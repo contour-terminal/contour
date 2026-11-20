@@ -228,7 +228,8 @@ WorkspaceTreeState SessionModel::captureTree() const
         auto state = WorkspaceState { .id = workspace->id(),
                                       .tabs = {},
                                       .activeTabIndex = workspace->_activeTabIndex,
-                                      .previousActiveTabIndex = workspace->_previousActiveTabIndex };
+                                      .previousActiveTabIndex = workspace->_previousActiveTabIndex,
+                                      .color = workspace->_color };
         for (auto const& tab: workspace->_tabs)
             state.tabs.push_back(TabState {
                 .id = tab->id(), .root = captureNode(*tab->rootPane()), .view = tab->viewState() });
@@ -261,6 +262,7 @@ std::expected<void, ModelRestoreError> SessionModel::restore(WorkspaceTreeState 
                 std::make_unique<Tab>(tabState.id, buildNode(tabState.root), tabState.view));
         workspace->_activeTabIndex = workspaceState.activeTabIndex;
         workspace->_previousActiveTabIndex = workspaceState.previousActiveTabIndex;
+        workspace->_color = workspaceState.color;
         _workspaces.push_back(std::move(workspace));
     }
     _nextWorkspaceId = ids.nextWorkspace;
@@ -295,6 +297,24 @@ void SessionModel::moveWorkspace(WorkspaceId workspaceId, int toIndex)
     else
         std::rotate(_workspaces.begin() + to, it, it + 1);
     _events.workspaceMoved(workspaceId, from, to);
+}
+
+void SessionModel::setWorkspaceColor(WorkspaceId workspaceId, vtbackend::RGBColor color)
+{
+    auto* const target = workspace(workspaceId);
+    if (target == nullptr || target->_color == color)
+        return;
+    target->_color = color;
+    _events.workspaceColorChanged(workspaceId);
+}
+
+void SessionModel::resetWorkspaceColor(WorkspaceId workspaceId)
+{
+    auto* const target = workspace(workspaceId);
+    if (target == nullptr || !target->_color)
+        return;
+    target->_color.reset();
+    _events.workspaceColorChanged(workspaceId);
 }
 
 void SessionModel::removeWorkspace(WorkspaceId workspaceId)

@@ -1,12 +1,14 @@
 // vim:syntax=qml
-// A popup with a grid of predefined color swatches for trivially colorizing a tab (Windows-Terminal
-// style). The palette comes from the authoritative vtworkspace model via the controller, so the GUI and
-// any future network client offer the same choices. One click on a swatch sets the tab color; a hex
-// field below the swatches lets the user enter an arbitrary RGB color.
+// A popup with a grid of predefined color swatches for trivially colorizing a tab or a workspace
+// (Windows-Terminal style). The palette comes from the authoritative vtworkspace model via the controller,
+// so the GUI and any future network client offer the same choices. One click on a swatch picks it; a hex
+// field below the swatches lets the user enter an arbitrary RGB color. What a pick colours is the host's:
+// the flyout only says what was picked (colorPicked, resetRequested) -- a TabItem colours its tab, the
+// sidebar the workspace whose row it hangs from.
 //
-// The grid is fully keyboard-drivable, which is what the SetTabColor action opens it for: cursor keys
-// and the vim motions h/j/k/l walk the swatches, Enter/Space picks the current one, Escape dismisses,
-// and Tab moves on to the hex field and the reset button.
+// The grid is fully keyboard-drivable, which is what the SetTabColor and SetWorkspaceColor actions open it
+// for: cursor keys and the vim motions h/j/k/l walk the swatches, Enter/Space picks the current one, Escape
+// dismisses, and Tab moves on to the hex field and the reset button.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -14,8 +16,13 @@ import QtQuick.Layouts
 Popup {
     id: root
 
+    /// The window's controller, for the palette.
     required property var controller
-    required property int tabIndex
+
+    /// The user picked @p c: a swatch, Enter on the keyboard cursor, or the hex field. The flyout closes.
+    signal colorPicked(color c)
+    /// The user asked for the colour to go. The flyout closes.
+    signal resetRequested()
 
     // The tab's color right now, so opening the flyout lands the keyboard cursor on the swatch the tab
     // already wears rather than always at the top-left one. Transparent (an uncolored tab) matches no
@@ -26,7 +33,7 @@ Popup {
     focus: true
     padding: chromeStyle.space.s4
 
-    // Keep the whole picker inside the window, wherever the tab it hangs off happens to be. A Popup is
+    // Keep the whole picker inside the window, wherever the tab (or row) it hangs off happens to be. A Popup is
     // positioned against its PARENT (this tab), and Qt's default `margins: -1` means it is never pushed
     // back inside the window — so a fixed "below the tab" puts the entire picker off-window when the tab
     // strip sits at the bottom (`tab_bar_position: Bottom`), where the tab's bottom edge IS the window's
@@ -279,12 +286,9 @@ Popup {
     }
 
     // The one way a color leaves this flyout: a clicked swatch, Enter on the keyboard cursor, and the hex
-    // field all funnel through here, so no entry point can forget the guard or the close. Null-guarded
-    // because the controller is torn down before this popup on window close.
+    // field all funnel through here, so no entry point can forget the close.
     function applyColor(color) {
-        if (!root.controller)
-            return;
-        root.controller.setTabColor(root.tabIndex, color);
+        root.colorPicked(color);
         root.close();
     }
 
@@ -298,11 +302,9 @@ Popup {
             root.applyColor("#" + hexField.text);
     }
 
-    // Drops the user's color, so any color the application gave the tab (DECAC) resurfaces.
+    // Drops the user's color; for a tab, any color the application gave it (DECAC) then resurfaces.
     function resetColor() {
-        if (!root.controller)
-            return;
-        root.controller.resetTabColor(root.tabIndex);
+        root.resetRequested();
         root.close();
     }
 }

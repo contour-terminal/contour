@@ -41,6 +41,7 @@
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/SidebarDropPolicy.hpp>
 #include <contour/window/SidebarMenuState.hpp>
+#include <contour/window/SidebarTabColor.hpp>
 #include <contour/window/SwitcherController.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TabColorScheme.hpp>
@@ -809,10 +810,14 @@ bool WindowController::isWorkspaceDropdownOpen() const noexcept
 
 command::WorkspaceMenuState WindowController::workspaceMenuStateOf(uint64_t workspace) const
 {
-    return window::workspaceMenuStateOf(_directorySource != nullptr ? _directorySource->directory()
-                                                                    : WorkspaceDirectory {},
-                                        workspace,
-                                        menuMovesOf(_manager.hostMovesOf(*this)));
+    return window::workspaceMenuStateOf(
+        _directorySource != nullptr ? _directorySource->directory() : WorkspaceDirectory {},
+        workspace,
+        menuMovesOf(_manager.hostMovesOf(*this)),
+        _manager.workspaceColorSupportOf(*this) == session::WorkspaceColorSupport::Supported
+            ? command::MenuColoring::Available
+            : command::MenuColoring::Unavailable,
+        _manager.model().colorPalette());
 }
 
 void WindowController::runWorkspaceMenuAction(uint64_t workspace, actions::Action const& action)
@@ -2084,12 +2089,10 @@ namespace
                                                            bool hovered,
                                                            bool windowActive) noexcept
     {
-        if (active)
-            return window::TabVisualState::Active;
-        if (hovered)
-            return window::TabVisualState::Hover;
-        return windowActive ? window::TabVisualState::Inactive
-                            : window::TabVisualState::InactiveWindowUnfocused;
+        // The sidebar's coloured rows decide it the same way; the tab strip's tab is a row of one.
+        return sidebarTabVisualState(active ? RowSelection::Selected : RowSelection::None,
+                                     hovered ? RowPointer::Hovering : RowPointer::Away,
+                                     windowActive ? WindowActivity::Active : WindowActivity::Inactive);
     }
 } // namespace
 
@@ -3231,6 +3234,8 @@ void WindowController::restoreSidebar()
     auto const metrics = app.sidebarMetrics();
     _sidebarVisibility = config.sidebar.value().visibility;
     _tabPlacement = config.tabPlacement.value();
+    _sidebarTabColorStyle = config.sidebar.value().tabColor;
+    _sidebarWorkspaceColorStyle = config.sidebar.value().workspaceColor;
     _sidebarUnits = config.sidebar.value().width.value_or(metrics.tokens.width);
 
     // What the user last chose wins over the configured defaults.
@@ -3513,6 +3518,53 @@ void WindowController::closeCurrentWorkspace()
         closeWorkspace(*shown);
 }
 
+std::optional<uint64_t> WindowController::colorableShownWorkspace()
+{
+    auto const shown = shownWorkspaceId();
+    if (!shown)
+        return std::nullopt;
+    // As the menu greys Workspace Color out: no picker and no request a daemon would not take.
+    if (_manager.workspaceColorSupportOf(*this) == session::WorkspaceColorSupport::Unsupported)
+    {
+        _notices.post(workspaceColorRefusedNotice());
+        return std::nullopt;
+    }
+    return shown;
+}
+
+void WindowController::colorCurrentWorkspace(vtbackend::RGBColor color)
+{
+    if (auto const shown = colorableShownWorkspace())
+        _manager.setWorkspaceColor(*this, *shown, color);
+}
+
+void WindowController::resetCurrentWorkspaceColor()
+{
+    if (auto const shown = colorableShownWorkspace())
+        _manager.setWorkspaceColor(*this, *shown, std::nullopt);
+}
+
+void WindowController::beginCurrentWorkspaceColorPick()
+{
+    auto const shown = colorableShownWorkspace();
+    if (!shown)
+        return;
+    // The picker hangs from the workspace's row, in a sidebar shown for it.
+    focusSidebar();
+    emit workspaceColorPickRequested(*shown);
+}
+
+void WindowController::setWorkspaceColor(quint64 workspace, QColor const& color)
+{
+    if (color.isValid())
+        _manager.setWorkspaceColor(*this, workspace, platform::toRGBColor(color));
+}
+
+void WindowController::resetWorkspaceColor(quint64 workspace)
+{
+    _manager.setWorkspaceColor(*this, workspace, std::nullopt);
+}
+
 std::optional<uint64_t> WindowController::shownWorkspaceId() const
 {
     if (_directorySource == nullptr)
@@ -3616,6 +3668,19 @@ namespace
     {
         return std::holds_alternative<Alternative>(action);
     }
+
+    /// The actions a sidebar tab row runs on its tab's active pane, which a split divides. Every other action
+    /// of a tab row (the tab strip's commands) shows the tab's first pane.
+    constexpr auto TabRowActivePaneActions = std::array<bool (*)(actions::Action const&) noexcept, 2> {
+        holds<actions::SplitVertical>,
+        holds<actions::SplitHorizontal>,
+    };
+
+    [[nodiscard]] bool runsOnActivePane(actions::Action const& action) noexcept
+    {
+        return std::ranges::any_of(TabRowActivePaneActions,
+                                   [&](auto const matches) { return matches(action); });
+    }
 } // namespace
 
 void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Action const& action)
@@ -3629,6 +3694,21 @@ void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Actio
         window.focusSidebar();
         emit window.sidebarRowRenameRequested(window._sidebar->rowIndexOf(key));
     };
+    constexpr Run ColorRow =
+        [](WindowController& window, SidebarRowKey const& key, actions::Action const& what) {
+            // A swatch colours the workspace; a bare one (Custom…) asks for the picker over its row.
+            if (auto const color = std::get<actions::SetWorkspaceColor>(what).color)
+                window._manager.setWorkspaceColor(window, key.workspace, color);
+            else
+            {
+                window.focusSidebar();
+                emit window.workspaceColorPickRequested(key.workspace);
+            }
+        };
+    constexpr Run ResetRowColor =
+        [](WindowController& window, SidebarRowKey const& key, actions::Action const&) {
+            window._manager.setWorkspaceColor(window, key.workspace, std::nullopt);
+        };
     constexpr Run MoveRowUp = [](WindowController& window, SidebarRowKey const& key, actions::Action const&) {
         window.moveWorkspaceBy(key.workspace, -1);
     };
@@ -3673,6 +3753,8 @@ void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Actio
         ByIdAction { .matches = holds<actions::MarkSeen>, .run = MarkRowSeen },
         ByIdAction { .matches = holds<actions::RenameWorkspace>, .run = RenameRow },
         ByIdAction { .matches = holds<actions::RenameTab>, .run = RenameRow },
+        ByIdAction { .matches = holds<actions::SetWorkspaceColor>, .run = ColorRow },
+        ByIdAction { .matches = holds<actions::ResetWorkspaceColor>, .run = ResetRowColor },
         ByIdAction { .matches = holds<actions::MoveWorkspaceUp>, .run = MoveRowUp },
         ByIdAction { .matches = holds<actions::MoveWorkspaceDown>, .run = MoveRowDown },
         ByIdAction { .matches = holds<actions::MoveTabToWorkspace>, .run = MoveRowTab },
@@ -3786,6 +3868,8 @@ void WindowController::runSidebarActionShown(SidebarRowKey const& row, actions::
                     shown = listed->tab->panes.front().key;
                 if (!shown)
                     return RowActionOutcome::Waiting; // the tab is not listed (yet)
+                if (runsOnActivePane(action))
+                    shown = _manager.activePaneBeside(_displayed, *shown).value_or(*shown);
                 break;
             }
             case SidebarRowKind::Pane: shown = row.pane; break;
@@ -3822,8 +3906,7 @@ void WindowController::openSidebarContextMenu(SidebarRow const& row, QPointF win
     switch (row.key.kind)
     {
         case SidebarRowKind::Workspace:
-            entries = command::buildWorkspaceMenu(
-                window::workspaceMenuStateOf(directory, row.key.workspace, moves));
+            entries = command::buildWorkspaceMenu(workspaceMenuStateOf(row.key.workspace));
             break;
         case SidebarRowKind::Tab: {
             // Every workspace but the tab's own can take it.

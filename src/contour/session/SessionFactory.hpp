@@ -7,6 +7,7 @@
 #include <contour/session/HostedOperation.hpp>
 #include <contour/window/DropZonePolicy.hpp>
 
+#include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/shell/CommandLineText.hpp>
@@ -127,6 +128,13 @@ enum class MoveSupport : uint8_t
 {
     Unsupported = 0, ///< No: the remote end's model would undo a local move, and it serves none itself.
     Supported,       ///< Yes, here or on the remote end.
+};
+
+/// Whether a workspace can be given a colour in a window this factory hosts.
+enum class WorkspaceColorSupport : uint8_t
+{
+    Unsupported = 0, ///< No: a daemon that predates the colour.
+    Supported,       ///< Yes, here or on the daemon.
 };
 
 /// Whether a request was handed to the remote end, which then owns the change.
@@ -262,6 +270,16 @@ class SessionFactory
     [[nodiscard]] virtual MoveSupport moveSupport() const noexcept
     {
         return hosting() == SessionHosting::Local ? MoveSupport::Supported : MoveSupport::Unsupported;
+    }
+
+    /// Whether a workspace can be coloured in this factory's windows: a local factory colours its own model,
+    /// an attach factory only where its remote end keeps the colour (requestRemoteWorkspaceColor()).
+    /// @return Supported for a local factory (the default); Unsupported for a remote one that does not
+    ///         override this.
+    [[nodiscard]] virtual WorkspaceColorSupport workspaceColorSupport() const noexcept
+    {
+        return hosting() == SessionHosting::Local ? WorkspaceColorSupport::Supported
+                                                  : WorkspaceColorSupport::Unsupported;
     }
 
     /// What can be moved into this factory's windows, as the move and refusal tables read it
@@ -410,6 +428,18 @@ class SessionFactory
     ///         workspace itself.
     [[nodiscard]] virtual RemoteRouting requestRemoteRenameWorkspace(uint64_t /*workspace*/,
                                                                      std::string_view /*name*/)
+    {
+        return RemoteRouting::Local;
+    }
+
+    /// Attach mode: colours the DAEMON's workspace @p workspace, or clears its colour; the daemon's change
+    /// reaches every window listing it (WorkspaceMeta::color).
+    /// @param workspace The daemon's workspace id, as a directory lists it.
+    /// @param color The new colour; none clears it.
+    /// @return As requestRemoteRenameWorkspace(); Refused also against a daemon that predates the colour
+    ///         (Capability::WorkspaceColor), which is sent nothing.
+    [[nodiscard]] virtual RemoteRouting requestRemoteWorkspaceColor(
+        uint64_t /*workspace*/, std::optional<vtbackend::RGBColor> /*color*/)
     {
         return RemoteRouting::Local;
     }

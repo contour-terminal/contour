@@ -4,8 +4,11 @@
 #include <contour/command/ContextMenu.hpp>
 #include <contour/command/TabMenus.hpp>
 
+#include <vtbackend/core/Color.hpp>
+
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -36,6 +39,14 @@ enum class MenuMoves : uint8_t
     Nothing,   ///< Nothing: a tmux server.
 };
 
+/// Whether the window's host keeps a workspace's colour, as the workspace menu offers it: the "Workspace
+/// Color" submenu is grayed out where a colour would do nothing.
+enum class MenuColoring : uint8_t
+{
+    Unavailable = 0, ///< No: a window listed by a daemon that predates the colour.
+    Available,       ///< Yes: a window that lists its own workspaces, or a daemon that keeps the colour.
+};
+
 /// The world, as a workspace row's context menu needs to see it.
 struct WorkspaceMenuState
 {
@@ -45,6 +56,11 @@ struct WorkspaceMenuState
     /// nothing.
     std::vector<TabChoiceGroup> joinable {};
     MenuMoves moves = MenuMoves::Nodes; ///< What the window's host moves.
+    /// The colours the "Workspace Color" submenu offers, in order (the tab menu's palette).
+    std::vector<vtbackend::RGBColor> palette {};
+    /// The colour the user gave the workspace; none while it is uncoloured.
+    std::optional<vtbackend::RGBColor> color {};
+    MenuColoring coloring = MenuColoring::Available; ///< Whether the window's host keeps the colour.
 };
 
 /// The workspace row's context menu for @p state.

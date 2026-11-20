@@ -516,6 +516,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// daemon, which a dragged pane is then refused by.
     [[nodiscard]] contour::session::MoveSupport moveSupport() const noexcept override;
 
+    /// Whether the daemon keeps a workspace's colour: it shares Capability::WorkspaceColor, and the
+    /// WorkspaceMeta the colour is announced in.
+    [[nodiscard]] contour::session::WorkspaceColorSupport workspaceColorSupport() const noexcept override;
+
     /// SessionFactory: a pane or tab dropped in a daemon-hosted window is moved by the daemon, which
     /// re-pushes the layouts of every window it touched; applyRemoteLayout() realizes them by moving the
     /// existing sessions. Refused when no session is named, a pane source names several, or the daemon does
@@ -531,6 +535,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
         uint64_t workspace, std::string_view name) override;
     [[nodiscard]] contour::session::RemoteRouting requestRemoteMoveWorkspace(uint64_t workspace,
                                                                              uint32_t position) override;
+    /// SessionFactory: colours the daemon's workspace (proto::SetWorkspaceColor). Refused where the daemon
+    /// does not share Capability::WorkspaceColor, which an older one does not: nothing is sent to it.
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteWorkspaceColor(
+        uint64_t workspace, std::optional<vtbackend::RGBColor> color) override;
     /// SessionFactory: renames the daemon's tab holding @p session (proto::EditTab), mirrored here or not.
     [[nodiscard]] contour::session::RemoteRouting requestRemoteTabRename(uint64_t session,
                                                                          std::string_view name) override;

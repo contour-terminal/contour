@@ -12,6 +12,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <utility>
 #include <vector>
@@ -147,6 +148,25 @@ TEST_CASE("a workspace the window does not own is not listed", "[directory][inpr
     CHECK(h.source.directory().workspaces.size() == 1);
 }
 
+TEST_CASE("the directory lists tabs in the model's order after a move", "[directory][inprocess]")
+{
+    auto h = Harness {};
+    auto const& workspace = h.addWorkspace();
+    auto const first = workspace.tabAt(0)->id();
+    auto const second = h.model.model.createTab(workspace.id())->id();
+    auto const third = h.model.model.createTab(workspace.id())->id();
+    auto const listedTabs = [&] {
+        auto const directory = h.source.directory();
+        REQUIRE(directory.workspaces.size() == 1);
+        return std::ranges::to<std::vector>(directory.workspaces[0].tabs
+                                            | std::views::transform([](auto const& tab) { return tab.id; }));
+    };
+    REQUIRE(listedTabs() == std::vector<uint64_t> { first.value, second.value, third.value });
+
+    h.model.model.moveTab(workspace.id(), third, 1);
+    CHECK(listedTabs() == std::vector<uint64_t> { first.value, third.value, second.value });
+}
+
 TEST_CASE("a split tab lists its panes depth-first", "[directory][inprocess]")
 {
     auto h = Harness {};
@@ -195,6 +215,33 @@ TEST_CASE("program status of an in-process pane appears", "[directory][inprocess
     REQUIRE(pane.status.size() == 1);
     CHECK(pane.status[0].title == "needs you");
     CHECK(directory.workspaces[0].tabs[0].name == "vim");
+}
+
+TEST_CASE("an in-process tab's colour appears until it is reset", "[directory][inprocess]")
+{
+    auto h = Harness {};
+    auto const tab = h.addWorkspace().activeTab()->id();
+    CHECK_FALSE(h.source.directory().workspaces.at(0).tabs.at(0).color.has_value());
+
+    h.model.model.setTabColor(
+        tab, vtworkspace::TabColorSource::User, vtbackend::RGBColor { 0xE8, 0x85, 0x3A });
+    CHECK(h.source.directory().workspaces.at(0).tabs.at(0).color == vtbackend::RGBColor { 0xE8, 0x85, 0x3A });
+
+    h.model.model.resetTabColor(tab, vtworkspace::TabColorSource::User);
+    CHECK_FALSE(h.source.directory().workspaces.at(0).tabs.at(0).color.has_value());
+}
+
+TEST_CASE("an in-process workspace's colour appears until it is reset", "[directory][inprocess]")
+{
+    auto h = Harness {};
+    auto const workspace = h.addWorkspace().id();
+    CHECK_FALSE(h.source.directory().workspaces.at(0).color.has_value());
+
+    h.model.model.setWorkspaceColor(workspace, vtbackend::RGBColor { 0xC2, 0x54, 0x8F });
+    CHECK(h.source.directory().workspaces.at(0).color == vtbackend::RGBColor { 0xC2, 0x54, 0x8F });
+
+    h.model.model.resetWorkspaceColor(workspace);
+    CHECK_FALSE(h.source.directory().workspaces.at(0).color.has_value());
 }
 
 TEST_CASE("a label set through the in-process store appears", "[directory][inprocess]")

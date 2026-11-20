@@ -73,6 +73,7 @@
     #include <vthost/testing/GatedFileSystem.hpp>
 #endif
 #include <vthost/ConfigReload.hpp>
+#include <vthost/DaemonBinary.hpp>
 #include <vthost/HostedShell.hpp>
 #include <vthost/ObjectRegistry.hpp>
 #include <vthost/SessionHost.hpp>
@@ -5931,8 +5932,8 @@ struct NamedFolders
         std::filesystem::remove_all(root, ignored);
     }
 
-    std::filesystem::path root =
-        std::filesystem::temp_directory_path() / std::format("contour-workspace-name-{}", ::getpid());
+    std::filesystem::path root = std::filesystem::temp_directory_path()
+                                 / std::format("contour-workspace-name-{}", vthost::currentProcessId());
 };
 
 /// @return The name of the workspace @p workspace of @p host.

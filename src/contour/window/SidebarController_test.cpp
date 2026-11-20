@@ -4,9 +4,11 @@
 // the user last chose), what it declares as horizontal chrome, and what a change writes back to the GUI
 // state.
 
+#include <contour/config/Actions.hpp>
 #include <contour/config/GuiStateStore.hpp>
 #include <contour/config/TabBarMode.hpp>
 #include <contour/geometry/SidebarGeometry.hpp>
+#include <contour/session/TerminalSession.hpp>
 #include <contour/test/AppFixture.hpp>
 #include <contour/test/CoreFixtures.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
@@ -15,10 +17,12 @@
 #include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/WindowController.hpp>
 
+#include <QtCore/QCoreApplication>
 #include <QtCore/QPointF>
 #include <QtCore/QRectF>
 #include <QtCore/QVariantList>
 #include <QtCore/QVariantMap>
+#include <QtGui/QColor>
 #include <QtGui/QWindow>
 #include <QtQuick/QQuickWindow>
 
@@ -315,6 +319,76 @@ TEST_CASE("the displayed tab is the one holding the active pane, whatever id the
         auto const& row =
             window->sidebar().rows()[static_cast<std::size_t>(window->sidebar().currentIndex())];
         CHECK(row.key.tab == 5002);
+    }
+}
+
+TEST_CASE("colouring a tab repaints its sidebar row", "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto const window =
+        contour::test::ScopedController { app.manager(), contour::config::MenuPresentation::InScene };
+    auto const made = contour::test::createSessionTabs(app.manager(), *window, 1);
+    auto const tab = made.tabs.at(0);
+    auto const row = tabRowOf(*window, tab.value);
+    auto const tabColorOfRow = [&] {
+        return window->sidebar().index(row).data(contour::window::SidebarModel::TabColorRole).value<QColor>();
+    };
+    REQUIRE(tabColorOfRow().alpha() == 0);
+
+    // Only the model is told; the window's own notifications must bring the row up to date.
+    app.manager().model().setTabColor(
+        tab, vtworkspace::TabColorSource::User, vtbackend::RGBColor { 0xE8, 0x85, 0x3A });
+    QCoreApplication::processEvents();
+    CHECK(tabColorOfRow() == QColor { 0xE8, 0x85, 0x3A });
+
+    app.manager().model().resetTabColor(tab, vtworkspace::TabColorSource::User);
+    QCoreApplication::processEvents();
+    CHECK(tabColorOfRow().alpha() == 0);
+}
+
+TEST_CASE("the sidebar lists a workspace's tabs in the tab bar's order", "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto const window =
+        contour::test::ScopedController { manager, contour::config::MenuPresentation::InScene };
+    auto const made = contour::test::createSessionTabs(manager, *window, 3);
+    auto const a = made.tabs[0].value;
+    auto const b = made.tabs[1].value;
+    auto const c = made.tabs[2].value;
+    window->activateTab(0);
+    QCoreApplication::processEvents();
+
+    // The sidebar's tab rows, as they stand: no refresh is forced, so a move nobody announced shows.
+    auto const sidebarTabs = [&] {
+        return std::ranges::to<std::vector>(
+            window->sidebar().rows()
+            | std::views::filter([](auto const& row) { return row.key.kind == SidebarRowKind::Tab; })
+            | std::views::transform([](auto const& row) { return row.key.tab; }));
+    };
+    // The tab bar's order: the model's tabs of the displayed workspace, row by row.
+    auto const stripTabs = [&] {
+        auto const* const shown = manager.model().workspace(window->displayedWorkspace());
+        return std::ranges::to<std::vector>(
+            std::views::iota(0, shown->tabCount())
+            | std::views::transform([&](int i) { return shown->tabAt(i)->id().value; }));
+    };
+    window->sidebar().refreshNow();
+    REQUIRE(sidebarTabs() == std::vector<uint64_t> { a, b, c });
+
+    SECTION("a move that leaves the active tab where it was")
+    {
+        manager.moveTab(window->displayedWorkspace(), 2, 1);
+        QCoreApplication::processEvents();
+        CHECK(stripTabs() == std::vector<uint64_t> { a, c, b });
+        CHECK(sidebarTabs() == stripTabs());
+    }
+    SECTION("a move of the active tab itself")
+    {
+        manager.moveTab(window->displayedWorkspace(), 0, 2);
+        QCoreApplication::processEvents();
+        CHECK(stripTabs() == std::vector<uint64_t> { b, c, a });
+        CHECK(sidebarTabs() == stripTabs());
     }
 }
 
@@ -647,6 +721,114 @@ TEST_CASE("a sidebar pane menu moves its pane to a new tab and to a new workspac
     CHECK(window->ownedWorkspaces().size() == 2);
 }
 
+namespace
+{
+/// A tab split once: its first pane A and the pane B split off it, B active.
+struct SplitTab
+{
+    vtworkspace::TabId tab;
+    PaneKey a;
+    PaneKey b;
+};
+
+[[nodiscard]] SplitTab splitLastTab(contour::session::TerminalSessionManager& manager,
+                                    contour::window::WindowController& window,
+                                    vtworkspace::TabId tab)
+{
+    auto const& model = manager.model();
+    auto const a = manager.paneKeyOf(model.findTab(tab)->activePane()->session());
+    manager.splitActivePane(false, window.activeSession());
+    REQUIRE(model.findTab(tab)->paneCount() == 2);
+    auto const b = manager.paneKeyOf(model.findTab(tab)->activePane()->session());
+    REQUIRE(a != b);
+    return SplitTab { .tab = tab, .a = a, .b = b };
+}
+
+/// @return The leaf of @p tab whose session is kept under @p key.
+[[nodiscard]] vtworkspace::Pane* leafOf(contour::session::TerminalSessionManager& manager,
+                                        vtworkspace::TabId tab,
+                                        PaneKey key)
+{
+    auto* const leaf = manager.model().findTab(tab)->rootPane()->walkTree(
+        [&](vtworkspace::Pane& pane) { return pane.isLeaf() && manager.paneKeyOf(pane.session()) == key; });
+    REQUIRE(leaf != nullptr);
+    return leaf;
+}
+
+/// @return The node beside @p pane under its parent; null for the root.
+[[nodiscard]] vtworkspace::Pane const* siblingOf(vtworkspace::Pane const& pane)
+{
+    auto const* const parent = pane.parent();
+    if (parent == nullptr)
+        return nullptr;
+    return parent->first() == &pane ? parent->second() : parent->first();
+}
+
+/// Checks that a split put a new leaf beside @p split's @p divided, leaving the other pane's leaf where it
+/// was.
+void checkSplitBeside(contour::session::TerminalSessionManager& manager,
+                      SplitTab const& split,
+                      PaneKey divided)
+{
+    auto const other = divided == split.a ? split.b : split.a;
+    REQUIRE(manager.model().findTab(split.tab)->paneCount() == 3);
+    auto const* const sibling = siblingOf(*leafOf(manager, split.tab, divided));
+    REQUIRE(sibling != nullptr);
+    CHECK(sibling->isLeaf());
+    CHECK(manager.paneKeyOf(sibling->session()) != other);
+    // The other pane's sibling is the split that now holds the divided pane.
+    auto const* const otherSibling = siblingOf(*leafOf(manager, split.tab, other));
+    REQUIRE(otherSibling != nullptr);
+    CHECK_FALSE(otherSibling->isLeaf());
+}
+} // namespace
+
+TEST_CASE("a pane row's split divides that pane", "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto const window =
+        contour::test::ScopedController { manager, contour::config::MenuPresentation::InScene };
+    auto const made = contour::test::createSessionTabs(manager, *window, 1);
+    auto const split = splitLastTab(manager, *window, made.tabs[0]);
+
+    window->sidebar().openContextMenu(paneRowOf(*window, split.a), QPointF { 3, 4 });
+    auto const action = actionIdOf(window->sidebarContextMenuModel(), "Split Vertically");
+    REQUIRE(action.has_value());
+    window->triggerSidebarContextMenuAction(*action);
+
+    checkSplitBeside(manager, split, split.a);
+}
+
+TEST_CASE("a tab row's split divides the tab's active pane", "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto const window =
+        contour::test::ScopedController { manager, contour::config::MenuPresentation::InScene };
+    auto const made = contour::test::createSessionTabs(manager, *window, 2);
+    auto const split = splitLastTab(manager, *window, made.tabs[1]);
+    auto const workspace = window->displayedWorkspace();
+
+    SECTION("the tab shown")
+    {
+        // Nothing to do: the split tab is the one shown.
+    }
+    SECTION("another tab shown: the tab is shown first")
+    {
+        manager.activateTab(workspace, 0);
+        REQUIRE(manager.model().workspace(workspace)->activeTab()->id() == made.tabs[0]);
+    }
+
+    window->sidebar().openContextMenu(tabRowOf(*window, split.tab.value), QPointF { 3, 4 });
+    auto const action = actionIdOf(window->sidebarContextMenuModel(), "Split Horizontally");
+    REQUIRE(action.has_value());
+    window->triggerSidebarContextMenuAction(*action);
+
+    CHECK(manager.model().workspace(workspace)->activeTab()->id() == split.tab);
+    checkSplitBeside(manager, split, split.b);
+}
+
 TEST_CASE("a one-tab workspace's menu merges its tab into another tab", "[contour][sidebar][controller]")
 {
     auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
@@ -670,6 +852,144 @@ TEST_CASE("a one-tab workspace's menu merges its tab into another tab", "[contou
     CHECK(model.findTab(lone.tabs[0]) == nullptr);
     CHECK(window->ownedWorkspaces().size() == 1);
     CHECK(window->displayedWorkspace() == firstWorkspace);
+}
+
+TEST_CASE("SetWorkspaceColor colours the displayed workspace's rows, ResetWorkspaceColor clears them",
+          "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto const window =
+        contour::test::ScopedController { manager, contour::config::MenuPresentation::InScene };
+    std::ignore = contour::test::createSessionTabs(manager, *window, 1);
+    auto const shown = window->displayedWorkspace();
+    auto const other = manager.createWorkspaceIn(window->windowId());
+    manager.selectWorkspace(window->windowId(), 1);
+    std::ignore = contour::test::createSessionTabs(manager, *window, 1);
+    manager.selectWorkspace(window->windowId(), 0);
+    REQUIRE(window->displayedWorkspace() == shown);
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+
+    auto const shownRow = workspaceRowOf(*window, shown.value);
+    auto const otherRow = workspaceRowOf(*window, other.value);
+    auto const colorOfRow = [&](int row) {
+        return window->sidebar()
+            .index(row)
+            .data(contour::window::SidebarModel::WorkspaceColorRole)
+            .value<QColor>();
+    };
+    REQUIRE(colorOfRow(shownRow).alpha() == 0);
+
+    // Only the action runs; the window's own notifications must bring the rows up to date.
+    CHECK((*session)(contour::actions::SetWorkspaceColor { vtbackend::RGBColor { 0xC2, 0x54, 0x8F } }));
+    QCoreApplication::processEvents();
+    CHECK(colorOfRow(shownRow) == QColor { 0xC2, 0x54, 0x8F });
+    CHECK(colorOfRow(otherRow).alpha() == 0);
+
+    CHECK((*session)(contour::actions::ResetWorkspaceColor {}));
+    QCoreApplication::processEvents();
+    CHECK(colorOfRow(shownRow).alpha() == 0);
+
+    // Without a colour, the binding opens the picker for the displayed workspace.
+    auto picks = QSignalSpy { &*window, &contour::window::WindowController::workspaceColorPickRequested };
+    CHECK((*session)(contour::actions::SetWorkspaceColor {}));
+    REQUIRE(picks.count() == 1);
+    CHECK(picks.at(0).at(0).value<quint64>() == shown.value);
+}
+
+namespace
+{
+/// The rows of the submenu titled @p title among @p rows.
+[[nodiscard]] QVariantList submenuRows(QVariantList const& rows, QString const& title)
+{
+    for (auto const& value: rows)
+    {
+        auto const row = value.toMap();
+        if (row["kind"].toString() == "submenu" && row["title"].toString() == title)
+            return row["children"].toList();
+    }
+    return {};
+}
+} // namespace
+
+TEST_CASE("the workspace menu's Workspace Color colours its workspace without showing it",
+          "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto const window =
+        contour::test::ScopedController { manager, contour::config::MenuPresentation::InScene };
+    std::ignore = contour::test::createSessionTabs(manager, *window, 1);
+    auto const shown = window->displayedWorkspace();
+    auto const other = manager.createWorkspaceIn(window->windowId());
+    manager.selectWorkspace(window->windowId(), 1);
+    std::ignore = contour::test::createSessionTabs(manager, *window, 1);
+    manager.selectWorkspace(window->windowId(), 0);
+    REQUIRE(window->displayedWorkspace() == shown);
+
+    auto const otherRow = [&] {
+        return workspaceRowOf(*window, other.value);
+    };
+    auto const colorOfOther = [&] {
+        return window->sidebar()
+            .index(otherRow())
+            .data(contour::window::SidebarModel::WorkspaceColorRole)
+            .value<QColor>();
+    };
+    auto const colourRows = [&] {
+        window->sidebar().openContextMenu(otherRow(), QPointF {});
+        return submenuRows(window->sidebarContextMenuModel(), "Workspace Color");
+    };
+    REQUIRE(colorOfOther().alpha() == 0);
+
+    // The first swatch: the palette's first colour.
+    auto const palette = window->tabColorPalette();
+    REQUIRE_FALSE(palette.isEmpty());
+    auto const rows = colourRows();
+    REQUIRE_FALSE(rows.isEmpty());
+    // The swatches come as one row of them, the menu's swatch grid.
+    auto const swatchRow = rows.front().toMap();
+    REQUIRE(swatchRow["kind"].toString() == "swatches");
+    auto const swatches = swatchRow["swatches"].toList();
+    REQUIRE(swatches.size() == palette.size());
+    auto const swatch = swatches.front().toMap();
+    CHECK(swatch["color"].value<QColor>() == palette.front().value<QColor>());
+    window->triggerSidebarContextMenuAction(swatch["actionId"].toInt());
+    QCoreApplication::processEvents();
+    CHECK(colorOfOther() == palette.front().value<QColor>());
+    CHECK(window->displayedWorkspace() == shown);
+    CHECK_FALSE(window->rowActionPending());
+
+    SECTION("Reset clears it, still without showing it")
+    {
+        auto const reset = actionIdOf(colourRows(), "Reset");
+        REQUIRE(reset.has_value());
+        window->triggerSidebarContextMenuAction(*reset);
+        QCoreApplication::processEvents();
+        CHECK(colorOfOther().alpha() == 0);
+        CHECK(window->displayedWorkspace() == shown);
+    }
+    SECTION("Custom… asks for the picker over that workspace")
+    {
+        auto picks = QSignalSpy { &*window, &contour::window::WindowController::workspaceColorPickRequested };
+        auto const custom = actionIdOf(colourRows(), "Custom…");
+        REQUIRE(custom.has_value());
+        window->triggerSidebarContextMenuAction(*custom);
+        REQUIRE(picks.count() == 1);
+        CHECK(picks.at(0).at(0).value<quint64>() == other.value);
+        CHECK(window->displayedWorkspace() == shown);
+    }
+    SECTION("the picker's choice and its reset colour it by id")
+    {
+        window->setWorkspaceColor(other.value, QColor { 0x12, 0x34, 0x56 });
+        QCoreApplication::processEvents();
+        CHECK(colorOfOther() == QColor { 0x12, 0x34, 0x56 });
+        window->resetWorkspaceColor(other.value);
+        QCoreApplication::processEvents();
+        CHECK(colorOfOther().alpha() == 0);
+        CHECK(window->displayedWorkspace() == shown);
+    }
 }
 
 // {{{ The switcher over a window: the real WindowController hosting it, through the real presenter.

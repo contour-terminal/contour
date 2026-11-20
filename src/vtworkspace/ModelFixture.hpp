@@ -51,6 +51,10 @@ struct RecordingEvents: ModelEvents
     {
         log.push_back(std::format("workspaceMoved:{}:{}>{}", w.value, from, to));
     }
+    void workspaceColorChanged(WorkspaceId w) override
+    {
+        log.push_back(std::format("workspaceColor:{}", w.value));
+    }
     void activeTabChanged(WorkspaceId, TabId t, int index) override
     {
         log.push_back(std::format("activeTab:{}:{}", t.value, index));

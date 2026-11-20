@@ -10,6 +10,7 @@
 #include <optional>
 #include <ranges>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <variant>
 
@@ -28,6 +29,10 @@ namespace
 
     constexpr auto RatioScale = 1'000'000.0;
     constexpr auto RatioScaleInt = std::uint64_t { 1'000'000 };
+
+    /// What a workspace record writes in the slot of the retired visibility byte, ahead of its colour: never
+    /// read, and 0 so that a daemon that still read the byte takes the default (Left).
+    constexpr auto VisibilitySlotFiller = std::uint8_t { 0 };
 
     // --- writing -----------------------------------------------------------------------------------
 
@@ -50,6 +55,11 @@ namespace
     void writeString(proto::Writer& sink, std::string const& text)
     {
         sink.string(text);
+    }
+
+    void writeColor(proto::Writer& sink, vtbackend::RGBColor const& color)
+    {
+        sink.u32(color.value());
     }
 
     void writeIdentity(proto::Writer& sink, std::optional<ObjectIdentityRecord> const& identity)
@@ -96,9 +106,7 @@ namespace
         writeBlob(sink, [&](proto::Writer& out) {
             writeIdentity(out, tab.identity);
             writeOptional(out, tab.title, writeString);
-            writeOptional(out, tab.color, [](proto::Writer& put, vtbackend::RGBColor const& color) {
-                put.u32(color.value());
-            });
+            writeOptional(out, tab.color, writeColor);
             out.varint(tab.activeLeaf);
             out.u8(static_cast<std::uint8_t>(tab.zoom));
             writeNode(out, tab.root);
@@ -113,6 +121,14 @@ namespace
             out.varint(workspace.tabs.size());
             for (auto const& tab: workspace.tabs)
                 writeTab(out, tab);
+            // Only a coloured workspace is written past its tabs, so one without a colour is byte for byte
+            // what a daemon before the colour wrote. The filler takes the slot of the retired visibility
+            // byte, which an older file still carries there; a daemon that read that byte reads 0 as Left.
+            if (workspace.color)
+            {
+                out.u8(VisibilitySlotFiller);
+                writeOptional(out, workspace.color, writeColor);
+            }
         });
     }
 
@@ -163,6 +179,15 @@ namespace
                     return std::unexpected(name.error());
                 record.name = *std::move(name);
                 return record;
+            });
+    }
+
+    [[nodiscard]] Parsed<std::optional<vtbackend::RGBColor>> readColor(proto::Reader& source)
+    {
+        return readOptional<vtbackend::RGBColor>(
+            source, [](proto::Reader& in) -> Parsed<vtbackend::RGBColor> {
+                return checked(in.u32()).transform(
+                    [](std::uint32_t rgb) { return vtbackend::RGBColor { rgb }; });
             });
     }
 
@@ -299,11 +324,10 @@ namespace
             if (!title)
                 return std::unexpected(title.error());
             tab.title = *std::move(title);
-            auto color = readOptional<std::uint32_t>(in, [](proto::Reader& r) { return checked(r.u32()); });
+            auto color = readColor(in);
             if (!color)
                 return std::unexpected(color.error());
-            if (*color)
-                tab.color = vtbackend::RGBColor { **color };
+            tab.color = *color;
             auto const activeLeaf = in.varint();
             auto const zoom = in.u8();
             if (!activeLeaf || !zoom || *activeLeaf > MaxLeavesPerTab
@@ -343,8 +367,16 @@ namespace
                     return std::unexpected(tab.error());
                 workspace.tabs.push_back(*std::move(tab));
             }
-            // A snapshot written before the daemon dropped its visibility byte carries one after the tabs:
-            // the blob's remainder is not read, so it is skipped.
+            // The slot after the tabs holds the retired visibility byte in a file from before the daemon
+            // dropped it, and the filler in a coloured workspace's record: either way it is skipped unread.
+            // Only a colour follows it, so a record that ends at or in that slot has none.
+            if (in.remaining() <= 1)
+                return workspace;
+            std::ignore = in.u8();
+            auto color = readColor(in);
+            if (!color)
+                return std::unexpected(color.error());
+            workspace.color = *color;
             return workspace;
         });
     }

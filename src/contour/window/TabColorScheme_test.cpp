@@ -23,12 +23,14 @@ TEST_CASE("tabColorFraction returns the tabled fraction per state", "[tabcolor]"
     // Mirrors Windows Terminal: full color when active, 0.6 on hover, 0.3 when inactive; dimmer still
     // when the whole window is unfocused. Data-driven from TabColorScheme.h's TabFadeTable.
     CHECK(tabColorFraction(TabVisualState::Active) == Catch::Approx(1.0F));
+    CHECK(tabColorFraction(TabVisualState::Pressed) == Catch::Approx(0.8F));
     CHECK(tabColorFraction(TabVisualState::Hover) == Catch::Approx(0.6F));
     CHECK(tabColorFraction(TabVisualState::Inactive) == Catch::Approx(0.3F));
     CHECK(tabColorFraction(TabVisualState::InactiveWindowUnfocused) == Catch::Approx(0.2F));
 
     // Prominence is monotonically decreasing across the enum order.
-    CHECK(tabColorFraction(TabVisualState::Active) > tabColorFraction(TabVisualState::Hover));
+    CHECK(tabColorFraction(TabVisualState::Active) > tabColorFraction(TabVisualState::Pressed));
+    CHECK(tabColorFraction(TabVisualState::Pressed) > tabColorFraction(TabVisualState::Hover));
     CHECK(tabColorFraction(TabVisualState::Hover) > tabColorFraction(TabVisualState::Inactive));
     CHECK(tabColorFraction(TabVisualState::Inactive)
           > tabColorFraction(TabVisualState::InactiveWindowUnfocused));

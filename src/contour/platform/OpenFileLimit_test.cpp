@@ -5,6 +5,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#ifdef _WIN32
+    #include <share.h>
+#endif
+
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -45,7 +49,8 @@ TEST_CASE("the process can hold more files open than the C runtime's default", "
     for ([[maybe_unused]] auto const _: std::views::iota(0, StreamsPastTheDefault))
     {
 #ifdef _WIN32
-        auto* stream = _wfopen(path.c_str(), L"rb");
+        // Shared, as FreeType's fopen opens it: _wfopen is deprecated, _wfopen_s denies a second open.
+        auto* stream = _wfsopen(path.c_str(), L"rb", _SH_DENYNO);
 #else
         auto* stream = std::fopen(path.c_str(), "rb");
 #endif

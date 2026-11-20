@@ -18,6 +18,8 @@
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/WorkspaceDirectory.hpp>
 
+#include <vtbackend/core/Color.hpp>
+
 #include <array>
 #include <chrono>
 #include <compare>
@@ -40,6 +42,9 @@ enum class SidebarRowKind : uint8_t
     Tab,           ///< A tab of a workspace.
     Pane,          ///< One pane of a tab with more than one.
 };
+
+/// Number of @c SidebarRowKind enumerators, derived from the last one.
+inline constexpr size_t SidebarRowKindCount = static_cast<size_t>(SidebarRowKind::Pane) + 1;
 
 /// Identifies a row across rebuilds, so a view keeps its selection and focus through a refresh.
 struct SidebarRowKey
@@ -85,6 +90,17 @@ enum class RowSelection : uint8_t
     None = 0,
     Selected,         ///< The tab this window displays; panes are not marked.
     ContainsSelected, ///< A folded workspace holding that tab: the selection moves to the nearest row shown.
+};
+
+/// Number of @c RowSelection enumerators, derived from the last one.
+inline constexpr size_t RowSelectionCount = static_cast<size_t>(RowSelection::ContainsSelected) + 1;
+
+/// Whether the window holding the sidebar has the user's attention: when a background pane that starts to
+/// need them is worth saying aloud, and how much of a coloured row's colour it keeps.
+enum class WindowActivity : uint8_t
+{
+    Inactive = 0, ///< Another window or application has focus.
+    Active,       ///< This window has focus.
 };
 
 /// A tree connector in one column of the Terminal look's tree.
@@ -144,6 +160,7 @@ struct SidebarRow
     std::string fullReasonCommand;               ///< Its command.
     std::string program;                         ///< The program the reason is about; empty when unknown.
     std::string folder;                          ///< The pane's working directory; empty when unknown.
+    std::string fullFolder;                      ///< The hover card's folder: whole, to MaxFullReasonLength.
     std::string gitText;                         ///< Workspace rows: `feat/billing ↑2 ↓1`.
     TimeText time;                               ///< The right-hand side.
     Urgency urgency = Urgency::Idle;             ///< Rolled up over the panes beneath a parent row.
@@ -159,6 +176,12 @@ struct SidebarRow
     /// it, and so does the line down to the row's own children. Empty columns on a workspace row.
     TreeLines continued;
     LeafCounts leaves; ///< The panes beneath it, for the footer.
+    /// The colour of the tab a tab or pane row belongs to (DirectoryTab::color); none when the tab is
+    /// uncoloured, and always none on a workspace row, folded or not.
+    std::optional<vtbackend::RGBColor> tabColor {};
+    /// The colour of the workspace the row belongs to (DirectoryWorkspace::color), on every row of it: the
+    /// workspace row, folded or not, its tab rows and their pane rows. None when the workspace is uncoloured.
+    std::optional<vtbackend::RGBColor> workspaceColor {};
 
     bool operator==(SidebarRow const&) const = default;
 };
@@ -283,6 +306,33 @@ enum class ChipMarker : uint8_t
 /// @return The parts it has, joined by ` · `; empty when it has none.
 [[nodiscard]] std::string hoverDetailOf(SidebarRow const& row);
 
+/// What a row's second line holds.
+enum class SecondLine : uint8_t
+{
+    None = 0, ///< Nothing to show: a workspace row, or a tab or pane row that knows neither its folder nor
+              ///< its program, whose name the row then centres in its two lines.
+    Idle,     ///< The idle line (idleLineOf()): where the pane is and what runs there.
+    Status,   ///< The reason: what the pane does or waits for.
+};
+
+/// @param row The row.
+/// @return Status when the row has a reason; else Idle when it is a tab or pane row that knows its folder
+///         or its program; None for a workspace row and for one that knows neither.
+[[nodiscard]] constexpr SecondLine secondLineOf(SidebarRow const& row) noexcept
+{
+    if (row.depth == 0)
+        return SecondLine::None;
+    if (!row.reason.empty())
+        return SecondLine::Status;
+    return row.folder.empty() && row.program.empty() ? SecondLine::None : SecondLine::Idle;
+}
+
+/// The second line of a tab or pane row with no reason to show (`~/src · claude`).
+/// @param row The row.
+/// @return The idle line: folder, then program, joined by LabelSeparator; a missing part is left out
+///         with its separator; empty for a workspace row and when both are empty.
+[[nodiscard]] std::string idleLineOf(SidebarRow const& row);
+
 /// The index of the row @p row hangs under.
 /// @param rows The rows as shown.
 /// @param row A row's index.
@@ -301,6 +351,25 @@ enum class ChipMarker : uint8_t
 /// @param row The row.
 /// @return The text, empty for a workspace row.
 [[nodiscard]] std::string treeContinuationText(SidebarRow const& row);
+
+/// What the Terminal look's workspace rail (`sidebar.workspace_color: group`) draws in a row's first cell, on
+/// each of the row's lines.
+struct RailCells
+{
+    std::string first;  ///< On the row's first line; empty where the workspace's disclosure is the cell.
+    std::string second; ///< On its second line; empty for a workspace row, which has one line.
+
+    bool operator==(RailCells const&) const = default;
+};
+
+/// The cells of a workspace's rail on @p row: the tree's own connector in its first column, made to run on,
+/// so the rail is one unbroken line from the workspace's row to the bottom of its last row. A blank (a pane
+/// under the last tab, the last tab's second line) becomes `│`, and a `└`, whose stroke stops half way down
+/// the cell, becomes `├`. The tree's own text (treeLinesText()) is left as it is.
+/// @param row The row.
+/// @return The cells. A workspace row's first is `│` when it folds nothing, so has no disclosure to draw it,
+///         and empty otherwise.
+[[nodiscard]] RailCells workspaceRailCellsOf(SidebarRow const& row);
 
 /// The cells of the Terminal look's progress meter.
 inline constexpr int MeterCells = 5;
@@ -331,10 +400,11 @@ inline constexpr int MeterCells = 5;
 inline constexpr std::string_view LabelSeparator = " · ";
 
 /// Text from outside, made fit for a row's line: no controls, no invisible or bidi formatting, at most
-/// MaxRowTextLength characters.
+/// @p maxLength characters.
 /// @param text The text.
+/// @param maxLength The most characters it holds: a row's line, or MaxFullReasonLength for its hover card.
 /// @return The text as a row may show it.
-[[nodiscard]] std::string rowTextOf(std::string_view text);
+[[nodiscard]] std::string rowTextOf(std::string_view text, std::size_t maxLength = MaxRowTextLength);
 
 /// What a program-status record says it is doing or waits for: the reason a row shows of it. A permission
 /// asks for a command the program wants to run, which is the reason's command part; whatever leads it, the

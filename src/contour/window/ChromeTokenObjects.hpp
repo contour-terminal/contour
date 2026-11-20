@@ -846,6 +846,7 @@ class ChromeSidebarTokens: public QObject
     Q_PROPERTY(qreal maxWidth READ maxWidth CONSTANT)
     Q_PROPERTY(qreal rowHeight READ rowHeight CONSTANT)
     Q_PROPERTY(qreal twoLineRowHeight READ twoLineRowHeight CONSTANT)
+    Q_PROPERTY(qreal lineGap READ lineGap CONSTANT)
     Q_PROPERTY(qreal indent READ indent CONSTANT)
     Q_PROPERTY(qreal glyph READ glyph CONSTANT)
     Q_PROPERTY(qreal gitGap READ gitGap CONSTANT)
@@ -853,6 +854,9 @@ class ChromeSidebarTokens: public QObject
     Q_PROPERTY(qreal selectionRadius READ selectionRadius CONSTANT)
     Q_PROPERTY(qreal accentPillWidth READ accentPillWidth CONSTANT)
     Q_PROPERTY(qreal hoverCardWidth READ hoverCardWidth CONSTANT)
+    Q_PROPERTY(qreal tabColorBarWidth READ tabColorBarWidth CONSTANT)
+    Q_PROPERTY(qreal workspaceRailWidth READ workspaceRailWidth CONSTANT)
+    Q_PROPERTY(qreal workspaceSwatchSize READ workspaceSwatchSize CONSTANT)
     /// How the sidebar looks: a config::SidebarLook as its underlying value, which the predicates below name.
     Q_PROPERTY(int look READ look CONSTANT)
     Q_PROPERTY(int sourceList READ sourceList CONSTANT)
@@ -900,6 +904,8 @@ class ChromeSidebarTokens: public QObject
     {
         return _tokens.twoLineRowHeight * _units.vertical;
     }
+    /// @return The gap between a two-line row's name and its second line.
+    [[nodiscard]] qreal lineGap() const noexcept { return _tokens.lineGap * _units.vertical; }
     /// @return What a tab row is indented by beneath its workspace.
     [[nodiscard]] qreal indent() const noexcept { return _tokens.indent * _units.horizontal; }
     /// @return A row's glyph, its edge.
@@ -921,6 +927,22 @@ class ChromeSidebarTokens: public QObject
 
     /// @return The width of a hovered row's card.
     [[nodiscard]] qreal hoverCardWidth() const noexcept { return _tokens.hoverCardWidth * _units.horizontal; }
+    /// @return The width of the bar a coloured tab's rows wear under `sidebar.tab_color: bar`.
+    [[nodiscard]] qreal tabColorBarWidth() const noexcept
+    {
+        return _tokens.tabColorBarWidth * _units.horizontal;
+    }
+    /// @return The width of the rail a coloured workspace's rows wear under `sidebar.workspace_color: group`.
+    [[nodiscard]] qreal workspaceRailWidth() const noexcept
+    {
+        return _tokens.workspaceRailWidth * _units.horizontal;
+    }
+    /// @return The edge of the square before a coloured workspace's name under `sidebar.workspace_color:
+    ///         swatch`.
+    [[nodiscard]] qreal workspaceSwatchSize() const noexcept
+    {
+        return _tokens.workspaceSwatchSize * _units.horizontal;
+    }
     /// @return How the sidebar looks, a config::SidebarLook as its underlying value.
     [[nodiscard]] int look() const noexcept { return static_cast<int>(_look); }
     /// @return Whether the sidebar stands beside the band, the window's full height.

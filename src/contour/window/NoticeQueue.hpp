@@ -47,6 +47,7 @@ enum class NoticeKind : uint8_t
     UpgradeFailed,          ///< The UpgradeDaemon action was refused, or the upgrade it started failed.
     WorkspaceRefused,       ///< The NewWorkspace action was refused: the window is attached to a tmux server.
     SwitchDeclined,         ///< The user declined a question a window switch asked; nothing changed.
+    WorkspaceColorRefused,  ///< A workspace colour action ran against a daemon that predates the colour.
 };
 
 /// Where a notice is shown.
@@ -166,6 +167,12 @@ inline constexpr auto NoticeRows = std::array {
                 .duration = std::chrono::milliseconds { 4000 },
                 .action = NoticeAction::None,
                 .actionText = "" },
+    NoticeRow { .kind = NoticeKind::WorkspaceColorRefused,
+                .surface = NoticeSurface::Toast,
+                .glyph = "!",
+                .duration = std::chrono::milliseconds { 6000 },
+                .action = NoticeAction::None,
+                .actionText = "" },
 };
 
 static_assert(
@@ -176,7 +183,7 @@ static_assert(
         return true;
     }(),
     "NoticeRows must list every notice kind in enumerator order");
-static_assert(NoticeRows.size() == std::to_underlying(NoticeKind::SwitchDeclined) + 1U,
+static_assert(NoticeRows.size() == std::to_underlying(NoticeKind::WorkspaceColorRefused) + 1U,
               "NoticeRows must have a row for every notice kind");
 
 /// The row of @p kind.
@@ -209,6 +216,15 @@ struct Notice
     return Notice { .kind = NoticeKind::WorkspaceRefused,
                     .text = "Could not make a workspace: this window's workspaces come from what it is "
                             "attached to." };
+}
+
+/// @return The NoticeKind::WorkspaceColorRefused notice telling that the window's daemon keeps no workspace
+///         colour.
+[[nodiscard]] inline Notice workspaceColorRefusedNotice()
+{
+    return Notice { .kind = NoticeKind::WorkspaceColorRefused,
+                    .text =
+                        "Could not colour the workspace: this window's daemon predates workspace colours." };
 }
 
 /// @param reason Why the window could not open, in words for the user.

@@ -578,6 +578,14 @@ class NativeClient final
     /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares Capability::WorkspaceMeta.
     [[nodiscard]] Delivery setWorkspaceName(uint64_t workspace, std::string name);
 
+    /// Asks the daemon to set or clear a workspace's colour. The daemon answers every client sharing the
+    /// colour with it (proto::WorkspaceMeta::color).
+    /// @param workspace The daemon's workspace id.
+    /// @param color The new colour; one without a colour clears it.
+    /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares
+    /// Capability::WorkspaceColor.
+    [[nodiscard]] Delivery setWorkspaceColor(uint64_t workspace, proto::WireWorkspaceColor color);
+
     /// Asks the daemon to set the axis of the split above a pane. The daemon answers with the layout push
     /// alone; a stale session is ignored there.
     /// @param anchorSession The session of a leaf inside the split to change.

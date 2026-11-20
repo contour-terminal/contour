@@ -135,6 +135,10 @@ enum class Capability : uint8_t
     /// `object.renamed`). Without it the other end speaks the old one to it (`label` keys, `object.setLabel`,
     /// `workspace.labelChanged`), through vtcontrol's legacy spelling table.
     Names = 32,
+    /// The peer carries a workspace's colour: a client sets it (SetWorkspaceColor), and the daemon states it
+    /// in WorkspaceMeta's colour field, in full and as a delta on each change. Without it a client does not
+    /// send the PDU, and the daemon states no colour to it, so an older client's metadata is what it was.
+    WorkspaceColor = 33,
 };
 
 /// One row of the table naming a Capability.
@@ -176,6 +180,7 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::ClientGoodbye, .name = "client-goodbye" },
     CapabilityRow { .capability = Capability::LaunchFirstTab, .name = "launch-first-tab" },
     CapabilityRow { .capability = Capability::Names, .name = "names" },
+    CapabilityRow { .capability = Capability::WorkspaceColor, .name = "workspace-color" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

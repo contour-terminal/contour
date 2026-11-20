@@ -8,6 +8,7 @@
 #include <vtbackend/core/Color.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <iterator>
 #include <optional>
@@ -390,6 +391,38 @@ inline void dropRedundantSeparators(std::vector<ContextMenuEntry>& entries)
         kept.pop_back();
 
     entries = std::move(kept);
+}
+
+/// The colour submenu the tab's and the workspace's menus share: one swatch per palette colour, ticked on
+/// the colour given, then "Custom…" and "Reset".
+///
+/// @tparam State      The menu's state; reads `palette` (the swatches, in order) and `color` (the tick).
+/// @tparam SetColor   The action a swatch runs with its colour; bare, as "Custom…", it opens the picker.
+/// @tparam ResetColor The action "Reset" runs.
+/// @tparam CanReset   Whether there is a colour to reset; "Reset" is grayed out otherwise.
+/// @param state The world the menu was opened over.
+/// @return The rows; an empty palette leaves no divider to open the submenu on.
+template <typename State, typename SetColor, typename ResetColor, MenuTable<State>::Predicate CanReset>
+[[nodiscard]] std::vector<ContextMenuEntry> colorRows(State const& state)
+{
+    using Table = MenuTable<State>;
+    static auto const rows = std::array {
+        Table::rows([](State const& menu) {
+            return std::ranges::to<std::vector>(
+                menu.palette | std::views::transform([&](auto const& color) {
+                    return commandEntry(vtbackend::formatColor(color),
+                                        SetColor { .color = color },
+                                        menu.color == color ? RowCheck::Checked : RowCheck::Unchecked,
+                                        color);
+                }));
+        }),
+        Table::separator(),
+        Table::command(SetColor {}, "Custom…"),
+        Table::command(ResetColor {}, "Reset").enabledWhen(CanReset),
+    };
+    auto entries = Table::buildRows(rows, state);
+    dropRedundantSeparators(entries);
+    return entries;
 }
 
 } // namespace contour::command::detail

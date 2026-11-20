@@ -196,15 +196,22 @@ class StopOnExit
     contour::remote::NativeController& _controller;
 };
 
+/// The services of a daemon that predates @p capability: it does not offer it.
+/// @param capability The capability the daemon leaves out of its offer.
+/// @return The services to give a DaemonFixture.
+[[nodiscard]] inline vthost::NativeSessionServices servicesWithout(vthost::proto::Capability capability)
+{
+    auto services = vthost::NativeSessionServices {};
+    std::erase(services.handshake.capabilities.idents, std::to_underlying(capability));
+    return services;
+}
+
 /// The services of a daemon that predates the window's selection: it does not offer
 /// Capability::DaemonFollow, so a controller cannot attach to it.
 /// @return The services to give a DaemonFixture.
 [[nodiscard]] inline vthost::NativeSessionServices servicesWithoutDaemonFollow()
 {
-    auto services = vthost::NativeSessionServices {};
-    std::erase(services.handshake.capabilities.idents,
-               std::to_underlying(vthost::proto::Capability::DaemonFollow));
-    return services;
+    return servicesWithout(vthost::proto::Capability::DaemonFollow);
 }
 
 /// The services of a daemon that predates Capability::LaunchFirstTab: it does not offer it, so a client's
@@ -212,10 +219,7 @@ class StopOnExit
 /// @return The services to give a DaemonFixture.
 [[nodiscard]] inline vthost::NativeSessionServices servicesWithoutLaunchFirstTab()
 {
-    auto services = vthost::NativeSessionServices {};
-    std::erase(services.handshake.capabilities.idents,
-               std::to_underlying(vthost::proto::Capability::LaunchFirstTab));
-    return services;
+    return servicesWithout(vthost::proto::Capability::LaunchFirstTab);
 }
 
 /// A daemon end of a connection that the fixture can drop, as a crashing daemon would: it is listed in
@@ -250,7 +254,8 @@ class ClientFrameCounts
     static constexpr auto Kinds = std::array { vthost::proto::PduType::ResizeRequest,
                                                vthost::proto::PduType::Heartbeat,
                                                vthost::proto::PduType::ResizePane,
-                                               vthost::proto::PduType::OpenFirstTab };
+                                               vthost::proto::PduType::OpenFirstTab,
+                                               vthost::proto::PduType::SetWorkspaceColor };
 
     /// @param type A counted kind.
     /// @return How many PDUs of @p type arrived so far; 0 for a kind that is not counted.

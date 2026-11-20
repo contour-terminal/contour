@@ -81,6 +81,16 @@ enum class RowSelection : uint8_t
 };
 Q_ENUM_NS(RowSelection)
 
+/// What a row's second line holds (@see window::SecondLine, which it mirrors).
+enum class SecondLine : uint8_t
+{
+    None =
+        0,  ///< Nothing to show: a workspace row, or a tab or pane row that knows neither folder nor program.
+    Idle,   ///< The idle line: the folder and the program.
+    Status, ///< The reason.
+};
+Q_ENUM_NS(SecondLine)
+
 /// Whether activating a row showed anything. Not exposed to QML: only C++ asks.
 enum class RowActivation : uint8_t
 {
@@ -152,6 +162,9 @@ static_assert(std::to_underlying(RowSelection::Selected)
               == std::to_underlying(window::RowSelection::Selected));
 static_assert(std::to_underlying(RowSelection::ContainsSelected)
               == std::to_underlying(window::RowSelection::ContainsSelected));
+static_assert(std::to_underlying(SecondLine::None) == std::to_underlying(window::SecondLine::None));
+static_assert(std::to_underlying(SecondLine::Idle) == std::to_underlying(window::SecondLine::Idle));
+static_assert(std::to_underlying(SecondLine::Status) == std::to_underlying(window::SecondLine::Status));
 
 } // namespace contour::window::sidebarrows
 
@@ -268,14 +281,6 @@ enum class SwitcherOverWindow : uint8_t
                ? SidebarPresence::Shown
                : SidebarPresence::Hidden;
 }
-
-/// Whether the window has the user's attention, which is when a background pane that starts to need them
-/// is worth saying aloud.
-enum class WindowActivity : uint8_t
-{
-    Inactive = 0, ///< Another window or application has focus.
-    Active,       ///< This window has focus.
-};
 
 /// What a screen reader names a row by: its title, which is what the row shows. Its kind, fold and status are
 /// the description's (accessibleDescriptionOf()), its selection the item's own state.
@@ -404,6 +409,12 @@ class SidebarModel: public QAbstractListModel
         SelectionRole,         ///< RowSelection: the displayed tab, or the folded row that holds it.
         TreeTextContinuedRole, ///< The Terminal look's connectors on the second line
                                ///< (treeContinuationText()).
+        SecondLineRole,        ///< SecondLine: whether the second line is the reason, the idle line or none.
+        IdleLineRole,          ///< The second line of a row with no reason (idleLineOf()).
+        TabColorRole,          ///< QColor: the row's tab colour; fully transparent when it has none.
+        WorkspaceColorRole,    ///< QColor: the row's workspace colour; fully transparent when it has none.
+        RailTextRole, ///< The Terminal look's workspace rail on the first line (workspaceRailCellsOf()).
+        RailTextContinuedRole, ///< The rail on the second line (workspaceRailCellsOf()).
     };
 
     /// @param host The window the sidebar sits in; must outlive the model.
@@ -500,6 +511,13 @@ class SidebarModel: public QAbstractListModel
     /// @param key A row's key.
     /// @return The row's index, or -1 when it is not listed.
     [[nodiscard]] int rowIndexOf(SidebarRowKey const& key) const noexcept;
+    /// @param workspace A workspace's id, as the window's directory lists it.
+    /// @return Its row, or -1 when it is not listed: where the sidebar's colour picker hangs.
+    [[nodiscard]] Q_INVOKABLE int workspaceRowIndex(quint64 workspace) const noexcept
+    {
+        return rowIndexOf(
+            { .kind = SidebarRowKind::Workspace, .workspace = workspace, .tab = 0, .pane = {} });
+    }
 
     /// Tells the model whether anyone can see its rows. The one-second timer runs only while they can.
     /// @param presence The sidebar's presence.

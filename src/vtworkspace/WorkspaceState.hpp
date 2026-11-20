@@ -70,8 +70,9 @@ struct WorkspaceState
 {
     WorkspaceId id {};
     std::vector<TabState> tabs;
-    int activeTabIndex = -1;         ///< -1 where the workspace holds no tab.
-    int previousActiveTabIndex = -1; ///< -1 where there is none.
+    int activeTabIndex = -1;                  ///< -1 where the workspace holds no tab.
+    int previousActiveTabIndex = -1;          ///< -1 where there is none.
+    std::optional<vtbackend::RGBColor> color; ///< The colour the user gave the workspace, if any.
 };
 
 /// The whole workspace tree: every workspace, tab and pane, with the ids and session ids they have.

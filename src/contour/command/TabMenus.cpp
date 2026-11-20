@@ -32,45 +32,14 @@ namespace
     }
     // }}}
 
-    /// One swatch per palette color, ticked on the tab's color.
-    [[nodiscard]] std::vector<ContextMenuEntry> swatchRows(TabContextMenuState const& state)
-    {
-        return std::ranges::to<std::vector>(
-            state.palette | std::views::transform([&](auto const& color) {
-                return detail::commandEntry(vtbackend::formatColor(color),
-                                            actions::SetTabColor { .color = color },
-                                            state.color == color ? RowCheck::Checked : RowCheck::Unchecked,
-                                            color);
-            }));
-    }
-
-    /// The "Tab Color" submenu: the swatches, then a custom color and a reset.
-    [[nodiscard]] std::span<Row const> tabColorTemplate()
-    {
-        static auto const rows = std::array {
-            Table::rows(swatchRows),
-            Table::separator(),
-            Table::command(actions::SetTabColor {}, "Custom…"),
-            Table::command(actions::ResetTabColor {}, "Reset").enabledWhen(hasUserColor),
-        };
-        return rows;
-    }
-
-    [[nodiscard]] std::vector<ContextMenuEntry> tabColorRows(TabContextMenuState const& state)
-    {
-        // Tidied as a menu bar submenu is: an empty palette must not open the submenu on a divider.
-        auto entries = Table::buildRows(tabColorTemplate(), state);
-        detail::dropRedundantSeparators(entries);
-        return entries;
-    }
-
     /// The tab menu, as data.
     [[nodiscard]] std::span<Row const> tabContextMenuTemplate()
     {
         using namespace actions;
 
         static auto const rows = std::array {
-            Table::submenu("Tab Color", tabColorRows),
+            Table::submenu("Tab Color",
+                           detail::colorRows<TabContextMenuState, SetTabColor, ResetTabColor, hasUserColor>),
             Table::command(RenameTab {}, "Rename…"),
             Table::command(MoveTabToNewWindow {}, "Move Tab to New Window").enabledWhen(hasMultipleTabs),
 

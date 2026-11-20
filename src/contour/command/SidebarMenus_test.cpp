@@ -8,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <ranges>
 #include <string>
 #include <variant>
@@ -39,14 +40,87 @@ TEST_CASE("workspace menu rows", "[sidebarmenu]")
 {
     auto const menu = buildWorkspaceMenu(WorkspaceMenuState { .position = 1, .count = 3 });
     CHECK(titles(menu)
-          == std::vector<std::string> {
-              "Rename…", "Mark Seen", "New Tab Here", "", "Move Up", "Move Down", "", "Close Workspace…" });
+          == std::vector<std::string> { "Workspace Color",
+                                        "Rename…",
+                                        "Mark Seen",
+                                        "New Tab Here",
+                                        "",
+                                        "Move Up",
+                                        "Move Down",
+                                        "",
+                                        "Close Workspace…" });
     CHECK(std::holds_alternative<actions::RenameWorkspace>(row(menu, "Rename…").action));
     CHECK(std::holds_alternative<actions::MarkSeen>(row(menu, "Mark Seen").action));
     CHECK(std::holds_alternative<actions::CreateNewTab>(row(menu, "New Tab Here").action));
     CHECK(std::holds_alternative<actions::CloseWorkspace>(row(menu, "Close Workspace…").action));
     for (auto const& entry: menu)
         CHECK(entry.availability == RowAvailability::Enabled);
+}
+
+TEST_CASE("the workspace menu starts with Workspace Color, then Rename", "[sidebarmenu]")
+{
+    constexpr auto Red = vtbackend::RGBColor { 0xC0, 0x39, 0x2B };
+    constexpr auto Magenta = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    constexpr auto Blue = vtbackend::RGBColor { 0x29, 0x80, 0xB9 };
+    auto const plain = buildWorkspaceMenu(WorkspaceMenuState { .position = 1, .count = 3 });
+    auto const menu = buildWorkspaceMenu(WorkspaceMenuState {
+        .position = 1, .count = 3, .palette = { Red, Magenta, Blue }, .color = Magenta });
+
+    REQUIRE(menu.size() >= 2);
+    auto const& colour = menu[0];
+    CHECK(colour.kind == ContextMenuEntryKind::Submenu);
+    CHECK(colour.title == "Workspace Color");
+    CHECK(colour.availability == RowAvailability::Enabled);
+    CHECK(menu[1].title == "Rename…");
+    CHECK(std::holds_alternative<actions::RenameWorkspace>(menu[1].action));
+    // The rest is as it was.
+    CHECK(std::ranges::equal(titles(menu) | std::views::drop(1), titles(plain) | std::views::drop(1)));
+
+    // The palette's swatches, the workspace's own one checked, then a custom colour and a reset.
+    REQUIRE(colour.children.size() == 6);
+    auto const swatches = std::array { Red, Magenta, Blue };
+    for (auto const index: std::views::iota(size_t { 0 }, swatches.size()))
+    {
+        auto const& swatch = colour.children[index];
+        CAPTURE(index);
+        auto const* const set = std::get_if<actions::SetWorkspaceColor>(&swatch.action);
+        REQUIRE(set != nullptr);
+        CHECK(set->color == swatches[index]);
+        CHECK(swatch.swatch == swatches[index]);
+        CHECK(swatch.check == (swatches[index] == Magenta ? RowCheck::Checked : RowCheck::Unchecked));
+    }
+    CHECK(colour.children[3].kind == ContextMenuEntryKind::Separator);
+    auto const& custom = colour.children[4];
+    CHECK(custom.title == "Custom…");
+    auto const* const bare = std::get_if<actions::SetWorkspaceColor>(&custom.action);
+    REQUIRE(bare != nullptr);
+    CHECK_FALSE(bare->color.has_value());
+    auto const& reset = colour.children[5];
+    CHECK(reset.title == "Reset");
+    CHECK(std::holds_alternative<actions::ResetWorkspaceColor>(reset.action));
+    CHECK(reset.availability == RowAvailability::Enabled);
+}
+
+TEST_CASE("an uncoloured workspace's Reset is greyed out and nothing is checked", "[sidebarmenu]")
+{
+    constexpr auto Red = vtbackend::RGBColor { 0xC0, 0x39, 0x2B };
+    auto const menu =
+        buildWorkspaceMenu(WorkspaceMenuState { .position = 0, .count = 1, .palette = { Red } });
+    auto const& colour = row(menu, "Workspace Color");
+    REQUIRE(colour.children.size() == 4);
+    CHECK(colour.children[0].check == RowCheck::Unchecked);
+    CHECK(colour.children[3].title == "Reset");
+    CHECK(colour.children[3].availability == RowAvailability::Disabled);
+}
+
+TEST_CASE("Workspace Color is greyed out where the host keeps no colour", "[sidebarmenu]")
+{
+    constexpr auto Red = vtbackend::RGBColor { 0xC0, 0x39, 0x2B };
+    auto const menu = buildWorkspaceMenu(WorkspaceMenuState {
+        .position = 0, .count = 2, .palette = { Red }, .coloring = MenuColoring::Unavailable });
+    CHECK(row(menu, "Workspace Color").availability == RowAvailability::Disabled);
+    // Everything else is offered as before.
+    CHECK(row(menu, "Rename…").availability == RowAvailability::Enabled);
 }
 
 TEST_CASE("move up and move down grey out at the ends of the list", "[sidebarmenu]")
@@ -69,7 +143,8 @@ TEST_CASE("close is disabled for the last workspace", "[sidebarmenu]")
     CHECK(row(several, "Close Workspace…").availability == RowAvailability::Enabled);
 }
 
-TEST_CASE("the sidebar tab menu is the tab strip's menu plus Move to Workspace", "[sidebarmenu]")
+TEST_CASE("the sidebar tab menu is the tab strip's menu plus the splits and Move to Workspace",
+          "[sidebarmenu]")
 {
     auto const state = SidebarTabMenuState {
         .tab = TabContextMenuState { .tabIndex = 0, .tabCount = 2 },
@@ -78,13 +153,13 @@ TEST_CASE("the sidebar tab menu is the tab strip's menu plus Move to Workspace",
     };
     auto const menu = buildSidebarTabMenu(state);
     auto const strip = buildTabContextMenu(state.tab);
-    REQUIRE(menu.size() == strip.size() + 3);
+    REQUIRE(menu.size() == strip.size() + 6);
     CHECK(titles(menu).front() == titles(strip).front());
     // Its close row says it asks.
     CHECK(std::ranges::contains(titles(menu), "Close Tab…"));
     CHECK_FALSE(std::ranges::contains(titles(menu), "Close Tab"));
     // Nothing to merge into: no Merge into Tab.
-    CHECK(std::ranges::equal(titles(menu) | std::views::drop(strip.size()),
+    CHECK(std::ranges::equal(titles(menu) | std::views::drop(strip.size() + 3),
                              std::vector<std::string> { "", "Move to Workspace", "Move to New Workspace" }));
 
     auto const& move = row(menu, "Move to Workspace");
@@ -110,12 +185,51 @@ TEST_CASE("the sidebar pane menu rows", "[sidebarmenu]")
 {
     auto const menu = buildSidebarPaneMenu(SidebarPaneMenuState {});
     CHECK(titles(menu)
-          == std::vector<std::string> {
-              "Go to Pane", "Mark Seen", "", "Move to New Tab", "Move to New Workspace", "", "Close Pane…" });
+          == std::vector<std::string> { "Go to Pane",
+                                        "Mark Seen",
+                                        "Split Vertically",
+                                        "Split Horizontally",
+                                        "",
+                                        "Move to New Tab",
+                                        "Move to New Workspace",
+                                        "",
+                                        "Close Pane…" });
     CHECK(std::holds_alternative<actions::GoToPane>(row(menu, "Go to Pane").action));
     CHECK(std::holds_alternative<actions::MoveToNewTab>(row(menu, "Move to New Tab").action));
     CHECK(std::holds_alternative<actions::MoveToNewWorkspace>(row(menu, "Move to New Workspace").action));
     CHECK(std::holds_alternative<actions::ClosePane>(row(menu, "Close Pane…").action));
+}
+
+TEST_CASE("the pane menu offers both splits after Mark Seen", "[sidebarmenu]")
+{
+    auto const menu = buildSidebarPaneMenu(SidebarPaneMenuState {});
+    CHECK(std::ranges::equal(titles(menu) | std::views::take(5),
+                             std::vector<std::string> {
+                                 "Go to Pane", "Mark Seen", "Split Vertically", "Split Horizontally", "" }));
+    CHECK(std::holds_alternative<actions::SplitVertical>(row(menu, "Split Vertically").action));
+    CHECK(std::holds_alternative<actions::SplitHorizontal>(row(menu, "Split Horizontally").action));
+}
+
+TEST_CASE("the sidebar's tab menu offers both splits", "[sidebarmenu]")
+{
+    auto const state = SidebarTabMenuState {
+        .tab = TabContextMenuState { .tabIndex = 0, .tabCount = 2 },
+        .others = { WorkspaceChoice { .position = 2, .title = "api" } },
+    };
+    auto const menu = buildSidebarTabMenu(state);
+    auto const strip = buildTabContextMenu(state.tab);
+    CHECK(std::ranges::equal(
+        titles(menu) | std::views::drop(strip.size()) | std::views::take(5),
+        std::vector<std::string> { "", "Split Vertically", "Split Horizontally", "", "Move to Workspace" }));
+    CHECK(std::holds_alternative<actions::SplitVertical>(row(menu, "Split Vertically").action));
+    CHECK(std::holds_alternative<actions::SplitHorizontal>(row(menu, "Split Horizontally").action));
+}
+
+TEST_CASE("the workspace menu offers no split", "[sidebarmenu]")
+{
+    auto const menu = buildWorkspaceMenu(WorkspaceMenuState { .position = 0, .count = 2 });
+    CHECK_FALSE(std::ranges::contains(titles(menu), "Split Vertically"));
+    CHECK_FALSE(std::ranges::contains(titles(menu), "Split Horizontally"));
 }
 
 namespace

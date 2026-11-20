@@ -107,6 +107,10 @@ class ModelEvents
     /// moved up one place. Defaulted to a no-op, as workspaceMoved().
     virtual void workspaceRemoved(WorkspaceId workspace, int index) { (void) workspace, (void) index; }
 
+    /// A workspace's colour changed (set or reset). Default: nothing, as workspaceMoved and workspaceRemoved.
+    /// @param workspace The workspace whose colour changed; Workspace::color() holds the new one.
+    virtual void workspaceColorChanged(WorkspaceId workspace) { (void) workspace; }
+
     /// The active tab of @p workspace changed to @p tab (at @p index).
     virtual void activeTabChanged(WorkspaceId workspace, TabId tab, int index) = 0;
 

@@ -96,9 +96,10 @@ struct ChromeGlyphs
     QString newTab;
     QString menu;
     QString submenu;
-    QString tabColor;  ///< A coloured tab's leading cell; empty where the colour tints the tab.
-    QString chipOpen;  ///< Opens a chip; empty where the chip is a shape.
-    QString chipClose; ///< Closes a chip; empty where the chip is a shape.
+    QString tabColor;        ///< A coloured tab's leading cell; empty where the colour tints the tab.
+    QString workspaceSwatch; ///< A coloured workspace's swatch cell; empty where the swatch is a shape.
+    QString chipOpen;        ///< Opens a chip; empty where the chip is a shape.
+    QString chipClose;       ///< Closes a chip; empty where the chip is a shape.
 
     QStringList paneActions; ///< A pane header's action buttons, indexed by config::PaneHeaderAction.
     QStringList splitLines;  ///< A split's line, side by side then stacked; empty where the gap draws it.
@@ -293,6 +294,7 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QString menuGlyph READ menuGlyph CONSTANT)
     Q_PROPERTY(QString submenuGlyph READ submenuGlyph CONSTANT)
     Q_PROPERTY(QString tabColorGlyph READ tabColorGlyph CONSTANT)
+    Q_PROPERTY(QString workspaceSwatchGlyph READ workspaceSwatchGlyph CONSTANT)
     Q_PROPERTY(QString chipOpenGlyph READ chipOpenGlyph CONSTANT)
     Q_PROPERTY(QString chipCloseGlyph READ chipCloseGlyph CONSTANT)
     Q_PROPERTY(QString drillInGlyph READ drillInGlyph CONSTANT)
@@ -940,6 +942,67 @@ class UiStyleProvider: public QObject
                                                            bool treeFocused,
                                                            bool rowFocused) const;
 
+    /// What the pointer does to a sidebar row, as sidebarTabColor() and sidebarWorkspaceColor() take it.
+    ///
+    /// The QML-facing carve-out: two bools, as QML holds them (HoverHandler.hovered, TapHandler.pressed),
+    /// converted to a window::RowPointer here and nowhere else.
+    /// @param hovered Whether the pointer is over the row.
+    /// @param pressed Whether the pointer holds the row down.
+    /// @return A window::RowPointer as an int: Pressing while held, else Hovering while over it, else Away.
+    [[nodiscard]] Q_INVOKABLE int sidebarRowPointer(bool hovered, bool pressed) const;
+
+    /// What a tab's colour paints on a sidebar row (window::sidebarTabColorPaint) in the configured style.
+    ///
+    /// The QML-facing carve-out: a bool as QML holds it (Window.active), converted to window::WindowActivity
+    /// at once; the enums as their underlying values.
+    /// @param style         A config::SidebarTabColorStyle as an int; anything else paints nothing.
+    /// @param tabColor      The row's tab colour; fully transparent (or invalid) when the tab has none.
+    /// @param rowBackground The sidebar's fill, the tint fades toward.
+    /// @param selection     A window::RowSelection as an int; anything else is no selection.
+    /// @param pointer       A window::RowPointer as an int (sidebarRowPointer()); anything else is away.
+    /// @param windowActive  Whether the row's window is the active one.
+    /// @return `{ fill, bar, ink }` as colours, each fully transparent when the style paints nothing of that
+    ///         kind -- the tabColor role's own convention, so QML tests each by its alpha.
+    [[nodiscard]] Q_INVOKABLE QVariantMap sidebarTabColor(int style,
+                                                          QColor const& tabColor,
+                                                          QColor const& rowBackground,
+                                                          int selection,
+                                                          int pointer,
+                                                          bool windowActive) const;
+
+    /// What a workspace's colour paints on a sidebar row (window::sidebarWorkspaceColorPaint) in the
+    /// configured style.
+    ///
+    /// The QML-facing carve-out, as sidebarTabColor(): a bool as QML holds it, converted to
+    /// window::WindowActivity at once; the enums as their underlying values.
+    /// @param style          A config::SidebarWorkspaceColorStyle as an int; anything else paints nothing.
+    /// @param kind           A window::SidebarRowKind as an int; anything else paints nothing.
+    /// @param workspaceColor The colour of the row's workspace; fully transparent (or invalid) when it has
+    /// none.
+    /// @param rowBackground  The sidebar's fill, the tint and the wash fade toward.
+    /// @param selection      A window::RowSelection as an int; anything else is no selection.
+    /// @param pointer        A window::RowPointer as an int (sidebarRowPointer()); anything else is away.
+    /// @param windowActive   Whether the row's window is the active one.
+    /// @return `{ fill, ink, rail, wash, swatch }` as colours, each fully transparent when the style paints
+    ///         nothing of that kind, so QML tests each by its alpha.
+    [[nodiscard]] Q_INVOKABLE QVariantMap sidebarWorkspaceColor(int style,
+                                                                int kind,
+                                                                QColor const& workspaceColor,
+                                                                QColor const& rowBackground,
+                                                                int selection,
+                                                                int pointer,
+                                                                bool windowActive) const;
+
+    /// The colour a status mark is drawn in on a sidebar row (window::sidebarMarkInk): its own, unless a
+    /// tab's tint under it would swallow it, then the tint's ink.
+    /// @param mark     The mark's semantic colour.
+    /// @param tintFill The row's tint (sidebarTabColor's `fill`); transparent where the row has none.
+    /// @param tintInk  The tint's ink (sidebarTabColor's `ink`).
+    /// @return The colour to draw the mark in.
+    [[nodiscard]] Q_INVOKABLE QColor sidebarMarkInk(QColor const& mark,
+                                                    QColor const& tintFill,
+                                                    QColor const& tintInk) const;
+
     /// @return The title band's height in logical pixels. @see bandHeight
     [[nodiscard]] qreal bandHeight() const noexcept;
 
@@ -1079,6 +1142,8 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QString const& menuGlyph() const noexcept { return _glyphs.menu; }
     [[nodiscard]] QString const& submenuGlyph() const noexcept { return _glyphs.submenu; }
     [[nodiscard]] QString const& tabColorGlyph() const noexcept { return _glyphs.tabColor; }
+    /// @return The cell a coloured workspace's swatch is drawn as; empty where it is a square shape.
+    [[nodiscard]] QString const& workspaceSwatchGlyph() const noexcept { return _glyphs.workspaceSwatch; }
     [[nodiscard]] QString const& chipOpenGlyph() const noexcept { return _glyphs.chipOpen; }
     [[nodiscard]] QString const& chipCloseGlyph() const noexcept { return _glyphs.chipClose; }
     [[nodiscard]] QString const& drillInGlyph() const noexcept { return _glyphs.drillIn; }

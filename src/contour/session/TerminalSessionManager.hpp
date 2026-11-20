@@ -479,6 +479,16 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param name Its new name; empty clears it.
     void renameWorkspace(window::WindowController& window, uint64_t workspace, std::string name);
 
+    /// Colours the workspace @p workspace that @p window lists: in its daemon for a window a daemon serves
+    /// (nothing, against a daemon that predates the colour), else in this process's model, where a workspace
+    /// the window does not own is left alone.
+    /// @param window The window the user acts in.
+    /// @param workspace The workspace's id, as the window's directory lists it (DirectoryWorkspace::id).
+    /// @param color Its new colour; std::nullopt takes its colour away.
+    void setWorkspaceColor(window::WindowController& window,
+                           uint64_t workspace,
+                           std::optional<vtbackend::RGBColor> color);
+
     /// Names the tab @p tab, whichever workspace of @p window's directory holds it, shown or not: in its
     /// daemon for a window a daemon serves (named by a session it holds), in this process's model otherwise.
     /// A tab the window does not list is left alone.
@@ -527,6 +537,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param window A window.
     /// @return What the host of the workspace @p window shows can move (SessionFactory::hostMoves()).
     [[nodiscard]] window::HostMoves hostMovesOf(window::WindowController const& window) const noexcept;
+
+    /// @param window A window.
+    /// @return Whether a workspace @p window lists can be coloured: Supported where the window lists its own
+    ///         workspaces (setWorkspaceColor() colours this process's model); else what its daemon's factory
+    ///         says (SessionFactory::workspaceColorSupport()).
+    [[nodiscard]] WorkspaceColorSupport workspaceColorSupportOf(
+        window::WindowController const& window) const noexcept;
 
     /// @param window The window the user acts in.
     /// @param subject What moves: a tab or a pane.
@@ -779,6 +796,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param key    The pane's key (paneKeyOf).
     /// @return Shown, or NotHeld when the displayed workspace holds no such pane, and nothing changed.
     [[nodiscard]] PaneShowing showPane(vtworkspace::WorkspaceId window, window::PaneKey key);
+    /// The active pane of the tab of @p window's displayed workspace that holds the pane known as @p key.
+    /// @param window The window's displayed workspace.
+    /// @param key    A pane's key (paneKeyOf).
+    /// @return That tab's active pane's key; none when the displayed workspace holds no such pane.
+    [[nodiscard]] std::optional<window::PaneKey> activePaneBeside(vtworkspace::WorkspaceId window,
+                                                                  window::PaneKey key) const;
     /// Counts @p window's active pane as seen: its output, bell and finished marks clear and its
     /// program-status records up to the newest count as seen.
     /// @param window The window's displayed workspace.
@@ -1864,6 +1887,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
                   int fromIndex,
                   int toIndex) override;
     void workspaceMoved(vtworkspace::WorkspaceId workspace, int fromIndex, int toIndex) override;
+    void workspaceColorChanged(vtworkspace::WorkspaceId workspace) override;
     void tabAboutToBeMovedToWorkspace(vtworkspace::WorkspaceId from,
                                       int fromIndex,
                                       vtworkspace::WorkspaceId to,
@@ -2451,6 +2475,19 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// (so the rendered split tree and subsequent pane operations target it). No-op if @p row is
     /// out of range.
     void activateModelTabByRow(vtworkspace::WorkspaceId window, int row);
+
+    /// A leaf of a window's workspace, with the tab holding it and that tab's row.
+    struct HeldLeaf
+    {
+        int row = 0;                       ///< The tab's tab-strip row.
+        vtworkspace::Tab* tab = nullptr;   ///< The tab holding the leaf.
+        vtworkspace::Pane* leaf = nullptr; ///< The leaf.
+    };
+    /// @param window The window's displayed workspace.
+    /// @param key    A pane's key (paneKeyOf).
+    /// @return The leaf of @p window's workspace known as @p key; none when it holds no such pane.
+    [[nodiscard]] std::optional<HeldLeaf> leafHolding(vtworkspace::WorkspaceId window,
+                                                      window::PaneKey key) const;
 
     /// Refreshes every window's indicator status line. The per-window tab list + per-pane marker fan-out
     /// lives on each WindowController (WindowController::updateStatusLine), so this simply routes to every

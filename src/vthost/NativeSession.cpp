@@ -359,6 +359,9 @@ NativeSession::NativeSession(core::net::EventLoop& loop,
     _layoutObserver.onWorkspaceOrderChange = [this] {
         syncWorkspacePositions();
     };
+    _layoutObserver.onWorkspaceColorChange = [this](vtworkspace::WorkspaceId workspace) {
+        workspaceColorChanged(workspace);
+    };
     _layoutObserver.onTabChange = [this](vtworkspace::TabId tab) {
         layoutChanged(_host.model().workspaceOfTab(tab));
     };
@@ -649,6 +652,29 @@ bool NativeSession::sharesWorkspaceMeta() const noexcept
     return _negotiated.has_value() && _negotiated->shared.contains(proto::Capability::WorkspaceMeta);
 }
 
+bool NativeSession::sharesWorkspaceColor() const noexcept
+{
+    return sharesWorkspaceMeta() && _negotiated->shared.contains(proto::Capability::WorkspaceColor);
+}
+
+proto::WireWorkspaceColor NativeSession::wireColorOf(vtworkspace::WorkspaceId workspace) const
+{
+    auto const* const known = _host.model().workspace(workspace);
+    auto const color = known != nullptr ? known->color() : std::nullopt;
+    return proto::WireWorkspaceColor { .rgb = color.transform(&vtbackend::RGBColor::value) };
+}
+
+void NativeSession::workspaceColorChanged(vtworkspace::WorkspaceId workspace)
+{
+    if (_phase != ConnectionPhase::Viewing || _closed || !sharesWorkspaceColor()
+        || !_announcedMeta.contains(workspace.value))
+        return;
+    send(0,
+         proto::DecodedPdu { proto::WorkspaceMeta { .workspace = workspace.value,
+                                                    .controlId = controlIdOf(workspace),
+                                                    .color = wireColorOf(workspace) } });
+}
+
 std::array<uint8_t, 16> NativeSession::controlIdOf(vtworkspace::WorkspaceId workspace) const
 {
     return _host.objects().uuidOf(workspace).value_or(vtcontrol::Uuid {}).bytes;
@@ -674,12 +700,15 @@ void NativeSession::announceWorkspaceMeta(vtworkspace::Workspace const& workspac
     // to a following window only (@see sendWorkspaceGit); absent, it is in no repository, or none was looked
     // up.
     auto git = summarizesPanes() ? _host.gitInfoOf(workspace.id()).transform(wireGitOf) : std::nullopt;
+    // The colour only to a client that reads it: an older one's full meta stays what it was.
+    auto color = sharesWorkspaceColor() ? std::optional { wireColorOf(workspace.id()) } : std::nullopt;
     send(0,
          proto::DecodedPdu { proto::WorkspaceMeta { .workspace = workspace.id().value,
                                                     .controlId = uuid.bytes,
                                                     .name = std::string { _host.objects().nameOf(ref) },
                                                     .git = std::move(git),
-                                                    .position = position } });
+                                                    .position = position,
+                                                    .color = color } });
 }
 
 int NativeSession::positionOf(vtworkspace::WorkspaceId workspace) const
@@ -2462,34 +2491,7 @@ NativeSession::TabVerb NativeSession::serveWorkspaceVerb(proto::DecodedFrame con
             refuse(frame);
             return TabVerb::Served;
         }
-        // A workspace whose last session ended is gone from the model: a select of it names nothing.
-        auto const asked = vtworkspace::WorkspaceId { select->workspace };
-        auto const known = select->workspace != 0 && _host.model().workspace(asked) != nullptr;
-        if (known)
-            selectWorkspace(asked);
-        else if (select->workspace == 0)
-        {
-            // A workspace of its own, which the connection selects as it creates it.
-            // Started where the pane that asked is, as a tab made from it would be.
-            auto const from = select->directoryFromSession
-                                  ? std::optional { vtworkspace::SessionId { *select->directoryFromSession } }
-                                  : std::nullopt;
-            if (auto const* created = _host.createWorkspace(spawnRequest({}, from)))
-                selectWorkspace(created->id());
-            else
-                errorLog()("{}: the workspace this client asked to select could not be created", _id);
-        }
-        else
-            errorLog()("{}: not selecting {}: there is no such workspace", _id, proto::describe(frame.pdu));
-        // Answered whatever came of it, with the selection as it stands and the request named as the batch's
-        // cause: a client that asked for a workspace the daemon does not have learns at once that it kept the
-        // old one, and the request is not one the daemon does not understand.
-        if (batchesLayouts())
-        {
-            _layoutBatchCause = std::max(_layoutBatchCause, frame.serial);
-            openLayoutBatch();
-            _layoutBatch = LayoutBatch::Pushed;
-        }
+        serveSelectWorkspace(frame, *select);
         return TabVerb::Served;
     }
     if (auto const* move = std::get_if<proto::MoveWorkspace>(&frame.pdu))
@@ -2536,6 +2538,17 @@ NativeSession::TabVerb NativeSession::serveWorkspaceVerb(proto::DecodedFrame con
                 vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace, .uuid = *uuid }, set->name);
         return TabVerb::Served;
     }
+    if (auto const* recolor = std::get_if<proto::SetWorkspaceColor>(&frame.pdu))
+    {
+        // Gated as the colour's announcement is: a client that cannot be told the colour does not set it.
+        if (!sharesWorkspaceColor())
+        {
+            refuse(frame);
+            return TabVerb::Served;
+        }
+        serveSetWorkspaceColor(frame, *recolor);
+        return TabVerb::Served;
+    }
     if (std::holds_alternative<proto::ReportFocus>(frame.pdu))
     {
         if (!_negotiated->shared.contains(proto::Capability::DaemonFollow))
@@ -2569,6 +2582,52 @@ NativeSession::TabVerb NativeSession::serveWorkspaceVerb(proto::DecodedFrame con
         return TabVerb::Served;
     }
     return TabVerb::None;
+}
+
+void NativeSession::serveSelectWorkspace(proto::DecodedFrame const& frame,
+                                         proto::SelectWorkspace const& select)
+{
+    // A workspace whose last session ended is gone from the model: a select of it names nothing.
+    auto const asked = vtworkspace::WorkspaceId { select.workspace };
+    auto const known = select.workspace != 0 && _host.model().workspace(asked) != nullptr;
+    if (known)
+        selectWorkspace(asked);
+    else if (select.workspace == 0)
+    {
+        // A workspace of its own, which the connection selects as it creates it.
+        // Started where the pane that asked is, as a tab made from it would be.
+        auto const from = select.directoryFromSession
+                              ? std::optional { vtworkspace::SessionId { *select.directoryFromSession } }
+                              : std::nullopt;
+        if (auto const* created = _host.createWorkspace(spawnRequest({}, from)))
+            selectWorkspace(created->id());
+        else
+            errorLog()("{}: the workspace this client asked to select could not be created", _id);
+    }
+    else
+        errorLog()("{}: not selecting {}: there is no such workspace", _id, proto::describe(frame.pdu));
+    // Answered whatever came of it, with the selection as it stands and the request named as the batch's
+    // cause: a client that asked for a workspace the daemon does not have learns at once that it kept the
+    // old one, and the request is not one the daemon does not understand.
+    if (batchesLayouts())
+    {
+        _layoutBatchCause = std::max(_layoutBatchCause, frame.serial);
+        openLayoutBatch();
+        _layoutBatch = LayoutBatch::Pushed;
+    }
+}
+
+void NativeSession::serveSetWorkspaceColor(proto::DecodedFrame const& frame,
+                                           proto::SetWorkspaceColor const& recolor)
+{
+    // Applied to the model, whose workspaceColorChanged tells every client sharing the colour.
+    auto const workspace = vtworkspace::WorkspaceId { recolor.workspace };
+    if (_host.model().workspace(workspace) == nullptr)
+        errorLog()("{}: ignoring {}: there is no such workspace", _id, proto::describe(frame.pdu));
+    else if (recolor.color.rgb)
+        _host.model().setWorkspaceColor(workspace, vtbackend::RGBColor { *recolor.color.rgb });
+    else
+        _host.model().resetWorkspaceColor(workspace);
 }
 
 void NativeSession::openFirstTab(uint64_t named)

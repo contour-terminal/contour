@@ -777,9 +777,11 @@ Item {
         id: colorFlyout
         objectName: "tabColorFlyout"
         controller: root.controller
-        tabIndex: root.tabIndex
         // Which swatch the keyboard cursor starts on when the flyout opens.
         currentColor: root.tabColor
+        // Null-guarded: the controller is torn down before this popup on window close.
+        onColorPicked: (c) => { if (root.controller) root.controller.setTabColor(root.tabIndex, c) }
+        onResetRequested: { if (root.controller) root.controller.resetTabColor(root.tabIndex) }
     }
 
     // Keyboard entry points (the RenameTab / SetTabColor actions): the WindowController emits

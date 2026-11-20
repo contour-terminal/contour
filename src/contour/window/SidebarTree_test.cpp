@@ -784,6 +784,41 @@ TEST_CASE("SidebarTree.tree_lines_connect_through_second_lines", "[sidebar]")
     CHECK(treeContinuationText(rows[0]).empty());
 }
 
+TEST_CASE("SidebarTree.workspace_rail_cells_run_unbroken", "[sidebar]")
+{
+    // A workspace's rail on the Terminal look is the tree's first cell on every line of its rows: drawn as
+    // the tree's own connector, a blank (a pane under the last tab, the last tab's second line) and a corner
+    // (whose stroke stops half way down) made to run on, so no line of the workspace is left without it.
+    auto const rows =
+        rowsOf(directoryOf({ workspaceOf(1,
+                                         "w",
+                                         { tabOf(1, "split", { paneOf(1, "a"), paneOf(2, "b") }),
+                                           tabOf(2, "last", { paneOf(3, "c"), paneOf(4, "d") }) }),
+                             workspaceOf(2, "empty", {}) }));
+    REQUIRE(rows.size() == 8);
+    auto const cells = std::ranges::to<std::vector>(rows | std::views::transform(workspaceRailCellsOf));
+
+    // The workspace row: its disclosure is the cell, and draws itself.
+    CHECK(cells[0] == RailCells { .first = "", .second = "" });
+    CHECK(cells[1] == RailCells { .first = "├", .second = "│" });
+    CHECK(cells[2] == RailCells { .first = "│", .second = "│" });
+    CHECK(cells[3] == RailCells { .first = "│", .second = "│" });
+    // The last tab: its corner runs on, and so do its blank second line and the cells of its panes.
+    CHECK(treeLinesText(rows[4].lines, rows[4].depth).starts_with("└"));
+    CHECK(treeContinuationText(rows[4]).starts_with(" "));
+    CHECK(cells[4] == RailCells { .first = "├", .second = "│" });
+    CHECK(treeLinesText(rows[5].lines, rows[5].depth).starts_with(" "));
+    CHECK(cells[5] == RailCells { .first = "│", .second = "│" });
+    CHECK(cells[6] == RailCells { .first = "│", .second = "│" });
+    // A workspace with nothing to fold has no disclosure: the rail draws its cell, on its one line.
+    REQUIRE(rows[7].expansion == RowExpansion::None);
+    CHECK(cells[7] == RailCells { .first = "│", .second = "" });
+
+    // Nothing the tree itself draws changes: the rail is drawn over it, not into it.
+    CHECK(treeLinesText(rows[4].lines, rows[4].depth) == "└ ");
+    CHECK(treeContinuationText(rows[5]) == "  │ ");
+}
+
 TEST_CASE("SidebarTree.meter_text_fills_eighths_of_cells", "[sidebar]")
 {
     CHECK(meterText(0) == "░░░░░");
@@ -807,6 +842,73 @@ TEST_CASE("SidebarTree.hover_detail_joins_what_it_has", "[sidebar]")
     CHECK(hoverDetailOf(rows.front()).empty());
 }
 
+TEST_CASE("the hover detail holds a long folder whole", "[sidebar]")
+{
+    auto const cwd = "/" + std::string(299, 'd');
+    auto directory = oneTabWith(recordOf(ProgramState::Working));
+    directory.workspaces[0].tabs[0].panes[0].cwd = cwd;
+    auto const rows = rowsOf(directory);
+    auto const& row = tabRowOf(rows);
+    // The row's own line stays cut at MaxRowTextLength (the ellipsis counts as one character).
+    CHECK(row.folder == cwd.substr(0, MaxRowTextLength - 1) + "…");
+    CHECK(hoverDetailOf(row).contains(cwd));
+}
+
+namespace
+{
+/// A row of @p depth with only the parts the second line is decided from.
+SidebarRow secondLineRow(uint8_t depth, std::string folder, std::string program, std::string reason = {})
+{
+    auto row = SidebarRow {};
+    row.depth = depth;
+    row.folder = std::move(folder);
+    row.program = std::move(program);
+    row.reason = std::move(reason);
+    return row;
+}
+} // namespace
+
+TEST_CASE("idleLineOf joins folder and program", "[sidebar]")
+{
+    CHECK(idleLineOf(secondLineRow(1, "~/src", "claude")) == "~/src · claude");
+    CHECK(idleLineOf(secondLineRow(2, "~/src", "claude")) == "~/src · claude");
+}
+
+TEST_CASE("idleLineOf leaves a missing half out", "[sidebar]")
+{
+    CHECK(idleLineOf(secondLineRow(1, "~/src", {})) == "~/src");
+    CHECK(idleLineOf(secondLineRow(1, {}, "claude")) == "claude");
+    CHECK(idleLineOf(secondLineRow(1, {}, {})).empty());
+}
+
+TEST_CASE("idleLineOf is empty for a workspace row", "[sidebar]")
+{
+    CHECK(idleLineOf(secondLineRow(0, "~/src", "claude")).empty());
+}
+
+TEST_CASE("secondLineOf prefers a status to the idle line", "[sidebar]")
+{
+    for (auto const depth: { uint8_t { 1 }, uint8_t { 2 } })
+    {
+        CHECK(secondLineOf(secondLineRow(depth, "~/src", {}, "exit 1")) == SecondLine::Status);
+        CHECK(secondLineOf(secondLineRow(depth, "~/src", {})) == SecondLine::Idle);
+        CHECK(secondLineOf(secondLineRow(depth, {}, "claude")) == SecondLine::Idle);
+        CHECK(secondLineOf(secondLineRow(depth, {}, {}, "exit 1")) == SecondLine::Status);
+    }
+    CHECK(secondLineOf(secondLineRow(0, {}, {}, "exit 1")) == SecondLine::None);
+    CHECK(secondLineOf(secondLineRow(0, {}, {})) == SecondLine::None);
+}
+
+TEST_CASE("secondLineOf has nothing for a row that knows neither its folder nor its program", "[sidebar]")
+{
+    // The row keeps its two-line height and centres its name in it (SidebarRow.qml).
+    for (auto const depth: { uint8_t { 1 }, uint8_t { 2 } })
+    {
+        CHECK(secondLineOf(secondLineRow(depth, {}, {})) == SecondLine::None);
+        CHECK(idleLineOf(secondLineRow(depth, {}, {})).empty());
+    }
+}
+
 TEST_CASE("SidebarTree.unlabelled_workspace_is_numbered_as_its_host_numbers_it", "[sidebar]")
 {
     // The daemon counts a workspace the list leaves out: the row says what `contour ls` says.
@@ -817,4 +919,81 @@ TEST_CASE("SidebarTree.unlabelled_workspace_is_numbered_as_its_host_numbers_it",
     REQUIRE(rows.size() == 4);
     CHECK(rows[0].title == "ops");
     CHECK(rows[2].title == "Workspace 3");
+}
+
+TEST_CASE("a coloured tab's row and its pane rows carry its colour", "[sidebar]")
+{
+    auto constexpr Orange = vtbackend::RGBColor { 0xE8, 0x85, 0x3A };
+    auto coloured = tabOf(1, "t", { paneOf(1, "a"), paneOf(2, "b") });
+    coloured.color = Orange;
+    auto const rows =
+        rowsOf(directoryOf({ workspaceOf(1, "w", { std::move(coloured), tabOf(2, "u", { paneOf(3) }) }) }));
+    REQUIRE(rows.size() == 5);
+    CHECK(rows[1].key.kind == SidebarRowKind::Tab);
+    CHECK(rows[1].tabColor == Orange);
+    CHECK(rows[2].key.kind == SidebarRowKind::Pane);
+    CHECK(rows[2].tabColor == Orange);
+    CHECK(rows[3].key.kind == SidebarRowKind::Pane);
+    CHECK(rows[3].tabColor == Orange);
+    // A tab without a colour leaves its row without one.
+    CHECK(rows[4].key.kind == SidebarRowKind::Tab);
+    CHECK_FALSE(rows[4].tabColor.has_value());
+}
+
+TEST_CASE("a workspace row carries no tab colour", "[sidebar]")
+{
+    auto coloured = tabOf(1, "t", { paneOf(1) });
+    coloured.color = vtbackend::RGBColor { 0xE8, 0x85, 0x3A };
+    auto const directory = directoryOf({ workspaceOf(1, "w", { std::move(coloured) }) });
+
+    auto const expanded = rowsOf(directory);
+    REQUIRE(expanded.size() == 2);
+    CHECK_FALSE(expanded[0].tabColor.has_value());
+
+    // Folded over its coloured tab, the workspace row still shows none of it.
+    auto const folded = rowsOf(directory, SidebarState { .collapsedWorkspaces = { 1 } });
+    REQUIRE(folded.size() == 1);
+    CHECK(folded[0].key.kind == SidebarRowKind::Workspace);
+    CHECK_FALSE(folded[0].tabColor.has_value());
+}
+
+TEST_CASE("every row of a coloured workspace carries its colour", "[sidebar]")
+{
+    auto constexpr Magenta = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    auto coloured = workspaceOf(
+        1, "w", { tabOf(1, "t", { paneOf(1, "a"), paneOf(2, "b") }), tabOf(2, "u", { paneOf(3) }) });
+    coloured.color = Magenta;
+    auto const rows = rowsOf(directoryOf({ std::move(coloured) }));
+    REQUIRE(rows.size() == 5);
+    CHECK(rows[0].key.kind == SidebarRowKind::Workspace);
+    CHECK(rows[1].key.kind == SidebarRowKind::Tab);
+    CHECK(rows[2].key.kind == SidebarRowKind::Pane);
+    CHECK(rows[3].key.kind == SidebarRowKind::Pane);
+    CHECK(rows[4].key.kind == SidebarRowKind::Tab);
+    for (auto const& row: rows)
+        CHECK(row.workspaceColor == Magenta);
+}
+
+TEST_CASE("a folded coloured workspace keeps its colour", "[sidebar]")
+{
+    auto coloured = workspaceOf(1, "w", { tabOf(1, "t", { paneOf(1) }) });
+    coloured.color = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    auto const folded =
+        rowsOf(directoryOf({ std::move(coloured) }), SidebarState { .collapsedWorkspaces = { 1 } });
+    REQUIRE(folded.size() == 1);
+    CHECK(folded[0].key.kind == SidebarRowKind::Workspace);
+    CHECK(folded[0].workspaceColor == vtbackend::RGBColor { 0xC2, 0x54, 0x8F });
+}
+
+TEST_CASE("an uncoloured workspace's rows carry none", "[sidebar]")
+{
+    auto coloured = workspaceOf(1, "w", { tabOf(1, "t", { paneOf(1) }) });
+    coloured.color = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    auto const rows = rowsOf(
+        directoryOf({ std::move(coloured),
+                      workspaceOf(2, "plain", { tabOf(2, "u", { paneOf(2, "a"), paneOf(3, "b") }) }) }));
+    REQUIRE(rows.size() == 6);
+    CHECK(rows[2].key.workspace == 2);
+    for (auto const& row: rows | std::views::drop(2))
+        CHECK_FALSE(row.workspaceColor.has_value());
 }

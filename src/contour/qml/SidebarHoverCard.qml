@@ -40,7 +40,11 @@ Popup {
     /// The pointer left the card: it closes, unless the pointer went back to the row it is about.
     signal left()
 
-    contentItem: ColumnLayout {
+    // A positioner, not a layout: each text is given the card's content width by its own binding, so it wraps
+    // within it whatever the platform and the order bindings settle in. A layout would size them itself, and
+    // rounds the width it gives to a whole pixel, up as readily as down, past a card of whole cells (the
+    // Terminal row), whose content width is fractional.
+    contentItem: Column {
         spacing: chromeStyle.space.s3
 
         HoverHandler {
@@ -49,14 +53,16 @@ Popup {
         }
 
         // The reason: its words in the body face, and its command, when it has one, in the monospace face
-        // after them; a long command wraps within the card.
+        // after them; both wrap within the card, so it shows them whole.
         Flow {
-            Layout.fillWidth: true
+            width: card.availableWidth
             visible: card.row !== null && card.row.fullReason !== ""
 
             Text {
                 objectName: "sidebarHoverCardReason"
+                width: Math.min(implicitWidth, parent.width)
                 textFormat: Text.PlainText
+                wrapMode: Text.Wrap
                 text: card.row !== null ? card.row.fullReasonLabel : ""
                 font: chromeStyle.type.body
                 color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.colors.paletteText
@@ -74,12 +80,13 @@ Popup {
             }
         }
 
+        // What it is about, where and for how long; it wraps, so a long folder the row cut reads to its end.
         Text {
             objectName: "sidebarHoverCardDetail"
-            Layout.fillWidth: true
+            width: card.availableWidth
             visible: text !== ""
             textFormat: Text.PlainText
-            elide: Text.ElideMiddle
+            wrapMode: Text.Wrap
             text: card.row !== null ? card.row.hoverDetail : ""
             font: chromeStyle.type.footnote
             color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.colors.paletteSecondaryText

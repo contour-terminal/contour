@@ -2599,6 +2599,73 @@ TEST_CASE("SessionModel: moveWorkspace reorders and clamps", "[vtworkspace][mode
     }
 }
 
+TEST_CASE("SessionModel: a workspace's colour is set, read back and reset", "[vtworkspace][model][workspace]")
+{
+    constexpr auto Magenta = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    Fixture f;
+    auto const id = f.model.createWorkspace()->id();
+    auto const colorEvents = [&] {
+        return std::ranges::count(f.events.log, std::format("workspaceColor:{}", id.value));
+    };
+    CHECK_FALSE(f.model.workspace(id)->color().has_value());
+
+    f.model.setWorkspaceColor(id, Magenta);
+    CHECK(f.model.workspace(id)->color() == std::optional { Magenta });
+    CHECK(colorEvents() == 1);
+
+    // The colour it already has is no change.
+    f.model.setWorkspaceColor(id, Magenta);
+    CHECK(colorEvents() == 1);
+
+    f.model.resetWorkspaceColor(id);
+    CHECK_FALSE(f.model.workspace(id)->color().has_value());
+    CHECK(colorEvents() == 2);
+
+    // Resetting none, or touching an unknown workspace, is no change either.
+    f.model.resetWorkspaceColor(id);
+    f.model.setWorkspaceColor(WorkspaceId { 9999 }, Magenta);
+    f.model.resetWorkspaceColor(WorkspaceId { 9999 });
+    CHECK(colorEvents() == 2);
+    CHECK_FALSE(f.events.sawPrefix("workspaceColor:9999"));
+}
+
+TEST_CASE("SessionModel: a workspace keeps its colour through moves", "[vtworkspace][model][workspace]")
+{
+    constexpr auto Magenta = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    Fixture f;
+    auto const a = f.model.createWorkspace()->id();
+    auto const b = f.model.createWorkspace()->id();
+    auto const* const tab = f.model.createTab(b);
+    f.model.setWorkspaceColor(a, Magenta);
+
+    f.model.moveWorkspace(a, 1);
+    CHECK(f.model.workspaceAt(1)->id() == a);
+    CHECK(f.model.workspace(a)->color() == std::optional { Magenta });
+
+    f.model.moveTabToWorkspace(b, tab->id(), a, 0);
+    CHECK(f.model.workspace(a)->color() == std::optional { Magenta });
+    CHECK_FALSE(f.model.workspace(b)->color().has_value());
+}
+
+TEST_CASE("SessionModel: a restored workspace keeps its colour", "[vtworkspace][model][restore]")
+{
+    constexpr auto Magenta = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    auto original = Fixture {};
+    auto const coloured = original.model.createWorkspace()->id();
+    std::ignore = original.model.createWorkspace();
+    original.model.setWorkspaceColor(coloured, Magenta);
+    auto const tree = original.model.captureTree();
+    REQUIRE(tree.workspaces.size() == 2);
+    CHECK(tree.workspaces[0].color == std::optional { Magenta });
+    CHECK_FALSE(tree.workspaces[1].color.has_value());
+
+    auto restored = Fixture {};
+    REQUIRE(restored.model.restore(tree, original.model.idState()).has_value());
+    CHECK(restored.model.workspaceAt(0)->color() == std::optional { Magenta });
+    CHECK_FALSE(restored.model.workspaceAt(1)->color().has_value());
+    CHECK(restored.events.log.empty());
+}
+
 TEST_CASE("SessionModel: removing a workspace announces it with the place it had",
           "[vtworkspace][model][workspace]")
 {

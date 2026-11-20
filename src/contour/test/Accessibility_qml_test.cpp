@@ -830,6 +830,8 @@ TEST_CASE(
             { "selection", 0 },
             { "treeText", QString {} },
             { "treeTextContinued", QString {} },
+            { "railText", QString {} },
+            { "railTextContinued", QString {} },
             { "meterText", QString {} },
             { "accessibleName", QStringLiteral("billing") },
             { "accessibleDescription", QStringLiteral("Workspace, expanded, 1 pane needs you") },
@@ -841,6 +843,10 @@ TEST_CASE(
             { "fullReasonCommand", QString {} },
             { "hoverDetail", QString {} },
             { "progressFraction", 0.0 },
+            { "secondLine", kind == 0 ? 0 : 1 },
+            { "idleLine", QString {} },
+            { "tabColor", QColor { Qt::transparent } },
+            { "workspaceColor", QColor { Qt::transparent } },
             { "sidebar", QVariant::fromValue<QObject*>(nullptr) },
             { "controller", QVariant::fromValue<QObject*>(nullptr) },
         };
@@ -854,5 +860,86 @@ TEST_CASE(
     CHECK(attached->property("name").toString() == QStringLiteral("billing"));
     CHECK(attached->property("description").toString()
           == QStringLiteral("Workspace, expanded, 1 pane needs you"));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: a coloured workspace's row says what it is handed, and its paint is decoration",
+          "[contour][gui][qml][a11y][sidebar]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::window::registerSidebarQmlTypes();
+    contour::test::QmlMessageCapture const warnings;
+    auto const rowWith = [](QColor const& workspaceColor) {
+        return QVariantMap {
+            { "index", 0 },
+            { "kind", 0 },
+            { "depth", 0 },
+            { "title", QStringLiteral("contour") },
+            { "reason", QString {} },
+            { "fullReason", QString {} },
+            { "gitText", QString {} },
+            { "timeText", QString {} },
+            { "timeKind", 0 },
+            { "progress", -1 },
+            { "glyph", 0 },
+            { "expansion", static_cast<int>(contour::window::RowExpansion::Expanded) },
+            { "selected", false },
+            { "selection", 0 },
+            { "treeText", QString {} },
+            { "treeTextContinued", QString {} },
+            { "railText", QString {} },
+            { "railTextContinued", QString {} },
+            { "meterText", QString {} },
+            { "accessibleName", QStringLiteral("contour") },
+            { "accessibleDescription", QStringLiteral("Workspace, expanded") },
+            { "program", QString {} },
+            { "folder", QString {} },
+            { "reasonLabel", QString {} },
+            { "reasonCommand", QString {} },
+            { "fullReasonLabel", QString {} },
+            { "fullReasonCommand", QString {} },
+            { "hoverDetail", QString {} },
+            { "progressFraction", 0.0 },
+            { "secondLine", 0 },
+            { "idleLine", QString {} },
+            { "tabColor", QColor { Qt::transparent } },
+            { "workspaceColor", workspaceColor },
+            { "sidebar", QVariant::fromValue<QObject*>(nullptr) },
+            { "controller", QVariant::fromValue<QObject*>(nullptr) },
+        };
+    };
+    auto plain = loadComponent(
+        engine, QStringLiteral("qrc:/qt/qml/Contour/Ui/SidebarRow.qml"), rowWith(Qt::transparent));
+    auto coloured = loadComponent(engine,
+                                  QStringLiteral("qrc:/qt/qml/Contour/Ui/SidebarRow.qml"),
+                                  rowWith(QColor { 0xC2, 0x54, 0x8F }));
+    auto* plainAttached = accessibleAttachedOf(plain.get());
+    auto* colouredAttached = accessibleAttachedOf(coloured.get());
+    REQUIRE(plainAttached != nullptr);
+    REQUIRE(colouredAttached != nullptr);
+    // Both say the model's words (SidebarModel's accessibleName and accessibleDescription roles), which
+    // SidebarModel_test checks are the same with and without a colour.
+    for (auto const* attached: { plainAttached, colouredAttached })
+    {
+        CHECK(attached->property("name").toString() == QStringLiteral("contour"));
+        CHECK(attached->property("description").toString() == QStringLiteral("Workspace, expanded"));
+    }
+
+    // What the colour draws is decoration, whichever style draws it.
+    for (auto const* part: { "sidebarRowWorkspaceFill",
+                             "sidebarRowWorkspaceRail",
+                             "sidebarRowWorkspaceRailCell",
+                             "sidebarRowWorkspaceRailCellContinued",
+                             "sidebarRowWorkspaceWash",
+                             "sidebarRowWorkspaceSwatch" })
+    {
+        INFO(part);
+        auto const parts = partsNamed(*coloured, QString::fromLatin1(part));
+        REQUIRE(parts.size() == 1);
+        auto* attached = accessibleAttachedOf(parts.front());
+        REQUIRE(attached != nullptr);
+        CHECK(attached->property("ignored").toBool());
+    }
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

@@ -263,6 +263,9 @@ namespace vthost::testing
         { proto::PduType::OpenFirstTab, proto::DecodedPdu { proto::OpenFirstTab { .workspace = 4 } } },
         { proto::PduType::SetWorkspaceName,
           proto::DecodedPdu { proto::SetWorkspaceName { .workspace = 3, .name = "secret-label" } } },
+        { proto::PduType::SetWorkspaceColor,
+          proto::DecodedPdu { proto::SetWorkspaceColor {
+              .workspace = 3, .color = proto::WireWorkspaceColor { .rgb = 0xC2548F } } } },
     };
 }
 

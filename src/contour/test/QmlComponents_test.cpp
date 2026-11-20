@@ -3205,7 +3205,6 @@ TEST_CASE("Tab color flyout offers a dependency-free arbitrary-color entry (offs
 
     QVariantMap initial;
     initial.insert("controller", QVariant::fromValue(&controller));
-    initial.insert("tabIndex", 0);
     std::unique_ptr<QObject> flyout(component.createWithInitialProperties(initial));
     REQUIRE(flyout != nullptr);
 

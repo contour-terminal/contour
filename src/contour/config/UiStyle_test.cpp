@@ -290,11 +290,13 @@ TEST_CASE("UiStyle: only the Terminal row draws the band's glyphs", "[uistyle]")
     {
         auto const& tokens = uiStyleTokens(row);
         CHECK(tokens.tabColorGlyph.empty());
+        CHECK(tokens.workspaceSwatchGlyph.empty());
         CHECK(tokens.chipOpenGlyph.empty());
         CHECK(tokens.chipCloseGlyph.empty());
     }
     auto const& terminal = uiStyleTokens(ChromeStyle::Terminal);
     CHECK(terminal.tabColorGlyph == "▌");
+    CHECK(terminal.workspaceSwatchGlyph == "■");
     CHECK(terminal.chipOpenGlyph == "[");
     CHECK(terminal.chipCloseGlyph == "]");
 }

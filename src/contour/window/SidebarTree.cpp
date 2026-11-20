@@ -29,6 +29,7 @@ namespace
         ReasonParts fullReason;
         std::string program;
         std::string folder;
+        std::string fullFolder;
         TimeText time;
     };
 
@@ -127,6 +128,7 @@ namespace
         auto leaf = LeafStatus {};
         leaf.urgency = paneUrgency(pane, attention);
         leaf.folder = rowTextOf(pane.cwd);
+        leaf.fullFolder = rowTextOf(pane.cwd, MaxFullReasonLength);
         auto const winner = winnerOf(pane.status, attention.seenStatusGeneration);
         if (winner.record && urgencyOf(winner.kind, StatusSeen::Unseen) == leaf.urgency)
         {
@@ -191,6 +193,7 @@ namespace
         row.fullReasonCommand = leaf.fullReason.command;
         row.program = leaf.program;
         row.folder = leaf.folder;
+        row.fullFolder = leaf.fullFolder;
         row.time = leaf.time;
     }
 
@@ -249,6 +252,8 @@ namespace
         if (row.title.empty())
             row.title = "Terminal";
         row.selection = selection;
+        row.tabColor = tab.color;
+        row.workspaceColor = workspace.color;
         adopt(row, mostUrgent(leaves));
         row.leaves = countsOf(leaves);
 
@@ -267,6 +272,8 @@ namespace
                 };
                 paneRow.depth = 2;
                 paneRow.position = panePosition;
+                paneRow.tabColor = tab.color;
+                paneRow.workspaceColor = workspace.color;
                 auto const& named = !pane.title.empty() ? pane.title : pane.cwd;
                 paneRow.title = rowTextOf(named);
                 if (paneRow.title.empty())
@@ -327,6 +334,22 @@ namespace
         return holdsDisplayed && !showsDisplayed ? RowSelection::ContainsSelected : RowSelection::None;
     }
 
+    /// @param parts The texts, in order.
+    /// @return The parts that are not empty, joined by LabelSeparator.
+    [[nodiscard]] std::string joinedParts(std::initializer_list<std::string const*> parts)
+    {
+        auto joined = std::string {};
+        for (auto const* part: parts)
+        {
+            if (part->empty())
+                continue;
+            if (!joined.empty())
+                joined += LabelSeparator;
+            joined += *part;
+        }
+        return joined;
+    }
+
 } // namespace
 
 std::string gitTextOf(DirectoryGit const& git)
@@ -378,6 +401,7 @@ SidebarListing sidebarListing(WorkspaceDirectory const& directory,
         row.title = rowTextOf(workspaceTitleOf(workspace, static_cast<std::size_t>(position)));
         if (workspace.git)
             row.gitText = gitTextOf(*workspace.git);
+        row.workspaceColor = workspace.color;
         auto const best = mostUrgent(leaves);
         row.urgency = best.urgency;
         row.glyph = best.glyph;
@@ -456,16 +480,14 @@ std::string_view urgencyText(Urgency urgency) noexcept
 
 std::string hoverDetailOf(SidebarRow const& row)
 {
-    auto detail = std::string {};
-    for (auto const* part: { &row.program, &row.folder, &row.time.text })
-    {
-        if (part->empty())
-            continue;
-        if (!detail.empty())
-            detail += LabelSeparator;
-        detail += *part;
-    }
-    return detail;
+    return joinedParts({ &row.program, &row.fullFolder, &row.time.text });
+}
+
+std::string idleLineOf(SidebarRow const& row)
+{
+    if (secondLineOf(row) == SecondLine::None)
+        return {};
+    return joinedParts({ &row.folder, &row.program });
 }
 
 int parentRowOf(std::span<SidebarRow const> rows, int row) noexcept
@@ -479,18 +501,41 @@ int parentRowOf(std::span<SidebarRow const> rows, int row) noexcept
     return -1;
 }
 
+namespace
+{
+    /// @return The cell @p glyph is drawn as.
+    [[nodiscard]] std::string_view treeGlyphText(TreeGlyph glyph) noexcept
+    {
+        switch (glyph)
+        {
+            case TreeGlyph::None: break;
+            case TreeGlyph::Tee: return "├";
+            case TreeGlyph::Last: return "└";
+            case TreeGlyph::Bar: return "│";
+        }
+        return " ";
+    }
+
+    /// @return @p glyph as the workspace rail draws it: a connector whose stroke reaches the cell's bottom.
+    [[nodiscard]] TreeGlyph railGlyphOf(TreeGlyph glyph) noexcept
+    {
+        switch (glyph)
+        {
+            case TreeGlyph::None:
+            case TreeGlyph::Bar: break;
+            case TreeGlyph::Tee:
+            case TreeGlyph::Last: return TreeGlyph::Tee;
+        }
+        return TreeGlyph::Bar;
+    }
+} // namespace
+
 std::string treeLinesText(TreeLines const& lines, uint8_t depth)
 {
     auto text = std::string {};
     for (auto const glyph: lines.columns | std::views::take(depth))
     {
-        switch (glyph)
-        {
-            case TreeGlyph::None: text += ' '; break;
-            case TreeGlyph::Tee: text += "├"; break;
-            case TreeGlyph::Last: text += "└"; break;
-            case TreeGlyph::Bar: text += "│"; break;
-        }
+        text += treeGlyphText(glyph);
         text += ' ';
     }
     return text;
@@ -500,6 +545,17 @@ std::string treeContinuationText(SidebarRow const& row)
 {
     return row.depth == 0 ? std::string {}
                           : treeLinesText(row.continued, static_cast<uint8_t>(row.continued.columns.size()));
+}
+
+RailCells workspaceRailCellsOf(SidebarRow const& row)
+{
+    if (row.depth == 0)
+        return RailCells { .first = row.expansion == RowExpansion::None
+                                        ? std::string { treeGlyphText(TreeGlyph::Bar) }
+                                        : std::string {},
+                           .second = {} };
+    return RailCells { .first = std::string { treeGlyphText(railGlyphOf(row.lines.columns.front())) },
+                       .second = std::string { treeGlyphText(railGlyphOf(row.continued.columns.front())) } };
 }
 
 std::string meterText(int percent)
@@ -539,9 +595,9 @@ std::string formatRelative(std::chrono::seconds elapsed)
     return std::format("{}d ago", chrono::duration_cast<chrono::hours>(clamped).count() / 24);
 }
 
-std::string rowTextOf(std::string_view text)
+std::string rowTextOf(std::string_view text, std::size_t maxLength)
 {
-    return sanitizedTo(text, MaxRowTextLength);
+    return sanitizedTo(text, maxLength);
 }
 
 ReasonParts statusReasonOf(vtbackend::ProgramStatusRecord const& record,

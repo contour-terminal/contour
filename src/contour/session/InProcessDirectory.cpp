@@ -29,7 +29,7 @@ namespace
         return wire;
     }
 
-    /// @param model Where the tabs' names are: a tree captures none.
+    /// @param model Where the tabs' names and colours are: a tree captures neither.
     vthost::proto::LayoutState layoutOf(vtworkspace::SessionModel const& model,
                                         vtworkspace::WorkspaceState const& workspace)
     {
@@ -40,20 +40,30 @@ namespace
         {
             auto wire = vthost::proto::WireTab {};
             wire.tabId = tab.id.value;
-            if (auto const* const named = model.findTab(tab.id))
-                wire.name = named->name();
+            if (auto const* const known = model.findTab(tab.id))
+            {
+                wire.name = known->name();
+                if (auto const color = known->color())
+                {
+                    wire.hasColor = 1;
+                    wire.color = color->value();
+                }
+            }
             wire.root = wirePaneOf(tab.root);
             layout.tabs.push_back(std::move(wire));
         }
         return layout;
     }
 
-    /// What an in-process workspace states of itself: its name and its git state; it has no control id.
+    /// What an in-process workspace states of itself: its name, its colour and its git state; it has no
+    /// control id.
     class MetaOfProcess final: public window::WorkspaceMetaLookup
     {
       public:
-        MetaOfProcess(WorkspaceNames const& names, vthost::WorkspaceGitTracker const* git):
-            _names { names }, _git { git }
+        MetaOfProcess(vtworkspace::SessionModel const& model,
+                      WorkspaceNames const& names,
+                      vthost::WorkspaceGitTracker const* git):
+            _model { model }, _names { names }, _git { git }
         {
         }
 
@@ -61,6 +71,8 @@ namespace
         {
             auto const id = vtworkspace::WorkspaceId { workspace };
             auto stated = window::WorkspaceMetadata { .name = _names.nameOf(id) };
+            if (auto const* const known = _model.workspace(id))
+                stated.color = known->color();
             if (_git != nullptr)
                 if (auto const info = _git->infoOf(id))
                     stated.git = window::DirectoryGit {
@@ -73,6 +85,7 @@ namespace
         }
 
       private:
+        vtworkspace::SessionModel const& _model;
         WorkspaceNames const& _names;
         vthost::WorkspaceGitTracker const* _git;
     };
@@ -122,7 +135,7 @@ window::WorkspaceDirectory InProcessDirectory::directory() const
     for (auto const& workspace: tree.workspaces)
         if (std::ranges::contains(owned, workspace.id))
             layouts.push_back(layoutOf(_model, workspace));
-    auto const meta = MetaOfProcess { _names, _git };
+    auto const meta = MetaOfProcess { _model, _names, _git };
     return window::directoryFromLayouts(layouts, _status, meta, _owner.displayedWorkspace().value);
 }
 

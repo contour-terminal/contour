@@ -6200,6 +6200,12 @@ class RoutingFactory final: public contour::session::SessionFactory
         renamed.emplace_back(workspace, std::string { label });
         return contour::session::RemoteRouting::Routed;
     }
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteWorkspaceColor(
+        uint64_t workspace, std::optional<vtbackend::RGBColor> color) override
+    {
+        colored.emplace_back(workspace, color);
+        return contour::session::RemoteRouting::Routed;
+    }
     [[nodiscard]] contour::session::RemoteRouting requestRemoteMoveWorkspace(uint64_t workspace,
                                                                              uint32_t position) override
     {
@@ -6226,13 +6232,22 @@ class RoutingFactory final: public contour::session::SessionFactory
         return moveRouting;
     }
 
+    [[nodiscard]] contour::session::WorkspaceColorSupport workspaceColorSupport() const noexcept override
+    {
+        return colorSupport;
+    }
+
     /// What requestRemoteMove() answers.
     contour::session::RemoteRouting moveRouting = contour::session::RemoteRouting::Routed;
+    /// Whether the daemon keeps a workspace's colour.
+    contour::session::WorkspaceColorSupport colorSupport = contour::session::WorkspaceColorSupport::Supported;
     /// What the daemon does before requestRemoteMove() returns: its answer may settle that soon.
     std::function<void()> onMove;
 
     std::vector<std::pair<uint64_t, std::string>> renamed;
     std::vector<std::pair<uint64_t, uint32_t>> moved;
+    /// The workspaces coloured, each with its colour; none for a reset.
+    std::vector<std::pair<uint64_t, std::optional<vtbackend::RGBColor>>> colored;
     std::vector<uint64_t> closed;                              ///< The workspaces closed.
     std::vector<std::pair<uint64_t, std::string>> renamedTabs; ///< The tabs renamed, by a session of theirs.
     std::vector<contour::session::RemoteMove> tabMoves;
@@ -6300,6 +6315,64 @@ class DaemonDirectoryBinding final: public contour::session::WindowBinding
 
 } // namespace
 
+TEST_CASE("TerminalSessionManager: a window that lists its own workspaces colours them, a tmux server's too",
+          "[manager][workspace][workspace-color]")
+{
+    contour::test::MockPtySessionFactory host;
+    host.reportedHosting = contour::session::SessionHosting::Remote;
+    host.reportedHostKind = contour::session::SessionHostKind::Tmux;
+    contour::session::FactoryBinding link { host };
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, link);
+
+    // The factory keeps no colour of its own, but the binding lists nothing: the window's own model does.
+    REQUIRE(host.workspaceColorSupport() == contour::session::WorkspaceColorSupport::Unsupported);
+    CHECK(manager.workspaceColorSupportOf(*window.controller)
+          == contour::session::WorkspaceColorSupport::Supported);
+    CHECK(window->workspaceMenuStateOf(window.id.value).coloring
+          == contour::command::MenuColoring::Available);
+
+    auto const plum = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    window->colorCurrentWorkspace(plum);
+    REQUIRE(manager.model().workspace(window.id) != nullptr);
+    CHECK(manager.model().workspace(window.id)->color() == std::optional { plum });
+    CHECK(window->notices().toastText().isEmpty());
+}
+
+TEST_CASE("TerminalSessionManager: against a daemon that keeps no colour, the colour actions only say so",
+          "[manager][workspace][workspace-color]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = RoutingFactory {};
+    factory.colorSupport = contour::session::WorkspaceColorSupport::Unsupported;
+    auto binding = DaemonDirectoryBinding { factory };
+    contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, binding);
+    auto picks =
+        QSignalSpy { window.controller, &contour::window::WindowController::workspaceColorPickRequested };
+
+    CHECK(manager.workspaceColorSupportOf(*window.controller)
+          == contour::session::WorkspaceColorSupport::Unsupported);
+    CHECK(window->workspaceMenuStateOf(10).coloring == contour::command::MenuColoring::Unavailable);
+
+    window->beginCurrentWorkspaceColorPick();
+    window->colorCurrentWorkspace(vtbackend::RGBColor { 1, 2, 3 });
+    window->resetCurrentWorkspaceColor();
+    CHECK(picks.count() == 0);
+    CHECK(factory.colored.empty());
+    CHECK(window->notices().toastText()
+          == QString::fromStdString(contour::window::workspaceColorRefusedNotice().text));
+
+    // A daemon that keeps it opens the picker over the shown workspace.
+    factory.colorSupport = contour::session::WorkspaceColorSupport::Supported;
+    window->beginCurrentWorkspaceColorPick();
+    REQUIRE(picks.count() == 1);
+    CHECK(picks.front().front().toULongLong() == 10);
+}
+
 TEST_CASE("TerminalSessionManager: a daemon's window routes the workspace mutations to its daemon",
           "[manager][workspace]")
 {
@@ -6315,6 +6388,14 @@ TEST_CASE("TerminalSessionManager: a daemon's window routes the workspace mutati
     manager.renameWorkspace(*window.controller, 10, "ops");
     REQUIRE(factory.renamed.size() == 1);
     CHECK(factory.renamed[0] == std::pair<uint64_t, std::string> { 10, "ops" });
+
+    // A colour is the daemon's to give, and so is its reset: neither colours the window's own model.
+    auto const plum = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    manager.setWorkspaceColor(*window.controller, 20, plum);
+    manager.setWorkspaceColor(*window.controller, 20, std::nullopt);
+    CHECK(factory.colored
+          == std::vector<std::pair<uint64_t, std::optional<vtbackend::RGBColor>>> { { 20, plum },
+                                                                                    { 20, std::nullopt } });
 
     manager.moveWorkspace(*window.controller, 20, 0);
     manager.moveWorkspace(*window.controller, 10, -4);

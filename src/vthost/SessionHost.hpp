@@ -1786,6 +1786,7 @@ class SessionHost final: public vtworkspace::ModelEvents
                   int toIndex) override;
     void workspaceMoved(vtworkspace::WorkspaceId workspace, int fromIndex, int toIndex) override;
     void workspaceRemoved(vtworkspace::WorkspaceId workspace, int index) override;
+    void workspaceColorChanged(vtworkspace::WorkspaceId workspace) override;
     void tabAboutToBeMovedToWorkspace(vtworkspace::WorkspaceId from,
                                       int fromIndex,
                                       vtworkspace::WorkspaceId to,

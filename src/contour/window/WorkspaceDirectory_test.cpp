@@ -150,6 +150,19 @@ TEST_CASE("a tab's control label names it over its title and its first pane's", 
     CHECK(tabs[2].name == "named");
 }
 
+TEST_CASE("a tab's colour is carried when the daemon states one", "[contour][directory]")
+{
+    auto const layouts = std::vector { layoutOf(
+        1,
+        { proto::WireTab { .tabId = 1, .hasColor = 1, .color = 0xE8853A, .root = leaf(5) },
+          proto::WireTab { .tabId = 2, .hasColor = 0, .color = 0xE8853A, .root = leaf(6) } }) };
+    auto const directory = directoryFromLayouts(layouts, TableStatus {}, TableMeta {}, std::nullopt);
+    auto const& tabs = directory.workspaces.at(0).tabs;
+    REQUIRE(tabs.size() == 2);
+    CHECK(tabs[0].color == vtbackend::RGBColor { 0xE8, 0x85, 0x3A });
+    CHECK_FALSE(tabs[1].color.has_value());
+}
+
 TEST_CASE("the selection is carried", "[contour][directory]")
 {
     auto const layouts = std::vector { layoutOf(4, {}) };

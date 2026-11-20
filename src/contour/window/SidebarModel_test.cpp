@@ -9,6 +9,7 @@
 #include <core/platform/Clock.hpp>
 
 #include <QtCore/QCoreApplication>
+#include <QtGui/QColor>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -548,6 +549,34 @@ TEST_CASE("SidebarModel: counts take their plural form, and zeros are left out",
     CHECK(accessibleDescriptionOf(row) == "Tab, failed");
 }
 
+TEST_CASE("SidebarModel: a colour changes neither a row's accessible name nor its description",
+          "[contour][sidebar]")
+{
+    auto const coloured = [](SidebarRow row) {
+        row.tabColor = vtbackend::RGBColor { 0x29, 0x80, 0xB9 };
+        row.workspaceColor = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+        return row;
+    };
+    auto workspace = SidebarRow {};
+    workspace.key.kind = SidebarRowKind::Workspace;
+    workspace.title = "contour";
+    workspace.expansion = RowExpansion::Expanded;
+    auto tab = SidebarRow {};
+    tab.key.kind = SidebarRowKind::Tab;
+    tab.depth = 1;
+    tab.title = "claude";
+    tab.urgency = Urgency::Failed;
+    for (auto const& row: { workspace, tab })
+    {
+        CAPTURE(row.title);
+        CHECK(accessibleNameOf(coloured(row)) == accessibleNameOf(row));
+        CHECK(accessibleNameOf(coloured(row)) == QString::fromStdString(row.title));
+        CHECK(accessibleDescriptionOf(coloured(row)) == accessibleDescriptionOf(row));
+    }
+    CHECK(accessibleDescriptionOf(coloured(workspace)) == "Workspace, expanded");
+    CHECK(accessibleDescriptionOf(coloured(tab)) == "Tab, failed");
+}
+
 TEST_CASE("SidebarModel: a fold that hides the displayed tab selects its workspace", "[contour][sidebar]")
 {
     auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }),
@@ -886,6 +915,48 @@ TEST_CASE("SidebarModel: the reason is delivered as its words and its command", 
     CHECK(failed.data(SidebarModel::ReasonCommandRole).toString() == "make");
 }
 
+TEST_CASE("SidebarModel: an idle tab row's second line is its folder", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) } };
+    t.source.listed.workspaces[0].tabs[0].panes[0].cwd = "/srv/app";
+    t.sidebar().refreshNow();
+
+    CHECK(t.sidebar().roleNames().value(SidebarModel::SecondLineRole) == "secondLine");
+    CHECK(t.sidebar().roleNames().value(SidebarModel::IdleLineRole) == "idleLine");
+    auto const tab = t.sidebar().index(1);
+    CHECK(tab.data(SidebarModel::SecondLineRole).toInt() == static_cast<int>(sidebarrows::SecondLine::Idle));
+    CHECK(tab.data(SidebarModel::IdleLineRole).toString() == "/srv/app");
+    auto const workspace = t.sidebar().index(0);
+    CHECK(workspace.data(SidebarModel::SecondLineRole).toInt()
+          == static_cast<int>(sidebarrows::SecondLine::None));
+    CHECK(workspace.data(SidebarModel::IdleLineRole).toString().isEmpty());
+
+    // A tab that knows neither its folder nor its program has nothing for its second line.
+    t.source.listed.workspaces[0].tabs[0].panes[0].cwd.clear();
+    t.sidebar().refreshNow();
+    CHECK(t.sidebar().index(1).data(SidebarModel::SecondLineRole).toInt()
+          == static_cast<int>(sidebarrows::SecondLine::None));
+}
+
+TEST_CASE("a reason arriving changes the second line's role", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) } };
+    t.sidebar().refreshNow();
+    auto changed = QSignalSpy { &t.sidebar(), &QAbstractItemModel::dataChanged };
+
+    auto record = recordOf(ProgramState::Done);
+    record.message = "All tests pass";
+    t.source.listed.workspaces[0].tabs[0].panes[0].status = { record };
+    t.sidebar().refreshNow();
+
+    auto const named = std::ranges::any_of(changed, [](QList<QVariant> const& signal) {
+        return signal.at(2).value<QList<int>>().contains(SidebarModel::SecondLineRole);
+    });
+    CHECK(named);
+    CHECK(t.sidebar().index(1).data(SidebarModel::SecondLineRole).toInt()
+          == static_cast<int>(sidebarrows::SecondLine::Status));
+}
+
 TEST_CASE("SidebarModel: the command map names every tree command", "[contour][sidebar]")
 {
     auto const commands = sidebarCommandMap();
@@ -960,4 +1031,129 @@ TEST_CASE("SidebarModel: the rows' times run while the sidebar or the switcher o
           == SidebarPresence::Shown);
     CHECK(sidebarPresenceOf(SidebarVisibility::Shown, WindowExposure::Hidden, SwitcherOverWindow::Yes)
           == SidebarPresence::Hidden);
+}
+
+namespace
+{
+constexpr auto Orange = vtbackend::RGBColor { 0xE8, 0x85, 0x3A };
+
+/// A workspace with one tab split in two panes, coloured @ref Orange: rows workspace, tab, pane, pane.
+std::vector<DirectoryWorkspace> oneColouredSplitTab()
+{
+    auto workspace = directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) });
+    workspace.tabs[0].panes.push_back(directoryPaneOf(11));
+    workspace.tabs[0].color = Orange;
+    return { std::move(workspace) };
+}
+} // namespace
+
+TEST_CASE("SidebarModel: a tab's rows serve its colour, a workspace row none", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { oneColouredSplitTab() };
+    REQUIRE(t.sidebar().rowCount() == 4);
+    CHECK(t.sidebar().roleNames().value(SidebarModel::TabColorRole) == "tabColor");
+
+    auto const orange = QColor { 0xE8, 0x85, 0x3A };
+    for (auto const row: { 1, 2, 3 })
+    {
+        INFO("row " << row);
+        CHECK(t.sidebar().index(row).data(SidebarModel::TabColorRole).value<QColor>() == orange);
+    }
+    CHECK(t.sidebar().index(0).data(SidebarModel::TabColorRole).value<QColor>().alpha() == 0);
+
+    // Uncoloured, the tab's rows are transparent, the convention the tab strip's accentColor keeps.
+    t.source.listed.workspaces[0].tabs[0].color.reset();
+    t.sidebar().refreshNow();
+    CHECK(t.sidebar().index(1).data(SidebarModel::TabColorRole).value<QColor>().alpha() == 0);
+}
+
+TEST_CASE("a tab colour change is reported for the row", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { oneColouredSplitTab() };
+    t.sidebar().refreshNow();
+    auto changed = QSignalSpy { &t.sidebar(), &QAbstractItemModel::dataChanged };
+
+    t.source.listed.workspaces[0].tabs[0].color.reset();
+    t.sidebar().refreshNow();
+
+    auto const named = [&](int row) {
+        return std::ranges::any_of(changed, [row](QList<QVariant> const& signal) {
+            auto const first = signal.at(0).value<QModelIndex>().row();
+            auto const last = signal.at(1).value<QModelIndex>().row();
+            return first <= row && row <= last
+                   && signal.at(2).value<QList<int>>().contains(SidebarModel::TabColorRole);
+        });
+    };
+    CHECK_FALSE(named(0));
+    CHECK(named(1));
+    CHECK(named(2));
+    CHECK(named(3));
+}
+
+TEST_CASE("SidebarModel: every row of a workspace serves its colour", "[contour][sidebar]")
+{
+    auto directory = oneColouredSplitTab();
+    directory[0].color = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    auto t = SidebarUnderTest { std::move(directory) };
+    REQUIRE(t.sidebar().rowCount() == 4);
+    CHECK(t.sidebar().roleNames().value(SidebarModel::WorkspaceColorRole) == "workspaceColor");
+
+    auto const magenta = QColor { 0xC2, 0x54, 0x8F };
+    for (auto const row: { 0, 1, 2, 3 })
+    {
+        INFO("row " << row);
+        CHECK(t.sidebar().index(row).data(SidebarModel::WorkspaceColorRole).value<QColor>() == magenta);
+    }
+
+    // Uncoloured, every row is transparent.
+    t.source.listed.workspaces[0].color.reset();
+    t.sidebar().refreshNow();
+    for (auto const row: { 0, 1, 2, 3 })
+    {
+        INFO("row " << row);
+        CHECK(t.sidebar().index(row).data(SidebarModel::WorkspaceColorRole).value<QColor>().alpha() == 0);
+    }
+}
+
+TEST_CASE("a workspace colour change is reported for all of its rows", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { oneColouredSplitTab() };
+    t.sidebar().refreshNow();
+    auto changed = QSignalSpy { &t.sidebar(), &QAbstractItemModel::dataChanged };
+
+    t.source.listed.workspaces[0].color = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    t.sidebar().refreshNow();
+
+    auto const named = [&](int row) {
+        return std::ranges::any_of(changed, [row](QList<QVariant> const& signal) {
+            auto const first = signal.at(0).value<QModelIndex>().row();
+            auto const last = signal.at(1).value<QModelIndex>().row();
+            return first <= row && row <= last
+                   && signal.at(2).value<QList<int>>().contains(SidebarModel::WorkspaceColorRole);
+        });
+    };
+    for (auto const row: { 0, 1, 2, 3 })
+    {
+        INFO("row " << row);
+        CHECK(named(row));
+    }
+}
+
+TEST_CASE("SidebarModel: every row serves the cells of its workspace's rail", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { oneColouredSplitTab() };
+    REQUIRE(t.sidebar().rowCount() == 4);
+    CHECK(t.sidebar().roleNames().value(SidebarModel::RailTextRole) == "railText");
+    CHECK(t.sidebar().roleNames().value(SidebarModel::RailTextContinuedRole) == "railTextContinued");
+    for (auto const row: { 0, 1, 2, 3 })
+    {
+        INFO("row " << row);
+        auto const cells = workspaceRailCellsOf(t.sidebar().rows()[static_cast<std::size_t>(row)]);
+        auto const index = t.sidebar().index(row);
+        CHECK(index.data(SidebarModel::RailTextRole).toString() == QString::fromStdString(cells.first));
+        CHECK(index.data(SidebarModel::RailTextContinuedRole).toString()
+              == QString::fromStdString(cells.second));
+    }
+    // The split tab is the workspace's last: its panes still carry the rail.
+    CHECK(t.sidebar().index(2).data(SidebarModel::RailTextRole).toString() == QStringLiteral("│"));
 }

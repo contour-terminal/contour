@@ -6,8 +6,8 @@
 ///
 /// An id a client may see is in the keeper's structure before the client hears of it, so that a daemon
 /// restarted after a crash serves every id a client holds. A cosmetic change -- a ratio dragged, a title
-/// typed -- waits a moment, so that a drag costs one push rather than one per step; a crash in that moment
-/// costs a ratio or a title, never a binding.
+/// typed, a colour picked -- waits a moment, so that a drag costs one push rather than one per step; a crash
+/// in that moment costs a ratio, a title or a colour, never a binding.
 
 #include <algorithm>
 #include <array>
@@ -38,6 +38,7 @@ enum class StructureEvent : uint8_t
     PaneTreeRestructured,
     TabTitleChanged,
     TabColorChanged,
+    WorkspaceColorChanged,
     SessionCreated,
     SessionClosed,
     SettingsChanged,
@@ -80,6 +81,7 @@ inline constexpr auto StructurePushTable = std::array {
     StructurePush { .event = StructureEvent::PaneTreeRestructured, .timing = PushTiming::Synchronous },
     StructurePush { .event = StructureEvent::TabTitleChanged, .timing = PushTiming::Debounced },
     StructurePush { .event = StructureEvent::TabColorChanged, .timing = PushTiming::Debounced },
+    StructurePush { .event = StructureEvent::WorkspaceColorChanged, .timing = PushTiming::Debounced },
     StructurePush { .event = StructureEvent::SessionCreated, .timing = PushTiming::Synchronous },
     StructurePush { .event = StructureEvent::SessionClosed, .timing = PushTiming::Synchronous },
     StructurePush { .event = StructureEvent::SettingsChanged, .timing = PushTiming::Synchronous },

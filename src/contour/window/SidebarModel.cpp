@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/platform/ColorConversion.hpp>
 #include <contour/window/AttentionJump.hpp>
 #include <contour/window/ChromeKeys.hpp>
 #include <contour/window/DisclosureWords.hpp>
@@ -15,6 +16,7 @@
 #include <QtCore/QStringList>
 #include <QtCore/QVariant>
 #include <QtCore/QVariantList>
+#include <QtGui/QColor>
 #include <QtQml/QQmlEngine>
 
 #include <algorithm>
@@ -74,6 +76,12 @@ namespace
         RoleName { SidebarModel::AccessibleDescriptionRole, "accessibleDescription" },
         RoleName { SidebarModel::SelectionRole, "selection" },
         RoleName { SidebarModel::TreeTextContinuedRole, "treeTextContinued" },
+        RoleName { SidebarModel::SecondLineRole, "secondLine" },
+        RoleName { SidebarModel::IdleLineRole, "idleLine" },
+        RoleName { SidebarModel::TabColorRole, "tabColor" },
+        RoleName { SidebarModel::WorkspaceColorRole, "workspaceColor" },
+        RoleName { SidebarModel::RailTextRole, "railText" },
+        RoleName { SidebarModel::RailTextContinuedRole, "railTextContinued" },
     };
 
     [[nodiscard]] QString qs(std::string const& text)
@@ -174,6 +182,12 @@ namespace
         note(before.selection == after.selection, { SidebarModel::SelectionRole });
         note(before.continued == after.continued && before.depth == after.depth,
              { SidebarModel::TreeTextContinuedRole });
+        note(secondLineOf(before) == secondLineOf(after), { SidebarModel::SecondLineRole });
+        note(idleLineOf(before) == idleLineOf(after), { SidebarModel::IdleLineRole });
+        note(before.tabColor == after.tabColor, { SidebarModel::TabColorRole });
+        note(before.workspaceColor == after.workspaceColor, { SidebarModel::WorkspaceColorRole });
+        note(workspaceRailCellsOf(before) == workspaceRailCellsOf(after),
+             { SidebarModel::RailTextRole, SidebarModel::RailTextContinuedRole });
         // The spoken name is the title; the description folds in the kind and the status, not a running time.
         if (accessibleNameOf(before) != accessibleNameOf(after))
             for (auto const role: { static_cast<int>(SidebarModel::AccessibleNameRole),
@@ -411,6 +425,15 @@ QVariant SidebarModel::data(QModelIndex const& index, int role) const
         case AccessibleDescriptionRole: return accessibleDescriptionOf(*row);
         case SelectionRole: return static_cast<int>(row->selection);
         case TreeTextContinuedRole: return qs(treeContinuationText(*row));
+        case SecondLineRole: return static_cast<int>(secondLineOf(*row));
+        case IdleLineRole: return qs(idleLineOf(*row));
+        case TabColorRole:
+            return row->tabColor ? platform::toQColor(*row->tabColor) : QColor { Qt::transparent };
+        case WorkspaceColorRole:
+            return row->workspaceColor ? platform::toQColor(*row->workspaceColor)
+                                       : QColor { Qt::transparent };
+        case RailTextRole: return qs(workspaceRailCellsOf(*row).first);
+        case RailTextContinuedRole: return qs(workspaceRailCellsOf(*row).second);
         default: break;
     }
     return {};

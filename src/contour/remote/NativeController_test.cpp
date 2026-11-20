@@ -2047,6 +2047,48 @@ TEST_CASE("a tab's name set through the control API names it in the window until
     gui.controller->stop();
 }
 
+TEST_CASE("a tab's colour set on the daemon reaches the window's directory until it is reset",
+          "[attach][controller]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("root");
+    auto gui = AttachedGui { daemon };
+    requireConnected(*gui.controller);
+    REQUIRE(waitUntil([&] {
+        auto const layout = gui.controller->settledLayout();
+        return layout && layout->tabs.size() == 1;
+    }));
+
+    auto constexpr Orange = vtbackend::RGBColor { 0xE8, 0x85, 0x3A };
+    // Colours the daemon's only tab, or resets it with none.
+    auto const colourTab = [&](std::optional<vtbackend::RGBColor> color) {
+        std::ignore = daemon.onDaemon([&] {
+            auto& model = daemon.host->model();
+            auto const tab = model.workspace(daemon.host->workspaceId())->tabAt(0)->id();
+            if (color)
+                model.setTabColor(tab, vtworkspace::TabColorSource::User, *color);
+            else
+                model.resetTabColor(tab, vtworkspace::TabColorSource::User);
+            return 0;
+        });
+    };
+    // The colour the window's directory lists for its only tab.
+    auto const listed = [&](std::optional<vtbackend::RGBColor> color) {
+        return waitUntil([&] {
+            auto const directory = gui.controller->directory();
+            return !directory.workspaces.empty() && !directory.workspaces.front().tabs.empty()
+                   && directory.workspaces.front().tabs.front().color == color;
+        });
+    };
+
+    colourTab(Orange);
+    CHECK(listed(Orange));
+    colourTab(std::nullopt);
+    CHECK(listed(std::nullopt));
+
+    gui.controller->stop();
+}
+
 // Regression: a departing client that moves the daemon's client area (here the smaller of a `smallest` pair)
 // re-projects every pane onto the new one, which used to discard the per-pane grids the survivor refined. The
 // survivor's own geometry did not change, so nothing on its side re-reports them: its split panes stayed on
@@ -3519,6 +3561,58 @@ TEST_CASE("a tab reorder pushed by the daemon keeps the TerminalSessions",
     ac->stop();
 }
 
+TEST_CASE("a tab reorder pushed by the daemon leaves its directory in the tab bar's order",
+          "[attach][controller][move][daemon][sidebar]")
+{
+    auto daemon = DaemonFixture {};
+    auto const first = daemon.seedSession("first");
+    std::ignore = daemon.seedSession("second");
+    auto const third = daemon.seedSession("third");
+
+    auto timeline = TestTimeline {};
+    auto acOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto* ac = acOwned.get();
+    contour::test::TestApp app { std::move(acOwned) };
+    auto& manager = app.manager();
+    contour::test::ScopedController const win { manager };
+    requireConnected(*ac);
+    REQUIRE(
+        waitUntil([&] { return ac->settledLayout() != nullptr && ac->settledLayout()->tabs.size() == 3; }));
+    contour::remote::applyRemoteLayout(manager, win.id, *ac);
+
+    // The last tab to the middle of the well.
+    REQUIRE(ac->requestRemoteMove({ .source = vtworkspace::MoveSourceKind::Tab,
+                                    .sourceSessions = { third.value },
+                                    .target = vtworkspace::MoveTargetKind::TabWell,
+                                    .targetSession = first.value,
+                                    .side = vtworkspace::SplitSide::Left,
+                                    .index = 1,
+                                    .request = 9 })
+            == contour::session::RemoteRouting::Routed);
+    REQUIRE(waitUntil([&] { return ac->settledLayout()->tabs.at(1).root.session == third.value; }));
+    contour::remote::applyRemoteLayout(manager, win.id, *ac);
+    QCoreApplication::processEvents();
+
+    auto const directory = ac->directory();
+    REQUIRE(directory.workspaces.size() == 1);
+    auto const& listed = directory.workspaces[0].tabs;
+    auto* const window = manager.model().workspace(win.id);
+    REQUIRE(window->tabCount() == 3);
+    REQUIRE(listed.size() == 3);
+    // A daemon's tab ids are its own: a listed tab is matched to a strip row by the session it shows.
+    for (auto const i: std::views::iota(0, window->tabCount()))
+    {
+        auto const& row = listed[static_cast<std::size_t>(i)];
+        REQUIRE(!row.panes.empty());
+        auto* const mirrored = sessionMirroring(manager, *ac, row.panes.front().key.value);
+        REQUIRE(mirrored != nullptr);
+        CHECK(std::ranges::contains(manager.sessionsOfTab(window->tabAt(i)), mirrored));
+    }
+    CHECK(listed[1].panes.front().key.value == third.value);
+
+    ac->stop();
+}
+
 // The last pane of a window moved out: the emptied window closes, and the moved session lives on beside
 // its new neighbour.
 TEST_CASE("a window's last pane moved by the daemon closes the window and keeps the session",
@@ -4696,6 +4790,60 @@ TEST_CASE("a window's move and rename of a workspace reach the daemon and come b
           == contour::session::RemoteRouting::Routed);
     CHECK(waitUntil([&] { return workspaceOf(controller, second.id).name == "ops"; }));
     CHECK(workspaceOf(controller, first).name.empty());
+}
+
+TEST_CASE("a window's colour of a workspace reaches the daemon and comes back in the directory",
+          "[attach][controller][directory][workspace-color]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.directory().workspaces.size() == 2; }));
+    CHECK_FALSE(workspaceOf(controller, second.id).color.has_value());
+    CHECK(controller.workspaceColorSupport() == contour::session::WorkspaceColorSupport::Supported);
+
+    auto const plum = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    CHECK(controller.requestRemoteWorkspaceColor(second.id, plum) == contour::session::RemoteRouting::Routed);
+    CHECK(waitUntil([&] { return workspaceOf(controller, second.id).color == std::optional { plum }; }));
+    CHECK(daemon.onDaemon([&] {
+        return daemon.host->model().workspace(vtworkspace::WorkspaceId { second.id })->color();
+    }) == std::optional { plum });
+
+    CHECK(controller.requestRemoteWorkspaceColor(second.id, std::nullopt)
+          == contour::session::RemoteRouting::Routed);
+    CHECK(waitUntil([&] { return !workspaceOf(controller, second.id).color.has_value(); }));
+}
+
+TEST_CASE("a window does not send a workspace's colour to a daemon that predates it",
+          "[attach][controller][directory][workspace-color]")
+{
+    auto daemon = DaemonFixture { {}, servicesWithout(vthost::proto::Capability::WorkspaceColor) };
+    std::ignore = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.directory().workspaces.size() == 2; }));
+
+    // The menus gray the colour out rather than offer what would do nothing.
+    CHECK(controller.workspaceColorSupport() == contour::session::WorkspaceColorSupport::Unsupported);
+    CHECK(controller.requestRemoteWorkspaceColor(second.id, vtbackend::RGBColor { 1, 2, 3 })
+          == contour::session::RemoteRouting::Refused);
+    // A rename after it arrives, so the colour would have too.
+    REQUIRE(controller.requestRemoteRenameWorkspace(second.id, "ops")
+            == contour::session::RemoteRouting::Routed);
+    REQUIRE(waitUntil([&] { return workspaceOf(controller, second.id).name == "ops"; }));
+    CHECK(daemon.clientFrames.count(vthost::proto::PduType::SetWorkspaceColor) == 0);
+    CHECK_FALSE(workspaceOf(controller, second.id).color.has_value());
 }
 
 TEST_CASE("a window renames a tab of a workspace it does not show, and the directory follows",

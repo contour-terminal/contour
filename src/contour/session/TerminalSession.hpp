@@ -1853,6 +1853,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::MoveWorkspaceUp);
     bool operator()(actions::MoveWorkspaceDown);
     bool operator()(actions::CloseWorkspace);
+    bool operator()(actions::SetWorkspaceColor const& action);
+    bool operator()(actions::ResetWorkspaceColor);
     bool operator()(actions::GoToPane);
     bool operator()(actions::MoveTabToWorkspace const& event);
     bool operator()(actions::MoveToTab const& event);

@@ -2690,6 +2690,146 @@ TEST_CASE(
     }
 }
 
+TEST_CASE("WorkspaceMeta round-trips with the colour set, cleared and absent",
+          "[vthost][pdu][workspace-color]")
+{
+    auto const colors = std::vector<std::optional<WireWorkspaceColor>> {
+        WireWorkspaceColor { .rgb = 0xC2548F },
+        WireWorkspaceColor { .rgb = 0x000000 },
+        WireWorkspaceColor { .rgb = std::nullopt },
+        std::nullopt,
+    };
+    for (auto const& color: colors)
+    {
+        auto const full =
+            WorkspaceMeta { .workspace = 3,
+                            .controlId = controlIdFrom(0xA0),
+                            .name = "ops",
+                            .git = WireGitInfo { .branch = "main", .kind = GitHeadKindWire::Branch },
+                            .position = 2,
+                            .color = color };
+        CHECK(roundTrip(DecodedPdu { full }) == DecodedPdu { full });
+        // A delta that carries the colour alone.
+        auto const delta = WorkspaceMeta { .workspace = 3, .controlId = controlIdFrom(0xA0), .color = color };
+        CHECK(roundTrip(DecodedPdu { delta }) == DecodedPdu { delta });
+    }
+}
+
+TEST_CASE("WorkspaceMeta carries the colour after the position, as a has-colour byte and 0xRRGGBB",
+          "[vthost][pdu][workspace-color]")
+{
+    auto const id = controlIdFrom(0x10);
+    auto const metaBytes = [&](uint8_t mask, auto&& appendFields) {
+        auto body = Writer {};
+        body.varint(4);
+        body.bytes(std::as_bytes(std::span { id }));
+        body.u8(mask);
+        appendFields(body);
+        return body;
+    };
+    SECTION("a colour, after the position")
+    {
+        auto const body = metaBytes(0b1100, [](Writer& out) {
+            out.varint(1); // position
+            out.u8(1);     // has colour
+            out.u32(0xC2548F);
+        });
+        auto const decoded = decodeAs<WorkspaceMeta>(frameOf(PduType::WorkspaceMeta, body.view()));
+        CHECK(decoded.position == std::optional<uint32_t> { 1 });
+        CHECK(decoded.color == std::optional { WireWorkspaceColor { .rgb = 0xC2548F } });
+        CHECK(std::ranges::equal(bodyOf(DecodedPdu { decoded }), body.view()));
+    }
+    SECTION("a cleared colour")
+    {
+        auto const body = metaBytes(0b1000, [](Writer& out) {
+            out.u8(0);
+            out.u32(0);
+        });
+        auto const decoded = decodeAs<WorkspaceMeta>(frameOf(PduType::WorkspaceMeta, body.view()));
+        CHECK(decoded.color == std::optional { WireWorkspaceColor { .rgb = std::nullopt } });
+    }
+    SECTION("an older daemon's meta, without the bit, leaves the colour unchanged")
+    {
+        auto const body = metaBytes(0b101, [](Writer& out) {
+            out.string("ops");
+            out.varint(1);
+        });
+        auto const decoded = decodeAs<WorkspaceMeta>(frameOf(PduType::WorkspaceMeta, body.view()));
+        CHECK(decoded.name == std::optional<std::string> { "ops" });
+        CHECK(decoded.position == std::optional<uint32_t> { 1 });
+        CHECK_FALSE(decoded.color.has_value());
+        // The recorded bytes of a released daemon's meta read the same way.
+        auto const recorded =
+            decodeAs<WorkspaceMeta>(std::as_bytes(std::span { vthost::testing::RecordedWorkspaceMetaName }));
+        CHECK(recorded.name == std::optional<std::string> { "ops" });
+        CHECK_FALSE(recorded.color.has_value());
+    }
+    SECTION("a colour announced and missing is malformed")
+    {
+        auto const body = metaBytes(0b1000, [](Writer& out) { out.u8(1); });
+        CHECK_FALSE(decodePdu(frameOf(PduType::WorkspaceMeta, body.view())).has_value());
+    }
+    SECTION("the colour is the last field, so an older client reads the fields it knows and stops before it")
+    {
+        auto const name = [](Writer& out) {
+            out.string("ops");
+        };
+        auto const coloured = metaBytes(0b1001, [&](Writer& out) {
+            name(out);
+            out.u8(1);
+            out.u32(0xC2548F);
+        });
+        auto const decoded = decodeAs<WorkspaceMeta>(frameOf(PduType::WorkspaceMeta, coloured.view()));
+        CHECK(decoded.name == std::optional<std::string> { "ops" });
+        CHECK_FALSE(decoded.position.has_value());
+        CHECK(decoded.color == std::optional { WireWorkspaceColor { .rgb = 0xC2548F } });
+
+        // Byte for byte, the meta an older daemon sends with the same name, the colour's five bytes after it,
+        // and only the mask's colour bit set besides: what an older client reads ends where its own fields
+        // do, and the bit it never tests is the only other difference.
+        auto const plain = metaBytes(0b0001, name);
+        auto const colouredBytes = coloured.view();
+        auto const plainBytes = plain.view();
+        REQUIRE(colouredBytes.size() == plainBytes.size() + 5);
+        auto const differing = std::ranges::count_if(
+            std::views::zip(colouredBytes.first(plainBytes.size()), plainBytes), [](auto const& pair) {
+                auto const& [left, right] = pair;
+                return left != right;
+            });
+        CHECK(differing == 1);
+    }
+}
+
+TEST_CASE("SetWorkspaceColor is a PDU of tag 62 that round-trips a colour and its clearing",
+          "[vthost][pdu][workspace-color]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::SetWorkspaceColor) == 62);
+    auto const set = SetWorkspaceColor { .workspace = 7, .color = WireWorkspaceColor { .rgb = 0xC2548F } };
+    auto const cleared =
+        SetWorkspaceColor { .workspace = 7, .color = WireWorkspaceColor { .rgb = std::nullopt } };
+    CHECK(roundTrip(DecodedPdu { set }) == DecodedPdu { set });
+    CHECK(roundTrip(DecodedPdu { cleared }) == DecodedPdu { cleared });
+
+    // The body: the workspace, a has-colour byte, and 0xRRGGBB (0 when cleared).
+    auto body = Writer {};
+    body.varint(7);
+    body.u8(1);
+    body.u32(0xC2548F);
+    CHECK(decodeAs<SetWorkspaceColor>(frameOf(PduType::SetWorkspaceColor, body.view())) == set);
+    SECTION("appended bytes are ignored")
+    {
+        body.u8(9);
+        CHECK(decodeAs<SetWorkspaceColor>(frameOf(PduType::SetWorkspaceColor, body.view())) == set);
+    }
+    SECTION("a body cut short is malformed")
+    {
+        auto cut = Writer {};
+        cut.varint(7);
+        cut.u8(1);
+        CHECK_FALSE(decodePdu(frameOf(PduType::SetWorkspaceColor, cut.view())).has_value());
+    }
+}
+
 TEST_CASE("a SwitchRequest from a daemon that states no deadline reads as stating none",
           "[vthost][pdu][workspace-follow]")
 {

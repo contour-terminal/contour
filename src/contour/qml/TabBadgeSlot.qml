@@ -27,7 +27,13 @@ Item {
     /// there whatever the tabs look like.
     property bool shaped: chromeStyle.layout.isPill
     readonly property bool pill: root.shaped
-    readonly property color ink: root.known ? root.look.ink : "transparent"
+    /// What the slot sits on, where that is a tab's tint ({ fill, ink }, SidebarRow.tabPaint): the mark keeps
+    /// its colour unless the tint would swallow it (window::sidebarMarkInk). Empty elsewhere.
+    property var tint: ({})
+    readonly property color ink: !root.known ? "transparent"
+                               : root.tint.fill !== undefined
+                                 ? chromeStyle.sidebarMarkInk(root.look.ink, root.tint.fill, root.tint.ink)
+                               : root.look.ink
     // The ring is Working's mark: with a progress it stands still as a dial of that many degrees.
     readonly property bool working: root.known && root.look.mark === "ring"
     readonly property bool spinning: root.working && root.progress < 0

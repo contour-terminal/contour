@@ -91,6 +91,7 @@ namespace
             vthost::proto::Capability::WorkspaceMeta,
             vthost::proto::Capability::ClientGoodbye,
             vthost::proto::Capability::LaunchFirstTab,
+            vthost::proto::Capability::WorkspaceColor,
             // compat(0.9.0): Names may stay; the legacy branches taken without it go.
             vthost::proto::Capability::Names,
         });
@@ -1235,6 +1236,9 @@ void NativeController::onWorkspaceMeta(vthost::proto::WorkspaceMeta const& meta)
         stated.git = directoryGitOf(*meta.git);
     if (meta.position)
         stated.position = meta.position;
+    // A colour without one clears it; absent (an older daemon, or a delta of another field) is unchanged.
+    if (meta.color)
+        stated.color = meta.color->rgb.transform([](uint32_t rgb) { return vtbackend::RGBColor { rgb }; });
     scheduleStatusFlush();
 }
 
@@ -1549,6 +1553,29 @@ contour::session::RemoteRouting NativeController::requestRemoteRenameWorkspace(u
     _reactor.post([this, workspace, name = std::string { name }]() mutable {
         if (_client != nullptr)
             std::ignore = _client->setWorkspaceName(workspace, std::move(name));
+    });
+    return contour::session::RemoteRouting::Routed;
+}
+
+contour::session::WorkspaceColorSupport NativeController::workspaceColorSupport() const noexcept
+{
+    auto const agreed = negotiated();
+    return agreed && agreed->shared.contains(vthost::proto::Capability::WorkspaceMeta)
+                   && agreed->shared.contains(vthost::proto::Capability::WorkspaceColor)
+               ? contour::session::WorkspaceColorSupport::Supported
+               : contour::session::WorkspaceColorSupport::Unsupported;
+}
+
+contour::session::RemoteRouting NativeController::requestRemoteWorkspaceColor(
+    uint64_t workspace, std::optional<vtbackend::RGBColor> color)
+{
+    if (workspaceColorSupport() == contour::session::WorkspaceColorSupport::Unsupported)
+        return contour::session::RemoteRouting::Refused;
+    auto const wire =
+        vthost::proto::WireWorkspaceColor { .rgb = color.transform(&vtbackend::RGBColor::value) };
+    _reactor.post([this, workspace, wire] {
+        if (_client != nullptr)
+            std::ignore = _client->setWorkspaceColor(workspace, wire);
     });
     return contour::session::RemoteRouting::Routed;
 }

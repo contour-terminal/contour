@@ -157,6 +157,8 @@ namespace
         ActionCategory { .name = "MoveWorkspaceUp", .category = CommandCategory::Window },
         ActionCategory { .name = "MoveWorkspaceDown", .category = CommandCategory::Window },
         ActionCategory { .name = "CloseWorkspace", .category = CommandCategory::Window },
+        ActionCategory { .name = "SetWorkspaceColor", .category = CommandCategory::Window },
+        ActionCategory { .name = "ResetWorkspaceColor", .category = CommandCategory::Window },
         ActionCategory { .name = "GoToPane", .category = CommandCategory::Pane },
         ActionCategory { .name = "MoveTabToWorkspace", .category = CommandCategory::Window },
         ActionCategory { .name = "MoveToTab", .category = CommandCategory::Pane },

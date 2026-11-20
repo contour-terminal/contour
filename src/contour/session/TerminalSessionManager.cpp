@@ -1601,6 +1601,30 @@ void TerminalSessionManager::renameWorkspace(window::WindowController& window,
         setWorkspaceName(vtworkspace::WorkspaceId { workspace }, std::move(name));
 }
 
+void TerminalSessionManager::setWorkspaceColor(window::WindowController& window,
+                                               uint64_t workspace,
+                                               std::optional<vtbackend::RGBColor> color)
+{
+    if (listsRemotely(window))
+    {
+        // The daemon's colour change comes back as the window's new directory. One that predates the colour
+        // is asked nothing, and the workspace is not coloured locally either: its next directory would undo
+        // it.
+        if (factoryFor(window.displayedWorkspace()).requestRemoteWorkspaceColor(workspace, color)
+            == RemoteRouting::Refused)
+            managerLog()("The daemon cannot colour workspace {}.", workspace);
+        return;
+    }
+    auto const id = vtworkspace::WorkspaceId { workspace };
+    if (!ownsWorkspace(window, id))
+        return;
+    // The model announces a real change through workspaceColorChanged(), which repaints the sidebars.
+    if (color)
+        _model->setWorkspaceColor(id, *color);
+    else
+        _model->resetWorkspaceColor(id);
+}
+
 void TerminalSessionManager::renameTab(window::WindowController& window, uint64_t tab, std::string name)
 {
     auto const* const source = window.directorySource();
@@ -1698,6 +1722,16 @@ namespace
 window::HostMoves TerminalSessionManager::hostMovesOf(window::WindowController const& window) const noexcept
 {
     return factoryFor(window.displayedWorkspace()).hostMoves();
+}
+
+WorkspaceColorSupport TerminalSessionManager::workspaceColorSupportOf(
+    window::WindowController const& window) const noexcept
+{
+    // As setWorkspaceColor() routes it: a window that lists its own workspaces (in-process, or a tmux
+    // server's, whose binding lists nothing) colours them in this process's model.
+    if (!listsRemotely(window))
+        return WorkspaceColorSupport::Supported;
+    return factoryFor(window.displayedWorkspace()).workspaceColorSupport();
 }
 
 window::MoveRefusal TerminalSessionManager::sidebarMoveRefusal(window::WindowController const& window,
@@ -3080,6 +3114,12 @@ void TerminalSessionManager::workspaceMoved(vtworkspace::WorkspaceId /*workspace
     notifyDirectoriesChanged();
 }
 
+void TerminalSessionManager::workspaceColorChanged(vtworkspace::WorkspaceId /*workspace*/)
+{
+    // An in-process window lists each workspace's colour from the model.
+    notifyDirectoriesChanged();
+}
+
 void TerminalSessionManager::tabAboutToBeMovedToWorkspace(vtworkspace::WorkspaceId from,
                                                           int fromIndex,
                                                           vtworkspace::WorkspaceId to,
@@ -3322,6 +3362,7 @@ void TerminalSessionManager::tabTitleChanged(vtworkspace::TabId tab)
 void TerminalSessionManager::tabColorChanged(vtworkspace::TabId tab)
 {
     updateStatusLine();
+    notifyDirectoriesChanged();
     if (auto* c = controllerDisplaying(_model->workspaceOfTab(tab)))
         c->notifyTabRowChanged(tab, { window::WindowController::Roles::ColorRole });
     reportTabPresentation(tab);
@@ -3764,26 +3805,42 @@ void TerminalSessionManager::activateTab(vtworkspace::WorkspaceId window, int in
     activateModelTabByRow(window, index);
 }
 
-PaneShowing TerminalSessionManager::showPane(vtworkspace::WorkspaceId window, window::PaneKey key)
+auto TerminalSessionManager::leafHolding(vtworkspace::WorkspaceId window, window::PaneKey key) const
+    -> std::optional<HeldLeaf>
 {
     auto const* const win = _model->workspace(window);
     if (win == nullptr)
-        return PaneShowing::NotHeld;
+        return std::nullopt;
     for (auto const row: std::views::iota(0, win->tabCount()))
     {
         auto* const tab = win->tabAt(row);
         if (tab == nullptr || tab->rootPane() == nullptr)
             continue;
-        auto const* const leaf = tab->rootPane()->walkTree(
-            [&](vtworkspace::Pane& pane) { return pane.isLeaf() && paneKeyOf(pane.session()) == key; });
-        if (leaf == nullptr)
-            continue;
-        activateModelTabByRow(window, row);
-        activatePane(tab->id(), leaf->id());
-        markPaneSeen(window, leaf->session());
-        return PaneShowing::Shown;
+        if (auto* const leaf = tab->rootPane()->walkTree(
+                [&](vtworkspace::Pane& pane) { return pane.isLeaf() && paneKeyOf(pane.session()) == key; }))
+            return HeldLeaf { .row = row, .tab = tab, .leaf = leaf };
     }
-    return PaneShowing::NotHeld;
+    return std::nullopt;
+}
+
+PaneShowing TerminalSessionManager::showPane(vtworkspace::WorkspaceId window, window::PaneKey key)
+{
+    auto const held = leafHolding(window, key);
+    if (!held)
+        return PaneShowing::NotHeld;
+    activateModelTabByRow(window, held->row);
+    activatePane(held->tab->id(), held->leaf->id());
+    markPaneSeen(window, held->leaf->session());
+    return PaneShowing::Shown;
+}
+
+std::optional<window::PaneKey> TerminalSessionManager::activePaneBeside(vtworkspace::WorkspaceId window,
+                                                                        window::PaneKey key) const
+{
+    auto const held = leafHolding(window, key);
+    if (!held || held->tab->activePane() == nullptr)
+        return std::nullopt;
+    return paneKeyOf(held->tab->activePane()->session());
 }
 
 void TerminalSessionManager::markActivePaneSeen(vtworkspace::WorkspaceId window)

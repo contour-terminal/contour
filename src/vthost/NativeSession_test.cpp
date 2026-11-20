@@ -22,6 +22,7 @@
 #include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
@@ -9921,11 +9922,13 @@ TEST_CASE("a TLS peer that stalls its handshake is closed at the pre-authenticat
 namespace
 {
 
-/// Whether a test window offers Capability::WorkspaceMeta.
+/// Whether a test window offers Capability::WorkspaceMeta, and Capability::WorkspaceColor with it.
 enum class OffersMeta : uint8_t
 {
     No = 0,
     Yes,
+    WithColor,
+    ColorOnly, ///< WorkspaceColor without the WorkspaceMeta that carries it.
 };
 
 /// Two workspaces of one session each, and windows on a ManualClock handshaken by hand.
@@ -9945,8 +9948,10 @@ struct MetaFixture
                                      { proto::Capability::AttachIntent, proto::Capability::DaemonFollow }),
                                  .attachIntent = { .kind = proto::AttachIntentKind::Select,
                                                    .workspace = workspace } };
-        if (offers == OffersMeta::Yes)
+        if (offers == OffersMeta::Yes || offers == OffersMeta::WithColor)
             hello.capabilities.idents.push_back(std::to_underlying(proto::Capability::WorkspaceMeta));
+        if (offers == OffersMeta::WithColor || offers == OffersMeta::ColorOnly)
+            hello.capabilities.idents.push_back(std::to_underlying(proto::Capability::WorkspaceColor));
         return flush.attach(workspace == first ? inFirst : inSecond, std::move(hello));
     }
 
@@ -10250,6 +10255,86 @@ TEST_CASE("workspace verbs are refused without the capability", "[vthost][native
         *client.session, proto::SetWorkspaceName { .workspace = f.first, .name = "x" });
     CHECK(f.flush.h.host.model().workspaceAt(0)->id().value == f.first);
     CHECK(f.flush.h.host.objects().nameOf(f.refOf(f.first)).empty());
+}
+
+TEST_CASE("a client's colour for a workspace is every client's", "[vthost][native][workspace-color]")
+{
+    auto f = MetaFixture {};
+    auto& one = f.attachSelecting(f.first, OffersMeta::WithColor);
+    auto& other = f.attachSelecting(f.second, OffersMeta::WithColor);
+    auto& old = f.attachSelecting(f.second, OffersMeta::Yes);
+    f.settle();
+    auto const skipOther = other.received.size();
+    auto const skipOld = old.received.size();
+    auto const colorOf = [&f](uint64_t workspace) {
+        return f.flush.h.host.model().workspace(vtworkspace::WorkspaceId { workspace })->color();
+    };
+
+    NativeSessionFlushTester::serveWorkspaceVerb(
+        *one.session,
+        proto::SetWorkspaceColor { .workspace = f.second,
+                                   .color = proto::WireWorkspaceColor { .rgb = 0xC2548F } });
+    f.settle();
+
+    CHECK(colorOf(f.second) == std::optional { vtbackend::RGBColor { 0xC2, 0x54, 0x8F } });
+    // The other window is told the colour alone; one that did not offer the capability is told nothing.
+    auto const metas = MetaFixture::metasOf(other, skipOther);
+    REQUIRE(metas.size() == 1);
+    CHECK(metas[0]
+          == proto::WorkspaceMeta { .workspace = f.second,
+                                    .controlId = f.refOf(f.second).uuid.bytes,
+                                    .color = proto::WireWorkspaceColor { .rgb = 0xC2548F } });
+    CHECK(MetaFixture::metasOf(old, skipOld).empty());
+
+    SECTION("a window attaching afterwards gets the colour with the rest of the workspace's meta")
+    {
+        auto& late = f.attachSelecting(f.first, OffersMeta::WithColor);
+        auto& lateOld = f.attachSelecting(f.first, OffersMeta::Yes);
+        f.settle();
+        auto const full = MetaFixture::metasOf(late);
+        REQUIRE(full.size() == 2);
+        CHECK(full[0].color == std::optional { proto::WireWorkspaceColor { .rgb = std::nullopt } });
+        CHECK(full[1].workspace == f.second);
+        CHECK(full[1].color == std::optional { proto::WireWorkspaceColor { .rgb = 0xC2548F } });
+        for (auto const& meta: MetaFixture::metasOf(lateOld))
+            CHECK_FALSE(meta.color.has_value());
+    }
+    SECTION("a clear reaches the other window as a colour of none")
+    {
+        auto const skip = other.received.size();
+        NativeSessionFlushTester::serveWorkspaceVerb(
+            *one.session, proto::SetWorkspaceColor { .workspace = f.second, .color = {} });
+        f.settle();
+        CHECK_FALSE(colorOf(f.second).has_value());
+        auto const cleared = MetaFixture::metasOf(other, skip);
+        REQUIRE(cleared.size() == 1);
+        CHECK(cleared[0].color == std::optional { proto::WireWorkspaceColor { .rgb = std::nullopt } });
+        CHECK_FALSE(cleared[0].name.has_value());
+    }
+    SECTION("an unknown workspace changes nothing")
+    {
+        auto const skip = other.received.size();
+        NativeSessionFlushTester::serveWorkspaceVerb(
+            *one.session,
+            proto::SetWorkspaceColor { .workspace = 987654,
+                                       .color = proto::WireWorkspaceColor { .rgb = 1 } });
+        f.settle();
+        CHECK(MetaFixture::metasOf(other, skip).empty());
+    }
+}
+
+TEST_CASE("a workspace colour is refused without the capability", "[vthost][native][workspace-color]")
+{
+    auto f = MetaFixture {};
+    // Without WorkspaceColor; or with it but without WorkspaceMeta, which is how the colour is announced.
+    auto const offers = GENERATE(OffersMeta::Yes, OffersMeta::ColorOnly);
+    auto& client = f.attachSelecting(f.first, offers);
+    f.settle();
+    NativeSessionFlushTester::serveWorkspaceVerb(
+        *client.session,
+        proto::SetWorkspaceColor { .workspace = f.first,
+                                   .color = proto::WireWorkspaceColor { .rgb = 0xC2548F } });
+    CHECK_FALSE(f.flush.h.host.model().workspace(vtworkspace::WorkspaceId { f.first })->color().has_value());
 }
 
 TEST_CASE("a label change reaches every client", "[vthost][native][workspace-meta]")

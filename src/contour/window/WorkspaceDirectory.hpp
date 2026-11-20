@@ -3,6 +3,7 @@
 
 #include <contour/window/PaneKey.hpp>
 
+#include <vtbackend/core/Color.hpp>
 #include <vtbackend/screen/GitHead.hpp>
 #include <vtbackend/vt/ProgramStatus.hpp>
 
@@ -57,6 +58,8 @@ struct DirectoryTab
     std::string name;  ///< What a list shows (vtworkspace::tabNameOf): its user-given name, its title, its
                        ///< first pane's.
     std::vector<DirectoryPane> panes; ///< Depth-first.
+    /// The tab's effective colour (vtworkspace::Tab::color()); none when it is uncoloured.
+    std::optional<vtbackend::RGBColor> color {};
     bool operator==(DirectoryTab const&) const = default;
 };
 
@@ -82,6 +85,8 @@ struct DirectoryWorkspace
     /// it did. The daemon's order may count workspaces this directory does not list (a tabless one), so a
     /// workspace's place in the directory need not be its place there.
     std::optional<uint32_t> position {};
+    /// The colour the user gave the workspace (vtworkspace::Workspace::color()); none when it is uncoloured.
+    std::optional<vtbackend::RGBColor> color {};
     bool operator==(DirectoryWorkspace const&) const = default;
 };
 
@@ -253,6 +258,8 @@ struct WorkspaceMetadata
     /// Its 0-based place in the daemon's workspace order, once the daemon stated it; a directory lists the
     /// workspaces by it, those without one after the rest in id order.
     std::optional<uint32_t> position {};
+    /// The colour the user gave it; none when it is uncoloured, or while nothing stated one.
+    std::optional<vtbackend::RGBColor> color {};
     bool operator==(WorkspaceMetadata const&) const = default;
 };
 
@@ -339,6 +346,7 @@ namespace detail
         workspace.controlId = stated.controlId;
         workspace.git = std::move(stated.git);
         workspace.position = stated.position;
+        workspace.color = stated.color;
         workspace.tabs.reserve(layout.tabs.size());
         for (auto const& wireTab: layout.tabs)
         {
@@ -347,6 +355,8 @@ namespace detail
             // compat(0.9.0): an older daemon names a tab by its runtime title, which tabNameOf() falls back
             // to.
             tab.title = wireTab.title;
+            if (wireTab.hasColor != 0)
+                tab.color = vtbackend::RGBColor { wireTab.color };
             detail::collectPanes(wireTab.root, status, tab.panes);
             tab.name = vtworkspace::tabNameOf(
                 { .name = wireTab.name, .title = tab.title },

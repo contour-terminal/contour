@@ -178,6 +178,15 @@ TEST_CASE("capability 32 is names", "[vthost][negotiation][compat-0.9.0]")
     CHECK(names->name == "names");
 }
 
+TEST_CASE("capability 33 is workspace-color", "[vthost][negotiation][workspace-color]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::WorkspaceColor) == 33);
+    auto const color =
+        std::ranges::find(CapabilityTable, Capability::WorkspaceColor, &CapabilityRow::capability);
+    REQUIRE(color != CapabilityTable.end());
+    CHECK(color->name == "workspace-color");
+}
+
 TEST_CASE("the workspace switch capability keeps its ident and name",
           "[vthost][negotiation][workspace-follow]")
 {

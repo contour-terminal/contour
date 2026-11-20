@@ -366,6 +366,10 @@ namespace
     {
         return std::to_underlying(PduType::SetWorkspaceName);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(SetWorkspaceColor const&) noexcept
+    {
+        return std::to_underlying(PduType::SetWorkspaceColor);
+    }
 
     [[nodiscard]] constexpr uint64_t tagOf(AuthChallenge const&) noexcept
     {
@@ -1176,6 +1180,7 @@ namespace
         MetaHasName = 0b01,
         MetaHasGit = 0b10,
         MetaHasPosition = 0b100,
+        MetaHasColor = 0b1000,
     };
 
     /// The presence bits of a WireGitInfo's optionals.
@@ -1185,6 +1190,14 @@ namespace
         GitHasBehind = 0b10,
     };
 
+    /// A workspace's colour: the has-colour byte, then 0xRRGGBB (0 without a colour), so the body is the same
+    /// size either way.
+    void encodeWorkspaceColor(Writer& out, WireWorkspaceColor const& color)
+    {
+        out.u8(color.rgb ? 1 : 0);
+        out.u32(color.rgb.value_or(0) & 0xFFFFFF);
+    }
+
     void encodeBody(Writer& out, WorkspaceMeta const& pdu)
     {
         out.varint(pdu.workspace);
@@ -1193,6 +1206,7 @@ namespace
         mask |= pdu.name ? MetaHasName : 0;
         mask |= pdu.git ? MetaHasGit : 0;
         mask |= pdu.position ? MetaHasPosition : 0;
+        mask |= pdu.color ? MetaHasColor : 0;
         out.u8(mask);
         if (pdu.name)
             out.string(*pdu.name);
@@ -1214,6 +1228,9 @@ namespace
         }
         if (pdu.position)
             out.varint(*pdu.position);
+        // Appended after the position: an older client never tests its bit, and leaves the bytes unread.
+        if (pdu.color)
+            encodeWorkspaceColor(out, *pdu.color);
     }
 
     void encodeBody(Writer& out, MoveWorkspace const& pdu)
@@ -1231,6 +1248,12 @@ namespace
     {
         out.varint(pdu.workspace);
         out.string(pdu.name);
+    }
+
+    void encodeBody(Writer& out, SetWorkspaceColor const& pdu)
+    {
+        out.varint(pdu.workspace);
+        encodeWorkspaceColor(out, pdu.color);
     }
 
     void encodeBody(Writer& out, SwitchRequest const& pdu)
@@ -2538,6 +2561,17 @@ namespace
                && decodeOptionalCount(in, mask, GitHasBehind, git.behind, error);
     }
 
+    /// One workspace colour, as encodeWorkspaceColor() writes it; any has-colour byte but 0 states a colour.
+    [[nodiscard]] bool decodeWorkspaceColor(Reader& in, WireWorkspaceColor& color, DecodeError& error)
+    {
+        auto hasColor = uint8_t { 0 };
+        auto rgb = uint32_t { 0 };
+        if (!assign(in.u8(), hasColor, error) || !assign(in.u32(), rgb, error))
+            return false;
+        color.rgb = hasColor != 0 ? std::optional { rgb & 0xFFFFFF } : std::nullopt;
+        return true;
+    }
+
     DecodeResult decodeWorkspaceMeta(Reader& in)
     {
         auto pdu = WorkspaceMeta {};
@@ -2566,6 +2600,14 @@ namespace
         }
         if (!decodeOptionalCount(in, mask, MetaHasPosition, pdu.position, error))
             return std::unexpected(error);
+        // An older daemon sets no such bit: the colour stays absent, which is "unchanged".
+        if ((mask & MetaHasColor) != 0)
+        {
+            auto color = WireWorkspaceColor {};
+            if (!decodeWorkspaceColor(in, color, error))
+                return std::unexpected(error);
+            pdu.color = color;
+        }
         return pdu;
     }
 
@@ -2592,6 +2634,15 @@ namespace
         auto pdu = SetWorkspaceName {};
         auto error = DecodeError {};
         if (!assign(in.varint(), pdu.workspace, error) || !assign(in.string(), pdu.name, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeSetWorkspaceColor(Reader& in)
+    {
+        auto pdu = SetWorkspaceColor {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.workspace, error) || !decodeWorkspaceColor(in, pdu.color, error))
             return std::unexpected(error);
         return pdu;
     }
@@ -2863,6 +2914,7 @@ namespace
         DecodeRow { PduType::CloseWorkspace, decodeCloseWorkspace },
         DecodeRow { PduType::Goodbye, decodeGoodbye },
         DecodeRow { PduType::OpenFirstTab, decodeOpenFirstTab },
+        DecodeRow { PduType::SetWorkspaceColor, decodeSetWorkspaceColor },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

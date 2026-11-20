@@ -21,8 +21,11 @@
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/SidebarControls.hpp>
 #include <contour/window/SidebarModel.hpp>
+#include <contour/window/SidebarTabColor.hpp>
 #include <contour/window/StatusUrgency.hpp>
 
+#include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/vt/ProgramStatus.hpp>
 
 #include <QtCore/QCoreApplication>
@@ -132,6 +135,19 @@ enum class ClaudeTab : uint8_t
     Split,       ///< claude and a second pane, review (key 12).
 };
 
+/// Whether billing's tabs are coloured.
+enum class TabColours : uint8_t
+{
+    None = 0,   ///< No tab has a colour.
+    Coloured,   ///< claude's tab is #4C5FD5 and build's #E8853A; docs' notes stays uncoloured.
+    ClaudeOnly, ///< claude's tab is #4C5FD5; build and docs' notes stay uncoloured.
+};
+
+/// claude's tab colour under TabColours::Coloured.
+constexpr auto ClaudeTabColour = vtbackend::RGBColor { 0x4C, 0x5F, 0xD5 };
+/// build's tab colour under TabColours::Coloured.
+constexpr auto BuildTabColour = vtbackend::RGBColor { 0xE8, 0x85, 0x3A };
+
 /// How the window the sidebar is loaded in is set up.
 struct SidebarScene
 {
@@ -149,6 +165,16 @@ struct SidebarScene
     ClaudeTab claudeTab = ClaudeTab::OnePane; ///< Whether claude's tab is split.
     std::string billingTitle = "billing";     ///< The first workspace's name, which the location chip shows.
     int tabCount = 2;                         ///< How many tabs the window has.
+    TabColours tabColours = TabColours::None; ///< Whether billing's tabs are coloured.
+    /// claude's tab colour in place of ClaudeTabColour, under TabColours::Coloured.
+    std::optional<vtbackend::RGBColor> claudeTabColour = std::nullopt;
+    /// How a coloured tab shows on its rows (`sidebar.tab_color`).
+    contour::config::SidebarTabColorStyle tabColorStyle = contour::config::SidebarTabColorStyle::Tint;
+    /// The first workspace's colour; docs stays uncoloured.
+    std::optional<vtbackend::RGBColor> billingColour = std::nullopt;
+    /// How a coloured workspace shows in the sidebar (`sidebar.workspace_color`).
+    contour::config::SidebarWorkspaceColorStyle workspaceColorStyle =
+        contour::config::SidebarWorkspaceColorStyle::Tint;
 };
 
 /// Main.qml over a mock whose sidebar lists two workspaces: billing (a pane that asks for a permission and
@@ -192,6 +218,11 @@ struct SidebarWindow
         billingWorkspace.git = contour::window::DirectoryGit { .branch = "feat/billing", .ahead = 2 };
         if (scene.claudeTab == ClaudeTab::Split)
             billingWorkspace.tabs.front().panes.push_back(contour::test::directoryPaneOf(12, "review"));
+        if (scene.tabColours != TabColours::None)
+            billingWorkspace.tabs.at(0).color = scene.claudeTabColour.value_or(ClaudeTabColour);
+        if (scene.tabColours == TabColours::Coloured)
+            billingWorkspace.tabs.at(1).color = BuildTabColour;
+        billingWorkspace.color = scene.billingColour;
         listed.workspaces = {
             std::move(billingWorkspace),
             contour::test::directoryWorkspaceOf(2, "docs", { contour::test::directoryPaneOf(20, "notes") }),
@@ -202,6 +233,8 @@ struct SidebarWindow
                                       .tab = scene.shownWorkspace == 1 ? 10u : 20u };
         controller.sidebarModel().refreshNow();
         controller.setTabPlacement(scene.placement);
+        controller.setSidebarTabColorStyle(scene.tabColorStyle);
+        controller.setSidebarWorkspaceColorStyle(scene.workspaceColorStyle);
 
         root = contour::test::loadMainWindow(engine, controller, warnings, setupOf(scene.row, scene.motion));
         if (scene.visibility == contour::config::SidebarVisibility::Shown)
@@ -463,11 +496,206 @@ TEST_CASE("the sidebar shows one row per model row with title, reason and time (
         CHECK(reason->property("y").toReal() == command->property("y").toReal());
         CHECK(time->isVisible());
         CHECK(time->property("text").toString() == QStringLiteral("0:30"));
-        // A row with a reason is two lines tall, one without it one line.
+        // A tab row is two lines tall, with a reason or without one; a workspace row is one line.
         CHECK(claude->height() == scene.token("twoLineRowHeight"));
+        auto* notes = scene.rowTitled(QStringLiteral("notes"));
+        REQUIRE(notes != nullptr);
+        CHECK(notes->height() == scene.token("twoLineRowHeight"));
         auto* docs = scene.rowTitled(QStringLiteral("docs"));
         REQUIRE(docs != nullptr);
         CHECK(docs->height() == scene.token("rowHeight"));
+        CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("a tab row keeps its height when its reason comes and goes (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        auto* claude = scene.rowTitled(QStringLiteral("claude"));
+        auto* build = scene.rowTitled(QStringLiteral("build"));
+        REQUIRE(claude != nullptr);
+        REQUIRE(build != nullptr);
+        auto* reasonLine = SidebarWindow::findNamed(*claude, QStringLiteral("sidebarRowReasonLine"));
+        REQUIRE(reasonLine != nullptr);
+        REQUIRE(reasonLine->isVisible());
+        auto const height = claude->height();
+        auto const below = build->y();
+
+        // The reason goes; the list lays out again on the next frame.
+        auto const frames = QSignalSpy { scene.window, &QQuickWindow::frameSwapped };
+        scene.controller.sidebarSource().listed.workspaces[0].tabs[0].panes[0].status = {};
+        scene.controller.sidebarModel().refreshNow();
+        REQUIRE(QTest::qWaitFor([&] { return !reasonLine->isVisible() && frames.count() > 0; }, 1000));
+
+        CHECK(claude->height() == height);
+        CHECK(build->y() == below);
+        CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("an idle row shows its folder on the second line (offscreen)", "[contour][gui][qml][sidebar]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        scene.controller.sidebarSource().listed.workspaces[1].tabs[0].panes[0].cwd = "/src/docs";
+        scene.controller.sidebarModel().refreshNow();
+
+        auto* notes = scene.rowTitled(QStringLiteral("notes"));
+        REQUIRE(notes != nullptr);
+        auto* idle = SidebarWindow::findNamed(*notes, QStringLiteral("sidebarRowIdle"));
+        auto* reasonLine = SidebarWindow::findNamed(*notes, QStringLiteral("sidebarRowReasonLine"));
+        REQUIRE(idle != nullptr);
+        REQUIRE(reasonLine != nullptr);
+        CHECK(idle->isVisible());
+        CHECK(idle->property("text").toString() == QStringLiteral("/src/docs"));
+        CHECK_FALSE(reasonLine->isVisible());
+
+        // A row with a reason shows it instead.
+        auto* claude = scene.rowTitled(QStringLiteral("claude"));
+        REQUIRE(claude != nullptr);
+        auto* claudeIdle = SidebarWindow::findNamed(*claude, QStringLiteral("sidebarRowIdle"));
+        auto* claudeReason = SidebarWindow::findNamed(*claude, QStringLiteral("sidebarRowReasonLine"));
+        REQUIRE(claudeIdle != nullptr);
+        REQUIRE(claudeReason != nullptr);
+        CHECK_FALSE(claudeIdle->isVisible());
+        CHECK(claudeReason->isVisible());
+        CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("two-line rows stand further apart than the lines within one (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        if (scene.token("look") == scene.token("cellTree"))
+            continue; // whole cell rows: each line is a row of the grid, with no space to share out
+        // claude asks, and build under it works in a folder: two rows that both have a second line.
+        scene.controller.sidebarSource().listed.workspaces[0].tabs[1].panes[0].cwd = "/src/billing";
+        scene.controller.sidebarModel().refreshNow();
+        auto* upper = scene.rowTitled(QStringLiteral("claude"));
+        auto* lower = scene.rowTitled(QStringLiteral("build"));
+        REQUIRE(upper != nullptr);
+        REQUIRE(lower != nullptr);
+        REQUIRE(lower->y() > upper->y());
+
+        /// @return The scene box of the visible part named @p name of @p rowItem.
+        auto const boxOf = [](QQuickItem& rowItem, QString const& name) {
+            auto* part = SidebarWindow::findNamed(rowItem, name);
+            REQUIRE(part != nullptr);
+            REQUIRE(part->isVisible());
+            return sceneRectOf(*part);
+        };
+        auto const secondOf = [&](QQuickItem& rowItem) {
+            auto* reason = SidebarWindow::findNamed(rowItem, QStringLiteral("sidebarRowReasonLine"));
+            REQUIRE(reason != nullptr);
+            return boxOf(rowItem,
+                         reason->isVisible() ? QStringLiteral("sidebarRowReasonLine")
+                                             : QStringLiteral("sidebarRowIdle"));
+        };
+
+        // From the line boxes, so it holds for any face: a row's two lines read as one block only when the
+        // space between two blocks is larger than the space within one.
+        auto const within =
+            secondOf(*upper).top() - boxOf(*upper, QStringLiteral("sidebarRowTitle")).bottom();
+        auto const between =
+            boxOf(*lower, QStringLiteral("sidebarRowTitle")).top() - secondOf(*upper).bottom();
+        INFO("within " << within << ", between " << between);
+        CHECK(between > within);
+        CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("a two-line row keeps its lines inside it, and centres a name with nothing under it (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    // Compared with the row's own geometry, never with a font's metrics, so it holds for every platform's
+    // faces; a fraction of a pixel is the rounding of a box placed by its own size.
+    constexpr auto Tolerance = qreal { 0.51 };
+    // The name is centred in its line by an anchor, which Qt aligns to whole pixels (alignWhenCentered):
+    // the line's half height and the name's are each rounded, by at most half a pixel apiece, so with a
+    // face whose heights are fractional the name lands less than a pixel from the true centre.
+    constexpr auto CentringRounding = qreal { 1 };
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        // claude asks (a reason), docs/notes is idle in a folder, and build stops working and knows nothing
+        // of itself: the three second lines a row can have.
+        scene.controller.sidebarSource().listed.workspaces[1].tabs[0].panes[0].cwd = "/src/docs";
+        scene.controller.sidebarSource().listed.workspaces[0].tabs[1].panes[0].status = {};
+        scene.controller.sidebarModel().refreshNow();
+        auto const twoLines = scene.token("twoLineRowHeight");
+        auto const cellTree = scene.token("look") == scene.token("cellTree");
+
+        /// @return @p name's box within the row @p rowItem.
+        auto const boxOf = [](QQuickItem& rowItem, QString const& name) {
+            auto* part = SidebarWindow::findNamed(rowItem, name);
+            REQUIRE(part != nullptr);
+            REQUIRE(part->isVisible());
+            return part->mapRectToItem(&rowItem, QRectF { 0, 0, part->width(), part->height() });
+        };
+
+        auto* blank = scene.rowTitled(QStringLiteral("build"));
+        auto* asking = scene.rowTitled(QStringLiteral("claude"));
+        auto* idle = scene.rowTitled(QStringLiteral("notes"));
+        REQUIRE(blank != nullptr);
+        REQUIRE(asking != nullptr);
+        REQUIRE(idle != nullptr);
+        REQUIRE(QTest::qWaitFor(
+            [&] {
+                auto* glyph = SidebarWindow::findNamed(*blank, QStringLiteral("sidebarRowGlyph"));
+                return glyph != nullptr && !glyph->isVisible();
+            },
+            1000));
+
+        for (auto* rowItem: { blank, asking, idle })
+        {
+            INFO("title " << rowItem->property("title").toString().toStdString());
+            CHECK(rowItem->height() == twoLines);
+            auto const title = boxOf(*rowItem, QStringLiteral("sidebarRowTitle"));
+            CHECK(title.top() > -CentringRounding);
+            CHECK(title.bottom() < rowItem->height() + CentringRounding);
+        }
+
+        // The second lines stay inside the row, under the name.
+        for (auto const& [rowItem, line]: { std::pair { asking, QStringLiteral("sidebarRowReasonLine") },
+                                            std::pair { idle, QStringLiteral("sidebarRowIdle") } })
+        {
+            INFO(line.toStdString());
+            auto const title = boxOf(*rowItem, QStringLiteral("sidebarRowTitle"));
+            auto const second = boxOf(*rowItem, line);
+            if (cellTree)
+            {
+                // Each line is a whole cell row: the second starts where the first cell row ends.
+                CHECK(std::abs(second.top() - scene.token("rowHeight")) <= Tolerance);
+                continue;
+            }
+            CHECK(second.top() > title.bottom() - CentringRounding);
+            CHECK(second.bottom() <= rowItem->height() + Tolerance);
+            // A name with a line under it sits above the row's middle, further than the rounding could ever
+            // move a centred one: the two cases below never overlap.
+            CHECK(title.center().y() < (rowItem->height() / 2) - CentringRounding);
+        }
+
+        // The row with nothing for its second line shows none, and centres its name in its two lines; the
+        // Terminal row keeps it in its first cell row, as half a cell is no place on the grid.
+        auto* blankIdle = SidebarWindow::findNamed(*blank, QStringLiteral("sidebarRowIdle"));
+        REQUIRE(blankIdle != nullptr);
+        CHECK_FALSE(blankIdle->isVisible());
+        auto const blankTitle = boxOf(*blank, QStringLiteral("sidebarRowTitle"));
+        if (cellTree)
+            CHECK(blankTitle.center().y() < scene.token("rowHeight") + Tolerance);
+        else
+            CHECK(std::abs(blankTitle.center().y() - (blank->height() / 2)) < CentringRounding);
         CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
     }
 }
@@ -1103,6 +1331,118 @@ TEST_CASE("the hover card closes when the pointer leaves it (offscreen)", "[cont
     QTest::mouseMove(scene.window, onCard);
     QTest::mouseMove(scene.window, QPoint { scene.window->width() - 10, scene.window->height() - 10 });
     CHECK(QTest::qWaitFor([&] { return !card->property("opened").toBool(); }, 3000));
+}
+
+namespace
+{
+/// Gives claude's pane @p record and hovers its row until the hover card opens.
+/// @return The card.
+QObject& openClaudeCard(SidebarWindow& scene, vtbackend::ProgramStatusRecord record)
+{
+    scene.controller.sidebarSource().listed.workspaces[0].tabs[0].panes[0].status = { std::move(record) };
+    scene.controller.sidebarModel().refreshNow();
+    QCoreApplication::processEvents();
+    auto* claude = scene.rowTitled(QStringLiteral("claude"));
+    REQUIRE(claude != nullptr);
+    auto* card = scene.root->findChild<QObject*>(QStringLiteral("sidebarHoverCard"));
+    REQUIRE(card != nullptr);
+    auto const over = claude->mapToScene(QPointF { claude->width() / 2, claude->height() / 2 }).toPoint();
+    QTest::mouseMove(scene.window, over - QPoint { 0, 1 });
+    QTest::mouseMove(scene.window, over);
+    REQUIRE(QTest::qWaitFor([&] { return card->property("opened").toBool(); }, 3000));
+    return *card;
+}
+
+/// Checks that the card's reason words, @p label long, wrap within the card and show every character.
+void checkReasonWraps(std::string const& label)
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        auto const& card = openClaudeCard(scene, recordOf(vtbackend::ProgramState::Working, label));
+        auto const* reason =
+            SidebarWindow::findNamed(*scene.window->contentItem(), QStringLiteral("sidebarHoverCardReason"));
+        REQUIRE(reason != nullptr);
+        CHECK(reason->property("text").toString() == QString::fromStdString(label));
+        CHECK(reason->width() <= card.property("availableWidth").toReal());
+        CHECK(reason->property("lineCount").toInt() > 1);
+        CHECK_FALSE(reason->property("truncated").toBool());
+        CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+} // namespace
+
+TEST_CASE("the hover card wraps a long status with no command (offscreen)", "[contour][gui][qml][sidebar]")
+{
+    auto label = std::string {};
+    for (auto const word: std::views::iota(1, 41))
+        label += std::format("{}word{:02}", label.empty() ? "" : " ", word);
+    checkReasonWraps(label);
+}
+
+TEST_CASE("the hover card wraps a status with no spaces (offscreen)", "[contour][gui][qml][sidebar]")
+{
+    checkReasonWraps(std::string(500, 'x'));
+}
+
+TEST_CASE("the hover card keeps its text inside a width of no whole pixels (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    // A layout rounds the width it gives an item to a whole pixel, up as well as down; a card whose width is
+    // whole cells of a fractional cell width (the Terminal row) must still not have its text overflow it.
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        scene.controller.sidebarSource().listed.workspaces[0].tabs[0].panes[0].cwd =
+            "/" + std::string(280, 'p') + "/the-last-directory";
+        // Before it opens, as the card's own width is: to a fraction above the half, which a layout rounds
+        // up.
+        auto* closed = scene.root->findChild<QObject*>(QStringLiteral("sidebarHoverCard"));
+        REQUIRE(closed != nullptr);
+        auto const available = closed->property("availableWidth").toReal();
+        auto const fraction = 0.71875;
+        closed->setProperty(
+            "width", closed->property("width").toReal() - (available - std::floor(available)) + fraction);
+        auto const& card =
+            openClaudeCard(scene, recordOf(vtbackend::ProgramState::Working, std::string(500, 'x')));
+        auto const bound = card.property("availableWidth").toReal();
+        REQUIRE(bound - std::floor(bound) == Catch::Approx(fraction));
+        for (auto const* name: { "sidebarHoverCardReason", "sidebarHoverCardDetail" })
+        {
+            INFO(name);
+            auto const* text =
+                SidebarWindow::findNamed(*scene.window->contentItem(), QString::fromLatin1(name));
+            REQUIRE(text != nullptr);
+            CHECK(text->width() <= bound);
+            CHECK(text->property("lineCount").toInt() > 1);
+        }
+        CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("the hover card shows a long folder to its end (offscreen)", "[contour][gui][qml][sidebar]")
+{
+    auto const folder = "/" + std::string(280, 'p') + "/the-last-directory";
+    REQUIRE(folder.size() == 300);
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        scene.controller.sidebarSource().listed.workspaces[0].tabs[0].panes[0].cwd = folder;
+        openClaudeCard(scene, recordOf(vtbackend::ProgramState::Working, "Thinking"));
+        auto const* detail =
+            SidebarWindow::findNamed(*scene.window->contentItem(), QStringLiteral("sidebarHoverCardDetail"));
+        REQUIRE(detail != nullptr);
+        auto const text = detail->property("text").toString();
+        INFO("detail " << text.toStdString());
+        // The time follows the folder.
+        CHECK(text.endsWith(QString::fromStdString(folder) + QStringLiteral(" · 0:30")));
+        CHECK(detail->property("lineCount").toInt() > 1);
+        CHECK_FALSE(detail->property("truncated").toBool());
+        CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
 }
 
 TEST_CASE("the Terminal row keeps the sidebar's text on the cell grid (offscreen)",
@@ -2699,5 +3039,627 @@ TEST_CASE("with no band, a shown sidebar's daemon control is the one place that 
     }
     // The scenario is real: some row draws no band here.
     CHECK(hiddenBands > 0);
+}
+// }}}
+
+// {{{ Tab colour
+namespace
+{
+
+/// @return @p value's colour as one comparable number, whatever spec it was made in.
+[[nodiscard]] QRgb rgbaOf(QVariant const& value)
+{
+    return value.value<QColor>().rgba();
+}
+
+/// What `chromeStyle.sidebarTabColor` paints on @p row as it stands: under the pointer as it is, in its
+/// window as active as the window the test drives really is.
+[[nodiscard]] QVariantMap tabPaintOf(SidebarWindow const& scene, QQuickItem const& row)
+{
+    auto* style =
+        scene.engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto const* colors = style->property("colors").value<QObject*>();
+    REQUIRE(colors != nullptr);
+    auto paint = QVariantMap {};
+    REQUIRE(QMetaObject::invokeMethod(style,
+                                      "sidebarTabColor",
+                                      Q_RETURN_ARG(QVariantMap, paint),
+                                      Q_ARG(int, scene.controller.sidebarTabColorStyle()),
+                                      Q_ARG(QColor, row.property("tabColor").value<QColor>()),
+                                      Q_ARG(QColor, colors->property("sidebarFill").value<QColor>()),
+                                      Q_ARG(int, row.property("selection").toInt()),
+                                      Q_ARG(int, row.property("pointer").toInt()),
+                                      Q_ARG(bool, scene.window->isActive())));
+    return paint;
+}
+
+/// The part of @p row named @p name.
+[[nodiscard]] QQuickItem& rowPart(QQuickItem const& row, char const* name)
+{
+    auto* found = SidebarWindow::findNamed(row, QString::fromLatin1(name));
+    REQUIRE(found != nullptr);
+    return *found;
+}
+
+/// @return The vertical centre of @p part, in @p row's coordinates.
+[[nodiscard]] qreal centreYIn(QQuickItem const& part, QQuickItem const& row)
+{
+    return part.mapToItem(&row, QPointF { 0, part.height() / 2 }).y();
+}
+
+/// Checks the Terminal row's tab-colour bar on @p row, a tab row whose tab has a colour: one glyph cell on
+/// each of the row's two lines, each centred on the line of the tree's connectors it stands beside.
+void checkCellBar(QQuickItem const& row)
+{
+    auto const cells = contour::test::itemsNamed(row, QStringLiteral("sidebarRowTabBarCell"));
+    REQUIRE(cells.size() == 2);
+    CHECK(centreYIn(*cells[0], row)
+          == Catch::Approx(centreYIn(rowPart(row, "sidebarRowTree"), row)).margin(0.5));
+    CHECK(centreYIn(*cells[1], row)
+          == Catch::Approx(centreYIn(rowPart(row, "sidebarRowTreeContinued"), row)).margin(0.5));
+}
+
+/// Checks that @p row wears no tab colour: no tint, no bar, and its name in the row's own ink.
+void checkWearsNoTabColour(QQuickItem const& row)
+{
+    CHECK_FALSE(rowPart(row, "sidebarRowTabFill").isVisible());
+    CHECK_FALSE(rowPart(row, "sidebarRowTabBar").isVisible());
+    CHECK(rgbaOf(rowPart(row, "sidebarRowTitle").property("color")) == rgbaOf(row.property("ink")));
+}
+
+} // namespace
+
+TEST_CASE("a coloured tab's rows show its colour as sidebar.tab_color says (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    using contour::config::SidebarTabColorStyle;
+    using contour::window::RowSelection;
+    using contour::window::SidebarRowKind;
+    auto const orange = QColor { QStringLiteral("#E8853A") };
+    auto const blue = QColor { QStringLiteral("#4C5FD5") };
+
+    for (auto const row: drawnRows())
+        for (auto const style:
+             { SidebarTabColorStyle::Tint, SidebarTabColorStyle::Bar, SidebarTabColorStyle::Name })
+        {
+            INFO("row " << static_cast<int>(row) << ", style " << static_cast<int>(style));
+            auto scene = SidebarWindow { { .row = row,
+                                           .claudeTab = ClaudeTab::Split,
+                                           .tabColours = TabColours::Coloured,
+                                           .tabColorStyle = style } };
+            // The pointer off the sidebar, so no row is hovered.
+            QTest::mouseMove(scene.window, QPoint { scene.window->width() - 5, scene.window->height() - 5 });
+            QCoreApplication::processEvents();
+
+            auto colouredRows = 0;
+            for (auto const* item: scene.rows())
+            {
+                INFO("title " << item->property("title").toString().toStdString());
+                auto const kind = static_cast<SidebarRowKind>(item->property("kind").toInt());
+                auto const tabColour = item->property("tabColor").value<QColor>();
+                if (tabColour.alpha() == 0)
+                {
+                    checkWearsNoTabColour(*item);
+                    continue;
+                }
+                REQUIRE(kind != SidebarRowKind::Workspace);
+                ++colouredRows;
+                // build's tab row is orange; claude's tab row and both its pane rows are blue.
+                CHECK(tabColour.rgba()
+                      == (item->property("title") == QStringLiteral("build") ? orange : blue).rgba());
+
+                auto const& fill = rowPart(*item, "sidebarRowTabFill");
+                auto const& bar = rowPart(*item, "sidebarRowTabBar");
+                auto const& selection = rowPart(*item, "sidebarRowSelection");
+                auto const titleInk = rgbaOf(rowPart(*item, "sidebarRowTitle").property("color"));
+                auto const marked =
+                    item->property("selection").toInt() != static_cast<int>(RowSelection::None);
+                auto const paint = tabPaintOf(scene, *item);
+                switch (style)
+                {
+                    case SidebarTabColorStyle::Tint:
+                        CHECK(fill.isVisible());
+                        CHECK(rgbaOf(fill.property("color")) == rgbaOf(paint.value(QStringLiteral("fill"))));
+                        CHECK(titleInk == rgbaOf(paint.value(QStringLiteral("ink"))));
+                        CHECK_FALSE(selection.isVisible());
+                        CHECK_FALSE(bar.isVisible());
+                        break;
+                    case SidebarTabColorStyle::Bar:
+                        CHECK(bar.isVisible());
+                        CHECK(bar.width() > 0);
+                        CHECK(bar.width() == scene.token("tabColorBarWidth"));
+                        CHECK(bar.height() == item->height());
+                        CHECK(rgbaOf(bar.property("color")) == tabColour.rgba());
+                        if (row == ChromeStyle::Terminal)
+                            checkCellBar(*item);
+                        CHECK_FALSE(fill.isVisible());
+                        CHECK(selection.isVisible() == marked);
+                        CHECK(titleInk == rgbaOf(item->property("ink")));
+                        break;
+                    case SidebarTabColorStyle::Name:
+                        CHECK(titleInk == tabColour.rgba());
+                        CHECK_FALSE(fill.isVisible());
+                        CHECK_FALSE(bar.isVisible());
+                        CHECK(selection.isVisible() == marked);
+                        break;
+                }
+            }
+            CHECK(colouredRows == 4);
+
+            // Folded, billing stands in for its selected, coloured tab, and still wears no tab colour.
+            auto* billing = scene.rowTitled(QStringLiteral("billing"));
+            REQUIRE(billing != nullptr);
+            scene.controller.sidebarModel().collapse(billing->property("index").toInt());
+            QCoreApplication::processEvents();
+            billing = scene.rowTitled(QStringLiteral("billing"));
+            REQUIRE(billing != nullptr);
+            REQUIRE(billing->property("selection").toInt()
+                    == static_cast<int>(RowSelection::ContainsSelected));
+            checkWearsNoTabColour(*billing);
+        }
+}
+TEST_CASE("a tinted row shows a press apart from a hover (offscreen)", "[contour][gui][qml][sidebar]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row,
+                                       .claudeTab = ClaudeTab::Split,
+                                       .tabColours = TabColours::Coloured,
+                                       .tabColorStyle = contour::config::SidebarTabColorStyle::Tint } };
+        // build: coloured, and not the shown tab, so the pointer is what fades its tint.
+        auto* build = scene.rowTitled(QStringLiteral("build"));
+        REQUIRE(build != nullptr);
+        REQUIRE(build->property("selection").toInt()
+                == static_cast<int>(contour::window::RowSelection::None));
+        auto const& fill = rowPart(*build, "sidebarRowTabFill");
+        auto const fillColour = [&] {
+            return rgbaOf(fill.property("color"));
+        };
+
+        scene.hover(*build);
+        REQUIRE(build->property("pointer").toInt()
+                == static_cast<int>(contour::window::RowPointer::Hovering));
+        auto const hovered = fillColour();
+        CHECK(hovered == rgbaOf(tabPaintOf(scene, *build).value(QStringLiteral("fill"))));
+
+        auto const centre = build->mapToScene(QPointF { build->width() / 2, build->height() / 2 }).toPoint();
+        QTest::mousePress(scene.window, Qt::LeftButton, Qt::NoModifier, centre);
+        QCoreApplication::processEvents();
+        CHECK(build->property("pointer").toInt() == static_cast<int>(contour::window::RowPointer::Pressing));
+        CHECK(fill.isVisible());
+        CHECK(fillColour() != hovered);
+        CHECK(fillColour() == rgbaOf(tabPaintOf(scene, *build).value(QStringLiteral("fill"))));
+        QTest::mouseRelease(scene.window, Qt::LeftButton, Qt::NoModifier, centre);
+        QCoreApplication::processEvents();
+    }
+}
+
+TEST_CASE("a status mark stays legible on its row's tint, even in the tab's own colour (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        // claude's permission mark, as it is drawn on an uncoloured row.
+        auto const markColour = [&] {
+            auto plain = SidebarWindow { { .row = row } };
+            auto* claude = plain.rowTitled(QStringLiteral("claude"));
+            REQUIRE(claude != nullptr);
+            return rowPart(*claude, "sidebarRowGlyph").property("ink").value<QColor>();
+        }();
+        REQUIRE(markColour.alpha() > 0);
+
+        // claude's tab coloured exactly as its mark: the selected row's tint is the mark's own colour.
+        auto scene = SidebarWindow { { .row = row,
+                                       .tabColours = TabColours::Coloured,
+                                       .claudeTabColour =
+                                           vtbackend::RGBColor { static_cast<uint8_t>(markColour.red()),
+                                                                 static_cast<uint8_t>(markColour.green()),
+                                                                 static_cast<uint8_t>(markColour.blue()) },
+                                       .tabColorStyle = contour::config::SidebarTabColorStyle::Tint } };
+        auto* claude = scene.rowTitled(QStringLiteral("claude"));
+        REQUIRE(claude != nullptr);
+        REQUIRE(claude->property("selection").toInt()
+                == static_cast<int>(contour::window::RowSelection::Selected));
+        REQUIRE(claude->property("tabColor").value<QColor>().rgb() == markColour.rgb());
+        auto const& fill = rowPart(*claude, "sidebarRowTabFill");
+        REQUIRE(fill.isVisible());
+        auto const fillColour = fill.property("color").value<QColor>();
+        auto const drawn = rowPart(*claude, "sidebarRowGlyph").property("ink").value<QColor>();
+        CHECK(drawn.rgb() != fillColour.rgb());
+        auto const rgbOf = [](QColor const& colour) {
+            return vtbackend::RGBColor { static_cast<uint8_t>(colour.red()),
+                                         static_cast<uint8_t>(colour.green()),
+                                         static_cast<uint8_t>(colour.blue()) };
+        };
+        CHECK(vtbackend::contrastRatio(rgbOf(drawn), rgbOf(fillColour)) >= vtbackend::MinimumMarkContrast);
+    }
+}
+// }}}
+
+// {{{ Workspace colour
+namespace
+{
+
+/// contour's colour in the workspace-colour cases.
+constexpr auto ContourColour = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+
+/// The scene the workspace-colour cases share: contour coloured #C2548F, its claude tab coloured (and split)
+/// and its build tab not, and docs uncoloured.
+[[nodiscard]] SidebarScene workspaceColourScene(
+    ChromeStyle row,
+    contour::config::SidebarWorkspaceColorStyle style,
+    contour::config::SidebarTabColorStyle tabStyle = contour::config::SidebarTabColorStyle::Tint)
+{
+    return SidebarScene { .row = row,
+                          .claudeTab = ClaudeTab::Split,
+                          .billingTitle = "contour",
+                          .tabColours = TabColours::ClaudeOnly,
+                          .tabColorStyle = tabStyle,
+                          .billingColour = ContourColour,
+                          .workspaceColorStyle = style };
+}
+
+/// What `chromeStyle.sidebarWorkspaceColor` paints on @p row as it stands: under the pointer as it is, in its
+/// window as active as the window the test drives really is.
+[[nodiscard]] QVariantMap workspacePaintOf(SidebarWindow const& scene, QQuickItem const& row)
+{
+    auto* style =
+        scene.engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto const* colors = style->property("colors").value<QObject*>();
+    REQUIRE(colors != nullptr);
+    auto paint = QVariantMap {};
+    REQUIRE(QMetaObject::invokeMethod(style,
+                                      "sidebarWorkspaceColor",
+                                      Q_RETURN_ARG(QVariantMap, paint),
+                                      Q_ARG(int, scene.controller.sidebarWorkspaceColorStyle()),
+                                      Q_ARG(int, row.property("kind").toInt()),
+                                      Q_ARG(QColor, row.property("workspaceColor").value<QColor>()),
+                                      Q_ARG(QColor, colors->property("sidebarFill").value<QColor>()),
+                                      Q_ARG(int, row.property("selection").toInt()),
+                                      Q_ARG(int, row.property("pointer").toInt()),
+                                      Q_ARG(bool, scene.window->isActive())));
+    return paint;
+}
+
+/// The four things a workspace's colour draws on a row.
+constexpr auto WorkspacePaintParts = std::array { "sidebarRowWorkspaceFill",
+                                                  "sidebarRowWorkspaceRail",
+                                                  "sidebarRowWorkspaceWash",
+                                                  "sidebarRowWorkspaceSwatch" };
+
+/// Checks that @p row wears no workspace colour.
+void checkWearsNoWorkspaceColour(QQuickItem const& row)
+{
+    for (auto const* part: WorkspacePaintParts)
+    {
+        INFO(part);
+        CHECK_FALSE(rowPart(row, part).isVisible());
+    }
+}
+
+/// Checks that @p row, contour's, wears its colour as @p style draws it there, folded or not.
+void checkWorkspaceRowPaint(QQuickItem const& row, contour::config::SidebarWorkspaceColorStyle style)
+{
+    using contour::config::SidebarWorkspaceColorStyle;
+    CHECK(rowPart(row, "sidebarRowWorkspaceFill").isVisible() == (style == SidebarWorkspaceColorStyle::Tint));
+    CHECK(rowPart(row, "sidebarRowWorkspaceRail").isVisible()
+          == (style == SidebarWorkspaceColorStyle::Group));
+    CHECK(rowPart(row, "sidebarRowWorkspaceWash").isVisible()
+          == (style == SidebarWorkspaceColorStyle::Group));
+    CHECK(rowPart(row, "sidebarRowWorkspaceSwatch").isVisible()
+          == (style == SidebarWorkspaceColorStyle::Swatch));
+}
+
+/// Checks the Terminal row's group rail on @p row, a row of contour's: the cells the rail draws, on each of
+/// the row's lines, are the model's, never blank, inked in @p colour, and stand in the tree's own cells, on
+/// the same line as the connectors they continue. A workspace row's cell is its disclosure where it folds.
+void checkCellRail(QQuickItem const& row, QQuickItem const& rail, QColor const& colour)
+{
+    using contour::window::RowExpansion;
+    auto const& cell = rowPart(row, "sidebarRowWorkspaceRailCell");
+    auto const& continued = rowPart(row, "sidebarRowWorkspaceRailCellContinued");
+    CHECK(cell.property("text").toString() == row.property("railText").toString());
+    if (static_cast<contour::window::SidebarRowKind>(row.property("kind").toInt())
+        == contour::window::SidebarRowKind::Workspace)
+    {
+        CHECK_FALSE(continued.isVisible());
+        auto const folds = row.property("expansion").toInt() != static_cast<int>(RowExpansion::None);
+        auto const& disclosure = rowPart(row, "sidebarRowDisclosureGlyph");
+        auto const& drawn = folds ? disclosure : cell;
+        INFO("the workspace's cell: " << drawn.property("text").toString().toStdString());
+        CHECK_FALSE(drawn.property("text").toString().trimmed().isEmpty());
+        CHECK(rgbaOf(drawn.property("color")) == colour.rgba());
+        CHECK(drawn.mapToItem(&row, QPointF {}).x() == Catch::Approx(rail.x()).margin(0.5));
+        return;
+    }
+    // Two lines, and on each a connector in the colour where the tree has one, or a blank.
+    REQUIRE(cell.isVisible());
+    REQUIRE(continued.isVisible());
+    CHECK(continued.property("text").toString() == row.property("railTextContinued").toString());
+    for (auto const* drawn: { &cell, &continued })
+    {
+        INFO("line " << (drawn == &cell ? 1 : 2) << ": '" << drawn->property("text").toString().toStdString()
+                     << "'");
+        CHECK_FALSE(drawn->property("text").toString().trimmed().isEmpty());
+        CHECK(rgbaOf(drawn->property("color")) == colour.rgba());
+    }
+    // In the tree's own lines: the rail's cell on the connectors' line, the rest of them past its cell, and
+    // the second line's connectors under the first line's, with no gap after the rail.
+    auto const& tree = rowPart(row, "sidebarRowTree");
+    auto const& treeContinued = rowPart(row, "sidebarRowTreeContinued");
+    CHECK(centreYIn(cell, row) == Catch::Approx(centreYIn(tree, row)).margin(0.5));
+    CHECK(centreYIn(continued, row) == Catch::Approx(centreYIn(treeContinued, row)).margin(0.5));
+    CHECK(tree.mapToItem(&row, QPointF {}).x() >= rail.x() + rail.width() - 0.5);
+    CHECK(treeContinued.mapToItem(&row, QPointF {}).x()
+          == Catch::Approx(tree.mapToItem(&row, QPointF {}).x()).margin(0.5));
+}
+
+/// @return @p colour as a vtbackend colour, its alpha dropped.
+[[nodiscard]] vtbackend::RGBColor rgbOf(QColor const& colour)
+{
+    return vtbackend::RGBColor { static_cast<uint8_t>(colour.red()),
+                                 static_cast<uint8_t>(colour.green()),
+                                 static_cast<uint8_t>(colour.blue()) };
+}
+
+} // namespace
+
+TEST_CASE("a coloured workspace's rows show its colour as sidebar.workspace_color says (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    using contour::config::SidebarWorkspaceColorStyle;
+    using contour::window::SidebarRowKind;
+    auto const magenta = QColor { QStringLiteral("#C2548F") };
+
+    for (auto const row: drawnRows())
+        for (auto const style: { SidebarWorkspaceColorStyle::Tint,
+                                 SidebarWorkspaceColorStyle::Group,
+                                 SidebarWorkspaceColorStyle::Swatch })
+        {
+            INFO("row " << static_cast<int>(row) << ", style " << static_cast<int>(style));
+            auto scene = SidebarWindow { workspaceColourScene(row, style) };
+            QTest::mouseMove(scene.window, QPoint { scene.window->width() - 5, scene.window->height() - 5 });
+            QCoreApplication::processEvents();
+
+            auto colouredRows = 0;
+            auto washes = std::vector<QRectF> {};
+            for (auto const* item: scene.rows())
+            {
+                INFO("title " << item->property("title").toString().toStdString());
+                auto const kind = static_cast<SidebarRowKind>(item->property("kind").toInt());
+                auto const workspaceColour = item->property("workspaceColor").value<QColor>();
+                if (workspaceColour.alpha() == 0)
+                {
+                    // docs and its tab: none of the four, in any style.
+                    checkWearsNoWorkspaceColour(*item);
+                    continue;
+                }
+                ++colouredRows;
+                CHECK(workspaceColour.rgba() == magenta.rgba());
+                auto const isWorkspace = kind == SidebarRowKind::Workspace;
+                auto const& fill = rowPart(*item, "sidebarRowWorkspaceFill");
+                auto const& rail = rowPart(*item, "sidebarRowWorkspaceRail");
+                auto const& wash = rowPart(*item, "sidebarRowWorkspaceWash");
+                auto const& swatch = rowPart(*item, "sidebarRowWorkspaceSwatch");
+                auto const paint = workspacePaintOf(scene, *item);
+                switch (style)
+                {
+                    case SidebarWorkspaceColorStyle::Tint:
+                        CHECK(fill.isVisible() == isWorkspace);
+                        if (isWorkspace)
+                        {
+                            CHECK(rgbaOf(fill.property("color"))
+                                  == rgbaOf(paint.value(QStringLiteral("fill"))));
+                            CHECK_FALSE(rowPart(*item, "sidebarRowSelection").isVisible());
+                            CHECK_FALSE(rowPart(*item, "sidebarRowFeedback").isVisible());
+                            CHECK(rgbaOf(rowPart(*item, "sidebarRowTitle").property("color"))
+                                  == rgbaOf(paint.value(QStringLiteral("ink"))));
+                        }
+                        CHECK_FALSE(rail.isVisible());
+                        CHECK_FALSE(wash.isVisible());
+                        CHECK_FALSE(swatch.isVisible());
+                        break;
+                    case SidebarWorkspaceColorStyle::Group:
+                        CHECK(rail.isVisible());
+                        CHECK(wash.isVisible());
+                        CHECK(rail.width() > 0);
+                        CHECK(rail.width() == scene.token("workspaceRailWidth"));
+                        CHECK(rail.x() == 0);
+                        CHECK(rgbaOf(rail.property("color")) == magenta.rgba());
+                        CHECK(rgbaOf(wash.property("color")) == rgbaOf(paint.value(QStringLiteral("wash"))));
+                        // The wash is the row's whole box, square: one band down the workspace's rows.
+                        CHECK(wash.mapToItem(item, QPointF {}).x() == 0);
+                        CHECK(wash.mapToItem(item, QPointF {}).y() == 0);
+                        CHECK(wash.width() == item->width());
+                        CHECK(wash.height() == item->height());
+                        CHECK(wash.property("radius").toReal() == 0);
+                        washes.push_back(wash.mapRectToScene(wash.boundingRect()));
+                        if (row != ChromeStyle::Terminal)
+                            CHECK(rail.height() == item->height());
+                        else
+                            checkCellRail(*item, rail, magenta);
+                        // A tab's own tint is drawn over the wash.
+                        if (item->property("title") == QStringLiteral("claude") && !isWorkspace)
+                            CHECK(rowPart(*item, "sidebarRowTabFill").isVisible());
+                        CHECK_FALSE(fill.isVisible());
+                        CHECK_FALSE(swatch.isVisible());
+                        break;
+                    case SidebarWorkspaceColorStyle::Swatch:
+                        CHECK(swatch.isVisible() == isWorkspace);
+                        if (isWorkspace)
+                        {
+                            CHECK(swatch.width() > 0);
+                            CHECK(rgbaOf(swatch.property("color")) == magenta.rgba());
+                            // On the Terminal row the glyph takes whole cells, at least the one the token
+                            // names and as many as the face draws it across, centred in them, and so never
+                            // spills into the name's.
+                            if (row == ChromeStyle::Terminal)
+                            {
+                                auto const& glyph = rowPart(*item, "sidebarRowWorkspaceSwatchGlyph");
+                                auto const cell = scene.style("cellWidth");
+                                auto const drawn = cell * std::ceil(glyph.implicitWidth() / cell);
+                                CHECK(swatch.width()
+                                      == Catch::Approx(std::max(scene.token("workspaceSwatchSize"), drawn)));
+                                CHECK(glyph.width() == Catch::Approx(swatch.width()));
+                                CHECK(glyph.implicitWidth() <= swatch.width());
+                                CHECK(glyph.property("horizontalAlignment").toInt() == Qt::AlignHCenter);
+                            }
+                            else
+                                CHECK(swatch.width() == scene.token("workspaceSwatchSize"));
+                            // Before the name.
+                            CHECK(swatch.mapToItem(item, QPointF {}).x()
+                                  < rowPart(*item, "sidebarRowTitle").mapToItem(item, QPointF {}).x());
+                        }
+                        CHECK_FALSE(fill.isVisible());
+                        CHECK_FALSE(rail.isVisible());
+                        CHECK_FALSE(wash.isVisible());
+                        break;
+                }
+            }
+            // contour, claude, its two panes, and build.
+            CHECK(colouredRows == 5);
+            // No gap between one coloured row's wash and the next's.
+            std::ranges::sort(washes, {}, &QRectF::top);
+            for (auto const& [above, below]: std::views::zip(washes, washes | std::views::drop(1)))
+                CHECK(below.top() == Catch::Approx(above.bottom()));
+
+            // Folded, contour keeps its paint.
+            auto* contourRow = scene.rowTitled(QStringLiteral("contour"));
+            REQUIRE(contourRow != nullptr);
+            scene.controller.sidebarModel().collapse(contourRow->property("index").toInt());
+            QCoreApplication::processEvents();
+            contourRow = scene.rowTitled(QStringLiteral("contour"));
+            REQUIRE(contourRow != nullptr);
+            checkWorkspaceRowPaint(*contourRow, style);
+        }
+}
+
+TEST_CASE("a tinted workspace row shows a press apart from a hover (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene =
+            SidebarWindow { workspaceColourScene(row, contour::config::SidebarWorkspaceColorStyle::Tint) };
+        auto* contourRow = scene.rowTitled(QStringLiteral("contour"));
+        REQUIRE(contourRow != nullptr);
+        REQUIRE(contourRow->property("selection").toInt()
+                == static_cast<int>(contour::window::RowSelection::None));
+        auto const& fill = rowPart(*contourRow, "sidebarRowWorkspaceFill");
+        auto const fillColour = [&] {
+            return rgbaOf(fill.property("color"));
+        };
+
+        scene.hover(*contourRow);
+        REQUIRE(contourRow->property("pointer").toInt()
+                == static_cast<int>(contour::window::RowPointer::Hovering));
+        auto const hovered = fillColour();
+        CHECK(hovered == rgbaOf(workspacePaintOf(scene, *contourRow).value(QStringLiteral("fill"))));
+
+        // Off the disclosure, which takes the press itself.
+        auto const at =
+            contourRow->mapToScene(QPointF { contourRow->width() * 3 / 4, contourRow->height() / 2 })
+                .toPoint();
+        QTest::mouseMove(scene.window, at);
+        QTest::mousePress(scene.window, Qt::LeftButton, Qt::NoModifier, at);
+        QCoreApplication::processEvents();
+        CHECK(contourRow->property("pointer").toInt()
+              == static_cast<int>(contour::window::RowPointer::Pressing));
+        CHECK(fill.isVisible());
+        CHECK(fillColour() != hovered);
+        CHECK(fillColour() == rgbaOf(workspacePaintOf(scene, *contourRow).value(QStringLiteral("fill"))));
+        QTest::mouseRelease(scene.window, Qt::LeftButton, Qt::NoModifier, at);
+        QCoreApplication::processEvents();
+    }
+}
+
+TEST_CASE("a workspace's rail and a tab's bar stand side by side (offscreen)", "[contour][gui][qml][sidebar]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { workspaceColourScene(row,
+                                                          contour::config::SidebarWorkspaceColorStyle::Group,
+                                                          contour::config::SidebarTabColorStyle::Bar) };
+        auto* claude = scene.rowTitled(QStringLiteral("claude"));
+        REQUIRE(claude != nullptr);
+        auto const& rail = rowPart(*claude, "sidebarRowWorkspaceRail");
+        auto const& tabBar = rowPart(*claude, "sidebarRowTabBar");
+        CHECK(rail.isVisible());
+        CHECK(tabBar.isVisible());
+        INFO("bar at " << tabBar.x() << ", rail at " << rail.x() << " + " << rail.width());
+        CHECK(tabBar.x() >= rail.x() + rail.width());
+        if (row == ChromeStyle::Terminal)
+            checkCellBar(*claude);
+    }
+}
+
+TEST_CASE("a status mark stays legible on a tinted workspace row (offscreen)", "[contour][gui][qml][sidebar]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        // The workspace's roll-up mark, as it is drawn on an uncoloured row.
+        auto const markColour = [&] {
+            auto plain = SidebarWindow { { .row = row } };
+            auto* billing = plain.rowTitled(QStringLiteral("billing"));
+            REQUIRE(billing != nullptr);
+            return rowPart(*billing, "sidebarRowRollUp").property("ink").value<QColor>();
+        }();
+        REQUIRE(markColour.alpha() > 0);
+
+        // The workspace coloured exactly as its mark, and folded so its row stands for the selected tab.
+        auto setup = workspaceColourScene(row, contour::config::SidebarWorkspaceColorStyle::Tint);
+        setup.billingColour = rgbOf(markColour);
+        auto scene = SidebarWindow { setup };
+        auto* contourRow = scene.rowTitled(QStringLiteral("contour"));
+        REQUIRE(contourRow != nullptr);
+        scene.controller.sidebarModel().collapse(contourRow->property("index").toInt());
+        QCoreApplication::processEvents();
+        contourRow = scene.rowTitled(QStringLiteral("contour"));
+        REQUIRE(contourRow != nullptr);
+        auto const& fill = rowPart(*contourRow, "sidebarRowWorkspaceFill");
+        REQUIRE(fill.isVisible());
+        auto const fillColour = fill.property("color").value<QColor>();
+        auto const drawn = rowPart(*contourRow, "sidebarRowRollUp").property("ink").value<QColor>();
+        CHECK(vtbackend::contrastRatio(rgbOf(drawn), rgbOf(fillColour)) >= vtbackend::MinimumMarkContrast);
+    }
+}
+
+TEST_CASE("the sidebar's colour picker opens at the workspace's row and colours it by id (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene =
+            SidebarWindow { workspaceColourScene(row, contour::config::SidebarWorkspaceColorStyle::Tint) };
+        auto* flyout = scene.window->findChild<QObject*>(QStringLiteral("sidebarWorkspaceColorFlyout"));
+        REQUIRE(flyout != nullptr);
+        REQUIRE_FALSE(flyout->property("opened").toBool());
+
+        // docs, the workspace the window does not show.
+        emit scene.controller.workspaceColorPickRequested(2);
+        REQUIRE(QTest::qWaitFor([&] { return flyout->property("opened").toBool(); }, 2000));
+        auto* docs = scene.rowTitled(QStringLiteral("docs"));
+        REQUIRE(docs != nullptr);
+        CHECK(flyout->property("parent").value<QQuickItem*>() == docs);
+
+        auto const picked = QColor { 0x12, 0x34, 0x56 };
+        QMetaObject::invokeMethod(flyout, "colorPicked", Q_ARG(QColor, picked));
+        REQUIRE(scene.controller.workspaceColorCalls.size() == 1);
+        CHECK(scene.controller.workspaceColorCalls[0].workspace == 2);
+        CHECK(scene.controller.workspaceColorCalls[0].color == picked);
+
+        QMetaObject::invokeMethod(flyout, "resetRequested");
+        REQUIRE(scene.controller.workspaceColorCalls.size() == 2);
+        CHECK(scene.controller.workspaceColorCalls[1].workspace == 2);
+        CHECK_FALSE(scene.controller.workspaceColorCalls[1].color.has_value());
+    }
 }
 // }}}

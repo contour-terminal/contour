@@ -7344,6 +7344,19 @@ bool TerminalSession::operator()(actions::CloseWorkspace)
     return onWindowOf(*_manager, *this, &window::WindowController::closeCurrentWorkspace);
 }
 
+bool TerminalSession::operator()(actions::SetWorkspaceColor const& action)
+{
+    // A colorless binding opens the colour picker over the displayed workspace's row.
+    if (!action.color)
+        return onWindowOf(*_manager, *this, &window::WindowController::beginCurrentWorkspaceColorPick);
+    return onWindowOf(*_manager, *this, &window::WindowController::colorCurrentWorkspace, *action.color);
+}
+
+bool TerminalSession::operator()(actions::ResetWorkspaceColor)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::resetCurrentWorkspaceColor);
+}
+
 bool TerminalSession::operator()(actions::GoToPane)
 {
     return onWindowOf(*_manager, *this, &window::WindowController::goToSidebarPane);

@@ -1285,6 +1285,7 @@ namespace
                                                        proto::Capability::WorkspaceMeta,
                                                        proto::Capability::ClientGoodbye,
                                                        proto::Capability::LaunchFirstTab,
+                                                       proto::Capability::WorkspaceColor,
                                                        // compat(0.9.0): Names may stay; the legacy
                                                        // branches taken without it go.
                                                        proto::Capability::Names });

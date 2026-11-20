@@ -1036,18 +1036,23 @@ static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SidebarLoo
 /// Widths, edges, gaps and radii are in horizontal units, heights in vertical ones.
 struct SidebarTokens
 {
-    int width = 0;            ///< The sidebar's default width.
-    int minWidth = 0;         ///< The narrowest it may be dragged to.
-    int maxWidth = 0;         ///< The widest it may be dragged to.
-    int rowHeight = 0;        ///< A one-line row's height.
-    int twoLineRowHeight = 0; ///< A two-line row's height.
-    int indent = 0;           ///< What a tab row is indented by beneath its workspace.
-    int glyph = 0;            ///< A row's glyph, its edge.
-    int gitGap = 0;           ///< The gap between a row's directory and its git state.
-    int footerHeight = 0;     ///< The footer's height.
-    int selectionRadius = 0;  ///< The selected row's corner radius; 0 squares it off.
-    int accentPillWidth = 0;  ///< The accent pill's width; 0 draws none.
-    int hoverCardWidth = 0;   ///< The width of the card a hovered row shows.
+    int width = 0;              ///< The sidebar's default width.
+    int minWidth = 0;           ///< The narrowest it may be dragged to.
+    int maxWidth = 0;           ///< The widest it may be dragged to.
+    int rowHeight = 0;          ///< A one-line row's height.
+    int twoLineRowHeight = 0;   ///< A two-line row's height.
+    int lineGap = 0;            ///< The gap between a two-line row's name and its second line.
+    int indent = 0;             ///< What a tab row is indented by beneath its workspace.
+    int glyph = 0;              ///< A row's glyph, its edge.
+    int gitGap = 0;             ///< The gap between a row's directory and its git state.
+    int footerHeight = 0;       ///< The footer's height.
+    int selectionRadius = 0;    ///< The selected row's corner radius; 0 squares it off.
+    int accentPillWidth = 0;    ///< The accent pill's width; 0 draws none.
+    int hoverCardWidth = 0;     ///< The width of the card a hovered row shows.
+    int tabColorBarWidth = 0;   ///< Width of the `bar` style's bar (`sidebar.tab_color`); > 0 on every row.
+    int workspaceRailWidth = 0; ///< The `group` style's rail (`sidebar.workspace_color`); > 0 on every row.
+    int workspaceSwatchSize =
+        0; ///< The `swatch` style's square (`sidebar.workspace_color`); > 0 on every row.
 
     [[nodiscard]] bool operator==(SidebarTokens const&) const = default;
 };

@@ -329,6 +329,8 @@ before the sidebar existed still gets them, unless it binds the same chord itsel
 | `JumpToNextAttention` | `Ctrl+Shift+J` | `⌘J` | Shows the next pane that needs you: blocked or bell first, then failed, then done and not seen. |
 | `MarkSeen` | none | none | Marks the active pane's output as seen. |
 | `RenameWorkspace` | none | none | Renames the current workspace inline. |
+| `SetWorkspaceColor` | none | none | Colours the current workspace: `color: '#RRGGBB'` applies that colour; without it, opens the colour picker on the workspace's row in the sidebar. |
+| `ResetWorkspaceColor` | none | none | Takes the current workspace's colour away. |
 | `MoveWorkspaceUp`, `MoveWorkspaceDown` | `Ctrl+Shift+Alt+PageUp` / `PageDown` | `⌃⇧⌘↑` / `⌃⇧⌘↓` | Moves the current workspace one place in the sidebar's list. |
 | `CloseWorkspace` | none | none | Closes the current workspace and everything in it, after asking. The last workspace of an in-process window cannot be closed. |
 | `GoToPane` | none | none | Shows the pane a sidebar row names; a row of the pane menu. |
@@ -337,7 +339,7 @@ before the sidebar existed still gets them, unless it binds the same chord itsel
 `NewWorkspace` is listed under [Switching daemons and workspaces](#switching-daemons-and-workspaces); the
 sidebar's **＋** button runs it.
 
-The settings are `sidebar: { visible, width }` and `tab_placement: sidebar | top`; see
-[the sidebar guide](../sidebar.md#configuration).
+The settings are `sidebar: { visible, width, tab_color, workspace_color }` and
+`tab_placement: sidebar | top`; see [the sidebar guide](../sidebar.md#configuration).
 
 --8<-- "configuration/key-mapping-actions.md"
