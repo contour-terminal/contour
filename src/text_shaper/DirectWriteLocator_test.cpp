@@ -6,9 +6,13 @@
 
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
+#include <cstdint>
 #include <ranges>
+#include <string>
 #include <type_traits>
+#include <vector>
 
 using namespace text;
 
@@ -249,4 +253,70 @@ TEMPLATE_TEST_CASE("DirectWrite.shapers_rasterize_empty_glyphs",
     REQUIRE(bitmap);
     CHECK(bitmap->valid());
     CHECK(bitmap->bitmap.empty() == (input == U" "));
+}
+
+TEST_CASE("DirectWriteLocator.strict_spacing_still_recovers_uncovered_symbols", "[directwrite][fallback]")
+{
+    // Neither symbol is in Consolas; DirectWrite names the proportional Segoe UI Symbol for both.
+    // Both are what Claude Code draws its UI with.
+    auto const symbol = GENERATE(U'⏵', U'⎿');
+    auto const strict = GENERATE(false, true);
+
+    auto locator = DirectWriteLocator {};
+    // Font-independent: holds on a runner whatever fonts it has.
+    CHECK(locator.coverageFallbackSpacing() == CoverageFallbackSpacing::Unrestricted);
+
+    // Names the face a failing runner resolved to.
+    auto const covering = locator.resolve(gsl::span<char32_t const>(&symbol, 1));
+    auto const coveringPath =
+        covering.empty() ? std::string { "<none>" } : std::get<FontPath>(covering.front()).value;
+    CAPTURE(static_cast<uint32_t>(symbol), strict, coveringPath);
+
+    auto shaper = OpenShaper({ 96, 96 }, locator);
+    auto desc = description("Consolas");
+    desc.strictSpacing = strict;
+
+    auto const input = std::u32string { U'A', symbol, U'B' };
+    auto clusters = std::vector<unsigned> { 0, 1, 2 };
+    auto result = ShapeResult {};
+
+    SECTION("recovered from a system face")
+    {
+        auto const font = shaper.loadFont(desc, FontSize { 13 });
+        REQUIRE(font);
+        shaper.shape(*font,
+                     input,
+                     gsl::span<unsigned>(clusters),
+                     unicode::Script::Latin,
+                     unicode::PresentationStyle::Text,
+                     result);
+        REQUIRE(result.size() == 3);
+        CHECK(result[0].glyph.font == *font);
+        CHECK(result[2].glyph.font == *font);
+        CHECK(result[1].glyph.font != *font);
+        for (auto const& glyph: result)
+            CHECK(glyph.glyph.index.value != 0);
+    }
+    SECTION("fallback disabled stays disabled")
+    {
+        SECTION("none policy")
+        {
+            desc.fontFallback = FontFallbackNone {};
+        }
+        SECTION("zero limit")
+        {
+            shaper.setFontFallbackLimit(0);
+        }
+        auto const font = shaper.loadFont(desc, FontSize { 13 });
+        REQUIRE(font);
+        shaper.shape(*font,
+                     input,
+                     gsl::span<unsigned>(clusters),
+                     unicode::Script::Latin,
+                     unicode::PresentationStyle::Text,
+                     result);
+        REQUIRE(result.size() == 3);
+        for (auto const& glyph: result)
+            CHECK(glyph.glyph.font == *font);
+    }
 }

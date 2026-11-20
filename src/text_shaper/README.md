@@ -37,7 +37,7 @@ placeholder glyphs as character coverage. Coverage recovery honors disabled fall
 fallback limit. Strict spacing still governs the configured chain. CoreText's final
 character-specific recovery permits proportional faces, as DirectWrite's recovery does: symbols
 such as U+23F1 are absent from the Nerd Font files and can require a proportional system math
-font even in a monospace terminal. Existing locators retain their strict coverage policy through
+font even in a monospace terminal. The fontconfig locator retains its strict coverage policy through
 FontLocator::coverageFallbackSpacing; Linux behavior is unchanged. The cache includes the
 resulting spacing eligibility, so answers cannot leak across different policies.
 
