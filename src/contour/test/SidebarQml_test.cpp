@@ -569,6 +569,87 @@ TEST_CASE("an idle row shows its folder on the second line (offscreen)", "[conto
     }
 }
 
+TEST_CASE("a two-line row keeps its lines inside it, and centres a name with nothing under it (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    // Compared with the row's own geometry, never with a font's metrics, so it holds for every platform's
+    // faces; a fraction of a pixel is the rounding of a centred box.
+    constexpr auto Tolerance = qreal { 0.51 };
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        // claude asks (a reason), docs/notes is idle in a folder, and build stops working and knows nothing
+        // of itself: the three second lines a row can have.
+        scene.controller.sidebarSource().listed.workspaces[1].tabs[0].panes[0].cwd = "/src/docs";
+        scene.controller.sidebarSource().listed.workspaces[0].tabs[1].panes[0].status = {};
+        scene.controller.sidebarModel().refreshNow();
+        auto const twoLines = scene.token("twoLineRowHeight");
+        auto const cellTree = scene.token("look") == scene.token("cellTree");
+
+        /// @return @p name's box within the row @p rowItem.
+        auto const boxOf = [](QQuickItem& rowItem, QString const& name) {
+            auto* part = SidebarWindow::findNamed(rowItem, name);
+            REQUIRE(part != nullptr);
+            REQUIRE(part->isVisible());
+            return part->mapRectToItem(&rowItem, QRectF { 0, 0, part->width(), part->height() });
+        };
+
+        auto* blank = scene.rowTitled(QStringLiteral("build"));
+        auto* asking = scene.rowTitled(QStringLiteral("claude"));
+        auto* idle = scene.rowTitled(QStringLiteral("notes"));
+        REQUIRE(blank != nullptr);
+        REQUIRE(asking != nullptr);
+        REQUIRE(idle != nullptr);
+        REQUIRE(QTest::qWaitFor(
+            [&] {
+                auto* glyph = SidebarWindow::findNamed(*blank, QStringLiteral("sidebarRowGlyph"));
+                return glyph != nullptr && !glyph->isVisible();
+            },
+            1000));
+
+        for (auto* rowItem: { blank, asking, idle })
+        {
+            INFO("title " << rowItem->property("title").toString().toStdString());
+            CHECK(rowItem->height() == twoLines);
+            auto const title = boxOf(*rowItem, QStringLiteral("sidebarRowTitle"));
+            CHECK(title.top() >= -Tolerance);
+            CHECK(title.bottom() <= rowItem->height() + Tolerance);
+        }
+
+        // The second lines stay inside the row, under the name.
+        for (auto const& [rowItem, line]: { std::pair { asking, QStringLiteral("sidebarRowReasonLine") },
+                                            std::pair { idle, QStringLiteral("sidebarRowIdle") } })
+        {
+            INFO(line.toStdString());
+            auto const title = boxOf(*rowItem, QStringLiteral("sidebarRowTitle"));
+            auto const second = boxOf(*rowItem, line);
+            if (cellTree)
+            {
+                // Each line is a whole cell row: the second starts where the first cell row ends.
+                CHECK(std::abs(second.top() - scene.token("rowHeight")) <= Tolerance);
+                continue;
+            }
+            CHECK(second.top() >= title.bottom() - Tolerance);
+            CHECK(second.bottom() <= rowItem->height() + Tolerance);
+            // A name with a line under it sits above the row's middle.
+            CHECK(title.center().y() < rowItem->height() / 2 - 1);
+        }
+
+        // The row with nothing for its second line shows none, and centres its name in its two lines; the
+        // Terminal row keeps it in its first cell row, as half a cell is no place on the grid.
+        auto* blankIdle = SidebarWindow::findNamed(*blank, QStringLiteral("sidebarRowIdle"));
+        REQUIRE(blankIdle != nullptr);
+        CHECK_FALSE(blankIdle->isVisible());
+        auto const blankTitle = boxOf(*blank, QStringLiteral("sidebarRowTitle"));
+        if (cellTree)
+            CHECK(blankTitle.center().y() < scene.token("rowHeight") + Tolerance);
+        else
+            CHECK(std::abs(blankTitle.center().y() - blank->height() / 2) <= Tolerance);
+        CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
 TEST_CASE("clicking a row calls activate (offscreen)", "[contour][gui][qml][sidebar]")
 {
     for (auto const row: drawnRows())

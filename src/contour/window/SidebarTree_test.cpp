@@ -892,10 +892,21 @@ TEST_CASE("secondLineOf prefers a status to the idle line", "[sidebar]")
     {
         CHECK(secondLineOf(secondLineRow(depth, "~/src", {}, "exit 1")) == SecondLine::Status);
         CHECK(secondLineOf(secondLineRow(depth, "~/src", {})) == SecondLine::Idle);
-        CHECK(secondLineOf(secondLineRow(depth, {}, {})) == SecondLine::Idle);
+        CHECK(secondLineOf(secondLineRow(depth, {}, "claude")) == SecondLine::Idle);
+        CHECK(secondLineOf(secondLineRow(depth, {}, {}, "exit 1")) == SecondLine::Status);
     }
     CHECK(secondLineOf(secondLineRow(0, {}, {}, "exit 1")) == SecondLine::None);
     CHECK(secondLineOf(secondLineRow(0, {}, {})) == SecondLine::None);
+}
+
+TEST_CASE("secondLineOf has nothing for a row that knows neither its folder nor its program", "[sidebar]")
+{
+    // The row keeps its two-line height and centres its name in it (SidebarRow.qml).
+    for (auto const depth: { uint8_t { 1 }, uint8_t { 2 } })
+    {
+        CHECK(secondLineOf(secondLineRow(depth, {}, {})) == SecondLine::None);
+        CHECK(idleLineOf(secondLineRow(depth, {}, {})).empty());
+    }
 }
 
 TEST_CASE("SidebarTree.unlabelled_workspace_is_numbered_as_its_host_numbers_it", "[sidebar]")

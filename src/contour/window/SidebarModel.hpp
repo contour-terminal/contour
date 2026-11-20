@@ -84,9 +84,10 @@ Q_ENUM_NS(RowSelection)
 /// What a row's second line holds (@see window::SecondLine, which it mirrors).
 enum class SecondLine : uint8_t
 {
-    None = 0, ///< No second line: a workspace row.
-    Idle,     ///< The idle line: the folder and the program.
-    Status,   ///< The reason.
+    None =
+        0,  ///< Nothing to show: a workspace row, or a tab or pane row that knows neither folder nor program.
+    Idle,   ///< The idle line: the folder and the program.
+    Status, ///< The reason.
 };
 Q_ENUM_NS(SecondLine)
 

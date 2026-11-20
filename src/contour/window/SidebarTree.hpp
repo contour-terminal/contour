@@ -309,19 +309,22 @@ enum class ChipMarker : uint8_t
 /// What a row's second line holds.
 enum class SecondLine : uint8_t
 {
-    None = 0, ///< No second line: a workspace row.
+    None = 0, ///< Nothing to show: a workspace row, or a tab or pane row that knows neither its folder nor
+              ///< its program, whose name the row then centres in its two lines.
     Idle,     ///< The idle line (idleLineOf()): where the pane is and what runs there.
     Status,   ///< The reason: what the pane does or waits for.
 };
 
 /// @param row The row.
-/// @return Status when the row has a reason; else Idle when it is a tab or pane row; None for a
-///         workspace row.
+/// @return Status when the row has a reason; else Idle when it is a tab or pane row that knows its folder
+///         or its program; None for a workspace row and for one that knows neither.
 [[nodiscard]] constexpr SecondLine secondLineOf(SidebarRow const& row) noexcept
 {
     if (row.depth == 0)
         return SecondLine::None;
-    return row.reason.empty() ? SecondLine::Idle : SecondLine::Status;
+    if (!row.reason.empty())
+        return SecondLine::Status;
+    return row.folder.empty() && row.program.empty() ? SecondLine::None : SecondLine::Idle;
 }
 
 /// The second line of a tab or pane row with no reason to show (`~/src · claude`).

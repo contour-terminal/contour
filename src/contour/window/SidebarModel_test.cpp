@@ -930,6 +930,12 @@ TEST_CASE("SidebarModel: an idle tab row's second line is its folder", "[contour
     CHECK(workspace.data(SidebarModel::SecondLineRole).toInt()
           == static_cast<int>(sidebarrows::SecondLine::None));
     CHECK(workspace.data(SidebarModel::IdleLineRole).toString().isEmpty());
+
+    // A tab that knows neither its folder nor its program has nothing for its second line.
+    t.source.listed.workspaces[0].tabs[0].panes[0].cwd.clear();
+    t.sidebar().refreshNow();
+    CHECK(t.sidebar().index(1).data(SidebarModel::SecondLineRole).toInt()
+          == static_cast<int>(sidebarrows::SecondLine::None));
 }
 
 TEST_CASE("a reason arriving changes the second line's role", "[contour][sidebar]")

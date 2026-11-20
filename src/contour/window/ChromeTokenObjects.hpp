@@ -846,6 +846,7 @@ class ChromeSidebarTokens: public QObject
     Q_PROPERTY(qreal maxWidth READ maxWidth CONSTANT)
     Q_PROPERTY(qreal rowHeight READ rowHeight CONSTANT)
     Q_PROPERTY(qreal twoLineRowHeight READ twoLineRowHeight CONSTANT)
+    Q_PROPERTY(qreal lineGap READ lineGap CONSTANT)
     Q_PROPERTY(qreal indent READ indent CONSTANT)
     Q_PROPERTY(qreal glyph READ glyph CONSTANT)
     Q_PROPERTY(qreal gitGap READ gitGap CONSTANT)
@@ -903,6 +904,8 @@ class ChromeSidebarTokens: public QObject
     {
         return _tokens.twoLineRowHeight * _units.vertical;
     }
+    /// @return The gap between a two-line row's name and its second line.
+    [[nodiscard]] qreal lineGap() const noexcept { return _tokens.lineGap * _units.vertical; }
     /// @return What a tab row is indented by beneath its workspace.
     [[nodiscard]] qreal indent() const noexcept { return _tokens.indent * _units.horizontal; }
     /// @return A row's glyph, its edge.

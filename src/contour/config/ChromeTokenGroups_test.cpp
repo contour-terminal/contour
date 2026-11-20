@@ -2475,8 +2475,9 @@ TEST_CASE("every chrome row has sidebar tokens", "[chrometokens][sidebar]")
         auto const& sidebar = row.sidebar;
         return sidebar.width > 0 && sidebar.minWidth > 0 && sidebar.minWidth <= sidebar.width
                && sidebar.width <= sidebar.maxWidth && sidebar.rowHeight > 0
-               && sidebar.twoLineRowHeight > sidebar.rowHeight && sidebar.indent > 0 && sidebar.glyph > 0
-               && sidebar.gitGap > 0 && sidebar.footerHeight > 0;
+               && sidebar.twoLineRowHeight > sidebar.rowHeight && sidebar.lineGap >= 0
+               && sidebar.lineGap < sidebar.twoLineRowHeight - sidebar.rowHeight && sidebar.indent > 0
+               && sidebar.glyph > 0 && sidebar.gitGap > 0 && sidebar.footerHeight > 0;
     }));
     CHECK(ChromeTokenRows.size() == contour::config::detail::ChromeStyleCount);
 }
@@ -2489,6 +2490,7 @@ TEST_CASE("sidebar tokens per row", "[chrometokens][sidebar]")
         ChromeStyle style;
         int rowHeight;
         int twoLineRowHeight;
+        int lineGap;
         int indent;
         SidebarLook look;
         int width; ///< Ruling Q3: the default width, and the bounds it is clamped to.
@@ -2496,10 +2498,10 @@ TEST_CASE("sidebar tokens per row", "[chrometokens][sidebar]")
         int maxWidth;
     };
     for (auto const& expected:
-         { Expected { ChromeStyle::MacOS, 24, 38, 16, SidebarLook::SourceList, 220, 160, 480 },
-           Expected { ChromeStyle::Fluent, 32, 48, 16, SidebarLook::NavigationPane, 240, 160, 480 },
-           Expected { ChromeStyle::ContourLinux, 32, 48, 16, SidebarLook::HeaderPane, 240, 160, 480 },
-           Expected { ChromeStyle::Terminal, 1, 2, 2, SidebarLook::CellTree, 28, 18, 60 } })
+         { Expected { ChromeStyle::MacOS, 24, 36, 1, 16, SidebarLook::SourceList, 220, 160, 480 },
+           Expected { ChromeStyle::Fluent, 32, 36, 1, 16, SidebarLook::NavigationPane, 240, 160, 480 },
+           Expected { ChromeStyle::ContourLinux, 32, 36, 1, 16, SidebarLook::HeaderPane, 240, 160, 480 },
+           Expected { ChromeStyle::Terminal, 1, 2, 0, 2, SidebarLook::CellTree, 28, 18, 60 } })
     {
         CAPTURE(static_cast<int>(expected.style));
         auto const& row = ChromeTokenRows[static_cast<size_t>(expected.style)];
@@ -2508,6 +2510,7 @@ TEST_CASE("sidebar tokens per row", "[chrometokens][sidebar]")
         CHECK(row.sidebar.maxWidth == expected.maxWidth);
         CHECK(row.sidebar.rowHeight == expected.rowHeight);
         CHECK(row.sidebar.twoLineRowHeight == expected.twoLineRowHeight);
+        CHECK(row.sidebar.lineGap == expected.lineGap);
         CHECK(row.sidebar.indent == expected.indent);
         CHECK(row.layout.sidebar == expected.look);
     }

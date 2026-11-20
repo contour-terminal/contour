@@ -1041,6 +1041,7 @@ struct SidebarTokens
     int maxWidth = 0;           ///< The widest it may be dragged to.
     int rowHeight = 0;          ///< A one-line row's height.
     int twoLineRowHeight = 0;   ///< A two-line row's height.
+    int lineGap = 0;            ///< The gap between a two-line row's name and its second line.
     int indent = 0;             ///< What a tab row is indented by beneath its workspace.
     int glyph = 0;              ///< A row's glyph, its edge.
     int gitGap = 0;             ///< The gap between a row's directory and its git state.

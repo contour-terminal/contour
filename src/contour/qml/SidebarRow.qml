@@ -144,16 +144,21 @@ Item {
     readonly property real fillInset: row.cellTree ? 0 : chromeStyle.space.paletteInset
     // A tab or pane row is always two lines, the reason or the idle line under the name, so a status coming
     // or going changes text and never the row's height. It groups its lines: the second sits a small step
-    // under the name, and the pair is centred in the row, so the rows stand further apart than the lines
-    // within one.
-    readonly property real lineGap: row.groupsLines ? chromeStyle.space.s1 : 0
+    // (sidebar.lineGap) under the name, and the pair is centred in the row, so the rows stand further apart
+    // than the lines within one.
+    readonly property real lineGap: row.groupsLines ? chromeStyle.sidebar.lineGap : 0
     // On the Terminal row each line is a whole cell row, so the first line keeps the row's height there.
     readonly property bool groupsLines: !row.isWorkspace && !row.cellTree
+    /// Whether a tab or pane row has anything for its second line (SidebarTree's secondLineOf()). A row that
+    /// has not keeps its two-line height and centres its name in it, except on the Terminal row, whose name
+    /// keeps the first of its two cell rows, as half a cell is no place on the grid.
+    readonly property bool hasSecondLine: row.secondLine !== SidebarRows.SecondLine.None
     readonly property real firstLineHeight: row.groupsLines ? Math.max(titleMetrics.height, chromeStyle.sidebar.glyph)
                                                             : chromeStyle.sidebar.rowHeight
     // Both second lines are set in the footnote face, so one measure centres the pair whichever it is.
-    readonly property real firstLineTop: row.groupsLines
-        ? Math.max(0, (row.height - row.firstLineHeight - row.lineGap - secondLineMetrics.height) / 2) : 0
+    readonly property real linesHeight: row.firstLineHeight
+                                        + (row.hasSecondLine ? row.lineGap + secondLineMetrics.height : 0)
+    readonly property real firstLineTop: row.groupsLines ? Math.max(0, (row.height - row.linesHeight) / 2) : 0
     // The row's edge padding: 0 on the Terminal row, whose small spacing steps are no cells at all.
     readonly property real padding: chromeStyle.space.s3
     // What the row keeps free at its trailing end, inside the selection: the padding (a cell on the Terminal
@@ -721,7 +726,7 @@ Item {
     }
 
     // The second line of a row with nothing to say: where it is and what runs there (`~/src · zsh`), in the
-    // row's muted ink. Empty when neither is known; the row keeps its height all the same.
+    // row's muted ink. A row that knows neither has no second line, and centres its name (firstLineTop).
     Text {
         objectName: "sidebarRowIdle"
         visible: row.secondLine === SidebarRows.SecondLine.Idle
