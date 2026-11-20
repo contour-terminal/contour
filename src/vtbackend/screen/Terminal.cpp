@@ -666,6 +666,10 @@ void Terminal::runParseBatch(std::unique_lock<Mutex> lock, Parse const& parse)
         // What the parse deferred runs now, inside this batch: no later batch is promised to drain it.
         processPendingLocalEcho(); // local echo (SRM) a reply deferred
 
+        // Kitty Unicode placeholder cells are resolved once the batch is whole, so that a placeholder split
+        // across reads -- its diacritics in the next one -- reads the same as one that arrived at once.
+        resolveKittyPlaceholders();
+
         // Under the lock, as every other thread moves the view: the view follows what was just written.
         followOutput();
         reconcileCommandBlockFocus();
@@ -678,6 +682,14 @@ void Terminal::runParseBatch(std::unique_lock<Mutex> lock, Parse const& parse)
 
     if (!batchedRendering)
         screenUpdated();
+}
+
+void Terminal::resolveKittyPlaceholders()
+{
+    for (auto& page: _pages)
+        page->resolveKittyPlaceholders();
+    _hostWritableStatusLineScreen.resolveKittyPlaceholders();
+    _indicatorStatusScreen.resolveKittyPlaceholders();
 }
 
 bool Terminal::processInputOnce()
@@ -696,6 +708,7 @@ bool Terminal::processInputOnce()
                 auto const _ = std::lock_guard { _ownStateLock };
                 auto const batchClock = sampleBatchClock(); // the queued sequences take effect now
                 _traceHandler.flushAllPending();
+                resolveKittyPlaceholders();
                 return true;
             }
             break;
@@ -713,6 +726,7 @@ bool Terminal::processInputOnce()
                 auto const batchClock = sampleBatchClock();
                 _executionMode = ExecutionMode::Waiting;
                 _traceHandler.flushOne();
+                resolveKittyPlaceholders();
                 return true;
             }
             break;

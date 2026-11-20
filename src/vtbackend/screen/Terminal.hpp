@@ -2761,6 +2761,12 @@ class Terminal: public IStatusLinePublishTarget
         _replicaRole.store(role, std::memory_order_release);
     }
 
+    /// @return What this terminal replicates; ReplicaRole::None for one fed by its own PTY.
+    [[nodiscard]] ReplicaRole replicaRole() const noexcept
+    {
+        return _replicaRole.load(std::memory_order_acquire);
+    }
+
     /// The host name the authority of a `file://` URL this terminal's application wrote -- an OSC 8 link's
     /// target -- must name for the URL to be a path on this machine (vtbackend::isLocalHost): this machine's
     /// (localIdentity()). None on a replica of another machine's terminal (ReplicaRole::OtherMachine), whose
@@ -4563,6 +4569,12 @@ class Terminal: public IStatusLinePublishTarget
     /// @param parse Parses the batch's bytes; called with _stateMutex held.
     template <typename Mutex, typename Parse>
     void runParseBatch(std::unique_lock<Mutex> lock, Parse const& parse);
+
+    /// Resolves the kitty Unicode placeholder cells written since the last call, on every screen that can
+    /// receive them: the pages and both status lines. Run once the parsed bytes took effect -- at the end of
+    /// a parse batch, and after a trace mode executed what it queued. Requires the state lock (_ownStateLock)
+    /// to be held.
+    void resolveKittyPlaceholders();
 
     /// Offers a key to hint mode and the Vi input handler, under _stateMutex: their commands write the grid's
     /// line flags, the fold set, the user-mark index, the viewport and the selection, which the parser thread

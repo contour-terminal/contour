@@ -1495,6 +1495,9 @@ LineCount Grid::scrollUp(LineCount n, GraphicsAttributes defaultAttributes, Marg
                 continue;
             copyColumns(
                 sourceLine.storage(), fromCol, targetLine.materializedStorage(), fromCol, columnsToMove);
+            // The flags recomputed from the cells go where the cells go (@see DerivedLineFlags): a row the
+            // placeholder cells land on must be resolved again when their placement changes.
+            targetLine.flags().enable(sourceLine.flags() & DerivedLineFlags);
         }
 
         for (LineOffset line = margin.vertical.to - *n2 + 1; line <= margin.vertical.to; ++line)
@@ -1588,6 +1591,8 @@ void Grid::scrollDown(LineCount vN, GraphicsAttributes const& defaultAttributes,
                     dstLine.materializedStorage(),
                     fromCol,
                     unbox<size_t>(margin.horizontal.length()));
+        // As in scrollUp: the derived flags travel with the cells.
+        dstLine.flags().enable(srcLine.flags() & DerivedLineFlags);
     }
 
     for (LineOffset line = margin.vertical.from; line < margin.vertical.from + *n; ++line)
@@ -2024,6 +2029,10 @@ void Grid::resize(PageSize newSize, std::span<CellLocation> cursors, std::option
                 // above just made the start, or a continuation whose head is gone.
                 if (logicalLineUsed == 0)
                     logicalLineAttributes = detail::logicalLineAttributesFrom(line);
+                // A derived flag describes cells, and the cells of every row of the logical line may land in
+                // any of its new rows: each of them carries it, for a later rescan to clear where it is
+                // spurious.
+                logicalLineAttributes.flags.enable(line.flags() & DerivedLineFlags);
 
                 auto const goesOn = i + 1 < *_pageSize.lines && _lines[i + 1].wrapped()
                                         ? detail::LineGoesOn::Yes
@@ -2125,6 +2134,15 @@ void Grid::resize(PageSize newSize, std::span<CellLocation> cursors, std::option
             // the initial value is never read. The two offsets stay at zero: a shrink emits only
             // continuations, which carry neither.
             auto previousAttributes = detail::LogicalLineAttributes {};
+            // The derived flags of that same row. Kept apart from previousAttributes.flags, which decides
+            // whether rows merge, and a flag describing cells has no say in that: they go wherever its cells
+            // go, the overflow and the row it is merged into alike.
+            auto previousDerived = LineFlags {};
+            auto const withPreviousDerived = [&]() {
+                auto attributes = previousAttributes;
+                attributes.flags.enable(previousDerived);
+                return attributes;
+            };
 
             auto const totalLineCount = unbox<size_t>(_pageSize.lines + maxHistoryLineCount());
             shrunkLines.reserve(totalLineCount);
@@ -2161,7 +2179,9 @@ void Grid::resize(PageSize newSize, std::span<CellLocation> cursors, std::option
                         // is NOT default-correct here: a rebuilt continuation keeps its own values, and a
                         // fresh Line would report none.
                         auto const provenance = line.provenance();
-                        line = Line(line.flags(), std::move(merged), ColumnCount::cast_from(totalCols));
+                        line = Line(line.flags() | previousDerived,
+                                    std::move(merged),
+                                    ColumnCount::cast_from(totalCols));
                         line.adoptProvenance(provenance);
                         reflowedCursors.prependOverflow(wrappedUsed);
                     }
@@ -2174,7 +2194,7 @@ void Grid::resize(PageSize newSize, std::span<CellLocation> cursors, std::option
                                                                                  newColumnCount,
                                                                                  wrappedColumns,
                                                                                  wrappedUsed,
-                                                                                 previousAttributes,
+                                                                                 withPreviousDerived(),
                                                                                  false);
                         numLinesWritten += numLinesInserted;
                     }
@@ -2190,6 +2210,7 @@ void Grid::resize(PageSize newSize, std::span<CellLocation> cursors, std::option
                 // from its predecessor's: a run of rebuilt continuations must not hand on the values of
                 // the row before the run. (A rebuilt row's flags equal the ones it was merged under.)
                 previousAttributes = { .flags = line.inheritableFlags(), .provenance = line.provenance() };
+                previousDerived = line.flags() & DerivedLineFlags;
                 auto const rowWidth = detail::carriedColumns(line, goesOn);
                 auto const kept =
                     line.wrappable() ? wideCharacterSafeEnd(line.storage(), 0, newColumns) : newColumns;
@@ -2220,7 +2241,7 @@ void Grid::resize(PageSize newSize, std::span<CellLocation> cursors, std::option
             {
                 reflowedCursors.cut(shrunkLines.size(), newColumns, wrappedColumns, wrappedUsed);
                 numLinesWritten += detail::addNewWrappedLines(
-                    shrunkLines, newColumnCount, wrappedColumns, wrappedUsed, previousAttributes, false);
+                    shrunkLines, newColumnCount, wrappedColumns, wrappedUsed, withPreviousDerived(), false);
             }
             reflowedCursors.placeLine(shrunkLines, newColumns);
             numLinesWritten += keepUnreflowedRows(shrunkLines, newColumnCount);

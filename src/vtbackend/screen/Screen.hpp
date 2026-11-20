@@ -335,11 +335,12 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
                             std::string_view status,
                             std::string_view keys = {});
 
-    /// Whether showKittyFrame() found a placement to show the frame in.
+    /// Whether a kitty image ended up shown on the page: showKittyFrame() found a placement to show the frame
+    /// in, or resolveKittyPlaceholderLine() attached a fragment there.
     enum class Placed : uint8_t
     {
-        No,  ///< No fragment of the previous frame is on the page.
-        Yes, ///< At least one fragment was replaced.
+        No,  ///< Nothing on the page shows it.
+        Yes, ///< At least one fragment on the page was replaced or attached.
     };
 
     /// Places @p image at the cursor, sized per the command's `c=`/`r=` or derived from its pixels.
@@ -351,6 +352,25 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// @return The reason it was refused, as the reply's status.
     [[nodiscard]] std::expected<void, std::string_view> createKittyVirtualPlacement(
         kitty_graphics::Command const& command, std::shared_ptr<Image const> const& image);
+
+    /// Resolves one line's kitty Unicode placeholder cells: attaches each resolved cell's fragment of its
+    /// virtual placement, drops the placeholder fragments no longer resolved, and clears the line's
+    /// LineFlag::ImagePlaceholders when it holds no placeholder any more.
+    /// @param line A page line, or a history line at a negative offset.
+    /// @return Placed::Yes when it attached a fragment to a cell of the page.
+    [[nodiscard]] Placed resolveKittyPlaceholderLine(LineOffset line);
+
+    /// Notes a kitty Unicode placeholder cell written to @p line, for resolveKittyPlaceholders().
+    void notePlaceholderCell(LineOffset line) noexcept;
+
+    /// Notes @p line for resolveKittyPlaceholders() when it holds kitty Unicode placeholder cells: a cell
+    /// without a column diacritic continues its left neighbour, so cells shifted, erased or overwritten
+    /// within the row change what the cells after them show, and the fragments the shifted cells carried
+    /// along.
+    void notePlaceholderRowChanged(LineOffset line) noexcept;
+
+    /// Makes the next resolveKittyPlaceholders() walk the history as well as the page.
+    void rescanKittyPlaceholdersEverywhere() noexcept;
 
     /// Removes @p imageId's virtual placement @p placementId, if it has one.
     void eraseKittyVirtualPlacement(uint32_t imageId, KittyPlacementId placementId);
@@ -1297,6 +1317,13 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
         std::shared_ptr<RasterizedImage const> raster; ///< The image fitted into the placement's span.
     };
 
+    /// Resolves the kitty Unicode placeholder cells written since the last call into image cells, if any
+    /// were: every page line flagged LineFlag::ImagePlaceholders, and the flagged history lines too after a
+    /// change that can resolve cells printed long ago (a placement made, an image re-transmitted, a resize).
+    /// Called once per parse batch, so that a placeholder whose diacritics arrive in a later read is
+    /// resolved from what the line holds once they have.
+    void resolveKittyPlaceholders();
+
     /// Looks up a virtual placement the way a placeholder cell names it.
     /// @param imageId The kitty image id.
     /// @param placementId The placement id; zero means the image's first virtual placement.
@@ -1745,7 +1772,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// blockRowChanges(); one that takes a vi mark off it is reported to the user-mark index; one that
     /// changes the shell marks a row carries drops the cached fold ranges.
     /// @param line The row to erase.
-    /// @param flags The flags it is left with.
+    /// @param flags The flags it is left with, less the DerivedLineFlags, which describe the cells erased.
     /// @param attributes The rendition its blank cells take.
     /// @return The erased row, for a caller that goes on to write it.
     Line& eraseRowInPlace(LineOffset line, LineFlags flags, GraphicsAttributes attributes) noexcept;
@@ -1989,6 +2016,17 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     std::unordered_map<uint32_t, std::shared_ptr<Image const>> _kittyImages {};
 
     std::unordered_map<uint32_t, KittyAnimation> _kittyAnimations {};
+
+    /// Which lines the next resolveKittyPlaceholders() walks.
+    enum class PlaceholderScan : uint8_t
+    {
+        Idle = 0,       ///< No placeholder was written, nor anything changed that could resolve one.
+        Pending = 1,    ///< Placeholder cells were written: the flagged page lines.
+        Everywhere = 2, ///< A placement or an image changed, or the page was resized: history too.
+    };
+
+    /// Not captured: a restored screen resolves nothing until a cell is written; its fragments came along.
+    PlaceholderScan _kittyPlaceholders = PlaceholderScan::Idle;
 
     /// Virtual placements (`U=1`) by image id, in the order they were made: the front one is what a
     /// placeholder cell without a placement id shows.

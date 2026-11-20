@@ -794,6 +794,9 @@ TEST_CASE("LineFlags.theMarkSetsFollowTheTablesRoles", "[Line][semanticblocks]")
         == LineFlags { LineFlag::Marked, LineFlag::OutputStart, LineFlag::CommandEnd, LineFlag::PromptEnd });
     CHECK(HeadOnlyLineFlags == ShellMarkLineFlags.with(LineFlag::UserMark));
     CHECK(lineFlagsOf(LineFlagRole::Physical) == LineFlags { LineFlag::Wrappable, LineFlag::Wrapped });
+    // A derived flag is recomputed from the cells, so it is no mark of any kind.
+    CHECK(lineFlagsOf(LineFlagRole::Derived) == LineFlags { LineFlag::ImagePlaceholders });
+    CHECK_FALSE(HeadOnlyLineFlags.contains(LineFlag::ImagePlaceholders));
     CHECK(LineRenditionFlags
           == LineFlags { LineFlag::DoubleWidth, LineFlag::DoubleHeightTop, LineFlag::DoubleHeightBottom });
 }

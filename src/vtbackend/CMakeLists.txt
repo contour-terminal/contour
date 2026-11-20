@@ -68,6 +68,7 @@ set(vtbackend_HEADERS
     core/Hyperlink.hpp
     core/UntrustedText.hpp
     core/Image.hpp
+    core/KittyPlaceholderCodepoint.hpp
     input/ClickCounter.hpp
     input/InputBinding.hpp
     input/InputGenerator.hpp
@@ -454,6 +455,7 @@ if(LIBTERMINAL_TESTING)
         screen/Screen_softfont_test.cpp
         screen/Screen_macros_test.cpp
         screen/Screen_multipage_test.cpp
+        screen/Screen_kitty_placeholders_test.cpp
         core/Image_test.cpp
         core/Search_test.cpp
         screen/SearchQuery_test.cpp
