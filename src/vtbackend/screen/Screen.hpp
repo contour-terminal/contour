@@ -342,6 +342,12 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
         Yes, ///< At least one fragment was replaced.
     };
 
+    /// Handles a kitty `a=t`/`a=T` once its chunks are stitched: stores the image and, for `a=T`, places it.
+    void transmitKittyImage(kitty_graphics::Command command);
+
+    /// Handles a kitty `a=p`: places a stored image at the cursor, or makes a virtual placement of it.
+    void putKittyImage(kitty_graphics::Command command);
+
     /// Places @p image at the cursor, sized per the command's `c=`/`r=` or derived from its pixels.
     void renderKittyImage(kitty_graphics::Command const& command, std::shared_ptr<Image const> const& image);
 
@@ -365,7 +371,32 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void rescanKittyPlaceholdersEverywhere() noexcept;
 
     /// Removes @p imageId's virtual placement @p placementId, if it has one.
-    void eraseKittyVirtualPlacement(uint32_t imageId, KittyPlacementId placementId);
+    /// @return Whether it had one.
+    bool eraseKittyVirtualPlacement(uint32_t imageId, KittyPlacementId placementId);
+
+    /// How far a kitty `a=d` reaches: the case of its `d=` target.
+    enum class KittyDeleteReach : uint8_t
+    {
+        Placements = 0,        ///< Lower case: the placements go, the image data stays.
+        PlacementsAndData = 1, ///< Upper case: the image data goes too, once no placement of it is left.
+    };
+
+    /// Deletes placements of the stored images among @p imageIds, the virtual ones included.
+    /// @param imageIds The images; ids no stored image holds are skipped.
+    /// @param placementId Only this placement of each; zero for all of them.
+    /// @param reach Whether the image data goes too.
+    void deleteKittyImages(std::span<uint32_t const> imageIds,
+                           KittyPlacementId placementId,
+                           KittyDeleteReach reach);
+
+    /// Forgets the kitty image @p imageId: its data, its animation and the numbers naming it.
+    void freeKittyImage(uint32_t imageId);
+
+    /// @return The id of the newest image transmitted under kitty image number @p imageNumber (`I=`), or 0.
+    [[nodiscard]] uint32_t kittyImageIdOfNumber(uint32_t imageNumber) const noexcept;
+
+    /// @return The smallest kitty image id no stored image holds, for a transmission by number.
+    [[nodiscard]] uint32_t freeKittyImageId() const;
 
     /// Moves the cursor past a placed image as ImageCursorPolicy::AdvancePastImage describes.
     /// @param topLeft the image's top-left cell, where the cursor was when it was placed.
@@ -461,7 +492,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     /// Clears the on-screen fragments of @p imageId, whichever of its frames the cells hold. Walks
     /// the page only.
-    void removeKittyPlacementsOf(uint32_t imageId);
+    void removeKittyPlacementsOf(std::span<uint32_t const> imageIds);
 
     /// Clears the fragments of the one placement of @p imageId made with @p placementId, page and
     /// scrollback alike, whichever of the image's frames the cells hold.
@@ -2022,6 +2053,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Virtual placements (`U=1`) by image id, in the order they were made: the front one is what a
     /// placeholder cell without a placement id shows.
     std::unordered_map<uint32_t, std::vector<KittyVirtualPlacement>> _kittyVirtualPlacements {};
+
+    /// Kitty image numbers (`I=`) to the id of the newest image transmitted under each.
+    std::unordered_map<uint32_t, uint32_t> _kittyImageNumbers {};
 
     /// Not captured: a cost counter tests read, which counts this process's walks only.
     uint64_t _kittyFragmentWalks = 0; ///< @see kittyFragmentWalks()

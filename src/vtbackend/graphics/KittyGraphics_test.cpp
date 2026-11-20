@@ -2838,3 +2838,37 @@ TEST_CASE("KittyGraphics.feature_query", "[kitty][placeholder]")
         CHECK(mock.terminal.peekInput() == "\033_Gi=9;OK\033\\");
     }
 }
+
+TEST_CASE("KittyGraphics.image_number", "[kitty][placeholder]")
+{
+    auto mock = KittyTerm { PageSize { LineCount(4), ColumnCount(8) } };
+
+    SECTION("a transmission by number is given the next free id")
+    {
+        mock.writeToScreen(std::format("\033_Ga=t,i=1,f=24,s=2,v=2,q=2;{}\033\\", rgbPixels2x2()));
+        mock.writeToScreen(std::format("\033_Ga=t,I=13,f=24,s=2,v=2;{}\033\\", rgbPixels2x2()));
+        CHECK(mock.terminal.peekInput() == "\033_Gi=2,I=13;OK\033\\");
+        CHECK(mock.terminal.primaryScreen().kittyImage(2) != nullptr);
+    }
+
+    SECTION("a put by number places its newest image")
+    {
+        mock.writeToScreen(std::format("\033_Ga=t,I=13,f=24,s=2,v=2,q=2;{}\033\\", rgbPixels2x2()));
+        mock.writeToScreen("\033_Ga=p,U=1,I=13,c=2,r=1\033\\"sv);
+        CHECK(mock.terminal.peekInput() == "\033_Gi=1,I=13;OK\033\\");
+        CHECK(mock.terminal.primaryScreen().findKittyVirtualPlacement(1, KittyPlacementId {}) != nullptr);
+    }
+
+    SECTION("an id and a number together are refused")
+    {
+        mock.writeToScreen(std::format("\033_Ga=t,i=4,I=13,f=24,s=2,v=2;{}\033\\", rgbPixels2x2()));
+        CHECK(mock.terminal.peekInput().starts_with("\033_Gi=4,I=13;EINVAL"));
+        CHECK(mock.terminal.primaryScreen().kittyImage(4) == nullptr);
+    }
+
+    SECTION("the feature query names the new delete targets")
+    {
+        mock.writeToScreen("\033_Ga=q,i=31,e=d,d=N\033\\"sv);
+        CHECK(mock.terminal.peekInput() == "\033_Gi=31,e=d,d=N;OK\033\\");
+    }
+}

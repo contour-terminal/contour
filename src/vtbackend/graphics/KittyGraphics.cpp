@@ -168,7 +168,7 @@ namespace
 
     /// The delete targets deleteKittyGraphics() implements, both cases. `a` is the protocol's default
     /// and therefore never echoed.
-    constexpr auto SupportedDeleteTargets = std::string_view { "AiIfF" };
+    constexpr auto SupportedDeleteTargets = std::string_view { "AiIfFnNrR" };
 
     /// Every key a feature query is answered for, in kitty's reply order. Animation keys are left out on
     /// purpose: under `a=q` the parser keeps `c`, `r` and `z` as geometry, so their animation reading is
