@@ -346,6 +346,25 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Handles a kitty `a=t`/`a=T` once its chunks are stitched: stores the image and, for `a=T`, places it.
     void transmitKittyImage(kitty_graphics::Command command);
 
+    /// An image a kitty transmission carries, decoded and checked, not yet stored.
+    struct PreparedKittyImage
+    {
+        ImageFormat format;
+        ImageSize size;
+        Image::Data pixels;
+    };
+
+    /// Validates, reads, inflates and decodes what a kitty `a=t`/`a=T`/`a=q` transmits, storing nothing.
+    /// @return The image, or the wire status to answer with.
+    [[nodiscard]] std::expected<PreparedKittyImage, std::string_view> prepareKittyImage(
+        kitty_graphics::Command const& command) const;
+
+    /// The bytes a kitty command's payload stands for: its base64 decoded for `t=d`; for a file medium the
+    /// named file's content, read through Terminal::kittyMediaForCurrentBatch().
+    /// @return The bytes, or kitty_graphics::MediaRefusalReply for any file medium refused.
+    [[nodiscard]] std::expected<Image::Data, std::string_view> kittyPayloadBytes(
+        kitty_graphics::Command const& command) const;
+
     /// Handles a kitty `a=p`: places a stored image at the cursor, or makes a virtual placement of it.
     void putKittyImage(kitty_graphics::Command const& command);
 

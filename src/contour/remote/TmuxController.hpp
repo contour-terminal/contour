@@ -200,6 +200,13 @@ class TmuxController final:
         return contour::session::SessionHosting::Remote;
     }
 
+    /// SessionFactory: every pane is a tmux server's, whose programs may run on any host.
+    [[nodiscard]] contour::session::SessionTransport transportOf(
+        vtpty::Pty const& /*pty*/) const noexcept override
+    {
+        return contour::session::SessionTransport::TmuxPane;
+    }
+
     /// SessionFactory: the remote end is a tmux server.
     [[nodiscard]] contour::session::SessionHostKind hostKind() const noexcept override
     {

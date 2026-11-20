@@ -87,6 +87,7 @@ HostedSession::HostedSession(SessionId id,
                              std::string profileName,
                              SettingsOrigin settingsOrigin,
                              std::optional<vtbackend::GitHeadServices> git,
+                             std::optional<vtbackend::kitty_graphics::KittyMediumServices> kittyMedia,
                              vtbackend::ImageDecoder imageDecoder):
     _id(id),
     _profileName(std::move(profileName)),
@@ -124,6 +125,7 @@ HostedSession::HostedSession(SessionId id,
               std::nullopt,
               _extensions ? std::optional { _extensions->terminalServices() } : std::nullopt,
               git,
+              std::move(kittyMedia),
               std::move(imageDecoder)),
     _onClosed(std::move(onClosed))
 {
@@ -561,6 +563,7 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     _sizePolicy(config.sizePolicy),
     _fileSystem(config.fileSystem.get()),
     _git(config.git, config.fileSystem.get()),
+    _kittyMedia(std::move(config.kittyMedia)),
     _imageDecoder(std::move(config.imageDecoder)),
     _profiles(std::move(config.profiles)),
     _defaultCellPixelSize(config.defaultCellPixelSize),
@@ -883,6 +886,7 @@ std::unique_ptr<HostedSession> SessionHost::makeHostedSession(SessionId id,
         std::move(profileName),
         origin,
         _git.services(),
+        _kittyMedia,
         _imageDecoder);
     // Neither pumped nor restored yet, so the application's first look at its window already sees the
     // host's cell -- a handover restore keeps it, as a cell size is not part of a terminal's state.

@@ -85,6 +85,7 @@
 #include <contour/window/WindowController.hpp>
 #include <contour/window/WindowLivenessQt.hpp>
 
+#include <vtbackend/graphics/KittyMediaDefaults.hpp>
 #include <vtbackend/vt/Capabilities.hpp>
 #include <vtbackend/vt/DesktopNotification.hpp>
 
@@ -487,6 +488,15 @@ namespace
     {
         QCoreApplication::exit(status);
     }
+
+    /// The policy every local session's kitty file media are read under: the one place the app chooses it,
+    /// until the configuration supplies one per profile.
+    /// @param env The app's environment, whose `$TMPDIR` is a temp root.
+    [[nodiscard]] vtbackend::kitty_graphics::MediaPolicy kittyMediaDefaults(core::Environment const& env)
+    {
+        return vtbackend::kitty_graphics::defaultMediaPolicy(
+            env, fs::path { QDir::homePath().toStdU16String() }, vtbackend::kitty_graphics::currentUserId());
+    }
 } // namespace
 
 ContourGuiApp::ContourGuiApp(core::Environment const& env,
@@ -533,6 +543,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _linkProbeExecutor(cli::makeBackgroundExecutor(LinkProbeThreads)),
     _workspaceGitExecutor(cli::makeBackgroundExecutor(GitProbeThreads)),
     _injectedLinkServices { std::move(linkServices) },
+    _kittyMediumSource { vtbackend::kitty_graphics::makePlatformMediumSource() },
+    _kittyMediaPolicy { kittyMediaDefaults(env) },
     _sessionFactory(sessionFactory ? std::move(sessionFactory)
                                    : std::make_unique<session::AppSessionFactory>(
                                          *this, _processPlacement, makeSshTerminfoInstaller())),
@@ -668,6 +680,12 @@ std::optional<vtbackend::GitHeadServices> ContourGuiApp::gitHeadServices() noexc
     if (&_fileSystem != &core::platform::NativeFileSystem::instance())
         return std::nullopt;
     return vtbackend::GitHeadServices { .executor = _linkProbeExecutor, .fileSystem = _gitFileSystem };
+}
+
+vtbackend::kitty_graphics::KittyMediumServices ContourGuiApp::kittyMediumServices() const
+{
+    return vtbackend::kitty_graphics::KittyMediumServices { .source = *_kittyMediumSource,
+                                                            .policy = _kittyMediaPolicy };
 }
 
 std::optional<vthost::WorkspaceGitServices> ContourGuiApp::workspaceGitServices() noexcept

@@ -6,6 +6,7 @@
 #include <vtbackend/core/LineFlags.hpp>
 #include <vtbackend/core/RowMove.hpp>
 #include <vtbackend/graphics/KittyInflate.hpp>
+#include <vtbackend/graphics/KittyMediaPolicy.hpp>
 #include <vtbackend/graphics/KittyPlaceholders.hpp>
 #include <vtbackend/graphics/MessageParser.hpp>
 #include <vtbackend/graphics/SixelParser.hpp>
@@ -401,21 +402,31 @@ namespace // {{{ helper
         return bytes;
     }
 
-    /// Base64-decodes a kitty graphics payload and, for `o=z`, inflates it.
-    ///
-    /// @param command The command carrying the payload.
-    /// @param maxInflatedBytes Largest inflated size to accept; a compressed payload claiming more is
-    ///        refused before it is materialised.
-    /// @param tooLargeReply Reply for a payload that inflates past @p maxInflatedBytes.
-    /// @return The pixel (or PNG file) bytes, or the reply to send instead.
-    [[nodiscard]] std::expected<Image::Data, std::string_view> decodeKittyPayload(
-        kitty_graphics::Command const& command, size_t maxInflatedBytes, std::string_view tooLargeReply)
+    /// Base64-decodes @p text into bytes.
+    [[nodiscard]] Image::Data decodeBase64(std::string_view text)
     {
         // Decoded into bytes rather than kept as the std::string base64::decode() returns: `char` is
         // signed here, so reading a pixel through it turns an opaque 0xFF alpha into 4294967295 and
         // the blend arithmetic into nonsense. Straight into the vector, so the payload is held once.
-        auto bytes = Image::Data(core::base64::decodeLength(command.payload));
-        bytes.resize(core::base64::decode(command.payload, bytes.data()));
+        auto bytes = Image::Data(core::base64::decodeLength(text));
+        bytes.resize(core::base64::decode(text, bytes.data()));
+        return bytes;
+    }
+
+    /// For `o=z`, inflates a kitty graphics payload's bytes (Screen::kittyPayloadBytes()).
+    ///
+    /// @param command The command carrying the payload.
+    /// @param bytes The payload's bytes, as they arrived.
+    /// @param maxInflatedBytes Largest inflated size to accept; a compressed payload claiming more is
+    ///        refused before it is materialised.
+    /// @param tooLargeReply Reply for a payload that inflates past @p maxInflatedBytes.
+    /// @return The pixel (or PNG file) bytes, or the reply to send instead.
+    [[nodiscard]] std::expected<Image::Data, std::string_view> inflateKittyPayload(
+        kitty_graphics::Command const& command,
+        Image::Data bytes,
+        size_t maxInflatedBytes,
+        std::string_view tooLargeReply)
+    {
         if (command.compression == kitty_graphics::Compression::None)
             return bytes;
 
@@ -424,6 +435,14 @@ namespace // {{{ helper
                 return error == kitty_graphics::InflateError::TooLarge ? tooLargeReply
                                                                        : "EINVAL:corrupt compressed payload";
             });
+    }
+
+    /// @return @p reply for a payload that came in the escape sequence; for one read from a file, the one
+    ///         refusal every failure of a file medium gets, a decode failure included.
+    [[nodiscard]] std::string_view payloadFailure(kitty_graphics::Command const& command,
+                                                  std::string_view reply)
+    {
+        return command.medium == kitty_graphics::Medium::Direct ? reply : kitty_graphics::MediaRefusalReply;
     }
 
 } // namespace
@@ -6015,11 +6034,6 @@ std::optional<std::string_view> Screen::validateKittyTransmission(
     if (command.transmissionFormat() != Format::Png && (command.pixelWidth == 0 || command.pixelHeight == 0))
         return "EINVAL:missing image dimensions";
 
-    if (command.medium != Medium::Direct)
-        // Reading a path or a shared-memory object the application names would let it point the
-        // terminal at any file the user can read. Not implemented deliberately.
-        return "ENOTSUP:only direct transmission is supported";
-
     return std::nullopt;
 }
 
@@ -6400,8 +6414,15 @@ void Screen::processKittyGraphics(std::string_view body)
             // A query must be validated exactly as a transmission would be -- answering OK to a
             // command we could not actually honour is worse than answering the error. An application
             // probes with `a=q` precisely so that it can fall back; telling it yes and then failing
-            // the real transmission leaves it with nothing to fall back to.
-            replyKittyGraphics(command, validateKittyTransmission(command).value_or("OK"));
+            // the real transmission leaves it with nothing to fall back to. A file is read (and a `t=t` one
+            // deleted) and decoded as a transmission would, then dropped: Claude Code probes with one.
+            if (command.medium == Medium::Direct)
+                replyKittyGraphics(command, validateKittyTransmission(command).value_or("OK"));
+            else
+            {
+                auto const prepared = prepareKittyImage(command);
+                replyKittyGraphics(command, prepared ? "OK"sv : prepared.error());
+            }
             return;
         case Action::Delete: {
             auto const deleted = deleteKittyGraphics(command);
@@ -6415,6 +6436,97 @@ void Screen::processKittyGraphics(std::string_view body)
         case Action::Animate: controlKittyAnimation(resolvedKittyImageNumber(std::move(command))); return;
         case Action::Compose: composeKittyFrames(resolvedKittyImageNumber(std::move(command))); return;
     }
+}
+
+std::expected<Image::Data, std::string_view> Screen::kittyPayloadBytes(
+    kitty_graphics::Command const& command) const
+{
+    using namespace kitty_graphics;
+
+    auto bytes = decodeBase64(command.payload);
+    if (command.medium == Medium::Direct)
+        return bytes;
+
+    // Any other medium names a file (or a shared-memory object): read only for bytes a local process wrote
+    // to the PTY, and only through the source and under the policy the composition root gave.
+    // A policy that reads no file, `t=s`, which is never read, or a path no platform could open refuses
+    // before any source is asked.
+    auto const* const media = _terminal->kittyMediaForCurrentBatch();
+    auto const path = std::string_view { reinterpret_cast<char const*>(bytes.data()), bytes.size() };
+    if (media == nullptr || !checkRequest(media->policy, command.medium, path))
+        return std::unexpected(MediaRefusalReply);
+    return media->source.read(path, command.medium, media->policy).transform_error([&](MediaRefusal refusal) {
+        // The reason is the log's alone: the application learns only the uniform refusal.
+        terminalLog()("Refused kitty file medium t={} (reason {}).",
+                      static_cast<char>(command.medium),
+                      static_cast<unsigned>(refusal));
+        return MediaRefusalReply;
+    });
+}
+
+std::expected<Screen::PreparedKittyImage, std::string_view> Screen::prepareKittyImage(
+    kitty_graphics::Command const& command) const
+{
+    using namespace kitty_graphics;
+
+    if (auto const rejection = validateKittyTransmission(command))
+        return std::unexpected(*rejection);
+
+    auto format = toImageFormat(command.transmissionFormat());
+    auto pixelSize =
+        ImageSize { Width::cast_from(command.pixelWidth), Height::cast_from(command.pixelHeight) };
+
+    // The renderer reads width*height*bytesPerPixel from a raw buffer, so a payload that does not
+    // match the declared size is a read past the end waiting to happen. That size is also the
+    // exact bound for inflating one: a bomb is refused after a few KiB instead of being inflated
+    // and then found to be the wrong size. A PNG states its own size only once decoded, so it is
+    // bounded by what the quota still has room for instead. Declared dimensions are attacker-chosen,
+    // though, so they are trusted only when they are sane: an overflowing or over-quota size is
+    // refused before a single byte is inflated -- and before an uncompressed payload is compared
+    // with it, since a product that wrapped compares equal to a payload it has nothing to do with.
+    auto const bounded = boundedRawBytes(command.pixelWidth,
+                                         command.pixelHeight,
+                                         bytesPerPixel(command.transmissionFormat()),
+                                         _settings->kittyImageStorageQuota);
+    if (format != ImageFormat::PNG && !bounded)
+        return std::unexpected("EINVAL:image dimensions too large");
+    auto const expected = bounded.value_or(0);
+    // Everything stored except this id's image and frames, which a re-transmission replaces.
+    auto const storedByOthers = storedKittyBytes() - storedKittyBytesOf(command.imageId);
+    auto const quota = _settings->kittyImageStorageQuota;
+
+    // From here on every failure concerns the payload: for a file, the one refusal (payloadFailure()).
+    auto bytes = kittyPayloadBytes(command);
+    if (!bytes)
+        return std::unexpected(bytes.error());
+    auto payload =
+        format == ImageFormat::PNG
+            ? inflateKittyPayload(command,
+                                  std::move(*bytes),
+                                  storedByOthers < quota ? quota - storedByOthers : size_t { 0 },
+                                  "ENOSPC:image storage quota exceeded")
+            : inflateKittyPayload(
+                  command, std::move(*bytes), expected, "EINVAL:payload size does not match dimensions");
+    if (!payload)
+        return std::unexpected(payloadFailure(command, payload.error()));
+    auto pixmap = std::move(*payload);
+
+    if (format != ImageFormat::PNG && pixmap.size() != expected)
+        return std::unexpected(payloadFailure(command, "EINVAL:payload size does not match dimensions"));
+
+    // A PNG is stored as the pixels it decodes to, under the size the file itself states: the bytes
+    // that arrived are a file, which nothing downstream can draw, and `s=`/`v=` are optional for one
+    // and unverified when given. Stored as it came, it would reach the renderer as a few bytes
+    // claiming to be a `s` x `v` pixmap.
+    if (format == ImageFormat::PNG)
+    {
+        auto decoded = decodePng(pixmap, pixelSize);
+        if (!decoded)
+            return std::unexpected(payloadFailure(command, "EINVAL:could not decode image"));
+        pixmap = std::move(*decoded);
+        format = ImageFormat::RGBA;
+    }
+    return PreparedKittyImage { .format = format, .size = pixelSize, .pixels = std::move(pixmap) };
 }
 
 void Screen::transmitKittyImage(kitty_graphics::Command command)
@@ -6435,73 +6547,16 @@ void Screen::transmitKittyImage(kitty_graphics::Command command)
             return;
         }
 
-    if (auto const rejection = validateKittyTransmission(command))
+    auto prepared = prepareKittyImage(command);
+    if (!prepared)
     {
-        replyKittyGraphics(command, *rejection);
+        replyKittyGraphics(command, prepared.error());
         return;
     }
-
-    auto format = toImageFormat(command.transmissionFormat());
-    auto pixelSize =
-        ImageSize { Width::cast_from(command.pixelWidth), Height::cast_from(command.pixelHeight) };
-
-    // The renderer reads width*height*bytesPerPixel from a raw buffer, so a payload that does not
-    // match the declared size is a read past the end waiting to happen. That size is also the
-    // exact bound for inflating one: a bomb is refused after a few KiB instead of being inflated
-    // and then found to be the wrong size. A PNG states its own size only once decoded, so it is
-    // bounded by what the quota still has room for instead. Declared dimensions are attacker-chosen,
-    // though, so they are trusted only when they are sane: an overflowing or over-quota size is
-    // refused before a single byte is inflated -- and before an uncompressed payload is compared
-    // with it, since a product that wrapped compares equal to a payload it has nothing to do with.
-    auto const bounded = boundedRawBytes(command.pixelWidth,
-                                         command.pixelHeight,
-                                         bytesPerPixel(command.transmissionFormat()),
-                                         _settings->kittyImageStorageQuota);
-    if (format != ImageFormat::PNG && !bounded)
-    {
-        replyKittyGraphics(command, "EINVAL:image dimensions too large");
-        return;
-    }
-    auto const expected = bounded.value_or(0);
     // Everything stored except this id's image and frames, which a re-transmission replaces.
     auto const storedByOthers = storedKittyBytes() - storedKittyBytesOf(command.imageId);
     auto const quota = _settings->kittyImageStorageQuota;
-    auto payload =
-        format == ImageFormat::PNG
-            ? decodeKittyPayload(command,
-                                 storedByOthers < quota ? quota - storedByOthers : size_t { 0 },
-                                 "ENOSPC:image storage quota exceeded")
-            : decodeKittyPayload(command, expected, "EINVAL:payload size does not match dimensions");
-    if (!payload)
-    {
-        replyKittyGraphics(command, payload.error());
-        return;
-    }
-    auto pixmap = std::move(*payload);
-
-    if (format != ImageFormat::PNG && pixmap.size() != expected)
-    {
-        replyKittyGraphics(command, "EINVAL:payload size does not match dimensions");
-        return;
-    }
-
-    // A PNG is stored as the pixels it decodes to, under the size the file itself states: the bytes
-    // that arrived are a file, which nothing downstream can draw, and `s=`/`v=` are optional for one
-    // and unverified when given. Stored as it came, it would reach the renderer as a few bytes
-    // claiming to be a `s` x `v` pixmap.
-    if (format == ImageFormat::PNG)
-    {
-        auto decoded = decodePng(pixmap, pixelSize);
-        if (!decoded)
-        {
-            replyKittyGraphics(command, "EINVAL:could not decode image");
-            return;
-        }
-        pixmap = std::move(*decoded);
-        format = ImageFormat::RGBA;
-    }
-
-    auto image = _terminal->imagePool().create(format, pixelSize, std::move(pixmap));
+    auto image = _terminal->imagePool().create(prepared->format, prepared->size, std::move(prepared->pixels));
 
     if (command.imageId != 0)
     {
@@ -6516,7 +6571,7 @@ void Screen::transmitKittyImage(kitty_graphics::Command command)
         // the replacement is accepted -- a refused re-transmission leaves the image as it was.
         if (storedByOthers + image->data().size() > quota)
         {
-            replyKittyGraphics(command, "ENOSPC:image storage quota exceeded");
+            replyKittyGraphics(command, payloadFailure(command, "ENOSPC:image storage quota exceeded"));
             return;
         }
         // Swapping the image out would leave the old placement showing a picture no id leads to, out of
@@ -7209,13 +7264,8 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
     using namespace kitty_graphics;
 
     // A frame carries a payload exactly as a transmission does, so it owes the same honest answers
-    // about how that payload arrives: a medium we do not read is refused as such, and a compressed
-    // payload is inflated before its size is checked, never composited as if it were raw pixels.
-    if (command.medium != Medium::Direct)
-    {
-        replyKittyGraphics(command, "ENOTSUP:only direct transmission is supported");
-        return;
-    }
+    // about how that payload arrives: a file is read under the same policy (kittyPayloadBytes()), and a
+    // compressed payload is inflated before its size is checked, never composited as if it were raw pixels.
     auto const stored = _kittyImages.find(command.imageId);
     if (stored == _kittyImages.end())
     {
@@ -7272,17 +7322,23 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
         return;
     }
     auto const expectedBytes = *bounded;
-    auto const payload =
-        decodeKittyPayload(command, expectedBytes, "EINVAL:payload size does not match dimensions");
+    auto bytes = kittyPayloadBytes(command);
+    if (!bytes)
+    {
+        replyKittyGraphics(command, bytes.error());
+        return;
+    }
+    auto const payload = inflateKittyPayload(
+        command, std::move(*bytes), expectedBytes, "EINVAL:payload size does not match dimensions");
     if (!payload)
     {
-        replyKittyGraphics(command, payload.error());
+        replyKittyGraphics(command, payloadFailure(command, payload.error()));
         return;
     }
     auto const& pixmap = *payload;
     if (pixmap.size() != expectedBytes)
     {
-        replyKittyGraphics(command, "EINVAL:payload size does not match dimensions");
+        replyKittyGraphics(command, payloadFailure(command, "EINVAL:payload size does not match dimensions"));
         return;
     }
 
@@ -7361,7 +7417,7 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
     auto const supersededBytes = superseded ? superseded->data().size() : 0;
     if (storedKittyBytes() - supersededBytes + frame->data().size() > _settings->kittyImageStorageQuota)
     {
-        replyKittyGraphics(command, "ENOSPC:image storage quota exceeded");
+        replyKittyGraphics(command, payloadFailure(command, "ENOSPC:image storage quota exceeded"));
         return;
     }
 

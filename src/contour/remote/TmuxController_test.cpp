@@ -627,3 +627,13 @@ TEST_CASE("tmux new-window in the acting pane's directory asks the server, then 
     // An unknown or empty directory leaves the server's default in force.
     CHECK(tmuxNewWindowCommand("") == "new-window");
 }
+
+TEST_CASE("TmuxController: a tmux pane reads no local file", "[attach][tmux][media]")
+{
+    // Its programs may run on any host: kitty graphics read nothing local for them.
+    auto const controller = makeTmuxController();
+    auto const pty = vtpty::MockPty { vtpty::PageSize { vtpty::LineCount(5), vtpty::ColumnCount(20) } };
+    CHECK(controller->transportOf(pty) == contour::session::SessionTransport::TmuxPane);
+    CHECK(contour::session::mediaAccessFor(controller->transportOf(pty))
+          == contour::session::MediaAccess::None);
+}
