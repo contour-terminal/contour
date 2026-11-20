@@ -1443,7 +1443,8 @@ class WindowController:
     void resetCurrentWorkspaceColor();
     /// Opens the colour picker over the displayed workspace's row (the SetWorkspaceColor action naming no
     /// colour): shows the sidebar and puts the keyboard in it, as renaming it does, and emits
-    /// workspaceColorPickRequested(). Nothing while the window shows no workspace.
+    /// workspaceColorPickRequested(). Nothing while the window shows no workspace, and only a notice where
+    /// its daemon keeps no workspace colour (colorableShownWorkspace()), as the color action and reset do.
     void beginCurrentWorkspaceColorPick();
     /// Shows the pane of the sidebar row a menu acts on and focuses it (the GoToPane action). Nothing when no
     /// sidebar row menu is acting.
@@ -1882,6 +1883,10 @@ class WindowController:
 
     /// @return The id of the workspace the window shows, as its directory lists it; none without one.
     [[nodiscard]] std::optional<uint64_t> shownWorkspaceId() const;
+    /// The workspace the window shows, for a colour action run by a key or the palette.
+    /// @return Its id; none without one, and none, after posting a notice, where the window's daemon keeps
+    ///         no workspace colour.
+    [[nodiscard]] std::optional<uint64_t> colorableShownWorkspace();
     /// Moves the shown workspace @p by places in the list.
     void moveShownWorkspaceBy(int by);
     /// Moves the workspace @p workspace @p by places in the list; nothing past either end.

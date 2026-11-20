@@ -133,7 +133,7 @@ enum class MoveSupport : uint8_t
 /// Whether a workspace can be given a colour in a window this factory hosts.
 enum class WorkspaceColorSupport : uint8_t
 {
-    Unsupported = 0, ///< No: tmux, or a daemon that predates the colour.
+    Unsupported = 0, ///< No: a daemon that predates the colour.
     Supported,       ///< Yes, here or on the daemon.
 };
 

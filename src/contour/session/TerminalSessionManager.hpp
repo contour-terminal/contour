@@ -539,8 +539,9 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     [[nodiscard]] window::HostMoves hostMovesOf(window::WindowController const& window) const noexcept;
 
     /// @param window A window.
-    /// @return Whether the host of the workspace @p window shows keeps a workspace's colour
-    ///         (SessionFactory::workspaceColorSupport()).
+    /// @return Whether a workspace @p window lists can be coloured: Supported where the window lists its own
+    ///         workspaces (setWorkspaceColor() colours this process's model); else what its daemon's factory
+    ///         says (SessionFactory::workspaceColorSupport()).
     [[nodiscard]] WorkspaceColorSupport workspaceColorSupportOf(
         window::WindowController const& window) const noexcept;
 

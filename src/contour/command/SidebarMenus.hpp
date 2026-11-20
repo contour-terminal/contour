@@ -43,8 +43,8 @@ enum class MenuMoves : uint8_t
 /// Color" submenu is grayed out where a colour would do nothing.
 enum class MenuColoring : uint8_t
 {
-    Unavailable = 0, ///< No: tmux, or a daemon that predates the colour.
-    Available,       ///< Yes: this process, or a daemon that keeps the colour.
+    Unavailable = 0, ///< No: a window listed by a daemon that predates the colour.
+    Available,       ///< Yes: a window that lists its own workspaces, or a daemon that keeps the colour.
 };
 
 /// The world, as a workspace row's context menu needs to see it.

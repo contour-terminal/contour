@@ -3518,21 +3518,35 @@ void WindowController::closeCurrentWorkspace()
         closeWorkspace(*shown);
 }
 
+std::optional<uint64_t> WindowController::colorableShownWorkspace()
+{
+    auto const shown = shownWorkspaceId();
+    if (!shown)
+        return std::nullopt;
+    // As the menu greys Workspace Color out: no picker and no request a daemon would not take.
+    if (_manager.workspaceColorSupportOf(*this) == session::WorkspaceColorSupport::Unsupported)
+    {
+        _notices.post(workspaceColorRefusedNotice());
+        return std::nullopt;
+    }
+    return shown;
+}
+
 void WindowController::colorCurrentWorkspace(vtbackend::RGBColor color)
 {
-    if (auto const shown = shownWorkspaceId())
+    if (auto const shown = colorableShownWorkspace())
         _manager.setWorkspaceColor(*this, *shown, color);
 }
 
 void WindowController::resetCurrentWorkspaceColor()
 {
-    if (auto const shown = shownWorkspaceId())
+    if (auto const shown = colorableShownWorkspace())
         _manager.setWorkspaceColor(*this, *shown, std::nullopt);
 }
 
 void WindowController::beginCurrentWorkspaceColorPick()
 {
-    auto const shown = shownWorkspaceId();
+    auto const shown = colorableShownWorkspace();
     if (!shown)
         return;
     // The picker hangs from the workspace's row, in a sidebar shown for it.

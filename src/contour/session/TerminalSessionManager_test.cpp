@@ -6232,8 +6232,15 @@ class RoutingFactory final: public contour::session::SessionFactory
         return moveRouting;
     }
 
+    [[nodiscard]] contour::session::WorkspaceColorSupport workspaceColorSupport() const noexcept override
+    {
+        return colorSupport;
+    }
+
     /// What requestRemoteMove() answers.
     contour::session::RemoteRouting moveRouting = contour::session::RemoteRouting::Routed;
+    /// Whether the daemon keeps a workspace's colour.
+    contour::session::WorkspaceColorSupport colorSupport = contour::session::WorkspaceColorSupport::Supported;
     /// What the daemon does before requestRemoteMove() returns: its answer may settle that soon.
     std::function<void()> onMove;
 
@@ -6307,6 +6314,64 @@ class DaemonDirectoryBinding final: public contour::session::WindowBinding
 };
 
 } // namespace
+
+TEST_CASE("TerminalSessionManager: a window that lists its own workspaces colours them, a tmux server's too",
+          "[manager][workspace][workspace-color]")
+{
+    contour::test::MockPtySessionFactory host;
+    host.reportedHosting = contour::session::SessionHosting::Remote;
+    host.reportedHostKind = contour::session::SessionHostKind::Tmux;
+    contour::session::FactoryBinding link { host };
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, link);
+
+    // The factory keeps no colour of its own, but the binding lists nothing: the window's own model does.
+    REQUIRE(host.workspaceColorSupport() == contour::session::WorkspaceColorSupport::Unsupported);
+    CHECK(manager.workspaceColorSupportOf(*window.controller)
+          == contour::session::WorkspaceColorSupport::Supported);
+    CHECK(window->workspaceMenuStateOf(window.id.value).coloring
+          == contour::command::MenuColoring::Available);
+
+    auto const plum = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    window->colorCurrentWorkspace(plum);
+    REQUIRE(manager.model().workspace(window.id) != nullptr);
+    CHECK(manager.model().workspace(window.id)->color() == std::optional { plum });
+    CHECK(window->notices().toastText().isEmpty());
+}
+
+TEST_CASE("TerminalSessionManager: against a daemon that keeps no colour, the colour actions only say so",
+          "[manager][workspace][workspace-color]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = RoutingFactory {};
+    factory.colorSupport = contour::session::WorkspaceColorSupport::Unsupported;
+    auto binding = DaemonDirectoryBinding { factory };
+    contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, binding);
+    auto picks =
+        QSignalSpy { window.controller, &contour::window::WindowController::workspaceColorPickRequested };
+
+    CHECK(manager.workspaceColorSupportOf(*window.controller)
+          == contour::session::WorkspaceColorSupport::Unsupported);
+    CHECK(window->workspaceMenuStateOf(10).coloring == contour::command::MenuColoring::Unavailable);
+
+    window->beginCurrentWorkspaceColorPick();
+    window->colorCurrentWorkspace(vtbackend::RGBColor { 1, 2, 3 });
+    window->resetCurrentWorkspaceColor();
+    CHECK(picks.count() == 0);
+    CHECK(factory.colored.empty());
+    CHECK(window->notices().toastText()
+          == QString::fromStdString(contour::window::workspaceColorRefusedNotice().text));
+
+    // A daemon that keeps it opens the picker over the shown workspace.
+    factory.colorSupport = contour::session::WorkspaceColorSupport::Supported;
+    window->beginCurrentWorkspaceColorPick();
+    REQUIRE(picks.count() == 1);
+    CHECK(picks.front().front().toULongLong() == 10);
+}
 
 TEST_CASE("TerminalSessionManager: a daemon's window routes the workspace mutations to its daemon",
           "[manager][workspace]")

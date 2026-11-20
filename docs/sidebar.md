@@ -289,8 +289,9 @@ colour is shown in the sidebar only.
 To colour a workspace, right-click its row and pick from **Workspace Color**: a swatch, **Custom…** for the
 colour picker, or **Reset**. The `SetWorkspaceColor` action without a colour opens the picker for the shown
 workspace. A workspace's colour belongs to the daemon, as its name does: every window of the daemon shows it,
-and it survives a restart and a live upgrade. Against tmux, or a daemon that predates workspace colours,
-**Workspace Color** is greyed out. A tab is coloured from **Tab Color** in its menu, as on the tab strip.
+and it survives a restart and a live upgrade. Against a daemon that predates workspace colours, **Workspace
+Color** is greyed out, and the `SetWorkspaceColor` and `ResetWorkspaceColor` actions only say so in a notice.
+A tab is coloured from **Tab Color** in its menu, as on the tab strip.
 
 `tab_color` and `workspace_color` are read when a window opens: a window that is open when the configuration
 is reloaded keeps the styles it opened with, and a window opened after it uses the new ones.

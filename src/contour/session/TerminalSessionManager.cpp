@@ -1727,6 +1727,10 @@ window::HostMoves TerminalSessionManager::hostMovesOf(window::WindowController c
 WorkspaceColorSupport TerminalSessionManager::workspaceColorSupportOf(
     window::WindowController const& window) const noexcept
 {
+    // As setWorkspaceColor() routes it: a window that lists its own workspaces (in-process, or a tmux
+    // server's, whose binding lists nothing) colours them in this process's model.
+    if (!listsRemotely(window))
+        return WorkspaceColorSupport::Supported;
     return factoryFor(window.displayedWorkspace()).workspaceColorSupport();
 }
 
