@@ -1255,6 +1255,40 @@ TEST_CASE("the hover card wraps a status with no spaces (offscreen)", "[contour]
     checkReasonWraps(std::string(500, 'x'));
 }
 
+TEST_CASE("the hover card keeps its text inside a width of no whole pixels (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    // A layout rounds the width it gives an item to a whole pixel, up as well as down; a card whose width is
+    // whole cells of a fractional cell width (the Terminal row) must still not have its text overflow it.
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        scene.controller.sidebarSource().listed.workspaces[0].tabs[0].panes[0].cwd =
+            "/" + std::string(280, 'p') + "/the-last-directory";
+        // Before it opens, as the card's own width is: to a fraction above the half, which a layout rounds
+        // up.
+        auto* closed = scene.root->findChild<QObject*>(QStringLiteral("sidebarHoverCard"));
+        REQUIRE(closed != nullptr);
+        auto const available = closed->property("availableWidth").toReal();
+        auto const fraction = 0.71875;
+        closed->setProperty(
+            "width", closed->property("width").toReal() - (available - std::floor(available)) + fraction);
+        auto const& card =
+            openClaudeCard(scene, recordOf(vtbackend::ProgramState::Working, std::string(500, 'x')));
+        auto const bound = card.property("availableWidth").toReal();
+        REQUIRE(bound - std::floor(bound) == Catch::Approx(fraction));
+        for (auto const* name: { "sidebarHoverCardReason", "sidebarHoverCardDetail" })
+        {
+            INFO(name);
+            auto const* text =
+                SidebarWindow::findNamed(*scene.window->contentItem(), QString::fromLatin1(name));
+            REQUIRE(text != nullptr);
+            CHECK(text->width() <= bound);
+        }
+    }
+}
+
 TEST_CASE("the hover card shows a long folder to its end (offscreen)", "[contour][gui][qml][sidebar]")
 {
     auto const folder = "/" + std::string(280, 'p') + "/the-last-directory";

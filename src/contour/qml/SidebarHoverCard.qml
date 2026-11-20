@@ -49,9 +49,12 @@ Popup {
         }
 
         // The reason: its words in the body face, and its command, when it has one, in the monospace face
-        // after them; both wrap within the card, so it shows them whole.
+        // after them; both wrap within the card, so it shows them whole. Bounded by the card's content width
+        // as well as filling it: a layout rounds the width it gives to a whole pixel, up as readily as down,
+        // and a card of whole cells (the Terminal row) has a fractional one.
         Flow {
             Layout.fillWidth: true
+            Layout.maximumWidth: card.availableWidth
             visible: card.row !== null && card.row.fullReason !== ""
 
             Text {
@@ -80,6 +83,7 @@ Popup {
         Text {
             objectName: "sidebarHoverCardDetail"
             Layout.fillWidth: true
+            Layout.maximumWidth: card.availableWidth // as the reason's
             visible: text !== ""
             textFormat: Text.PlainText
             wrapMode: Text.Wrap
