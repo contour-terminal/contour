@@ -253,6 +253,9 @@ class WindowController:
     /// How a coloured workspace shows its colour in the sidebar: a config::SidebarWorkspaceColorStyle's
     /// underlying value, read once from `sidebar.workspace_color` when the window is made.
     Q_PROPERTY(int sidebarWorkspaceColorStyle READ sidebarWorkspaceColorStyle CONSTANT)
+    /// How much room a tab's or a pane's sidebar row takes: a config::SidebarRowSpacing's underlying value,
+    /// read once from `sidebar.row_spacing` when the window is made.
+    Q_PROPERTY(int sidebarRowSpacing READ sidebarRowSpacing CONSTANT)
     /// What the workspaces this window does not show ask of the user: the most urgent of their roll-ups, an
     /// Urgency's underlying value (SidebarModel::otherWorkspacesUrgency).
     Q_PROPERTY(int otherWorkspacesUrgency READ otherWorkspacesUrgency NOTIFY otherWorkspacesUrgencyChanged)
@@ -1365,6 +1368,10 @@ class WindowController:
         return static_cast<int>(_sidebarWorkspaceColorStyle);
     }
 
+    /// @return How much room a tab's or a pane's sidebar row takes, a config::SidebarRowSpacing as its
+    ///         underlying value.
+    [[nodiscard]] int sidebarRowSpacing() const noexcept { return static_cast<int>(_sidebarRowSpacing); }
+
     /// Tells the window how wide the title band's parts are, so the window is never made narrower than they
     /// fit in: the band's fixed parts, the location chip at its last fit step and one tab-well minimum
     /// (bandMinimumWidth()). It joins the window's minimum-width size hint, so the tab well cannot collapse.
@@ -2439,6 +2446,7 @@ class WindowController:
     config::SidebarTabColorStyle _sidebarTabColorStyle = config::SidebarTabColorStyle::Tint;
     // How a coloured workspace shows in the sidebar; read with the tab colour's style, and as fixed.
     config::SidebarWorkspaceColorStyle _sidebarWorkspaceColorStyle = config::SidebarWorkspaceColorStyle::Tint;
+    config::SidebarRowSpacing _sidebarRowSpacing = config::SidebarRowSpacing::Comfortable;
 
     // Declared title-bar chrome height in logical px (written by Main.qml's binding).
     int _chromeHeight = 0;

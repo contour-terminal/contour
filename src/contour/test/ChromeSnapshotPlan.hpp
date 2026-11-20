@@ -137,6 +137,7 @@ enum class SnapshotScript : uint8_t
     SidebarWorkspaceSwatch, //!< The same under `workspace_color: swatch`.
     SidebarHoverCard, //!< sidebar-tree with the pointer on build's row: its hover card, a long status whole.
     SidebarWorkspaceColorPicker, //!< sidebar-workspace-tint with the colour picker open over billing's row.
+    SidebarTreeCompact,          //!< sidebar-tree under `row_spacing: compact` (sidebar-tree is comfortable).
 };
 
 /// What the workspace sidebar of a script shows.
@@ -549,6 +550,8 @@ struct SnapshotScriptRow
     config::SidebarTabColorStyle tabColorStyle = config::SidebarTabColorStyle::Tint;
     /// How a coloured workspace shows in the sidebar (`sidebar.workspace_color`).
     config::SidebarWorkspaceColorStyle workspaceColorStyle = config::SidebarWorkspaceColorStyle::Tint;
+    /// How much room a tab's or a pane's sidebar row takes (`sidebar.row_spacing`).
+    config::SidebarRowSpacing rowSpacing = config::SidebarRowSpacing::Comfortable;
 };
 
 /// The rows of the script table, in enumerator order.
@@ -2415,6 +2418,11 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::OpenWorkspaceColorPicker,
                         .sidebar = SnapshotSidebar::Tree,
                         .sidebarColor = SnapshotSidebarColor::Workspaces },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarTreeCompact,
+                        .name = "sidebar-tree-compact",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .rowSpacing = config::SidebarRowSpacing::Compact },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),

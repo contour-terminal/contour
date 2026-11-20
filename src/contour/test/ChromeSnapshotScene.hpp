@@ -1979,6 +1979,7 @@ class ChromeSnapshotScene
         }
         _controller.setSidebarTabColorStyle(script.tabColorStyle);
         _controller.setSidebarWorkspaceColorStyle(script.workspaceColorStyle);
+        _controller.setSidebarRowSpacing(script.rowSpacing);
 
         auto const shown = sidebar == SnapshotSidebar::NeedsYou || sidebar == SnapshotSidebar::Hidden
                                ? uint64_t { 2 }

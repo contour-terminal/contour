@@ -3342,6 +3342,7 @@ void WindowController::restoreSidebar()
     _tabPlacement = config.tabPlacement.value();
     _sidebarTabColorStyle = config.sidebar.value().tabColor;
     _sidebarWorkspaceColorStyle = config.sidebar.value().workspaceColor;
+    _sidebarRowSpacing = config.sidebar.value().rowSpacing;
     _sidebarUnits = config.sidebar.value().width.value_or(metrics.tokens.width);
 
     // What the user last chose wins over the configured defaults.

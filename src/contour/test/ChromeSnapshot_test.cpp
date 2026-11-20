@@ -690,6 +690,38 @@ void checkSwitcherScript(contour::test::snapshot::ChromeSnapshotScene const& sce
     return false;
 }
 
+/// Checks that every tab and pane row a sidebar tree script drew is as tall as the script's
+/// `sidebar.row_spacing` makes it on the row's look.
+/// @param scene The scene the script ran in.
+/// @param variant The picture.
+void checkSidebarRowSpacing(contour::test::snapshot::ChromeSnapshotScene const& scene,
+                            contour::test::snapshot::SnapshotVariant const& variant)
+{
+    using namespace contour::test::snapshot;
+    auto const* context = QQmlEngine::contextForObject(&scene.root());
+    REQUIRE(context != nullptr);
+    auto const* style = context->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto* sidebar = style->property("sidebar").value<QObject*>();
+    REQUIRE(sidebar != nullptr);
+    auto twoLines = qreal { 0 };
+    REQUIRE(QMetaObject::invokeMethod(sidebar,
+                                      "twoLineRowHeight",
+                                      Q_RETURN_ARG(qreal, twoLines),
+                                      Q_ARG(int, static_cast<int>(scriptRow(variant.script).rowSpacing))));
+    auto twoLineRows = 0;
+    for (auto const* row:
+         contour::test::itemsNamed(*scene.window().contentItem(), QStringLiteral("sidebarRow")))
+    {
+        if (!row->isVisible() || row->property("isWorkspace").toBool())
+            continue;
+        INFO(row->property("title").toString().toStdString());
+        CHECK(row->height() == twoLines);
+        ++twoLineRows;
+    }
+    CHECK(twoLineRows > 0);
+}
+
 /// Checks what a sidebar colour script drew: the coloured tabs or workspaces wearing their colour in the
 /// script's style, and the uncoloured ones none.
 /// @param scene The scene the script ran in.
@@ -1251,6 +1283,10 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
             case SnapshotScript::ToolTipNewTab:
             case SnapshotScript::ToolTipTab: checkToolTipScript(scene, variant); break;
             case SnapshotScript::SidebarTree:
+            case SnapshotScript::SidebarTreeCompact:
+                static_cast<void>(checkSidebarScript(scene, variant));
+                checkSidebarRowSpacing(scene, variant);
+                break;
             case SnapshotScript::SidebarNeedsYou:
             case SnapshotScript::SidebarCollapsed:
             case SnapshotScript::SidebarTopTabs:

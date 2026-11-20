@@ -892,3 +892,23 @@ TEST_CASE("snapshot plan: the sidebar's colour scripts cover every style, with t
     // The hover card's status is longer than any row holds, so the card is what shows it whole.
     CHECK(SnapshotLongStatus.size() > contour::window::MaxRowTextLength);
 }
+
+TEST_CASE("snapshot plan: the sidebar tree is drawn at each row spacing", "[snapshot]")
+{
+    using namespace contour::test::snapshot;
+    using contour::config::SidebarRowSpacing;
+    // Every script draws the default, comfortable, but the compact twin of sidebar-tree.
+    for (auto const& row: SnapshotScripts)
+    {
+        INFO(row.name);
+        CHECK((row.rowSpacing == SidebarRowSpacing::Compact)
+              == (row.script == SnapshotScript::SidebarTreeCompact));
+    }
+    auto const& comfortable = scriptRow(SnapshotScript::SidebarTree);
+    auto const& compact = scriptRow(SnapshotScript::SidebarTreeCompact);
+    CHECK(compact.name == std::string_view { "sidebar-tree-compact" });
+    CHECK(compact.sidebar == comfortable.sidebar);
+    CHECK(compact.tabCount == comfortable.tabCount);
+    CHECK(compact.sidebarColor == comfortable.sidebarColor);
+    CHECK(compact.action == comfortable.action);
+}

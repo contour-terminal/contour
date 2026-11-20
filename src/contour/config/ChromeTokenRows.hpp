@@ -607,79 +607,92 @@ namespace detail
                                                        .groupTitleType = 0,
                                                        .pageTitleType = 0 };
 
+    // A pixel row's two-line rows, comfortable then compact: compact is the 36 px the sidebar first shipped
+    // with, where Fluent's and ContourLinux's taller faces leave a row's lines as far apart as two rows. A
+    // row centres its pair of lines, so comfortable's 4 px more fall above and below it: they part the rows,
+    // and the gap within a row stays the compact one.
+
     /// The workspace sidebar on the macOS row: a source list, its selection an inset rounded rectangle.
-    inline constexpr SidebarTokens MacSidebar { .width = 220,
-                                                .minWidth = 160,
-                                                .maxWidth = 480,
-                                                .rowHeight = 24,
-                                                .twoLineRowHeight = 36,
-                                                .lineGap = 1,
-                                                .indent = 16,
-                                                .glyph = 16,
-                                                .gitGap = 6,
-                                                .footerHeight = 32,
-                                                .selectionRadius = 6,
-                                                .accentPillWidth = 0,
-                                                .hoverCardWidth = 280,
-                                                .tabColorBarWidth = 3,
-                                                .workspaceRailWidth = 3,
-                                                .workspaceSwatchSize = 10 };
+    inline constexpr SidebarTokens MacSidebar {
+        .width = 220,
+        .minWidth = 160,
+        .maxWidth = 480,
+        .rowHeight = 24,
+        .twoLineRows = { SidebarTwoLineRow { .height = 40, .lineGap = 1 },
+                         SidebarTwoLineRow { .height = 36, .lineGap = 1 } },
+        .indent = 16,
+        .glyph = 16,
+        .gitGap = 6,
+        .footerHeight = 32,
+        .selectionRadius = 6,
+        .accentPillWidth = 0,
+        .hoverCardWidth = 280,
+        .tabColorBarWidth = 3,
+        .workspaceRailWidth = 3,
+        .workspaceSwatchSize = 10
+    };
 
     /// The workspace sidebar on the Fluent row: a navigation pane, its selection marked by an accent pill.
-    inline constexpr SidebarTokens FluentSidebar { .width = 240,
-                                                   .minWidth = 160,
-                                                   .maxWidth = 480,
-                                                   .rowHeight = 32,
-                                                   .twoLineRowHeight = 36,
-                                                   .lineGap = 0,
-                                                   .indent = 16,
-                                                   .glyph = 16,
-                                                   .gitGap = 6,
-                                                   .footerHeight = 40,
-                                                   .selectionRadius = 4,
-                                                   .accentPillWidth = 3,
-                                                   .hoverCardWidth = 320,
-                                                   .tabColorBarWidth = 3,
-                                                   .workspaceRailWidth = 3,
-                                                   .workspaceSwatchSize = 10 };
+    inline constexpr SidebarTokens FluentSidebar {
+        .width = 240,
+        .minWidth = 160,
+        .maxWidth = 480,
+        .rowHeight = 32,
+        .twoLineRows = { SidebarTwoLineRow { .height = 40, .lineGap = 0 },
+                         SidebarTwoLineRow { .height = 36, .lineGap = 0 } },
+        .indent = 16,
+        .glyph = 16,
+        .gitGap = 6,
+        .footerHeight = 40,
+        .selectionRadius = 4,
+        .accentPillWidth = 3,
+        .hoverCardWidth = 320,
+        .tabColorBarWidth = 3,
+        .workspaceRailWidth = 3,
+        .workspaceSwatchSize = 10
+    };
 
     /// The workspace sidebar on the ContourLinux row: its selection a neutral fill (the label's ink at low
     /// alpha), inset and rounded as libadwaita's sidebars draw it, and as the row's own command palette does
     /// (radii.control); keyboard focus adds the accent ring, never an accent fill (window::SidebarSelection).
-    inline constexpr SidebarTokens LinuxSidebar { .width = 240,
-                                                  .minWidth = 160,
-                                                  .maxWidth = 480,
-                                                  .rowHeight = 32,
-                                                  .twoLineRowHeight = 36,
-                                                  .lineGap = 0,
-                                                  .indent = 16,
-                                                  .glyph = 16,
-                                                  .gitGap = 6,
-                                                  .footerHeight = 40,
-                                                  .selectionRadius = 8,
-                                                  .accentPillWidth = 0,
-                                                  .hoverCardWidth = 320,
-                                                  .tabColorBarWidth = 3,
-                                                  .workspaceRailWidth = 3,
-                                                  .workspaceSwatchSize = 10 };
+    inline constexpr SidebarTokens LinuxSidebar {
+        .width = 240,
+        .minWidth = 160,
+        .maxWidth = 480,
+        .rowHeight = 32,
+        .twoLineRows = { SidebarTwoLineRow { .height = 40, .lineGap = 0 },
+                         SidebarTwoLineRow { .height = 36, .lineGap = 0 } },
+        .indent = 16,
+        .glyph = 16,
+        .gitGap = 6,
+        .footerHeight = 40,
+        .selectionRadius = 8,
+        .accentPillWidth = 0,
+        .hoverCardWidth = 320,
+        .tabColorBarWidth = 3,
+        .workspaceRailWidth = 3,
+        .workspaceSwatchSize = 10
+    };
 
     /// The workspace sidebar on the Terminal row, in cells: a tree of whole rows.
-    inline constexpr SidebarTokens TerminalSidebar { .width = 28,
-                                                     .minWidth = 18,
-                                                     .maxWidth = 60,
-                                                     .rowHeight = 1,
-                                                     .twoLineRowHeight = 2,
-                                                     .lineGap = 0,
-                                                     .indent = 2,
-                                                     .glyph = 1,
-                                                     .gitGap = 1,
-                                                     .footerHeight = 1,
-                                                     .selectionRadius = 0,
-                                                     .accentPillWidth = 0,
-                                                     .hoverCardWidth = 40,
-                                                     .tabColorBarWidth = 1,
-                                                     .workspaceRailWidth = 1,
-                                                     .workspaceSwatchSize = 1 };
+    inline constexpr SidebarTokens TerminalSidebar {
+        .width = 28,
+        .minWidth = 18,
+        .maxWidth = 60,
+        .rowHeight = 1,
+        .twoLineRows = { SidebarTwoLineRow { .height = 2, .lineGap = 0 },
+                         SidebarTwoLineRow { .height = 2, .lineGap = 0 } },
+        .indent = 2,
+        .glyph = 1,
+        .gitGap = 1,
+        .footerHeight = 1,
+        .selectionRadius = 0,
+        .accentPillWidth = 0,
+        .hoverCardWidth = 40,
+        .tabColorBarWidth = 1,
+        .workspaceRailWidth = 1,
+        .workspaceSwatchSize = 1
+    };
 
     inline constexpr ChromeTokenRow MacRow {
         .size = { .titleBar = 38,
