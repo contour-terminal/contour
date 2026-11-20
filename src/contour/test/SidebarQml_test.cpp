@@ -1285,7 +1285,9 @@ TEST_CASE("the hover card keeps its text inside a width of no whole pixels (offs
                 SidebarWindow::findNamed(*scene.window->contentItem(), QString::fromLatin1(name));
             REQUIRE(text != nullptr);
             CHECK(text->width() <= bound);
+            CHECK(text->property("lineCount").toInt() > 1);
         }
+        CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
     }
 }
 

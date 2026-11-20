@@ -40,7 +40,11 @@ Popup {
     /// The pointer left the card: it closes, unless the pointer went back to the row it is about.
     signal left()
 
-    contentItem: ColumnLayout {
+    // A positioner, not a layout: each text is given the card's content width by its own binding, so it wraps
+    // within it whatever the platform and the order bindings settle in. A layout would size them itself, and
+    // rounds the width it gives to a whole pixel, up as readily as down, past a card of whole cells (the
+    // Terminal row), whose content width is fractional.
+    contentItem: Column {
         spacing: chromeStyle.space.s3
 
         HoverHandler {
@@ -49,12 +53,9 @@ Popup {
         }
 
         // The reason: its words in the body face, and its command, when it has one, in the monospace face
-        // after them; both wrap within the card, so it shows them whole. Bounded by the card's content width
-        // as well as filling it: a layout rounds the width it gives to a whole pixel, up as readily as down,
-        // and a card of whole cells (the Terminal row) has a fractional one.
+        // after them; both wrap within the card, so it shows them whole.
         Flow {
-            Layout.fillWidth: true
-            Layout.maximumWidth: card.availableWidth
+            width: card.availableWidth
             visible: card.row !== null && card.row.fullReason !== ""
 
             Text {
@@ -82,8 +83,7 @@ Popup {
         // What it is about, where and for how long; it wraps, so a long folder the row cut reads to its end.
         Text {
             objectName: "sidebarHoverCardDetail"
-            Layout.fillWidth: true
-            Layout.maximumWidth: card.availableWidth // as the reason's
+            width: card.availableWidth
             visible: text !== ""
             textFormat: Text.PlainText
             wrapMode: Text.Wrap
