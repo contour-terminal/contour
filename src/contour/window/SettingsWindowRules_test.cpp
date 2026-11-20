@@ -60,10 +60,12 @@ TEST_CASE("the Settings window is placed", "[contour][settingswindow][rules]")
                                          .screens = std::move(screens),
                                          .frame = frame };
     };
-    auto const small = QRect(0, 0, 1366, 728);
+    auto const smallScreen = QRect(0, 0, 1366, 728);
     auto const cases = std::vector<Case> {
         { "first show", make(preferred, std::nullopt, big, { big }), QRect(240, 27, 960, 820) },
-        { "small screen", make(QSize(1110, 920), std::nullopt, small, { small }), QRect(128, 0, 1110, 728) },
+        { "small screen",
+          make(QSize(1110, 920), std::nullopt, smallScreen, { smallScreen }),
+          QRect(128, 0, 1110, 728) },
         { "screen below the minimum",
           make(preferred, std::nullopt, QRect(0, 0, 600, 400), { QRect(0, 0, 600, 400) }),
           QRect(0, 0, 720, 480) },

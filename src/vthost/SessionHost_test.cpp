@@ -1342,7 +1342,7 @@ TEST_CASE("a client area report that leaves the resolved area unchanged keeps ev
     // Three clients under `smallest`: the third states a larger area than the smallest, so the resolved
     // one stays. The refinement of another client is not told about the report, so a re-projection
     // would silently put its split pane back on the ratio estimate.
-    auto const small = cells(100, 30);
+    auto const smallSize = cells(100, 30);
     auto const larger = cells(140, 40);
     auto h = HostHarness { vthost::ClientSizePolicy::Smallest };
     auto third = StubClient {};
@@ -1351,8 +1351,8 @@ TEST_CASE("a client area report that leaves the resolved area unchanged keeps ev
     h.host.subscribeStream(&h.client);
     h.host.subscribeStream(&h.otherClient);
     h.host.subscribeStream(&third);
-    std::ignore = h.host.applyClientSize(&h.client, small, std::nullopt);
-    std::ignore = h.host.applyClientSize(&h.otherClient, small, std::nullopt);
+    std::ignore = h.host.applyClientSize(&h.client, smallSize, std::nullopt);
+    std::ignore = h.host.applyClientSize(&h.otherClient, smallSize, std::nullopt);
     std::ignore = h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
     auto const firstSession = tab->rootPane()->first()->session();
     std::ignore = h.host.applyPaneSize(&h.otherClient, firstSession, cells(70, 30), std::nullopt);

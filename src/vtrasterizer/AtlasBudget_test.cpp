@@ -37,10 +37,10 @@ TEST_CASE("atlas budget: a grown page requires more tiles than the page it grew 
     // resized and the pane grows. Sizing the atlas once, at construction, left it holding a fraction of
     // what the grown page needs.
     auto const configured = crispy::LRUCapacity { 256 };
-    auto const small = PageSize { LineCount(10), ColumnCount(20) };
+    auto const smallPage = PageSize { LineCount(10), ColumnCount(20) };
     auto const grown = PageSize { LineCount(60), ColumnCount(200) };
 
-    auto const smallBudget = tileCountFor(configured, small);
+    auto const smallBudget = tileCountFor(configured, smallPage);
     auto const grownBudget = tileCountFor(configured, grown);
 
     auto const grownCells = static_cast<uint32_t>(grown.area());

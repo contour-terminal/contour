@@ -538,7 +538,7 @@ TEST_CASE("Terminal.extensions.font", "[extensions]")
     // The font is told to every extension, subscribed or not -- each one's surface takes its cell size from
     // it -- once per change, and again to extensions loaded or subscribing later.
     using namespace StatusLineEvents;
-    auto const small =
+    auto const smallFont =
         StatusLineFontMetrics { .pointSize = 12, .cellPixelSize = ImageSize { Width(9), Height(18) } };
     auto const large =
         StatusLineFontMetrics { .pointSize = 16, .cellPixelSize = ImageSize { Width(12), Height(24) } };
@@ -563,11 +563,11 @@ TEST_CASE("Terminal.extensions.font", "[extensions]")
 
     SECTION("told to every extension, once per change")
     {
-        setFont(small);
+        setFont(smallFont);
         REQUIRE(extensions.posted().size() == 1);
-        CHECK(extensions.posted().back() == StatusLineEvent { FontChanged { .metrics = small } });
+        CHECK(extensions.posted().back() == StatusLineEvent { FontChanged { .metrics = smallFont } });
 
-        setFont(small);
+        setFont(smallFont);
         CHECK(extensions.posted().size() == 1);
 
         setFont(large);
@@ -577,18 +577,18 @@ TEST_CASE("Terminal.extensions.font", "[extensions]")
 
     SECTION("metrics known before a subscription are replayed to it")
     {
-        setFont(small);
+        setFont(smallFont);
         extensions.subscribe(StatusLineEventKinds { StatusLineEventKind::Font });
         terminal.statusLineExtensionsPublished();
         terminal.refreshRenderBuffer();
         REQUIRE(fontEvents() == 2);
-        CHECK(extensions.posted().back() == StatusLineEvent { FontChanged { .metrics = small } });
+        CHECK(extensions.posted().back() == StatusLineEvent { FontChanged { .metrics = smallFont } });
     }
 
     SECTION("replaced extensions are told the metrics before the size they draw at")
     {
         // A frame is drawn once the size is known; it must not be drawn at a cell size told after it.
-        setFont(small);
+        setFont(smallFont);
         terminal.runUnderStateLock([&] { terminal.statusLineExtensionsReplaced(); });
         auto const postedAtResize = extensions.postedAtResize();
         REQUIRE(!postedAtResize.empty());
@@ -597,11 +597,11 @@ TEST_CASE("Terminal.extensions.font", "[extensions]")
 
     SECTION("replaced extensions are told the metrics once, subscribed or not")
     {
-        setFont(small);
+        setFont(smallFont);
         extensions.subscribe(StatusLineEventKinds { StatusLineEventKind::Font });
         terminal.runUnderStateLock([&] { terminal.statusLineExtensionsReplaced(); });
         REQUIRE(fontEvents() == 2);
-        CHECK(extensions.posted().back() == StatusLineEvent { FontChanged { .metrics = small } });
+        CHECK(extensions.posted().back() == StatusLineEvent { FontChanged { .metrics = smallFont } });
     }
 }
 
