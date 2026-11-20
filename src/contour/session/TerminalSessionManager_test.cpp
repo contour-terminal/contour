@@ -43,7 +43,12 @@
 
 #include <vtpty/ChannelPty.hpp>
 #include <vtpty/MockPty.hpp>
+#include <vtpty/ProcessPlacement.hpp>
+#ifdef VTPTY_LIBSSH2
+    #include <vtpty/SshSession.hpp>
+#endif
 #include <vtpty/test/NonAsciiSample.hpp>
+#include <vtpty/test/ProcessTesting.hpp>
 
 #include <core/Base64.hpp>
 #include <core/Utf8Path.hpp>
@@ -7697,29 +7702,39 @@ TEST_CASE("TerminalSessionManager: a reconnecting remote daemon shows its dot an
 #ifndef _WIN32
 TEST_CASE("TerminalSessionManager: kitty file media are read for a local process only", "[manager][media]")
 {
-    // A real file the app's own policy accepts, named in Claude Code's probe: a local factory's session reads
-    // it, a remote one's never does.
+    // A real file the app's own policy accepts -- its temp root is the test's, through the app's environment
+    // -- named in Claude Code's probe: only a session whose factory identifies a local process reads it.
     auto const temp = core::testing::ScopedTempDir { "contour-media-test" };
     auto const root = std::filesystem::canonical(temp.path());
     auto const file = root / "tty-graphics-protocol-probe.rgba";
     std::ofstream { file, std::ios::binary } << std::string_view { "\x01\x02\x03\xFF", 4 };
     auto const probe =
         std::format("\033_Ga=q,i=31,s=1,v=1,t=f,f=32;{}\033\\", core::base64::encode(file.native()));
+    static constexpr auto Read = std::string_view { "\033_Gi=31;OK\033\\" };
+    static constexpr auto Refused = std::string_view { "\033_Gi=31;EBADF:file not readable\033\\" };
 
+    using contour::session::SessionHosting;
+    using contour::session::SessionTransport;
     struct Row
     {
-        contour::session::SessionHosting hosting;
+        SessionHosting hosting;
+        std::optional<SessionTransport> transport;
         std::string_view reply;
     };
-    auto const row = GENERATE(
-        Row { contour::session::SessionHosting::Local, "\033_Gi=31;OK\033\\" },
-        Row { contour::session::SessionHosting::Remote, "\033_Gi=31;EBADF:file not readable\033\\" });
+    auto const row = GENERATE(Row { SessionHosting::Local, SessionTransport::LocalProcess, Read },
+                              Row { SessionHosting::Local, SessionTransport::Ssh, Refused },
+                              Row { SessionHosting::Local, std::nullopt, Refused },
+                              Row { SessionHosting::Remote, std::nullopt, Refused });
     auto factory = std::make_unique<contour::test::MockPtySessionFactory>();
     factory->reportedHosting = row.hosting;
-    contour::test::TestApp app { std::move(factory) };
-    auto const& roots = app.app().kittyMediumServices().policy.temporaryRoots;
-    if (std::ranges::none_of(roots, [&](auto const& tempRoot) { return root.parent_path() == tempRoot; }))
-        SKIP("the temp directory is not one of the app's temp roots");
+    factory->reportedTransport = row.transport;
+    contour::test::TestApp app { std::move(factory),
+                                 nullptr,
+                                 nullptr,
+                                 nullptr,
+                                 contour::test::TestApp::testHostIdentity(),
+                                 nullptr,
+                                 contour::test::TestEnvironment::Overrides { { "TMPDIR", root.string() } } };
 
     auto& manager = app.manager();
     contour::test::ScopedController const window { manager };
@@ -7732,5 +7747,31 @@ TEST_CASE("TerminalSessionManager: kitty file media are read for a local process
     CHECK(session->terminal().peekInput() == row.reply);
 
     contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("AppSessionFactory: a session's transport is what its pty is", "[contour][session][media]")
+{
+    // Positive identification: only the pty a local profile spawns is a local process.
+    auto testApp = contour::test::TestApp {};
+    auto factory = contour::session::AppSessionFactory { testApp.app(),
+                                                         std::make_shared<vtpty::NoPlacement>(),
+                                                         std::nullopt };
+    using contour::session::SessionTransport;
+
+    auto const local = factory.createPty(std::nullopt, std::nullopt, vtpty::testing::execInfo("/bin/true"));
+    REQUIRE(local != nullptr);
+    CHECK(factory.transportOf(*local) == SessionTransport::LocalProcess);
+
+    // Not spawned by the factory, and not a kind it knows: refused, not taken for local.
+    auto const mock =
+        vtpty::MockPty { vtbackend::PageSize { vtbackend::LineCount(5), vtbackend::ColumnCount(20) } };
+    CHECK(factory.transportOf(mock) == SessionTransport::Unknown);
+
+    #ifdef VTPTY_LIBSSH2
+    auto config = vtpty::SshHostConfig {};
+    config.hostname = "example.invalid";
+    auto const ssh = vtpty::SshSession { std::move(config), {} };
+    CHECK(factory.transportOf(ssh) == SessionTransport::Ssh);
+    #endif
 }
 #endif

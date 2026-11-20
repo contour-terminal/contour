@@ -6505,7 +6505,7 @@ void Screen::transmitKittyImage(kitty_graphics::Command command)
         // the replacement is accepted -- a refused re-transmission leaves the image as it was.
         if (storedByOthers + image->data().size() > quota)
         {
-            replyKittyGraphics(command, "ENOSPC:image storage quota exceeded");
+            replyKittyGraphics(command, payloadFailure(command, "ENOSPC:image storage quota exceeded"));
             return;
         }
         // Swapping the image out would leave the old placement showing a picture no id leads to, out of
@@ -7301,7 +7301,7 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
     auto const supersededBytes = superseded ? superseded->data().size() : 0;
     if (storedKittyBytes() - supersededBytes + frame->data().size() > _settings->kittyImageStorageQuota)
     {
-        replyKittyGraphics(command, "ENOSPC:image storage quota exceeded");
+        replyKittyGraphics(command, payloadFailure(command, "ENOSPC:image storage quota exceeded"));
         return;
     }
 

@@ -6,6 +6,7 @@
 #include <vtbackend/graphics/KittyMediumSource.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #ifndef _WIN32
 
@@ -17,6 +18,7 @@
 
     #include <unistd.h>
 
+using namespace std::string_literals;
 using namespace vtbackend::kitty_graphics;
 
 namespace
@@ -64,6 +66,7 @@ class TestDirectory
 {
     return MediaPolicy { .transmission = FileTransmission::Enabled,
                          .temporaryRoots = { root.path() },
+                         .temporaryFileOnlyRoots = {},
                          .allowedRoots = {},
                          .userId = static_cast<uint32_t>(::getuid()),
                          .sizeLimit = 16 };
@@ -197,10 +200,11 @@ TEST_CASE("KittyMediumSource.posix.swaps_after_the_path_check", "[kitty][media]"
     SECTION("the file swapped for a symbolic link (O_NOFOLLOW)")
     {
         auto const file = root.write("tty-graphics-protocol-a", "RGBA");
-        auto const source = PosixMediumSource { [&](std::filesystem::path const& canonical) {
-            std::filesystem::remove(canonical);
-            std::filesystem::create_symlink(secret, canonical);
-        } };
+        auto const source =
+            PosixMediumSource { { .pathAccepted = [&](std::filesystem::path const& canonical) {
+                std::filesystem::remove(canonical);
+                std::filesystem::create_symlink(secret, canonical);
+            } } };
         checkRefused(source.read(file.native(), Medium::TemporaryFile, policy), MediaRefusal::Unreadable);
         CHECK(std::filesystem::exists(secret));
     }
@@ -208,13 +212,51 @@ TEST_CASE("KittyMediumSource.posix.swaps_after_the_path_check", "[kitty][media]"
     SECTION("a directory above it swapped for a symbolic link (the descriptor's path differs)")
     {
         auto const file = root.write("dir/tty-graphics-protocol-a", "RGBA");
-        auto const source = PosixMediumSource { [&](std::filesystem::path const&) {
+        auto const source = PosixMediumSource { { .pathAccepted = [&](std::filesystem::path const&) {
             std::filesystem::rename(root.path() / "dir", root.path() / "moved");
             std::filesystem::create_directory_symlink(secret.parent_path(), root.path() / "dir");
-        } };
+        } } };
         checkRefused(source.read(file.native(), Medium::TemporaryFile, policy), MediaRefusal::Unreadable);
         CHECK(std::filesystem::exists(secret));
     }
+}
+
+TEST_CASE("KittyMediumSource.posix.a_swap_before_the_unlink_deletes_nothing_outside", "[kitty][media]")
+{
+    // The file that was read moves out of the roots, and a link takes its directory's place: the very inode
+    // read is reachable through the old path, but deleting through that link would delete outside the roots.
+    auto const root = TestDirectory {};
+    auto const outside = TestDirectory {};
+    auto const file = root.write("dir/tty-graphics-protocol-a", "RGBA");
+    auto const moved = outside.path() / "dir";
+    auto const source = PosixMediumSource { { .beforeUnlink = [&](std::filesystem::path const&) {
+        std::filesystem::rename(root.path() / "dir", moved);
+        std::filesystem::create_directory_symlink(moved, root.path() / "dir");
+    } } };
+
+    auto const bytes = source.read(file.native(), Medium::TemporaryFile, policyFor(root));
+    REQUIRE(bytes.has_value());
+    CHECK(std::filesystem::exists(moved / "tty-graphics-protocol-a"));
+}
+
+TEST_CASE("KittyMediumSource.posix.nothing_outside_the_roots_is_resolved", "[kitty][media]")
+{
+    // Checked as requested before anything resolves it: a lookup there could reach an automount or a network
+    // filesystem, stalling the terminal or beaconing to whoever named it.
+    auto const root = TestDirectory {};
+    auto const source = PosixMediumSource {};
+    auto const policy = policyFor(root);
+
+    auto const path = GENERATE("/net/example.invalid/tty-graphics-protocol-a"s,
+                               "tty-graphics-protocol-relative"s,
+                               "/nonexistent-contour-media-test/tty-graphics-protocol-a"s);
+    INFO(path);
+    checkRefused(source.read(path, Medium::File, policy), MediaRefusal::OutsideRoots);
+
+    // `..` leaves the root before anything is resolved.
+    checkRefused(
+        source.read((root.path() / ".." / "tty-graphics-protocol-gone").native(), Medium::File, policy),
+        MediaRefusal::OutsideRoots);
 }
 
 #endif

@@ -2002,9 +2002,11 @@ class Terminal: public IStatusLinePublishTarget
     /// What a kitty file medium in the bytes being parsed may be read with: the services given at
     /// construction, but only while the batch came from the PTY (ByteOrigin::Pty), on a terminal that is no
     /// replica (ReplicaRole::None), and while the active context is not ContextLocality::Foreign (`ssh`
-    /// typed into a local pane: the path names a file over there). Requires _stateMutex to be held.
+    /// typed into a local pane: the path names a file over there), nor while the PTY's foreground process is
+    /// a remote-shell client (kitty_graphics::isRemoteShellClient(), the same without shell integration).
+    /// Requires _stateMutex to be held.
     /// @return The services, or nullptr when every file medium is refused.
-    [[nodiscard]] kitty_graphics::KittyMediumServices const* kittyMediaForCurrentBatch() const noexcept;
+    [[nodiscard]] kitty_graphics::KittyMediumServices const* kittyMediaForCurrentBatch() const;
 
     /// Echoes @p bytes onto our own screen, as SRM (reset) asks for.
     ///

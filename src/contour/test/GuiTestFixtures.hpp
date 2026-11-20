@@ -364,6 +364,12 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
         return reportedHosting;
     }
 
+    [[nodiscard]] contour::session::SessionTransport transportOf(
+        vtpty::Pty const& pty) const noexcept override
+    {
+        return reportedTransport.value_or(SessionFactory::transportOf(pty));
+    }
+
     [[nodiscard]] contour::session::TabMergeSupport tabMergeSupport() const noexcept override
     {
         return reportedTabMergeSupport.value_or(SessionFactory::tabMergeSupport());
@@ -585,6 +591,8 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     std::vector<TabMergeRequest> requestedTabMerges;
     /// What hosting() reports: Remote stands in for an attach-mode factory, which runs no command here.
     contour::session::SessionHosting reportedHosting = contour::session::SessionHosting::Local;
+    /// What transportOf() reports; nullopt answers as the base factory does (Unknown for a local factory).
+    std::optional<contour::session::SessionTransport> reportedTransport;
     /// How createNotifier() makes each session's notifier: makeTestNotifier() unless a test says
     /// otherwise. A test that wants the platform's own -- the window's tray, off Linux -- unsets it.
     std::function<std::unique_ptr<contour::platform::Notifier>()> makeNotifier = makeTestNotifier;

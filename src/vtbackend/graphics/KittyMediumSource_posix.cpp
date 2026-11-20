@@ -116,14 +116,21 @@ namespace
         return bytes;
     }
 
-    /// Unlinks @p path, but only while it still names the file @p read was: a file swapped in after the read
-    /// is left alone.
-    void unlinkIfSame(std::filesystem::path const& path, struct stat const& read) noexcept
+    /// Unlinks @p path, but only while it still names the file @p read was, in the directory the policy
+    /// judged: the directory is opened without following a link and must be where the path says, and the name
+    /// is looked up and removed relative to it, so no directory swapped in between reaches outside the roots.
+    void unlinkIfSame(std::filesystem::path const& path, struct stat const& read)
     {
+        auto const parent = path.parent_path();
+        auto const directory =
+            FileDescriptor { ::open(parent.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC) };
+        if (directory.get() < 0 || descriptorPath(directory.get()) != parent)
+            return;
+        auto const name = path.filename();
         struct stat current {};
-        if (::lstat(path.c_str(), &current) == 0 && current.st_dev == read.st_dev
-            && current.st_ino == read.st_ino)
-            (void) ::unlink(path.c_str());
+        if (::fstatat(directory.get(), name.c_str(), &current, AT_SYMLINK_NOFOLLOW) == 0
+            && current.st_dev == read.st_dev && current.st_ino == read.st_ino)
+            (void) ::unlinkat(directory.get(), name.c_str(), 0);
     }
 } // namespace
 
@@ -137,14 +144,21 @@ std::expected<std::vector<uint8_t>, MediaRefusal> PosixMediumSource::read(std::s
     if (path.empty() || path.contains('\0'))
         return std::unexpected(MediaRefusal::Unreadable);
 
+    // Judged as requested before anything resolves it: resolving a path outside the roots could reach an
+    // automount or a network filesystem -- a stall under the terminal lock, and a beacon to whoever named it.
+    // A relative path is refused too, as it would resolve against the terminal's own working directory.
+    if (auto const accepted = checkPath(policy, std::filesystem::path { path }.lexically_normal(), medium);
+        !accepted)
+        return std::unexpected(accepted.error());
+
     auto const canonical = canonicalPath(std::string { path });
     if (!canonical)
         return std::unexpected(MediaRefusal::Unreadable);
     if (auto const accepted = checkPath(policy, *canonical, medium); !accepted)
         return std::unexpected(accepted.error());
 
-    if (_pathAccepted)
-        _pathAccepted(*canonical);
+    if (_interleavings.pathAccepted)
+        _interleavings.pathAccepted(*canonical);
 
     // O_NOFOLLOW refuses a final component swapped for a symbolic link; O_NONBLOCK keeps a FIFO from
     // blocking the open until a writer appears.
@@ -169,7 +183,11 @@ std::expected<std::vector<uint8_t>, MediaRefusal> PosixMediumSource::read(std::s
         return bytes;
 
     if (deletionAfterRead(policy, *canonical, medium) == DeletionAfterRead::Delete)
+    {
+        if (_interleavings.beforeUnlink)
+            _interleavings.beforeUnlink(*canonical);
         unlinkIfSame(*canonical, status);
+    }
     return bytes;
 }
 

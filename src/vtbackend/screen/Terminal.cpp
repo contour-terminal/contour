@@ -2944,7 +2944,7 @@ void Terminal::writeToScreen(string_view vtStream)
     });
 }
 
-kitty_graphics::KittyMediumServices const* Terminal::kittyMediaForCurrentBatch() const noexcept
+kitty_graphics::KittyMediumServices const* Terminal::kittyMediaForCurrentBatch() const
 {
     if (!_kittyMedia || _byteOrigin != ByteOrigin::Pty)
         return nullptr;
@@ -2953,6 +2953,11 @@ kitty_graphics::KittyMediumServices const* Terminal::kittyMediaForCurrentBatch()
         return nullptr;
     // `ssh` typed into a local pane: the bytes come from the local PTY, the path names a file over there.
     if (_contexts.localityOf(_contexts.activeId(), localIdentity()) == ContextLocality::Foreign)
+        return nullptr;
+    // The same without shell integration: a remote-shell client in the PTY's foreground relays another host.
+    // Asked of the PTY only for a file medium, never per byte.
+    if (auto const foreground = _pty->foregroundProcessName();
+        foreground && kitty_graphics::isRemoteShellClient(*foreground))
         return nullptr;
     return &*_kittyMedia;
 }
@@ -3101,6 +3106,8 @@ void Terminal::writeToScreenInternal(Screen& screen, std::string_view vtStream)
     // auto sequenceBuilder = SequenceBuilder { *this, NoOpInstructionCounter() };
     auto parser = vtparser::Parser { sequenceBuilder };
 
+    // A status line the host draws, even mid-batch: its bytes are not the PTY's.
+    auto const origin = ByteOriginScope { _byteOrigin, ByteOrigin::Injected };
     parser.parseFragment(vtStream);
 }
 
@@ -5988,6 +5995,9 @@ void Terminal::followOutput()
 
 void Terminal::runWithOwnStateLockReleased(std::function<void()> const& pause)
 {
+    // Whatever parses while the lock is let go -- the host's writes from another thread, a status line the
+    // render thread draws -- is not the PTY's. Set and restored under the lock.
+    auto const origin = ByteOriginScope { _byteOrigin, ByteOrigin::Injected };
     _ownStateLock.unlock();
     auto const _ = core::Finally([this] { _ownStateLock.lock(); });
     pause();

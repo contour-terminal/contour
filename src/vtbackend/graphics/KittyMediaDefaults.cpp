@@ -2,6 +2,8 @@
 #include <vtbackend/graphics/KittyMediaDefaults.hpp>
 
 #include <algorithm>
+#include <ranges>
+#include <string_view>
 #include <system_error>
 
 #ifdef __APPLE__
@@ -27,34 +29,71 @@ namespace
         auto canonical = std::filesystem::weakly_canonical(path, error);
         return error ? path.lexically_normal() : canonical;
     }
+
+    /// Adds @p root to @p roots as spelled and canonical, unless it is relative or already there.
+    void addRoot(std::vector<std::filesystem::path>& roots, std::filesystem::path const& root)
+    {
+        if (!root.is_absolute())
+            return;
+        for (auto const& spelling: { root.lexically_normal(), canonicalRoot(root) })
+        {
+            // Without the trailing separator `$TMPDIR` often carries: the policy compares components.
+            auto trimmed = spelling.has_filename() ? spelling : spelling.parent_path();
+            if (std::ranges::find(roots, trimmed) == roots.end())
+                roots.push_back(std::move(trimmed));
+        }
+    }
+
+    /// @return Whether @p root, made canonical, would open the whole home directory @p canonicalHome: it is
+    ///         `/`, the home directory, or a directory above it.
+    [[nodiscard]] bool isOverBroad(std::filesystem::path const& root,
+                                   std::filesystem::path const& canonicalHome)
+    {
+        auto const canonical = canonicalRoot(root);
+        if (canonical == canonical.root_path())
+            return true;
+        if (canonicalHome.empty())
+            return false;
+        auto const [rootEnd, homeEnd] = std::ranges::mismatch(canonical, canonicalHome);
+        return rootEnd == canonical.end();
+    }
+
+    /// @return @p roots without those isOverBroad() refuses.
+    [[nodiscard]] std::vector<std::filesystem::path> withoutOverBroad(
+        std::vector<std::filesystem::path> roots, std::filesystem::path const& canonicalHome)
+    {
+        std::erase_if(roots,
+                      [&](std::filesystem::path const& root) { return isOverBroad(root, canonicalHome); });
+        return roots;
+    }
 } // namespace
 
 std::vector<std::filesystem::path> platformTemporaryRoots([[maybe_unused]] core::Environment const& env)
 {
     auto roots = std::vector<std::filesystem::path> {};
 #ifndef _WIN32
-    auto const add = [&](std::filesystem::path const& root) {
-        if (!root.is_absolute())
-            return;
-        auto canonical = canonicalRoot(root);
-        if (std::ranges::find(roots, canonical) == roots.end())
-            roots.push_back(std::move(canonical));
-    };
     if (auto const tmpdir = env.get("TMPDIR"))
-        add(*tmpdir);
+        addRoot(roots, *tmpdir);
     #ifdef __APPLE__
-    add("/private/tmp");
+    addRoot(roots, "/private/tmp");
     auto userTemp = std::array<char, PATH_MAX> {};
     if (auto const length = ::confstr(_CS_DARWIN_USER_TEMP_DIR, userTemp.data(), userTemp.size());
         length > 0 && length <= userTemp.size())
-        add(userTemp.data());
+        addRoot(roots, userTemp.data());
     #else
-    add("/tmp");
-    // kitty reads `t=t` from POSIX shared memory's directory too.
-    add("/dev/shm");
+    addRoot(roots, "/tmp");
     #endif
 #endif
     return roots;
+}
+
+std::vector<std::filesystem::path> platformTemporaryFileOnlyRoots()
+{
+#ifdef __linux__
+    return { "/dev/shm" };
+#else
+    return {};
+#endif
 }
 
 MediaPolicy defaultMediaPolicy(core::Environment const& env,
@@ -69,12 +108,16 @@ MediaPolicy defaultMediaPolicy(core::Environment const& env,
 #endif
     // A home directory that is not absolute (unset) names no allow-list root: one relative to the working
     // directory would be wherever the process happened to start.
+    auto const canonicalHome =
+        homeDirectory.is_absolute() ? canonicalRoot(homeDirectory) : std::filesystem::path {};
     auto allowedRoots = std::vector<std::filesystem::path> {};
     if (homeDirectory.is_absolute())
-        allowedRoots.push_back(canonicalRoot(homeDirectory / DefaultAllowedRoot));
+        addRoot(allowedRoots, homeDirectory / DefaultAllowedRoot);
     return MediaPolicy { .transmission = Transmission,
-                         .temporaryRoots = platformTemporaryRoots(env),
-                         .allowedRoots = std::move(allowedRoots),
+                         .temporaryRoots = withoutOverBroad(platformTemporaryRoots(env), canonicalHome),
+                         .temporaryFileOnlyRoots =
+                             withoutOverBroad(platformTemporaryFileOnlyRoots(), canonicalHome),
+                         .allowedRoots = withoutOverBroad(std::move(allowedRoots), canonicalHome),
                          .userId = userId,
                          .sizeLimit = MaxChunkedPayloadSize };
 }

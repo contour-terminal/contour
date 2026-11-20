@@ -10,7 +10,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <format>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -44,6 +46,7 @@ class FakeMediumSource final: public KittyMediumSource
 {
     return MediaPolicy { .transmission = FileTransmission::Enabled,
                          .temporaryRoots = { "/tmp" },
+                         .temporaryFileOnlyRoots = {},
                          .allowedRoots = {},
                          .userId = 0,
                          .sizeLimit = 1024 };
@@ -198,5 +201,98 @@ TEST_CASE("KittyMedia.only_bytes_from_a_local_pty_are_read", "[kitty][media]")
         mock.writeToScreen(probe());
         CHECK(mock.terminal.peekInput() == Refused);
         CHECK(source.requests.empty());
+    }
+}
+
+TEST_CASE("KittyMedia.not_while_a_remote_shell_client_is_in_the_foreground", "[kitty][media]")
+{
+    // `ssh host` typed into a local pane, with no shell integration to say so: the PTY's foreground process
+    // tells that the bytes come from over there.
+    auto const source = FakeMediumSource {};
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+
+    SECTION("ssh")
+    {
+        mock.mockPty().setForegroundProcessName("ssh");
+        mock.writeToScreen(probe());
+        CHECK(mock.terminal.peekInput() == Refused);
+        CHECK(source.requests.empty());
+    }
+
+    SECTION("bash")
+    {
+        mock.mockPty().setForegroundProcessName("bash");
+        mock.writeToScreen(probe());
+        CHECK(mock.terminal.peekInput() == Ok);
+    }
+}
+
+TEST_CASE("KittyMedia.a_quota_refusal_after_a_read_is_the_one_refusal", "[kitty][media]")
+{
+    // Inside the roots, ENOSPC would tell the application more about a file than the uniform refusal does.
+    auto const source = FakeMediumSource {};
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+    mock.terminal.settings().kittyImageStorageQuota = 6;
+    mock.writeToScreen("\033_Ga=t,i=1,s=1,v=1,f=32,q=2;AAAA/w==\033\\"sv);
+
+    mock.writeToScreen(probe('f', "t"));
+
+    CHECK(mock.terminal.peekInput() == Refused);
+    CHECK(mock.terminal.primaryScreen().kittyImage(31) == nullptr);
+}
+
+namespace
+{
+/// A terminal that runs a test's code from the events a parse raises.
+class EventProbeTerm final: public MockTerm<vtpty::MockPty>
+{
+  public:
+    using MockTerm::MockTerm;
+
+    std::function<void()> onScreenUpdated;
+    std::function<void()> onBell;
+
+    void screenUpdated() override
+    {
+        if (onScreenUpdated)
+            onScreenUpdated();
+    }
+
+    void bell() override
+    {
+        if (onBell)
+            onBell();
+    }
+};
+} // namespace
+
+TEST_CASE("KittyMedia.what_the_host_writes_mid_batch_is_not_the_ptys", "[kitty][media]")
+{
+    auto const source = FakeMediumSource {};
+    auto mock = EventProbeTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+
+    SECTION("a status line written while the batch is parsed")
+    {
+        mock.onBell = [&] {
+            mock.terminal.writeToScreenInternal(mock.terminal.primaryScreen(), probe());
+        };
+        mock.writeToScreen("\a"sv);
+        CHECK(mock.terminal.peekInput() == Refused);
+        CHECK(source.requests.empty());
+    }
+
+    SECTION("anything while a smooth-scroll pause lets go of the lock")
+    {
+        mock.terminal.settings().smoothLineScrolling = std::chrono::milliseconds { 1 };
+        auto mediaInPause = std::optional<bool> {};
+        mock.onScreenUpdated = [&] {
+            if (!mediaInPause)
+                mediaInPause = mock.terminal.kittyMediaForCurrentBatch() != nullptr;
+        };
+        // The pause comes from the linefeed; the probe after it in the same batch is the PTY's again.
+        mock.writeToScreen("\033[?4h\n" + probe());
+        REQUIRE(mediaInPause.has_value());
+        CHECK_FALSE(*mediaInPause);
+        CHECK(mock.terminal.peekInput() == Ok);
     }
 }

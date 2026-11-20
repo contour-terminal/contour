@@ -16,8 +16,15 @@ namespace
     /// effects (devices) or reveals what no image needs (process environments, kernel state).
     constexpr auto SystemTrees = std::array<std::string_view, 3> { "/proc", "/sys", "/dev" };
 
-    /// Subtrees of SystemTrees still readable when a temp root contains them, as kitty allows for `t=t`.
-    constexpr auto SystemTreeExemptions = std::array<std::string_view, 1> { "/dev/shm" };
+    /// Subtrees of SystemTrees still readable by `t=t` alone, from a temp root there, as kitty allows.
+    constexpr auto TemporaryFileSystemTreeExemptions = std::array<std::string_view, 1> { "/dev/shm" };
+
+    /// The programs that, in the foreground of a PTY, relay another host's output: the names a PTY reports
+    /// (Linux `comm`, at most 15 characters), last path component only.
+    constexpr auto RemoteShellClients = std::array<std::string_view, 12> {
+        "autossh", "dbclient", "et",     "kitten", "mosh",    "mosh-client",
+        "rlogin",  "rsh",      "slogin", "ssh",    "sshpass", "telnet",
+    };
 
     /// The marker every `t=t` file name carries, kitty's rule against deleting files not meant for it.
     constexpr auto TemporaryNameMarker = std::string_view { "tty-graphics-protocol" };
@@ -59,12 +66,15 @@ namespace
                                      pathComponents | std::views::take(treeComponents.size()));
     }
 
-    [[nodiscard]] bool isSystemPath(std::filesystem::path const& path)
+    [[nodiscard]] bool isSystemPath(std::filesystem::path const& path, Medium medium)
     {
         auto const within = [&](std::string_view tree) {
             return isWithin(tree, path);
         };
-        return std::ranges::any_of(SystemTrees, within) && !std::ranges::any_of(SystemTreeExemptions, within);
+        if (!std::ranges::any_of(SystemTrees, within))
+            return false;
+        return medium != Medium::TemporaryFile
+               || !std::ranges::any_of(TemporaryFileSystemTreeExemptions, within);
     }
 
     /// Where a path lies relative to a set of roots.
@@ -116,13 +126,15 @@ std::expected<void, MediaRefusal> checkPath(MediaPolicy const& policy,
     return checkMedium(policy, medium).and_then([&]() -> std::expected<void, MediaRefusal> {
         if (!realPath.is_absolute())
             return std::unexpected(MediaRefusal::OutsideRoots);
-        if (isSystemPath(realPath))
+        if (isSystemPath(realPath, medium))
             return std::unexpected(MediaRefusal::SystemPath);
 
         // `t=t` deletes what it reads, so it reads only where deleting is the norm: the temp roots.
+        auto const& furtherRoots =
+            medium == Medium::File ? policy.allowedRoots : policy.temporaryFileOnlyRoots;
         auto placement = placementIn(policy.temporaryRoots, realPath);
-        if (placement != Placement::Inside && medium == Medium::File)
-            placement = std::max(placement, placementIn(policy.allowedRoots, realPath));
+        if (placement != Placement::Inside)
+            placement = std::max(placement, placementIn(furtherRoots, realPath));
         switch (placement)
         {
             case Placement::Outside: return std::unexpected(MediaRefusal::OutsideRoots);
@@ -148,6 +160,13 @@ std::expected<void, MediaRefusal> checkOpenedFile(MediaPolicy const& policy, Ope
     if (file.size > policy.sizeLimit)
         return std::unexpected(MediaRefusal::TooLarge);
     return {};
+}
+
+bool isRemoteShellClient(std::string_view processName) noexcept
+{
+    auto const separator = processName.rfind('/');
+    auto const name = separator == std::string_view::npos ? processName : processName.substr(separator + 1);
+    return std::ranges::contains(RemoteShellClients, name);
 }
 
 DeletionAfterRead deletionAfterRead(MediaPolicy const& policy,

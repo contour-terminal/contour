@@ -33,6 +33,9 @@ struct MediaPolicy
     /// Canonical temp directories: the only roots of `t=t`, and roots of `t=f` too. Deletion after a read
     /// happens only inside these.
     std::vector<std::filesystem::path> temporaryRoots;
+    /// Further roots of `t=t` alone (Linux `/dev/shm`, as kitty allows): never read by `t=f`, and exempt from
+    /// the system-tree refusal for `t=t` only. Deletion after a read happens inside these too.
+    std::vector<std::filesystem::path> temporaryFileOnlyRoots;
     /// Canonical further roots `t=f` may read below (default `~/.claude/plugins/data`). Never deleted from.
     std::vector<std::filesystem::path> allowedRoots;
     /// The user a readable file must be owned by: the reading process's own.
@@ -49,7 +52,7 @@ enum class MediaRefusal : uint8_t
     UnsupportedMedium, ///< `t=s` (shared memory), which is never read, or a medium that names no file.
     OutsideRoots,      ///< The canonical path lies under no allowed root.
     HiddenComponent,   ///< A path component below the root starts with `.`.
-    SystemPath,        ///< Under `/proc`, `/sys` or `/dev` (but for a temp root under `/dev/shm`).
+    SystemPath,        ///< Under `/proc`, `/sys` or `/dev` (but `/dev/shm` for `t=t`).
     NotTemporaryName,  ///< A `t=t` file whose name lacks `tty-graphics-protocol`.
     NotRegularFile,    ///< The opened file is a directory, FIFO, device, socket...
     WrongOwner,        ///< The opened file belongs to another user.
@@ -92,9 +95,11 @@ enum class DeletionAfterRead : uint8_t
 [[nodiscard]] std::expected<void, MediaRefusal> checkMedium(MediaPolicy const& policy,
                                                             Medium medium) noexcept;
 
-/// Judges a canonical path against the policy (checkMedium() first).
+/// Judges a path against the policy (checkMedium() first). Asked twice by a reader: of the requested path in
+/// its lexically normal form before anything resolves it -- so that no lookup leaves the roots, an automount
+/// or a network filesystem say -- and of the canonical path, which is final.
 /// @param policy The terminal's media policy.
-/// @param realPath The canonical, absolute path (symbolic links resolved).
+/// @param realPath The canonical path (symbolic links resolved), or the lexically normal requested one.
 /// @param medium The command's `t=`: `t=t` reads below the temp roots only, `t=f` below the allow-list too.
 /// @return Nothing when the path may be opened; the refusal otherwise.
 [[nodiscard]] std::expected<void, MediaRefusal> checkPath(MediaPolicy const& policy,
@@ -117,5 +122,12 @@ enum class DeletionAfterRead : uint8_t
 [[nodiscard]] DeletionAfterRead deletionAfterRead(MediaPolicy const& policy,
                                                   std::filesystem::path const& realPath,
                                                   Medium medium);
+
+/// Whether a foreground process is a remote-shell client (`ssh`, `mosh-client`, `telnet`, ...): while one is,
+/// the bytes come from another host, whatever the terminal's contexts say, and no local file is read for
+/// them.
+/// @param processName The process name as the PTY reports it; only its last path component counts.
+/// @return Whether it names a remote-shell client.
+[[nodiscard]] bool isRemoteShellClient(std::string_view processName) noexcept;
 
 } // namespace vtbackend::kitty_graphics

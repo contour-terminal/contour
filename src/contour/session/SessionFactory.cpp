@@ -99,11 +99,13 @@ std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(
 
 SessionTransport AppSessionFactory::transportOf([[maybe_unused]] vtpty::Pty const& pty) const noexcept
 {
+    if (dynamic_cast<vtpty::Process const*>(&pty) != nullptr)
+        return SessionTransport::LocalProcess;
 #ifdef VTPTY_LIBSSH2
     if (dynamic_cast<vtpty::SshSession const*>(&pty) != nullptr)
         return SessionTransport::Ssh;
 #endif
-    return SessionTransport::LocalProcess;
+    return SessionTransport::Unknown;
 }
 
 #ifdef VTPTY_LIBSSH2

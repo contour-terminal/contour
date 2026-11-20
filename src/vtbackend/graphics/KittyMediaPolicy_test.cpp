@@ -4,12 +4,16 @@
 
 #include <vtbackend/graphics/KittyMediaPolicy.hpp>
 
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
+// Windows reads no file medium, and its paths are not POSIX ones: `/tmp/x` is not absolute there.
+#ifndef _WIN32
 
-#include <format>
-#include <optional>
+    #include <catch2/catch_test_macros.hpp>
+    #include <catch2/generators/catch_generators.hpp>
 
+    #include <format>
+    #include <optional>
+
+using namespace std::string_view_literals;
 using namespace vtbackend::kitty_graphics;
 
 namespace
@@ -18,7 +22,8 @@ namespace
 [[nodiscard]] MediaPolicy testPolicy()
 {
     return MediaPolicy { .transmission = FileTransmission::Enabled,
-                         .temporaryRoots = { "/tmp", "/dev/shm" },
+                         .temporaryRoots = { "/tmp" },
+                         .temporaryFileOnlyRoots = { "/dev/shm" },
                          .allowedRoots = { "/home/u/.claude/plugins/data" },
                          .userId = 1000,
                          .sizeLimit = 1024 };
@@ -40,6 +45,8 @@ TEST_CASE("KittyMediaPolicy.checkPath", "[kitty][media]")
         PathCase { "/tmp/tty-graphics-protocol-x.rgba", Medium::TemporaryFile, std::nullopt },
         PathCase { "/home/u/.claude/plugins/data/rich-terminal/a.png", Medium::File, std::nullopt },
         PathCase { "/dev/shm/tty-graphics-protocol-y", Medium::TemporaryFile, std::nullopt },
+        PathCase { "/dev/shm/x", Medium::File, MediaRefusal::SystemPath },
+        PathCase { "/dev/shm/tty-graphics-protocol-y", Medium::File, MediaRefusal::SystemPath },
         PathCase { "/home/u/.ssh/id_ed25519", Medium::File, MediaRefusal::OutsideRoots },
         PathCase { "/tmpx/tty-graphics-protocol-x.rgba", Medium::File, MediaRefusal::OutsideRoots },
         PathCase { "/tmp", Medium::File, MediaRefusal::OutsideRoots },
@@ -130,3 +137,22 @@ TEST_CASE("KittyMediaPolicy.deletionAfterRead", "[kitty][media]")
           == DeletionAfterRead::Keep);
     CHECK(deletionAfterRead(policy, "/tmp/a.png", Medium::TemporaryFile) == DeletionAfterRead::Keep);
 }
+
+TEST_CASE("KittyMediaPolicy.isRemoteShellClient", "[kitty][media]")
+{
+    auto const remote = GENERATE("ssh"sv,
+                                 "mosh-client"sv,
+                                 "mosh"sv,
+                                 "telnet"sv,
+                                 "rlogin"sv,
+                                 "et"sv,
+                                 "autossh"sv,
+                                 "sshpass"sv,
+                                 "kitten"sv,
+                                 "/usr/bin/ssh"sv);
+    CHECK(isRemoteShellClient(remote));
+    auto const local = GENERATE("bash"sv, "zsh"sv, "claude"sv, "node"sv, "sshd"sv, ""sv, "/usr/bin/bash"sv);
+    CHECK_FALSE(isRemoteShellClient(local));
+}
+
+#endif

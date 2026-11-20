@@ -9,10 +9,11 @@ namespace contour::session
 /// How a session's bytes reach its terminal.
 enum class SessionTransport : uint8_t
 {
-    LocalProcess = 0,  ///< A process this machine runs on a local PTY.
-    Ssh = 1,           ///< An in-process SSH session (vtpty::SshSession): the program runs on another host.
-    TmuxPane = 2,      ///< A pane of a tmux server in control mode, which may run anywhere.
-    DaemonReplica = 3, ///< A replica of a session a daemon hosts, which reads files on its own machine.
+    Unknown = 0,       ///< Not identified: treated as remote, so an unrecognised transport grants nothing.
+    LocalProcess = 1,  ///< A process this machine runs on a local PTY (vtpty::Process).
+    Ssh = 2,           ///< An in-process SSH session (vtpty::SshSession): the program runs on another host.
+    TmuxPane = 3,      ///< A pane of a tmux server in control mode, which may run anywhere.
+    DaemonReplica = 4, ///< A replica of a session a daemon hosts, which reads files on its own machine.
 };
 
 /// What kitty graphics may read on a session's behalf.
@@ -30,6 +31,7 @@ enum class MediaAccess : uint8_t
     switch (transport)
     {
         case SessionTransport::LocalProcess: return MediaAccess::LocalFiles;
+        case SessionTransport::Unknown:
         case SessionTransport::Ssh:
         case SessionTransport::TmuxPane:
         case SessionTransport::DaemonReplica: break;

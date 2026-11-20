@@ -19,7 +19,8 @@ TEST_CASE("mediaAccessFor: only a local process reads local files", "[contour][m
         SessionTransport transport;
         MediaAccess access;
     };
-    auto const row = GENERATE(Row { SessionTransport::LocalProcess, MediaAccess::LocalFiles },
+    auto const row = GENERATE(Row { SessionTransport::Unknown, MediaAccess::None },
+                              Row { SessionTransport::LocalProcess, MediaAccess::LocalFiles },
                               Row { SessionTransport::Ssh, MediaAccess::None },
                               Row { SessionTransport::TmuxPane, MediaAccess::None },
                               Row { SessionTransport::DaemonReplica, MediaAccess::None });

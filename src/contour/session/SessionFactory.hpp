@@ -318,11 +318,12 @@ class SessionFactory
     /// How the bytes of the session backed by @p pty reach its terminal, which decides what kitty graphics
     /// may read for it (mediaAccessFor()).
     /// @param pty A pty this factory handed out.
-    /// @return A local process for a local factory (the default), a daemon's replica for a remote one; a
-    ///         factory whose ptys differ says so per pty.
+    /// @return A daemon's replica for a remote factory; for a local one, Unknown unless the factory
+    /// identifies
+    ///         its ptys itself -- fail closed, so a factory that hands out a new kind of pty grants nothing.
     [[nodiscard]] virtual SessionTransport transportOf(vtpty::Pty const& /*pty*/) const noexcept
     {
-        return hosting() == SessionHosting::Local ? SessionTransport::LocalProcess
+        return hosting() == SessionHosting::Local ? SessionTransport::Unknown
                                                   : SessionTransport::DaemonReplica;
     }
 
@@ -660,7 +661,8 @@ class AppSessionFactory final: public SessionFactory
         std::optional<vtpty::Process::ExecInfo> commandOverride = std::nullopt,
         std::optional<std::string> profileName = std::nullopt) override;
 
-    /// An SSH profile's session runs its program on another host; every other one is a local process.
+    /// Identified by what the pty is: a vtpty::Process is a local process, a vtpty::SshSession an SSH
+    /// profile's session on another host, and anything else Unknown.
     [[nodiscard]] SessionTransport transportOf(vtpty::Pty const& pty) const noexcept override;
 
   private:

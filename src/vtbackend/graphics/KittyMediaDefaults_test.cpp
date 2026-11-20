@@ -5,6 +5,7 @@
 #include <vtbackend/graphics/KittyMediaDefaults.hpp>
 
 #include <core/testing/Environment.hpp>
+#include <core/testing/ScopedTempDir.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -32,7 +33,8 @@ TEST_CASE("KittyMediaDefaults.platformTemporaryRoots", "[kitty][media]")
     CHECK(holds(roots, "/private/tmp"));
     #else
     CHECK(holds(roots, "/tmp"));
-    CHECK(holds(roots, "/dev/shm"));
+    CHECK_FALSE(holds(roots, "/dev/shm"));
+    CHECK(holds(platformTemporaryFileOnlyRoots(), "/dev/shm"));
     #endif
 #endif
 }
@@ -54,6 +56,7 @@ TEST_CASE("KittyMediaDefaults.defaultMediaPolicy", "[kitty][media]")
     CHECK(policy.allowedRoots
           == std::vector<std::filesystem::path> { "/home/nobody-here/.claude/plugins/data" });
     CHECK(policy.temporaryRoots == platformTemporaryRoots(env));
+    CHECK(policy.temporaryFileOnlyRoots == platformTemporaryFileOnlyRoots());
     CHECK(policy.userId == 1234);
     CHECK(policy.sizeLimit == MaxChunkedPayloadSize);
 #endif
@@ -64,3 +67,56 @@ TEST_CASE("KittyMediaDefaults.defaultMediaPolicy_without_a_home", "[kitty][media
     auto const env = core::testing::FakeEnvironment {};
     CHECK(defaultMediaPolicy(env, "", 1234).allowedRoots.empty());
 }
+
+TEST_CASE("KittyMediaDefaults.platformTemporaryRoots_keeps_the_spelling_and_drops_a_trailing_separator",
+          "[kitty][media]")
+{
+    auto const env = core::testing::FakeEnvironment { { { "TMPDIR", "/x/y/" } } };
+    auto const roots = platformTemporaryRoots(env);
+    CHECK(holds(roots, "/x/y"));
+}
+
+#ifndef _WIN32
+TEST_CASE("KittyMediaDefaults.defaultMediaPolicy_drops_roots_that_open_the_home_directory", "[kitty][media]")
+{
+    auto const temp = core::testing::ScopedTempDir { "contour-media-test" };
+    auto const home = std::filesystem::canonical(temp.path()) / "home";
+    std::filesystem::create_directories(home);
+    auto const holdsUnder = [](std::vector<std::filesystem::path> const& roots,
+                               std::filesystem::path const& dir) {
+        return std::ranges::any_of(roots, [&](auto const& root) { return root == dir; });
+    };
+
+    SECTION("TMPDIR=/")
+    {
+        auto const env = core::testing::FakeEnvironment { { { "TMPDIR", "/" } } };
+        CHECK_FALSE(holdsUnder(defaultMediaPolicy(env, home, 1).temporaryRoots, "/"));
+    }
+
+    SECTION("TMPDIR=$HOME")
+    {
+        auto const env = core::testing::FakeEnvironment { { { "TMPDIR", home.string() } } };
+        CHECK_FALSE(holdsUnder(defaultMediaPolicy(env, home, 1).temporaryRoots, home));
+    }
+
+    SECTION("TMPDIR above $HOME")
+    {
+        auto const env = core::testing::FakeEnvironment { { { "TMPDIR", home.parent_path().string() } } };
+        CHECK_FALSE(holdsUnder(defaultMediaPolicy(env, home, 1).temporaryRoots, home.parent_path()));
+    }
+
+    SECTION("plugins/data linked to $HOME")
+    {
+        std::filesystem::create_directories(home / ".claude/plugins");
+        std::filesystem::create_directory_symlink(home, home / ".claude/plugins/data");
+        CHECK(defaultMediaPolicy(core::testing::FakeEnvironment {}, home, 1).allowedRoots.empty());
+    }
+
+    SECTION("a real plugins/data stays")
+    {
+        std::filesystem::create_directories(home / ".claude/plugins/data");
+        CHECK(defaultMediaPolicy(core::testing::FakeEnvironment {}, home, 1).allowedRoots
+              == std::vector<std::filesystem::path> { home / ".claude/plugins/data" });
+    }
+}
+#endif

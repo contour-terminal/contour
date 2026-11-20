@@ -6044,11 +6044,21 @@ TEST_CASE("a hosted session reads kitty file media with the host's own services"
     // The daemon's sessions run local processes: what the host was composed with reaches every terminal it
     // spawns, and nothing else grants it.
     auto const source = OnePixelMediumSource {};
-    auto const granted = GENERATE(true, false);
+    struct Row
+    {
+        bool granted;
+        std::string_view foreground;
+        bool read;
+    };
+    auto const row = GENERATE(Row { .granted = true, .foreground = "bash", .read = true },
+                              Row { .granted = true, .foreground = "ssh", .read = false },
+                              Row { .granted = false, .foreground = "bash", .read = false });
+    auto const granted = row.granted;
     auto const services = vtbackend::kitty_graphics::KittyMediumServices {
         .source = source,
         .policy = { .transmission = vtbackend::kitty_graphics::FileTransmission::Enabled,
                     .temporaryRoots = { "/tmp" },
+                    .temporaryFileOnlyRoots = {},
                     .allowedRoots = {},
                     .userId = 0,
                     .sizeLimit = 1024 }
@@ -6072,12 +6082,14 @@ TEST_CASE("a hosted session reads kitty file media with the host's own services"
     REQUIRE(terminal != nullptr);
     auto& mock = dynamic_cast<vtpty::MockPty&>(dynamic_cast<vthost::TappingPty&>(terminal->device()).inner());
 
+    // The foreground process reaches the terminal through the host's byte tap.
+    mock.setForegroundProcessName(std::string { row.foreground });
     mock.appendStdOutBuffer(std::format("\033_Ga=q,i=31,s=1,v=1,t=f,f=32;{}\033\\",
                                         core::base64::encode("/tmp/tty-graphics-protocol-probe.rgba")));
     REQUIRE(terminal->processInputOnce());
 
     using namespace std::string_view_literals;
     CHECK(terminal->peekInput()
-          == (granted ? "\033_Gi=31;OK\033\\"sv : "\033_Gi=31;EBADF:file not readable\033\\"sv));
-    CHECK(source.reads == (granted ? 1 : 0));
+          == (row.read ? "\033_Gi=31;OK\033\\"sv : "\033_Gi=31;EBADF:file not readable\033\\"sv));
+    CHECK(source.reads == (row.read ? 1 : 0));
 }

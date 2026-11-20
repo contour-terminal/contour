@@ -17,15 +17,23 @@
 namespace vtbackend::kitty_graphics
 {
 
-/// The temp directories of the platform, canonical where they exist: `$TMPDIR` (when absolute), plus `/tmp`
-/// and `/dev/shm` on Linux, or `/private/tmp` and the per-user `confstr(_CS_DARWIN_USER_TEMP_DIR)` on macOS.
-/// None on Windows, which reads no file medium.
+/// The temp directories of the platform, each both as spelled and canonical (where it exists): a reader
+/// checks the requested path before resolving it, and the canonical one after (macOS spells `/var/folders`
+/// what is
+/// `/private/var/folders`). `$TMPDIR` (when absolute), plus `/tmp` on Linux, or `/private/tmp` and the
+/// per-user `confstr(_CS_DARWIN_USER_TEMP_DIR)` on macOS. None on Windows, which reads no file medium.
 /// @param env The environment of the process that parses: the daemon's `$TMPDIR` can differ from the app's.
 /// @return The roots, without duplicates.
 [[nodiscard]] std::vector<std::filesystem::path> platformTemporaryRoots(core::Environment const& env);
 
+/// The platform's roots of `t=t` alone: `/dev/shm` on Linux, as kitty allows; none elsewhere.
+/// @return The roots.
+[[nodiscard]] std::vector<std::filesystem::path> platformTemporaryFileOnlyRoots();
+
 /// The policy by default: file media enabled (disabled on Windows), the platform's temp roots, the allow-list
-/// `~/.claude/plugins/data`, and the size limit of one direct transmission (MaxChunkedPayloadSize).
+/// `~/.claude/plugins/data`, and the size limit of one direct transmission (MaxChunkedPayloadSize). A root
+/// that would open the whole home directory -- `/`, the home directory itself or any directory above it,
+/// judged by canonical forms (a `$TMPDIR=$HOME`, a `plugins/data` linked to `~`) -- is dropped.
 /// @param env The parsing process's environment, for platformTemporaryRoots().
 /// @param homeDirectory The user's home directory, which the allow-list is below; none when it is not
 ///        absolute.

@@ -43,6 +43,16 @@ class RefusingMediumSource final: public KittyMediumSource
 };
 
 #ifndef _WIN32
+/// The points between the steps of a PosixMediumSource read where a test acts, to prove that a file swapped
+/// there is refused or left alone rather than read or deleted. Production passes none.
+struct MediumReadInterleavings
+{
+    /// Called with the canonical path once checkPath() accepted it, just before it is opened.
+    std::function<void(std::filesystem::path const&)> pathAccepted {};
+    /// Called with the canonical path after the read, just before a `t=t` file is unlinked.
+    std::function<void(std::filesystem::path const&)> beforeUnlink {};
+};
+
 /// The POSIX (Linux, macOS) source. In this order, refusing at the first step that fails: canonicalize the
 /// path (`realpath`) -> checkPath() on the canonical path -> `open(O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC)`
 /// -> the opened descriptor's own path must be the canonical one (a swap between the check and the open is
@@ -52,18 +62,17 @@ class RefusingMediumSource final: public KittyMediumSource
 class PosixMediumSource final: public KittyMediumSource
 {
   public:
-    /// Called with the canonical path once checkPath() accepted it, just before it is opened.
-    using PathAccepted = std::function<void(std::filesystem::path const&)>;
-
-    /// @param pathAccepted Called between the path check and the open. Production passes none; a test passes
-    ///        one that swaps the file out, to prove the swap is refused rather than read.
-    explicit PosixMediumSource(PathAccepted pathAccepted = {}): _pathAccepted { std::move(pathAccepted) } {}
+    /// @param interleavings What runs between the steps; none in production.
+    explicit PosixMediumSource(MediumReadInterleavings interleavings = {}):
+        _interleavings { std::move(interleavings) }
+    {
+    }
 
     [[nodiscard]] std::expected<std::vector<uint8_t>, MediaRefusal> read(
         std::string_view path, Medium medium, MediaPolicy const& policy) const override;
 
   private:
-    PathAccepted _pathAccepted;
+    MediumReadInterleavings _interleavings;
 };
 #endif
 
