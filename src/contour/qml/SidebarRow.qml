@@ -490,7 +490,10 @@ Item {
                 readonly property color color: row.workspacePaint.swatch
                 visible: row.hasWorkspaceSwatch
                 anchors.verticalCenter: parent.verticalCenter
-                width: chromeStyle.sidebar.workspaceSwatchSize
+                // On the Terminal row the glyph's whole cells: a fallback face may draw it wider than one.
+                width: row.cellTree ? Math.max(chromeStyle.sidebar.workspaceSwatchSize,
+                                               chromeStyle.snapToCells(swatchGlyph.implicitWidth))
+                                    : chromeStyle.sidebar.workspaceSwatchSize
                 height: row.cellTree ? swatchGlyph.implicitHeight : chromeStyle.sidebar.workspaceSwatchSize
                 Accessible.ignored: true
 
@@ -505,7 +508,7 @@ Item {
                     id: swatchGlyph
                     objectName: "sidebarRowWorkspaceSwatchGlyph"
                     visible: row.cellTree
-                    // Centred in its one cell: a fallback face may draw the square narrower than the cell.
+                    // Centred in its cells: a fallback face may draw the square narrower than them.
                     anchors.fill: parent
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter

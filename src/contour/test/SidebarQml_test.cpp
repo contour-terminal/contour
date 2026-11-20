@@ -3360,17 +3360,23 @@ TEST_CASE("a coloured workspace's rows show its colour as sidebar.workspace_colo
                         if (isWorkspace)
                         {
                             CHECK(swatch.width() > 0);
-                            CHECK(swatch.width() == scene.token("workspaceSwatchSize"));
                             CHECK(rgbaOf(swatch.property("color")) == magenta.rgba());
-                            // On the Terminal row the glyph takes exactly its one cell, centred in it, and
-                            // never spills into the name's.
+                            // On the Terminal row the glyph takes whole cells, at least the one the token
+                            // names and as many as the face draws it across, centred in them, and so never
+                            // spills into the name's.
                             if (row == ChromeStyle::Terminal)
                             {
                                 auto const& glyph = rowPart(*item, "sidebarRowWorkspaceSwatchGlyph");
+                                auto const cell = scene.style("cellWidth");
+                                auto const drawn = cell * std::ceil(glyph.implicitWidth() / cell);
+                                CHECK(swatch.width()
+                                      == Catch::Approx(std::max(scene.token("workspaceSwatchSize"), drawn)));
                                 CHECK(glyph.width() == Catch::Approx(swatch.width()));
-                                CHECK(glyph.implicitWidth() <= swatch.width() + 0.5);
+                                CHECK(glyph.implicitWidth() <= swatch.width());
                                 CHECK(glyph.property("horizontalAlignment").toInt() == Qt::AlignHCenter);
                             }
+                            else
+                                CHECK(swatch.width() == scene.token("workspaceSwatchSize"));
                             // Before the name.
                             CHECK(swatch.mapToItem(item, QPointF {}).x()
                                   < rowPart(*item, "sidebarRowTitle").mapToItem(item, QPointF {}).x());
