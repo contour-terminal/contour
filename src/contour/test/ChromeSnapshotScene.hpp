@@ -1912,6 +1912,15 @@ class ChromeSnapshotScene
         return record;
     }
 
+    /// An idle pane titled @p title in @p folder: no status of its own, so its row's second line names where
+    /// it is, as a real local pane's does.
+    [[nodiscard]] static window::DirectoryPane idlePaneOf(uint64_t key, std::string title, std::string folder)
+    {
+        auto pane = directoryPaneOf(key, std::move(title));
+        pane.cwd = std::move(folder);
+        return pane;
+    }
+
     /// claude's and build's tab colours under SnapshotSidebarColor::Tabs.
     static constexpr auto SidebarTabColours =
         std::array { vtbackend::RGBColor { 0x4C, 0x5F, 0xD5 }, vtbackend::RGBColor { 0xE8, 0x85, 0x3A } };
@@ -1949,10 +1958,11 @@ class ChromeSnapshotScene
         auto split = window::DirectoryTab {};
         split.id = 14;
         split.name = "server";
-        split.panes = { directoryPaneOf(14, "server"), directoryPaneOf(15, "logs") };
+        split.panes = { idlePaneOf(14, "server", "/src/billing/api"),
+                        idlePaneOf(15, "logs", "/var/log/billing") };
         billing.tabs.push_back(std::move(split));
         billing.git = window::DirectoryGit { .branch = "feat/billing", .ahead = 2 };
-        auto infra = directoryWorkspaceOf(3, "infra", { directoryPaneOf(30, "terraform") });
+        auto infra = directoryWorkspaceOf(3, "infra", { idlePaneOf(30, "terraform", "/src/infra") });
         switch (script.sidebarColor)
         {
             case SnapshotSidebarColor::None: break;
@@ -1977,8 +1987,10 @@ class ChromeSnapshotScene
         listed.workspaces = { std::move(billing),
                               directoryWorkspaceOf(2,
                                                    "docs",
-                                                   { directoryPaneOf(20, "notes"),
-                                                     directoryPaneOf(21, "preview"),
+                                                   { idlePaneOf(20, "notes", "/src/docs"),
+                                                     idlePaneOf(21, "preview", "/src/docs/site"),
+                                                     // The one row that knows neither its folder nor its
+                                                     // program, so the pictures show its name centred.
                                                      directoryPaneOf(22, "publish") }),
                               // Folded below, so every sidebar picture shows the collapsed disclosure too.
                               std::move(infra) };
