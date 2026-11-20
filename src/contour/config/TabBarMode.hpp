@@ -71,6 +71,20 @@ enum class SidebarWorkspaceColorStyle : uint8_t
 inline constexpr size_t SidebarWorkspaceColorStyleCount =
     static_cast<size_t>(SidebarWorkspaceColorStyle::Swatch) + 1;
 
+/// How much room a two-line sidebar row (a tab or a pane) takes (`sidebar.row_spacing`).
+/// @note Exposed to QML as an @c int through WindowController::sidebarRowSpacing, which
+///       ChromeSidebarTokens::twoLineRowHeight() and lineGap() convert back; SidebarRow.qml takes 0
+///       (Comfortable) without a controller.
+enum class SidebarRowSpacing : uint8_t
+{
+    Comfortable =
+        0,   //!< Taller rows, the extra room between them rather than between a row's lines (default).
+    Compact, //!< The tighter rows: more of them fit, their lines nearer the next row's.
+};
+
+/// Number of @c SidebarRowSpacing enumerators, derived from the last one.
+inline constexpr size_t SidebarRowSpacingCount = static_cast<size_t>(SidebarRowSpacing::Compact) + 1;
+
 /// When the GUI tab strip (tab bar) is shown.
 enum class TabBarVisibility : uint8_t
 {
@@ -109,6 +123,11 @@ namespace detail
         ConfigEnumInfo<SidebarWorkspaceColorStyle> { SidebarWorkspaceColorStyle::Tint, "tint", "Tint" },
         ConfigEnumInfo<SidebarWorkspaceColorStyle> { SidebarWorkspaceColorStyle::Group, "group", "Group" },
         ConfigEnumInfo<SidebarWorkspaceColorStyle> { SidebarWorkspaceColorStyle::Swatch, "swatch", "Swatch" },
+    };
+
+    inline constexpr auto SidebarRowSpacingTable = std::array {
+        ConfigEnumInfo<SidebarRowSpacing> { SidebarRowSpacing::Comfortable, "comfortable", "Comfortable" },
+        ConfigEnumInfo<SidebarRowSpacing> { SidebarRowSpacing::Compact, "compact", "Compact" },
     };
 
     // The tokens are the ones already written into every existing contour.yml, so they are fixed;
@@ -164,6 +183,12 @@ template <>
 constexpr std::span<ConfigEnumInfo<SidebarWorkspaceColorStyle> const> configEnumValues() noexcept
 {
     return detail::SidebarWorkspaceColorStyleTable;
+}
+
+template <>
+constexpr std::span<ConfigEnumInfo<SidebarRowSpacing> const> configEnumValues() noexcept
+{
+    return detail::SidebarRowSpacingTable;
 }
 
 template <>
