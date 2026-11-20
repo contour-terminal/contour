@@ -5,7 +5,8 @@
 // by glyph in the atlas; this case checks the same in the frame a REAL TerminalDisplay draws through the RHI,
 // fed the orchestrator dashboard's goldens, so that whatever stands between the atlas and the screen
 // (tile placement, cell geometry, blending) cannot open a step or a notch at a corner either. The goldens
-// cover a lone panel and the dispatch form, a popup drawn over the two panels beneath it.
+// cover a lone panel, the dispatch form (a popup drawn over the two panels beneath it), an agent's status
+// board and a transcript page.
 //
 // Like every [display] case this SKIPs unless CONTOUR_TEST_DISPLAY=1 opts into a real windowing system
 // (scripts/run-display-tests.sh runs it under a headless weston).
@@ -54,9 +55,10 @@ struct Golden
 };
 
 /// The goldens drawn, each in its own window.
-/// @return `lists` at 50×20 (one panel, its four corners) and the dispatch form over two panels at 120×40
-///         (the panels' eight corners and the popup's four), the latter in a font small enough to fit.
-[[nodiscard]] std::array<Golden, 2> goldens()
+/// @return `lists` at 50×20 (one panel, its four corners), the dispatch form over two panels at 120×40 (the
+///         panels' eight corners and the popup's four), and a status board and a transcript page at 120×40
+///         (one full-page panel each); every 120×40 golden in a font small enough to fit.
+[[nodiscard]] std::array<Golden, 4> goldens()
 {
     using vtbackend::ColumnCount;
     using vtbackend::LineCount;
@@ -69,6 +71,14 @@ struct Golden
                  .fontSize = 7.0,
                  .page = vtbackend::PageSize { LineCount(40), ColumnCount(120) },
                  .corners = 12 },
+        Golden { .file = "board-120x40.screen"sv,
+                 .fontSize = 7.0,
+                 .page = vtbackend::PageSize { LineCount(40), ColumnCount(120) },
+                 .corners = 4 },
+        Golden { .file = "transcript-120x40.screen"sv,
+                 .fontSize = 7.0,
+                 .page = vtbackend::PageSize { LineCount(40), ColumnCount(120) },
+                 .corners = 4 },
     };
 }
 
