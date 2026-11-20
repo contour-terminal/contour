@@ -53,11 +53,13 @@ MAX_VERIFIED_CANDIDATES = 12
 UNHANDLED_CODE_SUFFIXES = (".mm", ".m", ".c", ".inl", ".ipp", ".tpp")
 # Path fragments that mark a file as belonging to another OS (derived from the files under src/ that
 # the Linux compile database leaves out: Cocoa*, CoreText*, DirectWrite*, Win32*, ConPty*, *_win32.*).
-# A header matching one and reached by no TU is not an error, because no Linux TU can include it.
+# A header matching one and reached by no TU is not an error, because no Linux host TU can include it.
 PLATFORM_MARKERS = (
     re.compile(r"Cocoa|CoreText|DirectWrite|Win32|ConPty", re.IGNORECASE),
     re.compile(r"_(win32|windows|macos|darwin)\b", re.IGNORECASE),
     re.compile(r"/(win32|windows|macos|darwin)/", re.IGNORECASE),
+    # The orchestrator guest's WASI glue and its generated bindings compile for WebAssembly only.
+    re.compile(r"/extensions/orchestrator/guest/(Wit[A-Za-z]*\.hpp$|bindings/)"),
 )
 HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 INCLUDE_RE = re.compile(r'^\s*#\s*include\s*([<"])([^>"]+)[>"]', re.MULTILINE)

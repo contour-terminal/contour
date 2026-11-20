@@ -229,6 +229,15 @@ jobs:
       with:
         path: _ucd
         key: ucd-${{ hashFiles('_deps/sources/libunicode-*/CMakeLists.txt') }}
+    # With the orchestrator's guest configured, the host tests that drive the real guest (and the test
+    # headers only they include) are in the compile database, so their changed lines are linted too.
+    - name: "wasi-sdk (the agent orchestrator)"
+      id: wasi_sdk
+      uses: ./.github/actions/wasi-sdk
+      with:
+        version: ${{ env.WASI_SDK_VERSION }}
+        platform: x86_64-linux
+        sha256: ${{ env.WASI_SDK_X86_64_LINUX_SHA256 }}
     - name: "cmake"
       run: |
         cmake \
@@ -238,6 +247,8 @@ jobs:
               -D CONTOUR_WAYLAND=OFF \
               -D LIBUNICODE_UCD_BASE_DIR="$PWD/_ucd" \
               -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}" \
+              -D CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST=ON \
+              -D WASI_SDK_PREFIX="${{ steps.wasi_sdk.outputs.prefix }}" \
               -D ENABLE_TIDY=OFF
     - name: "build generated headers only"
       run: ./scripts/ci-build-tidy-prerequisites.sh build
