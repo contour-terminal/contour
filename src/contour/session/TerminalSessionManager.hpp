@@ -512,6 +512,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///         and for a tab of a workspace the window does not own.
     [[nodiscard]] vtworkspace::Tab* ownTabOf(window::WindowController const& window, uint64_t tab) const;
 
+    /// Colours the tab @p tab, whichever workspace of @p window's directory holds it, shown or not, as the
+    /// user chose: on its daemon for a window a daemon serves (named by a session it holds, as renameTab()
+    /// names it), in this process's model otherwise. A tab the window does not list is left alone.
+    /// @param window The window the user acts in.
+    /// @param tab The tab's id, as the window's directory lists it (DirectoryTab::id).
+    /// @param color Its new colour; std::nullopt drops the user's, letting an application's resurface.
+    void colorTab(window::WindowController& window, uint64_t tab, std::optional<vtbackend::RGBColor> color);
+
     /// Moves the workspace @p workspace that @p window lists to place @p toPosition of its directory, where
     /// a daemon (or this process's model) orders it. The place is clamped.
     /// @param window The window the user acts in.

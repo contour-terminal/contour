@@ -414,26 +414,50 @@ void WindowController::triggerContextMenuAction(int actionId)
 
 namespace
 {
+    /// A tab's colour as its menu sees it: what "Tab Color" ticks, and whether "Reset" has anything to drop.
+    struct TabColoring
+    {
+        std::optional<vtbackend::RGBColor> color;                             ///< Its effective colour.
+        command::UserColorPresence user = command::UserColorPresence::Absent; ///< Whether the user chose it.
+    };
+
+    /// @param tab A tab of this process's model.
+    /// @return Its colour, and whether the user gave it.
+    [[nodiscard]] TabColoring coloringOf(vtworkspace::Tab const& tab)
+    {
+        return TabColoring { .color = tab.color(),
+                             .user = tab.color(vtworkspace::TabColorSource::User).has_value()
+                                         ? command::UserColorPresence::Present
+                                         : command::UserColorPresence::Absent };
+    }
+
+    /// @param color The colour a daemon's directory lists for a tab.
+    /// @return It as the tab's menu sees it: the wire carries one colour only, so a listed one reads as the
+    ///         user's, whose reset the daemon makes (and leaves an application's alone).
+    [[nodiscard]] TabColoring coloringListed(std::optional<vtbackend::RGBColor> color)
+    {
+        return TabColoring { .color = color,
+                             .user = color ? command::UserColorPresence::Present
+                                           : command::UserColorPresence::Absent };
+    }
+
     /// The tab menu's view of a tab, the tab strip's and a sidebar tab row's alike.
-    /// @param index   The tab's position in its workspace.
-    /// @param count   The tabs of its workspace.
-    /// @param palette The colours "Tab Color" offers.
-    /// @param tab     The tab, whose colour "Tab Color" ticks and "Reset" drops; null for one this process's
-    ///                model does not hold, which then reads as uncoloured.
+    /// @param index    The tab's position in its workspace.
+    /// @param count    The tabs of its workspace.
+    /// @param palette  The colours "Tab Color" offers.
+    /// @param coloring The tab's colour, which "Tab Color" ticks and "Reset" drops.
     /// @return The state the menu is built from.
     [[nodiscard]] command::TabContextMenuState tabMenuStateOf(int index,
                                                               int count,
                                                               std::span<vtbackend::RGBColor const> palette,
-                                                              vtworkspace::Tab const* tab)
+                                                              TabColoring const& coloring)
     {
         return command::TabContextMenuState {
             .tabIndex = index,
             .tabCount = count,
             .palette = { palette.begin(), palette.end() },
-            .color = tab != nullptr ? tab->color() : std::nullopt,
-            .userColor = tab != nullptr && tab->color(vtworkspace::TabColorSource::User).has_value()
-                             ? command::UserColorPresence::Present
-                             : command::UserColorPresence::Absent,
+            .color = coloring.color,
+            .userColor = coloring.user,
         };
     }
 } // namespace
@@ -444,7 +468,7 @@ void WindowController::openTabContextMenu(int index, QPointF /*windowPosition*/)
     if (tab == nullptr)
         return;
 
-    auto const state = tabMenuStateOf(index, count(), _manager.model().colorPalette(), tab);
+    auto const state = tabMenuStateOf(index, count(), _manager.model().colorPalette(), coloringOf(*tab));
 
     // Pinned by id: the strip can reorder or close tabs while the menu stands open.
     _tabContextMenuTab = tab->id();
@@ -1830,25 +1854,12 @@ void WindowController::resetTabColor(int index)
 
 void WindowController::setTabColorOf(quint64 tab, QColor const& color)
 {
-    colorOwnTab(tab, platform::toRGBColor(color));
+    _manager.colorTab(*this, tab, platform::toRGBColor(color));
 }
 
 void WindowController::resetTabColorOf(quint64 tab)
 {
-    colorOwnTab(tab, std::nullopt);
-}
-
-void WindowController::colorOwnTab(uint64_t tab, std::optional<vtbackend::RGBColor> color)
-{
-    auto const* const owned = _manager.ownTabOf(*this, tab);
-    if (owned == nullptr)
-        return;
-    // The user's own slot, as the tab strip's picker writes it: a reset lets an application's colour
-    // resurface.
-    if (color)
-        _manager.model().setTabColor(owned->id(), vtworkspace::TabColorSource::User, *color);
-    else
-        _manager.model().resetTabColor(owned->id(), vtworkspace::TabColorSource::User);
+    _manager.colorTab(*this, tab, std::nullopt);
 }
 
 // {{{ Keyboard focus in the chrome
@@ -3856,15 +3867,12 @@ void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Actio
         [](WindowController& window, SidebarRowKey const& key, actions::Action const&) {
             window._manager.setWorkspaceColor(window, key.workspace, std::nullopt);
         };
-    // A tab of this process's colours by id, as a workspace does, and the focus stays where it is; a daemon's
-    // tab ids are not the model's, so its row is shown and its tab coloured as the tab strip colours it.
+    // A tab colours by id, as a workspace does, in this process's model or on its daemon, and the focus stays
+    // where it is (TerminalSessionManager::colorTab()).
     constexpr Run ColorTabRow =
         [](WindowController& window, SidebarRowKey const& key, actions::Action const& what) {
-            auto const color = std::get<actions::SetTabColor>(what).color;
-            if (window._manager.ownTabOf(window, key.tab) == nullptr)
-                window.runSidebarActionShown(key, what);
-            else if (color)
-                window.colorOwnTab(key.tab, color);
+            if (auto const color = std::get<actions::SetTabColor>(what).color)
+                window._manager.colorTab(window, key.tab, color);
             else
             {
                 // Custom…: the sidebar's picker over the row, as a sidebar placement draws no tab strip.
@@ -3873,11 +3881,8 @@ void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Actio
             }
         };
     constexpr Run ResetTabRowColor =
-        [](WindowController& window, SidebarRowKey const& key, actions::Action const& what) {
-            if (window._manager.ownTabOf(window, key.tab) == nullptr)
-                window.runSidebarActionShown(key, what);
-            else
-                window.colorOwnTab(key.tab, std::nullopt);
+        [](WindowController& window, SidebarRowKey const& key, actions::Action const&) {
+            window._manager.colorTab(window, key.tab, std::nullopt);
         };
     constexpr Run MoveRowUp = [](WindowController& window, SidebarRowKey const& key, actions::Action const&) {
         window.moveWorkspaceBy(key.workspace, -1);
@@ -4085,11 +4090,18 @@ void WindowController::openSidebarContextMenu(SidebarRow const& row, QPointF win
             auto others = directory;
             others.selected = row.key.workspace;
             // The row's own tab's colour, not the shown one's: "Reset" is offered on what the row's tab has.
+            // This process's model says whether the user gave it; a daemon's tab has what its directory
+            // lists.
+            auto const* const owned = _manager.ownTabOf(*this, row.key.tab);
+            auto const listed = findTab(directory, row.key.workspace, row.key.tab);
+            auto const coloring = owned != nullptr
+                                      ? coloringOf(*owned)
+                                      : coloringListed(listed ? listed->tab->color : std::nullopt);
             entries = command::buildSidebarTabMenu(
                 { .tab = tabMenuStateOf(static_cast<int>(row.position),
                                         holder != nullptr ? static_cast<int>(holder->tabs.size()) : 0,
                                         _manager.model().colorPalette(),
-                                        _manager.ownTabOf(*this, row.key.tab)),
+                                        coloring),
                   .others = moveTargetsOf(others),
                   .joinable =
                       joinTargetsOf(directory, TabRef { .workspace = row.key.workspace, .tab = row.key.tab }),
