@@ -549,8 +549,9 @@ TEST_CASE("OpenShaper.fallback.accepts_a_proportional_fallback_rather_than_rende
 TEST_CASE("OpenShaper.fallback.strict_spacing_refuses_a_proportional_fallback",
           "[OpenShaper][fallback][spacing]")
 {
-    // strict_spacing is the opt-in hard filter: the user has said they would rather see nothing at all
-    // than a glyph from a font that does not fit the grid.
+    // strict_spacing is the opt-in hard filter: the user has said a glyph from a font that does not fit
+    // the grid is worse than none. This is the MatchDescription policy, which the fontconfig locator and the
+    // mock keep; the native Windows and macOS locators permit any face for the last-resort lookup.
     auto env = FallbackEnv {
         {
             { .name = "primary", .monospace = Monospaced, .glyphs = { { U'A', 8 }, { Replacement, 8 } } },

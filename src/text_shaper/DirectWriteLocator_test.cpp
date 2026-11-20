@@ -280,25 +280,18 @@ TEST_CASE("DirectWriteLocator.strict_spacing_still_recovers_uncovered_symbols", 
     auto clusters = std::vector<unsigned> { 0, 1, 2 };
     auto result = ShapeResult {};
 
+    enum class Expectation : uint8_t
+    {
+        Recovered,
+        StaysDisabled,
+    };
+    auto expectation = Expectation::Recovered;
     SECTION("recovered from a system face")
     {
-        auto const font = shaper.loadFont(desc, FontSize { 13 });
-        REQUIRE(font);
-        shaper.shape(*font,
-                     input,
-                     gsl::span<unsigned>(clusters),
-                     unicode::Script::Latin,
-                     unicode::PresentationStyle::Text,
-                     result);
-        REQUIRE(result.size() == 3);
-        CHECK(result[0].glyph.font == *font);
-        CHECK(result[2].glyph.font == *font);
-        CHECK(result[1].glyph.font != *font);
-        for (auto const& glyph: result)
-            CHECK(glyph.glyph.index.value != 0);
     }
     SECTION("fallback disabled stays disabled")
     {
+        expectation = Expectation::StaysDisabled;
         SECTION("none policy")
         {
             desc.fontFallback = FontFallbackNone {};
@@ -307,15 +300,26 @@ TEST_CASE("DirectWriteLocator.strict_spacing_still_recovers_uncovered_symbols", 
         {
             shaper.setFontFallbackLimit(0);
         }
-        auto const font = shaper.loadFont(desc, FontSize { 13 });
-        REQUIRE(font);
-        shaper.shape(*font,
-                     input,
-                     gsl::span<unsigned>(clusters),
-                     unicode::Script::Latin,
-                     unicode::PresentationStyle::Text,
-                     result);
-        REQUIRE(result.size() == 3);
+    }
+    auto const font = shaper.loadFont(desc, FontSize { 13 });
+    REQUIRE(font);
+    shaper.shape(*font,
+                 input,
+                 gsl::span<unsigned>(clusters),
+                 unicode::Script::Latin,
+                 unicode::PresentationStyle::Text,
+                 result);
+    REQUIRE(result.size() == 3);
+    if (expectation == Expectation::Recovered)
+    {
+        CHECK(result[0].glyph.font == *font);
+        CHECK(result[2].glyph.font == *font);
+        CHECK(result[1].glyph.font != *font);
+        for (auto const& glyph: result)
+            CHECK(glyph.glyph.index.value != 0);
+    }
+    else
+    {
         for (auto const& glyph: result)
             CHECK(glyph.glyph.font == *font);
     }
