@@ -2546,3 +2546,215 @@ TEST_CASE("pollInterval doubles up to the back-off limit and never shortens", "[
 }
 
 // }}}
+
+namespace
+{
+
+/// What each command of a poll answers.
+[[nodiscard]] ProcessOutcome pollAnswerOf(RunCommand const& command)
+{
+    if (command.command == "agent-setup-check")
+        return ok(readFixture(FixtureRoot::Testdata, "contour/setup-hooks-present.json"));
+    if (command.command == "git-worktree-list")
+        return ok(worktreeList(command.cwd));
+    if (command.command == "gh-default-branch")
+        return ok(readFixture(FixtureRoot::Testdata, "github/default-branch.json"));
+    if (command.command == "gh-prs")
+        return ok(readFixture(FixtureRoot::Testdata, "github/prs-open.json"));
+    if (command.command == "gh-issues")
+        return ok(readFixture(FixtureRoot::Testdata, "github/issues-open.json"));
+    return ok();
+}
+
+/// Answers every command @p effects ask for, and those the answers ask for, at @p monoMs.
+/// @return Every effect the answers asked for.
+[[nodiscard]] std::vector<Effect> answerAll(Engine& engine, std::vector<Effect> effects, uint64_t monoMs)
+{
+    auto asked = std::vector<Effect> {};
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 32))
+    {
+        auto const commands = all<RunCommand>(effects);
+        if (commands.empty())
+            return asked;
+        auto next = std::vector<Effect> {};
+        for (auto const& command: commands)
+        {
+            auto const stepped = engine.step(
+                ProcessFinished { .tag = command.tag, .outcome = pollAnswerOf(command), .monoMs = monoMs });
+            next.insert(next.end(), stepped.begin(), stepped.end());
+        }
+        asked.insert(asked.end(), next.begin(), next.end());
+        effects = std::move(next);
+    }
+    FAIL("the poll kept running commands");
+    return asked;
+}
+
+/// @return The tag of every RunCommand of @p effects, in order.
+[[nodiscard]] std::vector<std::string> runTagsOf(std::span<Effect const> effects)
+{
+    auto tags = std::vector<std::string> {};
+    for (auto const& command: all<RunCommand>(effects))
+        tags.push_back(command.tag);
+    return tags;
+}
+
+} // namespace
+
+TEST_CASE("a restart takes over the poll a previous instance left running", "[orchestrator][engine]")
+{
+    auto const prs = readFixture(FixtureRoot::Testdata, "github/prs-open.json");
+
+    SECTION("a list the host still runs is awaited, not run again")
+    {
+        auto context = contextFor(Settings {});
+        context.inFlight = { "poll/contour/prs"s };
+        auto started = Engine::start(std::move(context));
+        auto const tags = runTagsOf(started.effects);
+        CHECK_FALSE(std::ranges::contains(tags, "poll/contour/prs"sv));
+        CHECK_FALSE(std::ranges::contains(tags, "poll/auth"sv));
+        CHECK(std::ranges::contains(tags, "poll/contour/issues/0"sv));
+
+        auto const effects = started.engine.step(
+            ProcessFinished { .tag = "poll/contour/prs", .outcome = ok(prs), .monoMs = StartMonoMs });
+        CHECK(started.engine.changeRequests("contour").size() == 5);
+        CHECK_FALSE(std::ranges::contains(runTagsOf(effects), "poll/contour/prs"sv));
+    }
+
+    SECTION("a list that finished is taken in")
+    {
+        auto context = contextFor(Settings {});
+        context.finished = { FinishedResult { .tag = "poll/contour/prs", .outcome = ok(prs) } };
+        auto const started = Engine::start(std::move(context));
+        auto const tags = runTagsOf(started.effects);
+        CHECK(started.engine.changeRequests("contour").size() == 5);
+        CHECK_FALSE(std::ranges::contains(tags, "poll/contour/prs"sv));
+        CHECK_FALSE(std::ranges::contains(tags, "poll/auth"sv));
+        // The lists the previous instance had not run are run now.
+        CHECK(std::ranges::contains(tags, "poll/contour/issues/0"sv));
+        CHECK(std::ranges::contains(tags, "poll/contour/default-branch"sv));
+        CHECK(std::ranges::contains(tags, "poll/contour/worktrees"sv));
+    }
+
+    SECTION("the login check the host still runs is awaited")
+    {
+        auto context = contextFor(Settings {});
+        context.inFlight = { "poll/auth"s };
+        auto started = Engine::start(std::move(context));
+        CHECK_FALSE(std::ranges::contains(runTagsOf(started.effects), "poll/auth"sv));
+
+        auto const effects = started.engine.step(
+            ProcessFinished { .tag = "poll/auth", .outcome = ok(), .monoMs = StartMonoMs });
+        CHECK(std::ranges::contains(runTagsOf(effects), "poll/contour/prs"sv));
+    }
+
+    SECTION("a list of a repository no longer configured starts a poll of its own")
+    {
+        auto context = contextFor(Settings {});
+        context.inFlight = { "poll/gone/prs"s };
+        context.finished = { FinishedResult { .tag = "poll/gone/issues/0", .outcome = ok() } };
+        auto const started = Engine::start(std::move(context));
+        CHECK(std::ranges::contains(runTagsOf(started.effects), "poll/auth"sv));
+    }
+}
+
+TEST_CASE("a resumed poll ends, and the next one is scheduled after it", "[orchestrator][engine]")
+{
+    auto const pollEvery = static_cast<uint64_t>(DefaultPollEvery.count());
+
+    SECTION("every command of it answers: the next poll is one interval after the last answer")
+    {
+        auto context = contextFor(Settings {});
+        context.inFlight = { "poll/contour/prs"s };
+        context.finished = { FinishedResult {
+            .tag = "poll/contour/issues/0",
+            .outcome = ok(readFixture(FixtureRoot::Testdata, "github/issues-open.json")) } };
+        auto started = Engine::start(std::move(context));
+        auto& engine = started.engine;
+        // Well inside every command's deadline.
+        auto const answeredMs = StartMonoMs + 1'000;
+        auto asked = answerAll(engine, started.effects, answeredMs);
+        auto const last = engine.step(
+            ProcessFinished { .tag = "poll/contour/prs",
+                              .outcome = ok(readFixture(FixtureRoot::Testdata, "github/prs-open.json")),
+                              .monoMs = answeredMs });
+        asked.insert(asked.end(), last.begin(), last.end());
+
+        // The wake the engine asks for last is the next poll's.
+        auto const wakes = all<WakeAt>(asked);
+        REQUIRE_FALSE(wakes.empty());
+        CHECK(wakes.back().monoMs == answeredMs + pollEvery);
+        CHECK(engine.problems().empty());
+        auto const early =
+            engine.step(Wake { .monoMs = answeredMs + pollEvery - 1, .wallMs = DispatchWallMs });
+        CHECK(all<RunCommand>(early).empty());
+        auto const due = engine.step(Wake { .monoMs = answeredMs + pollEvery, .wallMs = DispatchWallMs });
+        CHECK(std::ranges::contains(runTagsOf(due), "poll/contour/prs"sv));
+    }
+
+    SECTION("a list that never answers is abandoned, and the failed poll's successor is backed off")
+    {
+        auto context = contextFor(Settings {});
+        context.inFlight = { "poll/contour/prs"s };
+        auto started = Engine::start(std::move(context));
+        auto& engine = started.engine;
+        static_cast<void>(answerAll(engine, started.effects, StartMonoMs));
+
+        auto const overdueMs =
+            StartMonoMs + static_cast<uint64_t>((LongTimeout + CallDeadlineMargin).count()) + 1;
+        auto const abandoned = engine.step(Wake { .monoMs = overdueMs, .wallMs = DispatchWallMs });
+        CHECK(std::ranges::any_of(engine.problems(), [](std::string const& problem) {
+            return problem.contains("the pull request list failed");
+        }));
+        // One failure doubles the interval.
+        auto const wakes = all<WakeAt>(abandoned);
+        REQUIRE(wakes.size() == 1);
+        CHECK(wakes.front().monoMs == overdueMs + (2 * pollEvery));
+        auto const early =
+            engine.step(Wake { .monoMs = overdueMs + (2 * pollEvery) - 1, .wallMs = DispatchWallMs });
+        CHECK(all<RunCommand>(early).empty());
+        // The login is checked again first.
+        auto const due =
+            engine.step(Wake { .monoMs = overdueMs + (2 * pollEvery), .wallMs = DispatchWallMs });
+        CHECK(std::ranges::contains(runTagsOf(due), "poll/auth"sv));
+    }
+}
+
+TEST_CASE("a restart runs no list whose result it takes in", "[orchestrator][engine]")
+{
+
+    SECTION("the login check and a list finished: the check's answer issues the other lists only")
+    {
+        auto context = contextFor(Settings {});
+        context.finished = {
+            FinishedResult { .tag = "poll/auth", .outcome = ok() },
+            FinishedResult { .tag = "poll/contour/prs",
+                             .outcome = ok(readFixture(FixtureRoot::Testdata, "github/prs-open.json")) },
+        };
+        auto started = Engine::start(std::move(context));
+        // Every command of the start, and every one queued behind them, until the poll ends.
+        auto effects = started.effects;
+        auto const asked = answerAll(started.engine, started.effects, StartMonoMs + 1'000);
+        effects.insert(effects.end(), asked.begin(), asked.end());
+        auto const tags = runTagsOf(effects);
+        CHECK_FALSE(std::ranges::contains(tags, "poll/contour/prs"sv));
+        CHECK_FALSE(std::ranges::contains(tags, "poll/auth"sv));
+        for (auto const& tag: tags)
+        {
+            CAPTURE(tag);
+            CHECK(std::ranges::count(tags, tag) == 1);
+        }
+        CHECK(started.engine.changeRequests("contour").size() == 5);
+    }
+
+    SECTION("a worktree list finished with no forge command: the poll starts without it")
+    {
+        auto context = contextFor(Settings {});
+        context.finished = { FinishedResult { .tag = "poll/contour/worktrees",
+                                              .outcome = ok(worktreeList(ContourPath)) } };
+        auto const started = Engine::start(std::move(context));
+        auto const tags = runTagsOf(started.effects);
+        CHECK(std::ranges::contains(tags, "poll/auth"sv));
+        CHECK_FALSE(std::ranges::contains(tags, "poll/contour/worktrees"sv));
+    }
+}

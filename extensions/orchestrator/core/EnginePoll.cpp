@@ -199,11 +199,87 @@ void Engine::startPoll(std::vector<Effect>& out)
         _pollResult = PollResult::Failed;
         onListAnswered(out);
     }
+    issueWorktreeLists(out);
+}
+
+bool Engine::isResumable(std::string_view tag) const noexcept
+{
+    if (tag == AuthTag || tag == HooksTag)
+        return true;
+    // A list of a repository no longer configured is answered to nobody.
+    auto const parsed = parsePollTag(tag);
+    return parsed && findRepoState(parsed->repo) != nullptr;
+}
+
+bool Engine::isForgePoll(std::string_view tag) const noexcept
+{
+    if (tag == AuthTag)
+        return true;
+    auto const parsed = parsePollTag(tag);
+    return parsed && parsed->list != WorktreesList && findRepoState(parsed->repo) != nullptr;
+}
+
+void Engine::startOrResumePoll(StartContext const& context, std::vector<Effect>& out)
+{
+    // A previous instance's poll commands are this one's: the ones the host still runs are awaited, and the
+    // ones that finished are taken in below, rather than run again.
+    // Kept for the whole start: a list whose result is taken in below is never run again, by this function
+    // or by an answer it feeds (the login check's issues the lists).
+    auto& answered = _answeredAtStart;
+    answered.clear();
+    for (auto const& result: context.finished)
+        if (isResumable(result.tag))
+            answered.push_back(result.tag);
+    for (auto const& tag: context.inFlight)
+    {
+        if (!isResumable(tag))
+            continue;
+        // Its timeout class is not known here: the longer one.
+        _inFlight.push_back(InFlightCall {
+            .tag = tag,
+            .deadlineMs =
+                later(_monoMs, static_cast<uint64_t>((LongTimeout + CallDeadlineMargin).count())) });
+        if (isForgePoll(tag))
+            ++_pollOutstanding;
+    }
+    if (!std::ranges::contains(answered, HooksTag))
+        checkHooks(out);
+
+    auto const forgeAnswered = static_cast<std::size_t>(
+        std::ranges::count_if(answered, [&](std::string const& tag) { return isForgePoll(tag); }));
+    if (_pollOutstanding == 0 && forgeAnswered == 0)
+        startPoll(out);
+    else
+    {
+        // The results are counted before any is taken in, so that the poll ends with the last of them.
+        _pollOutstanding += forgeAnswered;
+        _pollResult = PollResult::Clean;
+        recheckFinished(out);
+        // A list is only ever run once the login was confirmed; the lists the previous instance had not run,
+        // or whose results it took in before it went, are run now.
+        auto const isList = [&](std::string_view tag) {
+            return tag != AuthTag && isForgePoll(tag);
+        };
+        if (std::ranges::any_of(answered, isList) || std::ranges::any_of(context.inFlight, isList))
+        {
+            _auth = AuthState::LoggedIn;
+            _authCheck = AuthCheck::Skip;
+            issueLists(out);
+        }
+        issueWorktreeLists(out);
+    }
+    for (auto const& result: context.finished)
+        if (std::ranges::contains(answered, result.tag))
+            onPollResult(result.tag, result.outcome, out);
+}
+
+void Engine::issueWorktreeLists(std::vector<Effect>& out)
+{
     // The worktree lists need no forge: cleanup works while `gh` is logged out.
     for (auto const& repo: _config->repos())
     {
         auto tag = std::format("{}{}/{}", PollTagPrefix, repo.name, WorktreesList);
-        if (!isPending(tag))
+        if (!isPending(tag) && !std::ranges::contains(_answeredAtStart, tag))
             static_cast<void>(issuePoll(std::move(tag), WorktreeListCommand, {}, repo.path, out));
     }
 }
@@ -216,24 +292,23 @@ void Engine::issueLists(std::vector<Effect>& out)
         auto const* const state = findRepoState(repo.name);
         if (provider == nullptr || state == nullptr)
             continue;
-        auto const tagFor = [&](std::string_view list) {
-            return std::format("{}{}/{}", PollTagPrefix, repo.name, list);
-        };
-        // Only a command handed to the host is waited for.
-        auto const count = [&](Issued issued) {
-            if (issued == Issued::Yes)
-                ++_pollOutstanding;
-        };
+        // Only a command handed to the host is waited for; one it runs or answered already is not run again.
+        auto const issueList =
+            [&](std::string_view list, std::string_view command, std::vector<Argument> arguments) {
+                auto tag = std::format("{}{}/{}", PollTagPrefix, repo.name, list);
+                if (isPending(tag) || std::ranges::contains(_answeredAtStart, tag))
+                    return;
+                if (issuePoll(std::move(tag), command, std::move(arguments), repo.path, out) == Issued::Yes)
+                    ++_pollOutstanding;
+            };
         if (!repo.base && !state->defaultBranch)
-            count(issuePoll(tagFor(DefaultBranchList), provider->defaultBranch, {}, repo.path, out));
-        count(issuePoll(tagFor(PrsList), provider->listChangeRequests, {}, repo.path, out));
+            issueList(DefaultBranchList, provider->defaultBranch, {});
+        issueList(PrsList, provider->listChangeRequests, {});
         auto index = std::size_t { 0 };
         for (auto const& query: repo.issueQueries)
-            count(issuePoll(tagFor(std::format("{}{}", IssuesList, index++)),
-                            provider->listIssues,
-                            { Argument { .name = "query", .value = query } },
-                            repo.path,
-                            out));
+            issueList(std::format("{}{}", IssuesList, index++),
+                      provider->listIssues,
+                      { Argument { .name = "query", .value = query } });
     }
 }
 

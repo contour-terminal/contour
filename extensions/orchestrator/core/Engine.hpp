@@ -486,8 +486,12 @@ class Engine
     [[nodiscard]] std::expected<Run, DispatchRefusal> prepare(Dispatch const& request) const;
 
     // Defined in EnginePoll.cpp: the polls, the lists and the status boards.
+    void startOrResumePoll(StartContext const& context, std::vector<Effect>& out);
     void startPoll(std::vector<Effect>& out);
     void issueLists(std::vector<Effect>& out);
+    void issueWorktreeLists(std::vector<Effect>& out);
+    [[nodiscard]] bool isResumable(std::string_view tag) const noexcept;
+    [[nodiscard]] bool isForgePoll(std::string_view tag) const noexcept;
     [[nodiscard]] Issued issuePoll(std::string tag,
                                    std::string_view command,
                                    std::vector<Argument> arguments,
@@ -519,7 +523,8 @@ class Engine
     std::vector<InFlightCall> _inFlight;
     std::vector<InFlightCall> _paneOpenings; ///< The tabs asked for and not yet answered for, by run id.
     std::deque<Queued> _queue;
-    std::vector<std::string> _startProblems; ///< The configuration's, the store's and the outside runs'.
+    std::vector<std::string> _answeredAtStart; ///< During start(): the poll tags whose results it takes in.
+    std::vector<std::string> _startProblems;   ///< The configuration's, the store's and the outside runs'.
     std::map<std::string, std::vector<std::string>, std::less<>> _pollProblems; ///< By poll tag.
     std::vector<std::string> _problems;
     HooksState _hooks = HooksState::Unknown;

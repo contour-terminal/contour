@@ -150,10 +150,10 @@ Engine::Started Engine::start(StartContext context)
         // A run stored waiting for a main checkout that needs no listing, such as one of a repository no
         // longer configured, goes on now.
         engine.resumeCheckoutWaits(out);
-        engine.checkHooks(out);
-        engine.startPoll(out);
+        engine.startOrResumePoll(context, out);
     }
     engine.endStep(out, engine._revision + 1);
+    engine._answeredAtStart.clear();
     return Started { .engine = std::move(engine), .effects = std::move(out) };
 }
 
