@@ -200,10 +200,10 @@ TEST_CASE("KittyGraphics.query_validates_what_a_transmission_would_reject", "[ki
     // to: its feature probe already said yes.
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
 
-    SECTION("unsupported medium")
+    SECTION("a file medium on a terminal that reads none")
     {
         mock.writeToScreen("\033_Gi=31,s=1,v=1,a=q,t=t,f=24;AAAA\033\\"sv);
-        CHECK(mock.terminal.peekInput().contains("ENOTSUP"));
+        CHECK(mock.terminal.peekInput() == "\033_Gi=31;EBADF:file not readable\033\\");
     }
 
     SECTION("compressed payload is supported")
@@ -420,11 +420,11 @@ TEST_CASE("KittyGraphics.a_png_is_decoded_before_it_is_stored", "[kitty]")
 
 TEST_CASE("KittyGraphics.unsupported_media_are_refused_not_ignored", "[kitty]")
 {
-    // Reading a path the application names would let it point the terminal at any file the user can
-    // read; saying ENOTSUP is both safer and more useful than silence.
+    // A terminal given no medium services reads no path the application names, and says so rather than
+    // staying silent: the application then falls back to direct transmission.
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
     mock.writeToScreen("\033_Ga=T,f=32,s=1,v=1,t=f,i=3;L3RtcC94\033\\"sv);
-    CHECK(mock.terminal.peekInput().contains("ENOTSUP"));
+    CHECK(mock.terminal.peekInput() == "\033_Gi=3;EBADF:file not readable\033\\");
 }
 
 TEST_CASE("KittyGraphics.chunked_transmission_is_reassembled", "[kitty]")

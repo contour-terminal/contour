@@ -132,6 +132,22 @@ class MockTerm: public Terminal::NullEvents
     {
     }
 
+    /// A terminal reading kitty file media through @p kittyMedia; everything else as `MockTerm { size }`.
+    /// @param size The page size.
+    /// @param kittyMedia The medium source and policy. The source is borrowed: it must outlive the terminal.
+    MockTerm(PageSize size, kitty_graphics::KittyMediumServices kittyMedia):
+        MockTerm { createSettings(size, HistoryLimits {}, 1024),
+                   core::defaultEnvironment(),
+                   core::platform::NativeFileSystem::instance(),
+                   std::nullopt,
+                   &fixedOffsetLocalTime<>,
+                   std::nullopt,
+                   std::nullopt,
+                   std::nullopt,
+                   std::move(kittyMedia) }
+    {
+    }
+
     /// A terminal showing the status-line extensions @p extensionServices names.
     MockTerm(PageSize size, StatusLineExtensionServices extensionServices):
         MockTerm { createSettings(size, HistoryLimits {}, 1024),
@@ -540,7 +556,8 @@ class MockTerm: public Terminal::NullEvents
              LocalTimeConverter localTime,
              std::optional<LinkDetectionServices> linkServices,
              std::optional<StatusLineExtensionServices> extensionServices,
-             std::optional<GitHeadServices> gitServices = std::nullopt);
+             std::optional<GitHeadServices> gitServices = std::nullopt,
+             std::optional<kitty_graphics::KittyMediumServices> kittyMedia = std::nullopt);
 };
 
 template <typename PtyDevice>
@@ -581,7 +598,8 @@ inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
                                      LocalTimeConverter localTime,
                                      std::optional<LinkDetectionServices> linkServices,
                                      std::optional<StatusLineExtensionServices> extensionServices,
-                                     std::optional<GitHeadServices> gitServices):
+                                     std::optional<GitHeadServices> gitServices,
+                                     std::optional<kitty_graphics::KittyMediumServices> kittyMedia):
     terminal { *this,
                environment,
                fileSystem,
@@ -596,7 +614,8 @@ inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
                },
                std::move(linkServices),
                extensionServices,
-               gitServices }
+               gitServices,
+               std::move(kittyMedia) }
 {
     if (auto const logFilterString = core::defaultEnvironment().get("LOG"))
     {

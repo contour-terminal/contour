@@ -111,6 +111,26 @@ namespace // {{{ helpers
 
 namespace
 {
+    /// Holds a ByteOrigin for the length of one parse, and restores the one before it afterwards, however
+    /// the parse ends: a PTY batch must not leave the origin at Pty for the host's writes that follow.
+    class ByteOriginScope
+    {
+      public:
+        ByteOriginScope(ByteOrigin& slot, ByteOrigin origin) noexcept: _slot { slot }, _previous { slot }
+        {
+            _slot = origin;
+        }
+        ~ByteOriginScope() { _slot = _previous; }
+        ByteOriginScope(ByteOriginScope const&) = delete;
+        ByteOriginScope(ByteOriginScope&&) = delete;
+        ByteOriginScope& operator=(ByteOriginScope const&) = delete;
+        ByteOriginScope& operator=(ByteOriginScope&&) = delete;
+
+      private:
+        ByteOrigin& _slot;
+        ByteOrigin _previous;
+    };
+
     /// Non-zero while this thread is inside VTParser::parseFragment().
     ///
     /// The parser is a state machine that is not safe to re-enter. A sequence handler that replies
@@ -318,7 +338,8 @@ Terminal::Terminal(Events& eventListener,
                    SemanticBlockTokenSource sessionTokens,
                    std::optional<LinkDetectionServices> linkServices,
                    std::optional<StatusLineExtensionServices> extensionServices,
-                   std::optional<GitHeadServices> gitServices):
+                   std::optional<GitHeadServices> gitServices,
+                   std::optional<kitty_graphics::KittyMediumServices> kittyMedia):
     _eventListener { eventListener },
     // HOME, or Windows' USERPROFILE, when the composition root names none.
     _homeDirectory { !factorySettings.homeDirectory.empty()
@@ -329,6 +350,7 @@ Terminal::Terminal(Events& eventListener,
                                .value_or(std::string {}) },
     _fileSystem { fileSystem },
     _linkServices { std::move(linkServices) },
+    _kittyMedia { std::move(kittyMedia) },
     // Read here rather than per reply: what it names is how this terminal was launched, and a
     // configuration value re-read on every DA/DSR/CPR is a lookup on a path that answers thousands
     // of times a second.
@@ -774,6 +796,7 @@ bool Terminal::processInputOnce()
         // Parse against the buffer readFromPty() read into: Screen's bulk text path moves this buffer's hot
         // end past the text it parsed. writeToScreen() parses out of a buffer of its own.
         _parsingBuffer = ptyReadResult->buffer;
+        auto const origin = ByteOriginScope { _byteOrigin, ByteOrigin::Pty };
         for (auto const& piece: batch)
         {
             _usingStdoutFastPipe = piece.fromStdoutFastPipe;
@@ -2915,7 +2938,23 @@ void Terminal::writeToScreen(string_view vtStream)
 {
     ZoneScoped;
     TracyPlot("pty.parse.bytes", static_cast<int64_t>(vtStream.size()));
-    runParseBatch(std::unique_lock { _ownStateLock }, [&] { parseFragmentChunked(vtStream); });
+    runParseBatch(std::unique_lock { _ownStateLock }, [&] {
+        auto const origin = ByteOriginScope { _byteOrigin, ByteOrigin::Injected };
+        parseFragmentChunked(vtStream);
+    });
+}
+
+kitty_graphics::KittyMediumServices const* Terminal::kittyMediaForCurrentBatch() const noexcept
+{
+    if (!_kittyMedia || _byteOrigin != ByteOrigin::Pty)
+        return nullptr;
+    // A replica's bytes come from a daemon, which reads files where its application wrote them.
+    if (_replicaRole.load(std::memory_order_acquire) != ReplicaRole::None)
+        return nullptr;
+    // `ssh` typed into a local pane: the bytes come from the local PTY, the path names a file over there.
+    if (_contexts.localityOf(_contexts.activeId(), localIdentity()) == ContextLocality::Foreign)
+        return nullptr;
+    return &*_kittyMedia;
 }
 
 Terminal::BatchClock::BatchClock(Screen& primary, uint32_t stamp) noexcept: _primary { primary }

@@ -1,0 +1,202 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Kitty file media (`t=f`, `t=t`) on a terminal: read through the injected source only for bytes a local
+// process wrote to the PTY, and answered with one refusal for every failure.
+
+#include <vtbackend/graphics/KittyMediumSource.hpp>
+#include <vtbackend/testing/MockTerm.hpp>
+
+#include <core/Base64.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <format>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+using namespace std::string_view_literals;
+using namespace vtbackend;
+using namespace vtbackend::kitty_graphics;
+
+namespace
+{
+/// The path Claude Code's probe names, as it writes it.
+constexpr auto ProbePath = "/tmp/tty-graphics-protocol-probe.rgba"sv;
+
+/// A medium source that serves fixed bytes, or a fixed refusal, and records what it was asked.
+class FakeMediumSource final: public KittyMediumSource
+{
+  public:
+    std::expected<std::vector<uint8_t>, MediaRefusal> result = std::vector<uint8_t> { 1, 2, 3, 255 };
+    mutable std::vector<std::pair<std::string, Medium>> requests;
+
+    [[nodiscard]] std::expected<std::vector<uint8_t>, MediaRefusal> read(
+        std::string_view path, Medium medium, MediaPolicy const& /*policy*/) const override
+    {
+        requests.emplace_back(std::string { path }, medium);
+        return result;
+    }
+};
+
+[[nodiscard]] MediaPolicy enabledPolicy()
+{
+    return MediaPolicy { .transmission = FileTransmission::Enabled,
+                         .temporaryRoots = { "/tmp" },
+                         .allowedRoots = {},
+                         .userId = 0,
+                         .sizeLimit = 1024 };
+}
+
+/// A terminal that reads kitty file media from @p source.
+[[nodiscard]] KittyMediumServices servicesOf(FakeMediumSource const& source)
+{
+    return KittyMediumServices { .source = source, .policy = enabledPolicy() };
+}
+
+/// @return Claude Code's 1x1 RGBA file probe, with the medium @p medium.
+[[nodiscard]] std::string probe(char medium = 'f', std::string_view action = "q")
+{
+    return std::format(
+        "\033_Ga={},i=31,s=1,v=1,t={},f=32;{}\033\\", action, medium, core::base64::encode(ProbePath));
+}
+
+constexpr auto Ok = "\033_Gi=31;OK\033\\"sv;
+constexpr auto Refused = "\033_Gi=31;EBADF:file not readable\033\\"sv;
+} // namespace
+
+TEST_CASE("KittyMedia.probe_from_the_pty_is_read", "[kitty][media]")
+{
+    auto const source = FakeMediumSource {};
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+
+    mock.writeToScreen(probe());
+
+    CHECK(mock.terminal.peekInput() == Ok);
+    REQUIRE(source.requests.size() == 1);
+    CHECK(source.requests[0].first == ProbePath);
+    CHECK(source.requests[0].second == Medium::File);
+    // A query stores nothing.
+    CHECK(mock.terminal.primaryScreen().kittyImage(31) == nullptr);
+}
+
+TEST_CASE("KittyMedia.temporary_file_reaches_the_source_as_such", "[kitty][media]")
+{
+    auto const source = FakeMediumSource {};
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+
+    mock.writeToScreen(probe('t'));
+
+    CHECK(mock.terminal.peekInput() == Ok);
+    REQUIRE(source.requests.size() == 1);
+    CHECK(source.requests[0].second == Medium::TemporaryFile);
+}
+
+TEST_CASE("KittyMedia.transmission_stores_the_file", "[kitty][media]")
+{
+    auto const source = FakeMediumSource {};
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+
+    mock.writeToScreen(probe('f', "t"));
+
+    CHECK(mock.terminal.peekInput() == Ok);
+    auto const image = mock.terminal.primaryScreen().kittyImage(31);
+    REQUIRE(image != nullptr);
+    CHECK(image->data() == std::vector<uint8_t> { 1, 2, 3, 255 });
+}
+
+TEST_CASE("KittyMedia.a_frame_reads_the_file", "[kitty][media]")
+{
+    auto const source = FakeMediumSource {};
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+    mock.writeToScreen("\033_Ga=t,i=31,s=1,v=1,f=32;AAAA/w==\033\\"sv);
+    mock.discardPendingReplies();
+
+    mock.writeToScreen(probe('f', "f"));
+
+    CHECK(mock.terminal.peekInput() == Ok);
+    CHECK(source.requests.size() == 1);
+    CHECK(mock.terminal.primaryScreen().kittyFrameImage(31, 2) != nullptr);
+}
+
+TEST_CASE("KittyMedia.every_failure_gets_one_refusal", "[kitty][media]")
+{
+    auto source = FakeMediumSource {};
+
+    SECTION("the source refuses")
+    {
+        source.result = std::unexpected(MediaRefusal::OutsideRoots);
+        auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+        mock.writeToScreen(probe());
+        CHECK(mock.terminal.peekInput() == Refused);
+    }
+
+    SECTION("the file does not match the dimensions")
+    {
+        source.result = std::vector<uint8_t> { 1, 2, 3 };
+        auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+        mock.writeToScreen(probe('f', "t"));
+        CHECK(mock.terminal.peekInput() == Refused);
+        CHECK(mock.terminal.primaryScreen().kittyImage(31) == nullptr);
+    }
+
+    SECTION("t=s is never read")
+    {
+        auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+        mock.writeToScreen(probe('s'));
+        CHECK(mock.terminal.peekInput() == Refused);
+        CHECK(source.requests.empty());
+    }
+
+    SECTION("a terminal without medium services")
+    {
+        auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+        mock.writeToScreen(probe());
+        CHECK(mock.terminal.peekInput() == Refused);
+    }
+
+    SECTION("a disabled policy")
+    {
+        auto services = servicesOf(source);
+        services.policy.transmission = FileTransmission::Disabled;
+        auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, services };
+        mock.writeToScreen(probe());
+        CHECK(mock.terminal.peekInput() == Refused);
+        CHECK(source.requests.empty());
+    }
+}
+
+TEST_CASE("KittyMedia.only_bytes_from_a_local_pty_are_read", "[kitty][media]")
+{
+    auto const source = FakeMediumSource {};
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+
+    SECTION("written by the host, not the PTY")
+    {
+        mock.terminal.writeToScreen(probe());
+        CHECK(mock.terminal.peekInput() == Refused);
+        CHECK(source.requests.empty());
+
+        // The PTY's next batch is read again: the host's write left no origin behind.
+        mock.discardPendingReplies();
+        mock.writeToScreen(probe());
+        CHECK(mock.terminal.peekInput() == Ok);
+    }
+
+    SECTION("while the active context is behind a host boundary")
+    {
+        mock.writeToScreen("\033]3008;start=abc;type=container;container=foobar\033\\"sv);
+        mock.writeToScreen(probe());
+        CHECK(mock.terminal.peekInput() == Refused);
+        CHECK(source.requests.empty());
+    }
+
+    SECTION("on a replica of a daemon's terminal")
+    {
+        mock.terminal.bindReplica(ReplicaRole::SameMachine, HostIdentity {});
+        mock.writeToScreen(probe());
+        CHECK(mock.terminal.peekInput() == Refused);
+        CHECK(source.requests.empty());
+    }
+}
