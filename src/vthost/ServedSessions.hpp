@@ -133,7 +133,7 @@ class ServedTabHost
     ServedTabHost& operator=(ServedTabHost&&) = delete;
     virtual ~ServedTabHost() = default;
 
-    /// Creates a served tab in @p workspace, activated there as every new tab is.
+    /// Creates a served tab in @p workspace, activated there or in the background as @p request says.
     /// @param workspace Where.
     /// @param request The spawn: its `served` names the device.
     /// @return Its session; nullopt when it was refused (the workspace is gone, a live upgrade runs).
@@ -288,6 +288,9 @@ class ServedSessions final: public IServedTabs, public IServedTabLookup
         std::shared_ptr<vtpty::ChannelPty> device;     ///< What it runs on.
         std::shared_ptr<DeviceState> state;            ///< What its device recorded.
         std::optional<vtworkspace::SessionId> session; ///< Its session, once Open.
+        /// While Pending: the window a user action just now asked to show it in, with the workspace that
+        /// window showed; nullopt: it is created in the background.
+        std::optional<std::pair<ConnectionId, vtworkspace::WorkspaceId>> shownIn;
     };
 
     /// A device and what its sinks record.
@@ -306,7 +309,19 @@ class ServedSessions final: public IServedTabs, public IServedTabLookup
     ///         _mutex.
     [[nodiscard]] Tab* ownedBy(std::string_view extension, std::string_view id);
 
-    /// Creates the session of the pending tab @p id, or drops it if it was cancelled meanwhile. Loop thread.
+    /// Shows the tab @p id in @p connection's window, as a user action just now asked: at once when it has
+    /// @p session, or once a pending tab is created (Tab::shownIn). Any thread; call holding no lock.
+    /// @param id The tab.
+    /// @param session Its session, as last seen; nullopt while it was pending.
+    /// @param connection The window to show it in.
+    /// @param workspace The workspace that window shows.
+    void showOnceCreated(std::string const& id,
+                         std::optional<vtworkspace::SessionId> session,
+                         ConnectionId const& connection,
+                         vtworkspace::WorkspaceId workspace);
+
+    /// Creates the session of the pending tab @p id, in the background, or drops it if it was cancelled
+    /// meanwhile; shows it where Tab::shownIn says. Loop thread.
     void create(std::string const& id, std::string const& title, std::string const& moduleDigest);
 
     /// Removes @p id from the mirror. Call holding _mutex.

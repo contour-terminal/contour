@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/screen/TerminalClocks.hpp>
+
 #include <vtpty/ChannelPty.hpp>
 #include <vtpty/MockPty.hpp>
 
@@ -8,6 +10,7 @@
 #include <core/net/EventLoop.hpp>
 #include <core/net/testing/CoroTestSupport.hpp>
 #include <core/net/testing/ScriptedBackend.hpp>
+#include <core/platform/Clock.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -193,24 +196,34 @@ struct ServedBench
                   // A shell that never ends by itself: its pane lives as long as the test.
                   return std::make_unique<vtpty::ChannelPty>(size);
               },
-               SessionHostConfig {
-                   .daemonWorld =
-                       [this](DaemonWorldEvents events, OwnerPost post, DaemonWorldWiring wiring) {
-                           tabs = &wiring.tabs;
-                           world = std::make_shared<vthost::testing::FakeDaemonWorldHosting>(
-                               journal, std::move(post), std::move(events));
-                           world->rows = { ExtensionActionRows { .extension = std::string(Orchestrator),
-                                                                 .title = "Agents",
-                                                                 .state = DaemonExtensionState::Running,
-                                                                 .rows = { { "open", "Open Agents" } } },
-                                           ExtensionActionRows { .extension = "other",
-                                                                 .title = "Other",
-                                                                 .state = DaemonExtensionState::Running,
-                                                                 .rows = { { "open", "Open Other" } } } };
-                           return world;
-                       },
-                   .uuids = std::make_shared<vtcontrol::testing::SequentialUuidSource>(),
-                   .servedIds = std::make_shared<ServedUuids>() } }
+               [this] {
+                   auto config = SessionHostConfig {
+                       .daemonWorld =
+                           [this](DaemonWorldEvents events, OwnerPost post, DaemonWorldWiring wiring) {
+                               tabs = &wiring.tabs;
+                               world = std::make_shared<vthost::testing::FakeDaemonWorldHosting>(
+                                   journal, std::move(post), std::move(events));
+                               world->rows = { ExtensionActionRows { .extension = std::string(Orchestrator),
+                                                                     .title = "Agents",
+                                                                     .state = DaemonExtensionState::Running,
+                                                                     .rows = { { "open", "Open Agents" } } },
+                                               ExtensionActionRows { .extension = "other",
+                                                                     .title = "Other",
+                                                                     .state = DaemonExtensionState::Running,
+                                                                     .rows = { { "open", "Open Other" } } } };
+                               return world;
+                           },
+                       .uuids = std::make_shared<vtcontrol::testing::SequentialUuidSource>(),
+                       .servedIds = std::make_shared<ServedUuids>()
+                   };
+                   // How long ago the user invoked an action, when an open or reveal claims it, is judged by
+                   // this clock.
+                   config.clocks =
+                       vtbackend::TerminalClocks { .steady = clock,
+                                                   .wall = core::platform::defaultSystemWallClock(),
+                                                   .localTime = &vtbackend::systemLocalTime };
+                   return config;
+               }() }
     {
         auto* const tab = live.host.createTab();
         REQUIRE(tab != nullptr);
@@ -227,6 +240,13 @@ struct ServedBench
         window.selected = workspace.value;
         live.host.subscribeStream(&window);
         live.host.noteClientAttached(&window);
+        return invoke(window, extension);
+    }
+
+    /// Invokes @p extension's action from @p window, as the user does: its origin may be shown in once, now.
+    /// @return Its origin.
+    [[nodiscard]] Origin invoke(FakeWindow const& window, std::string_view extension = Orchestrator)
+    {
         REQUIRE(live.host.invokeExtensionAction(window.connectionId(), extension, "open")
                 == InvocationEffect::Deliver);
         auto const taken = live.host.extensionActions().take(extension);
@@ -305,6 +325,7 @@ struct ServedBench
     /// Turns the loop once.
     void turn() { std::ignore = live.loop.runOnce(0ms); }
 
+    core::platform::ManualClock clock; ///< The host's steady clock: declared before the host that reads it.
     std::shared_ptr<std::vector<std::string>> journal = std::make_shared<std::vector<std::string>>();
     std::shared_ptr<vthost::testing::FakeDaemonWorldHosting> world;
     IServedTabs* tabs = nullptr;
@@ -498,14 +519,16 @@ TEST_CASE("two opens in one batch make one tab", "[daemon][served]")
     auto const second = bench.tabs->open(Orchestrator, "Agents", "", AgentsScheme, origin);
     REQUIRE(first.has_value());
     CHECK(second == first);
-    std::ignore = bench.sessionOf(*first);
+    auto const session = bench.sessionOf(*first);
     bench.turn();
     CHECK(bench.served().size() == 1);
     CHECK(bench.tabs->list(Orchestrator).size() == 1);
+    // The user's action stood behind the first open alone: the new tab was shown once.
+    CHECK(window.reveals == std::vector { session });
 
-    // Opened once more, the open tab is the answer, revealed where the window is.
-    CHECK(bench.tabs->open(Orchestrator, "Agents", "", AgentsScheme, origin) == first);
-    CHECK(bench.live.eventually([&] { return !window.reveals.empty(); }));
+    // Opened once more on the next action, the open tab is the answer, revealed where the window is.
+    CHECK(bench.tabs->open(Orchestrator, "Agents", "", AgentsScheme, bench.invoke(window)) == first);
+    CHECK(bench.live.eventually([&] { return window.reveals == std::vector { session, session }; }));
     CHECK(bench.served().size() == 1);
 }
 
@@ -524,7 +547,7 @@ TEST_CASE("open from a second workspace opens a second dashboard", "[daemon][ser
     CHECK(*a != *b);
     CHECK(bench.workspaceOf(bench.sessionOf(*a)) == bench.first);
     CHECK(bench.workspaceOf(bench.sessionOf(*b)) == second);
-    // Each activated in its workspace, as a new tab is.
+    // Each activated in its workspace, as the user's action just now asked.
     CHECK(bench.activeIn(bench.first) == bench.sessionOf(*a));
     CHECK(bench.activeIn(second) == bench.sessionOf(*b));
     CHECK(bench.tabs->list(Orchestrator).size() == 2);
@@ -598,14 +621,16 @@ TEST_CASE("a reveal in the window's own workspace activates and tells it", "[dae
     auto const origin = bench.attach(window, bench.first);
     auto const opened = bench.tabs->open(Orchestrator, "Agents", "", AgentsScheme, origin);
     REQUIRE(opened.has_value());
-    // Pending, a reveal answers ok and does nothing more: the creation activates the tab.
+    // Pending, a reveal on the origin the open claimed answers ok and does nothing more: the creation shows
+    // the tab, once.
     CHECK(bench.tabs->reveal(Orchestrator, *opened, origin).has_value());
     auto const session = bench.sessionOf(*opened);
     REQUIRE(bench.live.host.createTabIn(bench.first) != nullptr);
     bench.turn();
-    CHECK(window.reveals.empty());
+    CHECK(window.reveals == std::vector { session });
+    window.reveals.clear();
 
-    REQUIRE(bench.tabs->reveal(Orchestrator, *opened, origin).has_value());
+    REQUIRE(bench.tabs->reveal(Orchestrator, *opened, bench.invoke(window)).has_value());
     CHECK(bench.live.eventually([&] { return window.reveals == std::vector { session }; }));
     CHECK(bench.activeIn(bench.first) == session);
     CHECK(window.switches.empty());
@@ -622,6 +647,7 @@ TEST_CASE("a tab-reveal without an origin goes to the window that just typed int
     auto const session = bench.sessionOf(*opened);
     REQUIRE(bench.live.host.createTabIn(bench.first) != nullptr);
     bench.turn();
+    typing.reveals.clear();
     auto const gone = std::expected<void, ServedTabError> { std::unexpect, ServedTabError::Gone };
     // Before any key: no user action stands behind origin 0.
     CHECK(bench.tabs->reveal(Orchestrator, *opened, 0) == gone);
@@ -659,6 +685,74 @@ TEST_CASE("tab-open returns at once and the tab follows on the loop", "[daemon][
     CHECK(bench.live.host.sessionCount() == sessionsBefore + 1);
     CHECK(bench.tabs->list(Orchestrator).front().state == ServedTabState::Open);
     CHECK(bench.live.eventually([&] { return bench.tabHints() > hintsBefore; }));
+}
+
+TEST_CASE("a new tab is shown only on the user's action of just now, and once", "[daemon][served]")
+{
+    auto bench = ServedBench {};
+    auto window = FakeWindow { 1 };
+    auto const origin = bench.attach(window, bench.first); // the user invokes "Agents: Open dashboard"
+    REQUIRE(bench.activeIn(bench.first) == bench.shell);
+
+    // Opens the dashboard on origin, and turns the loop until it exists.
+    auto const openNow = [&] {
+        auto const opened = bench.tabs->open(Orchestrator, "Agents", "", AgentsScheme, origin);
+        REQUIRE(opened.has_value());
+        auto const session = bench.sessionOf(*opened);
+        bench.turn();
+        CHECK(bench.workspaceOf(session) == bench.first);
+        return session;
+    };
+    // Created, but in the background: no window raised or asked to switch, the user's tab still active.
+    auto const inTheBackground = [&] {
+        std::ignore = openNow();
+        bench.turn();
+        CHECK(window.reveals.empty());
+        CHECK(window.switches.empty());
+        CHECK(bench.activeIn(bench.first) == bench.shell);
+    };
+
+    SECTION("within the grace: activated, and its window raised")
+    {
+        bench.clock.advance(vthost::ServedInputGrace);
+        auto const session = openNow();
+        CHECK(bench.live.eventually([&] { return window.reveals == std::vector { session }; }));
+        CHECK(bench.activeIn(bench.first) == session);
+    }
+    SECTION("just past the grace: in the background")
+    {
+        bench.clock.advance(vthost::ServedInputGrace + std::chrono::milliseconds { 1 });
+        inTheBackground();
+    }
+    SECTION("hours later, while the user types elsewhere: in the background")
+    {
+        bench.clock.advance(std::chrono::hours { 3 });
+        inTheBackground();
+    }
+    SECTION("an origin a reveal claimed already: in the background")
+    {
+        REQUIRE(bench.live.host.extensionActions().claimReveal(Orchestrator, origin).has_value());
+        inTheBackground();
+    }
+    bench.detach(window);
+}
+
+TEST_CASE("a tab opened in the background is shown once created when the user asks meanwhile",
+          "[daemon][served]")
+{
+    auto bench = ServedBench {};
+    auto window = FakeWindow { 1 };
+    auto const origin = bench.attach(window, bench.first);
+    bench.clock.advance(std::chrono::hours { 3 });
+    auto const opened = bench.tabs->open(Orchestrator, "Agents", "", AgentsScheme, origin);
+    REQUIRE(opened.has_value());
+
+    // Still pending, the user's next action reveals it: its creation shows it.
+    REQUIRE(bench.tabs->reveal(Orchestrator, *opened, bench.invoke(window)).has_value());
+    auto const session = bench.sessionOf(*opened);
+    CHECK(bench.live.eventually([&] { return window.reveals == std::vector { session }; }));
+    CHECK(bench.activeIn(bench.first) == session);
+    bench.detach(window);
 }
 
 TEST_CASE("an origin that left fails the open as gone", "[daemon][served]")

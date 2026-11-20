@@ -431,8 +431,9 @@ again in a later callback", which starts with a fresh budget, not "the store is 
   hours later would raise a window while the user types elsewhere, and their keys would follow it. A key
   typed or a mouse button pressed into one of its served tabs is a user action too: for at most 2 s after
   it, a reveal without such an origin (0 included) goes to the window that key or click came from -- which
-  is how a dashboard reveals from its own key bindings, whose input carries no origin; `tab-reveal`, and
-  `tab-open` of a tab already open, follow the same rule. Past that, an origin it was never handed (0, or
+  is how a dashboard reveals from its own key bindings, whose input carries no origin; `tab-reveal` and
+  `tab-open` follow the same rule, and a tab `tab-open` creates without such an action behind it opens in the
+  background -- created, but no window raised, nothing activated, no focus taken. Past that, an origin it was never handed (0, or
   another extension's), one stale or consumed, or one whose window has gone raises no window, activates no
   tab, and answers `gone`: a reveal needs a user action behind it, just now. A pane it closed answers `gone` until its session ended, `not-owned` after;
 - `file-read`: regular files inside a root declared readable, of at most 64 KiB.

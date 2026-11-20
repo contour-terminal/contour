@@ -340,7 +340,8 @@ std::expected<std::string, ServedTabError> ServedSessions::open(std::string_view
     if (!connection)
         return std::unexpected(ServedTabError::Gone);
     auto id = std::string {};
-    auto reveal = std::optional<std::pair<vtworkspace::SessionId, vtworkspace::WorkspaceId>> {};
+    auto session = std::optional<vtworkspace::SessionId> {};
+    auto where = vtworkspace::WorkspaceId {};
     auto created = false;
     {
         auto const lock = std::lock_guard { _mutex };
@@ -349,6 +350,7 @@ std::expected<std::string, ServedTabError> ServedSessions::open(std::string_view
         auto const workspace = _workspaces.selectedBy(*connection);
         if (!workspace)
             return std::unexpected(ServedTabError::Gone);
+        where = *workspace;
         // One dashboard per extension and workspace: a second open, pending or not, is the first one.
         auto const existing = std::ranges::find_if(_tabs, [&](Tab const& tab) {
             return tab.extension == extension && tab.workspace == *workspace
@@ -356,9 +358,7 @@ std::expected<std::string, ServedTabError> ServedSessions::open(std::string_view
         });
         if (existing != _tabs.end())
         {
-            // A pending one is activated by its creation.
-            if (existing->session)
-                reveal.emplace(*existing->session, *workspace);
+            session = existing->session;
             id = existing->id;
         }
         else
@@ -374,20 +374,45 @@ std::expected<std::string, ServedTabError> ServedSessions::open(std::string_view
                                   .phase = TabPhase::Pending,
                                   .device = std::move(tracked.device),
                                   .state = std::move(tracked.state),
-                                  .session = std::nullopt });
+                                  .session = std::nullopt,
+                                  .shownIn = std::nullopt });
             created = true;
         }
     }
+    // Shown -- new or again -- only as an action the user invoked just now asks; else a new tab is created
+    // in the background, and one open already stays where it is.
+    if (auto const claimed = _origins.claimReveal(extension, origin))
+        showOnceCreated(id, session, *claimed, where);
     if (created)
         _post([this, id, title = std::string(title), moduleDigest = std::string(moduleDigest)] {
             create(id, title, moduleDigest);
         });
-    else if (auto const claimed = reveal ? _origins.claimReveal(extension, origin) : std::nullopt)
-        // Shown again only as an action the user invoked just now asks.
-        _post([this, session = reveal->first, connection = *claimed, workspace = reveal->second] {
-            revealSession(_host, session, connection, workspace);
-        });
     return id;
+}
+
+void ServedSessions::showOnceCreated(std::string const& id,
+                                     std::optional<vtworkspace::SessionId> session,
+                                     ConnectionId const& connection,
+                                     vtworkspace::WorkspaceId workspace)
+{
+    if (!session)
+    {
+        auto const lock = std::lock_guard { _mutex };
+        auto const found = std::ranges::find(_tabs, id, &Tab::id);
+        if (found == _tabs.end() || found->phase == TabPhase::Cancelled)
+            return;
+        if (!found->session)
+        {
+            // Pending: its creation shows it.
+            found->shownIn.emplace(connection, workspace);
+            return;
+        }
+        // Created meanwhile.
+        session = found->session;
+    }
+    _post([this, session = *session, connection, workspace] {
+        revealSession(_host, session, connection, workspace);
+    });
 }
 
 void ServedSessions::create(std::string const& id, std::string const& title, std::string const& moduleDigest)
@@ -416,13 +441,16 @@ void ServedSessions::create(std::string const& id, std::string const& title, std
     auto const pane = vtcontrol::parseUuid(id);
     auto const extension = spawn.extension;
     auto const device = spawn.device;
+    // In the background, as every tab the daemon opens: shown below only as a user action asked just now.
     auto const session =
         pane ? _host.createServedTab(
                    workspace,
                    SessionSpawnRequest { .presetIds = PresetObjectIds { .pane = *pane, .tabName = title },
+                                         .activation = vtworkspace::TabActivation::Background,
                                          .served = std::move(spawn) })
              : std::nullopt;
     auto cancelled = false;
+    auto shownIn = std::optional<std::pair<ConnectionId, vtworkspace::WorkspaceId>> {};
     {
         auto const lock = std::lock_guard { _mutex };
         auto const found = std::ranges::find(_tabs, id, &Tab::id);
@@ -431,6 +459,7 @@ void ServedSessions::create(std::string const& id, std::string const& title, std
         {
             found->phase = TabPhase::Open;
             found->session = session;
+            shownIn = std::exchange(found->shownIn, std::nullopt);
         }
         else
             forget(id);
@@ -449,6 +478,8 @@ void ServedSessions::create(std::string const& id, std::string const& title, std
         _host.closeServed(*session, SessionEnd::Requested);
         return;
     }
+    if (shownIn)
+        revealSession(_host, *session, shownIn->first, shownIn->second);
     _raise(extension, ServedHint::Tabs);
 }
 
@@ -498,16 +529,13 @@ std::expected<void, ServedTabError> ServedSessions::reveal(std::string_view exte
                                                            std::string_view tab,
                                                            Origin origin)
 {
-    auto session = vtworkspace::SessionId {};
+    auto session = std::optional<vtworkspace::SessionId> {};
     {
         auto const lock = std::lock_guard { _mutex };
         auto const* const found = ownedBy(extension, tab);
         if (found == nullptr)
             return std::unexpected(ServedTabError::NotOwned);
-        // A pending tab is activated by its creation.
-        if (!found->session)
-            return {};
-        session = *found->session;
+        session = found->session;
     }
     // The origin's window, if the user invoked the action behind it just now and no reveal claimed it yet;
     // else that of the key or click that asked for it, into one of its tabs just now. A stale origin, or one
@@ -516,10 +544,10 @@ std::expected<void, ServedTabError> ServedSessions::reveal(std::string_view exte
         _origins.claimReveal(extension, origin).or_else([&] { return recentInputFrom(extension); });
     auto const workspace = connection ? _workspaces.selectedBy(*connection) : std::nullopt;
     if (!workspace)
-        return std::unexpected(ServedTabError::Gone);
-    _post([this, session, connection = *connection, workspace = *workspace] {
-        revealSession(_host, session, connection, workspace);
-    });
+        // A pending tab stays pending in the background, as it was opened.
+        return session ? std::expected<void, ServedTabError> { std::unexpect, ServedTabError::Gone }
+                       : std::expected<void, ServedTabError> {};
+    showOnceCreated(std::string(tab), session, *connection, *workspace);
     return {};
 }
 

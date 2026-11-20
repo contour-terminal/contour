@@ -7404,10 +7404,7 @@ TEST_CASE("NativeController hands the GUI the pane a daemon extension revealed",
         auto const listed = tabs->list("orchestrator");
         return !listed.empty() && listed.front().state == vthost::ServedTabState::Open;
     }));
-    // Opening activates the tab; it is the reveal that raises the window and focuses the pane.
-    CHECK(controller.takePaneReveals().empty());
-
-    REQUIRE(tabs->reveal("orchestrator", *opened, origin).has_value());
+    // Opened on the user's action just now, the new tab is shown: the window raises and focuses its pane.
     auto revealed = std::vector<uint64_t> {};
     REQUIRE(waitUntil([&] {
         for (auto const& reveal: controller.takePaneReveals())
@@ -7417,4 +7414,8 @@ TEST_CASE("NativeController hands the GUI the pane a daemon extension revealed",
     CHECK(revealed.size() == 1);
     CHECK(revealed.front() != 0);
     CHECK(revealsSignalled.load() >= 1);
+
+    // The origin counted once: a reveal on it raises nothing more.
+    CHECK(tabs->reveal("orchestrator", *opened, origin)
+          == std::expected<void, vthost::ServedTabError> { std::unexpect, vthost::ServedTabError::Gone });
 }

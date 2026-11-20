@@ -2083,7 +2083,10 @@ A served session is **disposable**: nothing of it survives the daemon, and its e
   it was handed to): `ExtensionActions::deliver` stamps each invoked action on the sessions' steady clock, and
   a claim answers only within `ServedInputGrace` of it, consuming it -- a reveal hours after "Agents: Refresh
   now" would steal the focus while the user types a password elsewhere. An origin whose connection detached,
-  went stale or was claimed already reveals nothing, and activates nothing. A key typed or a mouse button
+  went stale or was claimed already reveals nothing, and activates nothing. `tab-open` claims alike: a new
+  served tab is always created in the background (`TabActivation::Background`), and shown by that walk only
+  when a fresh origin stood behind the open; a pending tab a reveal claims for meanwhile is shown once created
+  (`ServedSessions::Tab::shownIn`). A key typed or a mouse button
   pressed into one of the extension's served tabs is a user action as well: for
   `ServedInputGrace` (2 s, on the sessions' steady clock) after it, a reveal without an attached origin --
   pane-reveal and tab-reveal alike -- goes to the window it came from (`ServedSessions::noteUserInput`, keyboard

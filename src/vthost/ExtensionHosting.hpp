@@ -300,10 +300,11 @@ class IServedTabs
     IServedTabs& operator=(IServedTabs&&) = delete;
     virtual ~IServedTabs() = default;
 
-    /// Opens the extension's tab in the workspace the origin's window shows, or reveals the one it has there
-    /// -- only as IExtensionActions::claimReveal() allows: the origin's action invoked just now, and not
-    /// claimed yet. Returns before the tab's session exists: it is created on the loop, activated in its
-    /// workspace.
+    /// Opens the extension's tab in the workspace the origin's window shows, or the one it has there. It is
+    /// shown -- activated, its window raised -- only as IExtensionActions::claimReveal() allows: the origin's
+    /// action invoked just now, and not claimed yet. Otherwise a new tab is created in the background (no
+    /// window raised, nothing activated, no focus taken), and one open already stays where it is. Returns
+    /// before the tab's session exists: it is created on the loop.
     /// @param extension What the daemon's configuration calls it.
     /// @param title The tab's fixed name: the manifest's `title`, else the extension's name.
     /// @param moduleDigest The hex SHA-256 of the module that draws it, which the chrome names.
@@ -327,12 +328,14 @@ class IServedTabs
     /// window asked first when it is in another workspace. The origin counts once, and only for
     /// ServedInputGrace after the action the user invoked through it (IExtensionActions::claimReveal());
     /// without it, the window whose user typed or clicked into one of its served tabs at most
-    /// ServedInputGrace ago is the one asking. A tab not created yet is activated by its creation.
+    /// ServedInputGrace ago is the one asking. A tab not created yet is shown once created; without such a
+    /// user action it stays in the background, and the reveal answers nothing.
     /// @param extension What the daemon's configuration calls it.
     /// @param tab The tab's id.
     /// @param origin The connection the action that asked for it came from.
-    /// @return Nothing; NotOwned for an id that is not one of its tabs; Gone for an origin that is stale,
-    ///         claimed already or detached, and no recent key or click to stand for it.
+    /// @return Nothing; NotOwned for an id that is not one of its tabs; Gone, for a tab created already, for
+    /// an
+    ///         origin that is stale, claimed already or detached, and no recent key or click to stand for it.
     [[nodiscard]] virtual std::expected<void, ServedTabError> reveal(std::string_view extension,
                                                                      std::string_view tab,
                                                                      Origin origin) = 0;

@@ -467,7 +467,10 @@ extern bool terminal_extensions_daemon_host_pane_open(daemon_string_t *template_
 extern bool terminal_extensions_daemon_host_pane_close(daemon_string_t *pane, terminal_extensions_daemon_host_host_error_t *err);
 // Lists the panes the extension owns.
 extern bool terminal_extensions_daemon_host_panes(terminal_extensions_daemon_host_list_pane_info_t *ret, terminal_extensions_daemon_host_host_error_t *err);
-// Opens a served tab in the origin's workspace.
+// Opens a served tab in the origin's workspace, or answers the one open there. It is shown -- activated,
+// its window raised -- as `tab-reveal` shows one: an origin counts once, and only for 2 s after the user
+// invoked the action it came with. Otherwise a new tab opens in the background: no window raised,
+// nothing activated, no focus taken.
 extern bool terminal_extensions_daemon_host_tab_open(daemon_string_t *scheme, terminal_extensions_daemon_host_origin_t origin, daemon_string_t *ret, terminal_extensions_daemon_host_host_error_t *err);
 // Closes a served tab.
 extern bool terminal_extensions_daemon_host_tab_close(daemon_string_t *tab, terminal_extensions_daemon_host_host_error_t *err);

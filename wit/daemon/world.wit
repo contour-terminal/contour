@@ -276,7 +276,10 @@ interface host {
     pane-close: func(pane: string) -> result<_, host-error>;
     /// Lists the panes the extension owns.
     panes: func() -> result<list<pane-info>, host-error>;
-    /// Opens a served tab in the origin's workspace.
+    /// Opens a served tab in the origin's workspace, or answers the one open there. It is shown -- activated,
+    /// its window raised -- as `tab-reveal` shows one: an origin counts once, and only for 2 s after the user
+    /// invoked the action it came with. Otherwise a new tab opens in the background: no window raised,
+    /// nothing activated, no focus taken.
     tab-open: func(scheme: string, origin: origin) -> result<string, host-error>;
     /// Closes a served tab.
     tab-close: func(tab: string) -> result<_, host-error>;

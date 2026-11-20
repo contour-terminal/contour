@@ -672,6 +672,8 @@ TEST_CASE("pane-reveal with no origin, just after a key typed into its dashboard
     auto const dashboard = b.tabs->open(Orchestrator, "Agents", "", "agents", origin);
     REQUIRE(dashboard.has_value());
     REQUIRE(b.eventually([&] { return b.sessionOf(*dashboard).has_value(); }));
+    // The dashboard's open stood on the user's action just now: it was shown in the focused window.
+    focused.reveals.clear();
     auto const pane = b.openNow(b.spawn());
     auto const session = b.sessionOf(pane);
     REQUIRE(session.has_value());
@@ -715,6 +717,8 @@ TEST_CASE("pane-reveal with no origin, just after a click into its dashboard, go
     auto const dashboard = b.tabs->open(Orchestrator, "Agents", "", "agents", origin);
     REQUIRE(dashboard.has_value());
     REQUIRE(b.eventually([&] { return b.sessionOf(*dashboard).has_value(); }));
+    // The dashboard's open stood on the user's action just now: it was shown in the focused window.
+    focused.reveals.clear();
     auto const pane = b.openNow(b.spawn());
     auto const session = b.sessionOf(pane);
     REQUIRE(session.has_value());
