@@ -3794,4 +3794,41 @@ TEST_CASE("the sidebar's colour picker opens at the workspace's row and colours 
         CHECK_FALSE(scene.controller.workspaceColorCalls[1].color.has_value());
     }
 }
+
+TEST_CASE("the sidebar's tab colour picker opens at the tab's row and colours it by id (offscreen)",
+          "[contour][gui][qml][sidebar][tabcolor]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row, .tabColours = TabColours::Coloured } };
+        auto* flyout = scene.window->findChild<QObject*>(QStringLiteral("sidebarTabColorFlyout"));
+        REQUIRE(flyout != nullptr);
+        REQUIRE_FALSE(flyout->property("opened").toBool());
+
+        // build, a tab that is not the current one.
+        auto* build = scene.rowTitled(QStringLiteral("build"));
+        REQUIRE(build != nullptr);
+        constexpr auto BuildTab = quint64 { 11 };
+        emit scene.controller.sidebarTabColorPickRequested(build->property("index").toInt(), BuildTab);
+        REQUIRE(QTest::qWaitFor([&] { return flyout->property("opened").toBool(); }, 2000));
+        build = scene.rowTitled(QStringLiteral("build"));
+        CHECK(flyout->property("parent").value<QQuickItem*>() == build);
+        // Its keyboard cursor starts on the colour the tab has.
+        CHECK(flyout->property("currentColor").value<QColor>()
+              == QColor { BuildTabColour.red, BuildTabColour.green, BuildTabColour.blue });
+
+        auto const picked = QColor { 0x12, 0x34, 0x56 };
+        QMetaObject::invokeMethod(flyout, "colorPicked", Q_ARG(QColor, picked));
+        REQUIRE(scene.controller.tabColorCalls.size() == 1);
+        CHECK(scene.controller.tabColorCalls[0].tab == BuildTab);
+        CHECK(scene.controller.tabColorCalls[0].color == picked);
+
+        QMetaObject::invokeMethod(flyout, "resetRequested");
+        REQUIRE(scene.controller.tabColorCalls.size() == 2);
+        CHECK(scene.controller.tabColorCalls[1].tab == BuildTab);
+        CHECK_FALSE(scene.controller.tabColorCalls[1].color.has_value());
+        CHECK(scene.controller.workspaceColorCalls.empty());
+    }
+}
 // }}}

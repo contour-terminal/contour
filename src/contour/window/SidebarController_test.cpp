@@ -8,6 +8,7 @@
 #include <contour/config/GuiStateStore.hpp>
 #include <contour/config/TabBarMode.hpp>
 #include <contour/geometry/SidebarGeometry.hpp>
+#include <contour/platform/ColorConversion.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/test/AppFixture.hpp>
 #include <contour/test/CoreFixtures.hpp>
@@ -27,6 +28,7 @@
 #include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <optional>
@@ -1009,6 +1011,89 @@ TEST_CASE("the workspace menu's Workspace Color colours its workspace without sh
         QCoreApplication::processEvents();
         CHECK(colorOfOther().alpha() == 0);
         CHECK(window->displayedWorkspace() == shown);
+    }
+}
+
+TEST_CASE("a sidebar tab menu's Tab Color colours its own tab, not the focused one",
+          "[contour][sidebar][controller][tabcolor]")
+{
+    // Whether or not a tab strip is drawn to hang its own picker from.
+    auto const placement = GENERATE(TabPlacement::Top, TabPlacement::Sidebar);
+    INFO("tab placement " << static_cast<int>(placement));
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    app.app().config().tabPlacement = placement;
+    auto& manager = app.manager();
+    auto const window =
+        contour::test::ScopedController { manager, contour::config::MenuPresentation::InScene };
+    auto const made = contour::test::createSessionTabs(manager, *window, 2);
+    auto const activeTab = [&] {
+        return manager.model().workspace(window->displayedWorkspace())->activeTab()->id();
+    };
+    // The window shows the second tab; the menu is opened on the first, as a sidebar's usually is.
+    auto const right = made.tabs.at(0);
+    auto const focused = made.tabs.at(1);
+    REQUIRE(activeTab() == focused);
+    auto const colourRows = [&] {
+        window->sidebar().openContextMenu(tabRowOf(*window, right.value), QPointF {});
+        return submenuRows(window->sidebarContextMenuModel(), "Tab Color");
+    };
+    auto const userColorOf = [&](vtworkspace::TabId tab) {
+        return manager.model().findTab(tab)->color(vtworkspace::TabColorSource::User);
+    };
+    auto picks = QSignalSpy { &*window, &contour::window::WindowController::sidebarTabColorPickRequested };
+    auto stripPicks = QSignalSpy { &*window, &contour::window::WindowController::tabColorPickRequested };
+
+    // Without a colour of the user's, there is nothing to reset.
+    REQUIRE_FALSE(menuRowOf(colourRows(), "Reset").isEmpty());
+    CHECK_FALSE(menuRowOf(colourRows(), "Reset")["enabled"].toBool());
+
+    SECTION("a swatch colours that tab and leaves the focus where it is")
+    {
+        auto const palette = window->tabColorPalette();
+        REQUIRE_FALSE(palette.isEmpty());
+        auto const swatchRow = colourRows().front().toMap();
+        REQUIRE(swatchRow["kind"].toString() == "swatches");
+        auto const swatch = swatchRow["swatches"].toList().front().toMap();
+        window->triggerSidebarContextMenuAction(swatch["actionId"].toInt());
+        QCoreApplication::processEvents();
+        CHECK(userColorOf(right) == contour::platform::toRGBColor(palette.front().value<QColor>()));
+        CHECK_FALSE(userColorOf(focused).has_value());
+        CHECK(activeTab() == focused);
+        CHECK_FALSE(window->rowActionPending());
+    }
+    SECTION("Reset is offered once the tab has a colour, and clears that tab's only")
+    {
+        manager.model().setTabColor(
+            right, vtworkspace::TabColorSource::User, vtbackend::RGBColor { 1, 2, 3 });
+        manager.model().setTabColor(
+            focused, vtworkspace::TabColorSource::User, vtbackend::RGBColor { 4, 5, 6 });
+        auto const reset = menuRowOf(colourRows(), "Reset");
+        REQUIRE(reset["enabled"].toBool());
+        window->triggerSidebarContextMenuAction(reset["actionId"].toInt());
+        QCoreApplication::processEvents();
+        CHECK_FALSE(userColorOf(right).has_value());
+        CHECK(userColorOf(focused) == vtbackend::RGBColor { 4, 5, 6 });
+        CHECK(activeTab() == focused);
+    }
+    SECTION("Custom… asks for the picker over that tab's row")
+    {
+        auto const custom = actionIdOf(colourRows(), "Custom…");
+        REQUIRE(custom.has_value());
+        window->triggerSidebarContextMenuAction(*custom);
+        REQUIRE(picks.count() == 1);
+        CHECK(picks.at(0).at(0).toInt() == tabRowOf(*window, right.value));
+        CHECK(picks.at(0).at(1).value<quint64>() == right.value);
+        CHECK(stripPicks.count() == 0); // not the tab strip's picker, which a sidebar placement does not draw
+        CHECK(activeTab() == focused);
+    }
+    SECTION("the picker's choice and its reset colour that tab by id")
+    {
+        window->setTabColorOf(right.value, QColor { 0x12, 0x34, 0x56 });
+        CHECK(userColorOf(right) == vtbackend::RGBColor { 0x12, 0x34, 0x56 });
+        CHECK_FALSE(userColorOf(focused).has_value());
+        window->resetTabColorOf(right.value);
+        CHECK_FALSE(userColorOf(right).has_value());
+        CHECK(activeTab() == focused);
     }
 }
 

@@ -1669,6 +1669,14 @@ void TerminalSessionManager::nameTab(vtworkspace::TabId tabId, std::string name)
                       .requestRemoteWindowRename(&session->terminal().device(), tab->name());
 }
 
+vtworkspace::Tab* TerminalSessionManager::ownTabOf(window::WindowController const& window, uint64_t tab) const
+{
+    if (listsRemotely(window))
+        return nullptr;
+    auto const id = vtworkspace::TabId { tab };
+    return ownsWorkspace(window, _model->workspaceOfTab(id)) ? _model->findTab(id) : nullptr;
+}
+
 void TerminalSessionManager::moveWorkspace(window::WindowController& window,
                                            uint64_t workspace,
                                            int toPosition)

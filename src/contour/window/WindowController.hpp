@@ -727,6 +727,14 @@ class WindowController:
     /// application's color, only the user's own choice.
     /// @param index The tab's row in this window.
     Q_INVOKABLE void resetTabColor(int index);
+    /// Colours tab @p tab on the user's behalf, by id, without showing it: the sidebar's colour picker hands
+    /// its choice here, for a row whose tab is not the one the window shows.
+    /// @param tab The tab's id, as the window's directory lists it.
+    /// @param color The colour the user picked.
+    Q_INVOKABLE void setTabColorOf(quint64 tab, QColor const& color);
+    /// Drops the user's colour from tab @p tab, by id, without showing it; as resetTabColor() otherwise.
+    /// @param tab The tab's id, as the window's directory lists it.
+    Q_INVOKABLE void resetTabColorOf(quint64 tab);
     /// Colours workspace @p workspace on the user's behalf, shown or not, without showing it: the sidebar's
     /// colour picker hands its choice here (TerminalSessionManager::setWorkspaceColor).
     /// @param workspace The workspace's id, as the window's directory lists it.
@@ -1708,6 +1716,11 @@ class WindowController:
     /// workspace menu's "Workspace Color", or the SetWorkspaceColor action naming no colour.
     /// @param workspace The workspace's id, as the window's directory lists it.
     void workspaceColorPickRequested(quint64 workspace);
+    /// Requests that the sidebar open its colour picker over tab row @p row: "Custom…" in a sidebar tab
+    /// menu's "Tab Color". The sidebar's own, as a sidebar placement draws no tab strip to hang one from.
+    /// @param row The tab's row in the sidebar's model.
+    /// @param tab The tab's id, which the picker's choice colours (setTabColorOf()).
+    void sidebarTabColorPickRequested(int row, quint64 tab);
     /// Requests that this window show its About dialog.
     void aboutRequested();
     /// Requests that this window show its command palette. Per-window (like tabTitleEditRequested), so
@@ -2135,6 +2148,11 @@ class WindowController:
     void runSidebarAction(SidebarRowKey const& row, actions::Action const& action);
     /// Runs @p action on what the window shows, once @p row is shown (the tail of runSidebarAction()).
     void runSidebarActionShown(SidebarRowKey const& row, actions::Action const& action);
+    /// Colours tab @p tab by id as the user chose, where this process's model holds it for this window
+    /// (TerminalSessionManager::ownTabOf()); nothing otherwise.
+    /// @param tab The tab's id, as the window's directory lists it.
+    /// @param color The colour; std::nullopt drops the user's, letting an application's resurface.
+    void colorOwnTab(uint64_t tab, std::optional<vtbackend::RGBColor> color);
     /// Asks, through sidebarCloseConfirmationRequested(), whether to close the node @p key stands for.
     void askToClose(CloseKind kind, SidebarRowKey const& key);
     /// Builds and presents the menu of sidebar row @p row.

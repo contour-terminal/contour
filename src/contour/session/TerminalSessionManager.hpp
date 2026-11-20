@@ -504,6 +504,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param name Its new name; empty (or blank) clears it.
     void nameTab(vtworkspace::TabId tab, std::string name);
 
+    /// The tab @p tab of this process's model, where @p window lists it among the workspaces it owns: what a
+    /// sidebar row's tab colour reads and writes by id.
+    /// @param window The window the user acts in.
+    /// @param tab The tab's id, as the window's directory lists it (DirectoryTab::id).
+    /// @return The tab; null for a window a daemon serves, whose ids are the daemon's and not the model's,
+    ///         and for a tab of a workspace the window does not own.
+    [[nodiscard]] vtworkspace::Tab* ownTabOf(window::WindowController const& window, uint64_t tab) const;
+
     /// Moves the workspace @p workspace that @p window lists to place @p toPosition of its directory, where
     /// a daemon (or this process's model) orders it. The place is clamped.
     /// @param window The window the user acts in.
