@@ -13,6 +13,7 @@
 #include <contour/window/DropZonePolicy.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/PaneState.hpp>
+#include <contour/window/QmlEnumIndex.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/StickyHeaderPlacement.hpp>
 #include <contour/window/TabBadge.hpp>
@@ -1027,11 +1028,10 @@ class ChromeSidebarTokens: public QObject
     ///         (Comfortable) for anything else, as QML hands a missing controller's 0 or a stray value.
     [[nodiscard]] config::SidebarTwoLineRow twoLineRowAt(int spacing) const noexcept
     {
-        auto const known =
-            std::cmp_greater_equal(spacing, 0) && std::cmp_less(spacing, config::SidebarRowSpacingCount);
         return config::sidebarTwoLineRow(_tokens,
-                                         known ? static_cast<config::SidebarRowSpacing>(spacing)
-                                               : config::SidebarRowSpacing::Comfortable);
+                                         inRange(spacing, config::SidebarRowSpacingCount)
+                                             ? static_cast<config::SidebarRowSpacing>(spacing)
+                                             : config::SidebarRowSpacing::Comfortable);
     }
 
     config::SidebarTokens _tokens {};

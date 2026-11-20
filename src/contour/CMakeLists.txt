@@ -357,6 +357,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/ToastPlacement.hpp
         window/SaveLayoutCheck.hpp
         window/ChromeTokenObjects.hpp
+        window/QmlEnumIndex.hpp
         window/MenuRouting.hpp
         window/SettingsWindowRules.hpp
         window/NewDefaultsNotice.hpp

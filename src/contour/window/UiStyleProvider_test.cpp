@@ -3342,6 +3342,35 @@ TEST_CASE("UiStyleProvider draws a workspace's disclosure as its row's chevron o
     }
 }
 
+TEST_CASE(
+    "UiStyleProvider sizes a two-line sidebar row by the spacing QML hands it, Comfortable for no spacing",
+    "[contour][uistyle][sidebar]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::SidebarRowSpacing;
+    auto const font = QGuiApplication::font();
+    for (auto const style:
+         { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+    {
+        CAPTURE(static_cast<int>(style));
+        auto const provider = contour::window::UiStyleProvider(contour::window::chromeInputsFor(style, font));
+        auto const* sidebar =
+            qobject_cast<contour::window::ChromeSidebarTokens const*>(groupOf(provider, "sidebar"));
+        REQUIRE(sidebar != nullptr);
+        auto const comfortable = static_cast<int>(SidebarRowSpacing::Comfortable);
+        auto const compact = static_cast<int>(SidebarRowSpacing::Compact);
+        // Each spacing reads its own row; Comfortable is never the shorter.
+        CHECK(sidebar->twoLineRowHeight(comfortable) >= sidebar->twoLineRowHeight(compact));
+        // A missing controller's 0 is Comfortable already; a value no enumerator has falls back to it.
+        for (auto const stray: { -1, static_cast<int>(contour::config::SidebarRowSpacingCount), 99 })
+        {
+            CAPTURE(stray);
+            CHECK(sidebar->twoLineRowHeight(stray) == sidebar->twoLineRowHeight(comfortable));
+            CHECK(sidebar->lineGap(stray) == sidebar->lineGap(comfortable));
+        }
+    }
+}
+
 TEST_CASE("UiStyleProvider snaps and bounds a dragged sidebar width, and says where its title row is",
           "[contour][uistyle][sidebar]")
 {
