@@ -547,6 +547,26 @@ TEST_CASE("a config reload changes an open window's tab placement", "[contour][s
     CHECK(changes.count() == 1);
 }
 
+TEST_CASE("a window takes sidebar.row_spacing when it opens, and keeps it over a reload",
+          "[contour][sidebar][controller]")
+{
+    using contour::config::SidebarRowSpacing;
+    using contour::test::ConfiguredTestApp;
+    auto app = ConfiguredTestApp {};
+    auto window = contour::test::ScopedController { app.manager() };
+    REQUIRE(window.controller->sidebarRowSpacing() == static_cast<int>(SidebarRowSpacing::Comfortable));
+
+    contour::test::writeConfigFile(
+        app.configFile(),
+        contour::test::profileConfigYaml(app.app().profileName(), "sidebar:\n    row_spacing: compact\n"));
+    REQUIRE(app.manager().reloadAllSessions());
+    REQUIRE(app.app().config().sidebar.value().rowSpacing == SidebarRowSpacing::Compact);
+    // The open window keeps the rows it opened with; the next one opens compact.
+    CHECK(window.controller->sidebarRowSpacing() == static_cast<int>(SidebarRowSpacing::Comfortable));
+    auto next = contour::test::ScopedController { app.manager() };
+    CHECK(next.controller->sidebarRowSpacing() == static_cast<int>(SidebarRowSpacing::Compact));
+}
+
 TEST_CASE("a Terminal-row sidebar width is remembered in cells, not pixels", "[contour][sidebar][geometry]")
 {
     using contour::config::LengthUnit;
