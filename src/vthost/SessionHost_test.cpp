@@ -36,6 +36,7 @@
 #include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
@@ -6017,4 +6018,66 @@ TEST_CASE("a start directory that is no directory here names no workspace", "[vt
     REQUIRE(workspace != nullptr);
     CHECK(h.seen.back().workingDirectory.empty());
     CHECK(nameOfWorkspace(h.host, workspace->id()).empty());
+}
+
+namespace
+{
+/// A kitty medium source that serves one 1x1 RGBA pixel for any path, and counts what it was asked.
+class OnePixelMediumSource final: public vtbackend::kitty_graphics::KittyMediumSource
+{
+  public:
+    mutable int reads = 0;
+
+    [[nodiscard]] std::expected<std::vector<uint8_t>, vtbackend::kitty_graphics::MediaRefusal> read(
+        std::string_view /*path*/,
+        vtbackend::kitty_graphics::Medium /*medium*/,
+        vtbackend::kitty_graphics::MediaPolicy const& /*policy*/) const override
+    {
+        ++reads;
+        return std::vector<uint8_t> { 1, 2, 3, 255 };
+    }
+};
+} // namespace
+
+TEST_CASE("a hosted session reads kitty file media with the host's own services", "[vthost][host][media]")
+{
+    // The daemon's sessions run local processes: what the host was composed with reaches every terminal it
+    // spawns, and nothing else grants it.
+    auto const source = OnePixelMediumSource {};
+    auto const granted = GENERATE(true, false);
+    auto const services = vtbackend::kitty_graphics::KittyMediumServices {
+        .source = source,
+        .policy = { .transmission = vtbackend::kitty_graphics::FileTransmission::Enabled,
+                    .temporaryRoots = { "/tmp" },
+                    .allowedRoots = {},
+                    .userId = 0,
+                    .sizeLimit = 1024 }
+    };
+    auto config =
+        vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                    .kittyMedia = granted ? std::optional { services } : std::nullopt };
+    auto const backend = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *backend };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              std::move(config) };
+
+    REQUIRE(host.createTab() != nullptr);
+    auto const session = host.model().workspace(host.workspaceId())->activeTab()->rootPane()->session();
+    auto* terminal = host.terminal(session);
+    REQUIRE(terminal != nullptr);
+    auto& mock = dynamic_cast<vtpty::MockPty&>(dynamic_cast<vthost::TappingPty&>(terminal->device()).inner());
+
+    mock.appendStdOutBuffer(std::format("\033_Ga=q,i=31,s=1,v=1,t=f,f=32;{}\033\\",
+                                        core::base64::encode("/tmp/tty-graphics-protocol-probe.rgba")));
+    REQUIRE(terminal->processInputOnce());
+
+    using namespace std::string_view_literals;
+    CHECK(terminal->peekInput()
+          == (granted ? "\033_Gi=31;OK\033\\"sv : "\033_Gi=31;EBADF:file not readable\033\\"sv));
+    CHECK(source.reads == (granted ? 1 : 0));
 }

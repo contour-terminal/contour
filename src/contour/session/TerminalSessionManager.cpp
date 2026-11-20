@@ -580,16 +580,20 @@ TerminalSession* TerminalSessionManager::createBackingSession(
     auto notifier = factory.createNotifier();
     if (!notifier && &factory != &_localFactory)
         notifier = _localFactory.createNotifier();
-    auto* session =
-        new TerminalSession(this,
-                            factory.createPty(std::move(cwd), pageSize, commandOverride, profileName),
-                            _app,
-                            profileName.value_or(std::string {}),
-                            pageSize,
-                            std::move(launchedCommand),
-                            std::move(notifier),
-                            role,
-                            factory.hosting());
+    auto pty = factory.createPty(std::move(cwd), pageSize, commandOverride, profileName);
+    // Kitty graphics read local files only for a session whose bytes come from a local process.
+    auto const mediaAccess = pty ? mediaAccessFor(factory.transportOf(*pty)) : MediaAccess::None;
+    auto* session = new TerminalSession(this,
+                                        std::move(pty),
+                                        _app,
+                                        profileName.value_or(std::string {}),
+                                        pageSize,
+                                        std::move(launchedCommand),
+                                        std::move(notifier),
+                                        role,
+                                        factory.hosting(),
+                                        {},
+                                        mediaAccess);
     // The manager owns what it makes: removeSession() frees a session that has ended, and those still
     // running go with the manager, along with whatever they had queued for themselves.
     session->setParent(this);

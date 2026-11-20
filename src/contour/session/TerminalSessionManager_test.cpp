@@ -45,6 +45,7 @@
 #include <vtpty/MockPty.hpp>
 #include <vtpty/test/NonAsciiSample.hpp>
 
+#include <core/Base64.hpp>
 #include <core/Utf8Path.hpp>
 #include <core/platform/FileUri.hpp>
 #include <core/platform/PathUtils.hpp>
@@ -7692,3 +7693,44 @@ TEST_CASE("TerminalSessionManager: a reconnecting remote daemon shows its dot an
 
     manager.releaseBinding(onHost);
 }
+
+#ifndef _WIN32
+TEST_CASE("TerminalSessionManager: kitty file media are read for a local process only", "[manager][media]")
+{
+    // A real file the app's own policy accepts, named in Claude Code's probe: a local factory's session reads
+    // it, a remote one's never does.
+    auto const temp = core::testing::ScopedTempDir { "contour-media-test" };
+    auto const root = std::filesystem::canonical(temp.path());
+    auto const file = root / "tty-graphics-protocol-probe.rgba";
+    std::ofstream { file, std::ios::binary } << std::string_view { "\x01\x02\x03\xFF", 4 };
+    auto const probe =
+        std::format("\033_Ga=q,i=31,s=1,v=1,t=f,f=32;{}\033\\", core::base64::encode(file.native()));
+
+    struct Row
+    {
+        contour::session::SessionHosting hosting;
+        std::string_view reply;
+    };
+    auto const row = GENERATE(
+        Row { contour::session::SessionHosting::Local, "\033_Gi=31;OK\033\\" },
+        Row { contour::session::SessionHosting::Remote, "\033_Gi=31;EBADF:file not readable\033\\" });
+    auto factory = std::make_unique<contour::test::MockPtySessionFactory>();
+    factory->reportedHosting = row.hosting;
+    contour::test::TestApp app { std::move(factory) };
+    auto const& roots = app.app().kittyMediumServices().policy.temporaryRoots;
+    if (std::ranges::none_of(roots, [&](auto const& tempRoot) { return root.parent_path() == tempRoot; }))
+        SKIP("the temp directory is not one of the app's temp roots");
+
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    auto* const session = sessionAtRow(manager, *window, 0);
+    REQUIRE(session != nullptr);
+
+    mockPtyOf(*session).appendStdOutBuffer(probe);
+    REQUIRE(session->terminal().processInputOnce());
+    CHECK(session->terminal().peekInput() == row.reply);
+
+    contour::test::closeAllTabs(*window);
+}
+#endif

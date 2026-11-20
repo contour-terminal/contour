@@ -86,7 +86,8 @@ HostedSession::HostedSession(SessionId id,
                              HostedSessionExtensions extensions,
                              std::string profileName,
                              SettingsOrigin settingsOrigin,
-                             std::optional<vtbackend::GitHeadServices> git):
+                             std::optional<vtbackend::GitHeadServices> git,
+                             std::optional<vtbackend::kitty_graphics::KittyMediumServices> kittyMedia):
     _id(id),
     _profileName(std::move(profileName)),
     _settingsOrigin(settingsOrigin),
@@ -122,7 +123,8 @@ HostedSession::HostedSession(SessionId id,
               vtbackend::randomSemanticBlockTokens(),
               std::nullopt,
               _extensions ? std::optional { _extensions->terminalServices() } : std::nullopt,
-              git),
+              git,
+              std::move(kittyMedia)),
     _onClosed(std::move(onClosed))
 {
     // DECSSDT 2 only REQUESTS the host-writable status line; the frontend decides.
@@ -536,6 +538,7 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     _sizePolicy(config.sizePolicy),
     _fileSystem(config.fileSystem.get()),
     _git(config.git, config.fileSystem.get()),
+    _kittyMedia(std::move(config.kittyMedia)),
     _profiles(std::move(config.profiles)),
     _defaultCellPixelSize(config.defaultCellPixelSize),
     _nextSessionId(config.firstSessionId),
@@ -851,7 +854,8 @@ std::unique_ptr<HostedSession> SessionHost::makeHostedSession(SessionId id,
         makeSessionExtensions(id),
         std::move(profileName),
         origin,
-        _git.services());
+        _git.services(),
+        _kittyMedia);
     // Neither pumped nor restored yet, so the application's first look at its window already sees the
     // host's cell -- a handover restore keeps it, as a cell size is not part of a terminal's state.
     pushCellPixelSize(hosted->terminal());

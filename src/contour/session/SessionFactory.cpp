@@ -97,6 +97,15 @@ std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(
         shell, vtpty::createPty(initialSize, nullopt), profile->escapeSandbox.value(), _placement);
 }
 
+SessionTransport AppSessionFactory::transportOf([[maybe_unused]] vtpty::Pty const& pty) const noexcept
+{
+#ifdef VTPTY_LIBSSH2
+    if (dynamic_cast<vtpty::SshSession const*>(&pty) != nullptr)
+        return SessionTransport::Ssh;
+#endif
+    return SessionTransport::LocalProcess;
+}
+
 #ifdef VTPTY_LIBSSH2
 void AppSessionFactory::requestSshHostkeyVerification(
     vtpty::SshHostkeyVerificationRequest const& request,

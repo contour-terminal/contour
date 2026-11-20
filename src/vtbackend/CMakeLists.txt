@@ -80,6 +80,7 @@ set(vtbackend_HEADERS
     graphics/KittyAnimation.hpp
     graphics/KittyGraphics.hpp
     graphics/KittyInflate.hpp
+    graphics/KittyMediaDefaults.hpp
     graphics/KittyMediaPolicy.hpp
     graphics/KittyMediumSource.hpp
     graphics/KittyPlaceholders.hpp
@@ -244,6 +245,7 @@ set(vtbackend_SOURCES
     graphics/KittyAnimation.cpp
     graphics/KittyGraphics.cpp
     graphics/KittyInflate.cpp
+    graphics/KittyMediaDefaults.cpp
     graphics/KittyMediaPolicy.cpp
     graphics/KittyPlaceholders.cpp
     vt/TextSizing.cpp
@@ -446,6 +448,7 @@ if(LIBTERMINAL_TESTING)
         graphics/KittyAnimation_test.cpp
         graphics/KittyGraphics_test.cpp
         graphics/KittyInflate_test.cpp
+        graphics/KittyMediaDefaults_test.cpp
         graphics/KittyMediaPolicy_test.cpp
         graphics/KittyMediumSource_test.cpp
         graphics/KittyPlaceholders_test.cpp

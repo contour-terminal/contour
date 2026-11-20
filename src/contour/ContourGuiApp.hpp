@@ -52,6 +52,7 @@
 #include <contour/window/WindowPositionStore.hpp>
 
 #include <vtbackend/core/TerminalContext.hpp>
+#include <vtbackend/graphics/KittyMediumSource.hpp>
 #include <vtbackend/screen/GitHead.hpp>
 #include <vtbackend/screen/LinkDetector.hpp>
 #include <vtbackend/screen/StatusLineCommandCache.hpp>
@@ -684,6 +685,12 @@ class ContourGuiApp:
     /// @return References valid for the app's lifetime; nullopt for an app given a filesystem other than this
     ///         machine's, so that its `{Git}` reads nothing.
     [[nodiscard]] std::optional<vtbackend::GitHeadServices> gitHeadServices() noexcept;
+
+    /// What a local session's kitty graphics read files (`t=f`, `t=t`) with: the platform's source and the
+    /// policy chosen at construction (kittyMediaDefaults()). Only for a session whose bytes come from a local
+    /// process (session::mediaAccessFor()).
+    /// @return References valid for the app's lifetime.
+    [[nodiscard]] vtbackend::kitty_graphics::KittyMediumServices kittyMediumServices() const;
 
     /// @return What the in-process windows track their workspaces' git state with: a probe over this
     ///         machine's disk and `git` (or the one a test injected) and a thread of its own, so that a slow
@@ -1567,6 +1574,11 @@ class ContourGuiApp:
     core::async::ThreadPoolExecutor _workspaceGitExecutor;
     /// The link detection services a test handed in; absent, linkDetectionServices() assembles the app's own.
     std::optional<vtbackend::LinkDetectionServices> _injectedLinkServices;
+    /// What local sessions read kitty file media with (kittyMediumServices()). Declared before
+    /// _sessionManager: every session borrows the source.
+    std::unique_ptr<vtbackend::kitty_graphics::KittyMediumSource const> _kittyMediumSource;
+    /// The policy every local session's kitty file media are read under. Fixed at construction.
+    vtbackend::kitty_graphics::MediaPolicy _kittyMediaPolicy;
     // Shared by every session's keyboard platform, which holds it by reference; @see keyboardLayout() and
     // keyboardPlatformFactory(). Declared before _sessionManager, so that it outlives every session and the
     // platform each one holds. Built by keyboardLayout() on first use, once the Qt application exists.
