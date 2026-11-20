@@ -126,6 +126,8 @@ TEST_CASE("KittyGraphics.parse.unicode_placement", "[kitty][placeholder]")
 
     CHECK(parseCommand("a=T,i=5"sv)->placementKind == PlacementKind::Cursor);
     CHECK(parseCommand("a=T,U=0,i=5"sv)->placementKind == PlacementKind::Cursor);
+    // kitty takes any non-zero U as a virtual placement.
+    CHECK(parseCommand("a=T,U=2,i=5"sv)->placementKind == PlacementKind::Virtual);
 }
 
 TEST_CASE("KittyGraphics.parse.feature_query", "[kitty][placeholder]")
@@ -2859,6 +2861,24 @@ TEST_CASE("KittyGraphics.virtual_placement_by_put", "[kitty][placeholder]")
         CHECK(screen.findKittyVirtualPlacement(7, KittyPlacementId {}) == nullptr);
     }
 
+    SECTION("a refused one leaves the placement of its (i, p) alone")
+    {
+        // Validated before anything changes: the placement at the cursor the pair names is still shown.
+        mock.writeToScreen("\033_Ga=p,i=7,p=3,q=2\033\\"sv);
+        REQUIRE(countImageCells(screen) != 0);
+        mock.terminal.flushInput();
+
+        mock.writeToScreen("\033_Ga=p,U=1,i=7,p=3,P=5\033\\"sv);
+        CHECK(mock.terminal.peekInput().starts_with("\033_Gi=7;EINVAL"));
+        CHECK(countImageCells(screen) != 0);
+
+        mock.terminal.flushInput();
+        mock.writeToScreen(std::format("\033_Ga=T,U=1,i=7,p=3,P=5,f=24,s=2,v=2;{}\033\\", rgbPixels2x2()));
+        CHECK(mock.terminal.peekInput().starts_with("\033_Gi=7"));
+        CHECK(mock.terminal.peekInput().contains("EINVAL"));
+        CHECK(countImageCells(screen) != 0);
+    }
+
     SECTION("one of an anonymous image is refused without an answer")
     {
         mock.terminal.flushInput();
@@ -2919,5 +2939,74 @@ TEST_CASE("KittyGraphics.feature_query", "[kitty][placeholder]")
         mock.terminal.flushInput();
         mock.writeToScreen("\033_Gm=0;AAAAAAAAAAAA\033\\"sv);
         CHECK(mock.terminal.peekInput() == "\033_Gi=9;OK\033\\");
+    }
+}
+
+TEST_CASE("KittyGraphics.image_number", "[kitty][placeholder]")
+{
+    auto mock = KittyTerm { PageSize { LineCount(4), ColumnCount(8) } };
+
+    SECTION("a transmission by number is given the next free id")
+    {
+        mock.writeToScreen(std::format("\033_Ga=t,i=1,f=24,s=2,v=2,q=2;{}\033\\", rgbPixels2x2()));
+        mock.writeToScreen(std::format("\033_Ga=t,I=13,f=24,s=2,v=2;{}\033\\", rgbPixels2x2()));
+        CHECK(mock.terminal.peekInput() == "\033_Gi=2,I=13;OK\033\\");
+        CHECK(mock.terminal.primaryScreen().kittyImage(2) != nullptr);
+    }
+
+    SECTION("a put by number places its newest image")
+    {
+        mock.writeToScreen(std::format("\033_Ga=t,I=13,f=24,s=2,v=2,q=2;{}\033\\", rgbPixels2x2()));
+        mock.writeToScreen("\033_Ga=p,U=1,I=13,c=2,r=1\033\\"sv);
+        CHECK(mock.terminal.peekInput() == "\033_Gi=1,I=13;OK\033\\");
+        CHECK(mock.terminal.primaryScreen().findKittyVirtualPlacement(1, KittyPlacementId {}) != nullptr);
+    }
+
+    SECTION("an id and a number together are refused")
+    {
+        mock.writeToScreen(std::format("\033_Ga=t,i=4,I=13,f=24,s=2,v=2;{}\033\\", rgbPixels2x2()));
+        CHECK(mock.terminal.peekInput().starts_with("\033_Gi=4,I=13;EINVAL"));
+        CHECK(mock.terminal.primaryScreen().kittyImage(4) == nullptr);
+    }
+
+    SECTION("the feature query echoes an explicit d=a")
+    {
+        mock.writeToScreen("\033_Ga=q,i=31,e=d,d=a\033\\"sv);
+        CHECK(mock.terminal.peekInput() == "\033_Gi=31,e=d,d=a;OK\033\\");
+    }
+
+    SECTION("a feature query without d= echoes no d= key")
+    {
+        mock.writeToScreen("\033_Ga=q,i=31,e=d\033\\"sv);
+        CHECK(mock.terminal.peekInput() == "\033_Gi=31,e=d;OK\033\\");
+    }
+
+    SECTION("a feature query naming an id and a number is refused, as kitty checks that first")
+    {
+        mock.writeToScreen("\033_Ga=q,i=31,I=3,e=T\033\\"sv);
+        CHECK(mock.terminal.peekInput().starts_with("\033_Gi=31,I=3;EINVAL"));
+    }
+
+    SECTION("the feature query names the new delete targets")
+    {
+        mock.writeToScreen("\033_Ga=q,i=31,e=d,d=N\033\\"sv);
+        CHECK(mock.terminal.peekInput() == "\033_Gi=31,e=d,d=N;OK\033\\");
+    }
+
+    SECTION("frames, playback and composition reach an image by its number")
+    {
+        mock.writeToScreen(std::format("\033_Ga=t,I=13,f=24,s=2,v=2,q=2;{}\033\\", rgbPixels2x2()));
+        CHECK(replyTo(mock, std::format("\033_Ga=f,I=13,f=24,s=2,v=2;{}\033\\", rgbPixels2x2()))
+              == "\033_Gi=1,I=13;OK\033\\");
+        CHECK(replyTo(mock, "\033_Ga=a,I=13,c=2\033\\"sv) == "\033_Gi=1,I=13;OK\033\\");
+        CHECK(replyTo(mock, "\033_Ga=c,I=13,r=2,c=1\033\\"sv) == "\033_Gi=1,I=13;OK\033\\");
+    }
+
+    SECTION("a re-transmission under the id a number named takes the number away")
+    {
+        // As in kitty, where the image under that id is replaced, its number with it.
+        mock.writeToScreen(std::format("\033_Ga=t,I=13,f=24,s=2,v=2,q=2;{}\033\\", rgbPixels2x2()));
+        mock.writeToScreen(std::format("\033_Ga=t,i=1,f=24,s=2,v=2,q=2;{}\033\\", rgbPixels2x2()));
+        CHECK(replyTo(mock, "\033_Ga=p,I=13\033\\"sv).contains("ENOENT"));
     }
 }

@@ -130,7 +130,8 @@ namespace
             case 'U': {
                 auto number = 0u;
                 (void) assignNumber(value, number);
-                command.placementKind = number == 1 ? PlacementKind::Virtual : PlacementKind::Cursor;
+                // kitty reads any non-zero value as a virtual placement.
+                command.placementKind = number != 0 ? PlacementKind::Virtual : PlacementKind::Cursor;
                 break;
             }
             case 'e': {
@@ -167,9 +168,9 @@ namespace
     /// The actions a feature query may ask about: all of them, as kitty's.
     constexpr auto FeatureActions = std::string_view { "tTqpdfac" };
 
-    /// The delete targets deleteKittyGraphics() implements, both cases. `a` is the protocol's default
-    /// and therefore never echoed.
-    constexpr auto SupportedDeleteTargets = std::string_view { "AiIfF" };
+    /// The delete targets deleteKittyGraphics() implements, both cases. An absent `d=` is no target and is
+    /// not echoed; an explicit `d=a` is.
+    constexpr auto SupportedDeleteTargets = std::string_view { "aAiIfFnNrR" };
 
     /// Every key a feature query is answered for, in kitty's reply order. Animation keys are left out on
     /// purpose: under `a=q` the parser keeps `c`, `r` and `z` as geometry, so their animation reading is
