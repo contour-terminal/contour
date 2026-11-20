@@ -60,6 +60,10 @@ Row {
     readonly property real joinedButtonY: root.height - chromeStyle.size.stripButton - chromeStyle.space.s1
     // The well's widths for the tabs there are: { tabWidth, wellWidth, label, scrolls }.
     readonly property var wellLayout: chromeStyle.tabWellLayout(root.availableWidth, list.count)
+    // The one width of every tab where tab_style.tab_width is equal on a strip that is not a well, or 0
+    // where each tab is as wide as its title (and on a strip on its own, whose width no bar assigns).
+    readonly property real equalTabWidth: !root.pill && chromeStyle.tabStyle.equalWidths && root.availableWidth > 0
+        ? chromeStyle.equalTabWidth(root.availableWidth, list.count, chromeStyle.tabStyle.spacing) : 0
 
     /// Whether the tabs would have room for the lock: not while the well shows icons alone (TabItem.lockShown).
     /// @param available What the tabs may take, as availableWidth.
@@ -159,6 +163,53 @@ Row {
         // Over the strip from its entry (which reports at once) to its exit or drop.
         if (dropArea.nodePayload !== "")
             Qt.callLater(root.reportSpans)
+        root.scheduleGlassShapes()
+    }
+
+    // --- Tabs the operating system draws as glass (WindowController.tabsAreGlass, Liquid Glass on macOS 26) ---
+    // The strip paints only their labels, and tells the controller where each tab's surface stands, in window
+    // coordinates, whenever it moves: the system draws the glass there, behind this scene. A tab scrolled out of
+    // the strip's clip is cut to what shows, and one wholly out of it is left out. `?? false` and the typeof
+    // check keep a controller without glass tabs (a lightweight mock) out of it.
+    readonly property bool glassTabs: !!root.controller && (root.controller.tabsAreGlass ?? false)
+    onGlassTabsChanged: root.scheduleGlassShapes()
+    onXChanged: root.scheduleGlassShapes()
+    onWidthChanged: root.scheduleGlassShapes()
+
+    function scheduleGlassShapes() {
+        if (root.glassTabs)
+            Qt.callLater(root.publishGlassShapes)
+    }
+
+    function publishGlassShapes() {
+        if (!root.controller || typeof root.controller.setTabGlassShapes !== "function")
+            return
+        const shapes = []
+        if (root.glassTabs) {
+            const clipLeft = listClip.mapToItem(null, 0, 0).x
+            const clipRight = clipLeft + listClip.width
+            for (let i = 0; i < list.count; ++i) {
+                const tab = list.itemAtIndex(i)
+                if (!tab || !tab.visible)
+                    continue
+                const surface = tab.glassSurface
+                const at = surface.mapToItem(null, 0, 0)
+                const left = Math.max(at.x, clipLeft)
+                const right = Math.min(at.x + surface.width, clipRight)
+                if (right <= left || surface.height <= 0)
+                    continue
+                shapes.push({ x: left, y: at.y, width: right - left, height: surface.height,
+                              radius: surface.radius, tint: tab.glassTint })
+            }
+        }
+        root.controller.setTabGlassShapes(shapes)
+    }
+
+    Connections {
+        target: list
+        function onContentXChanged() { root.scheduleGlassShapes() }
+        function onCountChanged() { root.scheduleGlassShapes() }
+        function onWidthChanged() { root.scheduleGlassShapes() }
     }
 
     // Where the insertion slot for gap @p index stands, in the drop area's coordinates: centred on the
@@ -199,7 +250,7 @@ Row {
             width: parent.width
             height: chromeStyle.size.tabWell
             radius: chromeStyle.radii.tabWell
-            color: chromeStyle.colors.tabWellFill
+            color: chromeStyle.bandColors.tabWellFill
         }
 
         // What the tabs are clipped to: the well, or the strip. A pill's focus ring reaches past the pill, into
@@ -227,7 +278,8 @@ Row {
                 // same the well's widths are laid out with); the Flat strip sets tabs flush.
                 leftMargin: root.pill ? chromeStyle.wellPadding : 0
                 rightMargin: root.pill ? chromeStyle.wellPadding : 0
-                spacing: root.pill ? chromeStyle.wellGap : 0
+                // Between tabs that are not pills, the gap tab_style.spacing names (0: they touch).
+                spacing: root.pill ? chromeStyle.wellGap : chromeStyle.tabStyle.spacing
                 // Shrink to content width (the Row's implicitWidth then reflects the tabs + button); the
                 // parent layout caps the Row, and listClip keeps overflow tidy.
                 orientation: ListView.Horizontal
@@ -245,6 +297,7 @@ Row {
                 onContentXChanged: root.scheduleSpans()
 
                 delegate: TabItem {
+                    id: tabDelegate
                     // Role values injected for this row. Declared as required properties (the modern
                     // delegate model); their names differ from this TabItem's own properties so there is
                     // no shadowing.
@@ -267,7 +320,8 @@ Row {
                     // A pill is the well's width, a Flat or joined tab as wide as its title; each is as tall as
                     // the list, which is placed where the tabs stand.
                     height: list.height
-                    width: root.pill ? root.wellLayout.tabWidth : implicitWidth
+                    width: root.pill ? root.wellLayout.tabWidth
+                         : root.equalTabWidth > 0 ? root.equalTabWidth : implicitWidth
                     labelMode: root.pill ? root.wellLayout.label : "full"
                     controller: root.controller
                     window: root.window
@@ -285,22 +339,146 @@ Row {
                     tabBadgeProgress: badgeProgress
                     locked: (model.tabSecure ?? 0) !== 0
                     secureState: model.tabSecure ?? 0
-                    // The tabs from the slot's gap on make room for it, animated as a reorder is.
-                    transform: Translate {
-                        x: index >= root.slotGap ? root.roomMade : 0
-                        Behavior on x {
-                            NumberAnimation { duration: chromeStyle.motion.standard }
-                        }
+                    iconInfo: model.tabIcon ?? ({})
+                    // The tabs from the slot's gap on make room for it, animated as a reorder is; and a tab
+                    // whose row changed slides from where it stood (rowSlide).
+                    transform: [
+                        Translate {
+                            x: index >= root.slotGap ? root.roomMade : 0
+                            Behavior on x {
+                                NumberAnimation { duration: chromeStyle.motion.standard }
+                            }
+                        },
+                        Translate { x: tabDelegate.rowSlide }
+                    ]
+
+                    // A tab whose row a tab opened, closed or moved before it changed slides from where it stood
+                    // to where the view puts it, as an offset of its own rather than the view's displaced
+                    // transition: the view does not lay out again when its first tab is resized while a
+                    // transition holds it (QQuickListViewPrivate::itemGeometryChanged), so a tab sliding into
+                    // the place a closed first tab left, its title arriving as it went, was left wider than
+                    // the strip -- cut off, or scrolled wholly out of it. The view always has the tab where it
+                    // stands. Under Reduce Motion nothing slides.
+                    /// How far from where the view puts it the tab is drawn, while it slides there.
+                    property real rowSlide: 0
+                    /// Where the tab was drawn when its row changed, until the view places it anew.
+                    property real slideFromX: NaN
+                    /// Whether the view has placed the tab once: a tab being made has no place to slide from.
+                    property bool isPlaced: false
+                    // The delegate may be gone by the time the call runs -- its tab closed, or the strip torn down.
+                    Component.onCompleted: Qt.callLater(() => {
+                        if (tabDelegate)
+                            tabDelegate.isPlaced = true
+                    })
+                    onIndexChanged: {
+                        if (isPlaced && chromeStyle.motion.animates && isNaN(slideFromX))
+                            slideFromX = x + rowSlide
                     }
-                    onXChanged: root.scheduleSpans()
+                    onXChanged: {
+                        root.scheduleSpans()
+                        if (isNaN(slideFromX))
+                            return
+                        rowSlide = slideFromX - x
+                        slideFromX = NaN
+                        rowSlideAnimation.restart()
+                    }
+                    onRowSlideChanged: root.scheduleGlassShapes()
+                    NumberAnimation {
+                        id: rowSlideAnimation
+                        target: tabDelegate
+                        property: "rowSlide"
+                        to: 0
+                        duration: chromeStyle.motion.standard
+                        easing.type: Easing.OutCubic
+                    }
                     onWidthChanged: root.scheduleSpans()
+                    onHeightChanged: root.scheduleGlassShapes()
+                    onGlassTintChanged: root.scheduleGlassShapes()
                     onEngagedChanged: root.engagedTabs += engaged ? 1 : -1
                     Component.onDestruction: if (engaged) root.engagedTabs -= 1
+
+                    // A tab opened fades in (and, with motion, grows from a little smaller), as its own animation
+                    // rather than the view's add transition. The view does not lay its first item out again when
+                    // that item is resized while a transition holds it (QQuickListViewPrivate::itemGeometryChanged)
+                    // -- and at startup the window's first tab is resized just then, its title arriving as it
+                    // fades in -- which left the strip at the old width, the + standing over the tab's end. Only
+                    // a tab the model adds fades: one the view creates as the strip scrolls does not.
+                    //
+                    // The fade drives values of its own, which the tab shows only while the fade runs: a fade
+                    // stopped short, by whatever stops it, leaves the tab whole rather than at the opacity it
+                    // had reached -- which once left a tab invisible for good, still holding its place.
+                    property real appearOpacity: 1
+                    property real appearScale: 1
+                    opacity: appear.running ? appearOpacity : 1
+                    scale: appear.running ? appearScale : 1
+                    ListView.onAdd: appear.restart()
+                    ParallelAnimation {
+                        id: appear
+                        objectName: "tabAppear"   // findChild() handle for the GUI test
+                        NumberAnimation {
+                            target: tabDelegate
+                            property: "appearOpacity"
+                            from: 0
+                            to: 1
+                            duration: chromeStyle.motion.standard
+                        }
+                        NumberAnimation {
+                            target: tabDelegate
+                            property: "appearScale"
+                            from: chromeStyle.motion.animates ? 0.92 : 1
+                            to: 1
+                            duration: chromeStyle.motion.standard
+                            easing.type: Easing.OutCubic
+                        }
+                    }
                 }
 
-                // Animate reordering when a tab is moved.
-                moveDisplaced: Transition {
-                    NumberAnimation { properties: "x"; duration: chromeStyle.motion.standard }
+                // No view transitions: the tabs making room for one opened, closing the gap one leaves, or
+                // reordering slide themselves (rowSlide). A closed tab goes at once, so what the strip holds is
+                // always what the model holds.
+
+                // The active tab's indicator line, one for the strip, so that it slides from the tab it leaves to
+                // the tab it marks; under Reduce Motion it moves at once. A tab draws its own line where this
+                // one does not stand (TabItem.lineOnStrip).
+                Rectangle {
+                    id: slidingIndicator
+                    objectName: "tabSlidingIndicator"   // findChild() handle for the GUI test
+                    parent: list.contentItem
+                    z: 2
+                    readonly property Item tab: list.currentItem
+                    readonly property real targetX: tab ? tab.x + tab.rowSlide + tab.indicatorInset : 0
+                    readonly property real targetWidth: tab ? tab.indicatorWidth : 0
+                    // The slide runs from the tab the line leaves, and only when the active tab changes: at
+                    // startup, and as tabs resize or scroll, the line stays on its tab. A tab that closed has
+                    // no place to slide from (a guarded Item property reads null once its object is gone).
+                    property Item lastTab: null
+                    property real fromX: 0
+                    property real fromWidth: 0
+                    property real travel: 1
+                    onTabChanged: {
+                        if (chromeStyle.motion.animates && lastTab !== null && tab !== null) {
+                            fromX = lastTab.x + lastTab.rowSlide + lastTab.indicatorInset
+                            fromWidth = lastTab.indicatorWidth
+                            slide.restart()
+                        }
+                        lastTab = tab
+                    }
+                    NumberAnimation {
+                        id: slide
+                        target: slidingIndicator
+                        property: "travel"
+                        from: 0
+                        to: 1
+                        duration: chromeStyle.motion.standard
+                        easing.type: Easing.OutCubic
+                    }
+                    visible: tab !== null && tab.lineOnStrip
+                    // Exactly on the tab once the slide is over, where a blend would leave a rounding error.
+                    x: travel >= slide.to ? targetX : fromX + (targetX - fromX) * travel
+                    y: tab ? tab.y + tab.indicatorY : 0
+                    width: travel >= slide.to ? targetWidth : fromWidth + (targetWidth - fromWidth) * travel
+                    height: chromeStyle.size.progressBar
+                    color: tab ? tab.indicatorTint : "transparent"
                 }
             }
         }
@@ -349,7 +527,9 @@ Row {
             property string title: ""
 
             function locate(drag) {
-                const hit = root.controller ? root.controller.tabBarHit(drag.x) : undefined
+                // As this drag sees the strip: no slot beside a tab of its own it carries, which a drop there
+                // would put back where it is.
+                const hit = root.controller ? root.controller.tabBarHit(drag.x, nodePayload) : undefined
                 gapIndex = hit !== undefined && hit.spot === TabBarSpot.Gap ? hit.index : -1
             }
 
@@ -414,7 +594,7 @@ Row {
                 elide: Text.ElideRight
                 text: dropArea.title !== "" ? dropArea.title : qsTr("New tab")
                 font: chromeStyle.activeTabFont(chromeStyle.type.tab)
-                color: chromeStyle.colors.tabText
+                color: chromeStyle.bandColors.tabText
             }
         }
     }
@@ -423,11 +603,26 @@ Row {
     // ToolbarButton). A Loader, so the shape without it has no second "newTabButton" for a test to find.
     Loader {
         id: newTabLoader
-        active: !root.pill
+        active: !root.pill && chromeStyle.tabStyle.showsNewTabButton
         y: root.joined ? root.joinedButtonY : 0
         height: root.joined ? chromeStyle.size.stripButton : root.height
         sourceComponent: ToolButton {
             id: newTabButton
+            // On a bar of the user's colour (tab_style.bar_fill) the glyph takes the bar's ink: the palette's
+            // button text, and the icon colour the Windows style draws its label in, were chosen for the
+            // OS window colour. Bindings with `when`, so without a bar colour the style's own stay.
+            Binding {
+                target: newTabButton.palette
+                property: "buttonText"
+                value: chromeStyle.bandColors.tabTextActive
+                when: chromeStyle.tabStyle.hasBarGround
+            }
+            Binding {
+                target: newTabButton
+                property: "icon.color"
+                value: chromeStyle.bandColors.tabTextActive
+                when: chromeStyle.tabStyle.hasBarGround
+            }
             objectName: "newTabButton"
             height: newTabLoader.height
             text: chromeStyle.newTabGlyph
@@ -460,10 +655,26 @@ Row {
     Loader {
         id: newTabMenuLoader
         active: !root.pill && chromeStyle.layout.profileMenu === chromeStyle.layout.caret
+                && chromeStyle.tabStyle.showsNewTabButton
         y: root.joined ? root.joinedButtonY : 0
         height: root.joined ? chromeStyle.size.stripButton : root.height
         sourceComponent: ToolButton {
             id: newTabMenuButton
+            // On a bar of the user's colour (tab_style.bar_fill) the glyph takes the bar's ink: the palette's
+            // button text, and the icon colour the Windows style draws its label in, were chosen for the
+            // OS window colour. Bindings with `when`, so without a bar colour the style's own stay.
+            Binding {
+                target: newTabMenuButton.palette
+                property: "buttonText"
+                value: chromeStyle.bandColors.tabTextActive
+                when: chromeStyle.tabStyle.hasBarGround
+            }
+            Binding {
+                target: newTabMenuButton
+                property: "icon.color"
+                value: chromeStyle.bandColors.tabTextActive
+                when: chromeStyle.tabStyle.hasBarGround
+            }
             objectName: "newTabMenuButton"
             height: newTabMenuLoader.height
             text: chromeStyle.menuGlyph

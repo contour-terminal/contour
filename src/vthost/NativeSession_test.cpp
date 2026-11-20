@@ -9065,18 +9065,49 @@ TEST_CASE("activity marks are throttled to one per second per session",
                                      });
     };
 
-    // Each output gets its own flush inside the second, so only the pacing can hold the marks back.
-    for ([[maybe_unused]] auto const output: std::views::iota(0, 10))
-    {
+    auto const print = [&] {
+        f.flush.h.host.terminal(f.inSecond)->writeToScreen("x");
         client.session->sessionScreenUpdated(f.inSecond);
         f.settle();
-    }
+    };
+
+    // Each output gets its own flush inside the second, so only the pacing can hold the marks back.
+    for ([[maybe_unused]] auto const output: std::views::iota(0, 10))
+        print();
     CHECK(marks() == 1);
 
     f.flush.clock.advance(1s);
+    print();
+    CHECK(marks() == 2);
+}
+
+TEST_CASE("a pane that only rewrites its host-writable status line is not marked active",
+          "[vthost][native][daemon-follow][status]")
+{
+    auto f = SummaryFixture {};
+    auto& client = f.attachSelecting(f.first);
+    auto* const terminal = f.flush.h.host.terminal(f.inSecond);
+    terminal->writeToScreen("\033[2$~"); // DECSSDT host-writable
     client.session->sessionScreenUpdated(f.inSecond);
     f.settle();
-    CHECK(marks() == 2);
+    f.flush.clock.advance(1s); // past the pacing of whatever that first update marked
+    auto const skip = client.received.size();
+    auto const marks = [&] {
+        return std::ranges::count_if(SummaryFixture::summariesOf(client, f.inSecond, skip),
+                                     [](proto::PaneSummary const& summary) {
+                                         return summary.activity == proto::OutputActivity::Output;
+                                     });
+    };
+
+    terminal->writeToScreen("\033[1$}12:00\r\033[0$}"); // DECSASD status line, a clock, back to the page
+    client.session->sessionScreenUpdated(f.inSecond);
+    f.settle();
+    CHECK(marks() == 0);
+
+    terminal->writeToScreen("done\r\n");
+    client.session->sessionScreenUpdated(f.inSecond);
+    f.settle();
+    CHECK(marks() == 1);
 }
 
 TEST_CASE("a finished command in an unselected workspace is summarized",

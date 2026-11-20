@@ -1363,6 +1363,31 @@ profiles:
     CHECK(YAML::Load(contour::config::emitProfileYaml(*config.profile("plain")))["tab_color"].IsNull());
 }
 
+TEST_CASE("Config: a profile's tab_icon is its own, not the default profile's", "[config][tab-icon]")
+{
+    // Every other key a profile leaves out is the default profile's; an icon copied into every profile -- an
+    // SSH host's tabs showing the shell's logo -- would tell the tabs apart no more.
+    QTemporaryDir dir;
+    writeSideFile(dir, "profiles/work.yml", "show_title_bar: false\n");
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        tab_icon: '~/icons/pwsh.png'
+    plex:
+        ssh:
+            host: plex
+    own:
+        tab_icon: none
+)"sv);
+    CHECK(config.profile("main")->tabIcon.value() == "~/icons/pwsh.png");
+    CHECK(config.profile("plex")->tabIcon.value() == "auto");
+    CHECK(config.profile("own")->tabIcon.value() == "none");
+    // A profile Settings wrote to a file of its own is read the same way.
+    REQUIRE(config.profile("work") != nullptr);
+    CHECK(config.profile("work")->tabIcon.value() == "auto");
+}
+
 TEST_CASE("Config: 'Ctrl' is accepted as a spelling of Control (issue #1987)", "[config][input-mapping]")
 {
     auto dir = QTemporaryDir {};

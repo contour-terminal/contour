@@ -16,6 +16,7 @@
 #include <contour/window/StatusKinds.hpp>
 #include <contour/window/StatusUrgency.hpp>
 #include <contour/window/TabAttention.hpp>
+#include <contour/window/TabIcon.hpp>
 #include <contour/window/WorkspaceDirectory.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -182,6 +183,9 @@ struct SidebarRow
     /// The colour of the workspace the row belongs to (DirectoryWorkspace::color), on every row of it: the
     /// workspace row, folded or not, its tab rows and their pane rows. None when the workspace is uncoloured.
     std::optional<vtbackend::RGBColor> workspaceColor {};
+    /// A tab row's icon as the window's tab strip shows it (window::tabIconOf); none for a workspace or pane
+    /// row, and for a tab the window does not hold, whose profile and program it does not know.
+    std::optional<TabIcon> icon {};
 
     bool operator==(SidebarRow const&) const = default;
 };

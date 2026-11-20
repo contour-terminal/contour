@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 
 namespace contour::window
@@ -73,6 +74,22 @@ struct TabBarHit
             return { .spot = TabBarSpot::Gap, .index = index };
     }
     return { .spot = TabBarSpot::Gap, .index = index };
+}
+
+/// A tab hit as a drag of a whole tab of this strip sees it: the gaps either side of the dragged tab would
+/// put it back where it is -- a drop there changes nothing, and the gap after the last tab names no place it
+/// can go -- so they offer no slot and take no drop.
+/// @param hit What resolveTabBarHit() found.
+/// @param draggedRow The row of the tab being dragged, when the drag moves a whole tab of this strip; none
+/// for
+///        a pane, or for a tab of another window, either of which a gap beside it does move.
+/// @return @p hit, or nothing for a gap beside the dragged tab.
+[[nodiscard]] constexpr TabBarHit excludingOwnPlace(TabBarHit hit, std::optional<int> draggedRow) noexcept
+{
+    if (hit.spot == TabBarSpot::Gap && draggedRow
+        && (hit.index == *draggedRow || hit.index == *draggedRow + 1))
+        return {};
+    return hit;
 }
 
 /// What a drag hovers a tab as.

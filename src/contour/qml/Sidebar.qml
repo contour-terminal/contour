@@ -384,9 +384,12 @@ Rectangle {
             enabled: chromeStyle.motion.animates
             NumberAnimation { property: "opacity"; from: 0; to: 1; duration: chromeStyle.motion.fast }
         }
+        // A row displaced while it still fades in has its fade cut short; the displacement finishes it (Qt's
+        // "Handling Interrupted Animations"), or the row stays half transparent.
         displaced: Transition {
             enabled: chromeStyle.motion.animates
             NumberAnimation { property: "y"; duration: chromeStyle.motion.fast }
+            NumberAnimation { property: "opacity"; to: 1; duration: chromeStyle.motion.fast }
         }
 
         delegate: SidebarRow {

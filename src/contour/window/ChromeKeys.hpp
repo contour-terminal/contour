@@ -254,6 +254,18 @@ enum class PaneActivity : uint8_t
                                                                                      : PaneActivity::Running;
 }
 
+/// The program in front of a pane's shell, named by its base name.
+/// @param shellProgram The profile's shell program, as paneActivityOf() takes it.
+/// @param foreground   The pane's foreground process name; empty when it cannot be known.
+/// @return Its base name while it is Running (paneActivityOf()); empty while the shell itself is in front.
+[[nodiscard]] inline std::string_view runningProgramOf(std::string_view shellProgram,
+                                                       std::string_view foreground)
+{
+    if (foreground.empty() || paneActivityOf(shellProgram, std::string(foreground)) != PaneActivity::Running)
+        return {};
+    return programBaseName(foreground);
+}
+
 /// Whether closing a tab should ask first.
 enum class CloseConfirmation : uint8_t
 {

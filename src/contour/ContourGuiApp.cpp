@@ -2666,7 +2666,8 @@ config::ChromeTokenRow ContourGuiApp::resolvedChromeTokens() const
     return config::resolveChromeTokens(_chromeStyle,
                                        accessibilityPreferences(),
                                        _config.chromeDensity.value(),
-                                       platformAppearance().materials);
+                                       platformAppearance().materials,
+                                       config::withTabPreset(_config.tabStyle.value()).material);
 }
 
 window::ChromeInputs ContourGuiApp::quickTerminalChromeInputs() const
@@ -2688,6 +2689,8 @@ window::ChromeInputs ContourGuiApp::chromeInputs() const
         .scheme = config::chromeSchemeColorsOf(palette ? *palette : vtbackend::ColorPalette {}),
         .density = _config.chromeDensity.value(),
         .secureInput = _secureInput->support(),
+        .tabStyle = config::withTabPreset(_config.tabStyle.value()),
+        .tabSeparators = config::editionDefaults(_config.defaultsEdition).tabSeparators,
     };
 }
 

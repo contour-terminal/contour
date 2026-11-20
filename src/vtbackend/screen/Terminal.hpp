@@ -4117,6 +4117,15 @@ class Terminal: public IStatusLinePublishTarget
     void setActiveStatusDisplay(ActiveStatusDisplay activeDisplay);
     constexpr ActiveStatusDisplay activeStatusDisplay() const noexcept { return _activeStatusDisplay; }
 
+    /// How many runs of text and C0 controls the parser has written to the main display, as opposed to a
+    /// status line DECSASD selected. It only grows; a reader that remembers it tells output the user would
+    /// see on the page from a program that only rewrote its status line. Any thread, without the lock.
+    /// @return The count so far.
+    [[nodiscard]] uint64_t mainDisplayOutputCount() const noexcept
+    {
+        return _mainDisplayOutputCount.load(std::memory_order_relaxed);
+    }
+
     /// Puts @p statusDisplayType up for a while as @p owner's notice, over the type shown, which comes back
     /// when every notice is down again.
     /// @param owner Who puts the notice up; it alone takes it down.
@@ -5888,6 +5897,18 @@ class Terminal: public IStatusLinePublishTarget
 
     std::optional<std::string> _programTabTitle {};
 
+    /// @see mainDisplayOutputCount(). Written by the parser thread alone, so a load and a store suffice: no
+    /// read-modify-write on the path every printed run takes.
+    std::atomic<uint64_t> _mainDisplayOutputCount { 0 };
+
+    /// Counts a run of text or a C0 control the parser hands on, if it reaches the main display.
+    void countMainDisplayOutput() noexcept
+    {
+        if (_activeStatusDisplay == ActiveStatusDisplay::Main)
+            _mainDisplayOutputCount.store(_mainDisplayOutputCount.load(std::memory_order_relaxed) + 1,
+                                          std::memory_order_relaxed);
+    }
+
     struct ModeDependantSequenceHandler
     {
         Terminal& terminal;
@@ -5896,6 +5917,7 @@ class Terminal: public IStatusLinePublishTarget
             // Only a C0 control inside a sequence executes while a tail is replayed, and it executed already.
             if (terminal._tailReplay == TailReplay::Replaying) [[unlikely]]
                 return;
+            terminal.countMainDisplayOutput();
             terminal.sequenceHandler().executeControlCode(controlCode);
         }
         void processSequence(Sequence const& sequence)
@@ -5903,9 +5925,14 @@ class Terminal: public IStatusLinePublishTarget
             terminal.sequenceHandler().processSequence(sequence);
         }
         void processAPC(std::string_view body) { terminal.sequenceHandler().processAPC(body); }
-        void writeText(char32_t codepoint) { terminal.sequenceHandler().writeText(codepoint); }
+        void writeText(char32_t codepoint)
+        {
+            terminal.countMainDisplayOutput();
+            terminal.sequenceHandler().writeText(codepoint);
+        }
         void writeText(std::string_view codepoints, size_t cellCount)
         {
+            terminal.countMainDisplayOutput();
             terminal.sequenceHandler().writeText(codepoints, cellCount);
         }
         void writeTextEnd() { terminal.sequenceHandler().writeTextEnd(); }

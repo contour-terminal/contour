@@ -348,6 +348,23 @@ TEST_CASE("MultiPage.DECPCCM_reset.outputToAnotherPageLeavesTheViewersStateAlone
     CHECK(terminal.extractSelectionText() == "line 37");
 }
 
+TEST_CASE("MultiPage.onlyOutputToThePageCountsAsMainDisplayOutput", "[screen]")
+{
+    // What a session raises the unseen-output mark on: a program that rewrites only its host-writable status
+    // line (a clock, a progress line) shows nothing new in the pane.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) }, LineCount(100) };
+    auto const& terminal = mock.terminal;
+    mock.writeToScreen("\033[2$~"); // DECSSDT host-writable
+
+    auto const before = terminal.mainDisplayOutputCount();
+    mock.writeToScreen("\033[1$}12:00\r\033[0$}"); // DECSASD status line, its text, back to the page
+    CHECK(terminal.activeStatusDisplay() == ActiveStatusDisplay::Main);
+    CHECK(terminal.mainDisplayOutputCount() == before);
+
+    mock.writeToScreen("hello\r\n");
+    CHECK(terminal.mainDisplayOutputCount() > before);
+}
+
 TEST_CASE("MultiPage.statusLineOutputLeavesThePageOnDisplayAlone", "[screen]")
 {
     // DECSASD sends output to the host-writable status line, a one-row screen of its own: each line feed

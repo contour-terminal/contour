@@ -45,6 +45,7 @@
 #include <contour/window/SwitcherController.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TabColorScheme.hpp>
+#include <contour/window/TabGlassShapes.hpp>
 #include <contour/window/TabLabel.hpp>
 #include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/TitleBandSurface.hpp>
@@ -56,6 +57,7 @@
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 
 #include <core/Overloaded.hpp>
+#include <core/Utf8Path.hpp>
 
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
@@ -189,6 +191,18 @@ class WindowController::SidebarHost final: public ISidebarHost
     void openContextMenu(SidebarRow const& row, QPointF windowPosition) override
     {
         _window.openSidebarContextMenu(row, windowPosition);
+    }
+
+    [[nodiscard]] std::optional<TabIcon> tabIcon(DirectoryTab const& tab) const override
+    {
+        auto const* const session = _window.sessionForDirectoryTab(tab);
+        return session != nullptr ? std::optional { _window.tabIconFor(*session) } : std::nullopt;
+    }
+
+    [[nodiscard]] std::vector<std::string> hoverLines(SidebarRowKey const& row) const override
+    {
+        auto const* const session = _window.sessionForSidebarRow(row);
+        return session != nullptr ? session->tabHoverLines() : std::vector<std::string> {};
     }
 
   private:
@@ -1033,6 +1047,7 @@ QHash<int, QByteArray> WindowController::roleNames() const
         { static_cast<int>(Roles::BadgeTextRole), "badgeText" },
         { static_cast<int>(Roles::BadgeProgressRole), "badgeProgress" },
         { static_cast<int>(Roles::SecureRole), "tabSecure" },
+        { static_cast<int>(Roles::IconRole), "tabIcon" },
     };
 }
 
@@ -1083,8 +1098,59 @@ QVariant WindowController::data(QModelIndex const& index, int role) const
         case Roles::BadgeProgressRole:
             return tab != nullptr ? tabBadge(*tab).progressPercent.value_or(-1) : -1;
         case Roles::SecureRole: return tab != nullptr ? static_cast<int>(tabSecureIndicator(*tab)) : 0;
+        case Roles::IconRole:
+            return session != nullptr ? tabIconVariant(tabIconFor(*session)) : QVariantMap {};
         default: return {};
     }
+}
+
+TabIcon WindowController::tabIconFor(session::TerminalSession const& session) const
+{
+    // The program in front of the shell: the one cachedProcessName() asked for with the title, unless that
+    // is the shell itself.
+    auto const running =
+        runningProgramOf(session.profile().shell.value().program, cachedProcessName(session));
+    return tabIconOf(
+        session.profile().tabIcon.value(), running, core::pathFromTrustedUtf8(_manager.homeDirectory()));
+}
+
+WindowController::HeldPane WindowController::heldPane(PaneKey key) const
+{
+    auto* const win = window();
+    if (win == nullptr)
+        return {};
+    for (auto const row: std::views::iota(0, win->tabCount()))
+    {
+        auto* const tab = win->tabAt(row);
+        if (tab == nullptr || tab->rootPane() == nullptr)
+            continue;
+        if (auto const* const leaf = tab->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+                return pane.isLeaf() && _manager.paneKeyOf(pane.session()) == key;
+            }))
+            return { .tab = tab, .session = _manager.sessionForId(leaf->session()) };
+    }
+    return {};
+}
+
+session::TerminalSession* WindowController::sessionForSidebarRow(SidebarRowKey const& row) const
+{
+    if (row.kind == SidebarRowKind::Pane)
+        return heldPane(row.pane).session;
+    if (row.kind != SidebarRowKind::Tab || _directorySource == nullptr)
+        return nullptr;
+    auto const directory = _directorySource->directory();
+    auto const listed = findTab(directory, row.workspace, row.tab);
+    return listed ? sessionForDirectoryTab(*listed->tab) : nullptr;
+}
+
+session::TerminalSession* WindowController::sessionForDirectoryTab(DirectoryTab const& tab) const
+{
+    // A daemon's tab ids are its own: the tab is found by its panes, whose keys this window shares, and
+    // speaks for itself through its active one, as it does in the strip.
+    for (auto const& pane: tab.panes)
+        if (auto const held = heldPane(pane.key); held.tab != nullptr && held.tab->activePane() != nullptr)
+            return _manager.sessionForId(held.tab->activePane()->session());
+    return nullptr;
 }
 
 int WindowController::rowCount(QModelIndex const& parent) const
@@ -1257,6 +1323,15 @@ QString WindowController::tabWorkingDirectory(int index) const
 
     // The same answer the pane header shows: abbreviated for a directory on this machine, made safe to show.
     return QString::fromStdString(session->shownWorkingDirectory(_manager.homeDirectory()));
+}
+
+QStringList WindowController::tabHoverLines(int index) const
+{
+    auto* const tab = tabAtRow(index);
+    if (tab == nullptr || tab->activePane() == nullptr)
+        return {};
+    auto const* const session = _manager.sessionForId(tab->activePane()->session());
+    return session != nullptr ? toQStringList(session->tabHoverLines()) : QStringList {};
 }
 
 void WindowController::dispatchTabStripWheel(
@@ -1473,9 +1548,16 @@ void WindowController::setTabSpans(QList<QRectF> const& tabs)
                                               }));
 }
 
-TabBarHitValue WindowController::tabBarHit(qreal x) const
+TabBarHitValue WindowController::tabBarHit(qreal x, QString const& nodePayload) const
 {
-    return TabBarHitValue { resolveTabBarHit(_tabSpans, x) };
+    auto const* const drag = _manager.resolveNodeDrag(nodePayload);
+    auto const* const window = _manager.model().workspace(_displayed);
+    auto draggedRow = std::optional<int> {};
+    if (drag != nullptr && window != nullptr && drag->tab && drag->workspace == _displayed
+        && drag->movesWholeTab())
+        if (auto const row = window->indexOf(*drag->tab); row >= 0)
+            draggedRow = row;
+    return TabBarHitValue { excludingOwnPlace(resolveTabBarHit(_tabSpans, x), draggedRow) };
 }
 
 bool WindowController::springOpens(int tabIndex, QString const& nodePayload) const
@@ -2717,7 +2799,10 @@ Qt::ColorScheme WindowController::effectiveColorScheme() const
 
 bool WindowController::dressesTitleBand() const noexcept
 {
-    return platform::hostsTitleBandMaterial(framePolicy().shadow);
+    // A material a compositor draws (KWin's blur) needs no title bar of the OS's; the others need a frame
+    // that keeps one.
+    return _manager.app().titleBandMaterial().host() == platform::BandMaterialHost::Compositor
+           || platform::hostsTitleBandMaterial(framePolicy().shadow);
 }
 
 QString WindowController::toastHost(QString const& band,
@@ -2771,9 +2856,16 @@ platform::TitleBandRequest WindowController::titleBandRequest() const
 {
     auto const surface = titleBandSurface();
     return platform::TitleBandRequest { .backdrop = surface.backdrop,
-                                        .kind = config::BackdropKind::Tabbed,
+                                        .kind = surface.kind,
                                         .growth = surface.growth,
-                                        .scheme = effectiveColorScheme() };
+                                        .scheme = effectiveColorScheme(),
+                                        .height = titleBandGeometry().height,
+                                        .tabs = surface.tabs,
+                                        // Only for tabs the material draws: shapes of painted tabs would
+                                        // re-apply the band on every tab move for nothing.
+                                        .tabShapes = surface.tabs == config::TabSurface::Glass
+                                                         ? _tabGlassShapes
+                                                         : std::vector<platform::TabGlassShape> {} };
 }
 
 WindowMode WindowController::windowMode() const noexcept
@@ -2847,10 +2939,24 @@ void WindowController::refreshTitleBand()
     emit titleBandChanged();
 }
 
+bool WindowController::tabsAreGlass() const
+{
+    return titleBandSurface().tabs == config::TabSurface::Glass;
+}
+
+void WindowController::setTabGlassShapes(QVariantList const& shapes)
+{
+    auto next = tabGlassShapesOf(shapes);
+    if (next == _tabGlassShapes)
+        return;
+    _tabGlassShapes = std::move(next);
+    refreshTitleBand();
+}
+
 bool WindowController::clearsTitleBarBackground() const noexcept
 {
     return needsExpandedClientArea() && _publishedTitleBand
-           && _publishedTitleBand->backdrop == config::BandBackdrop::Client;
+           && _publishedTitleBand->backdrop != config::BandBackdrop::NativeMaterial;
 }
 
 void WindowController::onOSWindowActiveChanged()
@@ -4620,9 +4726,15 @@ void WindowController::notifyTabRowChanged(vtworkspace::TabId tab, QList<Roles> 
         return;
 
     auto roleIds = QList<int> {};
-    roleIds.reserve(roles.size());
+    roleIds.reserve(roles.size() + 1);
     for (auto const role: roles)
         roleIds.append(static_cast<int>(role));
+    // The icon names the process the title asked for afresh, in the strip and on the sidebar's row.
+    if (roles.contains(Roles::TitleRole))
+    {
+        roleIds.append(static_cast<int>(Roles::IconRole));
+        noteSidebarChanged();
+    }
     emit dataChanged(index(row), index(row), roleIds);
 }
 
@@ -4655,8 +4767,11 @@ void WindowController::notifyAllTabRowsChanged(QList<Roles> const& roles)
 void WindowController::refreshAllTabTitles()
 {
     _processNames.clear();
+    noteSidebarChanged(); // the rows' icons follow the strip's
     if (auto const rows = rowCount(); rows > 0)
-        emit dataChanged(index(0), index(rows - 1), { static_cast<int>(Roles::TitleRole) });
+        emit dataChanged(index(0),
+                         index(rows - 1),
+                         { static_cast<int>(Roles::TitleRole), static_cast<int>(Roles::IconRole) });
 }
 
 void WindowController::showHostingNotice(QString notice)

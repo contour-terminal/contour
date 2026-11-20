@@ -135,6 +135,79 @@ Config keys you will touch: `ui_style`, `chrome_density` (`comfortable | minimal
 (`terminal` follows the background), `show_title_bar`, `defaults_edition`, `scrollbar.mode` and the
 window-control style (`src/contour/config/WindowControlStyle.hpp`).
 
+`tab_style` is the one place a user's configuration reaches into a row's look rather than choosing
+between rows. It is laid over the row by `config::resolveTabStyle` (`src/contour/config/TabStyle.hpp`)
+and published as `chromeStyle.tabStyle`, so `TabItem.qml` reads the result and never the section: a
+key left at `auto` is the row's own value.
+
+- `shape` is a *look*, not a layout: the row still owns the strip (`layout.tabShape`, the band rules,
+  the heights), and a look only changes how each tab is drawn inside it. A look is one row of
+  `TabLookTraitRows` (corners, seat, what marks the active tab); the tab reads those traits and never
+  the look's name, so a new look is a new row. The Terminal row counts in cells and takes no look.
+- `spacing` is the gap between tabs of a strip that is not a well of pills, whose gap is the well's.
+  With a gap, the line between two tabs is not drawn.
+- `material` is the one key that changes the row rather than the tabs: `config::bandMaterialFor` lays
+  it over `material.titleBand` inside `resolveChromeTokens`, before the accessibility steps, so Reduced
+  transparency and an OS without the material still end in Solid. Its values (`solid`, `frosted`,
+  `glass`) name what the user sees, not a platform's material: `BandMaterialGrants` says which
+  `Material` each row grants a wish with, and a row with no grant keeps its own. Windows grants Mica
+  and Acrylic (a `TitleBandSurfaceRows` row that asks DWM for `BackdropKind::TabbedGlass`). macOS
+  and KDE Plasma grant `Frost` and `Glass`: `BandBackdrop::Blurred`, under the band alone, painted
+  over with a translucent tint (`BandFill::FrostTint`, `GlassTint`). On macOS the blur is a view of
+  ours behind the Qt content view (`CocoaTitleBandMaterial.mm`), Liquid Glass on macOS 26 -- never
+  AppKit's title-bar material, which takes the band's clicks (F13). On Linux it is
+  `KWinTitleBandMaterial`, a material that needs a compositor rather than an OS title bar
+  (`BandMaterialHost::Compositor`); it reports itself unsupported where nothing blurs (a Wayland
+  compositor without `org_kde_kwin_blur`, an X11 window manager other than KWin), and the window
+  then paints the solid band. Its blur shares the window's one blur object with `background.blur`
+  (`BlurBehind.cpp` keeps both wishes per window).
+- `tab_color_mode` decides whether a tab's own colour is its fill (the default, which then wins over
+  `active_fill` and `inactive_fill`), a tint over the styled fill, or only its indicator line.
+
+The row's default for the line between two joined tabs is `contrast.tabSeparatorPercent`, apart from
+`separatorPercent` because over the band that line is all that separates two tabs. Where it is drawn
+is a defaults-edition choice (`EditionDefaults::tabSeparators`): `Classic` keeps the old line after
+every tab at rest at `separatorPercent`; `Native2026` draws it only where two tabs at rest meet, at
+`tabSeparatorPercent`.
+
+`tab_style.preset` names a look that sets several keys at once. Each preset is one row of
+`TabPresetRows`. `withTabPreset` lays it under the section before anything reads it (at
+`resolvedChromeTokens` and in the chrome inputs): a key still at its default takes the preset's value,
+and a key the user set wins. "At its default" rather than "absent", because a generated file writes every
+key. `withTabPreset` lists the members a row may set; the preset test fails for a row that sets one the
+list misses.
+
+The tabs, beyond the section:
+
+- **Icons.** A profile's `tab_icon` (`auto`, `none`, or an image path) becomes a `TabIcon` through the pure
+  `window::tabIconOf` (`TabIcon.hpp`). `auto` takes the initial of the program in front of the shell
+  (`runningProgramOf`). `WindowController` publishes it as `IconRole`, a `{ kind, text }` map
+  (`tabIconVariant`), and `TabIconMark.qml` draws it in the strip and on the sidebar's tab rows. The
+  square is shaded away from a tab its colour or the accent fills (`UiStyleProvider::markOn`, which is
+  `config::legibleShadeOn` at mark contrast). `tab_icon` is the one profile key that is not inherited
+  from the default profile: `loadProfileBody` resets it to `auto` before reading the profile's own value,
+  because an icon copied into every profile identifies none of them.
+- **Motion.** The strip's `ListView` fades a new tab in and slides the tabs beside one opened or closed
+  (`add`, `displaced`, `moveDisplaced`). The active tab's indicator is one line for the strip
+  (`tabSlidingIndicator`), which slides to the tab made active; a tab draws its own line only where the
+  strip's does not stand (`lineOnStrip`). Every displacement also animates opacity and scale back to 1.
+  A tab displaced while its `add` transition runs (opened, then the tab before it closed) otherwise keeps
+  the opacity and scale that transition had reached: transparent under Reduce Motion, 92% wide under full
+  motion. This is Qt's "handling interrupted animations"; the sidebar's rows follow the same rule.
+- **Hover details.** The tab's tooltip, and the sidebar's hover card for a tab or pane the window holds,
+  add what runs in the pane and how its last command ended. `session::tabHoverFactsOf` reads them from
+  the command-block records, falling back to the foreground process name without shell integration.
+- **The sidebar's rows of tabs the window holds** find their session through the directory tab's pane
+  keys (`WindowController::sessionForDirectoryTab`), since a daemon's tab ids are its own. Rows of other
+  workspaces and daemons show neither icon nor hover lines: the directory carries no profile or
+  program for them.
+
+The activity badges (unseen output, a bell, a finished command) predate this section and are unchanged,
+except for what counts as output. `vtbackend::Terminal::mainDisplayOutputCount()` counts the runs of text
+and C0 controls the parser writes to the main display. The in-process session (`screenUpdated`) and the
+daemon's summary mark (`NativeSession::noteActivity`) raise the unseen-output mark only when it moved,
+so a program that only rewrites the host-writable status line marks nothing.
+
 `DefaultsEdition { Classic = 0, Native2026 }` exists because a configuration that sets only
 `profiles.main.font` would otherwise inherit every new default. A fresh install is `Native2026` by
 virtue of the generated file carrying `defaults_edition: native2026`. A file that sets nothing is
@@ -242,8 +315,10 @@ Platform notes that are easy to get wrong:
 
 - **macOS.** The window keeps the full-size content view. As shipped the title band is the client's own
   tint over a compact toolbar (`Solid`): with AppKit's transparent title bar the `NSTitlebarView` took
-  the band's clicks. Glass remains a possible follow-up as a within-window `NSVisualEffectView` behind
-  the Qt content. `nativeControlsInset()` stays the horizontal inset for the traffic lights; the band's
+  the band's clicks. `tab_style.material: frosted` puts the title bar's material in an
+  `NSVisualEffectView` of ours behind the Qt content, and `glass` draws each tab as Liquid Glass
+  (macOS 26) in one `NSGlassEffectContainerView` behind it; neither is ever AppKit's own title-bar
+  material. `nativeControlsInset()` stays the horizontal inset for the traffic lights; the band's
   height comes from the safe area. Alpha-capable surfaces can clear `hasShadow`, so it is re-asserted
   after the frame is applied. On macOS `QWindow::setBaseSize` hard-resizes the `NSWindow`, and the
   OpenGL RHI backend maps a window that never composites; both are avoided in the code and must stay so.
@@ -263,7 +338,9 @@ Platform notes that are easy to get wrong:
   `button-layout`, KWin's `ButtonsOnLeft`/`ButtonsOnRight`, else close on the right). Window shadows are
   drawn client-side per windowing system (`X11WindowShadow`, `WaylandWindowShadow`) using Breeze's own
   parameters so a Contour window and a Breeze one cast the same shadow. Selected rows use the legible
-  highlight rule from the principles above.
+  highlight rule from the principles above. `tab_style.material: frosted | glass` is not a KDE variant
+  of the design but a capability: the same band over KWin's blur where the compositor offers it
+  (`KWinTitleBandMaterial`), the solid band everywhere else.
 
 ## The Settings window and its one save model
 

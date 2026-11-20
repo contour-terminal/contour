@@ -1401,8 +1401,16 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     std::unordered_set<uint64_t> _programStatusPending;
     /// What changed in each unmirrored pane since the last flush, merged into one summary per pane.
     std::map<uint64_t, proto::PaneSummary> _pendingSummaries;
-    /// When each unmirrored pane last had its output marked, which paces the next mark.
-    std::unordered_map<uint64_t, core::platform::SteadyTimePoint> _activityMarkedAt;
+    /// What this connection knows of an unmirrored pane's output, to decide whether an update is news.
+    struct ActivityMark
+    {
+        /// When its output was last marked, which paces the next mark; none before the first.
+        std::optional<core::platform::SteadyTimePoint> markedAt;
+        /// Its terminal's mainDisplayOutputCount() at the last update: one that leaves it there wrote to
+        /// the host-writable status line alone.
+        uint64_t mainDisplayOutput = 0;
+    };
+    std::unordered_map<uint64_t, ActivityMark> _activityMarks;
     /// The workspaces whose WorkspaceMeta this connection was sent in full, each with the position the
     /// connection was last told for it; a delta names only these. @see announceWorkspaceMeta
     std::unordered_map<uint64_t, uint32_t> _announcedMeta;

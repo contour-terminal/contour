@@ -34,12 +34,12 @@ TEST_CASE("SettingsSections: every group appears exactly once, in enumerator ord
     }
 }
 
-TEST_CASE("SettingsSections: the sections are the spec's six, in order", "[settingssections]")
+TEST_CASE("SettingsSections: the sections are the spec's seven, in order", "[settingssections]")
 {
     REQUIRE(SettingsSectionRows.size() == SettingsSectionCount);
-    auto const titles =
-        std::array<std::string_view, SettingsSectionCount> { "General",           "Appearance", "Keyboard",
-                                                             "Shell Integration", "Profiles",   "Hosts" };
+    auto const titles = std::array<std::string_view, SettingsSectionCount> {
+        "General", "Appearance", "Tab Bar", "Keyboard", "Shell Integration", "Profiles", "Hosts"
+    };
     for (auto const index: std::views::iota(std::size_t { 0 }, SettingsSectionCount))
     {
         INFO(index);

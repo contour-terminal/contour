@@ -39,6 +39,8 @@
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TabBarDropPolicy.hpp>
 #include <contour/window/TabBarHitValue.hpp>
+#include <contour/window/TabIcon.hpp>
+#include <contour/window/TabIconVariant.hpp>
 #include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/TitleBandSurface.hpp>
@@ -221,6 +223,10 @@ class WindowController:
     Q_PROPERTY(qreal titleBandHeight READ titleBandHeight NOTIFY titleBandChanged)
     Q_PROPERTY(qreal titleBandRevealTop READ titleBandRevealTop NOTIFY titleBandChanged)
     Q_PROPERTY(bool clearsTitleBarBackground READ clearsTitleBarBackground NOTIFY titleBandChanged)
+    // Whether the operating system draws this window's tabs as glass (config::TabSurface::Glass), so the
+    // strip paints only their labels and publishes where they are (setTabGlassShapes). A bool, the
+    // QML-facing carve-out: the strip asks only yes or no.
+    Q_PROPERTY(bool tabsAreGlass READ tabsAreGlass NOTIFY titleBandChanged)
     // What this window's band paints, a config::BandFill as its underlying value: the row's surface, unless
     // this window's frame hosts no material or its material failed.
     Q_PROPERTY(int titleBandFill READ titleBandFill NOTIFY titleBandChanged)
@@ -309,6 +315,10 @@ class WindowController:
         BadgeProgressRole = Qt::UserRole + 12,
         //!< The strongest window::SecureIndicator of the tab's panes, as its value (0 for no lock).
         SecureRole = Qt::UserRole + 13,
+        //!< The tab's icon (window::tabIconOf) as `{ kind, text }`: a window::TabIconKind value
+        //!< (`chromeStyle.tabIconKinds`), and the initial of a Monogram or the file URL of an Image. Re-read
+        //!< with the title, as is the program name it comes from.
+        IconRole = Qt::UserRole + 14,
     };
 
     /// @param manager  The session-lifetime service + model host (must outlive this controller).
@@ -424,6 +434,11 @@ class WindowController:
     /// @param index The tab's row.
     /// @return The directory, or an empty string when none can be determined.
     Q_INVOKABLE [[nodiscard]] QString tabWorkingDirectory(int index) const;
+    /// What the tab's hover card says of the commands in its active pane: what runs now, and the last
+    /// command that finished with how it ended (session::tabHoverLines).
+    /// @param index The tab's row.
+    /// @return The lines; none for a row out of range or a pane that tells nothing.
+    Q_INVOKABLE [[nodiscard]] QStringList tabHoverLines(int index) const;
     /// Routes a wheel event that occurred over the tab strip.
     ///
     /// Horizontal notches resolve through the same built-in fallback mouse mappings the terminal grid
@@ -522,10 +537,13 @@ class WindowController:
     /// lays out while the drag is over it.
     /// @param tabs Each tab's rectangle in the strip, left to right; only the horizontal extent is read.
     Q_INVOKABLE void setTabSpans(QList<QRectF> const& tabs);
-    /// Hit-tests the tab strip (resolveTabBarHit()) against the spans setTabSpans() last reported.
-    /// @param x The pointer's position along the strip.
+    /// Hit-tests the tab strip (resolveTabBarHit()) against the spans setTabSpans() last reported, as the
+    /// drag of @p nodePayload sees it: a gap beside a whole tab of this window being dragged is no gap
+    /// (excludingOwnPlace()).
+    /// @param x           The pointer's position along the strip.
+    /// @param nodePayload The drag's JSON.
     /// @return What the pointer is on (`hit.spot`, a TabBarSpot) and which tab or gap (`hit.index`).
-    Q_INVOKABLE [[nodiscard]] TabBarHitValue tabBarHit(qreal x) const;
+    Q_INVOKABLE [[nodiscard]] TabBarHitValue tabBarHit(qreal x, QString const& nodePayload) const;
     /// Whether resting a drag of @p nodePayload on the tab at @p tabIndex opens that tab
     /// (shouldSpringOpen()): never the tab dragged, nor the one the drag came from, nor in a window that
     /// refuses the drag.
@@ -1175,6 +1193,15 @@ class WindowController:
     /// own band), and only while the published request's backdrop is the client's own paint. A bool for
     /// QML, the documented QML-facing carve-out, read as the question the `flags` binding asks.
     [[nodiscard]] bool clearsTitleBarBackground() const noexcept;
+
+    /// @return Whether the operating system draws this window's tabs as glass: the band's surface asks for
+    ///         it (config::TabSurface::Glass) and the material has not failed.
+    [[nodiscard]] bool tabsAreGlass() const;
+
+    /// Where the tab strip lays out the tabs the operating system draws as glass. The strip publishes them
+    /// whenever they move; an unchanged list asks nothing of the material.
+    /// @param shapes The tabs, as window::tabGlassShapesOf reads them.
+    Q_INVOKABLE void setTabGlassShapes(QVariantList const& shapes);
     // }}}
 
     // {{{ Tab strip (tab bar) placement + visibility
@@ -1846,6 +1873,26 @@ class WindowController:
     /// _processNames). Only a TitleRole change re-reads it, so a tab keeps the name of the process it first
     /// found until its title changes; Step 2's foreground poll is what invalidates it on a process change.
     [[nodiscard]] std::string const& cachedProcessName(session::TerminalSession const& session) const;
+    /// @param session The tab's active session.
+    /// @return Its tab icon: from its profile's `tab_icon` and the program it runs (window::tabIconOf).
+    [[nodiscard]] TabIcon tabIconFor(session::TerminalSession const& session) const;
+    /// A pane this window holds, with the tab it is in.
+    struct HeldPane
+    {
+        vtworkspace::Tab* tab = nullptr;             ///< The tab; null when the window holds no such pane.
+        session::TerminalSession* session = nullptr; ///< The pane's session; null as well.
+    };
+    /// @param key A pane, by the key the directory lists it under.
+    /// @return It and its tab, when one of this window's tabs holds it.
+    [[nodiscard]] HeldPane heldPane(PaneKey key) const;
+    /// @param row A sidebar row.
+    /// @return The session a pane row stands for, or a tab row's active pane's; null for a workspace row and
+    ///         for panes this window does not hold.
+    [[nodiscard]] session::TerminalSession* sessionForSidebarRow(SidebarRowKey const& row) const;
+    /// @param tab A tab the directory lists, by whatever ids its host gives it.
+    /// @return Its active pane's session, found through the panes this window holds; null for a tab whose
+    ///         panes the window does not hold.
+    [[nodiscard]] session::TerminalSession* sessionForDirectoryTab(DirectoryTab const& tab) const;
     /// @return What names the other machine this window's daemon runs on (a saved host, or the chrome's label
     /// for
     ///         a `--connect-tcp` daemon); empty for a daemon on this machine and a local window.
@@ -2357,6 +2404,7 @@ class WindowController:
     // The title band request last applied to this window's platform window, if any; forgotten when the
     // decoration changes, so the next refresh applies again.
     std::optional<platform::TitleBandRequest> _appliedTitleBand;
+    std::vector<platform::TabGlassShape> _tabGlassShapes; ///< The strip's glass tabs, as last published.
     // The request and the geometry refreshTitleBand() last published (the properties read these).
     std::optional<platform::TitleBandRequest> _publishedTitleBand;
     std::optional<int> _publishedTitleBandFill;

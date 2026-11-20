@@ -2359,6 +2359,7 @@ QVariantList SettingsController::sidebar() const
                 break;
             case SettingsSection::General:
             case SettingsSection::Appearance:
+            case SettingsSection::TabBar:
             case SettingsSection::Keyboard:
             case SettingsSection::ShellIntegration: break;
         }

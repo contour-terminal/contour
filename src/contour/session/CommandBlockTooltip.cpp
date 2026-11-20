@@ -30,4 +30,16 @@ std::vector<std::string> commandBlockHeaderLines(vtbackend::CommandBlockRecord c
     return lines;
 }
 
+std::vector<std::string> tabHoverLines(TabHoverFacts const& facts)
+{
+    auto lines = std::vector<std::string> {};
+    if (!facts.running.empty())
+        lines.push_back(std::format("Running: {}", facts.running));
+    if (!facts.lastCommand.empty())
+        lines.push_back(facts.lastStatus.empty()
+                            ? std::format("Last: {}", facts.lastCommand)
+                            : std::format("Last: {} · {}", facts.lastCommand, facts.lastStatus));
+    return lines;
+}
+
 } // namespace contour::session

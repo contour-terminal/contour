@@ -36,6 +36,9 @@ struct SettingsBackdropRow
 /// window as it is (1d R-h), and every other row draws no material.
 inline constexpr auto SettingsBackdropRows = std::array {
     SettingsBackdropRow { .row = config::ChromeStyle::Fluent, .material = config::Material::Mica },
+    // The Settings window keeps Mica where the tab bar was asked to be Acrylic (tab_style.material): that
+    // wish is about the terminal window's bar.
+    SettingsBackdropRow { .row = config::ChromeStyle::Fluent, .material = config::Material::Acrylic },
 };
 
 /// Decides what the Settings window asks of the title-band material.

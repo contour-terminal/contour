@@ -18,6 +18,11 @@ import QtQuick.Window
 RowLayout {
     id: root
 
+    // The colour roles the buttons are inked with, and the ink of a glyph at rest: the chrome's and the OS
+    // window text, or the tab bar's where the group sits on a bar of its own colour (tab_style.bar_fill).
+    property var colors: chromeStyle.colors
+    property color ink: systemPalette.windowText
+
     required property var window
     // Which of the placement's two lists this group draws: "leading" or "trailing". TitleBar instantiates
     // one group per side.
@@ -159,7 +164,7 @@ RowLayout {
     function fillFor(button) {
         if (button.hoverFill !== "")
             return button.hoverFill
-        return button.wash === "kitFill" ? chromeStyle.colors.captionWash : chromeStyle.wash(systemPalette.highlight)
+        return button.wash === "kitFill" ? root.colors.captionWash : chromeStyle.wash(systemPalette.highlight)
     }
 
     // A button's glyph: legible on the style's own fill, dimmed on an inactive window, a step down while
@@ -168,17 +173,17 @@ RowLayout {
         if (lit && button.hoverFill !== "")
             return chromeStyle.onColor(button.hoverFill)
         if (!root.window.active)
-            return chromeStyle.colors.captionGlyphInactive
+            return root.colors.captionGlyphInactive
         if (held)
-            return chromeStyle.colors.captionGlyphPressed
-        return systemPalette.windowText
+            return root.colors.captionGlyphPressed
+        return root.ink
     }
 
     // A dot's colour: the scheme's status hue on the Terminal row (the provider's `hasDot`), the style's own
     // elsewhere; and a window-level fade while the window is inactive.
     function dotColorFor(button) {
         if (!root.window.active)
-            return button.hasDot ? chromeStyle.colors.captionGlyphInactive : windowControls.inactiveDotColor
+            return button.hasDot ? root.colors.captionGlyphInactive : windowControls.inactiveDotColor
         return button.hasDot ? chromeStyle.statusInk(button.dotRole) : button.dotColor
     }
 
@@ -350,8 +355,8 @@ RowLayout {
                                                           : slot.modelData.bundledIcon
                         icon.width: chromeStyle.size.windowButtonGlyph
                         icon.height: chromeStyle.size.windowButtonGlyph
-                        icon.color: root.window.active ? chromeStyle.colors.windowButtonGlyph
-                                                       : chromeStyle.colors.captionGlyphInactive
+                        icon.color: root.window.active ? root.colors.windowButtonGlyph
+                                                       : root.colors.captionGlyphInactive
                         contentItem: SymbolicIcon {
                             objectName: "windowControlIcon_" + slot.modelData.action
                             icon: round.icon
@@ -367,9 +372,9 @@ RowLayout {
                                 width: chromeStyle.size.windowButton
                                 height: width
                                 radius: chromeStyle.radii.windowButton
-                                color: round.held ? chromeStyle.colors.windowButtonPressedFill
-                                     : round.lit ? chromeStyle.colors.windowButtonHoverFill
-                                     : chromeStyle.colors.windowButtonFill
+                                color: round.held ? root.colors.windowButtonPressedFill
+                                     : round.lit ? root.colors.windowButtonHoverFill
+                                     : root.colors.windowButtonFill
                             }
                         }
 

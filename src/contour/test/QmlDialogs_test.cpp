@@ -2368,15 +2368,22 @@ TEST_CASE("KitPopUp: the button and its list fit every option, not just the chos
     REQUIRE(caption != nullptr);
     CHECK(caption->property("text").toString() == QStringLiteral("No"));
 
-    auto const widest = [&](QQuickItem const& labelItem) {
-        auto const font = labelItem.property("font").value<QFont>();
-        auto const metrics = QFontMetricsF(font);
+    // Measured as the caption lays a label out (its implicitWidth), not through the font's metrics: the two
+    // differ by a pixel on some platforms, and what must not be cut off is the label as laid out.
+    auto const widest = [&](QQuickItem& labelItem) {
+        auto const shown = labelItem.property("text");
         auto result = 0.0;
         for (auto const& label: { "No", "Always", "Underlined text", "Dotted wavy line" })
-            result = std::max(result, metrics.horizontalAdvance(QString::fromLatin1(label)));
+        {
+            labelItem.setProperty("text", QString::fromLatin1(label));
+            result = std::max(result, labelItem.implicitWidth());
+        }
+        labelItem.setProperty("text", shown);
         return result;
     };
-    CHECK(caption->property("width").toReal() >= widest(*qobject_cast<QQuickItem*>(caption)));
+    auto const needed = widest(*qobject_cast<QQuickItem*>(caption));
+    QCoreApplication::processEvents();
+    CHECK(caption->property("width").toReal() >= needed);
 
     // Choosing the longest one changes nothing about the width: the button never jumps.
     auto const before = item->width();

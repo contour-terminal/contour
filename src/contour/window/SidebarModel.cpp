@@ -4,8 +4,10 @@
 #include <contour/window/ChromeKeys.hpp>
 #include <contour/window/DisclosureWords.hpp>
 #include <contour/window/NodeDrag.hpp>
+#include <contour/window/QtString.hpp>
 #include <contour/window/SidebarDropPolicy.hpp>
 #include <contour/window/SidebarModel.hpp>
+#include <contour/window/TabIconVariant.hpp>
 
 #include <core/Overloaded.hpp>
 #include <core/Utils.hpp>
@@ -82,6 +84,7 @@ namespace
         RoleName { SidebarModel::WorkspaceColorRole, "workspaceColor" },
         RoleName { SidebarModel::RailTextRole, "railText" },
         RoleName { SidebarModel::RailTextContinuedRole, "railTextContinued" },
+        RoleName { SidebarModel::IconRole, "icon" },
     };
 
     [[nodiscard]] QString qs(std::string const& text)
@@ -175,6 +178,7 @@ namespace
              { SidebarModel::ProgressRole, SidebarModel::MeterTextRole, SidebarModel::ProgressFractionRole });
         note(before.urgency == after.urgency, { SidebarModel::UrgencyRole });
         note(before.glyph == after.glyph, { SidebarModel::GlyphRole });
+        note(before.icon == after.icon, { SidebarModel::IconRole });
         note(before.expansion == after.expansion, { SidebarModel::ExpansionRole });
         note(before.selection == after.selection, { SidebarModel::SelectedRole });
         note(before.lines == after.lines && before.depth == after.depth,
@@ -434,6 +438,7 @@ QVariant SidebarModel::data(QModelIndex const& index, int role) const
                                        : QColor { Qt::transparent };
         case RailTextRole: return qs(workspaceRailCellsOf(*row).first);
         case RailTextContinuedRole: return qs(workspaceRailCellsOf(*row).second);
+        case IconRole: return row->icon ? tabIconVariant(*row->icon) : QVariantMap {};
         default: break;
     }
     return {};
@@ -475,6 +480,11 @@ SidebarModel::Rebuilt SidebarModel::build(WorkspaceDirectory const& directory) c
 {
     auto const displayed = _host.displayedTab(directory);
     auto listing = sidebarListing(directory, _attention, _state, _clock.now(), displayed);
+    // A tab's icon is the window's to say: the directory knows neither its profile nor what runs in it.
+    for (auto& row: listing.rows)
+        if (row.key.kind == SidebarRowKind::Tab)
+            if (auto const listed = findTab(directory, row.key.workspace, row.key.tab))
+                row.icon = _host.tabIcon(*listed->tab);
     // A window that follows no selection shows the workspace of the tab it displays.
     auto current = directory.selected;
     if (!current && displayed)
@@ -744,6 +754,14 @@ void SidebarModel::markSeen(int row)
     for (auto const pane: panesUnder(directory(), shown->key))
         _host.markSeen(pane);
     noteChanged();
+}
+
+QStringList SidebarModel::hoverLines(int row) const
+{
+    auto const* const shown = rowAt(row);
+    if (shown == nullptr || shown->key.kind == SidebarRowKind::Workspace)
+        return {};
+    return toQStringList(_host.hoverLines(shown->key));
 }
 
 void SidebarModel::openContextMenu(int row, QPointF windowPosition)

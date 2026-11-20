@@ -119,3 +119,32 @@ TEST_CASE("CommandBlockHeader.showsTheCommandLineSanitised", "[contour][gutter][
     CHECK(lines.front().contains("\xEF\xBF\xBD")); // U+FFFD in their place
     CHECK(lines.at(2).contains("\xEF\xBF\xBD"));
 }
+
+TEST_CASE("TabHover.namesTheRunningAndTheLastFinishedCommand", "[contour][tabhover]")
+{
+    using contour::session::tabHoverFactsOf;
+    using contour::session::tabHoverLines;
+
+    auto running = vtbackend::CommandBlockRecord {};
+    running.state = vtbackend::CommandBlockState::Running;
+    running.commandLine = vtbackend::CommandLineText { "cargo build" };
+    auto prompting = vtbackend::CommandBlockRecord {};
+
+    // Newest last: an older command, the last finished one, then the one running now.
+    auto older = finished(0);
+    older.commandLine = vtbackend::CommandLineText { "ls" };
+    auto const records = std::vector { older, finished(2), running };
+    auto const facts = tabHoverFactsOf(records, chrono::system_clock::time_point {});
+    CHECK(facts.running == "cargo build");
+    CHECK(facts.lastCommand == "make -j8");
+    CHECK(facts.lastStatus == "Failed · exit 2 · 4s");
+    CHECK(tabHoverLines(facts)
+          == std::vector<std::string> { "Running: cargo build", "Last: make -j8 · Failed · exit 2 · 4s" });
+
+    // At a prompt nothing runs; with no blocks at all (no shell integration) the card says neither.
+    CHECK(tabHoverFactsOf(std::vector { finished(0), prompting }, {}).running.empty());
+    CHECK(tabHoverLines(tabHoverFactsOf(std::vector<vtbackend::CommandBlockRecord> {}, {})).empty());
+
+    // A block still marked running behind a finished one is stale, not what runs now.
+    CHECK(tabHoverFactsOf(std::vector { running, finished(0) }, {}).running.empty());
+}

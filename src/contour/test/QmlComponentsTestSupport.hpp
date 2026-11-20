@@ -306,6 +306,9 @@ class MockTabController: public QAbstractListModel
     /// Mirrors WindowController::tabWorkingDirectory: what TabItem's hover tooltip asks for the
     /// working-directory line. Answering empty means "nothing known", which suppresses that line.
     Q_INVOKABLE [[nodiscard]] QString tabWorkingDirectory(int) const { return {}; }
+    /// Mirrors WindowController::tabHoverLines: the command lines a test gives the hover card.
+    Q_INVOKABLE [[nodiscard]] QStringList tabHoverLines(int) const { return hoverLines; }
+    QStringList hoverLines {}; ///< What tabHoverLines() answers for every tab.
     Q_INVOKABLE void moveTab(int, int) {}
     /// Mirrors WindowController::tabDragPayload(): the node drag of the tab at @p tabIndex, a tab of two
     /// panes named after its row, so a test can tell drags apart.
@@ -341,11 +344,17 @@ class MockTabController: public QAbstractListModel
                 return contour::window::TabSpan { .left = tab.left(), .right = tab.right() };
             }));
     }
-    /// Mirrors WindowController::tabBarHit() through the same pure decision (resolveTabBarHit).
-    Q_INVOKABLE [[nodiscard]] contour::window::TabBarHitValue tabBarHit(qreal x) const
+    /// Mirrors WindowController::tabBarHit() through the same pure decisions (resolveTabBarHit,
+    /// excludingOwnPlace), with draggedTabRow standing in for the drag the payload names.
+    Q_INVOKABLE [[nodiscard]] contour::window::TabBarHitValue tabBarHit(qreal x,
+                                                                        QString const& /*payload*/) const
     {
-        return contour::window::TabBarHitValue { contour::window::resolveTabBarHit(tabSpans, x) };
+        return contour::window::TabBarHitValue { contour::window::excludingOwnPlace(
+            contour::window::resolveTabBarHit(tabSpans, x), draggedTabRow) };
     }
+    /// The row of the strip's own tab a drag carries, as WindowController resolves it from the payload; none
+    /// for a drag of a pane or of another window's tab.
+    std::optional<int> draggedTabRow;
     /// Mirrors WindowController::springOpens(): any tab but the one springClosedTab names.
     Q_INVOKABLE [[nodiscard]] bool springOpens(int tabIndex, QString const&) const
     {

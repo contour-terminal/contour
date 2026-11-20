@@ -1445,6 +1445,57 @@ TEST_CASE("the hover card shows a long folder to its end (offscreen)", "[contour
     }
 }
 
+TEST_CASE("a tab row shows the strip's icon, and its hover card what runs there (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    auto scene = SidebarWindow { { .row = drawnRows().front() } };
+    auto& host = scene.controller.sidebarHost();
+    host.icons[10] = contour::window::TabIcon { .kind = contour::window::TabIconKind::Monogram,
+                                                .initial = "C",
+                                                .image = {} };
+    host.lines[contour::window::SidebarRowKey {
+        .kind = contour::window::SidebarRowKind::Tab, .workspace = 1, .tab = 10, .pane = {} }] = {
+        "Running: claude", "Last: make · exit 0 · 2s"
+    };
+    scene.controller.sidebarModel().noteChanged();
+    QCoreApplication::processEvents();
+
+    auto* claude = scene.rowTitled(QStringLiteral("claude"));
+    REQUIRE(claude != nullptr);
+    auto const* icon = SidebarWindow::findNamed(*claude, QStringLiteral("sidebarRowIcon"));
+    REQUIRE(icon != nullptr);
+    CHECK(icon->isVisible());
+    auto const* initial = SidebarWindow::findNamed(*icon, QStringLiteral("tabIconInitial"));
+    REQUIRE(initial != nullptr);
+    CHECK(initial->property("text").toString() == QStringLiteral("C"));
+    // build's tab is one the window does not hold an icon for: its row shows none.
+    auto* build = scene.rowTitled(QStringLiteral("build"));
+    REQUIRE(build != nullptr);
+    CHECK_FALSE(SidebarWindow::findNamed(*build, QStringLiteral("sidebarRowIcon"))->isVisible());
+
+    auto* card = scene.root->findChild<QObject*>(QStringLiteral("sidebarHoverCard"));
+    REQUIRE(card != nullptr);
+    auto const over = claude->mapToScene(QPointF { claude->width() / 2, claude->height() / 2 }).toPoint();
+    QTest::mouseMove(scene.window, over - QPoint { 0, 1 });
+    QTest::mouseMove(scene.window, over);
+    REQUIRE(QTest::qWaitFor([&] { return card->property("opened").toBool(); }, 3000));
+    // The card's items are its content item's, in the window's overlay.
+    auto* surface = qobject_cast<QQuickItem*>(card->property("contentItem").value<QObject*>());
+    REQUIRE(surface != nullptr);
+    auto lines = QStringList {};
+    auto const collect = [&](this auto const& self, QQuickItem const& item) -> void {
+        for (auto const* child: item.childItems())
+        {
+            if (child->objectName() == QStringLiteral("sidebarHoverCardLine"))
+                lines.append(child->property("text").toString());
+            self(*child);
+        }
+    };
+    collect(*surface);
+    CHECK(lines
+          == QStringList { QStringLiteral("Running: claude"), QStringLiteral("Last: make · exit 0 · 2s") });
+}
+
 TEST_CASE("the Terminal row keeps the sidebar's text on the cell grid (offscreen)",
           "[contour][gui][qml][sidebar]")
 {
@@ -2029,7 +2080,16 @@ TEST_CASE("at the narrowest sidebar the footer keeps its counts whole, in fewer 
             INFO("counts width " << counts->width() << ", implicit "
                                  << counts->property("implicitWidth").toReal() << ", x " << counts->x());
             CHECK(!counts->property("truncated").toBool());
-            CHECK(chord->isVisible() == chordShown);
+            // The wide sidebar shows the chord. The narrowest drops it where the counts would not keep their
+            // room beside it -- with the default fonts of every platform CI measures; with narrower ones it
+            // may still fit, and then it stands clear of the counts, which keep their full wording.
+            if (chordShown)
+                CHECK(chord->isVisible());
+            else if (chord->isVisible())
+            {
+                CHECK(text == QStringLiteral("1 needs you · 1 working"));
+                CHECK(counts->x() + counts->property("implicitWidth").toReal() <= chord->x() + 0.5);
+            }
         }
     }
 }
@@ -2548,8 +2608,9 @@ TEST_CASE("the location chip yields before the tabs go icon-only (offscreen)",
                                    .visibility = contour::config::SidebarVisibility::Hidden,
                                    .billingTitle = "billing-and-invoices",
                                    .tabCount = 3 } };
-    scene.controller.setDaemon(QStringLiteral("starfive-build-server-0123456789-and-more"),
-                               DaemonLocality::Remote);
+    scene.controller.setDaemon(
+        QStringLiteral("starfive-build-server-0123456789-and-more-of-its-very-long-name"),
+        DaemonLocality::Remote);
     scene.controller.setHostChipState(static_cast<int>(HostChipState::Reconnecting));
     QCoreApplication::processEvents();
     auto* chip = scene.item(QStringLiteral("workspaceChip"));
@@ -2583,16 +2644,22 @@ TEST_CASE("the location chip yields before the tabs go icon-only (offscreen)",
             CHECK(layout.value(QStringLiteral("tabWidth")).toReal() >= scene.style("minTabWidth") - 0.5);
         }
         sawElidedChip = sawElidedChip || fit > static_cast<int>(LocationChipFit::Full);
-        if (requested == 700)
-        {
-            // At 700 the chip, in full, would not have left the tabs their labels: it stepped down to the
-            // step this row's room allows: the daemon's dot on the macOS and Terminal rows, the workspace's
-            // elision on the two whose chrome leaves less room.
-            auto const expected = (row == ChromeStyle::MacOS || row == ChromeStyle::Terminal)
-                                      ? LocationChipFit::DotOnly
-                                      : LocationChipFit::WorkspaceElided;
-            CHECK(fit == static_cast<int>(expected));
-        }
+
+        // The chip takes the first step, in elision order, that fits the room the band left it -- the last
+        // step when none does. Read against the chip's own measured widths, so it holds whatever widths the
+        // platform's fonts give the text.
+        auto const widths = chip->property("fitWidths").toMap();
+        auto const room = bar->property("chipRoom").toReal();
+        auto const widthOf = [&](LocationChipFit step) {
+            auto const key = contour::window::LocationChipSteps.at(static_cast<size_t>(step)).key;
+            return widths.value(QString::fromUtf8(key.data(), static_cast<qsizetype>(key.size()))).toReal();
+        };
+        auto const taken = static_cast<LocationChipFit>(fit);
+        INFO("chip room " << room << ", step width " << widthOf(taken));
+        if (taken != contour::window::LocationChipFits.back())
+            CHECK(widthOf(taken) <= room + 0.5);
+        if (taken != LocationChipFit::Full)
+            CHECK(widthOf(static_cast<LocationChipFit>(fit - 1)) > room - 0.5);
         if (row == ChromeStyle::Terminal)
         {
             // The Terminal row counts in cells: its well is a whole number of them, three at least.

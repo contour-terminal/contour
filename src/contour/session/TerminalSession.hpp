@@ -1235,6 +1235,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     ///         tab asks about such a pane, since it may be running anything.
     [[nodiscard]] window::PaneActivity paneActivity() const;
 
+    /// What this session's tab hover card says of its commands (tabHoverLines()): the running command as
+    /// the shell reported it, else the foreground program when it is not the shell, and the last one that
+    /// finished with how it ended. GUI thread; takes the terminal lock briefly.
+    /// @return The lines, none when nothing is known.
+    [[nodiscard]] std::vector<std::string> tabHoverLines() const;
+
     config::Config const& config() const noexcept { return _config; }
     config::TerminalProfile const& profile() const noexcept { return _profile; }
 
@@ -3164,6 +3170,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The origins of the output gathered for the queued tab-badge notice, one bit per window::OutputOrigin;
     /// zero when none is queued (@see noteOutputForTab). Set on the parser thread, cleared on the GUI thread.
     std::atomic<uint8_t> _pendingOutputOrigins = 0;
+    /// The terminal's mainDisplayOutputCount() when screenUpdated() last looked: a batch that leaves it where
+    /// it was wrote to a status line alone, and raises no unseen-output mark. Parser thread only.
+    uint64_t _notedMainDisplayOutput = 0;
     /// The origins of the bells gathered for the queued bell notice, like @ref _pendingOutputOrigins
     /// (@see noteBellForTab). Set on the parser thread, cleared on the GUI thread.
     std::atomic<uint8_t> _pendingBellOrigins = 0;
