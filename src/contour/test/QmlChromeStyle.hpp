@@ -4,6 +4,7 @@
 #include <contour/config/AccessibilityPreferences.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/DesktopButtonLayout.hpp>
+#include <contour/config/TabBarMode.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/config/WindowControlStyle.hpp>
 #include <contour/platform/GuiTheme.hpp>
@@ -22,6 +23,8 @@
 #include <QtGui/QStyleHints>
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
+
+#include <catch2/catch_test_macros.hpp>
 
 #include <functional>
 #include <optional>
@@ -135,6 +138,26 @@ inline void installChromeStyle(
     config::WindowControlStyle windowControlStyle = config::WindowControlStyle::Windows)
 {
     installChromeStyle(engine, defaultChromeSetup(style, windowControlStyle));
+}
+
+/// Reads a `chromeStyle.sidebar` token that depends on `sidebar.row_spacing`, which QML calls with the
+/// window's spacing rather than reading as a property.
+/// @param context The context the chrome style is visible in.
+/// @param name    `twoLineRowHeight` or `lineGap`.
+/// @param spacing The spacing to read it at.
+/// @return The token at @p spacing.
+[[nodiscard]] inline qreal sidebarSpacedToken(QQmlContext const& context,
+                                              char const* name,
+                                              config::SidebarRowSpacing spacing)
+{
+    auto const* style = context.contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto* sidebar = style->property("sidebar").value<QObject*>();
+    REQUIRE(sidebar != nullptr);
+    auto value = qreal { 0 };
+    REQUIRE(QMetaObject::invokeMethod(
+        sidebar, name, Q_RETURN_ARG(qreal, value), Q_ARG(int, static_cast<int>(spacing))));
+    return value;
 }
 
 /// Forces the application's palette and color scheme to one appearance for the lifetime of the scope.

@@ -281,15 +281,10 @@ struct SidebarWindow
     /// @param name `twoLineRowHeight` or `lineGap`.
     [[nodiscard]] qreal spacedToken(char const* name) const
     {
-        auto const* style =
-            engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
-        REQUIRE(style != nullptr);
-        auto* sidebar = style->property("sidebar").value<QObject*>();
-        REQUIRE(sidebar != nullptr);
-        auto value = qreal { 0 };
-        REQUIRE(QMetaObject::invokeMethod(
-            sidebar, name, Q_RETURN_ARG(qreal, value), Q_ARG(int, controller.sidebarRowSpacing())));
-        return value;
+        return contour::test::sidebarSpacedToken(
+            *engine.rootContext(),
+            name,
+            static_cast<contour::config::SidebarRowSpacing>(controller.sidebarRowSpacing()));
     }
 
     /// The `chromeStyle` property @p name.

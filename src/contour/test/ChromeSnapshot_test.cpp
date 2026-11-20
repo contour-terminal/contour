@@ -18,6 +18,7 @@
 #include <contour/test/ChromeSnapshotScene.hpp>
 #include <contour/test/ChromeSnapshotWriter.hpp>
 #include <contour/test/DisplayHarness.hpp>
+#include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMocks.hpp>
 #include <contour/test/TestEnvironment.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
@@ -700,15 +701,8 @@ void checkSidebarRowSpacing(contour::test::snapshot::ChromeSnapshotScene const& 
     using namespace contour::test::snapshot;
     auto const* context = QQmlEngine::contextForObject(&scene.root());
     REQUIRE(context != nullptr);
-    auto const* style = context->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
-    REQUIRE(style != nullptr);
-    auto* sidebar = style->property("sidebar").value<QObject*>();
-    REQUIRE(sidebar != nullptr);
-    auto twoLines = qreal { 0 };
-    REQUIRE(QMetaObject::invokeMethod(sidebar,
-                                      "twoLineRowHeight",
-                                      Q_RETURN_ARG(qreal, twoLines),
-                                      Q_ARG(int, static_cast<int>(scriptRow(variant.script).rowSpacing))));
+    auto const twoLines =
+        contour::test::sidebarSpacedToken(*context, "twoLineRowHeight", scriptRow(variant.script).rowSpacing);
     auto twoLineRows = 0;
     for (auto const* row:
          contour::test::itemsNamed(*scene.window().contentItem(), QStringLiteral("sidebarRow")))
