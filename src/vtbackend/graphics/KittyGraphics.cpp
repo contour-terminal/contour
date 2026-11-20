@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/graphics/KittyGraphics.hpp>
 
+#include <array>
 #include <charconv>
 #include <cstdlib>
+#include <format>
 #include <system_error>
 #include <utility>
 
@@ -124,6 +126,18 @@ namespace
                 command.deleteTarget = value[0];
                 break;
             }
+            case 'U': {
+                auto number = 0u;
+                (void) assignNumber(value, number);
+                command.placementKind = number == 1 ? PlacementKind::Virtual : PlacementKind::Cursor;
+                break;
+            }
+            case 'e': {
+                if (value.size() != 1)
+                    return std::unexpected(Error::InvalidControlData);
+                command.queryFeature = value[0];
+                break;
+            }
             case 'X': (void) assignNumber(value, command.rawX); break;
             case 'Y': (void) assignNumber(value, command.frameBackground); break;
             default:
@@ -132,7 +146,71 @@ namespace
         }
         return {};
     }
+
+    /// How a feature query's reply spells a key's value.
+    enum class EchoForm : uint8_t
+    {
+        Number = 0, ///< In decimal.
+        Letter = 1, ///< As the letter it is.
+    };
+
+    /// One key a feature query may ask about.
+    struct FeatureKey
+    {
+        char key;                                  ///< The wire letter.
+        std::string_view actions;                  ///< The actions (wire letters) Contour supports it for.
+        EchoForm form;                             ///< How its value is spelled.
+        int64_t (*value)(Command const&) noexcept; ///< Its value in the query; 0 when default.
+    };
+
+    /// The actions a feature query may ask about: all of them, as kitty's.
+    constexpr auto FeatureActions = std::string_view { "tTqpdfac" };
+
+    /// The delete targets deleteKittyGraphics() implements, both cases. `a` is the protocol's default
+    /// and therefore never echoed.
+    constexpr auto SupportedDeleteTargets = std::string_view { "AiIfF" };
+
+    /// Every key a feature query is answered for, in kitty's reply order. Animation keys are left out on
+    /// purpose: under `a=q` the parser keeps `c`, `r` and `z` as geometry, so their animation reading is
+    /// not available here, and an omitted key only under-claims.
+    // clang-format off
+    constexpr auto FeatureKeys = std::array {
+        FeatureKey { 'o', "tTq", EchoForm::Letter, [](Command const& c) noexcept -> int64_t { return c.compression == Compression::ZlibDeflate ? 'z' : 0; } },
+        FeatureKey { 'f', "tTq", EchoForm::Number, [](Command const& c) noexcept -> int64_t { return c.format ? static_cast<int64_t>(*c.format) : 0; } },
+        FeatureKey { 's', "tTq", EchoForm::Number, [](Command const& c) noexcept -> int64_t { return c.pixelWidth; } },
+        FeatureKey { 'v', "tTq", EchoForm::Number, [](Command const& c) noexcept -> int64_t { return c.pixelHeight; } },
+        FeatureKey { 'p', "Tp", EchoForm::Number, [](Command const& c) noexcept -> int64_t { return c.placementId; } },
+        FeatureKey { 'c', "Tp", EchoForm::Number, [](Command const& c) noexcept -> int64_t { return c.columns; } },
+        FeatureKey { 'r', "Tp", EchoForm::Number, [](Command const& c) noexcept -> int64_t { return c.rows; } },
+        FeatureKey { 'C', "Tp", EchoForm::Number, [](Command const& c) noexcept -> int64_t { return c.doNotMoveCursor ? 1 : 0; } },
+        FeatureKey { 'U', "Tp", EchoForm::Number, [](Command const& c) noexcept -> int64_t { return c.placementKind == PlacementKind::Virtual ? 1 : 0; } },
+        FeatureKey { 'z', "Tp", EchoForm::Number, [](Command const& c) noexcept -> int64_t { return c.zIndex; } },
+        FeatureKey { 'd', "d",   EchoForm::Letter, [](Command const& c) noexcept -> int64_t { return SupportedDeleteTargets.contains(c.deleteTarget) ? c.deleteTarget : 0; } },
+    };
+    // clang-format on
 } // namespace
+
+std::string supportedFeatureKeys(Command const& command)
+{
+    auto const action = command.queryFeature;
+    if (action == 0 || !FeatureActions.contains(action))
+        return {};
+
+    auto keys = std::format(",e={}", action);
+    for (auto const& feature: FeatureKeys)
+    {
+        if (!feature.actions.contains(action))
+            continue;
+        auto const value = feature.value(command);
+        if (value == 0)
+            continue;
+        if (feature.form == EchoForm::Letter)
+            keys += std::format(",{}={}", feature.key, static_cast<char>(value));
+        else
+            keys += std::format(",{}={}", feature.key, value);
+    }
+    return keys;
+}
 
 std::string_view errorCode(Error error) noexcept
 {

@@ -248,8 +248,8 @@ struct LineSoA
 // Image fragment helpers
 // ---------------------------------------------------------------------------
 
-/// Removes a Replace-layer image fragment at the given column.
-/// Below and Above layer images coexist with text; only Replace layer images are destroyed.
+/// Removes the image fragment at the given column unless shouldPreserveImageOnTextWrite() keeps it:
+/// Below and Above layer images coexist with text; Replace layer and kitty placeholder images are destroyed.
 inline void clearReplacedImageFragment(std::optional<LineSoA::ImageFragmentMap>& fragments, uint16_t col)
 {
     if (!fragments)

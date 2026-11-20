@@ -180,6 +180,13 @@ enum class ImageAlignment : uint8_t
     BottomEnd
 };
 
+/// What placed an image into the grid, which decides how the cells holding it behave.
+enum class ImageOrigin : uint8_t
+{
+    Cursor = 0,      ///< Placed at the cursor by an image protocol (sixel, kitty, GIP, ReGIS).
+    Placeholder = 1, ///< Attached to kitty Unicode placeholder cells; the cells' text is the placement.
+};
+
 /// Whether a screen has logged dropping an image for want of a cell size in pixels: a stream of images (a
 /// sixel video) would otherwise write a line for every frame.
 enum class CellSizeDropLog : uint8_t
@@ -231,7 +238,8 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
                     ImageLayer layer = ImageLayer::Replace,
                     PixelCoordinate imageOffset = {},
                     ImageSize imageSubSize = {},
-                    KittyPlacementId kittyPlacementId = {}):
+                    KittyPlacementId kittyPlacementId = {},
+                    ImageOrigin origin = ImageOrigin::Cursor):
         _image { std::move(image) },
         _alignmentPolicy { alignmentPolicy },
         _resizePolicy { resizePolicy },
@@ -241,7 +249,8 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
         _layer { layer },
         _imageOffset { imageOffset },
         _imageSubSize { imageSubSize },
-        _kittyPlacementId { kittyPlacementId }
+        _kittyPlacementId { kittyPlacementId },
+        _origin { origin }
     {
         ++ImageStats::get().rasterized;
     }
@@ -270,6 +279,9 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
     /// Together with the image id it identifies the placement: placing again under the same pair
     /// replaces it, and `a=d,d=i,p=` deletes it alone.
     [[nodiscard]] KittyPlacementId kittyPlacementId() const noexcept { return _kittyPlacementId; }
+
+    /// What placed this image: a protocol at the cursor, or kitty Unicode placeholder cells.
+    [[nodiscard]] ImageOrigin origin() const noexcept { return _origin; }
 
     /// @returns an RGBA buffer for a grid cell at given coordinate @p pos of the rasterized image.
     ///
@@ -300,6 +312,7 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
     PixelCoordinate _imageOffset;        //!< Pixel offset into the source image for sub-rectangle rendering.
     ImageSize _imageSubSize;             //!< Sub-region pixel size (zero means full image).
     KittyPlacementId _kittyPlacementId;  //!< Kitty `p=` of this placement; zero means none.
+    ImageOrigin _origin;                 //!< What placed the image.
 };
 
 std::shared_ptr<RasterizedImage> rasterize(std::shared_ptr<Image const> image,
@@ -308,7 +321,8 @@ std::shared_ptr<RasterizedImage> rasterize(std::shared_ptr<Image const> image,
                                            RGBAColor defaultColor,
                                            GridSize cellSpan,
                                            ImageSize cellSize,
-                                           ImageLayer layer = ImageLayer::Replace);
+                                           ImageLayer layer = ImageLayer::Replace,
+                                           ImageOrigin origin = ImageOrigin::Cursor);
 
 /// An ImageFragment holds a graphical image that occupies one full grid cell.
 class ImageFragment
@@ -353,13 +367,16 @@ using ImageFragmentId = boxed::boxed<uint16_t, detail::ImageFragmentId>;
 
 /// Returns true if the image fragment should be preserved when text is written to a cell.
 ///
-/// Below and Above layer images coexist with text; only Replace layer images are destroyed.
+/// Below and Above layer images coexist with text; only Replace layer images are destroyed. A kitty
+/// Unicode placeholder fragment never survives, whatever its layer: the placeholder text IS the
+/// placement, so text written over it ends it.
 [[nodiscard]] inline bool shouldPreserveImageOnTextWrite(
     std::shared_ptr<ImageFragment> const& fragment) noexcept
 {
     if (!fragment)
         return false;
-    return fragment->rasterizedImage().layer() != ImageLayer::Replace;
+    auto const& image = fragment->rasterizedImage();
+    return image.origin() == ImageOrigin::Cursor && image.layer() != ImageLayer::Replace;
 }
 
 inline bool operator==(ImageFragment const& a, ImageFragment const& b) noexcept
