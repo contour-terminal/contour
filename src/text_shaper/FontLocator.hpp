@@ -61,7 +61,8 @@ class FontLocator
     virtual ~FontLocator() = default;
 
     /// Returns the spacing policy for character-specific recovery after the configured chain fails.
-    /// The default preserves strict-spacing behavior for existing locators.
+    /// The default preserves strict-spacing behavior; the fontconfig locator and the mock keep it,
+    /// while the CoreText and DirectWrite locators override it to permit any face.
     [[nodiscard]] virtual CoverageFallbackSpacing coverageFallbackSpacing() const noexcept
     {
         return CoverageFallbackSpacing::MatchDescription;
