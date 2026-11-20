@@ -685,6 +685,18 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// @return Served when it was one of them.
     [[nodiscard]] TabVerb serveWorkspaceVerb(proto::DecodedFrame const& frame);
 
+    /// Serves a SelectWorkspace whose capability was negotiated: selects the workspace it names, or creates
+    /// one for workspace 0, and answers with the selection as it stands whatever came of it.
+    /// @param frame The frame read, whose serial the answering layout batch names as its cause.
+    /// @param select The request it carries.
+    void serveSelectWorkspace(proto::DecodedFrame const& frame, proto::SelectWorkspace const& select);
+
+    /// Serves a SetWorkspaceColor whose capability was negotiated: sets or resets the workspace's colour on
+    /// the model, or logs it when there is no such workspace.
+    /// @param frame The frame read, named in the log.
+    /// @param recolor The request it carries.
+    void serveSetWorkspaceColor(proto::DecodedFrame const& frame, proto::SetWorkspaceColor const& recolor);
+
     /// What requireGrant() decided.
     enum class GrantCheck : uint8_t
     {
