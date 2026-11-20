@@ -1675,6 +1675,7 @@ namespace
         GlobalFieldGroupRow { .key = "tab_bar_position", .group = SettingsGroup::TabBarPlacement },
         GlobalFieldGroupRow { .key = "tab_bar_visibility", .group = SettingsGroup::TabBarPlacement },
         GlobalFieldGroupRow { .key = "tab_placement", .group = SettingsGroup::TabBarPlacement },
+        GlobalFieldGroupRow { .key = "sidebar.row_spacing", .group = SettingsGroup::TabBarPlacement },
         GlobalFieldGroupRow { .key = "progress_show_delay", .group = SettingsGroup::TabBarTabs },
         GlobalFieldGroupRow { .key = "tab_style.active_fill", .group = SettingsGroup::TabBarTabs },
         GlobalFieldGroupRow { .key = "tab_style.inactive_fill", .group = SettingsGroup::TabBarTabs },
@@ -1815,6 +1816,14 @@ std::vector<GlobalFieldDescriptor> const& globalFieldDescriptors()
                 "Tab placement",
                 "Whether the tabs sit in the tab strip, or under their workspace in the workspace sidebar.",
                 [](config::Config const& c) { return c.tabPlacement.value(); }),
+            // Read when a window opens (WindowController::restoreSidebar), as sidebar.tab_color is: a window
+            // already open keeps its rows, and the help says so.
+            globalEnumFieldFromTable<config::SidebarRowSpacing>(
+                "sidebar.row_spacing",
+                "Sidebar row spacing",
+                "How much room a tab's or a pane's row takes in the workspace sidebar. Applies to windows "
+                "opened afterwards.",
+                [](config::Config const& c) { return c.sidebar.value().rowSpacing; }),
             // The tab_style section, applied live like the density: the chrome style provider is rebuilt on
             // reload. The fills and the opacity are words or values, so they are checked strings rather
             // than combo boxes.
