@@ -618,8 +618,12 @@ TEST_CASE("a two-line row keeps its lines inside it, and centres a name with not
           "[contour][gui][qml][sidebar]")
 {
     // Compared with the row's own geometry, never with a font's metrics, so it holds for every platform's
-    // faces; a fraction of a pixel is the rounding of a centred box.
+    // faces; a fraction of a pixel is the rounding of a box placed by its own size.
     constexpr auto Tolerance = qreal { 0.51 };
+    // The name is centred in its line by an anchor, which Qt aligns to whole pixels (alignWhenCentered):
+    // the line's half height and the name's are each rounded, by at most half a pixel apiece, so with a
+    // face whose heights are fractional the name lands less than a pixel from the true centre.
+    constexpr auto CentringRounding = qreal { 1 };
     for (auto const row: drawnRows())
     {
         INFO("row " << static_cast<int>(row));
@@ -658,8 +662,8 @@ TEST_CASE("a two-line row keeps its lines inside it, and centres a name with not
             INFO("title " << rowItem->property("title").toString().toStdString());
             CHECK(rowItem->height() == twoLines);
             auto const title = boxOf(*rowItem, QStringLiteral("sidebarRowTitle"));
-            CHECK(title.top() >= -Tolerance);
-            CHECK(title.bottom() <= rowItem->height() + Tolerance);
+            CHECK(title.top() > -CentringRounding);
+            CHECK(title.bottom() < rowItem->height() + CentringRounding);
         }
 
         // The second lines stay inside the row, under the name.
@@ -675,10 +679,11 @@ TEST_CASE("a two-line row keeps its lines inside it, and centres a name with not
                 CHECK(std::abs(second.top() - scene.token("rowHeight")) <= Tolerance);
                 continue;
             }
-            CHECK(second.top() >= title.bottom() - Tolerance);
+            CHECK(second.top() > title.bottom() - CentringRounding);
             CHECK(second.bottom() <= rowItem->height() + Tolerance);
-            // A name with a line under it sits above the row's middle.
-            CHECK(title.center().y() < rowItem->height() / 2 - 1);
+            // A name with a line under it sits above the row's middle, further than the rounding could ever
+            // move a centred one: the two cases below never overlap.
+            CHECK(title.center().y() < (rowItem->height() / 2) - CentringRounding);
         }
 
         // The row with nothing for its second line shows none, and centres its name in its two lines; the
@@ -690,7 +695,7 @@ TEST_CASE("a two-line row keeps its lines inside it, and centres a name with not
         if (cellTree)
             CHECK(blankTitle.center().y() < scene.token("rowHeight") + Tolerance);
         else
-            CHECK(std::abs(blankTitle.center().y() - blank->height() / 2) <= Tolerance);
+            CHECK(std::abs(blankTitle.center().y() - (blank->height() / 2)) < CentringRounding);
         CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
     }
 }
