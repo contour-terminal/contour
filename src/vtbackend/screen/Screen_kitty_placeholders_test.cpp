@@ -29,7 +29,7 @@ constexpr auto Diacritics = std::array { U'\u0305', U'\u030D', U'\u030E', U'\u03
 class PlaceholderTerm: public MockTerm<vtpty::MockPty>
 {
   public:
-    explicit PlaceholderTerm(PageSize size): MockTerm { size }
+    explicit PlaceholderTerm(PageSize size, LineCount history = LineCount(0)): MockTerm { size, history }
     {
         terminal.setCellPixelSize(ImageSize { Width(1), Height(1) });
     }
@@ -359,6 +359,20 @@ TEST_CASE("KittyPlaceholders.delete.by_number", "[kitty][placeholder]")
     }
 }
 
+TEST_CASE("KittyPlaceholders.delete.by_number_falls_back_to_the_older_image", "[kitty][placeholder]")
+{
+    // Freeing the newest image of a number leaves the number naming the one before it, as kitty's
+    // img_by_client_number() finds it.
+    auto mock = PlaceholderTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen(transmitVirtualAs("I=3"));
+    mock.writeToScreen(transmitVirtualAs("I=3"));
+    mock.writeToScreen("\033_Ga=d,d=N,I=3\033\\"sv);
+    mock.terminal.flushInput();
+
+    mock.writeToScreen("\033_Ga=p,I=3,U=1,c=1,r=1\033\\"sv);
+    CHECK(mock.terminal.peekInput() == "\033_Gi=1,I=3;OK\033\\");
+}
+
 TEST_CASE("KittyPlaceholders.delete.by_id_range", "[kitty][placeholder]")
 {
     auto mock = PlaceholderTerm { PageSize { LineCount(10), ColumnCount(20) } };
@@ -384,4 +398,104 @@ TEST_CASE("KittyPlaceholders.delete.by_id_range", "[kitty][placeholder]")
         CHECK(mock.screen().kittyImage(9) == nullptr);
         CHECK(mock.screen().kittyImage(10) != nullptr);
     }
+}
+
+TEST_CASE("KittyPlaceholders.screen.rows_scrolled_into_history_in_the_same_batch", "[kitty][placeholder]")
+{
+    // The picture and the lines that push it off the page arrive in one read: its rows are in the history
+    // by the time the batch ends, and are resolved there.
+    auto mock = PlaceholderTerm { PageSize { LineCount(10), ColumnCount(20) }, LineCount(100) };
+    mock.writeToScreen(transmitVirtual());
+    mock.writeToScreen(placeholderPicture() + std::string(9, '\n'));
+
+    REQUIRE(mock.screen().historyLineCount() == LineCount(2));
+    for (auto const row: std::views::iota(0, 2))
+        for (auto const column: std::views::iota(0, 4))
+        {
+            INFO(std::format("cell ({}, {})", row, column));
+            auto const fragment = mock.screen().at(LineOffset(row - 2), ColumnOffset(column)).imageFragment();
+            REQUIRE(fragment);
+            CHECK(fragment->offset()
+                  == CellLocation { .line = LineOffset(row), .column = ColumnOffset(column) });
+        }
+}
+
+TEST_CASE("KittyPlaceholders.screen.animation_frame_keeps_placeholder_origin", "[kitty][placeholder]")
+{
+    auto mock = PlaceholderTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen(transmitVirtual());
+    mock.writeToScreen(placeholderPicture());
+
+    // A second frame, made current.
+    mock.writeToScreen(std::format("\033_Ga=f,i=7,f=24,s=2,v=2,q=2;{}\033\\",
+                                   core::base64::encode(std::string(12, '\x20'))));
+    mock.writeToScreen("\033_Ga=a,i=7,c=2,q=2\033\\"sv);
+    auto const frame2 = mock.screen().kittyFrameImage(7, 2);
+    REQUIRE(frame2);
+
+    auto const checkShowsFrame2 = [&]() {
+        checkPictureResolved(mock.screen());
+        CHECK(
+            mock.screen().at(LineOffset(0), ColumnOffset(0)).imageFragment()->rasterizedImage().imagePointer()
+            == frame2);
+    };
+    checkShowsFrame2();
+
+    SECTION("reprinting keeps the frame")
+    {
+        mock.writeToScreen("\033[H" + placeholderPicture());
+        checkShowsFrame2();
+    }
+
+    SECTION("d=a keeps the cells")
+    {
+        mock.writeToScreen("\033_Ga=d,d=a,q=2\033\\"sv);
+        checkShowsFrame2();
+    }
+}
+
+TEST_CASE("KittyPlaceholders.screen.cursor_placement_replacing_a_virtual_one", "[kitty][placeholder]")
+{
+    // Cells without a placement id show the image's first virtual placement; when a cursor placement takes
+    // that pair over, they show the next one.
+    auto mock = PlaceholderTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen(std::format("\033_Ga=t,i=7,f=24,s=2,v=2,q=2;{}\033\\",
+                                   core::base64::encode(std::string(12, '\x7F'))));
+    mock.writeToScreen("\033_Ga=p,U=1,i=7,p=3,c=4,r=2,q=2\033\\"sv);
+    mock.writeToScreen("\033_Ga=p,U=1,i=7,p=5,c=4,r=2,q=2\033\\"sv);
+    mock.writeToScreen(placeholderPicture());
+    REQUIRE(
+        mock.screen().at(LineOffset(0), ColumnOffset(0)).imageFragment()->rasterizedImage().kittyPlacementId()
+        == KittyPlacementId { 3 });
+
+    mock.writeToScreen("\033[9;1H\033_Ga=p,i=7,p=3,q=2\033\\"sv);
+
+    checkPictureResolved(mock.screen());
+    CHECK(
+        mock.screen().at(LineOffset(0), ColumnOffset(0)).imageFragment()->rasterizedImage().kittyPlacementId()
+        == KittyPlacementId { 5 });
+}
+
+TEST_CASE("KittyPlaceholders.screen.other_pages", "[kitty][placeholder]")
+{
+    auto mock = PlaceholderTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[1U"sv); // NP: page 2
+    mock.writeToScreen(transmitVirtual());
+    mock.writeToScreen(placeholderPicture());
+    checkPictureResolved(mock.terminal.pageAt(PageIndex(1)));
+}
+
+TEST_CASE("KittyPlaceholders.screen.source_rect_is_ignored", "[kitty][placeholder]")
+{
+    // kitty's grman_put_cell_image fits the whole image into a virtual placement, whatever x/y/w/h say.
+    auto mock = PlaceholderTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen(std::format("\033_Ga=T,U=1,i=7,x=1,y=1,w=1,h=1,f=24,s=2,v=2,q=2;{}\033\\",
+                                   core::base64::encode(std::string(12, '\x7F'))));
+    auto const* const placement = mock.screen().findKittyVirtualPlacement(7, KittyPlacementId {});
+    REQUIRE(placement != nullptr);
+    CHECK(placement->raster->imageOffset().x.value == 0);
+    CHECK(placement->raster->imageOffset().y.value == 0);
+    CHECK(placement->raster->imageSubSize() == ImageSize {});
+    CHECK(placement->raster->cellSpan().lines == LineCount(2));
+    CHECK(placement->raster->cellSpan().columns == ColumnCount(2));
 }

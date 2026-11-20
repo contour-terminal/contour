@@ -150,9 +150,9 @@ struct Command
     bool quietOnSuccess = false;
     bool quietAlways = false;
 
-    /// What a Delete action targets (`d=`), e.g. 'a' for all, 'i' by id, 'n' by number.
-    /// An upper-case letter additionally frees the stored image data, not just the placement.
-    char deleteTarget = 'a';
+    /// What a Delete action targets (`d=`), e.g. 'a' for all, 'i' by id, 'n' by number; 0 when absent, which
+    /// means 'a'. An upper-case letter additionally frees the stored image data, not just the placement.
+    char deleteTarget = 0;
 
     /// Animation only (`a=f`, `a=a`, `a=c`), where the protocol reuses three keys that mean cell
     /// geometry everywhere else. They are decoded into their own fields rather than read back out of

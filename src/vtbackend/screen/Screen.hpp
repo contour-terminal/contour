@@ -370,9 +370,21 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Makes the next resolveKittyPlaceholders() walk the history as well as the page.
     void rescanKittyPlaceholdersEverywhere() noexcept;
 
-    /// Removes @p imageId's virtual placement @p placementId, if it has one.
+    /// Whether eraseKittyVirtualPlacement() found a placement to erase.
+    enum class Erased : uint8_t
+    {
+        No,  ///< The image had no virtual placement of that id.
+        Yes, ///< It had one, and it is gone.
+    };
+
+    /// Removes @p imageId's virtual placement @p placementId, if it has one. Its cells are left to the
+    /// rescan a caller asks for: a cell without a placement id may now show the image's next one.
     /// @return Whether it had one.
-    bool eraseKittyVirtualPlacement(uint32_t imageId, KittyPlacementId placementId);
+    [[nodiscard]] Erased eraseKittyVirtualPlacement(uint32_t imageId, KittyPlacementId placementId);
+
+    /// Erases @p imageId's virtual placement @p placementId, if it has one, and rescans the placeholder
+    /// cells, which may now show the image's next virtual placement or nothing.
+    void dropKittyVirtualPlacement(uint32_t imageId, KittyPlacementId placementId);
 
     /// How far a kitty `a=d` reaches: the case of its `d=` target.
     enum class KittyDeleteReach : uint8_t
@@ -391,6 +403,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     /// Forgets the kitty image @p imageId: its data, its animation and the numbers naming it.
     void freeKittyImage(uint32_t imageId);
+
+    /// Drops every image number's ids that no stored image holds any more.
+    void forgetFreedKittyImageNumbers();
 
     /// @return The id of the newest image transmitted under kitty image number @p imageNumber (`I=`), or 0.
     [[nodiscard]] uint32_t kittyImageIdOfNumber(uint32_t imageNumber) const noexcept;
@@ -464,6 +479,11 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// @param swaps What to replace, and with what.
     /// @return The image ids with at least one fragment on the page, already showing its swap or not.
     std::unordered_set<uint32_t> showKittyFrames(KittyFrameSwaps const& swaps);
+
+    /// @return A raster of @p next made exactly as @p previous was: geometry, alignment, gap colour, layer,
+    ///         placement id and origin.
+    [[nodiscard]] static std::shared_ptr<RasterizedImage> rasterizeKittyFrame(
+        RasterizedImage const& previous, std::shared_ptr<Image const> next);
 
     /// Shows @p next in every placement of @p imageId, whichever of its frames the cells hold: one page walk.
     /// @param imageId The kitty image.
@@ -2050,12 +2070,18 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Not captured: a restored screen resolves nothing until a cell is written; its fragments came along.
     PlaceholderScan _kittyPlaceholders = PlaceholderScan::Idle;
 
+    /// linesScrolledIntoHistory() when placeholder cells were first written since the last resolve: a
+    /// Pending resolve also walks the rows scrolled into the history since then, which the same batch may
+    /// have pushed a picture's top rows into.
+    uint64_t _kittyPlaceholderScrollMark = 0;
+
     /// Virtual placements (`U=1`) by image id, in the order they were made: the front one is what a
     /// placeholder cell without a placement id shows.
     std::unordered_map<uint32_t, std::vector<KittyVirtualPlacement>> _kittyVirtualPlacements {};
 
-    /// Kitty image numbers (`I=`) to the id of the newest image transmitted under each.
-    std::unordered_map<uint32_t, uint32_t> _kittyImageNumbers {};
+    /// Kitty image numbers (`I=`) to the ids of the images still stored under each, in transmission order:
+    /// the back one is what the number names, and freeing it makes the number name the one before.
+    std::unordered_map<uint32_t, std::vector<uint32_t>> _kittyImageNumbers {};
 
     /// Not captured: a cost counter tests read, which counts this process's walks only.
     uint64_t _kittyFragmentWalks = 0; ///< @see kittyFragmentWalks()

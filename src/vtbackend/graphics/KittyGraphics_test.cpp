@@ -126,6 +126,8 @@ TEST_CASE("KittyGraphics.parse.unicode_placement", "[kitty][placeholder]")
 
     CHECK(parseCommand("a=T,i=5"sv)->placementKind == PlacementKind::Cursor);
     CHECK(parseCommand("a=T,U=0,i=5"sv)->placementKind == PlacementKind::Cursor);
+    // kitty takes any non-zero U as a virtual placement.
+    CHECK(parseCommand("a=T,U=2,i=5"sv)->placementKind == PlacementKind::Virtual);
 }
 
 TEST_CASE("KittyGraphics.parse.feature_query", "[kitty][placeholder]")
@@ -2864,6 +2866,18 @@ TEST_CASE("KittyGraphics.image_number", "[kitty][placeholder]")
         mock.writeToScreen(std::format("\033_Ga=t,i=4,I=13,f=24,s=2,v=2;{}\033\\", rgbPixels2x2()));
         CHECK(mock.terminal.peekInput().starts_with("\033_Gi=4,I=13;EINVAL"));
         CHECK(mock.terminal.primaryScreen().kittyImage(4) == nullptr);
+    }
+
+    SECTION("the feature query echoes an explicit d=a")
+    {
+        mock.writeToScreen("\033_Ga=q,i=31,e=d,d=a\033\\"sv);
+        CHECK(mock.terminal.peekInput() == "\033_Gi=31,e=d,d=a;OK\033\\");
+    }
+
+    SECTION("a feature query naming an id and a number is refused, as kitty checks that first")
+    {
+        mock.writeToScreen("\033_Ga=q,i=31,I=3,e=T\033\\"sv);
+        CHECK(mock.terminal.peekInput().starts_with("\033_Gi=31,I=3;EINVAL"));
     }
 
     SECTION("the feature query names the new delete targets")
