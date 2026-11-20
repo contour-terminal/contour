@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/KittyPlaceholderCodepoint.hpp>
 
 #include <cstdint>
 #include <span>
@@ -13,9 +14,6 @@
 /// nothing about screens, grids or stored images.
 namespace vtbackend::kitty_graphics
 {
-
-/// The code point a Unicode placeholder cell starts with.
-inline constexpr char32_t PlaceholderCodepoint = U'\U0010EEEE';
 
 /// Number of combining characters kitty assigns a row/column number to.
 inline constexpr size_t DiacriticCount = 297;

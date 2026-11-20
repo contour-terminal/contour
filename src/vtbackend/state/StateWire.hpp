@@ -848,6 +848,7 @@ struct StateFlagWire<vtbackend::LineFlag>
         vtbackend::LineFlag::CommandEnd,
         vtbackend::LineFlag::PromptEnd,
         vtbackend::LineFlag::UserMark,
+        vtbackend::LineFlag::ImagePlaceholders,
     };
 };
 

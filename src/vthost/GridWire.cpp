@@ -40,6 +40,7 @@ namespace
         std::pair { vtbackend::LineFlag::CommandEnd, 7 },
         std::pair { vtbackend::LineFlag::PromptEnd, 8 },
         std::pair { vtbackend::LineFlag::UserMark, 9 },
+        std::pair { vtbackend::LineFlag::ImagePlaceholders, 10 },
     };
 
     constexpr auto PinnedCellFlagBits = std::array {

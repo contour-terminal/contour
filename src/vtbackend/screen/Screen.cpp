@@ -6,6 +6,7 @@
 #include <vtbackend/core/LineFlags.hpp>
 #include <vtbackend/core/RowMove.hpp>
 #include <vtbackend/graphics/KittyInflate.hpp>
+#include <vtbackend/graphics/KittyPlaceholders.hpp>
 #include <vtbackend/graphics/MessageParser.hpp>
 #include <vtbackend/graphics/SixelParser.hpp>
 #include <vtbackend/graphics/regis/ReGISContext.hpp>
@@ -558,6 +559,14 @@ void Screen::applyPageSizeToMainDisplay(PageSize mainDisplayPageSize)
     if (sizeChanged)
         resyncKittyAnimations();
 
+    // A reflow moves placeholder cells to other rows, a continuation row among them, where a cell may now
+    // start its run. Resolved now: a resize is no parse batch.
+    if (sizeChanged)
+    {
+        rescanKittyPlaceholdersEverywhere();
+        resolveKittyPlaceholders();
+    }
+
     verifyState();
 }
 
@@ -809,7 +818,12 @@ bool Screen::joinsLastCluster(char32_t codepoint) const noexcept
 
 void Screen::appendToLastCluster(char32_t codepoint)
 {
-    auto const widthChange = usePreviousCell().appendCharacter(codepoint, clusterWidthPolicy());
+    auto previousCell = usePreviousCell();
+    // A placeholder's diacritics may arrive in a later read than the placeholder: its line is resolved
+    // again once they have.
+    if (previousCell.codepoint(0) == kitty_graphics::PlaceholderCodepoint) [[unlikely]]
+        notePlaceholderCell(_lastCursorPosition.line);
+    auto const widthChange = previousCell.appendCharacter(codepoint, clusterWidthPolicy());
     applyClusterWidthChange(widthChange);
     _terminal->markCellDirty(_lastCursorPosition);
 }
@@ -1009,8 +1023,12 @@ Screen::CharacterPlacement Screen::placeWideCharacter(int width) noexcept
 
 void Screen::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
 {
-    // Measured once: the placement, the room IRM makes and the cell itself all take the same width.
-    auto const width = unicode::width(codepoint);
+    // The one comparison ordinary text pays for kitty Unicode placeholders.
+    auto const isPlaceholder = codepoint == kitty_graphics::PlaceholderCodepoint;
+
+    // Measured once: the placement, the room IRM makes and the cell itself all take the same width. A
+    // placeholder is one column, which its Ambiguous width only happens to measure.
+    auto const width = isPlaceholder ? 1u : unicode::width(codepoint);
 
     // A character wider than the room left before the margin goes to the next row, as in xterm, foot
     // and kitty, or, without autowrap, is dropped, as xterm drops it (measured).
@@ -1061,6 +1079,8 @@ void Screen::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
     cell.write(_cursor.graphicsRendition, codepoint, static_cast<uint8_t>(width), _cursor.hyperlink);
 
     _lastCursorPosition = _cursor.position;
+    if (isPlaceholder) [[unlikely]]
+        notePlaceholderCell(_cursor.position.line);
 
     clearAndAdvance(oldWidth, cell.width());
 
@@ -1686,7 +1706,8 @@ Line& Screen::eraseRowInPlace(LineOffset line, LineFlags flags, GraphicsAttribut
     auto& row = _grid.lineAt(line);
     auto const block = row.blockId();
     auto const before = row.flags();
-    row.reset(flags, attributes);
+    // A derived flag describes the cells, and the erase takes them all.
+    row.reset(flags.without(DerivedLineFlags), attributes);
     if (line == _cursor.position.line)
         row.adoptProvenance(_stamp);
 
@@ -1739,6 +1760,7 @@ void Screen::forgetCursorRowErasedWhole() noexcept
     auto& row = currentLine();
     auto const before = row.flags();
     row.flags().disable(LineRenditionFlags);
+    row.flags().disable(DerivedLineFlags);
     row.flags().disable(LineFlag::UserMark);
     noteUserMarkChange(_cursor.position.line, before);
 }
@@ -6365,7 +6387,8 @@ void Screen::processKittyGraphics(std::string_view body)
         _kittyAnimations.erase(command.imageId);
         // A re-transmission ends every placement of the image it replaces that has no cell of its own,
         // as kitty's free_image_resources() does: the virtual placements were fitted to the old pixels.
-        _kittyVirtualPlacements.erase(command.imageId);
+        if (_kittyVirtualPlacements.erase(command.imageId) != 0)
+            rescanKittyPlaceholdersEverywhere();
         _kittyImages[command.imageId] = image;
     }
 
@@ -6493,7 +6516,125 @@ std::expected<void, std::string_view> Screen::createKittyVirtualPlacement(
     else
         placements.push_back(
             KittyVirtualPlacement { .placementId = placementId, .raster = std::move(raster) });
+
+    // Placeholder cells printed before the placement existed -- or naming the one it replaces -- may be
+    // anywhere, scrolled into the history included.
+    rescanKittyPlaceholdersEverywhere();
     return {};
+}
+
+void Screen::notePlaceholderCell(LineOffset line) noexcept
+{
+    _grid.lineAt(line).setFlag(LineFlag::ImagePlaceholders, true);
+    if (_kittyPlaceholders == PlaceholderScan::Idle)
+        _kittyPlaceholders = PlaceholderScan::Pending;
+}
+
+void Screen::rescanKittyPlaceholdersEverywhere() noexcept
+{
+    _kittyPlaceholders = PlaceholderScan::Everywhere;
+}
+
+void Screen::resolveKittyPlaceholders()
+{
+    if (_kittyPlaceholders == PlaceholderScan::Idle)
+        return;
+
+    auto const firstLine =
+        _kittyPlaceholders == PlaceholderScan::Everywhere ? -unbox<int>(_grid.historyLineCount()) : 0;
+    _kittyPlaceholders = PlaceholderScan::Idle;
+    // Only the flag of each line is read: an unflagged line, the history's bulk, is never materialised.
+    for (auto const line: std::views::iota(firstLine, *pageSize().lines))
+        if (std::as_const(_grid).lineAt(LineOffset(line)).isFlagEnabled(LineFlag::ImagePlaceholders))
+            resolveKittyPlaceholderLine(LineOffset(line));
+}
+
+void Screen::resolveKittyPlaceholderLine(LineOffset line)
+{
+    using namespace kitty_graphics;
+
+    auto const& row = std::as_const(_grid).lineAt(line);
+    if (row.isBlank())
+    {
+        _grid.lineAt(line).setFlag(LineFlag::ImagePlaceholders, false);
+        return;
+    }
+
+    auto const columns = std::min(unbox<size_t>(row.size()), unbox<size_t>(pageSize().columns));
+    auto const diacriticAt = [](ConstCellProxy const& cell, size_t index) -> uint32_t {
+        return index < cell.codepointCount() ? diacriticOrdinal(cell.codepoint(index)) : 0;
+    };
+    auto cells = std::vector<PlaceholderCell>(columns);
+    auto holdsPlaceholders = false;
+    for (auto const [column, placeholder]: core::views::enumerate(cells))
+    {
+        auto const cell = ConstCellProxy(row.storage(), column);
+        if (cell.codepointCount() == 0 || cell.codepoint(0) != PlaceholderCodepoint)
+            continue;
+        holdsPlaceholders = true;
+        placeholder = PlaceholderCell {
+            .presence = CellPresence::Placeholder,
+            .idLow = placeholderIdOf(cell.foregroundColor()),
+            .placementId = placeholderIdOf(cell.underlineColor()),
+            .row = diacriticAt(cell, 1),
+            .column = diacriticAt(cell, 2),
+            .idHigh = diacriticAt(cell, 3),
+        };
+    }
+
+    // What each column should show: the raster of the virtual placement its run names, and where in it.
+    struct Shown
+    {
+        std::shared_ptr<RasterizedImage const> raster;
+        CellLocation offset;
+    };
+    auto shown = std::vector<Shown>(columns);
+    for (auto const& run: resolvePlaceholderRuns(cells))
+    {
+        auto const* const placement =
+            findKittyVirtualPlacement(run.imageId, KittyPlacementId { run.placementId });
+        if (!placement)
+            continue;
+        auto const span = placement->raster->cellSpan();
+        for (auto const k: std::views::iota(uint32_t { 0 }, uint32_t { run.length }))
+        {
+            auto const imageColumn = run.imageColumn + k;
+            if (std::cmp_greater_equal(run.imageRow, unbox(span.lines))
+                || std::cmp_greater_equal(imageColumn, unbox(span.columns)))
+                continue;
+            shown[run.firstColumn + k] = Shown {
+                .raster = placement->raster,
+                .offset = CellLocation { .line = LineOffset::cast_from(run.imageRow),
+                                         .column = ColumnOffset::cast_from(imageColumn) },
+            };
+        }
+    }
+
+    for (auto const [column, wanted]: core::views::enumerate(shown))
+    {
+        auto const current =
+            ConstCellProxy(std::as_const(_grid).lineAt(line).storage(), column).imageFragment();
+        // A fragment some protocol placed at the cursor is not the placeholder's to replace or remove.
+        if (current && current->rasterizedImage().origin() != ImageOrigin::Placeholder)
+            continue;
+        // Unchanged cells are left alone: re-attaching them would dirty every resolved line each batch.
+        auto const unchanged =
+            current ? wanted.raster.get() == &current->rasterizedImage() && wanted.offset == current->offset()
+                    : !wanted.raster;
+        if (unchanged)
+            continue;
+        auto const at = ColumnOffset::cast_from(column);
+        auto cell = _grid.lineAt(line).useCellAt(at);
+        if (wanted.raster)
+            cell.setImageFragment(std::const_pointer_cast<RasterizedImage>(wanted.raster), wanted.offset);
+        else
+            cell.clearImageFragment();
+        if (line >= LineOffset(0))
+            _terminal->markCellDirty(CellLocation { .line = line, .column = at });
+    }
+
+    if (!holdsPlaceholders)
+        _grid.lineAt(line).setFlag(LineFlag::ImagePlaceholders, false);
 }
 
 size_t Screen::storedKittyBytes() const
