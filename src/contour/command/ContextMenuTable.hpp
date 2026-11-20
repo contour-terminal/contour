@@ -402,10 +402,7 @@ inline void dropRedundantSeparators(std::vector<ContextMenuEntry>& entries)
 /// @tparam CanReset   Whether there is a colour to reset; "Reset" is grayed out otherwise.
 /// @param state The world the menu was opened over.
 /// @return The rows; an empty palette leaves no divider to open the submenu on.
-template <typename State,
-          typename SetColor,
-          typename ResetColor,
-          typename MenuTable<State>::Predicate CanReset>
+template <typename State, typename SetColor, typename ResetColor, MenuTable<State>::Predicate CanReset>
 [[nodiscard]] std::vector<ContextMenuEntry> colorRows(State const& state)
 {
     using Table = MenuTable<State>;

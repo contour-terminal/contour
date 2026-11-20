@@ -3698,7 +3698,7 @@ void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Actio
         [](WindowController& window, SidebarRowKey const& key, actions::Action const& what) {
             // A swatch colours the workspace; a bare one (Custom…) asks for the picker over its row.
             if (auto const color = std::get<actions::SetWorkspaceColor>(what).color)
-                window._manager.setWorkspaceColor(window, key.workspace, *color);
+                window._manager.setWorkspaceColor(window, key.workspace, color);
             else
             {
                 window.focusSidebar();
