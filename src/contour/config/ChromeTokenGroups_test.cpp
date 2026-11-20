@@ -2499,8 +2499,8 @@ TEST_CASE("sidebar tokens per row", "[chrometokens][sidebar]")
     };
     for (auto const& expected:
          { Expected { ChromeStyle::MacOS, 24, 36, 1, 16, SidebarLook::SourceList, 220, 160, 480 },
-           Expected { ChromeStyle::Fluent, 32, 36, 1, 16, SidebarLook::NavigationPane, 240, 160, 480 },
-           Expected { ChromeStyle::ContourLinux, 32, 36, 1, 16, SidebarLook::HeaderPane, 240, 160, 480 },
+           Expected { ChromeStyle::Fluent, 32, 36, 0, 16, SidebarLook::NavigationPane, 240, 160, 480 },
+           Expected { ChromeStyle::ContourLinux, 32, 36, 0, 16, SidebarLook::HeaderPane, 240, 160, 480 },
            Expected { ChromeStyle::Terminal, 1, 2, 0, 2, SidebarLook::CellTree, 28, 18, 60 } })
     {
         CAPTURE(static_cast<int>(expected.style));

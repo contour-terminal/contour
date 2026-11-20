@@ -569,6 +569,51 @@ TEST_CASE("an idle row shows its folder on the second line (offscreen)", "[conto
     }
 }
 
+TEST_CASE("two-line rows stand further apart than the lines within one (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        if (scene.token("look") == scene.token("cellTree"))
+            continue; // whole cell rows: each line is a row of the grid, with no space to share out
+        // claude asks, and build under it works in a folder: two rows that both have a second line.
+        scene.controller.sidebarSource().listed.workspaces[0].tabs[1].panes[0].cwd = "/src/billing";
+        scene.controller.sidebarModel().refreshNow();
+        auto* upper = scene.rowTitled(QStringLiteral("claude"));
+        auto* lower = scene.rowTitled(QStringLiteral("build"));
+        REQUIRE(upper != nullptr);
+        REQUIRE(lower != nullptr);
+        REQUIRE(lower->y() > upper->y());
+
+        /// @return The scene box of the visible part named @p name of @p rowItem.
+        auto const boxOf = [](QQuickItem& rowItem, QString const& name) {
+            auto* part = SidebarWindow::findNamed(rowItem, name);
+            REQUIRE(part != nullptr);
+            REQUIRE(part->isVisible());
+            return sceneRectOf(*part);
+        };
+        auto const secondOf = [&](QQuickItem& rowItem) {
+            auto* reason = SidebarWindow::findNamed(rowItem, QStringLiteral("sidebarRowReasonLine"));
+            REQUIRE(reason != nullptr);
+            return boxOf(rowItem,
+                         reason->isVisible() ? QStringLiteral("sidebarRowReasonLine")
+                                             : QStringLiteral("sidebarRowIdle"));
+        };
+
+        // From the line boxes, so it holds for any face: a row's two lines read as one block only when the
+        // space between two blocks is larger than the space within one.
+        auto const within =
+            secondOf(*upper).top() - boxOf(*upper, QStringLiteral("sidebarRowTitle")).bottom();
+        auto const between =
+            boxOf(*lower, QStringLiteral("sidebarRowTitle")).top() - secondOf(*upper).bottom();
+        INFO("within " << within << ", between " << between);
+        CHECK(between > within);
+        CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
 TEST_CASE("a two-line row keeps its lines inside it, and centres a name with nothing under it (offscreen)",
           "[contour][gui][qml][sidebar]")
 {
