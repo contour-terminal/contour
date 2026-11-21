@@ -45,6 +45,7 @@ struct JsonTask
     std::optional<std::string> appliesTo;
     std::optional<std::string> model;
     std::optional<std::string> prompt;
+    std::optional<JsonDuration> endDoneAfter;
 };
 
 /// The `config` subtree; its snake_case keys are mapped in Config.cpp.

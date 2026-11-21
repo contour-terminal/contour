@@ -661,7 +661,7 @@ Key                   | Meaning
 `max_agents_per_repo` | The most agents running at once in one repository. Default `2`.
 `poll_every`          | How often the forges are asked for the lists. Default `2m`, at least `30s`.
 `status_board_after`  | How long an agent runs before the orchestrator starts looking for its board, its `STATUS.md`. Default `15m`; `0` never looks, while `b` still shows a board.
-`end_done_after`      | How long an agent stays done before the orchestrator ends its run, as `e` would: its tab closes and its worktree is removed unless it holds work. The run is listed as completed. An agent that goes back to work, because you answered it, waits the whole time again. Done is a turn that ended with nothing in flight, which the dashboard shows as *waiting for you*: it also covers an agent that asked you a question in plain text, which this ends unanswered. An agent waiting on its own background work or a scheduled wake-up is not done, and shows what it waits for. Default `0`: a done run waits for you.
+`end_done_after`      | How long an agent stays done before the orchestrator ends its run, as `e` would: its tab closes and its worktree is removed unless it holds work. The run is listed as completed. An agent that goes back to work, because you answered it, waits the whole time again. Done is a turn that ended with nothing in flight, which the dashboard shows as *waiting for you*: it also covers an agent that asked you a question in plain text, which this ends unanswered. An agent waiting on its own background work or a scheduled wake-up is not done, and shows what it waits for. A task can set its own (below). Default `0`: a done run waits for you.
 `finished_retention`  | How long a finished run stays in the Finished list. Default `30d`. Every finished run is also appended, for good, to `agent-runs.jsonl` in the daemon's state directory, with what its agent spent and did.
 `repos`               | Required. The repositories, one entry each (below).
 `tasks`               | Required. What the dashboard offers to start on an item, one entry each (below).
@@ -688,14 +688,15 @@ recorded fixture`.
 
 A `tasks` entry:
 
-Key          | Meaning
--------------|---------------------------------------------------------------------------------------------------
-`id`         | Required. The task's name, unique among the tasks.
-`key`        | Required. The dashboard key that starts it: one printable character, none of the dashboard's own (the configuration names those when it refuses one).
-`label`      | Required. What the dashboard calls it.
-`applies_to` | Required. `pr` for a pull request, `issue` for an issue.
-`model`      | Required. The model it runs with, one of `models`; the dispatch form can change it.
-`prompt`     | Required. What the agent is started with; `{url}` stands for the item's URL, and must be there.
+Key              | Meaning
+-----------------|-----------------------------------------------------------------------------------------------
+`id`             | Required. The task's name, unique among the tasks.
+`key`            | Required. The dashboard key that starts it: one printable character, none of the dashboard's own (the configuration names those when it refuses one).
+`label`          | Required. What the dashboard calls it.
+`applies_to`     | Required. `pr` for a pull request, `issue` for an issue.
+`model`          | Required. The model it runs with, one of `models`; the dispatch form can change it.
+`prompt`         | Required. What the agent is started with; `{url}` stands for the item's URL, and must be there.
+`end_done_after` | Its runs' own `end_done_after`, over the global one: a task whose agents rarely ask anything, such as fixing CI, can end itself (`5m`) while the rest wait for you, and `0` keeps its runs waiting whatever the global one says. Default: the global one.
 
 An action of the extension opens the dashboard from a key binding, and its summary is a status-line segment;
 [Version 2](#version-2) and [Daemon extensions: what they show](#daemon-extensions-what-they-show) have the two

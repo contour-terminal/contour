@@ -672,9 +672,10 @@ namespace
                                         std::format("{}{}", reported(AgentStatus::Blocked), age) };
                 },
                 [&](Done const&) {
-                    auto const ends = lists.config != nullptr && lists.config->endDoneAfter().count() != 0
-                                          ? "ends by itself"sv
-                                          : "e ends it"sv;
+                    auto const ends =
+                        lists.config != nullptr && lists.config->endDoneAfterFor(run.task).count() != 0
+                            ? "ends by itself"sv
+                            : "e ends it"sv;
                     return std::tuple { "●"sv, Role::Warning, std::format("{} · {}", WaitingForYou, ends) };
                 },
                 [&](auto const&) { return std::tuple { "◌"sv, Role::Dim, runStateText(run) }; },
@@ -706,12 +707,12 @@ namespace
                 break;
         }
         if (std::holds_alternative<Done>(run.state) && lists.config != nullptr
-            && lists.config->endDoneAfter().count() != 0)
+            && lists.config->endDoneAfterFor(run.task).count() != 0)
             details.push_back(DetailLine {
                 .label = "ends",
-                .value =
-                    std::format("by itself once it waited for you for {} (end_done_after); e ends it now",
-                                ageText(static_cast<uint64_t>(lists.config->endDoneAfter().count()))),
+                .value = std::format(
+                    "by itself once it waited for you for {} (end_done_after); e ends it now",
+                    ageText(static_cast<uint64_t>(lists.config->endDoneAfterFor(run.task).count()))),
                 .role = Role::Warning });
         std::ranges::move(runDetails(lists, run), std::back_inserter(details));
         // A run whose STATUS.md was found says so: `b` shows it.

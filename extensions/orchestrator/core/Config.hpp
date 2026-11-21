@@ -41,6 +41,8 @@ struct TaskDef
     AppliesTo appliesTo = AppliesTo::PullRequest; ///< The kind of item it works on.
     std::string model;  ///< The model it runs with by default; one of Config::models().
     std::string prompt; ///< The prompt, with `{url}` standing for the item's URL.
+    /// How long its runs' agents stay done before their run ends (`end_done_after`); nullopt: the global one.
+    std::optional<std::chrono::milliseconds> endDoneAfter = std::nullopt;
 };
 
 /// A program a declared command names that the host runs as its own executable.
@@ -192,6 +194,12 @@ class Config
     [[nodiscard]] std::chrono::milliseconds statusBoardAfter() const noexcept { return _statusBoardAfter; }
     /// @return How long an agent stays done before its run is ended; 0: never.
     [[nodiscard]] std::chrono::milliseconds endDoneAfter() const noexcept { return _endDoneAfter; }
+
+    /// How long a run of @p taskId stays done before it ends: the task's own `end_done_after`, else the
+    /// global one. A task no longer configured takes the global one.
+    /// @param taskId A task id.
+    /// @return The duration; 0 never ends it.
+    [[nodiscard]] std::chrono::milliseconds endDoneAfterFor(std::string_view taskId) const noexcept;
     /// @return How long a finished run is kept.
     [[nodiscard]] std::chrono::milliseconds finishedRetention() const noexcept { return _finishedRetention; }
     /// @return The repositories, in the configured order.

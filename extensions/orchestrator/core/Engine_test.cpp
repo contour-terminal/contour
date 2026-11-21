@@ -53,7 +53,8 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
 /// What a test changes about the configuration.
 struct Settings
 {
-    std::string_view limits {}; ///< Extra top-level keys, each followed by a comma.
+    std::string_view limits {};    ///< Extra top-level keys, each followed by a comma.
+    std::string_view fixCiKeys {}; ///< Extra keys of the fix_ci task, each followed by a comma.
     std::string_view repos = R"([ { "name": "contour", "path": "~/projects/contour", "forge": "github",
                                      "issues": [ { "source": "forge", "query": "assignee:@me" } ] } ])";
     std::vector<std::string_view> repoPaths = { ContourPath };
@@ -64,12 +65,13 @@ struct Settings
     return std::format(R"({{ "worktree_root": "~/worktrees", "models": ["opus", "sonnet"], {}
   "repos": {},
   "tasks": [
-    {{ "id": "fix_ci", "key": "f", "label": "fix CI", "applies_to": "pr", "model": "sonnet",
+    {{ {} "id": "fix_ci", "key": "f", "label": "fix CI", "applies_to": "pr", "model": "sonnet",
        "prompt": "/contour-workflows:fix-ci {{url}}" }},
     {{ "id": "issue", "key": "w", "label": "work on issue", "applies_to": "issue", "model": "opus",
        "prompt": "/contour-workflows:work-issue {{url}}" }} ] }})",
                        settings.limits,
-                       settings.repos);
+                       settings.repos,
+                       settings.fixCiKeys);
 }
 
 [[nodiscard]] HostInfo hostFor(Settings const& settings, std::string_view root = WorktreeRoot)
@@ -1168,6 +1170,24 @@ TEST_CASE("end_done_after waits again for an agent that went back to work", "[or
     CHECK(countOf<ClosePane>(harness.wake(9 * Minute)) == 0);
     CHECK(holds<Done>(harness.run(PrId)));
     CHECK(countOf<ClosePane>(harness.wake(1 * Minute)) == 1);
+}
+
+TEST_CASE("a task's end_done_after overrides the global one", "[orchestrator][engine]")
+{
+    // The task's own wait, with no global one.
+    auto ownWait = booted({ .fixCiKeys = R"("end_done_after": "5m",)" });
+    ownWait.runToRunning(prDispatch());
+    ownWait.list({ paneOf(PrId, "p1", ProgramLiveness::Alive, AgentStatus::Done) });
+    CHECK(countOf<ClosePane>(ownWait.wake((5 * Minute) - 1'000)) == 0);
+    CHECK(countOf<ClosePane>(ownWait.wake(1'000)) == 1);
+
+    // The task's 0 keeps its runs waiting for the user, whatever the global wait.
+    auto never =
+        booted({ .limits = R"("end_done_after": "10m",)", .fixCiKeys = R"("end_done_after": "0",)" });
+    never.runToRunning(prDispatch());
+    never.list({ paneOf(PrId, "p1", ProgramLiveness::Alive, AgentStatus::Done) });
+    CHECK(countOf<ClosePane>(never.wake(24 * 60 * Minute)) == 0);
+    CHECK(holds<Done>(never.run(PrId)));
 }
 
 TEST_CASE("without end_done_after a done run waits for the user", "[orchestrator][engine]")

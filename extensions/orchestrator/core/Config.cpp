@@ -79,7 +79,9 @@ struct glz::meta<orchestrator::config::detail::JsonTask>
                                               "model",
                                               &T::model,
                                               "prompt",
-                                              &T::prompt);
+                                              &T::prompt,
+                                              "end_done_after",
+                                              &T::endDoneAfter);
 };
 
 namespace orchestrator
@@ -346,6 +348,7 @@ namespace
         Field { .key = "applies_to", .type = JsonType::String },
         Field { .key = "model", .type = JsonType::String },
         Field { .key = "prompt", .type = JsonType::String },
+        Field { .key = "end_done_after", .type = JsonType::Duration },
     };
 
     [[nodiscard]] constexpr std::span<Field const> fieldsOf(ObjectKind kind) noexcept
@@ -789,12 +792,25 @@ namespace
         if (!prompt)
             return std::unexpected(prompt.error());
 
+        auto endDoneAfter = std::optional<std::chrono::milliseconds> {};
+        if (json.endDoneAfter)
+        {
+            auto const duration = durationOf(json.endDoneAfter,
+                                             key("end_done_after"),
+                                             DefaultEndDoneAfter,
+                                             std::chrono::milliseconds { 0 });
+            if (!duration)
+                return std::unexpected(duration.error());
+            endDoneAfter = *duration;
+        }
+
         return TaskDef { .id = *id,
                          .key = keyText->front(),
                          .label = *label,
                          .appliesTo = *appliesTo,
                          .model = *model,
-                         .prompt = *prompt };
+                         .prompt = *prompt,
+                         .endDoneAfter = endDoneAfter };
     }
 
     [[nodiscard]] Checked<std::vector<TaskDef>> tasksOf(std::optional<std::vector<JsonTask>> const& value,
@@ -950,6 +966,12 @@ Repo const* Config::findRepo(std::string_view name) const noexcept
 {
     auto const repo = std::ranges::find(_repos, name, &Repo::name);
     return repo != _repos.end() ? &*repo : nullptr;
+}
+
+std::chrono::milliseconds Config::endDoneAfterFor(std::string_view taskId) const noexcept
+{
+    auto const* const task = findTask(taskId);
+    return task != nullptr ? task->endDoneAfter.value_or(_endDoneAfter) : _endDoneAfter;
 }
 
 TaskDef const* Config::findTask(std::string_view id) const noexcept

@@ -232,6 +232,31 @@ TEST_CASE("Config.endDoneAfter", "[config]")
     CHECK(malformed.error().problem == ConfigProblem::NotADuration);
 }
 
+TEST_CASE("Config.endDoneAfter per task", "[config]")
+{
+    // A task's own wait overrides the global one; a task without one, and an unknown task, take the global.
+    auto const config = parse(
+        Input { .find = R"({ "id": "fix_ci",)", .replace = R"({ "end_done_after": "5m", "id": "fix_ci",)" });
+    REQUIRE(config.has_value());
+    CHECK(config->findTask("fix_ci")->endDoneAfter == std::optional { 5min });
+    CHECK(config->findTask("issue")->endDoneAfter == std::nullopt);
+    CHECK(config->endDoneAfterFor("fix_ci") == 5min);
+    CHECK(config->endDoneAfterFor("issue") == 0ms);
+    CHECK(config->endDoneAfterFor("retired") == 0ms);
+
+    // A task's 0 keeps its runs waiting for the user, whatever the global wait.
+    auto const never = parse(
+        Input { .find = R"({ "id": "fix_ci",)", .replace = R"({ "end_done_after": 0, "id": "fix_ci",)" });
+    REQUIRE(never.has_value());
+    CHECK(never->endDoneAfterFor("fix_ci") == 0ms);
+
+    auto const malformed = parse(Input { .find = R"({ "id": "fix_ci",)",
+                                         .replace = R"({ "end_done_after": "soon", "id": "fix_ci",)" });
+    REQUIRE_FALSE(malformed.has_value());
+    CHECK(malformed.error().key == "tasks[0].end_done_after");
+    CHECK(malformed.error().problem == ConfigProblem::NotADuration);
+}
+
 TEST_CASE("Config.accepts", "[config]")
 {
     for (auto const& row: AcceptRows)

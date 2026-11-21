@@ -781,7 +781,7 @@ void Engine::trackDoneRuns()
 
 std::optional<uint64_t> Engine::endsWhenDoneAt(Run const& run) const
 {
-    auto const after = _config ? static_cast<uint64_t>(_config->endDoneAfter().count()) : 0;
+    auto const after = _config ? static_cast<uint64_t>(_config->endDoneAfterFor(run.task).count()) : 0;
     auto const since = _doneSinceMs.find(run.id);
     if (after == 0 || since == _doneSinceMs.end())
         return std::nullopt;
