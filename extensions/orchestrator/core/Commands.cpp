@@ -35,6 +35,7 @@ namespace
         ArgumentDecl { .name = "prompt", .kind = ArgumentKind::Text, .root = std::nullopt },
         ArgumentDecl { .name = "page", .kind = ArgumentKind::Number, .root = std::nullopt },
         ArgumentDecl { .name = "format", .kind = ArgumentKind::Number, .root = std::nullopt },
+        ArgumentDecl { .name = "record", .kind = ArgumentKind::Text, .root = std::nullopt },
         // A Jira query: Text, so one that starts with '-' is refused before it could read as an option.
         ArgumentDecl { .name = "jql", .kind = ArgumentKind::Text, .root = std::nullopt },
     };
@@ -228,6 +229,9 @@ namespace
         "contour"sv, "agent"sv,  "transcript"sv, "--session"sv, "{session}"sv, "--cwd"sv,
         "{path}"sv,  "--page"sv, "{page}"sv,     "--format"sv,  "{format}"sv,  "--json"sv,
     };
+    /// The run's line is the orchestrator's own (contract/agent-runs/); contour only checks and appends it.
+    constexpr auto AgentRecordArgv = std::array { "contour"sv,  "agent"sv,    "record"sv,  "--line"sv,
+                                                  "{record}"sv, "--format"sv, "{format}"sv };
     /// As the transcript's: the worktree is compared, not entered, and may be gone.
     constexpr auto AgentStatsArgv = std::array {
         "contour"sv, "agent"sv,  "stats"sv,    "--session"sv, "{session}"sv,
@@ -350,6 +354,12 @@ namespace
                       .timeout = Timeout::Short,
                       .root = Root::Worktrees,
                       .argv = AgentTranscriptArgv,
+                      .environment = {} },
+        // Appends to a file in contour's state directory; it runs in the worktree root, which always exists.
+        CommandDecl { .name = "agent-record",
+                      .timeout = Timeout::Short,
+                      .root = Root::Worktrees,
+                      .argv = AgentRecordArgv,
                       .environment = {} },
         // In the worktree root for the same reason: a run's statistics are read once it finished.
         CommandDecl { .name = "agent-stats",

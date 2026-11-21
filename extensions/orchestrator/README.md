@@ -130,6 +130,10 @@ requests it opened. The numbers are read with the declared command `agent-stats`
 after, and once more when its run finishes. They are stored with the run, beside the history of the states it
 entered and when, so a finished run keeps them after its worktree and Claude Code's log are gone.
 
+Once a run finished and its last statistics were read, it is appended to `agent-runs.jsonl` in the daemon's
+state directory (`~/.local/state/contour` on Linux), one JSON line per run, for analysis with `jq`, DuckDB or
+pandas: see `contract/agent-runs/`.
+
 ## The contract
 
 What the extension and Contour must agree on comes in three parts, each tested from both sides:

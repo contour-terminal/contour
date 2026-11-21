@@ -139,7 +139,7 @@ std::vector<RunCommand> carryOut(DashboardFixture& fixture,
                                           .tag = command->tag, .outcome = outcome, .monoMs = now }),
                                       std::back_inserter(next));
                 };
-                if (command->command == "agent-stats")
+                if (command->command == "agent-stats" || command->command == "agent-record")
                     reply(ProcessOutcome { .start = StartResult::Started,
                                            .completion = Completion::Exited,
                                            .exitCode = 1,

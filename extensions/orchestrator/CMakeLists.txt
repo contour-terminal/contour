@@ -83,6 +83,8 @@ add_library(orchestrator_core STATIC
     core/Run.cpp
     core/Run.hpp
     core/Reconcile.cpp
+    core/Record.cpp
+    core/Record.hpp
     core/Reconcile.hpp
     core/RunJson.hpp
     core/Sanitize.cpp
@@ -164,6 +166,7 @@ if(ORCHESTRATOR_TESTING)
         core/Prompt_test.cpp
         core/Provider_test.cpp
         core/Reconcile_test.cpp
+        core/Record_test.cpp
         core/Run_test.cpp
         core/Sanitize_test.cpp
         core/Stats_test.cpp

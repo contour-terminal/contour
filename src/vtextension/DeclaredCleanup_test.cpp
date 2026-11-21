@@ -494,6 +494,7 @@ TEST_CASE("GIT_ATTR_SOURCE and core.attributesFile reach exactly the cleanup com
         std::pair { "query"sv, std::string("query") },
         std::pair { "page"sv, std::string("1") },
         std::pair { "format"sv, std::string("1") },
+        std::pair { "record"sv, std::string(R"({"format":1})") },
     };
 
     auto const manifest = orchestratorManifest();

@@ -89,6 +89,7 @@ struct BundledExtension
                         "git-worktree-remove",
                         "agent-setup-check",
                         "agent-transcript",
+                        "agent-record",
                         "agent-stats" } },
 #endif
     };

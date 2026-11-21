@@ -10,6 +10,7 @@
 
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/core/EngineDetail.hpp>
+#include <orchestrator/core/Record.hpp>
 #include <orchestrator/core/Stats.hpp>
 
 using namespace std::string_view_literals;
@@ -21,11 +22,21 @@ namespace
 {
     using engine::detail::judge;
     using engine::detail::later;
+    using engine::detail::RecordTagSuffix;
     using engine::detail::StatsTagSuffix;
     using engine::detail::Verdict;
 
     /// The declared command a run's statistics are read with.
     constexpr auto StatsCommand = "agent-stats"sv;
+
+    /// The declared command a finished run is appended to the file of finished runs with.
+    constexpr auto RecordCommand = "agent-record"sv;
+
+    /// @return Whether @p tag is a background call's: a statistics read or a record.
+    [[nodiscard]] bool isBackground(std::string_view tag) noexcept
+    {
+        return tag.ends_with(StatsTagSuffix) || tag.ends_with(RecordTagSuffix);
+    }
 
     /// @return Whether @p run's agent has a session to read: its tab opened, and it has not finished.
     [[nodiscard]] bool isLive(Run const& run) noexcept
@@ -52,13 +63,9 @@ void Engine::readDueStats(std::vector<Effect>& out)
         auto const run = std::ranges::find(inside, due.first, &Run::id);
         return run == inside.end() || !isLive(*run);
     });
-    // One read at a time: the statistics are a record, never worth a slot a dashboard is waiting for.
-    auto const isStatsRead = [](Queued const& queued) {
-        return queued.command.tag.ends_with(StatsTagSuffix);
-    };
-    if (std::ranges::any_of(_inFlight,
-                            [](InFlightCall const& call) { return call.tag.ends_with(StatsTagSuffix); })
-        || std::ranges::any_of(_queue, isStatsRead))
+    // One call at a time: the statistics and the record, never worth a slot a dashboard is waiting for.
+    if (std::ranges::any_of(_inFlight, [](InFlightCall const& call) { return isBackground(call.tag); })
+        || std::ranges::any_of(_queue, [](Queued const& queued) { return isBackground(queued.command.tag); }))
         return;
     for (auto const& run: inside)
     {
@@ -80,6 +87,14 @@ void Engine::readDueStats(std::vector<Effect>& out)
             // Once a run finished its agent has exited, and Claude Code recorded the cost: read it once more.
             _statsFinalAsked.push_back(run.id);
             issueStats(run, out);
+            return;
+        }
+        else if (std::holds_alternative<Finished>(run.state) && run.ledger == Ledger::Pending
+                 && !std::ranges::contains(_recordAsked, run.id))
+        {
+            // Its statistics as complete as they get, the run goes to the file of finished runs, once.
+            _recordAsked.push_back(run.id);
+            issueRecord(run, out);
             return;
         }
     }
@@ -119,6 +134,28 @@ void Engine::onStatsResult(std::string_view runId, ProcessOutcome const& outcome
         return;
     run->stats = std::move(*stats);
     ++_revision;
+    out.emplace_back(StoreSet { .key = runKey(run->id), .value = toJson(*run) });
+}
+
+void Engine::issueRecord(Run const& run, std::vector<Effect>& out)
+{
+    issue(
+        RunCommand { .tag = std::format("{}{}", run.id, RecordTagSuffix),
+                     .command = RecordCommand,
+                     .arguments = { Argument { .name = "record", .value = recordLine(run) },
+                                    Argument { .name = "format", .value = std::format("{}", RecordFormat) } },
+                     .cwd = _config->worktreeRoot() },
+        Priority::Poll,
+        out);
+}
+
+void Engine::onRecordResult(std::string_view runId, ProcessOutcome const& outcome, std::vector<Effect>& out)
+{
+    auto* const run = findRun(runId);
+    // A record contour refused is asked for again by the next instance: the file is the user's, not ours.
+    if (run == nullptr || judge(outcome).verdict != Verdict::Ok)
+        return;
+    run->ledger = Ledger::Written;
     out.emplace_back(StoreSet { .key = runKey(run->id), .value = toJson(*run) });
 }
 

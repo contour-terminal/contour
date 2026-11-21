@@ -461,7 +461,9 @@ class Harness
     {
         while (_answersStats)
         {
-            auto const read = std::ranges::find(_pending, "agent-stats"sv, &RunCommand::command);
+            auto const read = std::ranges::find_if(_pending, [](RunCommand const& command) {
+                return command.command == "agent-stats" || command.command == "agent-record";
+            });
             if (read == _pending.end())
                 return;
             auto const tag = read->tag;
@@ -597,7 +599,7 @@ class Harness
         CHECK(!_tainted.contains(command.cwd));
         // A poll, a transcript read or a statistics read changes no run: no stored state awaits it.
         if (!command.tag.starts_with("poll/") && !command.tag.ends_with("#transcript")
-            && !command.tag.ends_with("#stats"))
+            && !command.tag.ends_with("#stats") && !command.tag.ends_with("#record"))
         {
             checkWriteAhead(command.tag);
             if (command.command == "git-worktree-remove")
@@ -1448,7 +1450,8 @@ TEST_CASE("guest restart mid-dispatch", "[orchestrator][engine]")
         auto const runEffects = [&](std::span<Effect const> effects) {
             auto found = std::vector<std::string> {};
             for (auto const& command: all<RunCommand>(effects))
-                if (!command.tag.starts_with("poll/") && command.command != "agent-stats")
+                if (!command.tag.starts_with("poll/") && command.command != "agent-stats"
+                    && command.command != "agent-record")
                     found.emplace_back(command.command);
             found.insert(found.end(), countOf<ReadFile>(effects), ".git");
             return found;
@@ -3999,6 +4002,47 @@ TEST_CASE("a report that cannot be read leaves the last one standing", "[orchest
     CHECK(countOf<StoreSet>(harness.finish("agent-stats", ok(R"({"format":2})"))) == 0);
     REQUIRE(harness.run(PrId)->stats.has_value());
     CHECK(harness.run(PrId)->stats->apiCalls == 4);
+}
+
+TEST_CASE("a finished run goes to the file of finished runs once, with its last statistics",
+          "[orchestrator][engine][stats]")
+{
+    auto harness = booted();
+    harness.holdStatsReads();
+    harness.runToRunning(prDispatch());
+    harness.list({ paneOf(PrId) });
+    harness.endCleanly(PrId);
+    // The statistics first: the record carries them.
+    CHECK_FALSE(harness.pending("agent-record"));
+    harness.finish("agent-stats", ok(statsReport()));
+    auto const record = harness.pending("agent-record");
+    REQUIRE(record);
+    auto const line = argumentOf(*record, "record");
+    CHECK(line.starts_with(R"({"format":1,"run":")"));
+    CHECK(line.contains(std::format(R"("run":"{}")", PrId)));
+    CHECK(line.contains(R"("usd":0.123457)"));
+    CHECK(argumentOf(*record, "format") == "1");
+    auto const written = harness.finish("agent-record", ok());
+    CHECK(harness.run(PrId)->ledger == Ledger::Written);
+    REQUIRE(countOf<StoreSet>(written) == 1);
+    CHECK(all<StoreSet>(written).front().value.contains(R"("ledger":"written")"));
+    harness.wake(10 * Minute);
+    CHECK_FALSE(harness.pending("agent-record"));
+}
+
+TEST_CASE("a record contour refused is not asked for again by the same instance",
+          "[orchestrator][engine][stats]")
+{
+    auto harness = booted();
+    harness.holdStatsReads();
+    harness.runToRunning(prDispatch());
+    harness.list({ paneOf(PrId) });
+    harness.endCleanly(PrId);
+    harness.finish("agent-stats", failed(1, "no session log"));
+    CHECK(countOf<StoreSet>(harness.finish("agent-record", failed(1, "cannot be written"))) == 0);
+    CHECK(harness.run(PrId)->ledger == Ledger::Pending);
+    harness.wake(10 * Minute);
+    CHECK_FALSE(harness.pending("agent-record"));
 }
 
 TEST_CASE("statistics are read one at a time", "[orchestrator][engine][stats]")

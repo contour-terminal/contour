@@ -73,6 +73,7 @@ struct JsonRun
     uint32_t attempt = 0;
     std::optional<RunStats> stats; ///< Absent until read, and in a run stored before it existed.
     std::optional<std::vector<JsonChange>> history; ///< Absent in a run stored before it existed.
+    std::optional<std::string> ledger;              ///< `written` once appended; absent before.
 };
 
 } // namespace orchestrator::run::detail

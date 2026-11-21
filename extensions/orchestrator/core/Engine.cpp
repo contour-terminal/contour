@@ -68,6 +68,7 @@ namespace
     using engine::detail::judge;
     using engine::detail::later;
     using engine::detail::PollTagPrefix;
+    using engine::detail::RecordTagSuffix;
     using engine::detail::StatsTagSuffix;
     using engine::detail::TranscriptTagSuffix;
     using engine::detail::Verdict;
@@ -575,6 +576,13 @@ void Engine::onProcessFinished(ProcessFinished const& finished, std::vector<Effe
             std::string_view(finished.tag).substr(0, finished.tag.size() - TranscriptTagSuffix.size()),
             finished.outcome,
             out);
+        return;
+    }
+    if (finished.tag.ends_with(RecordTagSuffix))
+    {
+        onRecordResult(std::string_view(finished.tag).substr(0, finished.tag.size() - RecordTagSuffix.size()),
+                       finished.outcome,
+                       out);
         return;
     }
     if (finished.tag.ends_with(StatsTagSuffix))

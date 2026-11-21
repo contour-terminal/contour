@@ -861,6 +861,11 @@ std::string_view agentStatusName(AgentStatus status) noexcept
     return spell(AgentStatusNames, status);
 }
 
+std::string_view endedName(Ended ended) noexcept
+{
+    return spell(EndedNames, ended);
+}
+
 RunState stateFor(AgentStatus status) noexcept
 {
     switch (status)
@@ -1012,6 +1017,8 @@ namespace
     constexpr auto ChangeRequestKind = "pr"sv;
     constexpr auto IssueKind = "issue"sv;
     constexpr auto JiraKind = "jira"sv;
+    /// How the store says a run was appended to the file of finished runs.
+    constexpr auto LedgerWritten = "written"sv;
 
     [[nodiscard]] JsonFinished jsonOf(Finished const& finished)
     {
@@ -1166,6 +1173,8 @@ std::string toJson(Run const& run)
     json.startedWallMs = run.startedWallMs;
     json.attempt = run.attempt;
     json.stats = run.stats;
+    if (run.ledger == Ledger::Written)
+        json.ledger = std::string { LedgerWritten };
     if (!run.history.empty())
     {
         auto history = std::vector<run::detail::JsonChange> {};
@@ -1225,7 +1234,10 @@ std::optional<Run> runFromJson(std::string_view text)
         .changedMonoMs = 0,
         .stats = std::move(json.stats),
         .history = {},
+        .ledger = json.ledger == LedgerWritten ? Ledger::Written : Ledger::Pending,
     };
+    if (json.ledger && json.ledger != LedgerWritten)
+        return std::nullopt;
     // A change naming no state is left out, and a history longer than kept is cut as recordChange() cuts it.
     for (auto& change: json.history.value_or(std::vector<run::detail::JsonChange> {}))
         if (std::ranges::contains(StateNames, change.state))

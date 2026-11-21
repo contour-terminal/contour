@@ -688,6 +688,8 @@ class Engine
     [[nodiscard]] std::optional<uint64_t> nextStatsDue() const;
     void issueStats(Run const& run, std::vector<Effect>& out);
     void onStatsResult(std::string_view runId, ProcessOutcome const& outcome, std::vector<Effect>& out);
+    void issueRecord(Run const& run, std::vector<Effect>& out);
+    void onRecordResult(std::string_view runId, ProcessOutcome const& outcome, std::vector<Effect>& out);
     [[nodiscard]] TranscriptView* findTranscript(std::string_view tab, std::string_view run) noexcept;
     [[nodiscard]] bool isTranscriptShown(TranscriptView const& view) const noexcept;
     void dropUnshownTranscripts();
@@ -731,6 +733,8 @@ class Engine
     std::map<std::string, uint64_t, std::less<>> _statsDueMs;
     /// The finished runs whose last statistics this instance has asked for, once each.
     std::vector<std::string> _statsFinalAsked;
+    /// The finished runs this instance asked contour to append to the file of finished runs, once each.
+    std::vector<std::string> _recordAsked;
     std::vector<InFlightCall> _inFlight;
     std::vector<InFlightCall> _paneOpenings; ///< The tabs asked for and not yet answered for, by run id.
     /// When each run that is done became so, by run id; monotonic, never persisted: after a restart the wait

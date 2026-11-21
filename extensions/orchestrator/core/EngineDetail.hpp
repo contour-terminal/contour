@@ -81,6 +81,9 @@ inline constexpr std::string_view TranscriptTagSuffix = "#transcript";
 /// The suffix of the tag a run's statistics are read with: `<run>#stats`.
 inline constexpr std::string_view StatsTagSuffix = "#stats";
 
+/// The suffix of the tag a finished run is appended to the file of finished runs with: `<run>#record`.
+inline constexpr std::string_view RecordTagSuffix = "#record";
+
 /// What every poll tag starts with.
 inline constexpr std::string_view PollTagPrefix = "poll/";
 

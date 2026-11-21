@@ -173,6 +173,13 @@ struct StateChange
 /// The most state changes a run's history keeps: the first, and the latest after it.
 inline constexpr std::size_t MaxHistory = 64;
 
+/// Whether a finished run was appended to the file of finished runs (`contour agent record`).
+enum class Ledger : uint8_t
+{
+    Pending = 0, ///< Not yet: a run stored before the file existed is appended once too.
+    Written,     ///< It was.
+};
+
 /// How long a run took, read from its history.
 struct RunTimes
 {
@@ -213,6 +220,7 @@ struct Run
     uint64_t changedMonoMs = 0; ///< When beginRun() or advance() last changed it; monotonic, never persisted.
     std::optional<RunStats> stats {}; ///< What its agent cost and did, as last read; kept once it finished.
     std::vector<StateChange> history {}; ///< When its state changed, oldest first; at most MaxHistory.
+    Ledger ledger = Ledger::Pending;     ///< Whether it was appended to the file of finished runs.
 };
 
 /// A host call's result: the command exited 0.
@@ -436,6 +444,10 @@ enum class BeginError : uint8_t
 /// @param status What an agent reported.
 /// @return Its name, such as `working`.
 [[nodiscard]] std::string_view agentStatusName(AgentStatus status) noexcept;
+
+/// @param ended How a run ended.
+/// @return Its name as the store and the file of finished runs spell it, such as `ended-by-you`.
+[[nodiscard]] std::string_view endedName(Ended ended) noexcept;
 
 /// The state an agent's report puts its run in.
 /// @param status What it reported.
