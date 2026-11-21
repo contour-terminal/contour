@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/cli/AgentReport.hpp>
 #include <contour/cli/AgentSkill.hpp>
+#include <contour/cli/AgentStats.hpp>
 #include <contour/cli/AgentTranscript.hpp>
 #include <contour/cli/BackgroundExecutor.hpp>
 #include <contour/cli/CaptureScreen.hpp>
@@ -558,7 +559,32 @@ namespace
                                 CLI::Option { "json",
                                               CLI::Value { false },
                                               "Prints the page as JSON instead of text." },
-                            } } },
+                            } },
+                    CLI::Command { .name = "stats",
+                                   .helpText = "Prints what a Claude Code session cost and did: its tokens, "
+                                               "API calls, tool calls, "
+                                               "turns, subagents and the pull requests it opened, and the "
+                                               "cost Claude Code "
+                                               "recorded when it exited. The session's log must have been "
+                                               "written in --cwd or "
+                                               "beneath it.",
+                                   .options =
+                                       CLI::OptionList {
+                                           CLI::Option {
+                                               "session", CLI::Value { ""s }, "The session's UUID.", "UUID" },
+                                           CLI::Option { "cwd",
+                                                         CLI::Value { ""s },
+                                                         "The directory the session ran in: its worktree.",
+                                                         "DIRECTORY" },
+                                           CLI::Option { "format",
+                                                         CLI::Value { 1u },
+                                                         "The JSON format to print; this contour prints "
+                                                         "format 1 only.",
+                                                         "N" },
+                                           CLI::Option { "json",
+                                                         CLI::Value { false },
+                                                         "Prints the statistics as JSON instead of text." },
+                                       } } },
         };
     }
 
@@ -670,6 +696,7 @@ ContourApp::ContourApp(core::Environment const& env):
     link("contour.agent.report", bind(&ContourApp::agentReportAction, this));
     link("contour.agent.setup", bind(&ContourApp::agentSetupAction, this));
     link("contour.agent.transcript", bind(&ContourApp::agentTranscriptAction, this));
+    link("contour.agent.stats", bind(&ContourApp::agentStatsAction, this));
     link("contour.mcp", bind(&ContourApp::mcpAction, this));
     for (auto const& verb: contour::cli::controlVerbs())
         link(std::format("contour.{}", verb.path), [this, &verb] { return controlVerbAction(verb); });
@@ -2242,6 +2269,23 @@ int ContourApp::agentTranscriptAction()
                               &vtbackend::systemLocalTime,
                               cout,
                               cerr);
+}
+
+int ContourApp::agentStatsAction()
+{
+    constexpr auto Prefix = "contour.agent.stats"sv;
+    auto const key = [&](std::string_view option) {
+        return std::format("{}.{}", Prefix, option);
+    };
+    auto const request = StatsRequest {
+        .session = parameters().get<string>(key("session")),
+        .cwd = parameters().get<string>(key("cwd")),
+        .format = parameters().get<unsigned>(key("format")),
+        .output = parameters().get<bool>(key("json")) ? StatsOutput::Json : StatsOutput::Text,
+    };
+    auto const opener = makeNativeSessionLogOpener();
+    return runAgentStats(
+        request, processEnvironment(), core::platform::NativeFileSystem::instance(), *opener, cout, cerr);
 }
 
 int ContourApp::agentSetupAction()

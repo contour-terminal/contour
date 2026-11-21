@@ -1,0 +1,3 @@
+{"type":"user","message":{"role":"user","content":"go"},"promptId":"p1","cwd":"/home/user/proj","version":"2.1.330","timestamp":"2026-11-21T10:00:00.000Z"}
+not json at all
+{"type":"assistant","message":{"id":"m1","content":[],"usage":{"input_tokens":1,"output_tokens":1}},"cwd":"/home/user/proj"}

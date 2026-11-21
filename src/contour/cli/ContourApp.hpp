@@ -125,6 +125,7 @@ class ContourApp: public core::cli::App
     /// Prints one page of a Claude Code session's transcript: `contour agent transcript`.
     /// @return The process exit code.
     int agentTranscriptAction();
+    int agentStatsAction();
     /// Serves the MCP server on standard input and output: `contour mcp`.
     /// @return The process exit code.
     int mcpAction();

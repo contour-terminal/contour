@@ -1747,6 +1747,7 @@ if(CONTOUR_TESTING)
         cli/AgentIntegrations_test.cpp
         cli/AgentReport_test.cpp
         cli/AgentSkill_test.cpp
+        cli/AgentStats_test.cpp
         cli/AgentTranscript_test.cpp
         cli/BackgroundExecutor_test.cpp
         cli/McpCommand_test.cpp
@@ -1900,7 +1901,10 @@ if(CONTOUR_TESTING)
         CONTOUR_CONFIG_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/config/testdata"
         CONTOUR_AGENT_TRANSCRIPT_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/cli/testdata/agent-transcript"
         # The pages the orchestrator reads, printed by `contour agent transcript`: its goldens, read in place.
-        CONTOUR_AGENT_TRANSCRIPT_CONTRACT="${PROJECT_SOURCE_DIR}/extensions/orchestrator/contract/agent-transcript")
+        CONTOUR_AGENT_TRANSCRIPT_CONTRACT="${PROJECT_SOURCE_DIR}/extensions/orchestrator/contract/agent-transcript"
+        CONTOUR_AGENT_STATS_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/cli/testdata/agent-stats"
+        # The reports the orchestrator reads, printed by `contour agent stats`: its goldens, read in place.
+        CONTOUR_AGENT_STATS_CONTRACT="${PROJECT_SOURCE_DIR}/extensions/orchestrator/contract/agent-stats")
     if(NOT WIN32)
         # Real files: a FIFO and a symbolic link where a session log should be.
         target_sources(contour_test PRIVATE cli/SessionLogOpener_test.cpp)
