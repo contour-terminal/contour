@@ -520,6 +520,11 @@ class Engine
     /// refused.
     [[nodiscard]] Run const* activeRunOn(std::string_view repo, ItemRef const& item) const noexcept;
 
+    /// @param run A run.
+    /// @return The reason line its agent reported with its status, as the last pane listing shows it, such as
+    ///         what it waits for; empty when it reported none or its tab is not listed. Untrusted text.
+    [[nodiscard]] std::string_view reportedMessageOf(Run const& run) const noexcept;
+
     /// @param group A group of the dashboard's list, such as `issues/pace`.
     /// @return Whether the user folded it; kept across restarts.
     [[nodiscard]] bool isFolded(std::string_view group) const noexcept;

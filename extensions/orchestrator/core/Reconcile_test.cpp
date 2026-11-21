@@ -203,10 +203,12 @@ constexpr auto StrayPane = "p-stray"sv;
     auto const alive = PaneFact { .pane = std::string(AlivePane),
                                   .tag = std::string(RunIdText),
                                   .status = toOptional(paneStatus),
+                                  .message = {},
                                   .program = ProgramLiveness::Alive };
     auto const gone = PaneFact { .pane = std::string(GonePane),
                                  .tag = std::string(RunIdText),
                                  .status = toOptional(paneStatus),
+                                 .message = {},
                                  .program = ProgramLiveness::Gone };
     switch (listed)
     {
@@ -218,6 +220,7 @@ constexpr auto StrayPane = "p-stray"sv;
             return { PaneFact { .pane = std::string(StrayPane),
                                 .tag = "issue-17-20261113-150847",
                                 .status = AgentStatus::Working,
+                                .message = {},
                                 .program = ProgramLiveness::Alive } };
     }
     return {};
@@ -432,13 +435,26 @@ TEST_CASE("Reconcile.manyRuns", "[orchestrator][reconcile]")
         makeRun("d-4", finished(Fate::Removed), AgentStatus::Done),
     };
     auto const panes = std::vector {
-        PaneFact { .pane = "p-b", .tag = "b-2", .status = std::nullopt, .program = ProgramLiveness::Alive },
-        PaneFact {
-            .pane = "p-x", .tag = "x-9", .status = AgentStatus::Blocked, .program = ProgramLiveness::Alive },
-        PaneFact {
-            .pane = "p-a", .tag = "a-1", .status = AgentStatus::Blocked, .program = ProgramLiveness::Alive },
-        PaneFact {
-            .pane = "p-d", .tag = "d-4", .status = AgentStatus::Working, .program = ProgramLiveness::Alive },
+        PaneFact { .pane = "p-b",
+                   .tag = "b-2",
+                   .status = std::nullopt,
+                   .message = {},
+                   .program = ProgramLiveness::Alive },
+        PaneFact { .pane = "p-x",
+                   .tag = "x-9",
+                   .status = AgentStatus::Blocked,
+                   .message = {},
+                   .program = ProgramLiveness::Alive },
+        PaneFact { .pane = "p-a",
+                   .tag = "a-1",
+                   .status = AgentStatus::Blocked,
+                   .message = {},
+                   .program = ProgramLiveness::Alive },
+        PaneFact { .pane = "p-d",
+                   .tag = "d-4",
+                   .status = AgentStatus::Working,
+                   .message = {},
+                   .program = ProgramLiveness::Alive },
     };
     auto const decisions = orchestrator::reconcile(runs, panes, ListedMs, Tagged);
     // In run order; the pane tagged with no run and the finished run's pane are left alone.

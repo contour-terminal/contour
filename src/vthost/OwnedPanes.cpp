@@ -14,12 +14,12 @@
 namespace vthost
 {
 
-std::optional<vtbackend::ProgramState> paneStatusOf(std::span<vtbackend::ProgramStatusRecord const> records)
+std::optional<PaneStatus> paneStatusOf(std::span<vtbackend::ProgramStatusRecord const> records)
 {
     for (auto const source: PaneStatusSources)
         if (auto const found = std::ranges::find(records, source, &vtbackend::ProgramStatusRecord::id);
             found != records.end())
-            return found->state;
+            return PaneStatus { .state = found->state, .message = found->message };
     return std::nullopt;
 }
 
@@ -314,7 +314,7 @@ void OwnedPanes::programExited(vtworkspace::SessionId session)
     _services.panesChanged(extension);
 }
 
-void OwnedPanes::statusChanged(vtworkspace::SessionId session, std::optional<vtbackend::ProgramState> status)
+void OwnedPanes::statusChanged(vtworkspace::SessionId session, std::optional<PaneStatus> status)
 {
     auto extension = std::string {};
     {
@@ -322,7 +322,7 @@ void OwnedPanes::statusChanged(vtworkspace::SessionId session, std::optional<vtb
         auto const found = entryOf(session);
         if (found == _entries.end() || found->status == status)
             return;
-        found->status = status;
+        found->status = std::move(status);
         extension = found->extension;
     }
     _services.panesChanged(extension);

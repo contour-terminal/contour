@@ -190,6 +190,8 @@ typedef struct terminal_extensions_daemon_host_pane_info_t {
   daemon_string_t   tag;
   // What the pane's program last reported, if anything.
   terminal_extensions_daemon_host_option_agent_status_t   status;
+  // The reason line it reported with that status, such as what it waits for; empty for none.
+  daemon_string_t   message;
   // Whether the spawned program is still the pane's program.
   terminal_extensions_daemon_host_program_t   program;
 } terminal_extensions_daemon_host_pane_info_t;

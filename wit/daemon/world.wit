@@ -198,6 +198,8 @@ interface host {
         tag: string,
         /// What the pane's program last reported, if anything.
         status: option<agent-status>,
+        /// The reason line it reported with that status, such as what it waits for; empty for none.
+        message: string,
         /// Whether the spawned program is still the pane's program.
         program: program,
     }

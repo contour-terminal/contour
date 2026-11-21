@@ -204,9 +204,10 @@ namespace
                             return vtextension::PaneInfo {
                                 .pane = info.pane,
                                 .tag = info.tag,
-                                .status = info.status.transform([](vtbackend::ProgramState state) {
-                                    return AgentStatusOf.at(std::to_underlying(state));
+                                .status = info.status.transform([](PaneStatus const& status) {
+                                    return AgentStatusOf.at(std::to_underlying(status.state));
                                 }),
+                                .message = info.status ? info.status->message : std::string {},
                                 .program = info.program == PaneLiveness::Alive
                                                ? vtextension::PaneProgram::Alive
                                                : vtextension::PaneProgram::Gone,

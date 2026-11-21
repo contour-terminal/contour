@@ -667,7 +667,7 @@ class Harness
                               std::optional<AgentStatus> status = AgentStatus::Working)
 {
     return PaneFact {
-        .pane = std::string(pane), .tag = std::string(id), .status = status, .program = program
+        .pane = std::string(pane), .tag = std::string(id), .status = status, .message = {}, .program = program
     };
 }
 

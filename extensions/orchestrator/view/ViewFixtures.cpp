@@ -186,11 +186,14 @@ Engine bootEngine(World const& world, std::vector<RunCommand>& held)
     for (auto const& run: world.stored)
     {
         context.stored.push_back(StoredEntry { .key = runKey(run.id), .value = toJson(run) });
+        auto const message = world.paneMessages.find(run.id);
         if (countsAsActive(run))
-            context.panes.push_back(PaneFact { .pane = std::format("p-{}", run.id),
-                                               .tag = run.id,
-                                               .status = run.lastStatus,
-                                               .program = ProgramLiveness::Alive });
+            context.panes.push_back(
+                PaneFact { .pane = std::format("p-{}", run.id),
+                           .tag = run.id,
+                           .status = run.lastStatus,
+                           .message = message != world.paneMessages.end() ? message->second : std::string {},
+                           .program = ProgramLiveness::Alive });
     }
     auto started = Engine::start(std::move(context));
     auto engine = std::move(started.engine);

@@ -6,6 +6,7 @@
 #include <optional>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -61,6 +62,12 @@ Run const* Engine::activeRunOn(std::string_view repo, ItemRef const& item) const
     auto const found = std::ranges::find_if(
         _runs, [&](Run const& run) { return countsAsActive(run) && run.repo == repo && run.item == item; });
     return found != _runs.end() ? &*found : nullptr;
+}
+
+std::string_view Engine::reportedMessageOf(Run const& run) const noexcept
+{
+    auto const found = std::ranges::find(_panes, run.id, &PaneFact::tag);
+    return found != _panes.end() ? std::string_view { found->message } : std::string_view {};
 }
 
 std::size_t Engine::activeRuns() const noexcept

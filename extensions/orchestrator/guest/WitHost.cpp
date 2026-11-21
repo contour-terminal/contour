@@ -28,7 +28,7 @@ namespace
     // fails to build here rather than read the host's answers wrong.
     static_assert(sizeof(terminal_extensions_daemon_host_proc_info_t) == 52);
     static_assert(alignof(terminal_extensions_daemon_host_proc_info_t) == 4);
-    static_assert(sizeof(terminal_extensions_daemon_host_pane_info_t) == 20);
+    static_assert(sizeof(terminal_extensions_daemon_host_pane_info_t) == 32);
     static_assert(alignof(terminal_extensions_daemon_host_pane_info_t) == 4);
     static_assert(sizeof(terminal_extensions_daemon_host_chunk_t) == 12);
     static_assert(alignof(terminal_extensions_daemon_host_chunk_t) == 4);
@@ -131,6 +131,7 @@ namespace
         return PaneInfo { .pane = copied(info.pane),
                           .tag = copied(info.tag),
                           .status = status,
+                          .message = copied(info.message),
                           .program = info.program == TERMINAL_EXTENSIONS_DAEMON_HOST_PROGRAM_ALIVE
                                          ? ProgramLiveness::Alive
                                          : ProgramLiveness::Gone };

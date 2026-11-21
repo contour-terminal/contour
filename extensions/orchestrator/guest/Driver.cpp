@@ -218,7 +218,11 @@ namespace
     [[nodiscard]] PaneFact paneFactOf(PaneInfo const& pane)
     {
         return PaneFact {
-            .pane = pane.pane, .tag = pane.tag, .status = pane.status, .program = pane.program
+            .pane = pane.pane,
+            .tag = pane.tag,
+            .status = pane.status,
+            .message = pane.message,
+            .program = pane.program,
         };
     }
 

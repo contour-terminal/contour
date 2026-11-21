@@ -159,6 +159,7 @@ struct PaneInfo
     std::string pane;                         ///< The pane's id.
     std::string tag;                          ///< The extension's own label for it.
     std::optional<AgentStatus> status;        ///< What the pane's program last reported, if anything.
+    std::string message;                      ///< The reason line it reported with its status; may be empty.
     PaneProgram program = PaneProgram::Alive; ///< Whether the spawned program is still the pane's program.
 
     [[nodiscard]] bool operator==(PaneInfo const&) const = default;
@@ -235,7 +236,7 @@ template <> struct RecordFields<ProcResult> { static constexpr auto Members = st
 template <> struct RecordFields<ProcRunning> { static constexpr auto Members = std::tuple {}; };
 template <> struct RecordFields<ProcInfo> { static constexpr auto Members = std::tuple { &ProcInfo::handle, &ProcInfo::tag, &ProcInfo::command, &ProcInfo::state }; };
 template <> struct RecordFields<Chunk> { static constexpr auto Members = std::tuple { &Chunk::bytes, &Chunk::remaining }; };
-template <> struct RecordFields<PaneInfo> { static constexpr auto Members = std::tuple { &PaneInfo::pane, &PaneInfo::tag, &PaneInfo::status, &PaneInfo::program }; };
+template <> struct RecordFields<PaneInfo> { static constexpr auto Members = std::tuple { &PaneInfo::pane, &PaneInfo::tag, &PaneInfo::status, &PaneInfo::message, &PaneInfo::program }; };
 template <> struct RecordFields<TabInfo> { static constexpr auto Members = std::tuple { &TabInfo::tab, &TabInfo::scheme, &TabInfo::cols, &TabInfo::rows }; };
 template <> struct RecordFields<ActionInfo> { static constexpr auto Members = std::tuple { &ActionInfo::id, &ActionInfo::origin }; };
 template <> struct RecordFields<FileContent> { static constexpr auto Members = std::tuple { &FileContent::bytes, &FileContent::modifiedUnixMs }; };

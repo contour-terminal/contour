@@ -141,6 +141,7 @@ void terminal_extensions_daemon_host_pane_info_free(terminal_extensions_daemon_h
   daemon_string_free(&ptr->pane);
   daemon_string_free(&ptr->tag);
   terminal_extensions_daemon_host_option_agent_status_free(&ptr->status);
+  daemon_string_free(&ptr->message);
 }
 
 void terminal_extensions_daemon_host_tab_info_free(terminal_extensions_daemon_host_tab_info_t *ptr) {

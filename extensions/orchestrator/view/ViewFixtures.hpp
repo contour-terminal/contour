@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -61,6 +62,8 @@ struct World
     std::vector<WorktreeEntry> worktrees = {}; ///< Listed in the contour repository after its checkout.
     std::vector<std::string> held = {}; ///< Commands left unanswered until DashboardFixture::answerHeld().
     std::vector<HostProgram> selfPrograms = {}; ///< What the host runs as its own executable.
+    std::map<std::string, std::string, std::less<>> paneMessages = {}; ///< By run id: the reason line its tab
+                                                                       ///< lists with its status.
 };
 
 /// @param world What the engine is started from.

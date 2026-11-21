@@ -435,6 +435,7 @@ TEST_CASE("pane-open, pane-close, panes and pane-reveal are served", "[daemon][i
         std::vector<PaneInfo> { PaneInfo { .pane = "0e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b",
                                            .tag = "run-1",
                                            .status = AgentStatus::Blocked,
+                                           .message = {},
                                            .program = PaneProgram::Alive } };
     guest.services.paneAnswer = std::unexpected(HostError::NotOwned);
     auto instance = guest.start();

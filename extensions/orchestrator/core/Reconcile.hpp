@@ -30,6 +30,7 @@ struct PaneFact
     std::string pane;                                ///< The pane's id.
     std::string tag;                                 ///< The id of the run it was opened for.
     std::optional<AgentStatus> status;               ///< What its agent last reported; nullopt: nothing yet.
+    std::string message;                             ///< The reason line it reported with it; may be empty.
     ProgramLiveness program = ProgramLiveness::Gone; ///< Whether its agent still runs in it.
 
     [[nodiscard]] bool operator==(PaneFact const&) const = default;

@@ -180,7 +180,7 @@ TEST_CASE("DaemonWorld: layouts follow the Canonical ABI", "[daemon][wit]")
     STATIC_CHECK(abi::Codec<ProcState>::Alignment == 4);
     STATIC_CHECK(abi::Codec<ProcInfo>::Size == 52);
     STATIC_CHECK(abi::Codec<ProcInfo>::Alignment == 4);
-    STATIC_CHECK(abi::Codec<PaneInfo>::Size == 20);
+    STATIC_CHECK(abi::Codec<PaneInfo>::Size == 32);
     STATIC_CHECK(abi::Codec<PaneInfo>::Alignment == 4);
     STATIC_CHECK(abi::Codec<TabInfo>::Size == 24);
     STATIC_CHECK(abi::Codec<TabInfo>::Alignment == 4);
@@ -224,11 +224,15 @@ TEST_CASE("DaemonWorld: every record round-trips through guest memory", "[daemon
 
     auto const withStatus = PaneInfo { .pane = "pane-1",
                                        .tag = "run:42",
-                                       .status = std::optional<AgentStatus> { AgentStatus::Blocked },
+                                       .status = std::optional<AgentStatus> { AgentStatus::Idle },
+                                       .message = "Waiting for Build pace",
                                        .program = PaneProgram::Gone };
     CHECK(roundTrip(withStatus) == withStatus);
-    auto const withoutStatus =
-        PaneInfo { .pane = "pane-2", .tag = "run:43", .status = std::nullopt, .program = PaneProgram::Alive };
+    auto const withoutStatus = PaneInfo { .pane = "pane-2",
+                                          .tag = "run:43",
+                                          .status = std::nullopt,
+                                          .message = {},
+                                          .program = PaneProgram::Alive };
     CHECK(roundTrip(withoutStatus) == withoutStatus);
 
     auto const tab = TabInfo { .tab = "tab-1", .scheme = "orchestrator", .cols = 120, .rows = 40 };

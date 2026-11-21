@@ -1087,16 +1087,21 @@ TEST_CASE("DaemonWorldExtensions: the pane calls reach the host's owned panes in
                               Row { vtbackend::ProgramState::Done, vtextension::AgentStatus::Done },
                               Row { vtbackend::ProgramState::Blocked, vtextension::AgentStatus::Blocked },
                               Row { vtbackend::ProgramState::Error, vtextension::AgentStatus::Error });
-    panes.listAnswer = std::vector { vthost::OwnedPaneInfo { .pane = "pane-1",
-                                                             .tag = "run-1",
-                                                             .status = row.status,
-                                                             .program = vthost::PaneLiveness::Gone,
-                                                             .state = vthost::OwnedPaneState::Open } };
+    panes.listAnswer =
+        std::vector { vthost::OwnedPaneInfo { .pane = "pane-1",
+                                              .tag = "run-1",
+                                              .status = row.status.transform([](auto state) {
+                                                  return vthost::PaneStatus { .state = state,
+                                                                              .message = "Waiting" };
+                                              }),
+                                              .program = vthost::PaneLiveness::Gone,
+                                              .state = vthost::OwnedPaneState::Open } };
     CHECK(host->list()
           == std::expected<std::vector<vtextension::PaneInfo>, vtextension::PaneError> {
               std::vector { vtextension::PaneInfo { .pane = "pane-1",
                                                     .tag = "run-1",
                                                     .status = row.agentStatus,
+                                                    .message = row.status ? "Waiting" : "",
                                                     .program = vtextension::PaneProgram::Gone } } });
 
     // The host refusals, as the policy words them.

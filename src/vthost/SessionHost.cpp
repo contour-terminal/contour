@@ -3112,7 +3112,7 @@ void SessionHost::noteOwnedPaneStatus(SessionId session)
         _ownedPanes.statusChanged(session, paneStatusOfSession(session));
 }
 
-std::optional<vtbackend::ProgramState> SessionHost::paneStatusOfSession(SessionId session) const
+std::optional<PaneStatus> SessionHost::paneStatusOfSession(SessionId session) const
 {
     auto const it = _sessions.find(session.value);
     if (it == _sessions.end())

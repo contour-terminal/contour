@@ -930,6 +930,7 @@ TEST_CASE("a running agent with no status after 30 s hints at a trust prompt", "
     static_cast<void>(engine.step(PanesListed { .panes = { PaneFact { .pane = std::format("p-{}", RunningId),
                                                                       .tag = std::string { RunningId },
                                                                       .status = AgentStatus::Working,
+                                                                      .message = {},
                                                                       .program = ProgramLiveness::Alive } },
                                                 .requestedMonoMs = StartMonoMs + 31'000,
                                                 .listing = PaneListing::Tagged }));

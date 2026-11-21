@@ -41,9 +41,9 @@ namespace vthost
 inline constexpr auto PaneStatusSources = std::array<std::string_view, 2> { "claude-code", "" };
 
 /// @param records A session's status records.
-/// @return The state of the first PaneStatusSources row that names a present record; nullopt for none.
-[[nodiscard]] std::optional<vtbackend::ProgramState> paneStatusOf(
-    std::span<vtbackend::ProgramStatusRecord const> records);
+/// @return The state and message of the first PaneStatusSources row that names a present record; nullopt for
+///         none.
+[[nodiscard]] std::optional<PaneStatus> paneStatusOf(std::span<vtbackend::ProgramStatusRecord const> records);
 
 /// The model calls OwnedPanes posts, which SessionHost implements (as ServedTabHost for served tabs). Every
 /// member is called on the host's loop thread only.
@@ -98,9 +98,9 @@ struct OwnedPanesServices
 /// A pane the host holds after a restore, as reconcile() is told it.
 struct HostedPane
 {
-    vtcontrol::Uuid pane;                             ///< Its UUID.
-    vtworkspace::SessionId session;                   ///< Its session.
-    std::optional<vtbackend::ProgramState> status {}; ///< Its status now (paneStatusOf()).
+    vtcontrol::Uuid pane;                ///< Its UUID.
+    vtworkspace::SessionId session;      ///< Its session.
+    std::optional<PaneStatus> status {}; ///< Its status now (paneStatusOf()).
 };
 
 /// Whether the registry has been checked against the panes the host holds.
@@ -155,9 +155,9 @@ class OwnedPanes final: public IOwnedPanes
     /// profiles -- was reloaded. Loop thread.
     void heldDirectoriesChanged();
 
-    /// Records @p session's status, raising Panes when it changed. Loop thread; a session no extension owns
-    /// is ignored.
-    void statusChanged(vtworkspace::SessionId session, std::optional<vtbackend::ProgramState> status);
+    /// Records @p session's status, raising Panes when its state or message changed. Loop thread; a session
+    /// no extension owns is ignored.
+    void statusChanged(vtworkspace::SessionId session, std::optional<PaneStatus> status);
 
     /// @return Whether @p session runs an extension's pane. Any thread.
     [[nodiscard]] bool owns(vtworkspace::SessionId session) const;
@@ -175,7 +175,7 @@ class OwnedPanes final: public IOwnedPanes
         std::string tag;
         OwnedPaneState state = OwnedPaneState::Pending;
         std::optional<vtworkspace::SessionId> session {};
-        std::optional<vtbackend::ProgramState> status {};
+        std::optional<PaneStatus> status {};
         PaneLiveness program = PaneLiveness::Alive;
     };
 

@@ -410,14 +410,23 @@ enum class PaneLiveness : uint8_t
     Alive,    ///< It runs, or is about to.
 };
 
+/// What an agent pane's program last reported, as its extension lists it: the record PaneStatusSources picks.
+struct PaneStatus
+{
+    vtbackend::ProgramState state = vtbackend::ProgramState::Idle; ///< What it is doing.
+    std::string message;                                           ///< Its reason line; may be empty.
+
+    bool operator==(PaneStatus const&) const = default;
+};
+
 /// One agent pane, as its extension lists it.
 struct OwnedPaneInfo
 {
-    std::string pane;                                 ///< Its id: its pane's UUID.
-    std::string tag;                                  ///< The extension's own label for it.
-    std::optional<vtbackend::ProgramState> status {}; ///< What its program last reported (PaneStatusSources).
-    PaneLiveness program = PaneLiveness::Alive;       ///< Whether its program still runs.
-    OwnedPaneState state = OwnedPaneState::Pending;   ///< Whether its session exists yet.
+    std::string pane;                               ///< Its id: its pane's UUID.
+    std::string tag;                                ///< The extension's own label for it.
+    std::optional<PaneStatus> status {};            ///< What its program last reported (PaneStatusSources).
+    PaneLiveness program = PaneLiveness::Alive;     ///< Whether its program still runs.
+    OwnedPaneState state = OwnedPaneState::Pending; ///< Whether its session exists yet.
 
     bool operator==(OwnedPaneInfo const&) const = default;
 };

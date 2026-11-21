@@ -1119,6 +1119,7 @@ TEST_CASE("panes not supported yet lists own records only", "[guest]")
         host.paneListing = std::vector { PaneInfo { .pane = "p1",
                                                     .tag = "pr-1-20261113-150847",
                                                     .status = AgentStatus::Working,
+                                                    .message = {},
                                                     .program = ProgramLiveness::Alive } };
         [[maybe_unused]] auto const driver = Driver::load(host, host.ids, configJson(), hostInfo(), observer);
         REQUIRE(observer.starts.size() == 1);
@@ -1127,6 +1128,7 @@ TEST_CASE("panes not supported yet lists own records only", "[guest]")
               == std::vector { PaneFact { .pane = "p1",
                                           .tag = "pr-1-20261113-150847",
                                           .status = AgentStatus::Working,
+                                          .message = {},
                                           .program = ProgramLiveness::Alive } });
     }
 }
@@ -1141,6 +1143,7 @@ TEST_CASE("the Panes hint lists the panes", "[guest][panes]")
     host.paneListing = std::vector { PaneInfo { .pane = "p1",
                                                 .tag = "pr-1-20261113-150847",
                                                 .status = AgentStatus::Blocked,
+                                                .message = {},
                                                 .program = ProgramLiveness::Alive } };
 
     driver.update(Hint::Panes);
@@ -1152,6 +1155,7 @@ TEST_CASE("the Panes hint lists the panes", "[guest][panes]")
           == std::vector { PaneFact { .pane = "p1",
                                       .tag = "pr-1-20261113-150847",
                                       .status = AgentStatus::Blocked,
+                                      .message = {},
                                       .program = ProgramLiveness::Alive } });
 }
 
@@ -1204,6 +1208,7 @@ TEST_CASE("a load whose listing answers limit ends no run", "[guest][panes]")
     served.host.paneListing = std::vector { PaneInfo { .pane = *run.pane,
                                                        .tag = run.id,
                                                        .status = AgentStatus::Working,
+                                                       .message = {},
                                                        .program = ProgramLiveness::Alive } };
     served.driver->update(Hint::Panes);
     CHECK(std::holds_alternative<Running>(stored().state));
@@ -1407,6 +1412,7 @@ TEST_CASE("show-blocked opens the tab on the first blocked agent", "[guest]")
                                      .status = std::holds_alternative<Blocked>(run.state)
                                                    ? AgentStatus::Blocked
                                                    : AgentStatus::Working,
+                                     .message = {},
                                      .program = ProgramLiveness::Alive });
     }
     served.host.paneListing = listing;
@@ -1436,6 +1442,7 @@ TEST_CASE("show-blocked leaves a board and stops reading it", "[guest][board]")
                                      .status = std::holds_alternative<Blocked>(run.state)
                                                    ? AgentStatus::Blocked
                                                    : AgentStatus::Working,
+                                     .message = {},
                                      .program = ProgramLiveness::Alive });
     }
     served.host.paneListing = listing;
@@ -1470,6 +1477,7 @@ namespace
     served.host.paneListing = std::vector { PaneInfo { .pane = *stored.pane,
                                                        .tag = stored.id,
                                                        .status = AgentStatus::Working,
+                                                       .message = {},
                                                        .program = ProgramLiveness::Alive } };
     return stored;
 }
@@ -1606,6 +1614,7 @@ TEST_CASE("an agent's age is redrawn by the wake it asks for", "[guest]")
     served.host.paneListing = std::vector { PaneInfo { .pane = *run.pane,
                                                        .tag = run.id,
                                                        .status = AgentStatus::Working,
+                                                       .message = {},
                                                        .program = ProgramLiveness::Alive } };
     served.load();
     served.invoke("open");
@@ -1678,6 +1687,7 @@ void addAgent(Served& served)
     served.host.paneListing = std::vector { PaneInfo { .pane = *run.pane,
                                                        .tag = run.id,
                                                        .status = AgentStatus::Working,
+                                                       .message = {},
                                                        .program = ProgramLiveness::Alive } };
 }
 

@@ -2520,8 +2520,7 @@ class SessionHost final:
     void noteOwnedPaneStatus(vtworkspace::SessionId session);
 
     /// @return @p session's status as an agent pane shows it (paneStatusOf()); nullopt for none.
-    [[nodiscard]] std::optional<vtbackend::ProgramState> paneStatusOfSession(
-        vtworkspace::SessionId session) const;
+    [[nodiscard]] std::optional<PaneStatus> paneStatusOfSession(vtworkspace::SessionId session) const;
 
     /// Publishes the workspace @p client selects to the served tabs' mirror.
     void publishSelection(SessionStreamEvents const& client);

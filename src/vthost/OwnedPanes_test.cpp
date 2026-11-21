@@ -978,34 +978,46 @@ TEST_CASE("the pane's status follows its named records", "[vthost][panes]")
 {
     using vtbackend::ProgramState;
     using vtbackend::ProgramStatusOrigin;
-    auto const record =
-        [](std::string id, ProgramState state, ProgramStatusOrigin origin, std::chrono::seconds since) {
-            auto made = vtbackend::ProgramStatusRecord {};
-            made.id = std::move(id);
-            made.state = state;
-            made.origin = origin;
-            made.since = std::chrono::system_clock::time_point { since };
-            return made;
-        };
+    auto const record = [](std::string id,
+                           ProgramState state,
+                           ProgramStatusOrigin origin,
+                           std::chrono::seconds since,
+                           std::string message = {}) {
+        auto made = vtbackend::ProgramStatusRecord {};
+        made.id = std::move(id);
+        made.state = state;
+        made.origin = origin;
+        made.message = std::move(message);
+        made.since = std::chrono::system_clock::time_point { since };
+        return made;
+    };
     struct Row
     {
         std::string_view what;
         std::vector<vtbackend::ProgramStatusRecord> records;
-        std::optional<ProgramState> status;
+        std::optional<PaneStatus> status;
     };
     auto const row = GENERATE_COPY(
         Row { .what = "the hooks' blocked over the root's working",
               .records = { record("", ProgramState::Working, ProgramStatusOrigin::Program, 20s),
                            record(
                                "claude-code", ProgramState::Blocked, ProgramStatusOrigin::Integration, 10s) },
-              .status = ProgramState::Blocked },
+              .status = PaneStatus { .state = ProgramState::Blocked, .message = {} } },
         Row { .what = "the root's done alone",
               .records = { record("", ProgramState::Done, ProgramStatusOrigin::Program, 10s) },
-              .status = ProgramState::Done },
+              .status = PaneStatus { .state = ProgramState::Done, .message = {} } },
         Row { .what = "a stale hooks record beats a fresh root record",
               .records = { record("claude-code", ProgramState::Idle, ProgramStatusOrigin::Integration, 1s),
                            record("", ProgramState::Working, ProgramStatusOrigin::Program, 900s) },
-              .status = ProgramState::Idle },
+              .status = PaneStatus { .state = ProgramState::Idle, .message = {} } },
+        Row { .what = "the message is the chosen record's",
+              .records = { record("", ProgramState::Working, ProgramStatusOrigin::Program, 20s, "root"),
+                           record("claude-code",
+                                  ProgramState::Idle,
+                                  ProgramStatusOrigin::Integration,
+                                  10s,
+                                  "Waiting for Build pace") },
+              .status = PaneStatus { .state = ProgramState::Idle, .message = "Waiting for Build pace" } },
         Row { .what = "an unrelated record only",
               .records = { record("build/test", ProgramState::Error, ProgramStatusOrigin::Program, 10s) },
               .status = std::nullopt });
@@ -1023,16 +1035,20 @@ TEST_CASE("each status change of a pane raises Panes once", "[vthost][panes]")
     b.journal->clear();
 
     device->feed("\033]7501;state=working\033\\");
-    REQUIRE(b.eventually(
-        [&] { return b.infoOf(Orchestrator, pane)->status == vtbackend::ProgramState::Working; }));
+    REQUIRE(b.eventually([&] {
+        return b.infoOf(Orchestrator, pane)->status
+               == PaneStatus { .state = vtbackend::ProgramState::Working, .message = {} };
+    }));
     REQUIRE(b.eventually([&] { return b.paneHints() == 1; }));
     b.settle();
     CHECK(b.paneHints() == 1);
 
     // The hooks' record wins over the root's, whatever came later.
     device->feed("\033]7501;state=blocked:id=claude-code\033\\\033]7501;state=done\033\\");
-    REQUIRE(b.eventually(
-        [&] { return b.infoOf(Orchestrator, pane)->status == vtbackend::ProgramState::Blocked; }));
+    REQUIRE(b.eventually([&] {
+        return b.infoOf(Orchestrator, pane)->status
+               == PaneStatus { .state = vtbackend::ProgramState::Blocked, .message = {} };
+    }));
     REQUIRE(b.eventually([&] { return b.paneHints() == 2; }));
     b.settle();
     CHECK(b.paneHints() == 2);
@@ -1048,8 +1064,23 @@ TEST_CASE("each status change of a pane raises Panes once", "[vthost][panes]")
             terminal.programStatus().records(), "lint", &vtbackend::ProgramStatusRecord::id);
     }));
     b.settle();
-    CHECK(b.infoOf(Orchestrator, pane)->status == vtbackend::ProgramState::Blocked);
+    CHECK(b.infoOf(Orchestrator, pane)->status
+          == PaneStatus { .state = vtbackend::ProgramState::Blocked, .message = {} });
     CHECK(b.paneHints() == 2);
+
+    // A new reason line alone is a change: the extension shows what its agent waits for.
+    device->feed("\033]7501;state=idle:id=claude-code:msg=V2FpdGluZyBmb3IgYnVpbGQ=\033\\");
+    REQUIRE(b.eventually([&] {
+        return b.infoOf(Orchestrator, pane)->status
+               == PaneStatus { .state = vtbackend::ProgramState::Idle, .message = "Waiting for build" };
+    }));
+    REQUIRE(b.eventually([&] { return b.paneHints() == 3; }));
+    device->feed("\033]7501;state=idle:id=claude-code:msg=V2FpdGluZyBmb3IgdGVzdHM=\033\\");
+    REQUIRE(b.eventually([&] {
+        return b.infoOf(Orchestrator, pane)->status
+               == PaneStatus { .state = vtbackend::ProgramState::Idle, .message = "Waiting for tests" };
+    }));
+    REQUIRE(b.eventually([&] { return b.paneHints() == 4; }));
 }
 
 TEST_CASE("pane-open is refused while an upgrade runs", "[vthost][panes]")

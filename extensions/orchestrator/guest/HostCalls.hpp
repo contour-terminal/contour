@@ -142,6 +142,7 @@ struct PaneInfo
     std::string pane;                                ///< The pane's id.
     std::string tag;                                 ///< The tag it was opened with.
     std::optional<AgentStatus> status;               ///< What its program last reported, if anything.
+    std::string message;                             ///< The reason line it reported with it; may be empty.
     ProgramLiveness program = ProgramLiveness::Gone; ///< Whether the spawned program is still its program.
 };
 
