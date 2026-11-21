@@ -179,12 +179,13 @@ void askedForFont(DisplayHarness const& h)
 
 } // namespace
 
-TEST_CASE("display: the display's PNG image decoder handles PNG, non-PNG and invalid data",
+TEST_CASE("display: a shown session's PNG image decoder handles PNG, non-PNG and invalid data",
           "[display][image]")
 {
-    // TerminalDisplay::setSession installs a QImage-backed PNG decoder on the terminal (the GIP image
-    // path). Invoke it directly through the terminal's decoder accessor: a valid PNG decodes to RGBA
-    // pixels with the right size, a non-PNG format is declined, and invalid PNG bytes return nullopt.
+    // A session is given the GUI build's QImage-backed PNG decoder when it is constructed (the GIP and
+    // kitty `f=100` image paths). Invoke it directly through the terminal's decoder accessor: a valid PNG
+    // decodes to RGBA pixels with the right size, a non-PNG format is declined, and invalid PNG bytes return
+    // nullopt.
     REQUIRE_DISPLAY_OR_SKIP();
     DisplayHarness const h;
 

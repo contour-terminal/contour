@@ -45,16 +45,19 @@
 #include <vtpty/MockPty.hpp>
 #include <vtpty/test/NonAsciiSample.hpp>
 
+#include <core/Base64.hpp>
 #include <core/Utf8Path.hpp>
 #include <core/platform/FileUri.hpp>
 #include <core/platform/PathUtils.hpp>
 #include <core/testing/ScopedTempDir.hpp>
 
+#include <QtCore/QBuffer>
 #include <QtCore/QPointer>
 #include <QtCore/QSet>
 #include <QtCore/QTemporaryDir>
 #include <QtGui/QColor>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QImage>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QPalette>
 #include <QtGui/QWheelEvent>
@@ -7691,4 +7694,31 @@ TEST_CASE("TerminalSessionManager: a reconnecting remote daemon shows its dot an
     CHECK(window->chip()->accessibleDescription() == "Reconnecting, collapsed");
 
     manager.releaseBinding(onHost);
+}
+
+TEST_CASE("TerminalSession: decodes a PNG before any display is attached", "[contour][session][image]")
+{
+    // The decoder is the session's from construction: a program that sends a PNG the moment it starts, or
+    // into a session no display shows yet, has it decoded rather than refused.
+    auto image = QImage { 1, 1, QImage::Format_RGBA8888 };
+    image.fill(Qt::white);
+    auto png = QByteArray {};
+    auto buffer = QBuffer { &png };
+    REQUIRE(buffer.open(QIODevice::WriteOnly));
+    REQUIRE(image.save(&buffer, "PNG"));
+
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    auto* const session = sessionAtRow(manager, *window, 0);
+    REQUIRE(session != nullptr);
+
+    mockPtyOf(*session).appendStdOutBuffer(std::format(
+        "\033_Ga=t,i=7,f=100;{}\033\\",
+        core::base64::encode(std::string_view { png.constData(), static_cast<size_t>(png.size()) })));
+    REQUIRE(session->terminal().processInputOnce());
+    CHECK(session->terminal().peekInput() == std::string_view { "\033_Gi=7;OK\033\\" });
+
+    contour::test::closeAllTabs(*window);
 }

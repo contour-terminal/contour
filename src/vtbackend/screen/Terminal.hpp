@@ -4332,13 +4332,8 @@ class Terminal: public IStatusLinePublishTarget
     ImagePool& imagePool() noexcept { return _imagePool; }
     ImagePool const& imagePool() const noexcept { return _imagePool; }
 
-    /// @see vtbackend::ImageDecoder.
-    using ImageDecoderCallback = ImageDecoder;
-
-    /// Replaces the image decoder. A rebinding seam for the in-process GUI, whose display supplies the
-    /// decoder when it attaches; a terminal hosted by a daemon gets its decoder at construction.
-    void setImageDecoder(ImageDecoderCallback decoder) noexcept { _imageDecoder = std::move(decoder); }
-    ImageDecoderCallback const& imageDecoder() const noexcept { return _imageDecoder; }
+    /// @return What PNG transmissions are decoded with, fixed at construction; empty refuses them.
+    [[nodiscard]] ImageDecoder const& imageDecoder() const noexcept { return _imageDecoder; }
 
     /// Takes the frontend's answer to the application's request for the host-writable status line.
     ///
@@ -5806,7 +5801,7 @@ class Terminal: public IStatusLinePublishTarget
     /// the latter. @see popPointerShape.
     bool _pointerShapeBaseSetByApplication = false;
     /// Not captured: wiring. @see vtbackend::ImageDecoder.
-    ImageDecoderCallback _imageDecoder;
+    ImageDecoder _imageDecoder;
 
     TabStops _tabs;
 

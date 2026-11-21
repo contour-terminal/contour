@@ -132,6 +132,23 @@ class MockTerm: public Terminal::NullEvents
     {
     }
 
+    /// A terminal decoding PNG images with @p imageDecoder; everything else as `MockTerm { size }`.
+    /// @param size The page size.
+    /// @param imageDecoder What PNG transmissions are decoded with.
+    /// @param historyLimits The scrollback's limits.
+    MockTerm(PageSize size, ImageDecoder imageDecoder, HistoryLimits historyLimits = {}):
+        MockTerm { createSettings(size, historyLimits, 1024),
+                   core::defaultEnvironment(),
+                   core::platform::NativeFileSystem::instance(),
+                   std::nullopt,
+                   &fixedOffsetLocalTime<>,
+                   std::nullopt,
+                   std::nullopt,
+                   std::nullopt,
+                   std::move(imageDecoder) }
+    {
+    }
+
     /// A terminal showing the status-line extensions @p extensionServices names.
     MockTerm(PageSize size, StatusLineExtensionServices extensionServices):
         MockTerm { createSettings(size, HistoryLimits {}, 1024),
@@ -540,7 +557,8 @@ class MockTerm: public Terminal::NullEvents
              LocalTimeConverter localTime,
              std::optional<LinkDetectionServices> linkServices,
              std::optional<StatusLineExtensionServices> extensionServices,
-             std::optional<GitHeadServices> gitServices = std::nullopt);
+             std::optional<GitHeadServices> gitServices = std::nullopt,
+             ImageDecoder imageDecoder = {});
 };
 
 template <typename PtyDevice>
@@ -581,7 +599,8 @@ inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
                                      LocalTimeConverter localTime,
                                      std::optional<LinkDetectionServices> linkServices,
                                      std::optional<StatusLineExtensionServices> extensionServices,
-                                     std::optional<GitHeadServices> gitServices):
+                                     std::optional<GitHeadServices> gitServices,
+                                     ImageDecoder imageDecoder):
     terminal { *this,
                environment,
                fileSystem,
@@ -596,7 +615,8 @@ inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
                },
                std::move(linkServices),
                extensionServices,
-               gitServices }
+               gitServices,
+               std::move(imageDecoder) }
 {
     if (auto const logFilterString = core::defaultEnvironment().get("LOG"))
     {

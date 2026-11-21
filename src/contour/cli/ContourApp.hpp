@@ -71,6 +71,11 @@ class ContourApp: public core::cli::App
 
     [[nodiscard]] core::cli::Command parameterDefinition() const override;
 
+    /// @return What this process decodes PNG images (kitty `f=100`, GIP) with: every terminal it makes, the
+    ///         sessions a window shows and those a daemon hosts alike, is given it at construction. Empty in
+    ///         a build without the GUI, where such images are refused.
+    [[nodiscard]] vtbackend::ImageDecoder const& imageDecoder() const noexcept { return _imageDecoder; }
+
   protected:
     /// Finds the first of @p options that the command line gave.
     /// @param verbPrefix The verb's dotted parameter prefix, e.g. "contour.daemon".

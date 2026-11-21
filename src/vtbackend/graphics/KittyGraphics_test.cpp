@@ -346,20 +346,22 @@ TEST_CASE("KittyGraphics.a_png_is_decoded_before_it_is_stored", "[kitty]")
     // `f=100` carries a PNG file, and `s=`/`v=` say nothing reliable about it. Stored as it arrived,
     // under the declared size, it is a few bytes of file header that the renderer uploads as a
     // 64x64 RGBA texture.
-    auto mock = KittyTerm { PageSize { LineCount(4), ColumnCount(8) } };
-    auto const& screen = mock.terminal.primaryScreen();
+    auto const pageSize = PageSize { LineCount(4), ColumnCount(8) };
     auto const command =
         std::format("\033_Ga=T,f=100,i=1,s=64,v=64;{}\033\\", core::base64::encode("\x89PNG\r\n\x1a\n"sv));
 
     SECTION("decoded")
     {
         auto received = std::string {};
-        mock.terminal.setImageDecoder(
-            [&](ImageFormat, std::span<uint8_t const> data, ImageSize& size) -> std::optional<Image::Data> {
-                received.assign(data.begin(), data.end());
-                size = ImageSize { Width(2), Height(2) };
-                return Image::Data(2uz * 2uz * 4uz, uint8_t { 0x7F });
-            });
+        auto mock = KittyTerm { pageSize,
+                                ImageDecoder { [&](ImageFormat,
+                                                   std::span<uint8_t const> data,
+                                                   ImageSize& size) -> std::optional<Image::Data> {
+                                    received.assign(data.begin(), data.end());
+                                    size = ImageSize { Width(2), Height(2) };
+                                    return Image::Data(2uz * 2uz * 4uz, uint8_t { 0x7F });
+                                } } };
+        auto const& screen = mock.terminal.primaryScreen();
 
         mock.writeToScreen(command);
 
@@ -375,6 +377,8 @@ TEST_CASE("KittyGraphics.a_png_is_decoded_before_it_is_stored", "[kitty]")
 
     SECTION("with no decoder there is nothing to store")
     {
+        auto mock = KittyTerm { pageSize };
+        auto const& screen = mock.terminal.primaryScreen();
         mock.writeToScreen(command);
 
         CHECK(mock.terminal.peekInput().contains("EINVAL"));
@@ -383,9 +387,10 @@ TEST_CASE("KittyGraphics.a_png_is_decoded_before_it_is_stored", "[kitty]")
 
     SECTION("a file the decoder refuses is not stored either")
     {
-        mock.terminal.setImageDecoder([](ImageFormat,
-                                         std::span<uint8_t const>,
-                                         ImageSize&) -> std::optional<Image::Data> { return std::nullopt; });
+        auto mock = KittyTerm { pageSize,
+                                ImageDecoder { [](ImageFormat, std::span<uint8_t const>, ImageSize&)
+                                                   -> std::optional<Image::Data> { return std::nullopt; } } };
+        auto const& screen = mock.terminal.primaryScreen();
 
         mock.writeToScreen(command);
 
@@ -494,17 +499,18 @@ TEST_CASE("ITerm2.an_absurd_height_does_not_scroll_the_screen_away", "[iterm2]")
     // `height=1000` scrolls a thousand rows: at the scale an application can actually ask for
     // (`height=90000000`) the terminal wedges for minutes and the scrollback is shredded. The image
     // can never occupy more than the page, so the request is clamped to it.
-    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) }, LineCount(20) };
+    // The PNG decoder is an injected dependency and MockTerm has none by default, so without one the image
+    // never decodes, renderImage returns before the scroll loop, and the test proves nothing.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) },
+                                           ImageDecoder { [](ImageFormat,
+                                                             std::span<uint8_t const>,
+                                                             ImageSize& size) -> std::optional<Image::Data> {
+                                               size = ImageSize { Width(2), Height(2) };
+                                               return Image::Data(2uz * 2uz * 4uz, uint8_t { 0xFF });
+                                           } },
+                                           HistoryLimits::plain(LineCount(20)) };
     auto const& screen = mock.terminal.primaryScreen();
     mock.terminal.setCellPixelSize(ImageSize { Width(2), Height(2) });
-
-    // The PNG decoder is an injected dependency and MockTerm has none, so without this the image
-    // never decodes, renderImage returns before the scroll loop, and the test proves nothing.
-    mock.terminal.setImageDecoder(
-        [](ImageFormat, std::span<uint8_t const>, ImageSize& size) -> std::optional<Image::Data> {
-            size = ImageSize { Width(2), Height(2) };
-            return Image::Data(2uz * 2uz * 4uz, uint8_t { 0xFF });
-        });
 
     mock.writeToScreen("marker"sv);
     mock.writeToScreen("\033]1337;File=inline=1;height=1000:AAAA\a"sv);

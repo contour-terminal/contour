@@ -3,7 +3,6 @@
 #include <contour/Logging.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/display/ContentScale.hpp>
-#include <contour/display/ImageDecoding.hpp>
 #include <contour/display/ImeQueryRect.hpp>
 #include <contour/display/Logging.hpp>
 #include <contour/display/RhiRenderer.hpp>
@@ -485,8 +484,6 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
         // Idempotent: applyResize() no-ops when the page already matches.
         applyDisplaySizeToGrid();
     }
-
-    _session->terminal().setImageDecoder(decodeImage);
 
     emit sessionChanged(newSession);
 }

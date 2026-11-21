@@ -445,7 +445,10 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                 vtbackend::randomSemanticBlockTokens(),
                 app.linkDetectionServices(),
                 terminalExtensionServices(),
-                app.gitHeadServices() },
+                app.gitHeadServices(),
+                // At construction, before the child starts: a display attaching later is too late for a
+                // program that sends a picture at once, and assigning it then raced the parser thread.
+                app.imageDecoder() },
     _exitWatcherThread { std::make_unique<ExitWatcherThread>(*this) },
     // _config is declared before _desktopNotifier, so reading it here is well-defined. The delay is
     // fixed for the notifier's life: it decides how a backend that cannot observe a close behaves,
