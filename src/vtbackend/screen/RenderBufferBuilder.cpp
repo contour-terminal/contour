@@ -4,6 +4,7 @@
 
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
+#include <vtbackend/core/KittyPlaceholderCodepoint.hpp>
 #include <vtbackend/grid/CellUtil.hpp>
 #include <vtbackend/screen/LinkPresentation.hpp>
 
@@ -442,7 +443,9 @@ RenderCell RenderBufferBuilder::makeRenderCell(ColorPalette const& colorPalette,
     renderCell.sizing.scale = screenCell.textScale();
     renderCell.sizing.columns = std::max<uint8_t>(1, screenCell.width());
 
-    if (screenCell.codepointCount() != 0)
+    // A kitty Unicode placeholder (U+10EEEE and its diacritics) only addresses an image, resolved or not:
+    // it never reaches shaping or font fallback, which would draw a missing glyph over the picture.
+    if (screenCell.codepointCount() != 0 && screenCell.codepoint(0) != kitty_graphics::PlaceholderCodepoint)
     {
         for (size_t i = 0; i < screenCell.codepointCount(); ++i)
             renderCell.codepoints.push_back(screenCell.codepoint(i));
