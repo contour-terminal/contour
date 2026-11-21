@@ -52,6 +52,11 @@ class TableResolver final: public ImageFragmentResolver
 
     [[nodiscard]] std::shared_ptr<Image const> image(ImageId /*id*/) const override { return nullptr; }
 
+    [[nodiscard]] std::shared_ptr<RasterizedImage const> rasterized(uint64_t /*id*/) const override
+    {
+        return nullptr;
+    }
+
   private:
     std::vector<std::shared_ptr<ImageFragment>> _fragments;
 };

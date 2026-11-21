@@ -787,12 +787,9 @@ namespace
         {
             out.svarint(entry.stableId);
             out.u16(entry.column);
-            out.u32(entry.imageId);
+            out.varint(entry.placement);
             out.u16(entry.offsetLine);
             out.u16(entry.offsetColumn);
-            out.u8(entry.layer);
-            out.u8(entry.alignment);
-            out.u8(entry.resize);
         }
 
         out.varint(pdu.setModes.size());
@@ -851,6 +848,25 @@ namespace
             out.u16(entry.column);
             out.u8(entry.font);
             out.u8(entry.position);
+        }
+
+        // After everything else, so a Delta recorded before it (a persisted pane history) still decodes.
+        out.varint(pdu.imagePlacements.size());
+        for (auto const& entry: pdu.imagePlacements)
+        {
+            out.varint(entry.placement);
+            out.u32(entry.imageId);
+            out.u8(entry.layer);
+            out.u8(entry.alignment);
+            out.u8(entry.resize);
+            out.u8(entry.origin);
+            out.varint(entry.spanLines);
+            out.varint(entry.spanColumns);
+            out.varint(entry.sourceX);
+            out.varint(entry.sourceY);
+            out.varint(entry.sourceWidth);
+            out.varint(entry.sourceHeight);
+            out.u32(entry.gapColor);
         }
     }
 
@@ -1932,12 +1948,9 @@ namespace
                                  auto error = DecodeError {};
                                  if (!assign(asStableRowId(reader.svarint()), entry.stableId, error)
                                      || !assign(reader.u16(), entry.column, error)
-                                     || !assign(reader.u32(), entry.imageId, error)
+                                     || !assign(reader.varint(), entry.placement, error)
                                      || !assign(reader.u16(), entry.offsetLine, error)
-                                     || !assign(reader.u16(), entry.offsetColumn, error)
-                                     || !assign(reader.u8(), entry.layer, error)
-                                     || !assign(reader.u8(), entry.alignment, error)
-                                     || !assign(reader.u8(), entry.resize, error))
+                                     || !assign(reader.u16(), entry.offsetColumn, error))
                                      return std::unexpected(error);
                                  return entry;
                              });
@@ -2005,6 +2018,34 @@ namespace
                     return entry;
                 });
             if (!decoded)
+                return std::unexpected(decoded.error());
+        }
+        // Appended by a later version, like the soft glyph cells: a body recorded before it has none.
+        if (in.remaining() != 0)
+        {
+            if (auto const decoded =
+                    decodeVector(in,
+                                 pdu.imagePlacements,
+                                 [](Reader& reader) -> std::expected<ImagePlacementEntry, DecodeError> {
+                                     auto entry = ImagePlacementEntry {};
+                                     auto error = DecodeError {};
+                                     if (!assign(reader.varint(), entry.placement, error)
+                                         || !assign(reader.u32(), entry.imageId, error)
+                                         || !assign(reader.u8(), entry.layer, error)
+                                         || !assign(reader.u8(), entry.alignment, error)
+                                         || !assign(reader.u8(), entry.resize, error)
+                                         || !assign(reader.u8(), entry.origin, error)
+                                         || !assign(reader.varint(), entry.spanLines, error)
+                                         || !assign(reader.varint(), entry.spanColumns, error)
+                                         || !assign(reader.varint(), entry.sourceX, error)
+                                         || !assign(reader.varint(), entry.sourceY, error)
+                                         || !assign(reader.varint(), entry.sourceWidth, error)
+                                         || !assign(reader.varint(), entry.sourceHeight, error)
+                                         || !assign(reader.u32(), entry.gapColor, error))
+                                         return std::unexpected(error);
+                                     return entry;
+                                 });
+                !decoded)
                 return std::unexpected(decoded.error());
         }
         return pdu;

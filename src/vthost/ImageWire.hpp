@@ -15,6 +15,8 @@
 #include <vtbackend/core/Image.hpp>
 
 #include <cstdint>
+#include <memory>
+#include <unordered_map>
 
 #include <vthost/WireEnum.hpp>
 
@@ -47,6 +49,14 @@ namespace vthost
         .value_or(vtbackend::ImageAlignment::MiddleCenter);
 }
 
+/// @param value An ImageOrigin as the wire spells it.
+/// @return The origin it names, falling back to Cursor for an out-of-range value: a cursor-placed image
+///         paints its own alignment gap, so an unknown origin never leaves a gap unpainted.
+[[nodiscard]] constexpr vtbackend::ImageOrigin imageOriginOf(uint8_t value) noexcept
+{
+    return enumUpTo(value, vtbackend::ImageOrigin::Placeholder).value_or(vtbackend::ImageOrigin::Cursor);
+}
+
 /// @param value An ImageFormat as the wire spells it.
 /// @return The format it names, falling back to Auto for an out-of-range value — which
 ///         `isConsistentPixmap` rejects, so an unresolvable format cannot reach an upload.
@@ -54,5 +64,42 @@ namespace vthost
 {
     return enumUpTo(value, vtbackend::ImageFormat::PNG).value_or(vtbackend::ImageFormat::Auto);
 }
+
+/// Numbers the placements a connection is told about, for proto::ImagePlacementEntry::placement.
+///
+/// A placement is a RasterizedImage, and nothing in one names it across deltas: its address can be reused
+/// once it is freed. So each is remembered beside a weak reference, and an address whose placement has
+/// died is a new placement with a new ordinal. Ordinals are never reused within one instance.
+class ImagePlacementOrdinals
+{
+  public:
+    /// @param placement A placement held by a shared_ptr (every ImageFragment's is).
+    /// @return The ordinal @p placement was given before while it lives, or a fresh one.
+    [[nodiscard]] uint32_t ordinalOf(vtbackend::RasterizedImage const& placement)
+    {
+        auto& entry = _ordinals[&placement];
+        if (entry.ordinal == 0 || entry.placement.lock().get() != &placement)
+            entry = Entry { .placement = placement.weak_from_this(), .ordinal = ++_lastOrdinal };
+        return entry.ordinal;
+    }
+
+    /// Forgets the placements that no longer exist, so the table stays as large as what is alive.
+    void prune()
+    {
+        std::erase_if(_ordinals, [](auto const& item) { return item.second.placement.expired(); });
+    }
+
+    /// @return How many placements the table remembers.
+    [[nodiscard]] std::size_t size() const noexcept { return _ordinals.size(); }
+
+  private:
+    struct Entry
+    {
+        std::weak_ptr<vtbackend::RasterizedImage const> placement;
+        uint32_t ordinal = 0; ///< 0: not numbered yet.
+    };
+    std::unordered_map<vtbackend::RasterizedImage const*, Entry> _ordinals;
+    uint32_t _lastOrdinal = 0;
+};
 
 } // namespace vthost

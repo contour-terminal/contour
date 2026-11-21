@@ -794,22 +794,39 @@ struct HyperlinkEntry
     bool operator==(HyperlinkEntry const&) const = default;
 };
 
-/// One image-covered cell: which row/column shows which part of which image.
+/// One image placement: which image, and everything that turns its pixels into the cells it covers.
 ///
-/// The last three fields describe the whole PLACEMENT rather than this cell, and are repeated per
-/// cell for the same reason `layer` always was: a receiver meets the cells first and has to be able
-/// to rebuild the placement from any one of them. They are what turn source pixels into the cells
-/// they cover, so a receiver that rasterizes without them gets a differently cropped image.
+/// Sent in the placement table of each Delta (and of each snapshot piece) that carries cells of it, once
+/// per PDU, so a receiver rebuilds the placement from that table and never from the cells themselves --
+/// including when its top-left cell is in no row it holds, as for a picture straddling the page top.
+struct ImagePlacementEntry
+{
+    /// Which placement this is: a sender-chosen ordinal, distinct for each of its RasterizedImages for as
+    /// long as the connection lasts. Two placements of one image with the same geometry are still two.
+    uint32_t placement = 0;
+    uint32_t imageId = 0;      ///< The image, by its pool-local id (what FetchImage asks for).
+    uint8_t layer = 0;         ///< vtbackend::ImageLayer's underlying value.
+    uint8_t alignment = 0;     ///< vtbackend::ImageAlignment's underlying value.
+    uint8_t resize = 0;        ///< vtbackend::ImageResize's underlying value.
+    uint8_t origin = 0;        ///< vtbackend::ImageOrigin's underlying value.
+    uint16_t spanLines = 0;    ///< The placement's cell span: rows.
+    uint16_t spanColumns = 0;  ///< The placement's cell span: columns.
+    uint32_t sourceX = 0;      ///< The source rectangle's left edge, in image pixels.
+    uint32_t sourceY = 0;      ///< The source rectangle's top edge, in image pixels.
+    uint32_t sourceWidth = 0;  ///< The source rectangle's width in image pixels; 0 is the whole image.
+    uint32_t sourceHeight = 0; ///< The source rectangle's height in image pixels; 0 is the whole image.
+    uint32_t gapColor = 0;     ///< The alignment gap's colour, as vtbackend::RGBAColor's value.
+    bool operator==(ImagePlacementEntry const&) const = default;
+};
+
+/// One image-covered cell: which row/column shows which tile of which placement.
 struct ImageCellEntry
 {
     int64_t stableId = 0; ///< Row.
     uint16_t column = 0;
-    uint32_t imageId = 0;
-    uint16_t offsetLine = 0; ///< Fragment offset within the image, in cells.
+    uint32_t placement = 0;  ///< The placement it shows, by its ordinal in the PDU's placement table.
+    uint16_t offsetLine = 0; ///< Fragment offset within the placement, in cells.
     uint16_t offsetColumn = 0;
-    uint8_t layer = 0;     ///< vtbackend::ImageLayer's underlying value.
-    uint8_t alignment = 0; ///< vtbackend::ImageAlignment's underlying value.
-    uint8_t resize = 0;    ///< vtbackend::ImageResize's underlying value.
     bool operator==(ImageCellEntry const&) const = default;
 };
 
@@ -880,6 +897,8 @@ struct Delta
     std::vector<WireLine> lines;
     std::vector<HyperlinkEntry> hyperlinks;
     std::vector<ImageCellEntry> imageCells;
+    /// Every placement @ref imageCells names, each once.
+    std::vector<ImagePlacementEntry> imagePlacements;
     /// The DEC private modes (by DECSET number) currently SET on the hosted
     /// terminal, restricted to the mirrored-mode table — sent complete with
     /// every delta so clients replay input-relevant state (cursor keys,

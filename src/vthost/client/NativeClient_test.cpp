@@ -498,12 +498,15 @@ TEST_CASE("RemoteScreen tracks, replaces and evicts image cells", "[vthost][atta
         line.columns = 5;
         seed.lines.push_back(line);
     }
-    seed.imageCells.push_back(proto::ImageCellEntry { .stableId = 7, .column = 1, .imageId = 3 });
-    seed.imageCells.push_back(proto::ImageCellEntry { .stableId = 10, .column = 0, .imageId = 3 });
+    seed.imageCells.push_back(proto::ImageCellEntry { .stableId = 7, .column = 1, .placement = 1 });
+    seed.imageCells.push_back(proto::ImageCellEntry { .stableId = 10, .column = 0, .placement = 1 });
+    seed.imagePlacements.push_back(proto::ImagePlacementEntry { .placement = 1, .imageId = 3 });
     screen.apply(seed);
 
     REQUIRE(screen.imageAt(7, 1) != nullptr);
-    CHECK(screen.imageAt(7, 1)->imageId == 3);
+    CHECK(screen.imageAt(7, 1)->placement == 1);
+    REQUIRE(screen.imagePlacement(1) != nullptr);
+    CHECK(screen.imagePlacement(1)->imageId == 3);
     CHECK(screen.imageAt(10, 0) != nullptr);
     CHECK(screen.imageAt(10, 4) == nullptr); // no entry at that column
 
@@ -526,6 +529,42 @@ TEST_CASE("RemoteScreen tracks, replaces and evicts image cells", "[vthost][atta
     cleared.stableFloor = 10;
     screen.apply(cleared);
     CHECK(screen.imageAt(7, 1) == nullptr);
+    // ...and its placement with its last cell.
+    CHECK(screen.imagePlacement(1) == nullptr);
+}
+
+TEST_CASE("RemoteScreen holds exactly the image placements its cells name", "[vthost][attach]")
+{
+    auto screen = RemoteScreen {};
+    auto const row = [](int64_t id) {
+        auto line = proto::WireLine {};
+        line.stableId = id;
+        line.columns = 4;
+        return line;
+    };
+
+    auto seed = proto::Delta {};
+    seed.snapshot = 1;
+    seed.lines = { row(0), row(1) };
+    seed.imageCells = { proto::ImageCellEntry { .stableId = 0, .column = 0, .placement = 1 },
+                        proto::ImageCellEntry { .stableId = 1, .column = 0, .placement = 2 },
+                        // A cell naming a placement the table did not state is dropped.
+                        proto::ImageCellEntry { .stableId = 1, .column = 1, .placement = 9 } };
+    seed.imagePlacements = { proto::ImagePlacementEntry { .placement = 1, .imageId = 3 },
+                             proto::ImagePlacementEntry { .placement = 2, .imageId = 3 },
+                             // A placement no cell names is not kept.
+                             proto::ImagePlacementEntry { .placement = 5, .imageId = 4 } };
+    screen.apply(seed);
+    CHECK(screen.imageAt(1, 1) == nullptr);
+    CHECK(screen.imagePlacements.size() == 2);
+
+    // Row 0 redrawn without its picture: its placement goes with its last cell, row 1's stays.
+    auto redraw = proto::Delta {};
+    redraw.lines = { row(0) };
+    screen.apply(redraw);
+    CHECK(screen.imagePlacement(1) == nullptr);
+    CHECK(screen.imagePlacement(2) != nullptr);
+    CHECK(screen.imagePlacements.size() == 1);
 }
 
 TEST_CASE("RemoteScreen.dropImage clears pixels and the cells that referenced it", "[vthost][attach]")
@@ -541,9 +580,11 @@ TEST_CASE("RemoteScreen.dropImage clears pixels and the cells that referenced it
         line.stableId = id;
         seed.lines.push_back(line);
     }
-    seed.imageCells.push_back(proto::ImageCellEntry { .stableId = 0, .column = 1, .imageId = 3 });
-    seed.imageCells.push_back(proto::ImageCellEntry { .stableId = 0, .column = 2, .imageId = 3 });
-    seed.imageCells.push_back(proto::ImageCellEntry { .stableId = 1, .column = 0, .imageId = 4 });
+    seed.imageCells.push_back(proto::ImageCellEntry { .stableId = 0, .column = 1, .placement = 1 });
+    seed.imageCells.push_back(proto::ImageCellEntry { .stableId = 0, .column = 2, .placement = 1 });
+    seed.imageCells.push_back(proto::ImageCellEntry { .stableId = 1, .column = 0, .placement = 2 });
+    seed.imagePlacements.push_back(proto::ImagePlacementEntry { .placement = 1, .imageId = 3 });
+    seed.imagePlacements.push_back(proto::ImagePlacementEntry { .placement = 2, .imageId = 4 });
     screen.apply(seed);
 
     // Pretend both images were fetched.
@@ -604,7 +645,8 @@ Task<void> fakeImageServer(core::net::EventLoop* loop, core::net::ISocket* socke
             line.stableId = 0;
             line.columns = 4;
             delta.lines.push_back(line);
-            delta.imageCells.push_back(proto::ImageCellEntry { .stableId = 0, .column = 1, .imageId = 7 });
+            delta.imageCells.push_back(proto::ImageCellEntry { .stableId = 0, .column = 1, .placement = 1 });
+            delta.imagePlacements.push_back(proto::ImagePlacementEntry { .placement = 1, .imageId = 7 });
             enqueuePdu(writer, 0, proto::DecodedPdu { delta });
             return true;
         }
@@ -2148,7 +2190,8 @@ TEST_CASE("the client reports an old daemon's refusal with both versions", "[vth
                                                return vthost::testing::codec3ServerHello(serial);
                                            })));
 
-    CHECK(client->refusal() == proto::HandshakeRefusal { .ours = { 4, 4 }, .theirs = { 3, 3 } });
+    CHECK(client->refusal()
+          == proto::HandshakeRefusal { .ours = proto::SupportedVersions, .theirs = { 3, 3 } });
     CHECK_FALSE(client->negotiated().has_value());
     CHECK_FALSE(client->connected());
 }

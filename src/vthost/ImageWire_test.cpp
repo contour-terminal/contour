@@ -3,6 +3,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <memory>
+
 #include <vthost/ImageWire.hpp>
 
 using namespace vthost;
@@ -25,6 +27,8 @@ TEST_CASE("image placement policies decode totally", "[vthost][imagewire]")
         CHECK(imageAlignmentOf(0) == vtbackend::ImageAlignment::TopStart);
         CHECK(imageAlignmentOf(8) == vtbackend::ImageAlignment::BottomEnd);
         CHECK(imageFormatOf(2) == vtbackend::ImageFormat::RGBA);
+        CHECK(imageOriginOf(0) == vtbackend::ImageOrigin::Cursor);
+        CHECK(imageOriginOf(1) == vtbackend::ImageOrigin::Placeholder);
     }
 
     SECTION("an out-of-range value degrades to the policy's default")
@@ -39,5 +43,43 @@ TEST_CASE("image placement policies decode totally", "[vthost][imagewire]")
         // so an unresolvable format cannot reach the GPU.
         CHECK(imageFormatOf(4) == vtbackend::ImageFormat::Auto);
         CHECK(imageFormatOf(255) == vtbackend::ImageFormat::Auto);
+        // A cursor-placed image is the one that paints its own gap, so an unknown origin never hides it.
+        CHECK(imageOriginOf(2) == vtbackend::ImageOrigin::Cursor);
+        CHECK(imageOriginOf(255) == vtbackend::ImageOrigin::Cursor);
     }
+}
+
+TEST_CASE("image placement ordinals name a placement for as long as it lives", "[vthost][imagewire]")
+{
+    auto const makePlacement = [] {
+        auto image = std::make_shared<vtbackend::Image>(
+            vtbackend::ImageId(1),
+            vtbackend::ImageFormat::RGBA,
+            vtbackend::Image::Data(4, 0xFF),
+            vtbackend::ImageSize { vtbackend::Width(1), vtbackend::Height(1) },
+            [](auto) {});
+        return vtbackend::rasterize(
+            std::move(image),
+            vtbackend::ImageAlignment::TopStart,
+            vtbackend::ImageResize::NoResize,
+            vtbackend::RGBAColor {},
+            vtbackend::GridSize { .lines = vtbackend::LineCount(1), .columns = vtbackend::ColumnCount(1) },
+            vtbackend::ImageSize { vtbackend::Width(1), vtbackend::Height(1) });
+    };
+    auto ordinals = ImagePlacementOrdinals {};
+    auto first = makePlacement();
+    auto const second = makePlacement();
+
+    auto const firstOrdinal = ordinals.ordinalOf(*first);
+    CHECK(ordinals.ordinalOf(*first) == firstOrdinal);
+    CHECK(ordinals.ordinalOf(*second) != firstOrdinal);
+
+    // A dead placement is forgotten, and whatever takes its address next is a new placement.
+    first.reset();
+    ordinals.prune();
+    CHECK(ordinals.size() == 1);
+    auto const third = makePlacement();
+    auto const thirdOrdinal = ordinals.ordinalOf(*third);
+    CHECK(thirdOrdinal != firstOrdinal);
+    CHECK(thirdOrdinal != ordinals.ordinalOf(*second));
 }

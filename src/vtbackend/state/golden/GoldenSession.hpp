@@ -40,6 +40,29 @@ inline std::string goldenSession()
     return session;
 }
 
+/// The bytes of the kitty golden: Claude Code showing a picture through Unicode placeholders. A virtual
+/// placement with its resolved placeholder rows, an image stored under a number, and a placeholder row whose
+/// image has not arrived -- what the virtual-placement and image-number tables and the placeholder origin
+/// are frozen by. Kept apart from goldenSession(), whose text the older v2 stream is still compared against.
+/// @return The same bytes on every call.
+inline std::string goldenKittySession()
+{
+    auto const row = [](std::string_view sgr, std::string_view rowMark) {
+        auto text = std::format("\033[{}m", sgr);
+        for (auto const column: { "\xCC\x85", "\xCC\x8D", "\xCC\x8E", "\xCC\x90" })
+            text += std::format("\xF4\x8E\xBB\xAE{}{}", rowMark, column);
+        return text + "\033[m\r\n";
+    };
+    auto session = std::string { "$ claude\r\n" };
+    session += "\033_Ga=T,U=1,i=300,c=4,r=2,f=24,s=2,v=2,q=2;/wAAAP8AAAD/////\033\\";
+    session += "\033_Ga=t,I=5,f=24,s=1,v=1,q=2;AAAA\033\\";
+    session += row("38;2;0;1;44", "\xCC\x85");
+    session += row("38;2;0;1;44", "\xCC\x8D");
+    session += row("38;5;9", "\xCC\x85");
+    session += "done";
+    return session;
+}
+
 /// @param mock A terminal; probed, so changed.
 /// @return Its scrollback, a separator line, its main page, another separator and the transcript of its probe
 ///         replies (probeTranscript()): what the golden test compares, text and behaviour alike.

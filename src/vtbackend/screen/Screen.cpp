@@ -6051,10 +6051,15 @@ void Screen::updateKittyFragments(std::predicate<ImageFragment const&> auto cons
             continue;
         for (auto const column: std::views::iota(0, *pageSize().columns))
         {
-            auto cell = at(LineOffset(line), ColumnOffset(column));
-            auto const fragment = cell.imageFragment();
+            // Read first: only a cell the walk changes is handed out for writing, so a walk over the history
+            // announces exactly the rows it changes (@see Grid::changingLineAt) to the delta stream.
+            auto const fragment =
+                ConstCellProxy(std::as_const(_grid).lineAt(LineOffset(line)).storage(), column)
+                    .imageFragment();
             if (!fragment || !selects(*fragment))
                 continue;
+            auto& row = line < 0 ? _grid.changingLineAt(LineOffset(line)) : _grid.lineAt(LineOffset(line));
+            auto cell = row.useCellAt(ColumnOffset(column));
             update(cell, *fragment);
             // Only the page is on display; a scrollback cell has nothing to repaint.
             if (line >= 0)
@@ -6216,7 +6221,10 @@ void Screen::removeKittyPlacementOf(uint32_t imageId, KittyPlacementId placement
 
     updateKittyFragments(
         [&](ImageFragment const& fragment) {
-            return wanted.contains(fragment.rasterizedImage().imagePointer().get())
+            // A placeholder cell's fragment is the resolver's alone: it goes by the rescan the erase of its
+            // virtual placement asks for.
+            return fragment.rasterizedImage().origin() == ImageOrigin::Cursor
+                   && wanted.contains(fragment.rasterizedImage().imagePointer().get())
                    && fragment.rasterizedImage().kittyPlacementId() == placementId;
         },
         [](CellProxy& cell, ImageFragment const&) { cell.clearImageFragment(); },
@@ -6914,7 +6922,10 @@ auto Screen::resolveKittyPlaceholderLine(LineOffset line) -> Placed
         if (unchanged)
             continue;
         auto const at = ColumnOffset::cast_from(column);
-        auto cell = _grid.lineAt(line).useCellAt(at);
+        // A history row is changed through the accessor that has the revision stamping and the daemon's
+        // delta scan reach that deep: a late transmit resolves rows a client mirrored long ago.
+        auto& changed = line < LineOffset(0) ? _grid.changingLineAt(line) : _grid.lineAt(line);
+        auto cell = changed.useCellAt(at);
         if (wanted.raster)
             cell.setImageFragment(wanted.raster, wanted.offset);
         else

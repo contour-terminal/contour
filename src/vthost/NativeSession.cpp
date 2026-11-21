@@ -227,10 +227,15 @@ namespace
         known.erase(kept, known.end());
     }
 
-    /// Collects the image-cell side-table entries of one row.
-    void appendImageCells(std::vector<proto::ImageCellEntry>& out,
+    /// Collects the image-cell side-table entries of one row, and the placement table entry of each placement
+    /// they name that @p delta does not carry yet.
+    /// @param ordinals Numbers each cell's placement, the same for every delta of this connection.
+    /// @param tabled The placements @p delta's table carries already.
+    void appendImageCells(proto::Delta& delta,
                           int64_t stableId,
-                          vtbackend::Line const& line)
+                          vtbackend::Line const& line,
+                          ImagePlacementOrdinals& ordinals,
+                          std::unordered_set<uint32_t>& tabled)
     {
         auto const& fragments = line.storage().imageFragments;
         if (!fragments)
@@ -240,17 +245,46 @@ namespace
             if (!fragment)
                 continue;
             auto const& rasterized = fragment->rasterizedImage();
-            out.push_back(proto::ImageCellEntry {
+            auto const placement = ordinals.ordinalOf(rasterized);
+            delta.imageCells.push_back(proto::ImageCellEntry {
                 .stableId = stableId,
                 .column = column,
-                .imageId = unbox<uint32_t>(rasterized.image().id()),
+                .placement = placement,
                 .offsetLine = static_cast<uint16_t>(unbox<int>(fragment->offset().line)),
                 .offsetColumn = static_cast<uint16_t>(unbox<int>(fragment->offset().column)),
+            });
+            if (!tabled.insert(placement).second)
+                continue;
+            delta.imagePlacements.push_back(proto::ImagePlacementEntry {
+                .placement = placement,
+                .imageId = unbox<uint32_t>(rasterized.image().id()),
                 .layer = std::to_underlying(rasterized.layer()),
                 .alignment = std::to_underlying(rasterized.alignmentPolicy()),
                 .resize = std::to_underlying(rasterized.resizePolicy()),
+                .origin = std::to_underlying(rasterized.origin()),
+                .spanLines = static_cast<uint16_t>(unbox<int>(rasterized.cellSpan().lines)),
+                .spanColumns = static_cast<uint16_t>(unbox<int>(rasterized.cellSpan().columns)),
+                .sourceX = static_cast<uint32_t>(std::max(0, rasterized.imageOffset().x.value)),
+                .sourceY = static_cast<uint32_t>(std::max(0, rasterized.imageOffset().y.value)),
+                .sourceWidth = unbox<uint32_t>(rasterized.imageSubSize().width),
+                .sourceHeight = unbox<uint32_t>(rasterized.imageSubSize().height),
+                .gapColor = rasterized.defaultColor().value,
             });
         }
+    }
+
+    /// @return The entries of @p table that @p cells name, each once, in the order first named.
+    [[nodiscard]] std::vector<proto::ImagePlacementEntry> placementsNamedBy(
+        std::span<proto::ImageCellEntry const> cells,
+        std::unordered_map<uint32_t, proto::ImagePlacementEntry> const& table)
+    {
+        auto named = std::vector<proto::ImagePlacementEntry> {};
+        auto seen = std::unordered_set<uint32_t> {};
+        for (auto const& cell: cells)
+            if (seen.insert(cell.placement).second)
+                if (auto const found = table.find(cell.placement); found != table.end())
+                    named.push_back(found->second);
+        return named;
     }
 
     /// Collects the soft-glyph cell side-table entries of one row.
@@ -1747,10 +1781,13 @@ std::expected<NativeSession::BuiltPush, NativeSession::BuildFailure> NativeSessi
         // not needing a snapshot, and Forced never needs anything else.
         auto const snapshot = mode == SnapshotMode::Forced;
 
+        follow.placementOrdinals.prune();
+        auto tabledPlacements = std::unordered_set<uint32_t> {};
         auto const sharesSoftFonts = mirrorsSoftFonts();
         auto const collect = [&](vtbackend::LineOffset offset, vtbackend::Line const& line) {
             delta.lines.push_back(toWireLine(grid, offset, line));
-            appendImageCells(delta.imageCells, delta.lines.back().stableId, line);
+            appendImageCells(
+                delta, delta.lines.back().stableId, line, follow.placementOrdinals, tabledPlacements);
             if (sharesSoftFonts)
                 appendSoftGlyphCells(delta.softGlyphCells, delta.lines.back().stableId, line);
             // Collect every referenced id (deduped within this delta), NOT only
@@ -2136,6 +2173,11 @@ core::async::Task<void> NativeSession::sendSnapshotPieces(proto::Delta delta, Se
     // their rows for the same reason. Both entry types are trivially copyable, so these are copies
     // however they are spelled; only the grouping matters.
     auto const imagesByRow = groupByRow(std::exchange(delta.imageCells, {}));
+    // Each piece carries the placements its own cells name: a receiver rebuilds a placement from the
+    // PDU that carries its cells, never from an earlier piece's table.
+    auto placementTable = std::unordered_map<uint32_t, proto::ImagePlacementEntry> {};
+    for (auto& placement: std::exchange(delta.imagePlacements, {}))
+        placementTable.emplace(placement.placement, placement);
     auto const softGlyphsByRow = groupByRow(std::exchange(delta.softGlyphCells, {}));
 
     for (auto const& part: proto::partitionSnapshotRows(lines, _snapshotPieceBytes))
@@ -2151,6 +2193,7 @@ core::async::Task<void> NativeSession::sendSnapshotPieces(proto::Delta delta, Se
         auto const rows = std::span { lines }.subspan(part.begin, part.count);
         piece.lines.assign(std::make_move_iterator(rows.begin()), std::make_move_iterator(rows.end()));
         appendRowEntries(piece.imageCells, imagesByRow, piece.lines);
+        piece.imagePlacements = placementsNamedBy(piece.imageCells, placementTable);
         appendRowEntries(piece.softGlyphCells, softGlyphsByRow, piece.lines);
 
         // Handed over with `exchange` rather than `move`: the piece that takes each is decided by

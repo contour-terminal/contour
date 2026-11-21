@@ -48,6 +48,10 @@ class ImageFragmentResolver
     /// @param id An image id from the capture.
     /// @return The image, or null when the capture knows no such id.
     [[nodiscard]] virtual std::shared_ptr<Image const> image(ImageId id) const = 0;
+
+    /// @param id A rasterized image's index from the capture.
+    /// @return The rasterized image every fragment of it shows, or null when the capture knows no such index.
+    [[nodiscard]] virtual std::shared_ptr<RasterizedImage const> rasterized(uint64_t id) const = 0;
 };
 
 /// The resolver for a state that holds no images: it refuses every reference, so a stream that names
@@ -58,6 +62,10 @@ class NoImagesResolver final: public ImageFragmentResolver
     [[nodiscard]] std::shared_ptr<ImageFragment> fragment(uint64_t /*id*/) const override { return nullptr; }
 
     [[nodiscard]] std::shared_ptr<Image const> image(ImageId /*id*/) const override { return nullptr; }
+    [[nodiscard]] std::shared_ptr<RasterizedImage const> rasterized(uint64_t /*id*/) const override
+    {
+        return nullptr;
+    }
 };
 
 } // namespace vtbackend
