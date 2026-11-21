@@ -201,9 +201,10 @@ namespace
         return finished == nullptr || finished->fate == Fate::Kept;
     }
 
-    [[nodiscard]] bool accountsFor(Run const& run, WorktreeEntry const& entry)
+    [[nodiscard]] bool accountsFor(Run const& run, WorktreeEntry const& entry, uint64_t listedMonoMs)
     {
-        return holdsWorktree(run) && (entry.path == run.worktree || entry.branch == run.branch);
+        return (holdsWorktree(run) || finishedSince(run, listedMonoMs))
+               && (entry.path == run.worktree || entry.branch == run.branch);
     }
 
     [[nodiscard]] bool isAgentBranch(std::optional<std::string> const& branch) noexcept
@@ -321,16 +322,23 @@ std::vector<WorktreeEntry> worktreeEntries(std::string_view porcelain)
     return entries;
 }
 
+bool finishedSince(Run const& run, uint64_t listedMonoMs) noexcept
+{
+    // A listing asked for in the very step a run finished in was asked for after it: the host runs it later.
+    return std::holds_alternative<Finished>(run.state) && run.changedMonoMs > listedMonoMs;
+}
+
 std::vector<WorktreeEntry> orphans(std::span<Run const> runs,
                                    std::string_view worktreeRoot,
-                                   std::span<WorktreeEntry const> entries)
+                                   std::span<WorktreeEntry const> entries,
+                                   uint64_t listedMonoMs)
 {
     auto found = std::vector<WorktreeEntry> {};
     for (auto const& entry: entries | std::views::drop(1))
     {
         if (!isAgentBranch(entry.branch) && !isUnder(entry.path, worktreeRoot))
             continue;
-        if (std::ranges::any_of(runs, [&](Run const& run) { return accountsFor(run, entry); }))
+        if (std::ranges::any_of(runs, [&](Run const& run) { return accountsFor(run, entry, listedMonoMs); }))
             continue;
         found.push_back(entry);
     }

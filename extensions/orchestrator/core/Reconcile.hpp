@@ -155,16 +155,25 @@ struct WorktreeEntry
 /// An entry is an orphan when it is on an `agent/…` branch or lies under @p worktreeRoot, and no run
 /// accounts for it by branch or by path, whichever repository name the run was filed under: a repository
 /// configured under two names, or renamed, still accounts for its runs' worktrees. A run accounts for its
-/// entry while it is unfinished, and once finished only if its worktree was kept: an entry still listed for a
-/// run filed as removed is an orphan. The first entry, the main worktree, never is; neither is a worktree
-/// elsewhere on another branch. Orphans are reported, never removed.
+/// entry while it is unfinished, once finished if its worktree was kept, and while the listing predates its
+/// end: a listing asked for before a run removed its worktree still names it. An entry a later listing
+/// still names for a run filed as removed is an orphan. The first entry, the main worktree, never is;
+/// neither is a worktree elsewhere on another branch. Orphans are reported, never removed.
 /// @param runs The runs.
 /// @param worktreeRoot The worktree root; compared with the paths as git prints them.
 /// @param entries worktreeEntries() of the repository.
+/// @param listedMonoMs When @p entries were asked for, in the engine's monotonic milliseconds; 0 when not
+///        known, which no finished run is older than.
 /// @return The orphans, in listing order.
 [[nodiscard]] std::vector<WorktreeEntry> orphans(std::span<Run const> runs,
                                                  std::string_view worktreeRoot,
-                                                 std::span<WorktreeEntry const> entries);
+                                                 std::span<WorktreeEntry const> entries,
+                                                 uint64_t listedMonoMs);
+
+/// @param run A run.
+/// @param listedMonoMs When a worktree listing was asked for (see orphans()).
+/// @return Whether @p run finished after that listing was asked for, which may still name its worktree.
+[[nodiscard]] bool finishedSince(Run const& run, uint64_t listedMonoMs) noexcept;
 
 /// The repository's main checkout.
 /// @param entries worktreeEntries() of the repository.

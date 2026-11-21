@@ -876,7 +876,7 @@ TEST_CASE("an orphan's row is read-only: Enter and Tab show its details", "[orch
 {
     auto fixture = Fixture { orphansWorld(), Narrow };
     CHECK(fixture.dashboard.input("\x1b[F"sv).empty());
-    CHECK(!fixture.screen().contains("by hand   git -C"));
+    CHECK(!fixture.screen().contains("to remove git -C"));
     // No key acts on it: nothing is asked, nothing reaches the engine.
     for (auto const key: { "e"sv, "x"sv, "\x1b[3~"sv })
     {
@@ -885,12 +885,12 @@ TEST_CASE("an orphan's row is read-only: Enter and Tab show its details", "[orch
         CHECK(!fixture.screen().contains("to confirm"));
     }
     CHECK(fixture.dashboard.input("\r"sv).empty());
-    CHECK(fixture.screen().contains("by hand   git -C"));
+    CHECK(fixture.screen().contains("to remove git -C"));
     static_cast<void>(fixture.dashboard.input("\x1b"sv));
     fixture.escapeTimesOut();
-    CHECK(!fixture.screen().contains("by hand   git -C"));
+    CHECK(!fixture.screen().contains("to remove git -C"));
     CHECK(fixture.dashboard.input("\t"sv).empty());
-    CHECK(fixture.screen().contains("by hand   git -C"));
+    CHECK(fixture.screen().contains("to remove git -C"));
 }
 
 TEST_CASE("Enter on an orphan in the Wide band shows its details on the whole width", "[orchestrator][view]")
@@ -904,10 +904,10 @@ TEST_CASE("Enter on an orphan in the Wide band shows its details on the whole wi
     CHECK(fixture.dashboard.input("\r"sv).empty());
     auto const page = fixture.screen();
     CHECK(page.contains(Command));
-    CHECK(!page.contains("ORPHANS"));
+    CHECK(!page.contains("LEFTOVER WORKTREES"));
     static_cast<void>(fixture.dashboard.input("\x1b"sv));
     fixture.escapeTimesOut();
-    CHECK(fixture.screen().contains("ORPHANS"));
+    CHECK(fixture.screen().contains("LEFTOVER WORKTREES"));
 }
 
 TEST_CASE("rows that arrive above the selection keep its heading in view", "[orchestrator][view]")

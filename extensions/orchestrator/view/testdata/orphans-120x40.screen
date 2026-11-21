@@ -1,11 +1,11 @@
 ╭─ Details ────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ /home/u/worktrees/contour/it's a test                                                                                │
 │                                                                                                                      │
-│           no run accounts for this worktree; it is left as it is                                                     │
+│           no agent run uses this worktree any more; the orchestrator never removes it                                │
+│           a run ended without removing it, or it was made by hand under worktree_root                                │
 │ branch    agent/pr-1-20260101-000000                                                                                 │
-│ by hand   git -C /home/u/projects/contour worktree remove '/home/u/worktrees/contour/it'\''s a test'                 │
+│ to remove git -C /home/u/projects/contour worktree remove '/home/u/worktrees/contour/it'\''s a test'                 │
 │           git refuses while it holds changes; its branch stays                                                       │
-│                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │

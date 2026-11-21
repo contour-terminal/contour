@@ -586,8 +586,10 @@ class Engine
         std::vector<WorktreeEntry> worktrees;          ///< Its worktrees, as last listed.
         std::vector<WorktreeEntry> orphans;            ///< Those no run accounts for.
         CheckoutUnknown unknownCheckout =
-            CheckoutUnknown::Pending;      ///< Why @ref worktrees names no main checkout, if they do not.
-        uint32_t worktreeListFailures = 0; ///< The worktree listings in a row that failed.
+            CheckoutUnknown::Pending;       ///< Why @ref worktrees names no main checkout, if they do not.
+        uint32_t worktreeListFailures = 0;  ///< The worktree listings in a row that failed.
+        uint64_t worktreesAskedMonoMs = 0;  ///< When the listing in flight was asked for.
+        uint64_t worktreesListedMonoMs = 0; ///< When @ref worktrees were asked for; 0 when not known.
     };
 
     Engine(std::optional<Config> config, HostInfo host, uint64_t monoMs, uint64_t wallMs);
@@ -632,6 +634,12 @@ class Engine
     void startPoll(std::vector<Effect>& out);
     void issueLists(std::vector<Effect>& out);
     void issueWorktreeLists(std::vector<Effect>& out);
+    /// Lists @p repo's worktrees, unless a listing of them is pending or was answered before this instance
+    /// started; records when it was asked for.
+    void issueWorktreeList(Repo const& repo, std::vector<Effect>& out);
+    /// Lists a repository's worktrees again where a run finished after its listing was asked for, so that
+    /// a worktree the run removed stops being shown before the next poll.
+    void relistAfterFinishedRuns(std::vector<Effect>& out);
     [[nodiscard]] bool isResumable(std::string_view tag) const noexcept;
     [[nodiscard]] bool isForgePoll(std::string_view tag) const noexcept;
     [[nodiscard]] Issued issuePoll(std::string tag,

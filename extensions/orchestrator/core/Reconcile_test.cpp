@@ -844,7 +844,7 @@ TEST_CASE("Reconcile.orphans", "[orchestrator][reconcile]")
     {
         CAPTURE(row.name, row.root);
         auto const runs = orphanRuns(row);
-        auto const found = orchestrator::orphans(runs, row.root, entries);
+        auto const found = orchestrator::orphans(runs, row.root, entries, 0);
         auto paths = std::vector<std::string_view> {};
         for (auto const& orphan: found)
             paths.emplace_back(orphan.path);
@@ -863,10 +863,30 @@ TEST_CASE("Reconcile.orphans.edges", "[orchestrator][reconcile]")
         checkout("/elsewhere/c", "agent/"),
         checkout("/home/u/worktrees", "feature"),
     };
-    auto const found = orchestrator::orphans({}, WorktreeRoot, entries);
+    auto const found = orchestrator::orphans({}, WorktreeRoot, entries, 0);
     REQUIRE(found.size() == 1);
     CHECK(found.front().path == "/elsewhere/a");
-    CHECK(orchestrator::orphans({}, WorktreeRoot, {}).empty());
+    CHECK(orchestrator::orphans({}, WorktreeRoot, {}, 0).empty());
+}
+
+TEST_CASE("Reconcile.orphans.listedBeforeTheRunFinished", "[orchestrator][reconcile]")
+{
+    // A listing asked for before a run removed its worktree still names it: the run accounts for it until a
+    // listing asked for in its finishing step or after.
+    auto const entries = recordedEntries();
+    auto runs =
+        std::vector { makeRun(std::string(RunIdText), stateOf(State::FinishedRemoved), AgentStatus::Done) };
+    runs.front().changedMonoMs = 500;
+    auto const isOrphan = [&](uint64_t listedMonoMs) {
+        return std::ranges::contains(
+            orchestrator::orphans(runs, WorktreeRoot, entries, listedMonoMs), PrPath, &WorktreeEntry::path);
+    };
+
+    CHECK_FALSE(isOrphan(400));
+    CHECK(isOrphan(500));
+    CHECK(isOrphan(600));
+    CHECK(orchestrator::finishedSince(runs.front(), 400));
+    CHECK_FALSE(orchestrator::finishedSince(runs.front(), 500));
 }
 
 // }}}

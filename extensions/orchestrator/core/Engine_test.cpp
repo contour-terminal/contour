@@ -2327,6 +2327,42 @@ TEST_CASE("orphan worktrees are listed", "[orchestrator][engine]")
     CHECK(harness.engine().orphans("contour").size() == 1);
 }
 
+TEST_CASE("a worktree a run just removed is no orphan, and is listed again at once", "[orchestrator][engine]")
+{
+    // The poll's last listing was asked for while the run ran, so it names the worktree the run then removed:
+    // until a listing asked for after the removal arrives, the finished run accounts for it.
+    auto harness = booted();
+    harness.runToRunning(prDispatch());
+    harness.feed(RefreshNow { .monoMs = harness.now() });
+    auto const worktree = agentWorktree(worktreeOf("contour", PrId), std::format("agent/{}", PrId));
+    harness.finish("git-worktree-list", ok(worktreeList(ContourPath, worktree)));
+    REQUIRE(harness.engine().orphans("contour").empty());
+
+    harness.endCleanly(PrId);
+    REQUIRE(finishedOf(harness.run(PrId)));
+    CHECK(harness.engine().orphans("contour").empty());
+    REQUIRE(harness.pending("git-worktree-list"));
+
+    // The fresh listing no longer names it; nothing more is asked.
+    harness.finish("git-worktree-list", ok(worktreeList(ContourPath)));
+    CHECK(harness.engine().orphans("contour").empty());
+    CHECK_FALSE(harness.pending("git-worktree-list"));
+}
+
+TEST_CASE("a worktree a later listing still names for a removed run is an orphan", "[orchestrator][engine]")
+{
+    // A guest fault between storing the removal and the command can leave the worktree behind: a listing
+    // asked for after the run finished shows it.
+    auto harness = booted();
+    harness.runToRunning(prDispatch());
+    harness.endCleanly(PrId);
+    REQUIRE(harness.pending("git-worktree-list"));
+    auto const worktree = agentWorktree(worktreeOf("contour", PrId), std::format("agent/{}", PrId));
+    harness.finish("git-worktree-list", ok(worktreeList(ContourPath, worktree)));
+    CHECK(harness.engine().orphans("contour").size() == 1);
+    CHECK_FALSE(harness.pending("git-worktree-list"));
+}
+
 TEST_CASE("orphans are not problem lines", "[orchestrator][engine]")
 {
     // The dashboard lists them in a section of their own; a problem line as well would show each twice.

@@ -223,7 +223,8 @@ void Engine::refreshOrphans()
     {
         auto found = repo.worktrees.empty() || !_config
                          ? std::vector<WorktreeEntry> {}
-                         : orchestrator::orphans(_runs, _config->worktreeRoot(), repo.worktrees);
+                         : orchestrator::orphans(
+                               _runs, _config->worktreeRoot(), repo.worktrees, repo.worktreesListedMonoMs);
         // The dashboard lists them: a change is drawn.
         if (found != repo.orphans)
         {
@@ -378,10 +379,34 @@ void Engine::issueWorktreeLists(std::vector<Effect>& out)
 {
     // The worktree lists need no forge: cleanup works while `gh` is logged out.
     for (auto const& repo: _config->repos())
+        issueWorktreeList(repo, out);
+}
+
+void Engine::issueWorktreeList(Repo const& repo, std::vector<Effect>& out)
+{
+    auto tag = std::format("{}{}/{}", PollTagPrefix, repo.name, WorktreesList);
+    if (isPending(tag) || std::ranges::contains(_answeredAtStart, tag))
+        return;
+    if (issuePoll(std::move(tag), WorktreeListCommand, {}, repo.path, out) == Issued::Yes)
+        if (auto* const state = findRepoState(repo.name))
+            state->worktreesAskedMonoMs = _monoMs;
+}
+
+void Engine::relistAfterFinishedRuns(std::vector<Effect>& out)
+{
+    if (!_config)
+        return;
+    for (auto const& repo: _config->repos())
     {
-        auto tag = std::format("{}{}/{}", PollTagPrefix, repo.name, WorktreesList);
-        if (!isPending(tag) && !std::ranges::contains(_answeredAtStart, tag))
-            static_cast<void>(issuePoll(std::move(tag), WorktreeListCommand, {}, repo.path, out));
+        auto const* const state = findRepoState(repo.name);
+        // A listing that keeps failing is asked for again by the poll, not on every step.
+        if (state == nullptr || state->worktreeListFailures != 0)
+            continue;
+        auto const isStale = [&](Run const& run) {
+            return run.repo == repo.name && finishedSince(run, state->worktreesListedMonoMs);
+        };
+        if (std::ranges::any_of(_runs, isStale))
+            issueWorktreeList(repo, out);
     }
 }
 
@@ -530,6 +555,7 @@ void Engine::onPollResult(std::string_view tag, ProcessOutcome const& outcome, s
         if (ok)
         {
             state->worktrees = worktreeEntries(outcome.stdoutText);
+            state->worktreesListedMonoMs = state->worktreesAskedMonoMs;
             state->worktreeListFailures = 0;
         }
         else

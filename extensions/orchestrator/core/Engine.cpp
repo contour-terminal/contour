@@ -720,6 +720,7 @@ bool Engine::isPending(std::string_view tag) const noexcept
 
 void Engine::endStep(std::vector<Effect>& out, uint64_t revision)
 {
+    relistAfterFinishedRuns(out);
     drainQueue(out);
     forgetSettledPaneOpenings();
     refreshOrphans();

@@ -380,7 +380,7 @@ TEST_CASE("orphans have their own section", "[orchestrator][view]")
     auto const engine = bootEngine(orphansWorld());
     REQUIRE(engine.orphans("contour").size() == 3);
     auto const rows = buildRows(engine, StartMonoMs);
-    CHECK(textsOf(rows, RowKind::Heading).back() == "ORPHANS");
+    CHECK(textsOf(rows, RowKind::Heading).back() == "LEFTOVER WORKTREES");
     CHECK(rows.back().kind == RowKind::Orphan);
     CHECK(std::ranges::count(rows, RowKind::Orphan, &Row::kind) == 3);
 
@@ -407,7 +407,7 @@ TEST_CASE("orphans have their own section", "[orchestrator][view]")
     CHECK(shellWords(command->value) == argv);
     // An untrusted path is cut to its cells, never wrapped.
     CHECK(command->fit == DetailFit::Cut);
-    CHECK(command->label == "by hand");
+    CHECK(command->label == "to remove");
 
     auto const* const detached = rowOfOrphan(rows, DetachedOrphan);
     REQUIRE(detached != nullptr);
@@ -444,7 +444,7 @@ TEST_CASE("no orphan, no section", "[orchestrator][view]")
     auto const engine = bootEngine({});
     REQUIRE(engine.orphans("contour").empty());
     auto const rows = buildRows(engine, StartMonoMs);
-    CHECK(!std::ranges::contains(textsOf(rows, RowKind::Heading), "ORPHANS"));
+    CHECK(!std::ranges::contains(textsOf(rows, RowKind::Heading), "LEFTOVER WORKTREES"));
     CHECK(std::ranges::none_of(rows, [](Row const& row) { return row.kind == RowKind::Orphan; }));
 }
 

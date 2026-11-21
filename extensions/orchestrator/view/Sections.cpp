@@ -508,18 +508,24 @@ namespace
     {
         auto const isDetached = !orphan.branch;
         auto const branch = isDetached ? std::string { "detached" } : clean(*orphan.branch);
-        // The path is the title; what to do about it comes first, so that a short panel still shows it.
+        // The path is the title; what it is and what to do about it come first, so that a short panel still
+        // shows them.
         auto details = std::vector<DetailLine> {
             DetailLine { .label = "",
-                         .value = "no run accounts for this worktree; it is left as it is",
+                         .value =
+                             "no agent run uses this worktree any more; the orchestrator never removes it",
                          .role = Role::Warning },
+            DetailLine { .label = "",
+                         .value =
+                             "a run ended without removing it, or it was made by hand under worktree_root",
+                         .role = Role::Dim },
             DetailLine { .label = "branch", .value = branch, .fit = DetailFit::Cut },
         };
         if (auto command = removalCommand(lists.engine->mainCheckoutOf(repo), orphan))
             details.push_back(
-                DetailLine { .label = "by hand", .value = std::move(*command), .fit = DetailFit::Cut });
+                DetailLine { .label = "to remove", .value = std::move(*command), .fit = DetailFit::Cut });
         else
-            details.push_back(DetailLine { .label = "by hand",
+            details.push_back(DetailLine { .label = "to remove",
                                            .value = "its path holds characters that cannot be shown; "
                                                     "git worktree list names it",
                                            .role = Role::Warning });
@@ -663,7 +669,7 @@ std::vector<Row> buildRows(Engine const& engine, uint64_t nowMonoMs)
         for (auto const& orphan: engine.orphans(repo))
             orphans.push_back(orphanRow(lists, repo, orphan));
     if (!orphans.empty())
-        appendSection(rows, "ORPHANS", {}, std::move(orphans));
+        appendSection(rows, "LEFTOVER WORKTREES", {}, std::move(orphans));
     return rows;
 }
 
