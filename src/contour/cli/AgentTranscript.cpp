@@ -3,10 +3,6 @@
 #include <contour/cli/AgentTranscriptJson.hpp>
 #include <contour/cli/ExitStatus.hpp>
 
-#include <vtpty/PathContainment.hpp>
-
-#include <core/Utf8Path.hpp>
-
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -29,8 +25,11 @@ namespace contour::cli
 
 namespace
 {
-    using detail::CwdField;
+    using detail::Binding;
+    using detail::LineExtent;
     using detail::LineFields;
+    using detail::LogLine;
+    using detail::LookupFailure;
     using detail::TypeField;
     using detail::WireEntry;
     using detail::WirePage;
@@ -152,78 +151,6 @@ namespace
     {
         return std::ranges::contains(EntryRows, type, &EntryRow::type);
     }
-
-    /// Whether a line was held whole or cut at MaxLogLineBytes.
-    enum class LineExtent : uint8_t
-    {
-        Whole = 0,
-        Cut,
-    };
-
-    struct LogLine
-    {
-        std::string_view text;
-        LineExtent extent = LineExtent::Whole;
-    };
-
-    /// Reads a log one newline-terminated line at a time, holding at most MaxLogLineBytes of a line; the rest
-    /// of a longer one is read through and discarded. A last line without its newline is never returned: it
-    /// is still being written.
-    class LineReader
-    {
-      public:
-        explicit LineReader(std::istream& in): _in { in }, _chunk(ChunkBytes) {}
-
-        [[nodiscard]] std::optional<LogLine> next()
-        {
-            _line.clear();
-            auto extent = LineExtent::Whole;
-            while (fill())
-            {
-                auto const available = std::string_view { _chunk.data() + _begin, _end - _begin };
-                auto const newline = available.find('\n');
-                auto const taken = available.substr(0, newline);
-                if (extent == LineExtent::Whole)
-                {
-                    auto const room = MaxLogLineBytes - _line.size();
-                    _line.append(taken.substr(0, room));
-                    if (taken.size() > room)
-                        extent = LineExtent::Cut;
-                }
-                _begin += taken.size();
-                if (newline != std::string_view::npos)
-                {
-                    ++_begin;
-                    return LogLine { .text = _line, .extent = extent };
-                }
-            }
-            return std::nullopt;
-        }
-
-        /// @return Whether reading stopped on an error rather than at the end.
-        [[nodiscard]] bool failed() const { return _in.bad(); }
-
-      private:
-        static constexpr std::size_t ChunkBytes = std::size_t { 64 } * 1024;
-
-        [[nodiscard]] bool fill()
-        {
-            if (_begin < _end)
-                return true;
-            if (!_in.good())
-                return false;
-            _in.read(_chunk.data(), static_cast<std::streamsize>(_chunk.size()));
-            _begin = 0;
-            _end = static_cast<std::size_t>(_in.gcount());
-            return _end > 0;
-        }
-
-        std::istream& _in;
-        std::vector<char> _chunk;
-        std::size_t _begin = 0;
-        std::size_t _end = 0;
-        std::string _line;
-    };
 
     // {{{ the shapes read from a line
 
@@ -479,147 +406,10 @@ namespace
         std::vector<TranscriptEntry> _entries;
     };
 
-    /// Where a log's entries were written, relative to the run's directory.
-    enum class Binding : uint8_t
-    {
-        NoDirectory = 0, ///< No entry carries a `cwd`: nothing ties the log to the run.
-        Beneath,         ///< Every `cwd` lies at or beneath the run's directory, and one entry carries one.
-        Outside,         ///< An entry was written outside it; the read stopped there.
-    };
-
-    /// A log read once: its page, and whether it is the run's.
-    struct Scan
-    {
-        TranscriptPage page;
-        Binding binding = Binding::NoDirectory;
-    };
-
-    /// @return Whether @p line names a directory, and where it lies against @p root. A cut line or one that
-    ///         does not parse names none.
-    [[nodiscard]] std::optional<Binding> bindingOf(LogLine const& line, std::filesystem::path const& root)
-    {
-        auto fields = CwdField {};
-        if (line.extent == LineExtent::Cut || glz::read<LineReadOptions>(fields, line.text) || !fields.cwd)
-            return std::nullopt;
-        auto const cwd = core::pathFromUtf8(*fields.cwd);
-        return cwd && vtpty::isAtOrBeneath(*cwd, root, vtpty::NativePathCase) ? Binding::Beneath
-                                                                              : Binding::Outside;
-    }
-
-    /// Reads the log in one pass: it keeps the requested page's entries and checks every entry's `cwd`
-    /// against the run's directory as it goes, stopping at the first written outside it. The page is not
-    /// checked against the count.
-    /// @param root The run's directory.
-    [[nodiscard]] std::expected<Scan, TranscriptError> scanTranscript(std::istream& log,
-                                                                      uint32_t page,
-                                                                      std::filesystem::path const& root)
-    {
-        auto reader = LineReader { log };
-        auto pageReader = PageReader { page };
-        auto binding = Binding::NoDirectory;
-        while (auto const line = reader.next())
-        {
-            if (auto const lineBinding = bindingOf(*line, root))
-                binding = *lineBinding;
-            if (binding == Binding::Outside)
-                break;
-            pageReader.read(*line);
-        }
-        if (reader.failed())
-            return std::unexpected(TranscriptError::Unreadable);
-        return Scan { .page = std::move(pageReader).finish(page), .binding = binding };
-    }
-
     [[nodiscard]] bool isInRange(TranscriptPage const& page) noexcept
     {
         return page.page >= 1 && page.page <= page.pages;
     }
-
-    // {{{ finding the log
-    /// Why no log was found, with the paths a message names.
-    struct LookupFailure
-    {
-        TranscriptError error = TranscriptError::NoLog;
-        std::filesystem::path directory; ///< The projects directory searched.
-        std::vector<std::filesystem::path> logs;
-    };
-
-    [[nodiscard]] std::optional<std::filesystem::path> pathOf(std::optional<std::string> const& text)
-    {
-        if (!text || text->empty())
-            return std::nullopt;
-        auto path = core::pathFromUtf8(*text);
-        return path ? std::optional { *path } : std::nullopt;
-    }
-
-    /// @return `$CLAUDE_CONFIG_DIR`, else `.claude` in ClaudeHomeVariable: where Claude Code itself looks.
-    [[nodiscard]] std::optional<std::filesystem::path> configDirectory(core::Environment const& env)
-    {
-        if (auto const config = pathOf(env.get("CLAUDE_CONFIG_DIR")))
-            return config;
-        if (auto const home = pathOf(env.get(ClaudeHomeVariable)))
-            return *home / ".claude";
-        return std::nullopt;
-    }
-
-    /// The session's one log, and its requested page, read in the same pass that bound it to the run.
-    struct Located
-    {
-        std::filesystem::path log;
-        TranscriptPage page;
-    };
-
-    /// Opens each candidate log once and reads it once, binding it to the run and keeping its page.
-    /// @param page The page to keep; 0 keeps none.
-    [[nodiscard]] std::expected<Located, LookupFailure> locateSessionLog(TranscriptRequest const& request,
-                                                                         uint32_t page,
-                                                                         core::Environment const& env,
-                                                                         core::platform::FileSystem const& fs,
-                                                                         ISessionLogOpener& opener)
-    {
-        if (!isCanonicalSessionId(request.session))
-            return std::unexpected(
-                LookupFailure { .error = TranscriptError::BadSession, .directory = {}, .logs = {} });
-        auto const config = configDirectory(env);
-        if (!config)
-            return std::unexpected(
-                LookupFailure { .error = TranscriptError::NoConfigDirectory, .directory = {}, .logs = {} });
-        auto const projects = *config / "projects";
-        auto const root = core::pathFromUtf8(request.cwd).value_or(std::filesystem::path {});
-        auto const fileName = std::filesystem::path { request.session + ".jsonl" };
-        auto bound = std::vector<Located> {};
-        for (auto const& entry:
-             fs.listDirectory(projects).value_or(std::vector<core::platform::FileSystem::DirectoryEntry> {}))
-        {
-            if (!entry.isDirectory || entry.isSymlink || opener.isLinkedDirectory(entry.path))
-                continue;
-            auto const candidate = entry.path / fileName;
-            if (!fs.exists(candidate) && !fs.isSymlink(candidate))
-                continue;
-            auto const failure = [&](TranscriptError error) {
-                return std::unexpected(
-                    LookupFailure { .error = error, .directory = projects, .logs = { candidate } });
-            };
-            auto stream = opener.open(candidate);
-            if (!stream)
-                return failure(stream.error());
-            auto scan = scanTranscript(**stream, page, root);
-            if (!scan)
-                return failure(scan.error());
-            if (scan->binding == Binding::Beneath)
-                bound.push_back(Located { .log = candidate, .page = std::move(scan->page) });
-        }
-        if (bound.size() == 1)
-            return std::move(bound.front());
-        auto logs = std::vector<std::filesystem::path> {};
-        for (auto& located: bound)
-            logs.push_back(std::move(located.log));
-        return std::unexpected(
-            LookupFailure { .error = bound.empty() ? TranscriptError::NoLog : TranscriptError::AmbiguousLog,
-                            .directory = projects,
-                            .logs = std::move(logs) });
-    }
-    // }}}
 
     // {{{ printing
 
@@ -732,63 +522,6 @@ namespace
     }
     // }}}
 
-    /// How a refusal exits.
-    [[nodiscard]] ExitStatus statusOf(TranscriptError error) noexcept
-    {
-        switch (error)
-        {
-            case TranscriptError::BadSession:
-            case TranscriptError::UnsupportedFormat: return ExitStatus::BadUsage;
-            case TranscriptError::NoLog:
-            case TranscriptError::PageOutOfRange: return ExitStatus::TargetNotFound;
-            case TranscriptError::NoConfigDirectory:
-            case TranscriptError::AmbiguousLog:
-            case TranscriptError::NotRegular:
-            case TranscriptError::Unreadable: return ExitStatus::Failed;
-        }
-        return ExitStatus::Failed;
-    }
-
-    /// @return @p path as a message names it: with the platform's own separator throughout, whatever spelling
-    ///         the file system's listing handed back, and sanitised.
-    [[nodiscard]] std::string printable(std::filesystem::path path)
-    {
-        return vthost::control::sanitizeStatusText(core::pathToUtf8(path.make_preferred()),
-                                                   MaxTranscriptEntryBytes);
-    }
-
-    /// @return The one line a lookup failure prints.
-    [[nodiscard]] std::string messageOf(LookupFailure const& failure, TranscriptRequest const& request)
-    {
-        auto const firstLog = failure.logs.empty() ? std::string {} : printable(failure.logs.front());
-        switch (failure.error)
-        {
-            case TranscriptError::BadSession:
-                return std::format("not a session id: {}",
-                                   vthost::control::sanitizeStatusText(request.session));
-            case TranscriptError::NoConfigDirectory:
-                return std::format(
-                    "no Claude Code configuration directory: none of CLAUDE_CONFIG_DIR and {} is set",
-                    ClaudeHomeVariable);
-            case TranscriptError::NoLog:
-                return std::format("no session log for {} in {} under {}",
-                                   request.session,
-                                   vthost::control::sanitizeStatusText(request.cwd, MaxTranscriptEntryBytes),
-                                   printable(failure.directory));
-            case TranscriptError::AmbiguousLog:
-                return std::format("two session logs for {} in {}: {}, {}",
-                                   request.session,
-                                   vthost::control::sanitizeStatusText(request.cwd, MaxTranscriptEntryBytes),
-                                   firstLog,
-                                   failure.logs.size() > 1 ? printable(failure.logs[1]) : std::string {});
-            case TranscriptError::NotRegular: return std::format("{} is not a regular file", firstLog);
-            case TranscriptError::Unreadable: return std::format("{}: cannot be read", firstLog);
-            case TranscriptError::PageOutOfRange:
-            case TranscriptError::UnsupportedFormat: break;
-        }
-        return {};
-    }
-
     /// @return The page as text or as format-1 JSON, ending in a newline.
     [[nodiscard]] std::string formatPage(TranscriptPage const& page,
                                          TranscriptRequest const& request,
@@ -802,29 +535,11 @@ namespace
         return {};
     }
 
-    [[nodiscard]] int refuse(std::ostream& err, TranscriptError error, std::string_view message)
-    {
-        err << message << '\n';
-        return exitCode(statusOf(error));
-    }
 } // namespace
 
 std::span<EntryRow const> transcriptEntryRows() noexcept
 {
     return EntryRows;
-}
-
-bool isCanonicalSessionId(std::string_view session) noexcept
-{
-    constexpr auto Shape = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"sv;
-    if (session.size() != Shape.size())
-        return false;
-    return std::ranges::all_of(std::views::iota(std::size_t { 0 }, Shape.size()), [&](std::size_t index) {
-        auto const c = session[index];
-        if (Shape[index] == '-')
-            return c == '-';
-        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
-    });
 }
 
 int runAgentTranscript(TranscriptRequest const& request,
@@ -836,20 +551,28 @@ int runAgentTranscript(TranscriptRequest const& request,
                        std::ostream& err)
 {
     if (request.format != TranscriptFormat)
-        return refuse(err,
-                      TranscriptError::UnsupportedFormat,
-                      std::format("unsupported transcript format {}; this contour prints {}",
-                                  request.format,
-                                  TranscriptFormat));
+        return detail::refuse(err,
+                              TranscriptError::UnsupportedFormat,
+                              std::format("unsupported transcript format {}; this contour prints {}",
+                                          request.format,
+                                          TranscriptFormat));
     // One open and one pass: the read that binds the log to the run is the one that keeps its page.
-    auto const located = locateSessionLog(request, request.page, env, fs, opener);
+    auto pages = std::vector<TranscriptPage> {};
+    auto const scan = [&](std::istream& log, std::filesystem::path const& root) {
+        auto reader = PageReader { request.page };
+        auto binding = detail::scanBound(log, root, [&](LogLine const& line) { reader.read(line); });
+        pages.push_back(std::move(reader).finish(request.page));
+        return binding;
+    };
+    auto const query = detail::SessionLogQuery { .session = request.session, .cwd = request.cwd };
+    auto const located = detail::locateSessionLog(query, env, fs, opener, scan);
     if (!located)
-        return refuse(err, located.error().error, messageOf(located.error(), request));
-    auto const& page = located->page;
+        return detail::refuse(err, located.error().error, detail::lookupMessage(located.error(), query));
+    auto const& page = pages[located->candidate];
     if (!isInRange(page))
-        return refuse(err,
-                      TranscriptError::PageOutOfRange,
-                      std::format("page {} of {} does not exist", request.page, page.pages));
+        return detail::refuse(err,
+                              TranscriptError::PageOutOfRange,
+                              std::format("page {} of {} does not exist", request.page, page.pages));
     out << formatPage(page, request, localTime);
     return exitCode(ExitStatus::Ok);
 }

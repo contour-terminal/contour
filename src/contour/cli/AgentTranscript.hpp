@@ -11,6 +11,8 @@
 /// bounded line at a time. A table, transcriptEntryRows(), decides what each line is; a line no row names is
 /// counted, never fatal, so that a log from a newer Claude Code degrades to a count.
 
+#include <contour/cli/AgentSessionLog.hpp>
+
 #include <vtbackend/screen/LocalTime.hpp>
 
 #include <core/Environment.hpp>
@@ -41,20 +43,8 @@ inline constexpr std::size_t MaxTranscriptEntryBytes = 2048;
 /// The most bytes of a time or a version kept.
 inline constexpr std::size_t MaxTranscriptFieldBytes = 40;
 
-/// The most bytes of one log line held in memory; the rest of a longer line is discarded unread.
-inline constexpr std::size_t MaxLogLineBytes = std::size_t { 1024 } * 1024;
-
 /// The output format this contour prints; another one asked for is refused.
 inline constexpr uint32_t TranscriptFormat = 1;
-
-/// The variable naming the home Claude Code keeps `.claude` in, as Node's `os.homedir()` reads it:
-/// `%USERPROFILE%` on Windows, where `$HOME` (as Git Bash or MSYS2 set it) is not looked at, `$HOME`
-/// elsewhere.
-#ifdef _WIN32
-inline constexpr std::string_view ClaudeHomeVariable = "USERPROFILE";
-#else
-inline constexpr std::string_view ClaudeHomeVariable = "HOME";
-#endif
 
 /// What a shown entry is.
 enum class TranscriptEntryKind : uint8_t
@@ -86,48 +76,6 @@ struct EntryRow
 
 /// @return The table of known log lines and message blocks; a pair no row names is not understood.
 [[nodiscard]] std::span<EntryRow const> transcriptEntryRows() noexcept;
-
-/// Why no page could be printed.
-enum class TranscriptError : uint8_t
-{
-    NoConfigDirectory = 0, ///< Neither $CLAUDE_CONFIG_DIR nor ClaudeHomeVariable is set.
-    BadSession,            ///< The session is not a canonical (lower-case) UUID.
-    NoLog,                 ///< No log of that session was written in the run's directory.
-    AmbiguousLog,          ///< Two logs of that session were.
-    NotRegular,            ///< The log is a link, a FIFO, a directory or a device.
-    Unreadable,            ///< The log could not be opened or read.
-    PageOutOfRange,        ///< Page 0, or a page past the last.
-    UnsupportedFormat,     ///< An output format this contour does not print.
-};
-
-/// Opens a session log without following a link and without blocking; a regular file only. Also tells a
-/// projects directory that is a link (a symbolic link, or on Windows a junction) from a real one.
-class ISessionLogOpener
-{
-  public:
-    ISessionLogOpener() = default;
-    virtual ~ISessionLogOpener() = default;
-    ISessionLogOpener(ISessionLogOpener const&) = delete;
-    ISessionLogOpener& operator=(ISessionLogOpener const&) = delete;
-    ISessionLogOpener(ISessionLogOpener&&) = delete;
-    ISessionLogOpener& operator=(ISessionLogOpener&&) = delete;
-
-    /// @param log The log's path.
-    /// @return A stream of its bytes; NotRegular for a link or anything but a regular file, Unreadable when
-    /// it
-    ///         cannot be opened.
-    [[nodiscard]] virtual std::expected<std::unique_ptr<std::istream>, TranscriptError> open(
-        std::filesystem::path const& log) = 0;
-
-    /// @param directory A directory in Claude Code's projects directory.
-    /// @return Whether it is a link to elsewhere -- a symbolic link, or a junction or other reparse point on
-    ///         Windows -- whose logs are not looked at.
-    [[nodiscard]] virtual bool isLinkedDirectory(std::filesystem::path const& directory) = 0;
-};
-
-/// @return The opener of the real file system (`O_NOFOLLOW|O_NONBLOCK` + `fstat`; on Windows a reparse point
-///         is opened as itself and must be a disk file).
-[[nodiscard]] std::unique_ptr<ISessionLogOpener> makeNativeSessionLogOpener();
 
 /// One shown entry, sanitised.
 struct TranscriptEntry
@@ -163,10 +111,6 @@ struct TranscriptRequest
     uint32_t format = TranscriptFormat; ///< The output format asked for.
     TranscriptOutput output = TranscriptOutput::Text; ///< How to print it.
 };
-
-/// @param session A session id as given.
-/// @return Whether it is a canonical UUID: 8-4-4-4-12 lower-case hexadecimal digits.
-[[nodiscard]] bool isCanonicalSessionId(std::string_view session) noexcept;
 
 /// Runs `contour agent transcript`: finds the session's log, `<config>/projects/*/<session>.jsonl` whose
 /// entries carry a `cwd` and were all written at or beneath the request's directory, reads its page in the

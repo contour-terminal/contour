@@ -26,12 +26,6 @@ struct TypeField
     std::string type;
 };
 
-/// The binding read: the directory an entry was written in.
-struct CwdField
-{
-    std::optional<std::string> cwd;
-};
-
 struct MessageFields
 {
     std::optional<glz::generic> content;

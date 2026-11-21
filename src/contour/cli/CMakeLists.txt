@@ -42,6 +42,7 @@ add_library(contour_cli STATIC
     AgentIntegrations.cpp AgentIntegrations.hpp
     AgentReport.cpp AgentReport.hpp
     AgentSkill.cpp AgentSkill.hpp
+    AgentSessionLog.cpp AgentSessionLog.hpp
     AgentTranscript.cpp AgentTranscript.hpp AgentTranscriptJson.hpp
     BackgroundExecutor.cpp BackgroundExecutor.hpp
     CaptureScreen.cpp CaptureScreen.hpp
