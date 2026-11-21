@@ -318,7 +318,8 @@ Terminal::Terminal(Events& eventListener,
                    SemanticBlockTokenSource sessionTokens,
                    std::optional<LinkDetectionServices> linkServices,
                    std::optional<StatusLineExtensionServices> extensionServices,
-                   std::optional<GitHeadServices> gitServices):
+                   std::optional<GitHeadServices> gitServices,
+                   ImageDecoder imageDecoder):
     _eventListener { eventListener },
     // HOME, or Windows' USERPROFILE, when the composition root names none.
     _homeDirectory { !factorySettings.homeDirectory.empty()
@@ -386,6 +387,7 @@ Terminal::Terminal(Events& eventListener,
     _sixelColorPalette { std::make_shared<SixelColorPalette>(_maxSixelColorRegisters,
                                                              _maxSixelColorRegisters) },
     _imagePool { [this](Image const* image) { discardImage(*image); } },
+    _imageDecoder { std::move(imageDecoder) },
     _hyperlinks { .cache = HyperlinkCache { _settings.hyperlinkCacheCapacity } },
     _sequenceBuilder { ModeDependantSequenceHandler { *this }, TerminalInstructionCounter { *this } },
     _parser { std::ref(_sequenceBuilder), _settings.parserBulkScan },

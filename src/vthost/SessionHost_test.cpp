@@ -37,6 +37,7 @@
 #include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
@@ -6095,4 +6096,60 @@ TEST_CASE("a start directory that is no directory here names no workspace", "[vt
     REQUIRE(workspace != nullptr);
     CHECK(h.seen.back().workingDirectory.empty());
     CHECK(nameOfWorkspace(h.host, workspace->id()).empty());
+}
+namespace
+{
+/// The eight bytes every PNG file starts with, and some more: what the fake decoder below stands a PNG with.
+constexpr auto FakePng = std::string_view { "\x89PNG\r\n\x1a\nIHDR" };
+
+/// A decoder that takes any PNG for one opaque white pixel, and counts its calls.
+struct OnePixelDecoder
+{
+    std::shared_ptr<int> calls = std::make_shared<int>(0);
+
+    [[nodiscard]] vtbackend::ImageDecoder decoder() const
+    {
+        return [calls = calls](vtbackend::ImageFormat format,
+                               std::span<uint8_t const> /*data*/,
+                               vtbackend::ImageSize& size) -> std::optional<vtbackend::Image::Data> {
+            ++*calls;
+            if (format != vtbackend::ImageFormat::PNG)
+                return std::nullopt;
+            size = vtbackend::ImageSize { vtbackend::Width(1), vtbackend::Height(1) };
+            return vtbackend::Image::Data { 255, 255, 255, 255 };
+        };
+    }
+};
+} // namespace
+
+TEST_CASE("a hosted session decodes PNG images with the host's decoder", "[vthost][host][image]")
+{
+    // vthost decodes no file format: the daemon's composition root hands its sessions the GUI build's
+    // decoder. Without one, a PNG is refused with EINVAL, as every PNG sent to a daemon session was.
+    auto const decoder = OnePixelDecoder {};
+    auto const given = GENERATE(true, false);
+    auto config = vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                              .imageDecoder = given ? decoder.decoder() : vtbackend::ImageDecoder {} };
+    auto const backend = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *backend };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              std::move(config) };
+
+    REQUIRE(host.createTab() != nullptr);
+    auto const session = host.model().workspace(host.workspaceId())->activeTab()->rootPane()->session();
+    auto* terminal = host.terminal(session);
+    REQUIRE(terminal != nullptr);
+    auto& mock = dynamic_cast<vtpty::MockPty&>(dynamic_cast<vthost::TappingPty&>(terminal->device()).inner());
+
+    using namespace std::string_view_literals;
+    mock.appendStdOutBuffer(std::format("\033_Ga=t,i=5,f=100;{}\033\\", core::base64::encode(FakePng)));
+    REQUIRE(terminal->processInputOnce());
+    CHECK(terminal->peekInput()
+          == (given ? "\033_Gi=5;OK\033\\"sv : "\033_Gi=5;EINVAL:could not decode image\033\\"sv));
+    CHECK(*decoder.calls == (given ? 1 : 0));
 }

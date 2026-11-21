@@ -24,6 +24,7 @@
 #include <contour/display/ContentScale.hpp>
 #include <contour/display/FirstFrameWatchdog.hpp>
 #include <contour/display/GpuInventory.hpp>
+#include <contour/display/ImageDecoding.hpp>
 #include <contour/display/LatencyProbeDriver.hpp>
 #ifdef CONTOUR_WITH_GPU_SELECTION
     #include <contour/display/GraphicsDeviceSelector.hpp>
@@ -515,7 +516,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::unique_ptr<remote::IWorkspaceLister> startupLister,
                              std::unique_ptr<vthost::IGitStatusProbe> workspaceGitProbe,
                              platform::ApplicationReadiness::State applicationAtStart):
-    ContourApp { env },
+    ContourApp { env, display::decodeImage },
     _startupTimeline { core::platform::defaultSteadyClock(), processStart },
     _exitEventLoop { exitEventLoop ? std::move(exitEventLoop)
                                    : std::function<void(int)> { exitQtEventLoop } },

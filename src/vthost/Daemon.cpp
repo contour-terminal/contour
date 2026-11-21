@@ -1736,6 +1736,7 @@ int runDaemon(DaemonConfig const& config,
             .startupLayout = config.startupLayout,
             .identity = thisHostIdentity(),
             .workspaceGit = WorkspaceGitServices { .probe = *gitProbe, .executor = gitExecutor },
+            .imageDecoder = config.imageDecoder,
             .extensions = config.extensions ? config.extensions() : nullptr,
             .profiles = config.profiles,
             .profilePtys = config.profiles

@@ -5,6 +5,7 @@
 /// The daemon entry points (`contour daemon` / `contour client`) — kept in
 /// this Qt-free module so the whole serving path never touches the GUI stack.
 
+#include <vtbackend/core/Image.hpp>
 #include <vtbackend/screen/Settings.hpp>
 
 #include <vtpty/Process.hpp>
@@ -185,6 +186,9 @@ struct DaemonConfig
     /// remembered or persisted, since only a size a client reported is. See
     /// SessionHostConfig::defaultCellPixelSize.
     vtpty::ImageSize defaultCellPixelSize = DefaultCellPixelSize;
+    /// What every hosted session decodes PNG images (kitty `f=100`, GIP) with: vthost is Qt-free and decodes
+    /// no file format itself, so `contour daemon` supplies the GUI build's decoder. None refuses PNG images.
+    vtbackend::ImageDecoder imageDecoder {};
     /// Makes the status-line extensions every hosted session runs; unset for none, which constructs, polls
     /// and wakes nothing of them. A factory rather than the extensions themselves, because they post to the
     /// daemon's event loop: runDaemon() makes them once that exists, and its session host destroys them

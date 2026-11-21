@@ -577,8 +577,9 @@ namespace
 } // namespace
 // }}}
 
-ContourApp::ContourApp(core::Environment const& env):
-    App(env, "contour", "Contour Terminal Emulator", CONTOUR_VERSION_STRING, "Apache-2.0")
+ContourApp::ContourApp(core::Environment const& env, vtbackend::ImageDecoder imageDecoder):
+    App(env, "contour", "Contour Terminal Emulator", CONTOUR_VERSION_STRING, "Apache-2.0"),
+    _imageDecoder { std::move(imageDecoder) }
 {
     using Project = core::cli::about::Project;
     core::cli::about::registerProjects(
@@ -1512,6 +1513,7 @@ int ContourApp::serveDaemon(DaemonVerbOptions const& options,
 
     auto config = vthost::DaemonConfig {};
     config.instance = daemonInstanceOf(handover);
+    config.imageDecoder = _imageDecoder;
     // Behind a keeper, the socket the keeper resolved and holds the lock beside.
     config.socketPath = keeper ? keeper->launch.socketPath()
                                : DaemonLaunch::resolve(options, daemonSettings.socket).socketPath();

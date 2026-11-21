@@ -1047,6 +1047,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/SidebarFakes.hpp
             platform/SpeechSynthesizer_test.cpp
             display/ContentScale_test.cpp
+            display/ImageDecoding_test.cpp
             display/InGridVisualsRendering_test.cpp
             session/ExitCode_test.cpp
             session/WindowSwitching_test.cpp

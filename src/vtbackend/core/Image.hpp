@@ -12,6 +12,8 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -145,6 +147,17 @@ class Image: public std::enable_shared_from_this<Image>
     ImageSize _size;
     OnImageRemove _onImageRemove;
 };
+
+/// Decodes an encoded image (e.g. PNG) to RGBA pixel data. A frontend supplies one: the terminal itself
+/// decodes no file format, so a terminal without one refuses PNG transmissions.
+///
+/// Called from whichever thread parses, so it must be safe to call concurrently.
+/// @param format The source image format.
+/// @param data The encoded image data.
+/// @param size [in/out] For PNG: set from the decoded image. For RGB/RGBA: already known.
+/// @return Decoded RGBA pixel data, or std::nullopt on failure.
+using ImageDecoder = std::function<std::optional<Image::Data>(
+    ImageFormat format, std::span<uint8_t const> data, ImageSize& size)>;
 
 /// Image layer determines the z-ordering of the image relative to text.
 ///
