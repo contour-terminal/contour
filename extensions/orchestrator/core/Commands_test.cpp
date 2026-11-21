@@ -1017,6 +1017,18 @@ TEST_CASE("agent-transcript runs in the worktree root", "[orchestrator][commands
         "{session} --cwd {path} --page {page} --format {format} --json"sv));
 }
 
+TEST_CASE("agent-stats runs in the worktree root", "[orchestrator][commands][stats]")
+{
+    auto const* const stats = findCommand("agent-stats");
+    REQUIRE(stats != nullptr);
+    CHECK(stats->root == Root::Worktrees);
+    CHECK(stats->timeout == Timeout::Short);
+    CHECK(stats->environment.empty());
+    CHECK(std::ranges::contains(manifestLines(),
+                                "command agent-stats short @worktrees = contour agent stats --session "
+                                "{session} --cwd {path} --format {format} --json"sv));
+}
+
 TEST_CASE("unmeasured commands are not in the manifest", "[orchestrator][commands][manifest]")
 {
     auto const lines = manifestLines();

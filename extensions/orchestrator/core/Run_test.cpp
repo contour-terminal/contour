@@ -51,6 +51,7 @@ using orchestrator::ItemRef;
 using orchestrator::JiraRef;
 using orchestrator::Lost;
 using orchestrator::MarkSeen;
+using orchestrator::MaxHistory;
 using orchestrator::OpenAgentPane;
 using orchestrator::PaneGone;
 using orchestrator::PaneOpened;
@@ -65,10 +66,14 @@ using orchestrator::Run;
 using orchestrator::RunDeclared;
 using orchestrator::RunEffect;
 using orchestrator::RunFailure;
+using orchestrator::runFromJson;
 using orchestrator::RunInput;
 using orchestrator::Running;
 using orchestrator::RunState;
+using orchestrator::RunStats;
 using orchestrator::Seen;
+using orchestrator::StateChange;
+using orchestrator::StatsCost;
 using orchestrator::StatusReported;
 using orchestrator::StepContext;
 
@@ -2295,3 +2300,66 @@ TEST_CASE("preparation runs what the provider row of the run's forge names", "[o
 }
 
 // }}}
+
+TEST_CASE("a run's statistics and history are stored with it", "[orchestrator][run]")
+{
+    auto run = makeRun(Item::Pr, Done {});
+    run.stats =
+        RunStats { .writtenBy = "2.1.330",
+                   .first = "2026-11-21T10:00:00.000Z",
+                   .last = "2026-11-21T10:02:31.000Z",
+                   .tokens = { .input = 1, .output = 2, .thinking = 0, .cacheWrite = 3, .cacheRead = 4 },
+                   .apiCalls = 5,
+                   .apiErrors = 0,
+                   .prompts = 1,
+                   .activeMs = 6,
+                   .toolCalls = 2,
+                   .toolFailures = 0,
+                   .tools = { { .name = "Bash", .calls = 2 } },
+                   .compactions = 0,
+                   .subagents = {},
+                   .pullRequests = { { .number = 7, .url = "https://github.com/o/r/pull/7" } },
+                   .cost = StatsCost { .usd = 0.5 },
+                   .notUnderstood = 0 };
+    run.history = { { .wallMs = StartedMs, .state = "preparing" },
+                    { .wallMs = StartedMs + 1, .state = "done" } };
+    auto const read = runFromJson(toJson(run));
+    REQUIRE(read.has_value());
+    CHECK(read->stats == run.stats);
+    CHECK(read->history == run.history);
+}
+
+TEST_CASE("a run stored before statistics and history existed still loads", "[orchestrator][run]")
+{
+    auto run = makeRun(Item::Pr, Done {});
+    auto json = toJson(run);
+    REQUIRE_FALSE(json.contains("\"stats\""));
+    REQUIRE_FALSE(json.contains("\"history\""));
+    auto const read = runFromJson(json);
+    REQUIRE(read.has_value());
+    CHECK_FALSE(read->stats.has_value());
+    CHECK(read->history.empty());
+}
+
+TEST_CASE("a run's history records each state it enters, first kept", "[orchestrator][run]")
+{
+    auto run = makeRun(Item::Pr, Preparing { PrepareStep::Fetch });
+    std::ignore = beginEffects(run);
+    REQUIRE(run.history.size() == 1);
+    CHECK(run.history.front() == StateChange { .wallMs = NowMs, .state = "preparing" });
+
+    // A run that keeps changing state keeps its first entry and its latest ones.
+    auto context = knownContext();
+    run.state = Running {};
+    for (auto const index: std::views::iota(0, 100))
+    {
+        context.wallMs = NowMs + static_cast<uint64_t>(index) + 1;
+        std::ignore =
+            advance(run,
+                    StatusReported { .status = index % 2 == 0 ? AgentStatus::Blocked : AgentStatus::Working },
+                    context);
+    }
+    REQUIRE(run.history.size() == MaxHistory);
+    CHECK(run.history.front().state == "preparing");
+    CHECK(run.history.back() == StateChange { .wallMs = NowMs + 100, .state = "running" });
+}

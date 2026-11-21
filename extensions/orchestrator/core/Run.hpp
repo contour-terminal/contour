@@ -13,6 +13,7 @@
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Provider.hpp>
+#include <orchestrator/core/Stats.hpp>
 
 namespace orchestrator
 {
@@ -158,6 +159,19 @@ struct Ending
 /// Where a run stands. A Finished run is a state of the same record, so one store key holds both.
 using RunState = std::variant<Preparing, Running, Blocked, Done, Ending, Finished>;
 
+/// When a run's state changed, as its history keeps it.
+struct StateChange
+{
+    uint64_t wallMs = 0; ///< When, in wall-clock milliseconds.
+    std::string state;   ///< The state it entered, as the store names it: `preparing`, `running`, `blocked`,
+                         ///< `done`, `ending` or `finished`.
+
+    [[nodiscard]] bool operator==(StateChange const&) const = default;
+};
+
+/// The most state changes a run's history keeps: the first, and the latest after it.
+inline constexpr std::size_t MaxHistory = 64;
+
 /// One agent run, from dispatch to the Finished list.
 struct Run
 {
@@ -186,6 +200,8 @@ struct Run
                           ///< that a late reply to an earlier call is told apart from the awaited one.
     uint64_t runningSinceMs = 0; ///< When its tab opened; monotonic, never persisted.
     uint64_t changedMonoMs = 0; ///< When beginRun() or advance() last changed it; monotonic, never persisted.
+    std::optional<RunStats> stats {}; ///< What its agent cost and did, as last read; kept once it finished.
+    std::vector<StateChange> history {}; ///< When its state changed, oldest first; at most MaxHistory.
 };
 
 /// A host call's result: the command exited 0.

@@ -33,6 +33,8 @@ namespace orchestrator
 inline constexpr std::size_t MaxInFlight = 4;
 /// The longest the engine sleeps while a run is unfinished, so that a lost hint is made up for.
 inline constexpr auto ReconcileEvery = std::chrono::milliseconds { std::chrono::seconds { 30 } };
+/// How often a live agent's statistics are read again.
+inline constexpr auto StatsEvery = std::chrono::milliseconds { std::chrono::minutes { 1 } };
 /// How long past its timeout class a command's reply may be late before the engine abandons the call.
 inline constexpr auto CallDeadlineMargin = std::chrono::milliseconds { std::chrono::seconds { 30 } };
 /// The longest a command of the short timeout class runs.
@@ -679,6 +681,13 @@ class Engine
     void issueWaitingTranscript(std::string_view runId, std::vector<Effect>& out);
     static void applyTranscriptOutcome(TranscriptView& view, ProcessOutcome const& outcome);
     void onTranscriptResult(std::string_view runId, ProcessOutcome const& outcome, std::vector<Effect>& out);
+    // Defined in EngineStats.cpp: what each run cost and did.
+    /// Reads the statistics of each live agent every StatsEvery, and once more of a run that finished.
+    void readDueStats(std::vector<Effect>& out);
+    /// @return When the next live agent's statistics are due; std::nullopt when none is.
+    [[nodiscard]] std::optional<uint64_t> nextStatsDue() const;
+    void issueStats(Run const& run, std::vector<Effect>& out);
+    void onStatsResult(std::string_view runId, ProcessOutcome const& outcome, std::vector<Effect>& out);
     [[nodiscard]] TranscriptView* findTranscript(std::string_view tab, std::string_view run) noexcept;
     [[nodiscard]] bool isTranscriptShown(TranscriptView const& view) const noexcept;
     void dropUnshownTranscripts();
@@ -718,6 +727,10 @@ class Engine
         uint32_t page = 1; ///< The page asked for.
     };
     std::map<std::string, TranscriptCall, std::less<>> _transcriptCalls; ///< The page in flight, by run id.
+    /// When each live agent's statistics are read next, by run id; never persisted.
+    std::map<std::string, uint64_t, std::less<>> _statsDueMs;
+    /// The finished runs whose last statistics this instance has asked for, once each.
+    std::vector<std::string> _statsFinalAsked;
     std::vector<InFlightCall> _inFlight;
     std::vector<InFlightCall> _paneOpenings; ///< The tabs asked for and not yet answered for, by run id.
     /// When each run that is done became so, by run id; monotonic, never persisted: after a restart the wait

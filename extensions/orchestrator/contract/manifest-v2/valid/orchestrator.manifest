@@ -41,6 +41,7 @@ command git-clean short @worktrees = git clean -f -- STATUS.md
 command git-worktree-remove long @worktrees = git worktree remove {path}
 command agent-setup-check short @worktrees = contour agent setup --dry-run --json
 command agent-transcript short @worktrees = contour agent transcript --session {session} --cwd {path} --page {page} --format {format} --json
+command agent-stats short @worktrees = contour agent stats --session {session} --cwd {path} --format {format} --json
 command-env-for git-common-dir GIT_CONFIG_COUNT = 3
 command-env-for git-common-dir GIT_CONFIG_KEY_0 = core.fsmonitor
 command-env-for git-common-dir GIT_CONFIG_VALUE_0 = false

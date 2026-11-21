@@ -78,6 +78,9 @@ inline constexpr std::string_view BoardViewTagSuffix = "#board-view";
 /// The suffix of the tag a run's transcript page is read with: `<run>#transcript`.
 inline constexpr std::string_view TranscriptTagSuffix = "#transcript";
 
+/// The suffix of the tag a run's statistics are read with: `<run>#stats`.
+inline constexpr std::string_view StatsTagSuffix = "#stats";
+
 /// What every poll tag starts with.
 inline constexpr std::string_view PollTagPrefix = "poll/";
 

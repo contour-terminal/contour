@@ -228,6 +228,11 @@ namespace
         "contour"sv, "agent"sv,  "transcript"sv, "--session"sv, "{session}"sv, "--cwd"sv,
         "{path}"sv,  "--page"sv, "{page}"sv,     "--format"sv,  "{format}"sv,  "--json"sv,
     };
+    /// As the transcript's: the worktree is compared, not entered, and may be gone.
+    constexpr auto AgentStatsArgv = std::array {
+        "contour"sv, "agent"sv,  "stats"sv,    "--session"sv, "{session}"sv,
+        "--cwd"sv,   "{path}"sv, "--format"sv, "{format}"sv,  "--json"sv,
+    };
 
     // GitLab, through `glab`, and Jira, through Atlassian's `acli`: written from the tools' documentation and
     // Unmeasured until their output is recorded, so none of them is in the manifest yet. `glab` prints the
@@ -345,6 +350,12 @@ namespace
                       .timeout = Timeout::Short,
                       .root = Root::Worktrees,
                       .argv = AgentTranscriptArgv,
+                      .environment = {} },
+        // In the worktree root for the same reason: a run's statistics are read once it finished.
+        CommandDecl { .name = "agent-stats",
+                      .timeout = Timeout::Short,
+                      .root = Root::Worktrees,
+                      .argv = AgentStatsArgv,
                       .environment = {} },
         CommandDecl { .name = "glab-auth",
                       .timeout = Timeout::Short,

@@ -93,6 +93,7 @@ git-worktree-remove (long, in worktrees): git worktree remove {path}
   GIT_OPTIONAL_LOCKS=0
 agent-setup-check (short, in worktrees): contour agent setup --dry-run --json
 agent-transcript (short, in worktrees): contour agent transcript --session {session} --cwd {path} --page {page} --format {format} --json
+agent-stats (short, in worktrees): contour agent stats --session {session} --cwd {path} --format {format} --json
 It may open tabs running: agent (in worktrees): claude --model {model} --session-id {session} {prompt}
   GIT_CONFIG_COUNT=2
   GIT_CONFIG_KEY_0=push.default

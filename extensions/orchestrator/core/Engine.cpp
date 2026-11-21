@@ -68,6 +68,7 @@ namespace
     using engine::detail::judge;
     using engine::detail::later;
     using engine::detail::PollTagPrefix;
+    using engine::detail::StatsTagSuffix;
     using engine::detail::TranscriptTagSuffix;
     using engine::detail::Verdict;
 
@@ -576,6 +577,13 @@ void Engine::onProcessFinished(ProcessFinished const& finished, std::vector<Effe
             out);
         return;
     }
+    if (finished.tag.ends_with(StatsTagSuffix))
+    {
+        onStatsResult(std::string_view(finished.tag).substr(0, finished.tag.size() - StatsTagSuffix.size()),
+                      finished.outcome,
+                      out);
+        return;
+    }
     auto const run = std::ranges::find_if(std::span(_runs).first(_insideCount), [&](Run const& candidate) {
         return callTag(candidate) == finished.tag;
     });
@@ -723,6 +731,7 @@ void Engine::endStep(std::vector<Effect>& out, uint64_t revision)
     trackDoneRuns();
     endDoneRuns(out);
     relistAfterFinishedRuns(out);
+    readDueStats(out);
     drainQueue(out);
     forgetSettledPaneOpenings();
     refreshOrphans();
@@ -805,6 +814,8 @@ std::optional<uint64_t> Engine::nextWake() const
     for (auto const& run: inside)
         if (auto const due = endsWhenDoneAt(run))
             consider(*due);
+    if (auto const due = nextStatsDue())
+        consider(*due);
     for (auto const& call: _inFlight)
         consider(call.deadlineMs);
     for (auto const& opening: _paneOpenings)

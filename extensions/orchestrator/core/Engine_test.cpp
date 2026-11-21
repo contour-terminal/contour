@@ -283,8 +283,12 @@ class Harness
         }
         _last = _engine->step(input);
         accept(_last);
+        answerStatsReads();
         return _last;
     }
+
+    /// Leaves statistics reads pending for the test to answer, instead of failing each at once.
+    void holdStatsReads() { _answersStats = false; }
 
     /// Wakes the engine @p ms after the last wake.
     std::vector<Effect> wake(uint64_t ms)
@@ -308,6 +312,7 @@ class Harness
     }
 
     [[nodiscard]] std::size_t pendingCount() const { return _pending.size(); }
+    [[nodiscard]] std::span<RunCommand const> pendingCommands() const { return _pending; }
 
     /// @return The store as the effects so far left it.
     [[nodiscard]] std::vector<StoredEntry> stored() const
@@ -449,6 +454,22 @@ class Harness
     }
 
   private:
+    /// Fails every pending statistics read, unless holdStatsReads() was called: they change no run, and a
+    /// test about something else should not have to answer them. What they leave behind is carried out but
+    /// not returned: the step that issued them is what the test looks at.
+    void answerStatsReads()
+    {
+        while (_answersStats)
+        {
+            auto const read = std::ranges::find(_pending, "agent-stats"sv, &RunCommand::command);
+            if (read == _pending.end())
+                return;
+            auto const tag = read->tag;
+            _pending.erase(read);
+            accept(_engine->step(ProcessFinished { .tag = tag, .outcome = failed(1, "not in this test") }));
+        }
+    }
+
     [[nodiscard]] static ProcessOutcome answerFor(RunCommand const& command)
     {
         if (command.command == "agent-setup-check")
@@ -574,8 +595,9 @@ class Harness
         CHECK(std::ranges::none_of(_pending,
                                    [&](RunCommand const& other) { return other.tag == command.tag; }));
         CHECK(!_tainted.contains(command.cwd));
-        // A poll or a transcript read changes no run: no stored state awaits it.
-        if (!command.tag.starts_with("poll/") && !command.tag.ends_with("#transcript"))
+        // A poll, a transcript read or a statistics read changes no run: no stored state awaits it.
+        if (!command.tag.starts_with("poll/") && !command.tag.ends_with("#transcript")
+            && !command.tag.ends_with("#stats"))
         {
             checkWriteAhead(command.tag);
             if (command.command == "git-worktree-remove")
@@ -623,6 +645,7 @@ class Harness
     std::map<std::string, uint64_t, std::less<>> _deadlines;
     uint64_t _now = 0;
     uint64_t _wakeAt = 0;
+    bool _answersStats = true; ///< Whether statistics reads are failed at once (holdStatsReads()).
     std::optional<PublishSummary> _lastSummary;
 };
 
@@ -1425,7 +1448,7 @@ TEST_CASE("guest restart mid-dispatch", "[orchestrator][engine]")
         auto const runEffects = [&](std::span<Effect const> effects) {
             auto found = std::vector<std::string> {};
             for (auto const& command: all<RunCommand>(effects))
-                if (!command.tag.starts_with("poll/"))
+                if (!command.tag.starts_with("poll/") && command.command != "agent-stats")
                     found.emplace_back(command.command);
             found.insert(found.end(), countOf<ReadFile>(effects), ".git");
             return found;
@@ -3904,6 +3927,95 @@ TEST_CASE("a jira item dispatches on a new branch named from its key", "[orchest
     CHECK(argument("base") == "origin/master");
     auto const opened = all<OpenPane>(harness.finish("git-worktree-add-branch", ok()));
     CHECK(opened.size() == 1);
+}
+
+// }}}
+
+// {{{ statistics
+
+namespace
+{
+
+[[nodiscard]] std::string statsReport(std::string_view name = "basic.json")
+{
+    return readFixture(FixtureRoot::Contract, std::format("agent-stats/format-1/{}", name));
+}
+
+} // namespace
+
+TEST_CASE("a live agent's statistics are read a minute after it started, then every minute",
+          "[orchestrator][engine][stats]")
+{
+    auto harness = booted();
+    harness.holdStatsReads();
+    harness.runToRunning(prDispatch());
+    CHECK_FALSE(harness.pending("agent-stats"));
+
+    harness.wake(Minute);
+    auto const read = harness.pending("agent-stats");
+    REQUIRE(read);
+    CHECK(argumentOf(*read, "session") == harness.run(PrId)->session);
+    CHECK(argumentOf(*read, "path") == harness.run(PrId)->worktree);
+    CHECK(argumentOf(*read, "format") == "1");
+    auto const answered = harness.finish("agent-stats", ok(statsReport("running.json")));
+    REQUIRE(harness.run(PrId)->stats.has_value());
+    CHECK(harness.run(PrId)->stats->apiCalls == 4);
+    // Stored with the run, so that it outlives the log.
+    REQUIRE(countOf<StoreSet>(answered) == 1);
+    CHECK(all<StoreSet>(answered).front().value.contains(R"("apiCalls":4)"));
+
+    // The same report again stores nothing; the next is a minute later.
+    CHECK_FALSE(harness.pending("agent-stats"));
+    harness.wake(Minute);
+    CHECK(countOf<StoreSet>(harness.finish("agent-stats", ok(statsReport("running.json")))) == 0);
+}
+
+TEST_CASE("a finished run's statistics are read once more, with the cost", "[orchestrator][engine][stats]")
+{
+    auto harness = booted();
+    harness.holdStatsReads();
+    harness.runToRunning(prDispatch());
+    harness.list({ paneOf(PrId) });
+    harness.endCleanly(PrId);
+    REQUIRE(finishedOf(harness.run(PrId)));
+    REQUIRE(harness.pending("agent-stats"));
+    harness.finish("agent-stats", ok(statsReport()));
+    REQUIRE(harness.run(PrId)->stats.has_value());
+    CHECK(harness.run(PrId)->stats->cost.has_value());
+    harness.wake(10 * Minute);
+    CHECK_FALSE(harness.pending("agent-stats"));
+}
+
+TEST_CASE("a report that cannot be read leaves the last one standing", "[orchestrator][engine][stats]")
+{
+    auto harness = booted();
+    harness.holdStatsReads();
+    harness.runToRunning(prDispatch());
+    harness.wake(Minute);
+    harness.finish("agent-stats", ok(statsReport("running.json")));
+    harness.wake(Minute);
+    CHECK(countOf<StoreSet>(harness.finish("agent-stats", failed(2, "no session log for x"))) == 0);
+    harness.wake(Minute);
+    CHECK(countOf<StoreSet>(harness.finish("agent-stats", ok(R"({"format":2})"))) == 0);
+    REQUIRE(harness.run(PrId)->stats.has_value());
+    CHECK(harness.run(PrId)->stats->apiCalls == 4);
+}
+
+TEST_CASE("statistics are read one at a time", "[orchestrator][engine][stats]")
+{
+    auto harness = booted();
+    harness.holdStatsReads();
+    harness.runToRunning(prDispatch());
+    harness.runToRunning(prDispatch(2369), "p2");
+    harness.wake(Minute);
+    auto const reads = [&] {
+        return std::ranges::count(harness.pendingCommands(), "agent-stats"sv, &RunCommand::command);
+    };
+    CHECK(reads() == 1);
+    harness.finish("agent-stats", ok(statsReport("running.json")));
+    CHECK(reads() == 1);
+    harness.finish("agent-stats", ok(statsReport("running.json")));
+    CHECK(reads() == 0);
 }
 
 // }}}

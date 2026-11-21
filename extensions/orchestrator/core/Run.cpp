@@ -641,6 +641,21 @@ namespace
     // }}}
 } // namespace
 
+namespace
+{
+    /// Appends the run's state to its history when it differs from the last one kept; past MaxHistory the
+    /// oldest after the first goes, so that the history still says when the run began.
+    void recordChange(Run& run, StepContext const& context)
+    {
+        auto const state = StateNames[run.state.index()];
+        if (!run.history.empty() && run.history.back().state == state)
+            return;
+        run.history.push_back(StateChange { .wallMs = context.wallMs, .state = std::string { state } });
+        if (run.history.size() > MaxHistory)
+            run.history.erase(run.history.begin() + 1);
+    }
+} // namespace
+
 std::expected<std::vector<RunEffect>, BeginError> beginRun(Run& run, StepContext const& context)
 {
     auto const* const preparing = std::get_if<Preparing>(&run.state);
@@ -649,6 +664,7 @@ std::expected<std::vector<RunEffect>, BeginError> beginRun(Run& run, StepContext
     if (!isStorable(run))
         return std::unexpected { BeginError::NotStorable };
     run.changedMonoMs = context.monoMs;
+    recordChange(run, context);
     return enterPreparation(run,
                             context,
                             Preparing { PrepareStep::Fetch },
@@ -787,7 +803,10 @@ std::vector<RunEffect> advance(Run& run, RunInput const& input, StepContext cons
     };
     auto effects = std::visit(visitor, run.state, input);
     if (!effects.empty())
+    {
         run.changedMonoMs = context.monoMs;
+        recordChange(run, context);
+    }
     return effects;
 }
 
@@ -1130,6 +1149,14 @@ std::string toJson(Run const& run)
                                      .why = run.failure->why };
     json.startedWallMs = run.startedWallMs;
     json.attempt = run.attempt;
+    json.stats = run.stats;
+    if (!run.history.empty())
+    {
+        auto history = std::vector<run::detail::JsonChange> {};
+        for (auto const& change: run.history)
+            history.push_back(run::detail::JsonChange { .wallMs = change.wallMs, .state = change.state });
+        json.history = std::move(history);
+    }
 
     auto text = std::string {};
     if (glz::write_json(json, text))
@@ -1180,7 +1207,16 @@ std::optional<Run> runFromJson(std::string_view text)
         .attempt = json.attempt,
         .runningSinceMs = 0,
         .changedMonoMs = 0,
+        .stats = std::move(json.stats),
+        .history = {},
     };
+    // A change naming no state is left out, and a history longer than kept is cut as recordChange() cuts it.
+    for (auto& change: json.history.value_or(std::vector<run::detail::JsonChange> {}))
+        if (std::ranges::contains(StateNames, change.state))
+            run.history.push_back(StateChange { .wallMs = change.wallMs, .state = std::move(change.state) });
+    if (run.history.size() > MaxHistory)
+        run.history.erase(run.history.begin() + 1,
+                          run.history.end() - static_cast<std::ptrdiff_t>(MaxHistory - 1));
     if (!isStorable(run))
         return std::nullopt;
     return run;

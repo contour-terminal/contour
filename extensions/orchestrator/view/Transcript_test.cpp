@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <iterator>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -123,15 +124,37 @@ std::vector<RunCommand> carryOut(DashboardFixture& fixture,
         else if (std::holds_alternative<HideBoardAction>(action))
             effects = fixture.engine.step(
                 HideBoard { .tab = std::string { DashboardFixture::Tab }, .monoMs = now });
-        for (auto const& effect: effects)
-            if (auto const* const command = std::get_if<RunCommand>(&effect);
-                command != nullptr && command->command == "agent-transcript")
+        // What the answers lead to is followed too: a statistics read, which this test fails at once, may
+        // have held the transcript's back in the queue.
+        while (!effects.empty())
+        {
+            auto next = std::vector<Effect> {};
+            for (auto const& effect: effects)
             {
-                commands.push_back(*command);
-                if (answer)
-                    static_cast<void>(fixture.engine.step(
-                        ProcessFinished { .tag = command->tag, .outcome = *answer, .monoMs = now }));
+                auto const* const command = std::get_if<RunCommand>(&effect);
+                if (command == nullptr)
+                    continue;
+                auto const reply = [&](ProcessOutcome const& outcome) {
+                    std::ranges::move(fixture.engine.step(ProcessFinished {
+                                          .tag = command->tag, .outcome = outcome, .monoMs = now }),
+                                      std::back_inserter(next));
+                };
+                if (command->command == "agent-stats")
+                    reply(ProcessOutcome { .start = StartResult::Started,
+                                           .completion = Completion::Exited,
+                                           .exitCode = 1,
+                                           .extent = OutputExtent::Whole,
+                                           .stdoutText = {},
+                                           .stderrText = "not in this test" });
+                else if (command->command == "agent-transcript")
+                {
+                    commands.push_back(*command);
+                    if (answer)
+                        reply(*answer);
+                }
             }
+            effects = std::move(next);
+        }
     }
     fixture.dashboard.engineChanged();
     return commands;

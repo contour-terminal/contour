@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include <orchestrator/core/Stats.hpp>
+
 /// A run as Run.cpp stores it; nothing else includes this header. Glaze reflects only types with linkage,
 /// so these cannot sit in Run.cpp's anonymous namespace. The keys are the members' names (but for nearTab,
 /// see Run.cpp's glz::meta); a member that only some states have is optional, every other one must be
@@ -28,6 +30,13 @@ struct JsonFinished
     std::vector<std::string> entries;
     std::string seen;
     uint64_t endedWallMs = 0;
+};
+
+/// One change of the run's state.
+struct JsonChange
+{
+    uint64_t wallMs = 0;
+    std::string state;
 };
 
 /// The stored run. Enumerations are stored by name, so that a reordered enumeration cannot change what a
@@ -62,6 +71,8 @@ struct JsonRun
     std::optional<JsonFailure> failure;
     uint64_t startedWallMs = 0;
     uint32_t attempt = 0;
+    std::optional<RunStats> stats; ///< Absent until read, and in a run stored before it existed.
+    std::optional<std::vector<JsonChange>> history; ///< Absent in a run stored before it existed.
 };
 
 } // namespace orchestrator::run::detail
