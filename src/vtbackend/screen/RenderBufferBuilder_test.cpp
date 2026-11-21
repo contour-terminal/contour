@@ -12,6 +12,8 @@
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
 
+#include <libunicode/convert.h>
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
@@ -22,6 +24,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -133,6 +136,46 @@ constexpr auto SearchFocused = RGBColor { 0x12, 0x34, 0x56 };
         painted[unbox<size_t>(cell.position.column)] = mark;
     }
     return painted;
+}
+
+/// The screen row the text @p text starts in column 0 of, batched as a RenderLine or drawn cell by cell.
+[[nodiscard]] std::optional<LineOffset> rowDrawing(RenderBuffer const& buffer, std::u32string_view text)
+{
+    for (auto const& line: buffer.lines)
+        if (line.text.starts_with(text))
+            return line.lineOffset;
+    auto const rowStartingWith = [&](LineOffset row) {
+        for (auto column = ColumnOffset(0); unbox<size_t>(column) < text.size(); ++column)
+        {
+            auto const cell = std::ranges::find(
+                buffer.cells, CellLocation { .line = row, .column = column }, &RenderCell::position);
+            if (cell == buffer.cells.end() || cell->codepoints != text.substr(unbox<size_t>(column), 1))
+                return false;
+        }
+        return true;
+    };
+    for (auto const& cell: buffer.cells)
+        if (cell.position.column == ColumnOffset(0) && rowStartingWith(cell.position.line))
+            return cell.position.line;
+    return std::nullopt;
+}
+
+/// The frame as text, one entry per RenderLine and per row of cells, for a failing check to show.
+[[nodiscard]] std::string describe(RenderBuffer const& buffer)
+{
+    auto out = std::string {};
+    for (auto const& line: buffer.lines)
+        out += std::format("line {}: \"{}\"\n",
+                           line.lineOffset.value,
+                           unicode::convert_to<char>(std::u32string_view(line.text)));
+    auto rows = std::map<int, std::string> {};
+    for (auto const& cell: buffer.cells)
+        rows[unbox<int>(cell.position.line)] +=
+            cell.codepoints.empty() ? std::string(" ")
+                                    : unicode::convert_to<char>(std::u32string_view(cell.codepoints));
+    for (auto const& [row, text]: rows)
+        out += std::format("cells {}: \"{}\"\n", row, text);
+    return out;
 }
 } // namespace
 
@@ -342,6 +385,49 @@ TEST_CASE("RenderBufferBuilder.aTrivialRowWithoutALinkStaysBatched", "[renderbuf
                                [](RenderCell const& cell) { return cell.position.line == LineOffset(0); }));
     CHECK(std::ranges::any_of(buffer.get().lines,
                               [](RenderLine const& line) { return line.lineOffset == LineOffset(0); }));
+}
+
+TEST_CASE("RenderBufferBuilder.aBatchedRowUnderATopStatusLineIsDrawnBelowIt", "[renderbuffer][statusline]")
+{
+    // The status line on top takes the screen's first row, and the page is drawn from the row below it. A
+    // plain row goes out as a RenderLine, a selected row or the cursor's cell by cell -- and both have to
+    // land on the page's rows, or the first row is drawn over the status line and selecting a row moves it
+    // a row down, away from its neighbours.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    mock.terminal.settings().statusDisplayPosition = StatusDisplayPosition::Top;
+    mock.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+    REQUIRE(mock.terminal.pageSize().lines == LineCount(4)); // the status line's row is taken off the page
+    mock.writeToScreen("alpha\r\nbravo\r\ncharlie\r\ndelta");
+
+    auto const isBatched = [](RenderBuffer const& buffer, std::u32string_view text) {
+        return std::ranges::any_of(buffer.lines,
+                                   [&](RenderLine const& line) { return line.text.starts_with(text); });
+    };
+
+    SECTION("plain rows")
+    {
+    }
+    SECTION("a selected row between them")
+    {
+        auto const from = CellLocation { .line = LineOffset(1), .column = ColumnOffset(0) };
+        mock.terminal.setSelector(
+            std::make_unique<LinearSelection>(mock.terminal.selectionHelper(), from, [] {}));
+        (void) mock.terminal.selector()->extend(
+            CellLocation { .line = LineOffset(1), .column = ColumnOffset(9) });
+        REQUIRE(mock.terminal.isSelected(mock.terminal.primaryScreen(), from));
+    }
+
+    auto const buffer = vtbackend::test::renderOf(mock.terminal);
+    INFO(describe(buffer));
+    // Both paths are in this frame: plain rows batched, the cursor's row (and a selected one) per cell.
+    REQUIRE(isBatched(buffer, U"alpha"));
+    REQUIRE_FALSE(isBatched(buffer, U"delta"));
+    CHECK(std::ranges::none_of(buffer.lines,
+                               [](RenderLine const& line) { return line.lineOffset == LineOffset(0); }));
+    CHECK(rowDrawing(buffer, U"alpha") == LineOffset(1));
+    CHECK(rowDrawing(buffer, U"bravo") == LineOffset(2));
+    CHECK(rowDrawing(buffer, U"charlie") == LineOffset(3));
+    CHECK(rowDrawing(buffer, U"delta") == LineOffset(4));
 }
 
 TEST_CASE("RenderBufferBuilder.detachedLine.aLinkKeepsItsRole", "[renderbuffer][links][stickyheader]")
