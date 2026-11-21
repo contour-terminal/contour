@@ -1112,8 +1112,8 @@ void ScreenMirror::applySoftGlyphCells(RemoteScreen const& screen,
             return;
         auto const offset = vtbackend::LineOffset::cast_from(target);
         auto& line = target < 0 ? grid.changingLineAt(offset) : grid.lineAt(offset);
-        // Shifted as the page row it lies on is (@see writeRow).
-        auto const firstColumn = stableId < screen.viewportBase ? vtbackend::ColumnOffset(0) : _origin.column;
+        // Shifted as the row's text was written (@see writeRow), as an image tile is (@see applyImageRow).
+        auto const firstColumn = rowShiftOf(stableId, target);
         for (auto const& [column, entry]: columns)
         {
             auto const at = vtbackend::ColumnOffset::cast_from(column) - firstColumn;

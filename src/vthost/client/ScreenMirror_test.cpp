@@ -605,6 +605,42 @@ TEST_CASE("a picture in a narrower mirror's history stays once, beside its text"
     CHECK(line.storage().imageFragments->contains(5));
 }
 
+TEST_CASE("a soft glyph in a narrower mirror's history stays beside its text", "[vthost][mirror][softfont]")
+{
+    // A 30-column mirror of a 40-column host shows the host's columns 10..39 while the cursor is at the
+    // right edge, so a page row's cells are shifted 10 to the left; a row of the host's history is not. An
+    // update that rewrites a row and scrolls it into the host's history in one go writes its text as a
+    // history row -- and its soft glyph has to land beside that text, at the shift the text was written with.
+    auto bare = BareMirror { BareMirrorShape { .lines = vtbackend::LineCount(5),
+                                               .columns = vtbackend::ColumnCount(30),
+                                               .history = vtbackend::LineCount(50) } };
+    auto screen = vthost::client::RemoteScreen {};
+    auto const snapshot = largeGridSnapshot(screen, { wideRowAt(20, 40, 15, U'x') }, cellAt(19, 39));
+    bare.mirror->apply(screen, snapshot);
+
+    // The host draws a soft glyph at column 15 of row 20 and scrolls twenty-five rows, the cursor staying at
+    // the right edge.
+    auto delta = proto::Delta {};
+    delta.generation = 1;
+    delta.stableViewportBase = 26;
+    delta.stableFloor = 1;
+    delta.cursorLine = 19;
+    delta.cursorColumn = 39;
+    delta.lines.push_back(wideRowAt(20, 40, 15, U'!'));
+    for (auto const id: std::views::iota(21, 46))
+        delta.lines.push_back(wideRowAt(id, 40, 39, U'x'));
+    delta.softGlyphCells = { proto::SoftGlyphCellEntry {
+        .stableId = 20, .column = 15, .font = 1, .position = 0x21 } };
+    screen.apply(delta);
+    bare.mirror->apply(screen, delta);
+
+    auto const& line = bare.terminal->primaryScreen().grid().lineAt(vtbackend::LineOffset(4 - 25));
+    REQUIRE(line.toUtf8().find('!') == 15);
+    REQUIRE(line.storage().softGlyphs);
+    CHECK(line.storage().softGlyphs->size() == 1);
+    CHECK(line.storage().softGlyphs->contains(15));
+}
+
 TEST_CASE("a mirror at least as large as the remote grid is not panned", "[vthost][mirror][viewport]")
 {
     auto bare = BareMirror { BareMirrorShape { .lines = vtbackend::LineCount(25),
