@@ -9049,7 +9049,76 @@ TEST_CASE("an unselected pane's title change reaches the client as a PaneSummary
     auto const summaries = SummaryFixture::summariesOf(client, f.inSecond, skip);
     REQUIRE(summaries.size() == 1);
     CHECK(summaries.front().title == std::optional<std::string> { "building" });
-    CHECK(SummaryFixture::countOf<proto::PaneSummary>(client, f.inFirst) == 0); // a mirrored pane has none
+    // A mirrored pane says its title in its own stream: no summary carries it.
+    CHECK(std::ranges::none_of(SummaryFixture::summariesOf(client, f.inFirst),
+                               [](proto::PaneSummary const& summary) { return summary.title.has_value(); }));
+}
+
+TEST_CASE("every pane's directory reaches the client as a PaneSummary, as its pane header shows it",
+          "[vthost][native][daemon-follow][status][cwd]")
+{
+    // The screen stream carries the OSC 7 URL as reported; the row shows the path it names, of whichever
+    // host, so one source says it for every pane, mirrored or not.
+    auto f = SummaryFixture {};
+    auto& client = f.attachSelecting(f.first);
+    f.settle();
+    auto const skip = client.received.size();
+    auto const directoriesOf = [&](vtworkspace::SessionId session) {
+        auto found = std::vector<std::string> {};
+        for (auto const& summary: SummaryFixture::summariesOf(client, session, skip))
+            if (summary.cwd)
+                found.push_back(*summary.cwd);
+        return found;
+    };
+
+    SECTION("a mirrored pane")
+    {
+        f.flush.h.host.terminal(f.inFirst)->writeToScreen("\033]7;file://other.host/tmp/x%20y\033\\");
+        f.settle();
+        CHECK(directoriesOf(f.inFirst) == std::vector<std::string> { "/tmp/x y" });
+        // Its title it says in its own stream.
+        CHECK(std::ranges::none_of(
+            SummaryFixture::summariesOf(client, f.inFirst, skip),
+            [](proto::PaneSummary const& summary) { return summary.title.has_value(); }));
+    }
+    SECTION("an unselected pane on another host")
+    {
+        f.flush.h.host.terminal(f.inSecond)->writeToScreen("\033]7;file://other.host/srv/app\033\\");
+        f.settle();
+        CHECK(directoriesOf(f.inSecond) == std::vector<std::string> { "/srv/app" });
+    }
+    SECTION("a shell that reports only an OSC 3008 context")
+    {
+        // As systemd's shell integration does, with no OSC 7 at all: the directory shown is the context's.
+        f.flush.h.host.terminal(f.inFirst)->writeToScreen(
+            "\033]3008;start=shell-1;type=shell;cwd=/srv/ctx\033\\");
+        f.settle();
+        CHECK(directoriesOf(f.inFirst) == std::vector<std::string> { "/srv/ctx" });
+    }
+    SECTION("a report that moves nothing is not told again")
+    {
+        auto* const terminal = f.flush.h.host.terminal(f.inSecond);
+        terminal->writeToScreen("\033]7;file:///srv/app\033\\");
+        f.settle();
+        terminal->writeToScreen("\033]7;file:///srv/app\033\\");
+        f.settle();
+        terminal->writeToScreen("\033]7;file:///srv/lib\033\\");
+        f.settle();
+        CHECK(directoriesOf(f.inSecond) == std::vector<std::string> { "/srv/app", "/srv/lib" });
+    }
+}
+
+TEST_CASE("a window that attaches is told a mirrored pane's directory",
+          "[vthost][native][daemon-follow][status][cwd]")
+{
+    auto f = SummaryFixture {};
+    f.flush.h.host.terminal(f.inFirst)->writeToScreen("\033]7;file:///home/user/src\033\\");
+    auto& client = f.attachSelecting(f.first);
+    f.settle();
+    auto const announced = SummaryFixture::summariesOf(client, f.inFirst);
+    REQUIRE(announced.size() == 1);
+    CHECK(announced.front().cwd == std::optional<std::string> { "/home/user/src" });
+    CHECK_FALSE(announced.front().title.has_value()); // its stream says that
 }
 
 TEST_CASE("activity marks are throttled to one per second per session",

@@ -177,6 +177,29 @@ void HostedSession::pollForegroundProcess()
     _terminal.foregroundProcessChanged(_foregroundProcessName);
 }
 
+std::string HostedSession::processDirectory()
+{
+    auto const* const child = process();
+    if (child == nullptr)
+        return {};
+    // "." is the lookup's failure value.
+    auto directory = child->workingDirectory();
+    return directory == "." ? std::string {} : directory;
+}
+
+ShownDirectory HostedSession::shownDirectory()
+{
+    {
+        auto const guard = std::lock_guard { _terminal };
+        if (auto resolved = _terminal.resolveWorkingDirectory(vtbackend::CwdPurpose::Display))
+            return ShownDirectory { .path = std::move(resolved->path),
+                                    .source = ShownDirectorySource::Reported };
+    }
+    auto directory = processDirectory();
+    auto const source = directory.empty() ? ShownDirectorySource::None : ShownDirectorySource::Process;
+    return ShownDirectory { .path = std::move(directory), .source = source };
+}
+
 HostedSession::~HostedSession()
 {
     terminate(TerminationReason::Teardown);
@@ -839,12 +862,17 @@ std::unique_ptr<HostedSession> SessionHost::makeHostedSession(SessionId id,
             postFromPump([this, id, signal = std::move(signal)] {
                 if (!_sessions.contains(id.value))
                     return;
+                // The terminal says the directory may have moved; whether the one shown did, the host says.
+                if (std::holds_alternative<WorkingDirectoryChangedSignal>(signal))
+                {
+                    tellDirectoryIfMoved(id);
+                    return;
+                }
                 for (auto* observer: _streamSubscribers)
                     observer->sessionSignal(id, signal);
-                // A new directory, or a finished command (it may have switched branch or committed), is
-                // when the workspace showing this pane has its git state looked up again.
-                if (std::holds_alternative<WorkingDirectoryChangedSignal>(signal)
-                    || std::holds_alternative<CommandBlockFinishedSignal>(signal))
+                // A finished command (it may have switched branch or committed) is when the workspace showing
+                // this pane has its git state looked up again.
+                if (std::holds_alternative<CommandBlockFinishedSignal>(signal))
                     refreshWorkspaceGitOf(id);
             });
         },
@@ -871,6 +899,8 @@ void SessionHost::installSession(std::unique_ptr<HostedSession> session)
     auto const id = session->id();
     _sessions.emplace(id.value, std::move(session));
     tellStructure(&StructureEvents::sessionCreated, id);
+    // Its directory is the process's until its shell reports one.
+    armForegroundPoll();
 }
 
 void SessionHost::realizeStartupLayout(vtworkspace::WorkspaceId workspace, vtworkspace::Layout const& layout)
@@ -2472,12 +2502,36 @@ std::optional<std::filesystem::path> SessionHost::workingDirectoryOf(SessionId s
             if (auto path = core::pathFromUtf8(resolved->path))
                 return *std::move(path);
     }
-    if (auto const* const child = hosted.process())
-        // "." is the lookup's failure value.
-        if (auto const directory = child->workingDirectory(); !directory.empty() && directory != ".")
-            if (auto path = core::pathFromUtf8(directory))
-                return *std::move(path);
+    if (auto const directory = hosted.processDirectory(); !directory.empty())
+        if (auto path = core::pathFromUtf8(directory))
+            return *std::move(path);
     return std::nullopt;
+}
+
+std::optional<std::string> SessionHost::shownWorkingDirectoryOf(SessionId session) const
+{
+    auto const it = _sessions.find(session.value);
+    if (it == _sessions.end())
+        return std::nullopt;
+    auto shown = it->second->shownDirectory();
+    if (shown.source == ShownDirectorySource::None)
+        return std::nullopt;
+    return std::move(shown.path);
+}
+
+void SessionHost::tellDirectoryIfMoved(SessionId session)
+{
+    auto const it = _sessions.find(session.value);
+    if (it == _sessions.end())
+        return;
+    auto shown = it->second->shownDirectory();
+    if (it->second->exchangeToldDirectory(shown) == shown)
+        return;
+    for (auto* observer: _streamSubscribers)
+        observer->sessionSignal(session, WorkingDirectoryChangedSignal {});
+    // A new directory is when the workspace showing this pane has its git state looked up again.
+    refreshWorkspaceGitOf(session);
+    armForegroundPoll();
 }
 
 PaneRuntime SessionHost::paneRuntime(SessionId session) const
@@ -2783,9 +2837,16 @@ bool SessionHost::followsForegroundProcess() const noexcept
                                [](auto const& entry) { return entry.second->followsForegroundProcess(); });
 }
 
+bool SessionHost::followsProcessDirectory() const noexcept
+{
+    return std::ranges::any_of(_sessions,
+                               [](auto const& entry) { return entry.second->followsProcessDirectory(); });
+}
+
 void SessionHost::armForegroundPoll()
 {
-    if ((_foregroundPoll && !_foregroundPoll->settled()) || !followsForegroundProcess())
+    if ((_foregroundPoll && !_foregroundPoll->settled())
+        || (!followsForegroundProcess() && !followsProcessDirectory()))
         return;
     _foregroundPoll.reset();
     _foregroundPoll.emplace(
@@ -2795,8 +2856,16 @@ void SessionHost::armForegroundPoll()
 void SessionHost::pollForegroundProcesses(void* host)
 {
     auto& self = *static_cast<SessionHost*>(host);
+    auto unreported = std::vector<SessionId> {};
     for (auto const& [id, session]: self._sessions)
+    {
         session->pollForegroundProcess();
+        if (session->followsProcessDirectory())
+            unreported.emplace_back(id);
+    }
+    // Told after the walk: a subscriber told of a directory may not change the sessions under it.
+    for (auto const session: unreported)
+        self.tellDirectoryIfMoved(session);
     // Re-armed from inside its own callback, which DeadlineTimer allows: it is settled before it is called.
     // Not while no extension follows the foreground process any more: a build that subscribes re-arms it.
     self._foregroundPoll.reset();
