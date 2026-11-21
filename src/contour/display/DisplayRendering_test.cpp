@@ -42,6 +42,7 @@
 
 #include <vtpty/ChannelPty.hpp>
 
+#include <core/Base64.hpp>
 #include <core/Environment.hpp>
 
 #include <QtCore/QBuffer>
@@ -407,6 +408,88 @@ TEST_CASE("display: a scaled block draws at its full height", "[display][render]
     // A block drawing only its head row lands at ~1x here, which is the failure this gates.
     CHECK(scaled.height() >= ordinary.height() * 3 / 2);
     CHECK(scaled.width() >= ordinary.width() * 3 / 2);
+}
+
+TEST_CASE("display: a kitty placeholder picture shows the fitted image with the cell background around it",
+          "[display][render][kitty]")
+{
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+
+    // An 8x4 solid red RGB image, placed virtually over 4 columns and 2 rows, then drawn as two rows of
+    // placeholder cells (U+10EEEE, a row diacritic, a column diacritic) in the foreground colour that names
+    // image 42. The span is taller than the 2:1 image fitted into it, so the picture is centred with a gap
+    // above and below it, where the cell background shows.
+    auto pixels = std::string {};
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 8 * 4))
+        pixels += "\xFF\x00\x00"sv;
+    constexpr auto Placeholder = "\xF4\x8E\xBB\xAE"sv; // U+10EEEE
+    constexpr auto Diacritics = std::array { "\xCC\x85"sv, "\xCC\x8D"sv, "\xCC\x8E"sv, "\xCC\x90"sv }; // 0..3
+    auto cells = std::string { "\033[38;5;42m" };
+    for (auto const row: std::views::iota(0, 2))
+    {
+        for (auto const column: std::views::iota(0, 4))
+            cells += std::format("{}{}{}", Placeholder, Diacritics.at(row), Diacritics.at(column));
+        cells += "\r\n";
+    }
+    cells += "\033[m";
+
+    h.feedAndSettle("\033[?25l\033[2J\033[H"sv);
+    auto const blank = h.pump();
+    h.feedAndSettle(std::format(
+        "\033_Ga=T,U=1,i=42,c=4,r=2,f=24,s=8,v=4,q=2;{}\033\\\033[H{}", core::base64::encode(pixels), cells));
+    auto const frame = h.pump();
+    REQUIRE(frame.size() == blank.size());
+
+    // Where the span is, and where the image fitted into it lands: scaled by the smaller ratio, centred.
+    auto const metrics = h.display->gridMetrics();
+    auto const cellWidth = metrics.cellSize.width.as<int>();
+    auto const cellHeight = metrics.cellSize.height.as<int>();
+    auto const span =
+        QRect { metrics.pageMargin.left, metrics.pageMargin.top, 4 * cellWidth, 2 * cellHeight };
+    auto const scale = std::min(span.width() / 8.0, span.height() / 4.0);
+    auto const fittedWidth = static_cast<int>(8 * scale);
+    auto const fittedHeight = static_cast<int>(4 * scale);
+    auto const fitted = QRect { span.left() + ((span.width() - fittedWidth) / 2),
+                                span.top() + ((span.height() - fittedHeight) / 2),
+                                fittedWidth,
+                                fittedHeight };
+    INFO("span " << span.width() << "x" << span.height() << " at " << span.left() << "," << span.top()
+                 << ", fitted " << fitted.width() << "x" << fitted.height() << " at " << fitted.left() << ","
+                 << fitted.top());
+    // Cells about twice as tall as wide leave a gap of about a cell's height; the test means nothing without.
+    REQUIRE(span.height() - fitted.height() >= 4);
+
+    auto const isRed = [](QRgb pixel) {
+        return qRed(pixel) > 200 && qGreen(pixel) < 60 && qBlue(pixel) < 60;
+    };
+    // Inside the fitted image, away from its edges, which a scaler may blend: red.
+    auto const inside = fitted.adjusted(2, 2, -2, -2);
+    auto notRed = 0;
+    for (auto const y: std::views::iota(inside.top(), inside.bottom() + 1))
+        for (auto const x: std::views::iota(inside.left(), inside.right() + 1))
+            notRed += isRed(frame.pixel(x, y)) ? 0 : 1;
+    CHECK(notRed == 0);
+
+    // Everywhere else in the span -- the gaps -- what the cell showed before: its background, no ink of a
+    // glyph for U+10EEEE, and no fill painted at placement time.
+    auto const edge = fitted.adjusted(-1, -1, 1, 1);
+    auto changedOutside = 0;
+    auto inkInside = 0;
+    for (auto const y: std::views::iota(span.top(), span.bottom() + 1))
+        for (auto const x: std::views::iota(span.left(), span.right() + 1))
+        {
+            auto const pixel = frame.pixel(x, y);
+            if (!edge.contains(x, y))
+                changedOutside += pixel != blank.pixel(x, y) ? 1 : 0;
+            else if (inside.contains(x, y))
+                continue;
+            else
+                // The fitted image's rim: red blending into the background, never a glyph's (grey) ink.
+                inkInside += qRed(pixel) > qGreen(pixel) || pixel == blank.pixel(x, y) ? 0 : 1;
+        }
+    CHECK(changedOutside == 0);
+    CHECK(inkInside == 0);
 }
 
 TEST_CASE("display: a scaled block is selected over its whole height", "[display][render][textsizing]")
