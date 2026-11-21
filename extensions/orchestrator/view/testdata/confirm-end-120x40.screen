@@ -1,6 +1,6 @@
 ╭─ Agents ─────────────────────────────────────────────────────────────╮ ╭─ Details ───────────────────────────────────╮
 │ MY PULL REQUESTS                                                     │ │ pr-2375 · fix CI · sonnet                   │
-│ ● #2375 Say why the stdio relay failed, and send a hello before hal… │ │                                             │
+│ ● #2375 Say why the stdio relay failed, and send a … ○ agent working │ │                                             │
 │ ✓ #2369 examples: add donut-animation, a full-screen animation done… │ │ task      fix CI                            │
 │ ✓ #2346 contour: tab_style — shapes, fills, materials and widths fo… │ │ model     sonnet                            │
 │ ✗ #2114 vtbackend: WIP -- DEC mode 44 and a partial margin-bell tri… │ │ state     running                           │

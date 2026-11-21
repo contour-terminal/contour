@@ -1,10 +1,10 @@
 ╭─ Agents ─────────────────────────────────────────────────────────────────────╮
 │ MY PULL REQUESTS                                                             │
 │ ● #2375 Say why the stdio relay failed, and send a hello before half-closin… │
-│ ✓ #2369 examples: add donut-animation, a full-screen animation done right    │
-│ ✓ #2346 contour: tab_style — shapes, fills, materials and widths for the ta… │
-│ ✗ #2114 vtbackend: WIP -- DEC mode 44 and a partial margin-bell trigger · d… │
-│ ✗ #1847 Adds ability to set Contour as default terminal on Windows OS · dra… │
+│ ✓ #2369 examples: add donut-animation, a full-screen animat… ○ agent working │
+│ ✓ #2346 contour: tab_style — shapes, fills, materials and w… ○ agent working │
+│ ✗ #2114 vtbackend: WIP -- DEC mode 44 and a partial margin-… ○ agent working │
+│ ✗ #1847 Adds ability to set Contour as default terminal on … ○ agent working │
 │   ╭─ Dispatch an agent ──────────────────────────────────────────────────╮   │
 │ IS│ item      #2375 · Say why the stdio relay failed, and send a hello … │   │
 │   │ task      ‹ fix CI › f                                               │n… │

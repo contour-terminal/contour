@@ -283,6 +283,48 @@ namespace
         return lists.prefix == RepoPrefix::Shown ? clean(repo) : std::string {};
     }
 
+    /// What a pull request's or an issue's row says while an agent works on it.
+    struct AgentCue
+    {
+        std::string status; ///< The row's status: the agent's mark and state, such as `○ agent working`.
+        Role role;          ///< How it is drawn: as the agent's own row draws its state.
+        DetailLine detail;  ///< The details' first line: the task and the state.
+    };
+
+    /// @return What the row of @p item says while an active run works on it; std::nullopt while none does.
+    [[nodiscard]] std::optional<AgentCue> agentCueFor(Lists const& lists,
+                                                      std::string_view repo,
+                                                      ItemRef const& item)
+    {
+        auto const* const run = lists.engine->activeRunOn(repo, item);
+        if (run == nullptr)
+            return std::nullopt;
+        auto const reported = [&](AgentStatus fallback) {
+            return std::string { agentStatusName(run->lastStatus.value_or(fallback)) };
+        };
+        auto const [mark, role, state] = std::visit(
+            Overloaded {
+                [&](Running const&) {
+                    return std::tuple { "○"sv, Role::Accent, reported(AgentStatus::Working) };
+                },
+                [&](Blocked const&) {
+                    return std::tuple { "●"sv, Role::Warning, reported(AgentStatus::Blocked) };
+                },
+                [](Done const&) { return std::tuple { "●"sv, Role::Passing, std::string { "done" } }; },
+                [&](auto const&) { return std::tuple { "◌"sv, Role::Dim, runStateText(*run) }; },
+            },
+            run->state);
+        return AgentCue {
+            .status = std::format("{} agent {}", mark, state),
+            .role = role,
+            .detail =
+                DetailLine { .label = "agent",
+                             .value = clean(std::format(
+                                 "{} · {} · enter shows its tab", taskLabel(lists.config, *run), state)),
+                             .role = role },
+        };
+    }
+
     // }}}
     // {{{ one row per item
 
@@ -290,11 +332,15 @@ namespace
     {
         auto const& ci = entryOf(CiLooks, request.ci);
         auto const& review = entryOf(ReviewLooks, request.review);
-        auto details = std::vector<DetailLine> {
-            DetailLine { .label = "branch",
-                         .value = clean(std::format("{} → {}", request.head, request.base)) },
-            DetailLine { .label = "checks", .value = std::string { ci.word }, .role = ci.role },
-        };
+        auto const cue = agentCueFor(lists, repo, ChangeRequestRef { request.number });
+        // An agent at work comes first, so that a short details panel still shows it.
+        auto details = std::vector<DetailLine> {};
+        if (cue)
+            details.push_back(cue->detail);
+        details.push_back(DetailLine { .label = "branch",
+                                       .value = clean(std::format("{} → {}", request.head, request.base)) });
+        details.push_back(
+            DetailLine { .label = "checks", .value = std::string { ci.word }, .role = ci.role });
         for (auto const& check: request.failingChecks)
             details.push_back(DetailLine {
                 .label = "", .value = clean(std::format("✗ {}", check)), .role = Role::Failing });
@@ -314,8 +360,10 @@ namespace
                                                request.number,
                                                request.title,
                                                request.readiness == Readiness::Draft ? " · draft"sv : ""sv)),
-                     .status = std::string { review.word },
-                     .statusRole = review.role,
+                     .status = !cue                  ? std::string { review.word }
+                               : review.word.empty() ? cue->status
+                                                     : std::format("{} · {}", cue->status, review.word),
+                     .statusRole = cue ? cue->role : review.role,
                      .repo = std::string { repo },
                      .item = ChangeRequestRef { request.number },
                      .title = clean(request.title),
@@ -324,15 +372,21 @@ namespace
 
     [[nodiscard]] Row issueRow(Lists const& lists, std::string_view repo, Issue const& issue)
     {
+        auto const cue = agentCueFor(lists, repo, issue.item);
+        auto details = std::vector<DetailLine> {};
+        if (cue)
+            details.push_back(cue->detail);
+        details.push_back(DetailLine { .label = "issue", .value = clean(itemLabel(issue.item)) });
+        details.push_back(DetailLine { .label = "url", .value = clean(issue.url), .role = Role::Dim });
         return Row { .kind = RowKind::Issue,
                      .prefix = prefixOf(lists, repo),
                      .text = clean(std::format("{} {}", itemLabel(issue.item), issue.title)),
+                     .status = cue ? cue->status : std::string {},
+                     .statusRole = cue ? cue->role : Role::Dim,
                      .repo = std::string { repo },
                      .item = issue.item,
                      .title = clean(issue.title),
-                     .details = {
-                         DetailLine { .label = "issue", .value = clean(itemLabel(issue.item)) },
-                         DetailLine { .label = "url", .value = clean(issue.url), .role = Role::Dim } } };
+                     .details = std::move(details) };
     }
 
     /// The details every run row shows.
