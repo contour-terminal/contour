@@ -1352,6 +1352,18 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 CHECK(flyout->property("opened").toBool());
                 break;
             }
+            case SnapshotScript::SidebarTabColorPicker: {
+                static_cast<void>(checkSidebarScript(scene, variant));
+                checkSidebarColourScript(scene, variant);
+                auto const* flyout =
+                    scene.root().findChild<QObject*>(QStringLiteral("sidebarTabColorFlyout"));
+                REQUIRE(flyout != nullptr);
+                CHECK(flyout->property("opened").toBool());
+                // It hangs from build's row, not from a tab strip the sidebar placement does not draw.
+                CHECK(flyout->property("parent").value<QQuickItem*>()->property("title").toString()
+                      == QStringLiteral("build"));
+                break;
+            }
             case SnapshotScript::QuickTerminal: {
                 // The panel's frame, and a role that made the window a frameless tool window.
                 CHECK(scene.window().size() == ChromeSnapshotScene::quickTerminalPanelSize());

@@ -138,6 +138,7 @@ enum class SnapshotScript : uint8_t
     SidebarHoverCard, //!< sidebar-tree with the pointer on build's row: its hover card, a long status whole.
     SidebarWorkspaceColorPicker, //!< sidebar-workspace-tint with the colour picker open over billing's row.
     SidebarTreeCompact,          //!< sidebar-tree under `row_spacing: compact` (sidebar-tree is comfortable).
+    SidebarTabColorPicker,       //!< sidebar-tab-tint with the tab colour picker open over build's row.
 };
 
 /// What the workspace sidebar of a script shows.
@@ -226,7 +227,8 @@ enum class ScriptAction : uint8_t
     SwitcherRowMenu,     //!< The switcher, the selected row's menu opened as the Menu key opens it.
     HoverSwitcherRow,    //!< The switcher, the pointer moved onto its third row.
     HoverSidebarRow, //!< build's sidebar row given a long status, the pointer resting on it: its hover card.
-    OpenWorkspaceColorPicker, //!< The sidebar's colour picker over billing's row, as Custom… opens it.
+    OpenWorkspaceColorPicker,  //!< The sidebar's colour picker over billing's row, as Custom… opens it.
+    OpenSidebarTabColorPicker, //!< The sidebar's tab colour picker over build's row, as its Custom… opens it.
 };
 
 /// What a script's tabs carry beyond their titles.
@@ -2423,6 +2425,12 @@ inline constexpr auto SnapshotScripts = std::array {
                         .tabCount = 3,
                         .sidebar = SnapshotSidebar::Tree,
                         .rowSpacing = config::SidebarRowSpacing::Compact },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarTabColorPicker,
+                        .name = "sidebar-tab-color-picker",
+                        .tabCount = 3,
+                        .action = ScriptAction::OpenSidebarTabColorPicker,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sidebarColor = SnapshotSidebarColor::Tabs },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),

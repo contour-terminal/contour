@@ -874,7 +874,7 @@ TEST_CASE("snapshot plan: the sidebar's colour scripts cover every style, with t
         INFO(row.name);
         if (row.sidebarColor != SnapshotSidebarColor::None)
             CHECK(row.sidebar == SnapshotSidebar::Tree);
-        if (row.sidebarColor == SnapshotSidebarColor::Tabs)
+        if (row.sidebarColor == SnapshotSidebarColor::Tabs && row.action == ScriptAction::None)
             tabStyles.push_back(row.tabColorStyle);
         if (row.sidebarColor == SnapshotSidebarColor::Workspaces && row.action == ScriptAction::None)
             workspaceStyles.push_back(row.workspaceColorStyle);
@@ -889,6 +889,8 @@ TEST_CASE("snapshot plan: the sidebar's colour scripts cover every style, with t
     CHECK(scriptRow(SnapshotScript::SidebarHoverCard).action == ScriptAction::HoverSidebarRow);
     CHECK(scriptRow(SnapshotScript::SidebarWorkspaceColorPicker).action
           == ScriptAction::OpenWorkspaceColorPicker);
+    CHECK(scriptRow(SnapshotScript::SidebarTabColorPicker).action == ScriptAction::OpenSidebarTabColorPicker);
+    CHECK(scriptRow(SnapshotScript::SidebarTabColorPicker).sidebarColor == SnapshotSidebarColor::Tabs);
     // The hover card's status is longer than any row holds, so the card is what shows it whole.
     CHECK(SnapshotLongStatus.size() > contour::window::MaxRowTextLength);
 }
