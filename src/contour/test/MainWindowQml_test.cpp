@@ -5953,6 +5953,45 @@ TEST_CASE("Main.qml shows the ssh prompts of its window and answers them (offscr
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+// A grant's lines are command lines: the dialog grows to hold the widest whole, as far as the window lets it.
+TEST_CASE("Main.qml's daemon extension consent dialog is as wide as its widest line allows (offscreen)",
+          "[contour][gui][qml][mainwindow][consent]")
+{
+    QQmlEngine engine;
+    MainWindowPalette palette;
+    MockMainController controller { palette.scene() };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings);
+    auto& window = activeMainWindow(*root);
+    auto* dialog = root->findChild<QObject*>(QStringLiteral("daemonExtensionConsentDialog"));
+    REQUIRE(dialog != nullptr);
+    auto& consent = controller.daemonExtensionConsent();
+
+    auto const widthFor = [&](std::string line, std::string grantDigest) {
+        consent.show(vthost::proto::ExtensionPermissionRequest {
+            .name = "orchestrator",
+            .grantDigest = std::move(grantDigest),
+            .title = "“orchestrator” wants to run in the background",
+            .lines = { vthost::proto::WireConsentLine { .text = std::move(line), .weight = 1 } },
+        });
+        waitForPopupOpened(*dialog);
+        auto const width = dialog->property("width").toReal();
+        QTest::keyClick(&window, Qt::Key_Escape);
+        waitForPopupClosed(*dialog);
+        return width;
+    };
+    auto const narrow = widthFor("gh-auth (short, in repos): gh auth status", "1");
+    auto const wide = widthFor("gh-prs (short, in repos): gh pr list --author @me --state open --limit 100 "
+                               "--json number,title,url,headRefName",
+                               "2");
+    auto const huge = widthFor(std::string(4000, 'x'), "3");
+
+    CHECK(wide > narrow);
+    CHECK(huge >= wide);
+    CHECK(huge <= window.width());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 // Main.qml hosts one DaemonExtensionConsentDialog per window on the window controller's consent model.
 TEST_CASE("Main.qml asks for a daemon extension's grant: Return denies, Allow waits out its hold (offscreen)",
           "[contour][gui][qml][mainwindow][consent]")

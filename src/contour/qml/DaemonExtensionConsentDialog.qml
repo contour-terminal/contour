@@ -37,10 +37,17 @@ KitDialog {
     }
 
     readonly property var _lines: root.model !== null ? root.model.lines : []
+    // The widest line, set as it is: the dialog grows to hold it as far as the window lets it (KitDialog keeps
+    // it inside), so that a command line reads whole and wraps only beyond that, as AskpassDialog's block does.
+    readonly property real _widestLineWidth: root._lines.length === 0
+        ? 0
+        : Math.max(...root._lines.map(line => lineMetrics.advanceWidth(line)))
+          + consentLines.leftPadding + consentLines.rightPadding + chromeStyle.space.s8
     // The most the lines may take: half of what the dialog hangs in.
     readonly property real _linesRoom: root.parent ? root.parent.height / 2 : linesColumn.implicitHeight
 
     heading: root.model !== null ? root.model.title : ""
+    bodyControlsWidth: root._widestLineWidth
     message: ""
     description: root._lines.join("\n")
     acceptText: qsTr("Allow")
@@ -119,6 +126,11 @@ KitDialog {
             }
         }
     ]
+
+    FontMetrics {
+        id: lineMetrics
+        font: chromeStyle.type.footnote
+    }
 
     SystemPalette {
         id: sys
