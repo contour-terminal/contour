@@ -146,10 +146,13 @@ struct MaterialWindow
     [[nodiscard]] HWND hwnd() const { return reinterpret_cast<HWND>(window.winId()); }
 };
 
-constexpr auto MicaAlt = TitleBandRequest { .backdrop = BandBackdrop::NativeMaterial,
-                                            .kind = BackdropKind::Tabbed,
-                                            .growth = contour::config::TitleBarGrowth::None,
-                                            .scheme = Qt::ColorScheme::Unknown };
+[[nodiscard]] TitleBandRequest micaAlt()
+{
+    return TitleBandRequest { .backdrop = BandBackdrop::NativeMaterial,
+                              .kind = BackdropKind::Tabbed,
+                              .growth = contour::config::TitleBarGrowth::None,
+                              .scheme = Qt::ColorScheme::Unknown };
+}
 
 } // namespace
 
@@ -162,7 +165,7 @@ TEST_CASE("Mica Alt on a tabbed window", "[native][win32][mica]")
     auto const material = contour::platform::makeTitleBandMaterial();
     auto fixture = MaterialWindow {};
 
-    auto const applied = material->apply(fixture.window, MicaAlt);
+    auto const applied = material->apply(fixture.window, micaAlt());
     if (!hasSystemBackdrop())
     {
         REQUIRE_FALSE(applied.has_value());
@@ -189,7 +192,7 @@ TEST_CASE("a rejected backdrop attribute reports Unsupported and restores the ma
     REQUIRE(material != nullptr);
     auto fixture = MaterialWindow {};
 
-    auto const applied = material->apply(fixture.window, MicaAlt);
+    auto const applied = material->apply(fixture.window, micaAlt());
     REQUIRE_FALSE(applied.has_value());
     CHECK(applied.error() == TitleBandMaterialError::Unsupported);
     REQUIRE_FALSE(StubDwm::margins.empty());
@@ -199,7 +202,7 @@ TEST_CASE("a rejected backdrop attribute reports Unsupported and restores the ma
     {
         auto const rejecting = StubDwm::make(E_FAIL);
         auto const other = contour::platform::makeWin32TitleBandMaterial(rejecting);
-        auto const result = other->apply(fixture.window, MicaAlt);
+        auto const result = other->apply(fixture.window, micaAlt());
         REQUIRE_FALSE(result.has_value());
         CHECK(result.error() == TitleBandMaterialError::Rejected);
     }
@@ -208,7 +211,7 @@ TEST_CASE("a rejected backdrop attribute reports Unsupported and restores the ma
     {
         auto const accepting = StubDwm::make(S_OK);
         auto const other = contour::platform::makeWin32TitleBandMaterial(accepting);
-        CHECK(other->apply(fixture.window, MicaAlt).has_value());
+        CHECK(other->apply(fixture.window, micaAlt()).has_value());
         REQUIRE_FALSE(StubDwm::margins.empty());
         CHECK(StubDwm::margins.back() == contour::platform::SheetOfGlassMargins);
     }
@@ -237,7 +240,7 @@ TEST_CASE("blur wins over Mica, and off restores it", "[native][win32][mica][win
         SKIP("Requires Windows 11 22H2 or later.");
     auto const material = contour::platform::makeTitleBandMaterial();
     auto fixture = MaterialWindow {};
-    REQUIRE(material->apply(fixture.window, MicaAlt).has_value());
+    REQUIRE(material->apply(fixture.window, micaAlt()).has_value());
 
     contour::platform::setBlurBehind(&fixture.window, BlurBehindWish::On);
     CHECK(backdropOf(fixture.hwnd()) == dword(DwmBackdrop::TransientWindow));
@@ -253,7 +256,7 @@ TEST_CASE("a composition restart extends the window's frame again", "[native][wi
     auto const api = StubDwm::make(S_OK);
     auto const material = contour::platform::makeWin32TitleBandMaterial(api);
     auto fixture = MaterialWindow { api };
-    REQUIRE(material->apply(fixture.window, MicaAlt).has_value());
+    REQUIRE(material->apply(fixture.window, micaAlt()).has_value());
     StubDwm::margins.clear();
 
     // A restart drops what DwmExtendFrameIntoClientArea established. The frame's filter extends it again
@@ -270,7 +273,7 @@ TEST_CASE("the corner preference stays round under Mica", "[native][win32][mica]
     auto const material = contour::platform::makeTitleBandMaterial();
     auto fixture = MaterialWindow {};
     // Unsupported below 22H2 is fine here: the frame owns the corner either way (R-h).
-    (void) material->apply(fixture.window, MicaAlt);
+    (void) material->apply(fixture.window, micaAlt());
 
     CHECK(attributeOf(fixture.hwnd(), contour::platform::DwmwaWindowCornerPreference)
           == std::optional { contour::platform::DwmwcpRound });

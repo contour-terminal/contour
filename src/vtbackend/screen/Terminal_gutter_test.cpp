@@ -692,7 +692,10 @@ TEST_CASE("Gutter.terminal.theIndicatorStatusLineSpansTheGutterToo", "[gutter][s
 namespace
 {
 /// The gutter settings of a native chrome row with exit status on: the block column is the rail's strip.
-constexpr auto RailGutter = GutterSettings { .exitStatus = true, .blockColumnForm = BlockColumnForm::Rail };
+[[nodiscard]] GutterSettings railGutter()
+{
+    return GutterSettings { .exitStatus = true, .blockColumnForm = BlockColumnForm::Rail };
+}
 
 /// The rail cells of @p buffer, by screen row: the cells that draw a segment or a mark.
 [[nodiscard]] std::map<int, RenderGutterCell> railCellsOf(RenderBuffer const& buffer)
@@ -737,7 +740,7 @@ void runASuccessAndAFailure(MockTerm<>& mc, GutterSettings const& gutter)
 TEST_CASE("Gutter.terminal.aFailedBlockDrawsAHeadAndATail", "[gutter]")
 {
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
-    runASuccessAndAFailure(mc, RailGutter);
+    runASuccessAndAFailure(mc, railGutter());
 
     auto const cells = railCellsOf(renderOf(mc.terminal));
     auto const segments = std::vector { RailSegment::Head, RailSegment::Body, RailSegment::Tail,
@@ -759,7 +762,7 @@ TEST_CASE("Gutter.terminal.aFailedBlockDrawsAHeadAndATail", "[gutter]")
 TEST_CASE("Gutter.terminal.hoveringASuccessShowsItsCheck", "[gutter]")
 {
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
-    runASuccessAndAFailure(mc, RailGutter);
+    runASuccessAndAFailure(mc, railGutter());
     auto const* first = mc.terminal.commandBlockAt(LineOffset(0));
     REQUIRE(first != nullptr);
     auto const& palette = mc.terminal.colorPalette();
@@ -787,7 +790,7 @@ TEST_CASE("Gutter.terminal.hoveringASuccessShowsItsCheck", "[gutter]")
 TEST_CASE("Gutter.terminal.aRunningBlockShowsItsTriangle", "[gutter]")
 {
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
-    mc.terminal.settings().gutter = RailGutter;
+    mc.terminal.settings().gutter = railGutter();
     startCommand(mc, "sleep 9");
     mc.writeToScreen("still going\r\n");
 
@@ -813,7 +816,7 @@ namespace
     auto mc = std::make_unique<MockTerm<>>(
         PageSize { LineCount(10), ColumnCount(80) },
         HistoryLimits { .guaranteed = LineCount(120'000), .capacity = LineCount(120'000) });
-    mc->terminal.settings().gutter = RailGutter;
+    mc->terminal.settings().gutter = railGutter();
     startCommand(*mc, "seq");
     printLines(*mc, "line", lines);
     mc->writeToScreen(commandEnd(0));
@@ -886,7 +889,7 @@ TEST_CASE("Gutter.terminal.aBlockEndingOnThePagesLastRowEndsThere", "[gutter]")
     // found by walking visible lines, which stops at the page's last line: a block reaching it still ends on
     // it rather than running on into itself.
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
-    mc.terminal.settings().gutter = RailGutter;
+    mc.terminal.settings().gutter = railGutter();
     runCommand(mc, "ls", { "a", "b", "c" }); // rows 0-3, collapsed to row 0
     REQUIRE(mc.terminal.collapseLastFold());
     startCommand(mc, "make"); // its head on row 4, its output on rows 5-8, the cursor on row 9
@@ -910,7 +913,7 @@ TEST_CASE("Gutter.terminal.aBlockStartingOnTheHistorysFirstRowStartsThere", "[gu
     // a block starting on it, scrolled to the top under a collapsed fold, still starts there.
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) },
                          HistoryLimits { .guaranteed = LineCount(100), .capacity = LineCount(100) } };
-    mc.terminal.settings().gutter = RailGutter;
+    mc.terminal.settings().gutter = railGutter();
     startCommand(mc, "seq");
     printLines(mc, "x", 20);
     mc.writeToScreen(commandEnd(0));
@@ -987,7 +990,7 @@ struct RedrawCountingTerm final: MockTerm<>
 TEST_CASE("Gutter.terminal.theRailRedrawsWhenItsHoverChanges", "[gutter]")
 {
     auto mc = RedrawCountingTerm { PageSize { LineCount(10), ColumnCount(20) } };
-    mc.terminal.settings().gutter = RailGutter;
+    mc.terminal.settings().gutter = railGutter();
     runCommand(mc, "true", {}, 0);       // row 0, a block with no output: nothing to fold
     runCommand(mc, "false", { "x" }, 1); // rows 1-2
     mc.writeToScreen(PromptStart);
@@ -1091,7 +1094,7 @@ TEST_CASE("Gutter.terminal.aChipNeverCoversAnRprompt", "[gutter][blockchip]")
 {
     // Review Focus 1: the chip lands in the blanks between the command and the RPROMPT, two clear of it.
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(80) } };
-    mc.terminal.settings().gutter = RailGutter;
+    mc.terminal.settings().gutter = railGutter();
     constexpr auto RpromptColumn = 69; // "[main] 14:02" in columns 68..79
     mc.writeToScreen(commandUnderAnRprompt("[main] 14:02", RpromptColumn, 2));
 
@@ -1117,7 +1120,7 @@ TEST_CASE("Gutter.terminal.aCollapsedChipLeavesTheMark", "[gutter][blockchip]")
 {
     // The row filled to the edge: no run holds the chip, and the rail's ✗ is the one sign.
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(80) } };
-    mc.terminal.settings().gutter = RailGutter;
+    mc.terminal.settings().gutter = railGutter();
     mc.writeToScreen(commandUnderAnRprompt(std::string(70, '='), 10, 2));
 
     auto const buffer = renderOf(mc.terminal);
@@ -1129,7 +1132,7 @@ TEST_CASE("Gutter.terminal.aCollapsedChipLeavesTheMark", "[gutter][blockchip]")
 TEST_CASE("Gutter.terminal.aRunningChipTicks", "[gutter][blockchip]")
 {
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(80) } };
-    mc.terminal.settings().gutter = RailGutter;
+    mc.terminal.settings().gutter = railGutter();
     startCommand(mc, "sleep 9");
     mc.wallClock.advance(std::chrono::seconds(3));
 
@@ -1168,7 +1171,7 @@ TEST_CASE("Gutter.terminal.aPillCoversItsMeasuredColumns", "[gutter][blockchip]"
     // The pill is placed over the whole columns its measured label and padding take, rounded up -- so it
     // never covers a non-blank cell however its proportional label falls -- and it keeps the right edge.
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(80) } };
-    mc.terminal.settings().gutter = RailGutter;
+    mc.terminal.settings().gutter = railGutter();
     mc.writeToScreen(commandUnderAnRprompt("[main] 14:02", 69, 2));
     auto const unmeasured = chipOnRow(renderOf(mc.terminal), 0);
     REQUIRE(unmeasured.has_value());
@@ -1230,7 +1233,7 @@ TEST_CASE("Gutter.terminal.aStatusChipKeepsClearOfAFoldChip", "[gutter][blockchi
     // The fold chip is drawn over blanks after the command: the status chip treats those as taken, and on a
     // page with no room left beside it, collapses rather than crowding it.
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(26) } };
-    mc.terminal.settings().gutter = RailGutter;
+    mc.terminal.settings().gutter = railGutter();
     runCommand(mc, "ls", { "a", "b", "c" });
     mc.writeToScreen(PromptStart);
     REQUIRE(mc.terminal.collapseLastFold());
@@ -1275,7 +1278,7 @@ TEST_CASE("Gutter.terminal.aChipOnADoubledRowKeepsToTheDrawnColumns", "[gutter][
         SECTION("a long command leaves no room: the chip collapses to the rail, or keeps clear of the text")
         {
             auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(80) } };
-            mc.terminal.settings().gutter = RailGutter;
+            mc.terminal.settings().gutter = railGutter();
             mc.writeToScreen(commandOnADoubledRow(sequence, 36, 2));
             auto const chip = chipOnRow(renderOf(mc.terminal), 0);
             if (chip)
@@ -1285,7 +1288,7 @@ TEST_CASE("Gutter.terminal.aChipOnADoubledRowKeepsToTheDrawnColumns", "[gutter][
         SECTION("a short command: the chip sits in the shown half, on whole doubled columns")
         {
             auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(80) } };
-            mc.terminal.settings().gutter = RailGutter;
+            mc.terminal.settings().gutter = railGutter();
             mc.writeToScreen(commandOnADoubledRow(sequence, 4, 2));
             auto const chip = chipOnRow(renderOf(mc.terminal), 0);
             REQUIRE(chip.has_value());
@@ -1298,7 +1301,7 @@ TEST_CASE("Gutter.terminal.aChipOnADoubledRowKeepsToTheDrawnColumns", "[gutter][
         SECTION("a collapsed fold's chip and its hit are drawn where the text is not")
         {
             auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(80) } };
-            mc.terminal.settings().gutter = RailGutter;
+            mc.terminal.settings().gutter = railGutter();
             mc.writeToScreen(commandOnADoubledRow(sequence, 4, 0));
             REQUIRE(mc.terminal.collapseLastFold());
             auto const buffer = renderOf(mc.terminal);
@@ -1352,7 +1355,7 @@ TEST_CASE("Gutter.terminal.aHoveredBlockIsTintedAndRinged", "[gutter][blockhover
 {
     // The canvas's hover: the hovered block's rows, head to tail, under a tint and a ring of the label.
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
-    runASuccessAndAFailure(mc, RailGutter); // `ls` on rows 0..2, `false` on rows 3..4
+    runASuccessAndAFailure(mc, railGutter()); // `ls` on rows 0..2, `false` on rows 3..4
     CHECK_FALSE(renderOf(mc.terminal).blockHighlight.has_value());
 
     auto const* first = mc.terminal.commandBlockAt(LineOffset(0));
@@ -1394,7 +1397,7 @@ TEST_CASE("Gutter.terminal.aRingOmitsTheEdgesABlockContinuesPast", "[gutter][blo
     SECTION("the whole block on the page")
     {
         auto small = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
-        runASuccessAndAFailure(small, RailGutter);
+        runASuccessAndAFailure(small, railGutter());
         small.terminal.setHoveredCommandBlock(small.terminal.commandBlockAt(LineOffset(0))->id);
         auto const lit = renderOf(small.terminal).blockHighlight;
         REQUIRE(lit.has_value());
@@ -1445,7 +1448,7 @@ TEST_CASE("Gutter.terminal.aHoverTintClipsAtThePage", "[gutter][blockhover]")
 {
     // A page of four rows shows `file2`, `false`, `bad` and the prompt: of the first block, one row.
     auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) }, LineCount(100) };
-    runASuccessAndAFailure(mc, RailGutter);
+    runASuccessAndAFailure(mc, railGutter());
     auto const* first = mc.terminal.commandBlockAt(LineOffset(-2));
     REQUIRE(first != nullptr);
     mc.terminal.setHoveredCommandBlock(first->id);
@@ -1459,7 +1462,7 @@ TEST_CASE("Gutter.terminal.aHoverTintFoldsWithItsBlock", "[gutter][blockhover]")
 {
     // A collapsed block is its head row: so is its tint.
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(40) } };
-    runASuccessAndAFailure(mc, RailGutter);
+    runASuccessAndAFailure(mc, railGutter());
     auto const* second = mc.terminal.commandBlockAt(LineOffset(3));
     REQUIRE(second != nullptr);
     REQUIRE(mc.terminal.collapseLastFold());
@@ -1475,7 +1478,7 @@ TEST_CASE("Gutter.terminal.aRunningTimeCountsOnlyWhileOnDisplay", "[gutter][bloc
     // I2: what the once-a-second redraw asks is whether a running time is on display -- a chip's, or the
     // sticky header's -- and nothing else.
     auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(80) }, LineCount(100) };
-    mc.terminal.settings().gutter = RailGutter;
+    mc.terminal.settings().gutter = railGutter();
 
     SECTION("a running header whose command row is off the page")
     {
@@ -1522,7 +1525,7 @@ TEST_CASE("Gutter.terminal.aCrossfadeSnapshotLeavesTheRunningTime", "[gutter][bl
     // outgoing page is built, never drawn, and must not change it -- here, though the command's row has
     // scrolled off since the last frame, that frame still shows its chip.
     auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(80) }, LineCount(100) };
-    mc.terminal.settings().gutter = RailGutter;
+    mc.terminal.settings().gutter = railGutter();
     mc.terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Fade;
     mc.terminal.settings().stickyHeader.mode = StickyHeaderMode::Never;
     mc.writeToScreen("\033[?64h"); // DECPCCM: the page on display follows the cursor's
