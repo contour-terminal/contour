@@ -484,6 +484,127 @@ TEST_CASE("the mirror pans when the cursor moves past the view", "[vthost][mirro
     CHECK(bare.events.screenUpdates == 0);
 }
 
+namespace
+{
+/// Gives @p screen image @p imageId's pixels (one opaque pixel), as an ImageData answer would.
+void givePixels(vthost::client::RemoteScreen& screen, uint32_t imageId)
+{
+    screen.images.insert_or_assign(
+        imageId,
+        proto::ImageData { .imageId = imageId,
+                           .format = std::to_underlying(vtbackend::ImageFormat::RGBA),
+                           .width = 1,
+                           .height = 1,
+                           .data = std::vector<std::byte>(4, std::byte { 0xFF }) });
+}
+
+/// @return How many image fragments row @p row of @p terminal's primary page holds.
+std::size_t fragmentsOnRow(vtbackend::Terminal const& terminal, int row)
+{
+    auto const& fragments =
+        terminal.primaryScreen().grid().lineAt(vtbackend::LineOffset(row)).storage().imageFragments;
+    return fragments ? static_cast<std::size_t>(std::ranges::count_if(
+                           *fragments, [](auto const& item) { return item.second != nullptr; }))
+                     : 0;
+}
+
+/// A delta that moves the host's page to start at @p base, carrying @p rows, the cursor at @p cursor.
+proto::Delta deltaAt(vthost::client::RemoteScreen& screen,
+                     int64_t base,
+                     std::vector<proto::WireLine> rows,
+                     vtbackend::CellLocation cursor)
+{
+    auto delta = proto::Delta {};
+    delta.generation = 1;
+    delta.stableViewportBase = base;
+    delta.stableFloor = 1;
+    delta.cursorLine = unbox<int32_t>(cursor.line);
+    delta.cursorColumn = unbox<int32_t>(cursor.column);
+    delta.lines = std::move(rows);
+    screen.apply(delta);
+    return delta;
+}
+} // namespace
+
+TEST_CASE("an update restates the image cells of the page and of the history rows it carries only",
+          "[vthost][mirror][image]")
+{
+    // Restating every image cell the mirror holds on every update is work proportional to the scrollback,
+    // on the reactor thread, under the lock the render thread takes too.
+    auto bare = BareMirror { BareMirrorShape { .lines = vtbackend::LineCount(5),
+                                               .columns = vtbackend::ColumnCount(10),
+                                               .history = vtbackend::LineCount(50) } };
+    auto screen = vthost::client::RemoteScreen {};
+    auto snapshot = proto::Delta {};
+    snapshot.snapshot = 1;
+    snapshot.generation = 1;
+    snapshot.stableViewportBase = 1;
+    snapshot.stableFloor = 1;
+    snapshot.lines = { wideRowAt(1, 10, 0, U'I') };
+    snapshot.imageCells = { proto::ImageCellEntry { .stableId = 1, .column = 0, .placement = 1 } };
+    snapshot.imagePlacements = { proto::ImagePlacementEntry {
+        .placement = 1, .imageId = 3, .spanLines = 1, .spanColumns = 1 } };
+    screen.columns = 10;
+    screen.lines = 5;
+    screen.apply(snapshot);
+    givePixels(screen, 3);
+    bare.mirror->apply(screen, snapshot);
+    REQUIRE(fragmentsOnRow(*bare.terminal, 0) == 1);
+
+    // Ten rows of output push the picture's row into the history.
+    auto rows = std::vector<proto::WireLine> {};
+    for (auto const id: std::views::iota(6, 16))
+        rows.push_back(wideRowAt(id, 10, 0, U'x'));
+    bare.mirror->apply(screen, deltaAt(screen, 11, std::move(rows), cellAt(4, 1)));
+    REQUIRE(bare.historyLines() == 10);
+    REQUIRE(fragmentsOnRow(*bare.terminal, -10) == 1);
+
+    // A keystroke echoed on the page: the history's image cells are not looked at.
+    auto const before = bare.mirror->imageCellsVisited();
+    bare.mirror->apply(screen, deltaAt(screen, 11, { wideRowAt(15, 10, 1, U'y') }, cellAt(4, 2)));
+    CHECK(bare.mirror->imageCellsVisited() == before);
+    CHECK(fragmentsOnRow(*bare.terminal, -10) == 1);
+}
+
+TEST_CASE("a picture in a narrower mirror's history stays once, beside its text", "[vthost][mirror][image]")
+{
+    // A 30-column mirror of a 40-column host shows the host's columns 10..39 while the cursor is at the
+    // right edge, so a page row's cells are shifted 10 to the left. Once the host has scrolled the row into
+    // its history, a row is no longer shifted -- and a later full pass (new pixels arriving) must not leave
+    // the tile the shifted pass put there beside the one it puts now.
+    auto bare = BareMirror { BareMirrorShape { .lines = vtbackend::LineCount(5),
+                                               .columns = vtbackend::ColumnCount(30),
+                                               .history = vtbackend::LineCount(50) } };
+    auto screen = vthost::client::RemoteScreen {};
+    auto snapshot = largeGridSnapshot(screen, {}, cellAt(19, 39));
+    snapshot.lines = { wideRowAt(20, 40, 15, U'I') };
+    snapshot.imageCells = { proto::ImageCellEntry { .stableId = 20, .column = 15, .placement = 1 } };
+    snapshot.imagePlacements = { proto::ImagePlacementEntry {
+        .placement = 1, .imageId = 3, .spanLines = 1, .spanColumns = 1 } };
+    screen.apply(snapshot);
+    givePixels(screen, 3);
+    bare.mirror->apply(screen, snapshot);
+    REQUIRE(fragmentsOnRow(*bare.terminal, 4) == 1); // host column 15, shown at 5
+
+    // The host scrolls twenty-five rows, the cursor staying at the right edge.
+    auto rows = std::vector<proto::WireLine> {};
+    for (auto const id: std::views::iota(21, 46))
+        rows.push_back(wideRowAt(id, 40, 39, U'x'));
+    bare.mirror->apply(screen, deltaAt(screen, 26, std::move(rows), cellAt(19, 39)));
+    auto const row = 4 - 25;
+    REQUIRE(fragmentsOnRow(*bare.terminal, row) == 1);
+
+    // Pixels of another image arrive: a full pass.
+    givePixels(screen, 4);
+    bare.mirror->applyImage(screen, 4);
+    CHECK(fragmentsOnRow(*bare.terminal, row) == 1);
+    // And it stays where the row's text is: the row was written shifted, so its tile is too.
+    auto const& line = bare.terminal->primaryScreen().grid().lineAt(vtbackend::LineOffset(row));
+    CHECK(line.toUtf8().find('I') == 5);
+    REQUIRE(line.storage().imageFragments.has_value());
+    CHECK(line.storage().imageFragments->contains(5));
+}
+
 TEST_CASE("a mirror at least as large as the remote grid is not panned", "[vthost][mirror][viewport]")
 {
     auto bare = BareMirror { BareMirrorShape { .lines = vtbackend::LineCount(25),
@@ -3482,6 +3603,44 @@ TEST_CASE("a late kitty transmit resolves placeholder rows the client holds in h
         REQUIRE(fragmentAt(*h->serverTerminal(session), pictureTop + 1, 3) != nullptr);
         auto const gaps = vthost::testing::compareGrids(*h->serverTerminal(session), *h->mirror);
         checkParity(gaps);
+        h->client->detach();
+    }(&h, session, std::move(bytes));
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
+TEST_CASE("deleting a kitty placement clears its picture from the client's history",
+          "[vthost][mirror][image]")
+{
+    // d=i with a placement id clears the placement's placeholder cells in the host's history; a client that
+    // holds those rows has to be told, or it keeps showing the picture until the next resync.
+    auto h = MirrorHarness {};
+    auto const session = newSession(h.host);
+    auto bytes = kittyVirtualTransmit(7, 2, 4, ",p=2") + kittyPlaceholderRow("38;5;7;58;5;2", 0, 4)
+                 + kittyPlaceholderRow("38;5;7;58;5;2", 1, 4) + lineBreaks(30) + "tail";
+
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session, std::string bytes) -> Task<void> {
+        serverWrites(h, session, bytes);
+        auto const& serverGrid = h->serverTerminal(session)->primaryScreen().grid();
+        auto const pictureTop = [&] {
+            for (auto const row: std::views::iota(-unbox<int>(serverGrid.historyLineCount()), 0))
+                if (fragmentAt(*h->serverTerminal(session), row, 0) != nullptr)
+                    return row;
+            return 0;
+        }();
+        REQUIRE(pictureTop < 0);
+        co_await waitUntil(&h->loop, [&] { return fragmentAt(*h->mirror, pictureTop + 1, 3) != nullptr; });
+        REQUIRE(fragmentAt(*h->mirror, pictureTop, 0) != nullptr);
+
+        serverWrites(h, session, "\033_Ga=d,d=i,i=7,p=2\033\\");
+        REQUIRE(fragmentAt(*h->serverTerminal(session), pictureTop, 0) == nullptr);
+        co_await waitUntil(&h->loop, [&] {
+            return fragmentAt(*h->mirror, pictureTop, 0) == nullptr
+                   && fragmentAt(*h->mirror, pictureTop + 1, 3) == nullptr;
+        });
+        CHECK(fragmentAt(*h->mirror, pictureTop, 0) == nullptr);
+        CHECK(fragmentAt(*h->mirror, pictureTop + 1, 3) == nullptr);
+        checkParity(vthost::testing::compareGrids(*h->serverTerminal(session), *h->mirror));
         h->client->detach();
     }(&h, session, std::move(bytes));
 

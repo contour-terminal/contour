@@ -65,7 +65,7 @@ namespace vthost
     return enumUpTo(value, vtbackend::ImageFormat::PNG).value_or(vtbackend::ImageFormat::Auto);
 }
 
-/// Numbers the placements a connection is told about, for ImageCellEntry::placement.
+/// Numbers the placements a connection is told about, for proto::ImagePlacementEntry::placement.
 ///
 /// A placement is a RasterizedImage, and nothing in one names it across deltas: its address can be reused
 /// once it is freed. So each is remembered beside a weak reference, and an address whose placement has

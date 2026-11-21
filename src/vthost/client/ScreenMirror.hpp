@@ -41,6 +41,7 @@
 #include <vtbackend/screen/Terminal.hpp>
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -202,6 +203,10 @@ class ScreenMirror
     /// it — what the client's image handler calls so the image appears where the delta put it.
     void applyImage(RemoteScreen const& screen, uint32_t imageId);
 
+    /// @return How many image cells the mirror has examined so far: the cost of keeping its images current,
+    ///         which an update keeps to the rows it touched. For tests.
+    [[nodiscard]] uint64_t imageCellsVisited() const noexcept { return _imageCellsVisited; }
+
     /// The row of the host's primary grid that a row of this mirror's primary page holds: what the host is
     /// asked to act on when the user acts on the mirror's row -- a vi mark, which is the host's.
     ///
@@ -325,9 +330,31 @@ class ScreenMirror
     /// template -- until an indicator page with no rows gives it its own back.
     void applyStatusLines(RemoteScreen const& screen);
 
-    /// (Re)builds every image placement whose anchor sits in the current viewport, and drops the
-    /// fragments of images the server released.
-    void applyImages(RemoteScreen const& screen);
+    /// Puts the image fragments of @p screen's cells on the mirror's grid, for the rows it holds, each
+    /// placement rasterized once from its table entry. A row the update rewrote lost its fragments with its
+    /// cells, and the screen restates them; a cell already showing its tile is left alone. The caller holds
+    /// the terminal lock.
+    /// @param screen The mirrored screen holding the cells and placements.
+    /// @param rewritten The rows an incremental update carried: of the history, only those are restated (the
+    ///        page always is). Absent for a replay or newly arrived pixels, which restate every row.
+    void applyImages(RemoteScreen const& screen,
+                     std::optional<std::span<proto::WireLine const>> rewritten = std::nullopt);
+
+    /// Puts the image fragments of one of @p screen's rows on the mirror's grid, if the mirror holds the row,
+    /// clearing any it shows that its cells do not name. A row already showing its tiles is not written.
+    void applyImageRow(RemoteScreen const& screen,
+                       int64_t stableId,
+                       std::map<uint16_t, proto::ImageCellEntry> const& columns);
+
+    /// Remembers that the text of row @p stableId was written shifted by @p firstColumn.
+    void noteRowShift(int64_t stableId, vtbackend::ColumnOffset firstColumn);
+
+    /// @return The shift the row @p stableId, at page offset @p target, has its cells written with.
+    [[nodiscard]] vtbackend::ColumnOffset rowShiftOf(int64_t stableId, int64_t target) const;
+
+    /// @return The raster of @p placement, built now if its pixels are here, or null when they are not.
+    [[nodiscard]] std::shared_ptr<vtbackend::RasterizedImage const> placementRaster(
+        RemoteScreen const& screen, proto::ImagePlacementEntry const& placement);
 
     /// Puts the soft glyph references of @p screen's cells on the mirror's grid, for the rows it holds. A row
     /// the update rewrote lost its references with its cells, and the screen restates them, so this runs
@@ -492,6 +519,15 @@ class ScreenMirror
     /// them once. Holding the reference is also what keeps the pool entry alive: `ImagePool`'s id
     /// index is weak, so an image nothing holds is collected.
     std::unordered_map<uint32_t, std::shared_ptr<vtbackend::Image const>> _images;
+    /// Placement ordinal → its raster, built once: an ordinal names one placement for the connection's life.
+    /// Forgotten with the connection, on a replay, and for an image the server released.
+    std::unordered_map<uint32_t, std::shared_ptr<vtbackend::RasterizedImage const>> _placementRasters;
+    /// The column shift each held row's text was written with (@see writeRow), by stable id, for the rows
+    /// written shifted only: empty for a mirror at least as wide as the host. What a history row's image
+    /// tiles are shifted by, so they stay beside their text after the row scrolled off the page.
+    std::map<int64_t, vtbackend::ColumnOffset> _rowShifts;
+    /// Not a state: a cost counter tests read. @see imageCellsVisited()
+    uint64_t _imageCellsVisited = 0;
     /// The daemon-store generation of the soft fonts the mirror holds, so a replay that finds the set
     /// unchanged rebuilds nothing. Empty until the daemon stated one.
     std::optional<uint64_t> _softFontGeneration;

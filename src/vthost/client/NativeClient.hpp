@@ -211,10 +211,19 @@ struct RemoteScreen
     /// number space from the DEC one. @see vthost/MirroredModes.h.
     std::vector<uint32_t> setAnsiModes;
 
-    /// Image-covered cells, keyed by stable row id then column: which image tile
-    /// (pool-local id + in-image cell offset + layer) is shown at that cell.
-    /// Replaced per row as deltas redraw it; trimmed with the row eviction.
+    /// Image-covered cells, keyed by stable row id then column: which tile of which placement is shown at
+    /// that cell. Replaced per row as deltas redraw it; trimmed with the row eviction. A cell whose
+    /// placement the delta's table did not state is dropped on arrival.
     std::map<int64_t, std::map<uint16_t, proto::ImageCellEntry>> imageCells;
+
+    /// A placement, and how many of @ref imageCells show it.
+    struct HeldPlacement
+    {
+        proto::ImagePlacementEntry entry; ///< The placement as its latest table stated it.
+        std::size_t cells = 0;            ///< The cells of @ref imageCells naming it; 0 forgets it.
+    };
+    /// The placements @ref imageCells names, by ordinal: exactly those, so the table never outgrows them.
+    std::unordered_map<uint32_t, HeldPlacement> imagePlacements;
     /// Soft-glyph cells, keyed like @ref imageCells: which soft font glyph a cell shows in place of its
     /// character. Empty unless both ends negotiated Capability::SoftFonts.
     std::map<int64_t, std::map<uint16_t, proto::SoftGlyphCellEntry>> softGlyphCells;
@@ -273,12 +282,24 @@ struct RemoteScreen
     /// @return The image-cell entry at (@p stableId, @p column), or nullptr.
     [[nodiscard]] proto::ImageCellEntry const* imageAt(int64_t stableId, uint16_t column) const;
 
+    /// @return The placement whose ordinal is @p placement, or nullptr when no held cell names it.
+    [[nodiscard]] proto::ImagePlacementEntry const* imagePlacement(uint32_t placement) const;
+
     /// @return The cached pixels for @p imageId, or nullptr if not fetched yet.
     [[nodiscard]] proto::ImageData const* imageData(uint32_t imageId) const;
 
     /// Drops @p imageId: forgets its pixels and clears every cell referencing it
     /// (those cells render blank until redrawn). Called on ImageGone.
     void dropImage(uint32_t imageId);
+
+  private:
+    /// Holds @p cell, replacing what its row and column held; dropped when its placement is not held.
+    void holdImageCell(proto::ImageCellEntry const& cell);
+    /// Forgets that @p cell names its placement, and the placement once nothing names it.
+    void releaseImageCell(proto::ImageCellEntry const& cell);
+    /// Forgets the image cells of the rows in [@p first, @p last).
+    void releaseImageRows(std::map<int64_t, std::map<uint16_t, proto::ImageCellEntry>>::iterator first,
+                          std::map<int64_t, std::map<uint16_t, proto::ImageCellEntry>>::iterator last);
 };
 
 /// Whether a request reached the wire.
@@ -477,7 +498,7 @@ class NativeClient final
                     std::optional<proto::WireCellPixelSize> cell);
 
     /// Requests an image's pixels: @p session scopes the per-session image pool,
-    /// @p imageId is the pool-local id carried by the cell's ImageCellEntry.
+    /// @p imageId is the pool-local id its placement's ImagePlacementEntry carries.
     void fetchImage(uint64_t session, uint32_t imageId);
 
     /// Layout authoring (F2): ask the daemon to create a tab, split @p tab's

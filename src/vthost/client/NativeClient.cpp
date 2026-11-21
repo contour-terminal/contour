@@ -217,6 +217,7 @@ void RemoteScreen::apply(proto::Delta const& delta)
     {
         rows.clear();
         imageCells.clear();
+        imagePlacements.clear();
         softGlyphCells.clear();
         // The pixel caches stay valid: image ids are pool-scoped, not
         // generation-scoped, so a rebuild does not invalidate a fetched image.
@@ -275,11 +276,17 @@ void RemoteScreen::apply(proto::Delta const& delta)
         // The row was redrawn: its previous image cells are stale. The server
         // re-sends any that survived in delta.imageCells (which only references
         // rows present in delta.lines), so clearing first is loss-free.
-        imageCells.erase(line.stableId);
+        if (auto const row = imageCells.find(line.stableId); row != imageCells.end())
+            releaseImageRows(row, std::next(row));
         softGlyphCells.erase(line.stableId); // likewise: the row's cells are restated beside it
     }
+    // The table before the cells: a cell is held only while the placement it names is.
+    for (auto const& placement: delta.imagePlacements)
+        imagePlacements[placement.placement].entry = placement;
     for (auto const& entry: delta.imageCells)
-        imageCells[entry.stableId][entry.column] = entry;
+        holdImageCell(entry);
+    // A placement the table stated that no cell names -- a peer's surplus -- is not kept either.
+    std::erase_if(imagePlacements, [](auto const& item) { return item.second.cells == 0; });
     for (auto const& entry: delta.softGlyphCells)
         softGlyphCells[entry.stableId][entry.column] = entry;
     for (auto const& entry: delta.hyperlinks)
@@ -334,7 +341,7 @@ void RemoteScreen::apply(proto::Delta const& delta)
     // the floor sits far below the viewport; unset means the floor alone bounds it.
     auto const evictBelow = historyKeep ? std::max(stableFloor, viewportBase - *historyKeep) : stableFloor;
     rows.erase(rows.begin(), rows.lower_bound(evictBelow));
-    imageCells.erase(imageCells.begin(), imageCells.lower_bound(evictBelow));
+    releaseImageRows(imageCells.begin(), imageCells.lower_bound(evictBelow));
     softGlyphCells.erase(softGlyphCells.begin(), softGlyphCells.lower_bound(evictBelow));
 }
 
@@ -347,6 +354,44 @@ proto::ImageCellEntry const* RemoteScreen::imageAt(int64_t stableId, uint16_t co
     return colIt != rowIt->second.end() ? &colIt->second : nullptr;
 }
 
+proto::ImagePlacementEntry const* RemoteScreen::imagePlacement(uint32_t placement) const
+{
+    auto const it = imagePlacements.find(placement);
+    return it != imagePlacements.end() ? &it->second.entry : nullptr;
+}
+
+void RemoteScreen::holdImageCell(proto::ImageCellEntry const& cell)
+{
+    auto const placement = imagePlacements.find(cell.placement);
+    if (placement == imagePlacements.end())
+        return;
+    // Counted before the cell it replaces is released, which may name the same placement.
+    ++placement->second.cells;
+    auto& columns = imageCells[cell.stableId];
+    if (auto const [held, inserted] = columns.try_emplace(cell.column, cell); !inserted)
+    {
+        releaseImageCell(held->second);
+        held->second = cell;
+    }
+}
+
+void RemoteScreen::releaseImageCell(proto::ImageCellEntry const& cell)
+{
+    auto const placement = imagePlacements.find(cell.placement);
+    if (placement != imagePlacements.end() && --placement->second.cells == 0)
+        imagePlacements.erase(placement);
+}
+
+void RemoteScreen::releaseImageRows(
+    std::map<int64_t, std::map<uint16_t, proto::ImageCellEntry>>::iterator first,
+    std::map<int64_t, std::map<uint16_t, proto::ImageCellEntry>>::iterator last)
+{
+    for (auto const& columns: std::ranges::subrange(first, last) | std::views::values)
+        for (auto const& cell: columns | std::views::values)
+            releaseImageCell(cell);
+    imageCells.erase(first, last);
+}
+
 proto::ImageData const* RemoteScreen::imageData(uint32_t imageId) const
 {
     auto const it = images.find(imageId);
@@ -357,8 +402,14 @@ void RemoteScreen::dropImage(uint32_t imageId)
 {
     images.erase(imageId);
     requestedImages.erase(imageId);
-    for (auto& [stableId, columns]: imageCells)
-        std::erase_if(columns, [imageId](auto const& pair) { return pair.second.imageId == imageId; });
+    for (auto& columns: imageCells | std::views::values)
+        std::erase_if(columns, [this, imageId](auto const& pair) {
+            auto const* placement = imagePlacement(pair.second.placement);
+            if (placement == nullptr || placement->imageId != imageId)
+                return false;
+            releaseImageCell(pair.second);
+            return true;
+        });
     std::erase_if(imageCells, [](auto const& pair) { return pair.second.empty(); });
 }
 
@@ -861,12 +912,14 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
         // Pull pixels for any image this delta newly referenced that we neither
         // hold nor have a request in flight for. The cells render blank until the
         // ImageData answer lands and fires the image handler.
-        for (auto const& entry: delta->imageCells)
+        for (auto const& placement: delta->imagePlacements)
         {
-            if (screen.images.contains(entry.imageId) || screen.requestedImages.contains(entry.imageId))
+            if (screen.imagePlacement(placement.placement) == nullptr // no cell of it was held
+                || screen.images.contains(placement.imageId)
+                || screen.requestedImages.contains(placement.imageId))
                 continue;
-            screen.requestedImages.insert(entry.imageId);
-            fetchImage(delta->session, entry.imageId);
+            screen.requestedImages.insert(placement.imageId);
+            fetchImage(delta->session, placement.imageId);
         }
         // Publish only a screen that is whole. A mid-run piece leaves the mirror holding part of
         // a grid, and handing that to a frontend would have it repaint a snapshot it has only
