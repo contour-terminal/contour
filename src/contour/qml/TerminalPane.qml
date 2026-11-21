@@ -14,7 +14,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Window
-import Qt5Compat.GraphicalEffects
+import QtQuick.Effects
 import Contour.Terminal
 
 ContourTerminal {
@@ -151,11 +151,16 @@ ContourTerminal {
             source: pane.session ? pane.session.pathToBackground : ""
         }
 
-        FastBlur {
+        // Qt Quick's own MultiEffect, not Qt5Compat's FastBlur: same 32px radius, and no padding past the
+        // image's edges, as FastBlur's default (transparentBorder: false) had none either.
+        MultiEffect {
             visible: pane.session ? pane.session.isBlurBackground : false
             anchors.fill: backgroundImage
             source: backgroundImage
-            radius: 32
+            autoPaddingEnabled: false
+            blurEnabled: true
+            blur: 1.0
+            blurMax: 32
         }
 
         Rectangle {

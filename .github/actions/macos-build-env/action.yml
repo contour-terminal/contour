@@ -21,14 +21,14 @@ runs:
       uses: jurplel/install-qt-action@v4
       with:
         version: 6.11.1
-        modules: qtmultimedia qt5compat qtshadertools qtspeech
+        modules: qtmultimedia qtshadertools qtspeech
         cache: true
     - name: Install Qt -- retry past a bad mirror
       if: steps.install_qt.outcome == 'failure'
       uses: jurplel/install-qt-action@v4
       with:
         version: 6.11.1
-        modules: qtmultimedia qt5compat qtshadertools qtspeech
+        modules: qtmultimedia qtshadertools qtspeech
         cache: true
     - name: "Install dependencies"
       # Sometimes, brew thinks it needs to install from source rather than binary; the job's bound

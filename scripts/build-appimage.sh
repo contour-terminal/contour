@@ -9,7 +9,7 @@ set -euo pipefail
 # host but the C library. Build it on the OLDEST glibc you want to support (CI uses Ubuntu 24.04).
 #
 # Prerequisites, installed by the caller (see the `package_for_AppImage` job in build.yml):
-#   - Qt 6.11 with qtmultimedia, qt5compat, qtshadertools and qtspeech, reachable through
+#   - Qt 6.11 with qtmultimedia, qtshadertools and qtspeech, reachable through
 #     $QT_ROOT_DIR (the variable install-qt-action exports) or qmake6/qmake on PATH
 #   - a C++23 compiler, named by $CXX (default: g++), and the build dependencies of
 #     scripts/install-deps.sh

@@ -88,7 +88,7 @@ Install the official Qt with:
 ```sh
 pip install aqtinstall
 aqt install-qt mac desktop 6.11.1 clang_64 \
-    -m qtmultimedia qt5compat qtshadertools qtspeech -O ~/Qt
+    -m qtmultimedia qtshadertools qtspeech -O ~/Qt
 ```
 
 ## One-time credential setup

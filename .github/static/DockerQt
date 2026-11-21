@@ -44,7 +44,7 @@ RUN cmake -S . -B build -G Ninja \
     -D CMAKE_INSTALL_PREFIX=/opt/qt \
     -D CMAKE_CXX_COMPILER=clang++-20 \
     -D CMAKE_C_COMPILER=clang-20 \
-    -D QT_BUILD_SUBMODULES='qtbase;qt5compat;qtmultimedia;qtdeclarative' \
+    -D QT_BUILD_SUBMODULES='qtbase;qtshadertools;qtmultimedia;qtdeclarative' \
     -D BUILD_qtquick3d=OFF \
     -D QT_FEATURE_zstd=OFF \
     -D QT_FEATURE_png=OFF \

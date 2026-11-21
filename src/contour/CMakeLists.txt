@@ -2537,7 +2537,7 @@ else()
         if(CONTOUR_FRONTEND_GUI)
             # Qt SVG's image plugin draws the header bar's bundled icons: in qt6-svg-plugins since Debian's
             # 6.7.2-5, in libqt6svg6 before it (Ubuntu 24.04).
-            set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt6core6, libqt6multimedia6, libqt6opengl6, libqt6openglwidgets6, libqt6widgets6, libssh2-1, qml6-module-qt-labs-platform, qml6-module-qt5compat-graphicaleffects, qml6-module-qtmultimedia, qml6-module-qtqml-workerscript, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtquick-templates, qml6-module-qtquick-window, qt6-qpa-plugins, qt6-svg-plugins | libqt6svg6 (<< 6.7.2-5)")
+            set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt6core6, libqt6multimedia6, libqt6opengl6, libqt6openglwidgets6, libqt6widgets6, libssh2-1, qml6-module-qt-labs-platform, qml6-module-qtmultimedia, qml6-module-qtqml-workerscript, qml6-module-qtquick-controls, qml6-module-qtquick-effects, qml6-module-qtquick-layouts, qml6-module-qtquick-templates, qml6-module-qtquick-window, qt6-qpa-plugins, qt6-svg-plugins | libqt6svg6 (<< 6.7.2-5)")
             set(CPACK_DEBIAN_PACKAGE_DEPENDS "libfreetype6, libharfbuzz0b, libxkbcommon0, libxkbcommon-x11-0${DEPENDS_EXTRA}")
             set(CPACK_DEBIAN_PACKAGE_SECTION "x11")
             set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "xdg-open")

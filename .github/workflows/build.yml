@@ -200,13 +200,13 @@ jobs:
       uses: jurplel/install-qt-action@v4
       with:
         version: "6.11.1"
-        modules: qtmultimedia qt5compat qtshadertools qtspeech
+        modules: qtmultimedia qtshadertools qtspeech
     - name: "Install Qt (GuiPrivate-capable) -- retry past a bad mirror"
       if: steps.install_qt.outcome == 'failure'
       uses: jurplel/install-qt-action@v4
       with:
         version: "6.11.1"
-        modules: qtmultimedia qt5compat qtshadertools qtspeech
+        modules: qtmultimedia qtshadertools qtspeech
     - name: Install clang
       run: |
         wget https://apt.llvm.org/llvm.sh
@@ -559,13 +559,13 @@ jobs:
       uses: jurplel/install-qt-action@v4
       with:
         version: "6.11.1"
-        modules: qtmultimedia qt5compat qtshadertools qtspeech
+        modules: qtmultimedia qtshadertools qtspeech
     - name: "Install Qt (GuiPrivate-capable) -- retry past a bad mirror"
       if: steps.install_qt.outcome == 'failure'
       uses: jurplel/install-qt-action@v4
       with:
         version: "6.11.1"
-        modules: qtmultimedia qt5compat qtshadertools qtspeech
+        modules: qtmultimedia qtshadertools qtspeech
     - name: Install clang
       run: |
         wget https://apt.llvm.org/llvm.sh
@@ -2024,13 +2024,13 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: "6.11.1"
-          modules: qtmultimedia qt5compat qtshadertools qtspeech
+          modules: qtmultimedia qtshadertools qtspeech
       - name: "Install Qt (GuiPrivate-capable) -- retry past a bad mirror"
         if: steps.install_qt.outcome == 'failure'
         uses: jurplel/install-qt-action@v4
         with:
           version: "6.11.1"
-          modules: qtmultimedia qt5compat qtshadertools qtspeech
+          modules: qtmultimedia qtshadertools qtspeech
       # PyYAML lets check_workflows run its required-checks rule against the real workflow files;
       # CHECK_WORKFLOWS_REQUIRE_YAML (job env above) makes a missing PyYAML a failure, so a pull
       # request cannot pass with that rule silently skipped. It goes into the python3 that is on
@@ -2333,13 +2333,13 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: "6.11.1"
-          modules: qtmultimedia qt5compat qtshadertools qtspeech
+          modules: qtmultimedia qtshadertools qtspeech
       - name: "Install Qt -- retry past a bad mirror"
         if: steps.install_qt.outcome == 'failure'
         uses: jurplel/install-qt-action@v4
         with:
           version: "6.11.1"
-          modules: qtmultimedia qt5compat qtshadertools qtspeech
+          modules: qtmultimedia qtshadertools qtspeech
       - name: Install GCC
         run: |
           sudo ./scripts/add-ppa.sh ppa:ubuntu-toolchain-r/test
@@ -2789,13 +2789,13 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: "6.11.1"
-          modules: qtmultimedia qt5compat qtshadertools qtspeech
+          modules: qtmultimedia qtshadertools qtspeech
       - name: "Install Qt (Windows)"
         if: runner.os == 'Windows'
         uses: jurplel/install-qt-action@v4
         with:
           version: "6.10.*"
-          modules: qtmultimedia qt5compat qtshadertools qtspeech
+          modules: qtmultimedia qtshadertools qtspeech
       # CONTOUR_EXTENSIONS_BUNDLED is on by default, and its configuration fails without cargo and the
       # wasm32-wasip1 target: the bundled status-line extensions are Rust.
       - name: "install Rust (wasm32-wasip1)"
