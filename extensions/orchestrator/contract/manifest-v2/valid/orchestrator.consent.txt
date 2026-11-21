@@ -1,0 +1,105 @@
+“orchestrator” wants to run in the background
+Module: orchestrator@/usr/lib/contour/extensions/orchestrator.wasm
+Directory (worktrees, created if missing): /home/u/worktrees
+Directory (repos): /home/u/repo/contour
+It may run only these, which can reach the network as you:
+Each of them with:
+  GIT_TERMINAL_PROMPT=0
+  GIT_ALLOW_PROTOCOL=https:ssh:git:file
+  GIT_CONFIG_COUNT=2
+  GIT_CONFIG_KEY_0=core.fsmonitor
+  GIT_CONFIG_VALUE_0=false
+  GIT_CONFIG_KEY_1=core.hooksPath
+  GIT_CONFIG_VALUE_1=/dev/null
+gh-auth (short, in repos): gh auth status
+gh-default-branch (short, in repos): gh repo view --json defaultBranchRef
+gh-prs (long, in repos): gh pr list --author @me --state open --limit 100 --json number,title,url,headRefName,baseRefName,isDraft,isCrossRepository,reviewDecision,statusCheckRollup,closingIssuesReferences --jq [.[]|[.number,.title,.url,.headRefName,.baseRefName,.isDraft,.isCrossRepository,.reviewDecision,[.closingIssuesReferences[]|[.number,.url]],[.statusCheckRollup[]|[.__typename,.name,.context,.status,.conclusion,.state]]]]
+gh-issues (long, in repos): gh issue list --state open --limit 100 --search {query} --json number,title,url
+git-fetch (long, in repos): git fetch --quiet {remote}
+git-worktree-add (long, in repos): git worktree add --detach {path} {base}
+git-worktree-add-branch (long, in repos): git worktree add --no-track -b {branch} {path} {base}
+git-worktree-list (short, in repos): git worktree list --porcelain -z
+gh-pr-checkout (long, in worktrees): gh pr checkout {number} --branch {branch}
+git-common-dir (short, in worktrees): git rev-parse --path-format=absolute --git-common-dir
+  GIT_CONFIG_COUNT=3
+  GIT_CONFIG_KEY_0=core.fsmonitor
+  GIT_CONFIG_VALUE_0=false
+  GIT_CONFIG_KEY_1=core.hooksPath
+  GIT_CONFIG_VALUE_1=/dev/null
+  GIT_CONFIG_KEY_2=core.attributesFile
+  GIT_CONFIG_VALUE_2=/dev/null
+  GIT_ATTR_SOURCE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
+  GIT_OPTIONAL_LOCKS=0
+git-status (short, in worktrees): git status --porcelain --untracked-files=normal --ignore-submodules=none
+  GIT_CONFIG_COUNT=3
+  GIT_CONFIG_KEY_0=core.fsmonitor
+  GIT_CONFIG_VALUE_0=false
+  GIT_CONFIG_KEY_1=core.hooksPath
+  GIT_CONFIG_VALUE_1=/dev/null
+  GIT_CONFIG_KEY_2=core.attributesFile
+  GIT_CONFIG_VALUE_2=/dev/null
+  GIT_ATTR_SOURCE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
+  GIT_OPTIONAL_LOCKS=0
+git-head-reachable (short, in worktrees): git for-each-ref --count=1 --contains HEAD refs/heads refs/tags refs/remotes
+  GIT_CONFIG_COUNT=3
+  GIT_CONFIG_KEY_0=core.fsmonitor
+  GIT_CONFIG_VALUE_0=false
+  GIT_CONFIG_KEY_1=core.hooksPath
+  GIT_CONFIG_VALUE_1=/dev/null
+  GIT_CONFIG_KEY_2=core.attributesFile
+  GIT_CONFIG_VALUE_2=/dev/null
+  GIT_ATTR_SOURCE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
+  GIT_OPTIONAL_LOCKS=0
+git-operation-state (short, in worktrees): git -c status.displayCommentPrefix=false -c color.status=false status --long
+  LC_ALL=C
+  GIT_CONFIG_COUNT=3
+  GIT_CONFIG_KEY_0=core.fsmonitor
+  GIT_CONFIG_VALUE_0=false
+  GIT_CONFIG_KEY_1=core.hooksPath
+  GIT_CONFIG_VALUE_1=/dev/null
+  GIT_CONFIG_KEY_2=core.attributesFile
+  GIT_CONFIG_VALUE_2=/dev/null
+  GIT_ATTR_SOURCE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
+  GIT_OPTIONAL_LOCKS=0
+git-index-flags (short, in worktrees): git ls-files -v --stage
+  GIT_CONFIG_COUNT=3
+  GIT_CONFIG_KEY_0=core.fsmonitor
+  GIT_CONFIG_VALUE_0=false
+  GIT_CONFIG_KEY_1=core.hooksPath
+  GIT_CONFIG_VALUE_1=/dev/null
+  GIT_CONFIG_KEY_2=core.attributesFile
+  GIT_CONFIG_VALUE_2=/dev/null
+  GIT_ATTR_SOURCE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
+  GIT_OPTIONAL_LOCKS=0
+git-clean (short, in worktrees): git clean -f -- STATUS.md
+  GIT_CONFIG_COUNT=3
+  GIT_CONFIG_KEY_0=core.fsmonitor
+  GIT_CONFIG_VALUE_0=false
+  GIT_CONFIG_KEY_1=core.hooksPath
+  GIT_CONFIG_VALUE_1=/dev/null
+  GIT_CONFIG_KEY_2=core.attributesFile
+  GIT_CONFIG_VALUE_2=/dev/null
+  GIT_ATTR_SOURCE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
+  GIT_OPTIONAL_LOCKS=0
+git-worktree-remove (long, in worktrees): git worktree remove {path}
+  GIT_CONFIG_COUNT=3
+  GIT_CONFIG_KEY_0=core.fsmonitor
+  GIT_CONFIG_VALUE_0=false
+  GIT_CONFIG_KEY_1=core.hooksPath
+  GIT_CONFIG_VALUE_1=/dev/null
+  GIT_CONFIG_KEY_2=core.attributesFile
+  GIT_CONFIG_VALUE_2=/dev/null
+  GIT_ATTR_SOURCE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
+  GIT_OPTIONAL_LOCKS=0
+agent-setup-check (short, in worktrees): contour agent setup --dry-run --json
+agent-transcript (short, in worktrees): contour agent transcript --session {session} --cwd {path} --page {page} --format {format} --json
+agent-record (short, in worktrees): contour agent record --line {record} --format {format}
+agent-stats (short, in worktrees): contour agent stats --session {session} --cwd {path} --format {format} --json
+It may open tabs running: agent (in worktrees): claude --model {model} --session-id {session} {prompt}
+  GIT_CONFIG_COUNT=2
+  GIT_CONFIG_KEY_0=push.default
+  GIT_CONFIG_VALUE_0=upstream
+  GIT_CONFIG_KEY_1=push.autoSetupRemote
+  GIT_CONFIG_VALUE_1=true
+It may read files in: worktrees
+It shows its own tab: orchestrator://

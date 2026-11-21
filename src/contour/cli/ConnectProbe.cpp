@@ -61,7 +61,7 @@ std::expected<void, std::string> checkHostReachable(vthost::client::DaemonContro
 }
 
 std::unique_ptr<vthost::client::DaemonControlPort> makeHostControl(
-    std::shared_ptr<vthost::ITransportFactory> transport, vthost::AttachBudget timeout)
+    std::shared_ptr<vthost::ITransportFactory> transport, vthost::AttachBudget const& timeout)
 {
     return vthost::client::makeDaemonControl(std::move(transport), timeout);
 }

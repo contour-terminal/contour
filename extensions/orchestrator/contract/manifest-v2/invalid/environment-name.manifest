@@ -1,0 +1,4 @@
+# An environment name is letters, digits and underscores, not starting with a digit.
+name = dotted
+version = 2
+command-env GIT.TERMINAL_PROMPT = 0

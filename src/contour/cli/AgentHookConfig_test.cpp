@@ -10,6 +10,8 @@
 #include <string>
 #include <string_view>
 
+#include <testing/ExactBuffer.hpp>
+
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 using contour::cli::HookMergeResult;
@@ -281,5 +283,24 @@ TEST_CASE("claudeHooks.aWrapperMentioningOurCommandIsTheUsers", "[contour][cli][
         CHECK(contour::cli::mergeHooks(claudeRow(), installed.text, exe).result
               == HookMergeResult::Unchanged);
         CHECK_FALSE(contour::cli::removeHooks(claudeRow(), installed.text).text.contains("agent report"));
+    }
+}
+
+TEST_CASE("claudeHooks.readsNoBytePastTheSettings", "[contour][cli][agent]")
+{
+    struct Row
+    {
+        std::string_view settings;
+        HookMergeResult expected;
+    };
+    for (auto const& row: { Row { .settings = R"({"other":1})", .expected = HookMergeResult::Changed },
+                            Row { .settings = R"({"other":1)", .expected = HookMergeResult::Malformed },
+                            Row { .settings = R"({"oth)", .expected = HookMergeResult::Malformed },
+                            Row { .settings = R"({"a": 1)", .expected = HookMergeResult::Malformed },
+                            Row { .settings = "[1, 2", .expected = HookMergeResult::Malformed } })
+    {
+        CAPTURE(row.settings);
+        auto const buffer = contour::testing::ExactBuffer { row.settings };
+        CHECK(contour::cli::mergeHooks(claudeRow(), buffer.view(), Exe).result == row.expected);
     }
 }

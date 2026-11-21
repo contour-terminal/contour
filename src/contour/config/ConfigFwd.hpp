@@ -88,6 +88,14 @@ enum class Permission : uint8_t
     return "ask";
 }
 
+/// When a daemon-scoped extension starts (`daemon.extensions.<name>.autostart`): the configuration's own
+/// spelling, which the extension runtime's ExtensionAutostart is converted from.
+enum class DaemonExtensionAutostart : uint8_t
+{
+    OnDemand,      ///< `autostart: false`, or none: when something asks for it.
+    AtDaemonStart, ///< `autostart: true`: as the daemon starts.
+};
+
 enum class SelectionAction : uint8_t
 {
     Nothing,

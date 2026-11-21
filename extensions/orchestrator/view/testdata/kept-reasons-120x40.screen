@@ -1,0 +1,40 @@
+╭─ Agents ─────────────────────────────────────────────────────────────╮ ╭─ Details ───────────────────────────────────╮
+│ MY PULL REQUESTS                                                     │ │ issue-2356 · work on issue · ended by you   │
+│ no open pull requests                                                │ │                                             │
+│                                                                      │ │ task      work on issue                     │
+│ ISSUES WITHOUT A PR                                                  │ │ model     sonnet                            │
+│ ▾ contour · 5                                                        │ │ state     ended by you, worktree kept,      │
+│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │             seen: git uses another          │
+│   #2338 Flaky on Windows: SessionHost.extension.controlVerb require… │ │             directory than the main         │
+│   #2253 Switch `daemon` Same `client`                                │ │             checkout's .git; nothing more   │
+│   #2163 OSC 133: optional nonce to reject forged command lines and … │ │             was run there                   │
+│   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead o… │ │ branch    agent/issue-2356-20261113-151001  │
+│                                                                      │ │ worktree  /home/u/worktrees/contour/issue-2 │
+│ TIMELINE · LAST 24 HOURS, AN HOUR A BAR                              │ │             356-20261113-151001             │
+│ agents active  ························               peak 0 · now 0 │ │ url       https://github.com/contour-termin │
+│ tokens out     ························                     0 in 24h │ │             al/contour/issues/2356          │
+│ runs started   ·······················█          1 started · 1 ended │ │           git uses another directory than   │
+│                                                                      │ │             the main checkout's .git;       │
+│ AGENTS · 0 OF 4 RUNNING                                              │ │             nothing more was run there      │
+│ no agents                                                            │ │           x tries the removal again         │
+│                                                                      │ │                                             │
+│ FINISHED · 0 NEW                                                     │ │                                             │
+│   issue-2356 · work on issue · ended by you            kept: 1 entry │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
+ ↑↓ move · enter open · d dispatch · ? help · b board · t transcript · / filter · z fold · R refresh · e end run        
+ ⬢ agents 0/4                                                                                                           

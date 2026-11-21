@@ -318,6 +318,7 @@ Terminal::Terminal(Events& eventListener,
                    SemanticBlockTokenSource sessionTokens,
                    std::optional<LinkDetectionServices> linkServices,
                    std::optional<StatusLineExtensionServices> extensionServices,
+                   IDaemonExtensionSummaries const* daemonSummaries,
                    std::optional<GitHeadServices> gitServices):
     _eventListener { eventListener },
     // HOME, or Windows' USERPROFILE, when the composition root names none.
@@ -394,6 +395,7 @@ Terminal::Terminal(Events& eventListener,
     _semanticBlockTracker { std::move(sessionTokens) },
     _extensions { extensionServices ? &extensionServices->extensions : nullptr },
     _publishSink { extensionServices ? &extensionServices->published : nullptr },
+    _daemonSummaries { daemonSummaries },
     _extensionEvents { _extensions },
     _maxReplayedUserVars { extensionServices ? extensionServices->maxUserVars : 0 },
     _takeOverName { _extensions ? _extensions->takeOverName() : std::nullopt },
@@ -895,11 +897,20 @@ bool Terminal::indicatorStatusLineDependsOnHostState() const noexcept
     // A user variable is told to this terminal alone: a client mirroring it runs no parser to see it.
     if (containsItem<StatusLineDefinitions::UserVar>(_indicatorStatusLineDefinition))
         return true;
+    // A daemon's summaries are drawn here, extensions in the session or none: a client has none to read.
+    if (indicatorStatusLineShowsDaemonSummaries())
+        return true;
     if (!_extensions)
         return false;
     if (_takeOverName)
         return true;
     return containsItem<StatusLineDefinitions::Extension>(_indicatorStatusLineDefinition);
+}
+
+bool Terminal::indicatorStatusLineShowsDaemonSummaries() const noexcept
+{
+    return _daemonSummaries != nullptr
+           && containsItem<StatusLineDefinitions::DaemonExtension>(_indicatorStatusLineDefinition);
 }
 
 void Terminal::setMirroredIndicatorStatusLine(std::optional<Line> row)
@@ -1032,6 +1043,22 @@ std::string Terminal::statusLineExtensionText(StatusLineDefinitions::Extension c
             _extensionFrame->snapshots.emplace_back(item.name, _extensions->snapshot(item.name)).second;
 
     return snapshot ? snapshot->sgrText : std::string {};
+}
+
+std::string Terminal::statusLineDaemonExtensionText(StatusLineDefinitions::DaemonExtension const& item) const
+{
+    if (_daemonSummaries == nullptr)
+        return {};
+    // Outside a repaint, the latest summary; within one, the one the repaint first read for this name, so
+    // that measuring a slot and drawing it cannot see two (a summary changes on another thread).
+    if (!_extensionFrame)
+        return _daemonSummaries->summaryOf(item.name);
+    auto& summaries = _extensionFrame->summaries;
+    auto read = std::ranges::find(
+        summaries, std::string_view { item.name }, [](auto const& entry) { return entry.first; });
+    if (read == summaries.end())
+        read = summaries.insert(summaries.end(), { item.name, _daemonSummaries->summaryOf(item.name) });
+    return read->second;
 }
 
 void Terminal::resizeStatusLineExtensions()
@@ -1782,8 +1809,8 @@ void Terminal::updateIndicatorStatusLine()
 
     refreshGitHead();
 
-    // Every {Extension} item of this repaint reads one frame per name, so that two slots, and the measuring
-    // of a slot, cannot see two generations.
+    // Every {Extension} and {DaemonExtension} item of this repaint reads one frame per name, so that two
+    // slots, and the measuring of a slot, cannot see two generations.
     auto extensionFrame = StatusLineExtensionFrame {};
     _extensionFrame = &extensionFrame;
     auto const closeExtensionFrame = core::Finally { [&]() { _extensionFrame = nullptr; } };
@@ -2170,8 +2197,13 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
     auto const eventHandledByApp = [&] {
         if (allowPassMouseEventToApp(modifiers))
             return core::locked(_inputMutex, [&] {
-                return _inputGenerator.generateMousePress(
+                auto const generated = _inputGenerator.generateMousePress(
                     modifiers, button, position, pixelPosition, uiHandledHint);
+                // A button the user pressed is an action of theirs, as a key is -- a wheel step is not, nor
+                // is motion. What was typed with it still reads as typed.
+                if (generated && !isMouseWheel(button) && _pendingInputKind == vtpty::InputKind::Other)
+                    _pendingInputKind = vtpty::InputKind::ButtonPress;
+                return generated;
             });
         if (allowWheelTranslationToApp(button, modifiers))
             return core::locked(_inputMutex,

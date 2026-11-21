@@ -1,44 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <catch2/catch_test_macros.hpp>
 
-#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include <vtextension/CommandPolicy.hpp>
+#include <vtextension/testing/FakeGrantStore.hpp>
 
 using vtextension::CommandPermission;
 using vtextension::CommandPolicy;
 using vtextension::ExtensionError;
 using vtextension::GrantState;
-using vtextension::IGrantStore;
 using vtextension::Manifest;
+using vtextension::testing::FakeGrantStore;
 
 namespace
 {
 
 using Args = std::vector<std::pair<std::string, std::string>>;
-
-/// An in-memory grant store.
-class FakeGrantStore final: public IGrantStore
-{
-  public:
-    [[nodiscard]] GrantState lookup(std::string_view hostId, std::string_view digest) const override
-    {
-        auto const it = _grants.find({ std::string(hostId), std::string(digest) });
-        return it != _grants.end() ? it->second : GrantState::Pending;
-    }
-
-    void record(std::string_view hostId, std::string_view digest, GrantState state) override
-    {
-        _grants[{ std::string(hostId), std::string(digest) }] = state;
-    }
-
-  private:
-    std::map<std::pair<std::string, std::string>, GrantState> _grants;
-};
 
 /// What the host calls the installation under test.
 constexpr auto HostId = std::string_view("config:git|/opt/ext/git.wasm");

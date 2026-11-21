@@ -1,0 +1,20 @@
+╭─ Details ──────────────────────────────────────╮
+│ issue-2356 · work on issue · ended by you      │
+│                                                │
+│ task      work on issue                        │
+│ model     sonnet                               │
+│ state     ended by you, worktree kept, seen:   │
+│             git uses another directory than    │
+│             the main checkout's .git; nothing  │
+│             more was run there                 │
+│ branch    agent/issue-2356-20261113-151001     │
+│ worktree  /home/u/worktrees/contour/issue-2356 │
+│             -20261113-151001                   │
+│ url       https://github.com/contour-terminal/ │
+│             contour/issues/2356                │
+│           git uses another directory than the  │
+│             main checkout's .git; nothing more │
+│             was run there…                     │
+╰────────────────────────────────────────────────╯
+ ↑↓ move · enter open · d dispatch · ? help       
+ ⬢ agents 0/4                                     

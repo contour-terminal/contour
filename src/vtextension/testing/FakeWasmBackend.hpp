@@ -22,9 +22,12 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
+#include <vtextension/CanonicalAbi.hpp>
+#include <vtextension/DaemonImports.hpp>
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 
@@ -143,6 +146,32 @@ class FakeWasmInstance final: public wasm::IWasmInstance
     std::atomic<Interruption> _interruption = Interruption::None;
 };
 
+/// A fake instance's linear memory as the codec reads it: for a test to lift what the host lowered, and what
+/// a scripted guest passes the host. It allocates nothing and charges no lift budget.
+class FakeInstanceMemory final: public abi::IGuestMemory
+{
+  public:
+    explicit FakeInstanceMemory(FakeWasmInstance& instance) noexcept: _instance { instance } {}
+
+    [[nodiscard]] abi::Result<std::span<std::byte>> view(abi::Address address, uint32_t size) override
+    {
+        auto const bytes = _instance.memory(address, size);
+        if (!bytes)
+            return std::unexpected(ExtensionError::Trapped);
+        return *bytes;
+    }
+
+    [[nodiscard]] abi::Result<abi::Address> allocate(uint32_t /*size*/, uint32_t /*alignment*/) override
+    {
+        return std::unexpected(ExtensionError::Trapped);
+    }
+
+    [[nodiscard]] abi::Result<void> chargeLift(uint64_t /*bytes*/) override { return {}; }
+
+  private:
+    FakeWasmInstance& _instance;
+};
+
 /// The function exports a fake module describes: those the world requires, with their core signatures.
 struct FakeExportShape
 {
@@ -151,7 +180,7 @@ struct FakeExportShape
     std::size_t results;    ///< How many i32 results it returns.
 };
 
-/// The world's required exports.
+/// The status-line world's required exports.
 inline constexpr auto FakeRequiredExports = std::array {
     FakeExportShape { .name = "load", .parameters = 2, .results = 1 },
     FakeExportShape { .name = "update", .parameters = 5, .results = 1 },
@@ -159,13 +188,21 @@ inline constexpr auto FakeRequiredExports = std::array {
     FakeExportShape { .name = "cabi_realloc", .parameters = 4, .results = 1 },
 };
 
+/// The daemon world's required exports.
+inline constexpr auto FakeDaemonRequiredExports = std::array {
+    FakeExportShape { .name = "load", .parameters = 9, .results = 0 },
+    FakeExportShape { .name = "update", .parameters = 1, .results = 0 },
+    FakeExportShape { .name = "cabi_realloc", .parameters = 4, .results = 1 },
+};
+
 /// The backend whose runtimes the fakes come from; declared here so that a module can tell it of the
 /// instances it creates.
 class FakeWasmBackend;
 
-/// A fake module: whatever bytes it was loaded from, it describes a world guest. It imports every host
-/// function its runtime was created with, all satisfied, and exports a one-page `memory` and the
-/// world's required functions.
+/// A fake module: whatever bytes it was loaded from, it describes a guest of its runtime's world. It
+/// imports every host function its runtime was created with, all satisfied, and exports a one-page
+/// `memory` and the world's required functions: the daemon world's if the runtime's host functions are
+/// the daemon world's, the status line's otherwise.
 class FakeWasmModule final: public wasm::IWasmModule, public std::enable_shared_from_this<FakeWasmModule>
 {
   public:
@@ -240,7 +277,15 @@ class FakeWasmBackend final: public wasm::IWasmBackend
         auto const lock = std::scoped_lock { _mutex };
         if (_runtimesAlive == 0)
             return std::unexpected(ExtensionError::RuntimeUnavailable);
+        _enteredOn.push_back(std::this_thread::get_id());
         return std::make_unique<Guard>(_generation.load(std::memory_order_relaxed));
+    }
+
+    /// @return Whether a guard was ever entered on @p thread.
+    [[nodiscard]] bool enteredOn(std::thread::id thread) const
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        return std::ranges::contains(_enteredOn, thread);
     }
 
     [[nodiscard]] bool isCurrentThreadPrepared() const override
@@ -261,6 +306,10 @@ class FakeWasmBackend final: public wasm::IWasmBackend
 
     /// How every instance created from now on behaves.
     FakeGuest guest;
+
+    /// Runs before every instance is created; an error refuses it, as a module that fails to instantiate.
+    /// Set before the first instance: it is read on whichever thread instantiates.
+    std::function<std::expected<void, ExtensionError>()> onInstantiate;
 
     /// The instance created last; null before the first. Valid only while that instance lives.
     FakeWasmInstance* lastInstance = nullptr;
@@ -296,9 +345,10 @@ class FakeWasmBackend final: public wasm::IWasmBackend
         --_runtimesAlive;
     }
 
-    mutable std::mutex _mutex;             ///< Guards the counters below; the generation is read without it.
-    std::size_t _runtimesAlive = 0;        ///< How many runtimes are alive.
-    std::atomic<uint64_t> _generation = 0; ///< How many times the engine was brought up.
+    mutable std::mutex _mutex; ///< Guards the counters below; the generation is read without it.
+    std::vector<std::thread::id> _enteredOn; ///< Every thread a guard was entered on; guarded by _mutex.
+    std::size_t _runtimesAlive = 0;          ///< How many runtimes are alive.
+    std::atomic<uint64_t> _generation = 0;   ///< How many times the engine was brought up.
 };
 
 inline FakeWasmRuntime::FakeWasmRuntime(FakeWasmBackend& backend,
@@ -332,7 +382,9 @@ inline FakeWasmModule::FakeWasmModule(std::shared_ptr<wasm::IWasmRuntime> runtim
         });
     _exports.push_back(wasm::ExportDescription {
         .name = "memory", .kind = wasm::ExternKind::Memory, .signature = {}, .initialPages = 1 });
-    for (auto const& shape: FakeRequiredExports)
+    auto const isDaemon = !hostFunctions.empty() && hostFunctions.front().module == DaemonImportModule;
+    for (auto const& shape: isDaemon ? std::span<FakeExportShape const> { FakeDaemonRequiredExports }
+                                     : std::span<FakeExportShape const> { FakeRequiredExports })
         _exports.push_back(wasm::ExportDescription {
             .name = std::string { shape.name },
             .kind = wasm::ExternKind::Function,
@@ -345,6 +397,9 @@ inline FakeWasmModule::FakeWasmModule(std::shared_ptr<wasm::IWasmRuntime> runtim
 inline std::expected<std::unique_ptr<wasm::IWasmInstance>, ExtensionError> FakeWasmModule::instantiate(
     wasm::IHostContext& context)
 {
+    if (_backend.onInstantiate)
+        if (auto refused = _backend.onInstantiate(); !refused)
+            return std::unexpected(refused.error());
     auto names = std::ranges::to<std::vector<std::string>>(
         _exports | std::views::filter([](wasm::ExportDescription const& entry) {
             return entry.kind == wasm::ExternKind::Function;

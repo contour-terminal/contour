@@ -91,6 +91,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -5949,5 +5950,136 @@ TEST_CASE("Main.qml shows the ssh prompts of its window and answers them (offscr
     REQUIRE(answers.size() == 1);
     CHECK(answers.front().outcome == contour::askpass::AskpassOutcome::Answered);
     CHECK(answers.front().answer == "hunter2");
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+// A grant's lines are command lines: the dialog grows to hold the widest whole, as far as the window lets it.
+TEST_CASE("Main.qml's daemon extension consent dialog is as wide as its widest line allows (offscreen)",
+          "[contour][gui][qml][mainwindow][consent]")
+{
+    QQmlEngine engine;
+    MainWindowPalette palette;
+    MockMainController controller { palette.scene() };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings);
+    auto& window = activeMainWindow(*root);
+    auto* dialog = root->findChild<QObject*>(QStringLiteral("daemonExtensionConsentDialog"));
+    REQUIRE(dialog != nullptr);
+    auto& consent = controller.daemonExtensionConsent();
+
+    auto const widthFor = [&](std::string line, std::string grantDigest) {
+        consent.show(vthost::proto::ExtensionPermissionRequest {
+            .name = "orchestrator",
+            .grantDigest = std::move(grantDigest),
+            .title = "“orchestrator” wants to run in the background",
+            .lines = { vthost::proto::WireConsentLine { .text = std::move(line), .weight = 1 } },
+        });
+        waitForPopupOpened(*dialog);
+        auto const width = dialog->property("width").toReal();
+        QTest::keyClick(&window, Qt::Key_Escape);
+        waitForPopupClosed(*dialog);
+        return width;
+    };
+    auto const narrow = widthFor("gh-auth (short, in repos): gh auth status", "1");
+    auto const wide = widthFor("gh-prs (short, in repos): gh pr list --author @me --state open --limit 100 "
+                               "--json number,title,url,headRefName",
+                               "2");
+    auto const huge = widthFor(std::string(4000, 'x'), "3");
+
+    CHECK(wide > narrow);
+    CHECK(huge >= wide);
+    CHECK(huge <= window.width());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+// Main.qml hosts one DaemonExtensionConsentDialog per window on the window controller's consent model.
+TEST_CASE("Main.qml asks for a daemon extension's grant: Return denies, Allow waits out its hold (offscreen)",
+          "[contour][gui][qml][mainwindow][consent]")
+{
+    QQmlEngine engine;
+    MainWindowPalette palette;
+    MockMainController controller { palette.scene() };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings);
+    auto& window = activeMainWindow(*root);
+
+    auto* dialog = root->findChild<QObject*>(QStringLiteral("daemonExtensionConsentDialog"));
+    REQUIRE(dialog != nullptr);
+    CHECK_FALSE(dialog->property("opened").toBool());
+
+    auto const question = [](std::string grantDigest) {
+        return vthost::proto::ExtensionPermissionRequest {
+            .name = "orchestrator",
+            .grantDigest = std::move(grantDigest),
+            .title = "“orchestrator” wants to run in the background",
+            .lines = { vthost::proto::WireConsentLine { .text = "Module: <b>orchestrator</b>@/x.wasm",
+                                                        .weight = 0 },
+                       vthost::proto::WireConsentLine { .text = "gh-auth (short, in repos): gh auth status",
+                                                        .weight = 1 } },
+        };
+    };
+    auto const findItems =
+        [](QQuickItem* from, QString const& name, auto const& self) -> std::vector<QQuickItem*> {
+        auto found = std::vector<QQuickItem*> {};
+        if (from->objectName() == name)
+            found.push_back(from);
+        for (auto* child: from->childItems())
+            std::ranges::copy(self(child, name, self), std::back_inserter(found));
+        return found;
+    };
+    auto const part = [&](QString const& name) -> QQuickItem* {
+        auto* const content = dialog->property("contentItem").value<QQuickItem*>();
+        REQUIRE(content != nullptr);
+        auto const found = findItems(content, name, findItems);
+        REQUIRE(found.size() == 1);
+        return found.front();
+    };
+    auto& consent = controller.daemonExtensionConsent();
+
+    // Shown: the title, and every line as plain text.
+    consent.show(question("1"));
+    waitForPopupOpened(*dialog);
+    CHECK(part(QStringLiteral("kitDialogHeading"))->property("text").toString()
+          == QStringLiteral("“orchestrator” wants to run in the background"));
+    auto* const content = dialog->property("contentItem").value<QQuickItem*>();
+    auto const lines = findItems(content, QStringLiteral("daemonExtensionConsentLine"), findItems);
+    REQUIRE(lines.size() == 2);
+    CHECK(lines[0]->property("text").toString() == QStringLiteral("Module: <b>orchestrator</b>@/x.wasm"));
+    CHECK(lines[0]->property("textFormat").toInt() == Qt::PlainText);
+    CHECK(lines[1]->property("text").toString()
+          == QStringLiteral("gh-auth (short, in repos): gh auth status"));
+
+    // Return is Deny, never Allow -- held or not.
+    CHECK_FALSE(part(QStringLiteral("kitDialogAccept"))->property("enabled").toBool());
+    QTest::keyClick(&window, Qt::Key_Return);
+    waitForPopupClosed(*dialog);
+    REQUIRE(controller.consentAnswers.size() == 1);
+    CHECK(controller.consentAnswers[0].grantDigest == "1");
+    CHECK(controller.consentAnswers[0].answer == vthost::GrantState::Denied);
+
+    // Escape dismisses: nothing answered.
+    consent.show(question("2"));
+    waitForPopupOpened(*dialog);
+    QTest::keyClick(&window, Qt::Key_Escape);
+    waitForPopupClosed(*dialog);
+    CHECK(controller.consentAnswers.size() == 1);
+    CHECK_FALSE(consent.isVisible());
+
+    // Allow is disabled during the hold; once it passed, clicking it grants.
+    consent.show(question("3"));
+    waitForPopupOpened(*dialog);
+    auto* const accept = part(QStringLiteral("kitDialogAccept"));
+    CHECK_FALSE(accept->property("enabled").toBool());
+    controller.consentClock.advance(contour::window::DaemonConsentAllowHold);
+    for (auto const& timer: std::exchange(controller.consentTimers, {}))
+        timer();
+    QCoreApplication::processEvents();
+    CHECK(accept->property("enabled").toBool());
+    REQUIRE(QMetaObject::invokeMethod(accept, "clicked"));
+    waitForPopupClosed(*dialog);
+    REQUIRE(controller.consentAnswers.size() == 2);
+    CHECK(controller.consentAnswers[1].grantDigest == "3");
+    CHECK(controller.consentAnswers[1].answer == vthost::GrantState::Granted);
+
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

@@ -66,12 +66,20 @@ struct glz::to<glz::JSON, std::string>
 namespace vtcontrol
 {
 
+/// Glaze's defaults, for reading a `std::string_view`. Glaze assumes a NUL after any buffer it cannot resize
+/// and reads it to find the end; a view promises no such byte, so without this a document that ends where
+/// its view does is read one byte past it.
+inline constexpr auto ViewReadOptions = glz::opts { .null_terminated = false };
+
 /// The glaze options every control JSON document is read and written with.
 ///
 /// Reading is strict about what is there (an unknown key or a wrong type is an error) and lenient
-/// about what is not (an absent key keeps the member's default). Writing leaves out empty optionals.
-inline constexpr auto JsonOptions =
-    glz::opts { .error_on_unknown_keys = true, .skip_null_members = true, .error_on_missing_keys = false };
+/// about what is not (an absent key keeps the member's default), and reads no byte past the view it is
+/// given (see ViewReadOptions). Writing leaves out empty optionals.
+inline constexpr auto JsonOptions = glz::opts { .null_terminated = false,
+                                                .error_on_unknown_keys = true,
+                                                .skip_null_members = true,
+                                                .error_on_missing_keys = false };
 
 /// @param value An API struct.
 /// @return Its compact JSON, with the keys spelled like the members.

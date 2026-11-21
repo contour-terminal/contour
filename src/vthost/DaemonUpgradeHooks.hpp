@@ -3,7 +3,8 @@
 
 /// @file
 /// `DaemonUpgradeHooks` -- the daemon's side of a live upgrade that is its clients and its workspace: it
-/// tells every connection the daemon is upgrading, writes the workspace snapshot and closes every connection.
+/// closes the served sessions, tells every connection the daemon is upgrading, writes the workspace snapshot
+/// and closes every connection.
 
 #include <algorithm>
 #include <functional>
@@ -17,6 +18,8 @@
 namespace vthost
 {
 
+class SessionHost;
+
 /// The UpgradeHooks of a running daemon. Loop thread only.
 ///
 /// Its connections come in two kinds. Those that speak the native protocol end in an orderly way of their own
@@ -26,11 +29,14 @@ namespace vthost
 class DaemonUpgradeHooks final: public handover::UpgradeHooks
 {
   public:
+    /// @param host The daemon's host, whose served sessions the upgrade closes (not owned; outlives this).
     /// @param connections The daemon's non-native connections (not owned; outlives this).
     /// @param writeSnapshot Writes the workspace snapshot now and blocks until it is on disk, without sealing
     ///        the writer (WorkspacePersistence::writeNow); empty while the daemon keeps no workspaces.
-    DaemonUpgradeHooks(ConnectionRegistry const& connections, std::function<void()> writeSnapshot):
-        _connections(connections), _writeSnapshot(std::move(writeSnapshot))
+    DaemonUpgradeHooks(SessionHost& host,
+                       ConnectionRegistry const& connections,
+                       std::function<void()> writeSnapshot):
+        _host(host), _connections(connections), _writeSnapshot(std::move(writeSnapshot))
     {
     }
 
@@ -63,10 +69,17 @@ class DaemonUpgradeHooks final: public handover::UpgradeHooks
     /// Closes every observer's connection at once, and every other connection.
     void abortClients() override;
 
+    /// Closes the host's served sessions (SessionHost::closeServedSessions()).
+    void closeServedSessions() override;
+
+    /// Admits served sessions to the host again (SessionHost::admitServedSessions()).
+    void admitServedSessions() noexcept override;
+
     /// @return The observers still subscribed: a native connection unsubscribes as its orderly end is done.
     [[nodiscard]] std::size_t endingConnections() const override { return _observers.size(); }
 
   private:
+    SessionHost& _host;
     ConnectionRegistry const& _connections;
     std::function<void()> _writeSnapshot;
     UpgradeStarted _requester;

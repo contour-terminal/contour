@@ -28,6 +28,10 @@ class FactoryBinding final: public WindowBinding
     [[nodiscard]] std::string_view hostLabel() const noexcept override { return _hostLabel; }
     /// @return None: a factory has no daemon whose release could drift.
     [[nodiscard]] window::DaemonDriftModel* daemonDrift() noexcept override { return nullptr; }
+    [[nodiscard]] window::DaemonExtensionConsentModel* daemonExtensionConsent() noexcept override
+    {
+        return nullptr;
+    }
     /// Nothing to do: a factory shows nothing that outlives the window's sessions.
     void windowClosed(vtworkspace::WorkspaceId /*window*/) override {}
     /// Nothing to do: the factory serves whatever window comes next.

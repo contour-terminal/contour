@@ -1,0 +1,6 @@
+# The program is never a placeholder: a value would choose what runs.
+name = chooser
+version = 2
+root repos = config:repos/*/path
+arg remote = name
+command run short @repos = {remote} --version

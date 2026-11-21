@@ -29,7 +29,7 @@ bool isMethodName(std::string_view name)
 
 TEST_CASE("every catalog row is unique and its examples decode", "[vtcontrol][catalog]")
 {
-    STATIC_REQUIRE(std::tuple_size_v<decltype(vtcontrol::Methods)> == 25);
+    STATIC_REQUIRE(std::tuple_size_v<decltype(vtcontrol::Methods)> == 29);
 
     auto names = std::set<std::string_view> {};
     std::apply(
@@ -53,7 +53,7 @@ TEST_CASE("every catalog row is unique and its examples decode", "[vtcontrol][ca
                 ...);
         },
         vtcontrol::Methods);
-    CHECK(names.size() == 25);
+    CHECK(names.size() == 29);
 }
 
 TEST_CASE("daemon.upgrade needs write and is for sockets only", "[vtcontrol][catalog]")
@@ -159,4 +159,37 @@ TEST_CASE("pane.reportStatus and pane.clearStatus need input", "[vtcontrol][cata
     STATIC_REQUIRE(Clear.name == "pane.clearStatus");
     STATIC_REQUIRE(Clear.permission == vtcontrol::Permission::Input);
     STATIC_REQUIRE(Clear.exposure == vtcontrol::Exposure::Everywhere);
+}
+
+TEST_CASE("the extension verbs are for sockets only; only listing is a read", "[vtcontrol][catalog][consent]")
+{
+    constexpr auto List =
+        std::get<vtcontrol::Method<vtcontrol::ExtensionListRequest, vtcontrol::ExtensionListReply>>(
+            vtcontrol::Methods);
+    constexpr auto Grant =
+        std::get<vtcontrol::Method<vtcontrol::ExtensionGrantRequest, vtcontrol::ExtensionGrantReply>>(
+            vtcontrol::Methods);
+    constexpr auto Revoke =
+        std::get<vtcontrol::Method<vtcontrol::ExtensionRevokeRequest, vtcontrol::ExtensionRevokeReply>>(
+            vtcontrol::Methods);
+    STATIC_REQUIRE(List.name == "extension.list");
+    STATIC_REQUIRE(List.permission == vtcontrol::Permission::Read);
+    STATIC_REQUIRE(List.exposure == vtcontrol::Exposure::SocketOnly);
+    // Never an extension's: an extension asking for another's grant, or revoking it, is not its decision.
+    STATIC_REQUIRE(Grant.name == "extension.grant");
+    STATIC_REQUIRE(Grant.permission == vtcontrol::Permission::Write);
+    STATIC_REQUIRE(Grant.exposure == vtcontrol::Exposure::SocketOnly);
+    STATIC_REQUIRE(Revoke.name == "extension.revoke");
+    STATIC_REQUIRE(Revoke.permission == vtcontrol::Permission::Write);
+    STATIC_REQUIRE(Revoke.exposure == vtcontrol::Exposure::SocketOnly);
+}
+
+TEST_CASE("extension.status is a read, for sockets only", "[vtcontrol][catalog][summary]")
+{
+    constexpr auto Status =
+        std::get<vtcontrol::Method<vtcontrol::ExtensionStatusRequest, vtcontrol::ExtensionStatusReply>>(
+            vtcontrol::Methods);
+    STATIC_REQUIRE(Status.name == "extension.status");
+    STATIC_REQUIRE(Status.permission == vtcontrol::Permission::Read);
+    STATIC_REQUIRE(Status.exposure == vtcontrol::Exposure::SocketOnly);
 }

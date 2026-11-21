@@ -74,6 +74,12 @@ class TextRendererTest
     {
         return renderer.getOrCreateCachedGlyphPositions(codepoints, clusters, style);
     }
+
+    /// The renderer's builtin box drawing, so a test can ask what the style it draws with leaves to the font.
+    static BoxDrawingRenderer const& boxDrawingRenderer(TextRenderer const& renderer)
+    {
+        return renderer._boxDrawingRenderer;
+    }
 };
 
 /// Test accessor granting unit tests access to Renderer's deferred-reconfiguration internals.
@@ -150,6 +156,19 @@ class RendererTest
 
 namespace
 {
+/// A TextRenderer whose builtin box drawing draws in the default style, which these tests do not vary.
+[[nodiscard]] TextRenderer textRendererFor(
+    GridMetrics const& gridMetrics,
+    Shaper& textShaper,
+    FontDescriptions& fontDescriptions,
+    FontKeys const& fontKeys,
+    TextRendererEvents& events,
+    GlyphScaler const& glyphScaler = TextRenderer::defaultGlyphScaler())
+{
+    return TextRenderer { gridMetrics, textShaper,         fontDescriptions, fontKeys,
+                          events,      BoxDrawingStyle {}, glyphScaler };
+}
+
 class MockTextRendererEvents: public TextRendererEvents
 {
   public:
@@ -381,7 +400,7 @@ TEST_CASE("TextRenderer", "[renderer]")
 
     MockTextRendererEvents events;
 
-    auto renderer = TextRenderer { gridMetrics, textShaper, fontDescriptions, fontKeys, events };
+    auto renderer = textRendererFor(gridMetrics, textShaper, fontDescriptions, fontKeys, events);
 
     MockRenderTarget renderTarget;
     vtrasterizer::atlas::DirectMappingAllocator<vtrasterizer::RenderTileAttributes> allocator;
@@ -795,7 +814,7 @@ TEST_CASE("TextRenderer shaping cache key changes with the font generation", "[r
                                .emoji = *firstKey };
 
     MockTextRendererEvents events;
-    auto renderer = TextRenderer { gridMetrics, textShaper, fontDescriptions, fontKeys, events };
+    auto renderer = textRendererFor(gridMetrics, textShaper, fontDescriptions, fontKeys, events);
 
     auto const text = std::u32string { U"Building" };
     auto const clusters = std::vector<unsigned> { 0, 1, 2, 3, 4, 5, 6, 7 }; // one codepoint per cell
@@ -875,7 +894,7 @@ TEST_CASE("TextRenderer flushes its caches without a render target", "[renderer]
     };
 
     MockTextRendererEvents events;
-    auto renderer = TextRenderer { gridMetrics, textShaper, fontDescriptions, fontKeys, events };
+    auto renderer = textRendererFor(gridMetrics, textShaper, fontDescriptions, fontKeys, events);
 
     // No setRenderTarget() call: this is the detached pane. The flush must run rather than be skipped,
     // and must not reach for the atlas that does not exist.
@@ -1023,7 +1042,8 @@ struct ReconfigFixture
                  /* atlasDirectMapping */ false,
                  fontLocator,
                  Decorator::Underline,
-                 Decorator::Underline)
+                 Decorator::Underline,
+                 BoxDrawingStyle {})
     {
         RendererTest::seedMetrics(renderer, seededMetrics());
     }
@@ -1124,6 +1144,72 @@ TEST_CASE("Renderer.reconfig.geometry_resizes_render_target_on_apply", "[rendere
 
     vtrasterizer::RendererTest::applyPendingReconfig(renderer);
     CHECK(fixture.renderTarget.renderSize() == newPixelSize); // applied on the render thread
+    CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+}
+
+TEST_CASE("Renderer.reconfig.box_drawing_style_applies_on_the_render_thread", "[renderer]")
+{
+    // A config reload hands the renderer a new box-drawing style. The box-drawing renderer is read every
+    // frame, so the change is staged and only reaches it when the render thread applies the reconfig.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+    auto const& boxDrawing = vtrasterizer::TextRendererTest::boxDrawingRenderer(
+        vtrasterizer::RendererTest::textRenderer(renderer));
+    auto constexpr BrailleDots = char32_t { 0x28FF };
+    REQUIRE_FALSE(boxDrawing.leavesToFont(BrailleDots));
+
+    auto const reloaded = BoxDrawingStyle { .arcStyle = BoxDrawingStyle::ArcStyle::Elliptic,
+                                            .brailleStyle = BoxDrawingStyle::BrailleStyle::Font };
+    renderer.setBoxDrawingStyle(reloaded);
+    CHECK(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+    CHECK(renderer.boxDrawingStyle() == reloaded);
+    CHECK_FALSE(boxDrawing.leavesToFont(BrailleDots)); // not yet applied
+
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+    CHECK(boxDrawing.leavesToFont(BrailleDots));
+    CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+}
+
+TEST_CASE("Renderer.reconfig.unchanged_box_drawing_style_stages_nothing", "[renderer]")
+{
+    // A reload that left the style alone, or one that restates the style already staged, must not cost a
+    // reconfiguration.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    renderer.setBoxDrawingStyle(BoxDrawingStyle {});
+    CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+
+    auto const reloaded = BoxDrawingStyle { .brailleStyle = BoxDrawingStyle::BrailleStyle::Solid };
+    renderer.setBoxDrawingStyle(reloaded);
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+    REQUIRE_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+
+    renderer.setBoxDrawingStyle(reloaded);
+    CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+}
+
+TEST_CASE("Renderer.reconfig.box_drawing_style_staged_then_reverted_applies_the_revert", "[renderer]")
+{
+    // A second reload that restores the applied style before the render thread got to the first one. The
+    // revert differs from the style staged, though not from the one applied, so it must be staged too:
+    // compared against the applied style, it would be dropped and the frame would apply the first reload.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+    auto const& boxDrawing = vtrasterizer::TextRendererTest::boxDrawingRenderer(
+        vtrasterizer::RendererTest::textRenderer(renderer));
+    auto constexpr BrailleDots = char32_t { 0x28FF };
+    REQUIRE_FALSE(boxDrawing.leavesToFont(BrailleDots));
+
+    renderer.setBoxDrawingStyle(BoxDrawingStyle { .brailleStyle = BoxDrawingStyle::BrailleStyle::Font });
+    renderer.setBoxDrawingStyle(BoxDrawingStyle {});
+    CHECK(renderer.boxDrawingStyle() == BoxDrawingStyle {});
+
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+    CHECK_FALSE(boxDrawing.leavesToFont(BrailleDots));
     CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
 }
 
@@ -1821,7 +1907,7 @@ TEST_CASE("TextRenderer.a_failed_shaping_is_not_cached", "[renderer][shaping]")
     };
 
     MockTextRendererEvents events;
-    auto renderer = TextRenderer { gridMetrics, textShaper, fontDescriptions, fontKeys, events };
+    auto renderer = textRendererFor(gridMetrics, textShaper, fontDescriptions, fontKeys, events);
 
     auto const text = std::u32string { U"AB" };
     auto clusters = std::vector<unsigned> { 0, 1 };
@@ -1892,7 +1978,7 @@ TEST_CASE("TextRenderer.fallback_run_stays_on_the_cell_grid", "[renderer][fallba
     };
 
     MockTextRendererEvents events;
-    auto renderer = TextRenderer { gridMetrics, textShaper, fontDescriptions, fontKeys, events };
+    auto renderer = textRendererFor(gridMetrics, textShaper, fontDescriptions, fontKeys, events);
 
     MockRenderTarget renderTarget;
     vtrasterizer::atlas::DirectMappingAllocator<vtrasterizer::RenderTileAttributes> allocator;
@@ -2018,7 +2104,7 @@ TEST_CASE("TextRenderer.a_scaled_block_draws_one_cell_sized_tile_per_band", "[re
     INFO("scaling method: " << nameOf(method));
     auto const& scaler = glyphScalerFor(method);
 
-    auto renderer = TextRenderer { gridMetrics, textShaper, fontDescriptions, fontKeys, events, scaler };
+    auto renderer = textRendererFor(gridMetrics, textShaper, fontDescriptions, fontKeys, events, scaler);
 
     MockRenderTarget renderTarget;
     vtrasterizer::atlas::DirectMappingAllocator<vtrasterizer::RenderTileAttributes> allocator;
@@ -2133,7 +2219,7 @@ TEST_CASE("TextRenderer.a_tile_normalizes_against_its_own_atlas", "[renderer][at
         .regular = *fontKey, .bold = *fontKey, .italic = *fontKey, .boldItalic = *fontKey, .emoji = *fontKey
     };
     MockTextRendererEvents events;
-    auto renderer = TextRenderer { gridMetrics, textShaper, fontDescriptions, fontKeys, events };
+    auto renderer = textRendererFor(gridMetrics, textShaper, fontDescriptions, fontKeys, events);
 
     MockRenderTarget renderTarget;
     vtrasterizer::atlas::DirectMappingAllocator<vtrasterizer::RenderTileAttributes> allocator;
@@ -2971,7 +3057,8 @@ class EmojiRenderEnv
                           _wrapper ? *_wrapper : static_cast<text::Shaper&>(_shaper),
                           _fontDescriptions,
                           _fontKeys,
-                          _events);
+                          _events,
+                          BoxDrawingStyle {});
         _renderer->setRenderTarget(_renderTarget, _allocator);
         _atlas.emplace(_renderTarget.getMockBackend(),
                        vtrasterizer::atlas::AtlasProperties { .format = format,

@@ -1,0 +1,4 @@
+# An argument has one of the known kinds.
+name = kindless
+version = 2
+arg remote = url

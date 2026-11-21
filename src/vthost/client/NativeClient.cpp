@@ -413,7 +413,9 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
                            PaneSummaryHandler onPaneSummary,
                            RaiseRoleHandler onRaiseRole,
                            WorkspaceMetaHandler onWorkspaceMeta,
-                           SnapshotProgressHandler onSnapshotProgress):
+                           SnapshotProgressHandler onSnapshotProgress,
+                           DaemonConsentHandler onDaemonConsent,
+                           ExtensionEventHandler onExtensionEvent):
     _loop(loop),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024),
@@ -434,6 +436,8 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
     _onRaiseRole(std::move(onRaiseRole)),
     _onWorkspaceMeta(std::move(onWorkspaceMeta)),
     _onSnapshotProgress(std::move(onSnapshotProgress)),
+    _onDaemonConsent(std::move(onDaemonConsent)),
+    _onExtensionEvent(std::move(onExtensionEvent)),
     _liveness(liveness),
     _keyAuth(_handshake.keySource ? std::optional { KeyAuthenticator { _handshake.keySource } }
                                   : std::nullopt),
@@ -761,6 +765,29 @@ void NativeClient::performOperation(proto::PerformOperation request)
     send(proto::DecodedPdu { std::move(request) });
 }
 
+void NativeClient::answerDaemonExtension(std::string name, std::string grantDigest, GrantState answer)
+{
+    if (!_negotiated || !_negotiated->shared.contains(proto::Capability::DaemonExtensionConsent))
+    {
+        clientLog()("attach: not answering daemon extension {}: the daemon did not offer to ask", name);
+        return;
+    }
+    send(proto::DecodedPdu { proto::ExtensionPermissionReply { .name = std::move(name),
+                                                               .grantDigest = std::move(grantDigest),
+                                                               .grantState = std::to_underlying(answer) } });
+}
+
+void NativeClient::invokeExtensionAction(std::string extension, std::string action)
+{
+    if (!_negotiated || !_negotiated->shared.contains(proto::Capability::ExtensionPresence))
+    {
+        clientLog()("attach: not invoking daemon extension {}: the daemon shows no palette rows", extension);
+        return;
+    }
+    send(proto::DecodedPdu {
+        proto::InvokeExtensionAction { .extension = std::move(extension), .action = std::move(action) } });
+}
+
 void NativeClient::answerPermission(std::string hostId, std::string digest, GrantState answer)
 {
     // Only a daemon that offered to ask reads an answer; to any other it is a PDU it did not expect.
@@ -1029,6 +1056,30 @@ bool NativeClient::handleNotice(proto::DecodedFrame const& frame)
             _onPanesReprojected();
         return true;
     }
+    if (auto const* request = std::get_if<proto::ExtensionPermissionRequest>(&pdu))
+    {
+        if (_onDaemonConsent)
+            _onDaemonConsent(DaemonConsentEvent { *request });
+        return true;
+    }
+    if (auto const* settled = std::get_if<proto::ExtensionPermissionSettled>(&pdu))
+    {
+        if (_onDaemonConsent)
+            _onDaemonConsent(DaemonConsentEvent { *settled });
+        return true;
+    }
+    if (auto const* presence = std::get_if<proto::ExtensionPresence>(&pdu))
+    {
+        if (_onExtensionEvent)
+            _onExtensionEvent(ExtensionEvent { *presence });
+        return true;
+    }
+    if (auto const* reveal = std::get_if<proto::RevealPane>(&pdu))
+    {
+        if (_onExtensionEvent)
+            _onExtensionEvent(ExtensionEvent { *reveal });
+        return true;
+    }
     if (auto const* request = std::get_if<proto::PermissionRequest>(&pdu))
     {
         if (_onPermissionRequest)
@@ -1134,6 +1185,11 @@ void NativeClient::handleServerHello(proto::ServerHello const& hello)
     // Only a daemon that echoes is probed: an older one would answer every Heartbeat Unsupported.
     if (shares(proto::Capability::Heartbeat))
         armLivenessTick();
+    // A window that holds the daemon's consent key proves it over this connection's nonce, and only then is
+    // asked the daemon extensions' questions. Without the key it proves nothing, and is never asked.
+    if (hello.consentNonce && _handshake.consentProver && shares(proto::Capability::DaemonExtensionConsent))
+        if (auto const mac = _handshake.consentProver(hello.daemonInstance, *hello.consentNonce))
+            send(proto::DecodedPdu { proto::ConsentProof { .mac = *mac } });
     if (_onHandshake)
         _onHandshake();
 }

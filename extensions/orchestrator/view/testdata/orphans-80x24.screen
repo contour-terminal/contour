@@ -1,0 +1,24 @@
+╭─ Agents ─────────────────────────────────────────────────────────────────────╮
+│   #2163 OSC 133: optional nonce to reject forged command lines and marks     │
+│   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead of settin… │
+│                                                                              │
+│ AGENTS · 0 OF 4 RUNNING                                                      │
+│ no agents                                                                    │
+│                                                                              │
+│ FINISHED · 0 NEW                                                             │
+│ nothing finished                                                             │
+│                                                                              │
+│ LEFTOVER WORKTREES                                                           │
+│   /home/u/worktrees/contour/pr-2-20260101-000000                    detached │
+│   /home/u/worktrees/contour/it's a test           agent/pr-1-20260101-000000 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Details ────────────────────────────────────────────────────────────────────╮
+│ /home/u/worktrees/contour/it's a test                                        │
+│                                                                              │
+│           no agent run uses this worktree any more; the orchestrator never   │
+│             removes it                                                       │
+│           a run ended without removing it, or it was made by hand under      │
+│             worktree_root…                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ ↑↓ move · enter open · d dispatch · ? help · b board · t transcript · / filter 
+ ⬢ agents 0/4                                                                   

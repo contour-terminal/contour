@@ -16,6 +16,7 @@
 #include <string_view>
 #include <vector>
 
+#include <testing/ExactBuffer.hpp>
 #include <vtcontrol/Json.hpp>
 
 using namespace std::string_literals;
@@ -697,4 +698,26 @@ TEST_CASE("a request id must be a string or an integer", "[mcp-server]")
     CHECK(f.channel.calls.empty());
     CHECK(f.server.handleLine(R"({"jsonrpc":"2.0","id":"abc","method":"ping"})")->contains(R"("id":"abc")"));
     CHECK(f.server.handleLine(R"({"jsonrpc":"2.0","id":-4,"method":"ping"})")->contains(R"("id":-4)"));
+}
+
+TEST_CASE("a line from stdin is read without a byte past its end", "[mcp-server]")
+{
+    struct Row
+    {
+        std::string_view line;
+        std::string_view replyHolds;
+    };
+    for (auto const& row:
+         { Row { .line = R"({"jsonrpc":"2.0","id":3,"method":"ping"})", .replyHolds = R"("result":{})" },
+           Row { .line = R"({"jsonrpc":"2.0","id":3,"method":"ping")", .replyHolds = "-32700" },
+           Row { .line = R"({"jsonrpc":"2.0","id":3,"meth)", .replyHolds = "-32700" },
+           Row { .line = R"({"jsonrpc":"2.0","id":1)", .replyHolds = "-32700" },
+           Row { .line = R"({"a": 1)", .replyHolds = "-32700" } })
+    {
+        CAPTURE(row.line);
+        auto f = Fixture {};
+        auto const reply = f.server.handleLine(contour::testing::ExactBuffer { row.line }.view());
+        REQUIRE(reply);
+        CHECK(reply->contains(row.replyHolds));
+    }
 }

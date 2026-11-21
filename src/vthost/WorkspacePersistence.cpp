@@ -217,6 +217,8 @@ SnapshotTrigger WorkspacePersistence::triggerOf(SessionEnd cause) noexcept
         case SessionEnd::Exited: return SnapshotTrigger::SessionExited;
         case SessionEnd::Requested: return SnapshotTrigger::SessionClosedByRequest;
         case SessionEnd::Killed: return SnapshotTrigger::SessionKilled;
+        // A served tab, which no snapshot holds: only the layout around it changed.
+        case SessionEnd::Upgrade: return SnapshotTrigger::LayoutChanged;
     }
     return SnapshotTrigger::SessionExited;
 }

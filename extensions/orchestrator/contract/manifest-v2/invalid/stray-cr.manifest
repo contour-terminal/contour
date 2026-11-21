@@ -1,0 +1,5 @@
+# A carriage return is part of a line end only right before a line feed: anywhere else it is refused.
+name = stray
+version = 2
+root repos = config:repos/*/path
+command gh-auth short @repos = ghauth status

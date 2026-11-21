@@ -181,6 +181,7 @@ if(CONTOUR_EXTENSIONS AND NOT CONTOUR_WASM_RUNTIME IN_LIST _CONTOUR_WASM_RUNTIME
     message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is \"${CONTOUR_WASM_RUNTIME}\", which is not a WebAssembly runtime "
                         "Contour has a backend for. Known: ${_CONTOUR_WASM_RUNTIMES}.")
 endif()
+option(CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST "Builds the agent orchestrator's WebAssembly guest; needs a WASI C++ toolchain [default: OFF]" OFF)
 option(CONTOUR_CARGO_OFFLINE "Runs cargo with --offline, for builds from vendored crates [default: OFF]" OFF)
 option(CONTOUR_TRACY "Compiles Tracy profiler instrumentation into contour [default: OFF]" OFF)
 option(CONTOUR_TRACY_TOOLS "Builds Tracy's capture and csvexport CLI tools [default: OFF]" OFF)
@@ -327,6 +328,20 @@ if(CONTOUR_TESTING)
         contour_add_lint_gate(check_wasm_runtime_containment check-wasm-runtime-containment.py)
         contour_add_lint_gate(check_wasm_runtime_containment_selftest check-wasm-runtime-containment.py --self-test)
 
+        # The agent orchestrator's core, view and guest driver also build as a wasm32-wasip1 guest with
+        # -fno-exceptions -fno-rtti and no OS access: no throw/try/catch, no throwing accessor, no run-time
+        # format, no host-only header, no RTTI, no direct clock, randomness or environment read. Test code is
+        # exempt; the self-test holds every rule to an offending and a clean sample.
+        contour_add_lint_gate(check_guest_portability check-guest-portability.py)
+        contour_add_lint_gate(check_guest_portability_selftest check-guest-portability.py --self-test)
+
+        # Fixtures recorded from real tools (a Claude Code session log, a forge CLI's JSON) hold no address,
+        # account, home directory, real UUID or token: the scrubber's allowlist drops them, and this gate checks
+        # that it held. Its self-test, and the scrubber's, hold both to planted samples.
+        contour_add_lint_gate(fixture-privacy check-fixture-privacy.py)
+        contour_add_lint_gate(fixture-privacy_selftest check-fixture-privacy.py --self-test)
+        contour_add_lint_gate(scrub_session_log_selftest scrub-session-log.py --self-test)
+
         # No platform test below the keyboard normalizer: the router, the default-binding table and the
         # session's key path are platform-neutral, so a platform macro or BuildKeyboardPlatformKind there
         # fails this gate. The self-test keeps the scanner itself honest.
@@ -338,6 +353,12 @@ if(CONTOUR_TESTING)
         # script names it and the crash-path addr2line). Test code is exempt; the self-test keeps the scanner honest.
         contour_add_lint_gate(check_no_threaded_fork check-no-threaded-fork.py)
         contour_add_lint_gate(check_no_threaded_fork_selftest check-no-threaded-fork.py --self-test)
+
+        # No identifier named after one of the Windows SDK's lowercase object-like macros (near, far, pascal,
+        # cdecl, small, hyper): <windows.h> rewrites it in any translation unit that sees the SDK, so the build
+        # breaks only on Windows. Test code included; the self-test keeps the scanner itself honest.
+        contour_add_lint_gate(check_windows_macro_identifiers check-windows-macro-identifiers.py)
+        contour_add_lint_gate(check_windows_macro_identifiers_selftest check-windows-macro-identifiers.py --self-test)
 
         # The PTY keeper includes nothing of the terminal engine: no vtbackend, vtparser or vtworkspace header,
         # and of vthost only its own and proto/Wire.hpp. The self-test keeps the scanner itself honest.
@@ -424,6 +445,10 @@ include(Tracy)
 if(CONTOUR_EXTENSIONS)
     include(ContourCargo)
 endif()
+# The C++ guests' toolchain (wasi-sdk), and contour_add_wasm_cxx_guest(); after glaze, which they build with.
+if(CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST)
+    include(ContourWasiCxx)
+endif()
 # Only the GUI draws text, so only the GUI has any use for a font to fall back to.
 if(CONTOUR_FRONTEND_GUI)
     include(NerdFontSymbols)
@@ -434,6 +459,13 @@ set(CMAKE_CXX_CLANG_TIDY "${_CONTOUR_SAVED_CLANG_TIDY}")
 include(ProductionBuild)
 if(CONTOUR_WASM_GUESTS)
     add_subdirectory(extensions)
+endif()
+# The agent orchestrator: its own CMake project, built with Contour's gates. Its native libraries build when
+# extensions are on and its tests (ORCHESTRATOR_TESTING) or its guest (CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST) are,
+# independent of CONTOUR_WASM_GUESTS. Before src/, which installs its module (CONTOUR_ORCHESTRATOR_WASM_MODULE)
+# with the bundled extensions when it is built.
+if(CONTOUR_EXTENSIONS)
+    add_subdirectory(extensions/orchestrator)
 endif()
 add_subdirectory(src)
 add_subdirectory(examples)
@@ -484,6 +516,7 @@ macro(ContourConfigurationSummary)
     message(STATUS "WebAssembly status-line extensions:                 ${CONTOUR_EXTENSIONS}")
     if(CONTOUR_EXTENSIONS)
         message(STATUS "|> WebAssembly runtime:                             ${CONTOUR_WASM_RUNTIME}")
+        message(STATUS "|> Agent orchestrator guest (WASI C++):             ${CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST}")
     endif()
     message(STATUS "Build contour using mimalloc:                       ${CONTOUR_BUILD_WITH_MIMALLOC}")
     message(STATUS "Clang Tidy:                                         ${USING_TIDY_STRING}")

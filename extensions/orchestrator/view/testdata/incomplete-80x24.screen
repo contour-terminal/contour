@@ -1,0 +1,24 @@
+contour: the pull request list shows the first 100; there may be more           
+╭─ Agents ─────────────────────────────────────────────────────────────────────╮
+│ MY PULL REQUESTS                                                             │
+│ ▾ contour · 100                                                              │
+│ ● #100000 Say why the stdio relay failed, and send a hello before half-clos… │
+│ ✓ #100001 examples: add donut-animation, a full-screen animation done right  │
+│ ✓ #100002 contour: tab_style — shapes, fills, materials and widths for the … │
+│ ✗ #100003 vtbackend: WIP -- DEC mode 44 and a partial margin-bell trigger ·… │
+│ ✗ #100004 Adds ability to set Contour as default terminal on Windows OS · d… │
+│ ● #100005 Say why the stdio relay failed, and send a hello before half-clos… │
+│ ✓ #100006 examples: add donut-animation, a full-screen animation done right  │
+│ ✓ #100007 contour: tab_style — shapes, fills, materials and widths for the … │
+│ ✗ #100008 vtbackend: WIP -- DEC mode 44 and a partial margin-bell trigger ·… │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Details ────────────────────────────────────────────────────────────────────╮
+│ Say why the stdio relay failed, and send a hello before half-closing in the… │
+│                                                                              │
+│ branch    fix/stdio-attach-starter-hello-0 → master                          │
+│ checks    running                                                            │
+│ url       https://github.com/contour-terminal/contour/pull/100000            │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ ↑↓ move · enter open · d dispatch · ? help · b board · t transcript · / filter 
+ ⬢ agents 0/4 · ✗40                                                             

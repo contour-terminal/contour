@@ -1,0 +1,4 @@
+# Only a declared root can be made readable.
+name = reader
+version = 2
+read worktrees

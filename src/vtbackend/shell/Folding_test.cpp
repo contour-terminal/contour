@@ -1969,17 +1969,17 @@ TEST_CASE("Folding.terminal.gridToScreenStaysOrderedBelowTheProjection", "[foldi
         return terminal.viewport().translateGridToScreenCoordinate(line);
     };
 
-    auto const near = screenRowOf(bottom + LineOffset(1));
-    auto const far = screenRowOf(bottom + LineOffset(20));
+    auto const nearRow = screenRowOf(bottom + LineOffset(1));
+    auto const farRow = screenRowOf(bottom + LineOffset(20));
 
-    CHECK(near > screenRowOf(bottom));
-    CHECK(far > near);
-    CHECK(far - near
+    CHECK(nearRow > screenRowOf(bottom));
+    CHECK(farRow > nearRow);
+    CHECK(farRow - nearRow
           == LineOffset(terminal.visibleDistance(bottom + LineOffset(1), bottom + LineOffset(20))));
 
     // And that really is fewer rows than the twenty grid lines between them -- otherwise the two
     // quantities would coincide and the assertion above would prove nothing.
-    CHECK(far - near < LineOffset(19));
+    CHECK(farRow - nearRow < LineOffset(19));
 }
 
 TEST_CASE("Folding.terminal.theAlternateScreenKeepsTheViCursorOnItsOwnGrid", "[folding][vi]")

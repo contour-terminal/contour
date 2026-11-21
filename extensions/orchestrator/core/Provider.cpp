@@ -1,0 +1,73 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <orchestrator/core/Provider.hpp>
+
+#include <algorithm>
+#include <array>
+#include <format>
+#include <span>
+#include <string>
+
+#include <orchestrator/core/GitHub.hpp>
+#include <orchestrator/core/GitLab.hpp>
+
+namespace orchestrator
+{
+
+namespace
+{
+    constexpr auto ProviderTable = std::array {
+        Provider { .forge = Forge::GitHub,
+                   .name = "GitHub",
+                   .authCheck = "gh-auth",
+                   .listChangeRequests = "gh-prs",
+                   .listIssues = "gh-issues",
+                   .defaultBranch = "gh-default-branch",
+                   .fetch = "git-fetch",
+                   .addWorktree = "git-worktree-add",
+                   .addBranchWorktree = "git-worktree-add-branch",
+                   .checkout = "gh-pr-checkout",
+                   .changeRequests = &github::changeRequests,
+                   .issues = &github::issues,
+                   .defaultBranchOf = &github::defaultBranch,
+                   .verification = Verification::Recorded },
+        // Written from the GitLab REST API's documented list shape; refused by the configuration until glab's
+        // own output is recorded. It carries no pipeline status and no closing issues.
+        Provider { .forge = Forge::GitLab,
+                   .name = "GitLab",
+                   .authCheck = "glab-auth",
+                   .listChangeRequests = "glab-mrs",
+                   .listIssues = "glab-issues",
+                   .defaultBranch = "glab-default-branch",
+                   .fetch = "git-fetch",
+                   .addWorktree = "git-worktree-add",
+                   .addBranchWorktree = "git-worktree-add-branch",
+                   .checkout = "glab-mr-checkout",
+                   .changeRequests = &gitlab::changeRequests,
+                   .issues = &gitlab::issues,
+                   .defaultBranchOf = &gitlab::defaultBranch,
+                   .verification = Verification::Unmeasured },
+    };
+} // namespace
+
+std::span<Provider const> providers() noexcept
+{
+    return ProviderTable;
+}
+
+Provider const* findProvider(Forge forge) noexcept
+{
+    return findProvider(ProviderTable, forge);
+}
+
+Provider const* findProvider(std::span<Provider const> rows, Forge forge) noexcept
+{
+    auto const row = std::ranges::find(rows, forge, &Provider::forge);
+    return row != rows.end() ? &*row : nullptr;
+}
+
+std::string unrecordedText(Provider const& provider)
+{
+    return std::format("not yet supported: {} has no recorded fixture", provider.name);
+}
+
+} // namespace orchestrator

@@ -94,6 +94,10 @@ namespace
             vthost::proto::Capability::WorkspaceColor,
             // compat(0.9.0): Names may stay; the legacy branches taken without it go.
             vthost::proto::Capability::Names,
+            // A window asks its user for a daemon extension's grant; the only client that offers it.
+            vthost::proto::Capability::DaemonExtensionConsent,
+            // A window's command palette shows the daemon extensions' rows, and invokes them.
+            vthost::proto::Capability::ExtensionPresence,
         });
         if (switchRequests == NativeController::SwitchRequests::Answered)
             offered.idents.push_back(std::to_underlying(vthost::proto::Capability::WorkspaceSwitch));
@@ -139,6 +143,7 @@ namespace
         switch (kind)
         {
             case vtpty::InputKind::Keyboard: return vthost::proto::InputKind::Keyboard;
+            case vtpty::InputKind::ButtonPress: return vthost::proto::InputKind::ButtonPress;
             case vtpty::InputKind::Other: break;
         }
         return vthost::proto::InputKind::Other;
@@ -159,6 +164,7 @@ NativeController::NativeController(Config config):
     _attachSettings(std::move(config.attachSettings)),
     _sessionSettings(std::move(config.sessionSettings)),
     _colorPreference(std::move(config.colorPreference)),
+    _consentProver(std::move(config.consentProver)),
     _timeline(config.timeline),
     _backoff(config.backoff)
 {
@@ -365,6 +371,8 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
                 _acceptedConnections == 0 ? core::pathToUtf8(_workingDirectory) : std::string {},
             // What signs in to a daemon that authenticates by key: the transport's, which only it can make.
             .keySource = connection->keySource,
+            // Asked as the hello is answered, for the run it names: a restarted daemon made a fresh key.
+            .consentProver = _consentProver,
         },
         // What the panes' own stores keep (`command_blocks.max_records`), resolved from the same
         // configuration: a mirror holds no more records than the terminal it feeds.
@@ -401,7 +409,11 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
         NativeClient::WorkspaceMetaHandler {
             [this](vthost::proto::WorkspaceMeta const& meta) { onWorkspaceMeta(meta); } },
         // A snapshot piece is the daemon delivering: the wait for the first session is not out of time yet.
-        NativeClient::SnapshotProgressHandler { [this] { noteAttachProgress(); } });
+        NativeClient::SnapshotProgressHandler { [this] { noteAttachProgress(); } },
+        NativeClient::DaemonConsentHandler {
+            [this](NativeClient::DaemonConsentEvent const& event) { onDaemonConsent(event); } },
+        NativeClient::ExtensionEventHandler {
+            [this](NativeClient::ExtensionEvent const& event) { onExtensionEvent(event); } });
 }
 
 core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
@@ -1813,6 +1825,70 @@ std::vector<NativeController::HostedPermissionRequest> NativeController::takePer
         return true;
     });
     return taken;
+}
+
+void NativeController::onDaemonConsent(vthost::client::NativeClient::DaemonConsentEvent const& event)
+{
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _daemonConsentEvents.push_back(event);
+    }
+    emit daemonExtensionConsentChanged();
+}
+
+std::vector<vthost::client::NativeClient::DaemonConsentEvent> NativeController::takeDaemonConsentEvents()
+{
+    auto const lock = std::lock_guard { _mutex };
+    return std::exchange(_daemonConsentEvents, {});
+}
+
+void NativeController::onExtensionEvent(vthost::client::NativeClient::ExtensionEvent const& event)
+{
+    if (auto const* presence = std::get_if<vthost::proto::ExtensionPresence>(&event))
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _extensionPresence = *presence;
+        return;
+    }
+    // An extension revealed its tab, which the daemon activated: the window raises itself and focuses it.
+    if (auto const* reveal = std::get_if<vthost::proto::RevealPane>(&event))
+    {
+        {
+            auto const lock = std::lock_guard { _mutex };
+            _paneReveals.push_back(PendingReveal { .session = reveal->session, .arrived = _clock.now() });
+        }
+        emit paneRevealRequested();
+    }
+}
+
+std::vector<PendingReveal> NativeController::takePaneReveals()
+{
+    auto const lock = std::lock_guard { _mutex };
+    return std::exchange(_paneReveals, {});
+}
+
+vthost::proto::ExtensionPresence NativeController::extensionPresence() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _extensionPresence;
+}
+
+void NativeController::invokeExtensionAction(std::string extension, std::string action)
+{
+    _reactor.post([this, extension = std::move(extension), action = std::move(action)]() mutable {
+        if (_client != nullptr)
+            _client->invokeExtensionAction(std::move(extension), std::move(action));
+    });
+}
+
+void NativeController::answerDaemonExtension(std::string name,
+                                             std::string grantDigest,
+                                             vthost::GrantState answer)
+{
+    _reactor.post([this, name = std::move(name), grantDigest = std::move(grantDigest), answer]() mutable {
+        if (_client != nullptr)
+            _client->answerDaemonExtension(std::move(name), std::move(grantDigest), answer);
+    });
 }
 
 void NativeController::onSwitchRequest(vthost::proto::SwitchRequest const& request)

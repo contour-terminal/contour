@@ -187,6 +187,10 @@ CommandArguments commandArguments(actions::Action const& action)
             [](CycleDaemon const& a) -> CommandArguments { return cycleArguments(a.direction); },
             [](SwitchToDaemon const& a) -> CommandArguments { return daemonArguments(a.daemon); },
             [](OpenDaemon const& a) -> CommandArguments { return daemonArguments(a.daemon); },
+            [](ExtensionAction const& a) -> CommandArguments {
+                return { .id = std::format("{}:{}", a.extension, a.id),
+                         .title = std::format(": {} {}", a.extension, a.id) };
+            },
             [](ColorActionConcept auto const& a) -> CommandArguments {
                 // Colorless is the DEFAULT (it opens the picker), so it carries no arguments: the row
                 // keeps the plain "SetTabColor"/"SetWorkspaceColor" id, and the palette can offer it straight

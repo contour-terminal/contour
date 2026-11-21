@@ -74,6 +74,8 @@
                 "CONTOUR_MACOS_STAPLE_APP": "ON",
                 "CONTOUR_MACOS_NOTARY_PROFILE": "contour-notary",
                 "CONTOUR_MACOS_MIN_SUPPORTED": "13.3",
+                "CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST": "ON",
+                "WASI_SDK_PREFIX": "$env{WASI_SDK_PREFIX}",
                 "CMAKE_PREFIX_PATH": "$env{QT_ROOT_DIR}",
                 "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
                 "VCPKG_TARGET_TRIPLET": "arm64-osx-contour",

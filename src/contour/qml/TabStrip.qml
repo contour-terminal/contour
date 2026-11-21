@@ -339,6 +339,8 @@ Row {
                     tabBadgeProgress: badgeProgress
                     locked: (model.tabSecure ?? 0) !== 0
                     secureState: model.tabSecure ?? 0
+                    // Through the model object too: a model without the servedBy role marks no tab served.
+                    servedBy: model.servedBy ?? ""
                     iconInfo: model.tabIcon ?? ({})
                     // The tabs from the slot's gap on make room for it, animated as a reorder is; and a tab
                     // whose row changed slides from where it stood (rowSlide).

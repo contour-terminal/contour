@@ -25,4 +25,5 @@ TEST_CASE("every SessionEnd has a name", "[vthost][snapshot]")
     CHECK(describe(SessionEnd::Exited) == "exited");
     CHECK(describe(SessionEnd::Requested) == "closed on request");
     CHECK(describe(SessionEnd::Killed) == "killed");
+    CHECK(describe(SessionEnd::Upgrade) == "closed for an upgrade");
 }

@@ -537,7 +537,7 @@ TEST_CASE("ConPty.closedProcessIsNotHeldUpByItsChild", "[vtpty][conpty]")
     auto process = std::optional<vtpty::Process> {};
     process.emplace(execInfo(core::pathToUtf8(probeProgram()), { "--linger-on-close" }),
                     vtpty::createPty(pageSize(80, 24), std::nullopt),
-                    /*escapeSandbox=*/false,
+                    vtpty::SandboxEscape::Contained,
                     std::make_shared<vtpty::NoPlacement>());
     REQUIRE(process->start().has_value());
     readProbeOutput(*process); // the probe is up, and lingers once closed
@@ -991,7 +991,7 @@ TEST_CASE("ConPty.adoptedInASecondProcessResizesAndCloses", "[vtpty][conpty][han
     auto process =
         std::make_unique<vtpty::Process>(execInfo(core::pathToUtf8(handoverProbe()), { "program" }),
                                          std::make_unique<ConPty>(pageSize(80, 25)),
-                                         /*escapeSandbox=*/false,
+                                         vtpty::SandboxEscape::Contained,
                                          std::make_shared<vtpty::NoPlacement>());
     REQUIRE(process->start().has_value());
     auto& pty = static_cast<ConPty&>(process->pty());

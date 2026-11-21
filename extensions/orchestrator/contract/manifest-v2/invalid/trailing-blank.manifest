@@ -1,0 +1,5 @@
+# Words are separated by single spaces: a line that ends with a blank is refused, never trimmed.
+name = trailing
+version = 2
+root repos = config:repos/*/path
+command gh-auth short @repos = gh auth status 

@@ -455,15 +455,15 @@ TEST_CASE("ScrollbarMarks.terminal.searchMatchesAreMarkedOncePerRow", "[scrollba
     SECTION("a match the scrollback evicted has no tick")
     {
         REQUIRE(terminal.continueSearchTally(*tally, LineCount(100)).value() == WalkProgress::Finished);
-        auto small = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, LineCount(3) };
-        small.writeToScreen("foo\r\n");
-        REQUIRE(small.terminal.setNewSearchTerm(U"foo", SearchOrigin::Typed).has_value());
-        auto walk = small.terminal.beginSearchTally(CellLocation {});
+        auto smallTerm = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, LineCount(3) };
+        smallTerm.writeToScreen("foo\r\n");
+        REQUIRE(smallTerm.terminal.setNewSearchTerm(U"foo", SearchOrigin::Typed).has_value());
+        auto walk = smallTerm.terminal.beginSearchTally(CellLocation {});
         REQUIRE(walk.has_value());
-        REQUIRE(small.terminal.continueSearchTally(*walk, LineCount(100)).has_value());
-        REQUIRE(small.terminal.scrollbarMarkInputs().size() == 1);
-        test::printLines(small, "filler", 12);
-        CHECK(small.terminal.scrollbarMarkInputs().empty());
+        REQUIRE(smallTerm.terminal.continueSearchTally(*walk, LineCount(100)).has_value());
+        REQUIRE(smallTerm.terminal.scrollbarMarkInputs().size() == 1);
+        test::printLines(smallTerm, "filler", 12);
+        CHECK(smallTerm.terminal.scrollbarMarkInputs().empty());
     }
 }
 

@@ -234,17 +234,52 @@ std::optional<std::filesystem::path> sessionSnapshotPath(std::filesystem::path c
     return stateDirectory / "sessions" / std::format("{}.snapshot", name);
 }
 
+namespace
+{
+    /// @return @p name as the daemon at @p socket spells it in its state directory: the name itself when
+    ///         @p socket is the one the name runs on, else `<name>@<hash>`, the hash being the 16 hex
+    ///         digits of the FNV-1a 64 of the socket's path.
+    [[nodiscard]] std::string qualifiedDaemonName(std::string_view name,
+                                                  std::filesystem::path const& socket,
+                                                  std::filesystem::path const& namedSocket)
+    {
+        auto const normal = socket.lexically_normal();
+        if (normal == namedSocket.lexically_normal())
+            return std::string(name);
+        auto const text = core::pathToUtf8(normal);
+        return std::format("{}@{:016x}", name, fnv1a64(std::as_bytes(std::span { text })));
+    }
+} // namespace
+
 std::optional<std::filesystem::path> daemonSnapshotPath(std::filesystem::path const& stateDirectory,
                                                         std::string_view name,
                                                         std::filesystem::path const& socket,
                                                         std::filesystem::path const& namedSocket)
 {
-    auto const normal = socket.lexically_normal();
-    if (normal == namedSocket.lexically_normal())
-        return sessionSnapshotPath(stateDirectory, name);
-    auto const text = core::pathToUtf8(normal);
-    auto const keyed = std::format("{}@{:016x}", name, fnv1a64(std::as_bytes(std::span { text })));
-    return sessionSnapshotPath(stateDirectory, keyed);
+    return sessionSnapshotPath(stateDirectory, qualifiedDaemonName(name, socket, namedSocket));
+}
+
+std::optional<std::filesystem::path> daemonExtensionStoreDirectory(
+    std::filesystem::path const& stateDirectory,
+    std::string_view name,
+    std::filesystem::path const& socket,
+    std::filesystem::path const& namedSocket,
+    std::string_view extension)
+{
+    if (!isFileSafeDaemonName(name) || !isFileSafeDaemonName(extension))
+        return std::nullopt;
+    return stateDirectory / "extensions" / qualifiedDaemonName(name, socket, namedSocket) / extension
+           / "store";
+}
+
+std::optional<std::filesystem::path> daemonExtensionPanesFile(std::filesystem::path const& stateDirectory,
+                                                              std::string_view name,
+                                                              std::filesystem::path const& socket,
+                                                              std::filesystem::path const& namedSocket,
+                                                              std::string_view extension)
+{
+    return daemonExtensionStoreDirectory(stateDirectory, name, socket, namedSocket, extension)
+        .transform([](std::filesystem::path const& store) { return store.parent_path() / "owned-panes"; });
 }
 
 } // namespace vthost

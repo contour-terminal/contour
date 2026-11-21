@@ -52,7 +52,7 @@ inline constexpr auto CatScript = "stty raw -echo; printf ready; exec cat";
 {
     return std::make_unique<vtpty::Process>(vtpty::testing::execInfo("/bin/sh", { "-c", std::move(script) }),
                                             vtpty::createPty(size, std::nullopt),
-                                            /*escapeSandbox=*/false,
+                                            vtpty::SandboxEscape::Contained,
                                             std::move(placement));
 }
 
@@ -67,7 +67,7 @@ inline constexpr auto CatScript = "stty raw -echo; printf ready; exec cat";
     exec.env = { { "PROMPT", "$G" } };
     return std::make_unique<vtpty::Process>(exec,
                                             vtpty::createPty(size, std::nullopt),
-                                            /*escapeSandbox=*/false,
+                                            vtpty::SandboxEscape::Contained,
                                             std::make_shared<vtpty::NoPlacement>());
 }
 #endif
@@ -101,14 +101,24 @@ struct LiveHost
     explicit LiveHost(Devices devices,
                       SessionHostConfig config = sequentialIds(),
                       vtbackend::Settings settings = {}):
-        host { loop,
-               [devices = std::move(devices)](vtpty::PageSize size,
-                                              std::optional<vtpty::Process::ExecInfo> const&) {
-                   return devices(size);
-               },
-               std::move(settings),
-               core::defaultEnvironment(),
-               pumping(std::move(config)) }
+        LiveHost { PtyFactory { [devices = std::move(devices)](
+                                    vtpty::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                       return devices(size);
+                   } },
+                   std::move(config),
+                   std::move(settings) }
+    {
+    }
+
+    /// @param ptys Makes the device of each session, given the program a spawn names instead of the shell.
+    /// @param config How the host is set up; its sessions always pump.
+    /// @param settings The sessions' terminal settings.
+    explicit LiveHost(PtyFactory ptys,
+                      SessionHostConfig config = sequentialIds(),
+                      vtbackend::Settings settings = {}):
+        host {
+            loop, std::move(ptys), std::move(settings), core::defaultEnvironment(), pumping(std::move(config))
+        }
     {
     }
 
@@ -127,7 +137,7 @@ struct LiveHost
     {
         auto* const tab = host.createTab();
         REQUIRE(tab != nullptr);
-        host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical);
+        std::ignore = host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical);
         REQUIRE(host.sessionCount() == 2);
     }
 

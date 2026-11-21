@@ -1,0 +1,40 @@
+╭─ Agents ─────────────────────────────────────────────────────────────╮ ╭─ Details ───────────────────────────────────╮
+│ MY PULL REQUESTS                                                     │ │ issue-2356 · work on issue · ended by you   │
+│ ▾ contour · 5                                                        │ │                                             │
+│ ● #2375 Say why the stdio relay failed, and send a hello before hal… │ │ task      work on issue                     │
+│ ✓ #2369 examples: add donut-animation, a full-screen animation done… │ │ model     sonnet                            │
+│ ✓ #2346 contour: tab_style — shapes, fills, materials and widths fo… │ │ state     ended by you, worktree kept,      │
+│ ✗ #2114 vtbackend: WIP -- DEC mode 44 and a partial margin-bell tri… │ │             seen: M src/vtbackend/Grid.cpp  │
+│ ✗ #1847 Adds ability to set Contour as default terminal on Windows … │ │ branch    agent/issue-2356-20261113-151001  │
+│                                                                      │ │ worktree  /home/u/worktrees/contour/issue-2 │
+│ ISSUES WITHOUT A PR                                                  │ │             356-20261113-151001             │
+│ ▾ contour · 5                                                        │ │ url       https://github.com/contour-termin │
+│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │             al/contour/issues/2356          │
+│   #2338 Flaky on Windows: SessionHost.extension.controlVerb require… │ │           M src/vtbackend/Grid.cpp          │
+│   #2253 Switch `daemon` Same `client`                                │ │           ?? notes.txt                      │
+│   #2163 OSC 133: optional nonce to reject forged command lines and … │ │           x tries the removal again         │
+│   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead o… │ │                                             │
+│                                                                      │ │                                             │
+│ TIMELINE · LAST 24 HOURS, AN HOUR A BAR                              │ │                                             │
+│ agents active  ························               peak 0 · now 0 │ │                                             │
+│ tokens out     ························                     0 in 24h │ │                                             │
+│ runs started   ·······················█          3 started · 3 ended │ │                                             │
+│                                                                      │ │                                             │
+│ AGENTS · 0 OF 4 RUNNING                                              │ │                                             │
+│ no agents                                                            │ │                                             │
+│                                                                      │ │                                             │
+│ FINISHED · 1 NEW                                                     │ │                                             │
+│ ● pr-2366 · fix CI · completed                               removed │ │                                             │
+│   issue-2338 · work on issue · completed                     removed │ │                                             │
+│   issue-2356 · work on issue · ended by you          kept: 2 entries │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
+ ↑↓ move · enter open · d dispatch · ? help · b board · t transcript · / filter · z fold · R refresh · e end run        
+ ⬢ agents 0/4 · ✗2 · ✓1 new                                                                                             

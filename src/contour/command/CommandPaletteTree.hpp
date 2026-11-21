@@ -87,8 +87,10 @@ struct PaletteTree
 
 /// Splits @p commands into plain commands and one parent per parameterised action.
 ///
-/// A command whose action `actions::isParameterized` becomes a child of its action's parent, even when
-/// it is the only one; every other command is plain. Parents come in catalogue order of their action.
+/// A command placed PalettePlacement::UnderItsAction whose action `actions::isParameterized` becomes a
+/// child of its action's parent, even when it is the only one, found by its argument; every other command
+/// -- including one placed PalettePlacement::OnItsOwn, whatever its action -- is plain, found by its
+/// title. Parents come in catalogue order of their action.
 /// @param commands Every command the sources offer (see collectCommands()).
 /// @return The tree.
 [[nodiscard]] PaletteTree buildPaletteTree(std::vector<Command> commands);

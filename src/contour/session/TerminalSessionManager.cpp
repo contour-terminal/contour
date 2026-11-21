@@ -943,6 +943,13 @@ std::optional<SwitchTarget> TerminalSessionManager::daemonTargetOf(vtworkspace::
     return binding->daemonTarget();
 }
 
+vthost::proto::ExtensionPresence TerminalSessionManager::extensionPresenceOf(
+    vtworkspace::WorkspaceId window) const
+{
+    auto const* const binding = bindingOf(window);
+    return binding != nullptr ? binding->extensionPresence() : vthost::proto::ExtensionPresence {};
+}
+
 std::string TerminalSessionManager::daemonNameOf(vtworkspace::WorkspaceId window) const
 {
     if (auto const target = daemonTargetOf(window))
@@ -988,6 +995,13 @@ window::DaemonDriftModel* TerminalSessionManager::daemonDriftOf(
 {
     auto* const binding = mutableBindingOf(window);
     return binding != nullptr ? binding->daemonDrift() : nullptr;
+}
+
+window::DaemonExtensionConsentModel* TerminalSessionManager::daemonExtensionConsentOf(
+    vtworkspace::WorkspaceId window) const noexcept
+{
+    auto* const binding = mutableBindingOf(window);
+    return binding != nullptr ? binding->daemonExtensionConsent() : nullptr;
 }
 
 std::string_view TerminalSessionManager::hostLabelOf(TerminalSession const& session) const noexcept
@@ -1242,7 +1256,8 @@ bool TerminalSessionManager::applyLayoutToWindow(
     vtworkspace::WorkspaceId window,
     config::Layout const& layout,
     std::optional<vtbackend::PageSize> pageSize,
-    std::function<void(config::LayoutPane const&)> const& beforeLeafSeed)
+    std::function<void(config::LayoutPane const&)> const& beforeLeafSeed,
+    vtworkspace::TabActivation activation)
 {
     if (layout.tabs.empty())
     {
@@ -1294,7 +1309,7 @@ bool TerminalSessionManager::applyLayoutToWindow(
                    != nullptr;
         };
 
-        auto* modelTab = vtworkspace::realizeLayoutTab(*_model, window, tabSpec, seeder);
+        auto* modelTab = vtworkspace::realizeLayoutTab(*_model, window, tabSpec, seeder, activation);
         _pendingSessionId.reset(); // consumed by the allocator; clear any leftover
         if (modelTab != nullptr)
         {
@@ -2306,6 +2321,18 @@ void TerminalSessionManager::upgradeDaemon(TerminalSession const& acting)
         return;
     managerLog()("UpgradeDaemon: {}.", started.error());
     postNotice(window::upgradeFailedNotice(started.error()), &acting);
+}
+
+void TerminalSessionManager::invokeExtensionAction(TerminalSession const& acting,
+                                                   std::string const& extension,
+                                                   std::string const& id)
+{
+    auto const* const window = hostOf(&acting).window;
+    auto* const binding = window != nullptr ? mutableBindingOf(window->id()) : nullptr;
+    auto const invoked =
+        binding != nullptr ? binding->invokeExtensionAction(extension, id) : ExtensionInvocation::NoDaemon;
+    if (invoked == ExtensionInvocation::NoDaemon)
+        managerLog()("ExtensionAction {} {}: this window has no daemon behind it.", extension, id);
 }
 
 void TerminalSessionManager::openSwitcherOver(TerminalSession const& acting,
@@ -3550,6 +3577,24 @@ void TerminalSessionManager::noteInputEchoChanged(TerminalSession const& session
     refreshSecureInput();
 }
 
+void TerminalSessionManager::noteServedTab(vtworkspace::Tab const& tab,
+                                           std::optional<window::ServedMark> const& mark)
+{
+    auto changed = false;
+    for (auto const session: tab.leafSessions())
+        if (auto* terminal = sessionForId(session); terminal != nullptr && terminal->servedMark() != mark)
+        {
+            terminal->setServedMark(mark);
+            changed = true;
+        }
+    if (!changed)
+        return;
+    if (auto* c = controllerDisplaying(_model->workspaceOfTab(tab.id())))
+        c->notifyTabRowChanged(tab.id(),
+                               { window::WindowController::Roles::ServedByRole,
+                                 window::WindowController::Roles::ServedStripRole });
+}
+
 void TerminalSessionManager::notifySecureTab(TerminalSession const& session)
 {
     if (auto* tab = findTabHostingSession(session.modelSessionId()))
@@ -4215,6 +4260,18 @@ TerminalSession* TerminalSessionManager::sessionForHostId(window::HostIdentity c
         return served && hostSessionIdOf(*session) == hostSession;
     });
     return found != sessions.end() ? *found : nullptr;
+}
+
+TerminalSession* TerminalSessionManager::sessionShownBy(WindowBinding const& binding,
+                                                        uint64_t hostSession) const
+{
+    auto const bound = sessionsBoundTo(binding);
+    auto const found = std::ranges::find_if(bound, [&](TerminalSession const* session) {
+        auto const where = hostOf(session);
+        return where.window != nullptr && leafOfSession(*where.tab, *session) != nullptr
+               && hostSessionIdOf(*session) == hostSession;
+    });
+    return found != bound.end() ? *found : nullptr;
 }
 
 std::optional<window::NodeDrag> TerminalSessionManager::paneDragOf(TerminalSession const& session) const

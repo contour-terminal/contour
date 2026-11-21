@@ -80,6 +80,16 @@ enum class HeaderTrailingOccupant : uint8_t
 inline constexpr size_t HeaderTrailingOccupantCount =
     static_cast<size_t>(HeaderTrailingOccupant::LinkPill) + 1;
 
+/// What draws a pane: a program in its terminal, or a daemon-scoped extension (a served tab).
+enum class PaneSource : uint8_t
+{
+    Program = 0, //!< A program runs in the pane's terminal.
+    Served,      //!< A daemon-scoped extension draws it: its header always shows who does.
+};
+
+/// The number of window::PaneSource values.
+inline constexpr size_t PaneSourceCount = static_cast<size_t>(PaneSource::Served) + 1;
+
 /// What the header text shows.
 enum class PaneHeaderContent : uint8_t
 {
@@ -123,11 +133,12 @@ struct PaneHeaderInputs
     PointerPresence pointer = PointerPresence::Away;
     PaneFocus focus = PaneFocus::Unfocused;
     config::PaneActionsReveal actionsReveal = config::PaneActionsReveal::OnHover;
-    int visiblePanes = 1;            ///< Panes visible in the tab.
-    double width = 0;                ///< The pane's width.
-    double height = 0;               ///< The pane's height.
-    double headerHeight = 0;         ///< The height an inline header would take.
-    double minimumContentHeight = 0; ///< The least height the terminal content needs.
+    int visiblePanes = 1;                    ///< Panes visible in the tab.
+    double width = 0;                        ///< The pane's width.
+    double height = 0;                       ///< The pane's height.
+    double headerHeight = 0;                 ///< The height an inline header would take.
+    double minimumContentHeight = 0;         ///< The least height the terminal content needs.
+    PaneSource source = PaneSource::Program; ///< What draws the pane.
 };
 
 /// The decided header.
@@ -159,8 +170,24 @@ inline constexpr std::array<DensityHeaderRule, config::ChromeDensityCount> Densi
 /// Decides a pane's header.
 /// @param inputs What the decision depends on.
 /// @return The header; PaneHeader {} (hidden) for a lone pane, an unmet reveal or too short an inline header.
+///         A served pane's is inline and name-only whatever the panes and the reveal, unless too short.
 [[nodiscard]] constexpr PaneHeader resolvePaneHeader(PaneHeaderInputs const& inputs) noexcept
 {
+    // A served pane says who draws it whatever the density and however alone it is -- in its own row, as
+    // nothing may cover its cells -- and offers no actions: a served tab is closed to restructuring.
+    if (inputs.source == PaneSource::Served)
+    {
+        if (inputs.height < inputs.headerHeight + inputs.minimumContentHeight)
+            return {};
+        return PaneHeader {
+            .content = PaneHeaderContent::Name,
+            .actions = HeaderActions::Hidden,
+            .placement = HeaderPlacement::Inline,
+            .emphasis =
+                inputs.focus != PaneFocus::Unfocused ? HeaderEmphasis::Primary : HeaderEmphasis::Secondary,
+        };
+    }
+
     if (inputs.visiblePanes < 2)
         return {};
 

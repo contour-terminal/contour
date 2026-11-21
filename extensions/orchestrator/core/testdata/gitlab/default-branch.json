@@ -1,0 +1,33 @@
+{
+  "id": 7,
+  "description": "A project.",
+  "name": "project",
+  "name_with_namespace": "group / project",
+  "path": "project",
+  "path_with_namespace": "group/project",
+  "created_at": "2026-01-01T00:00:00.000Z",
+  "default_branch": "main",
+  "tag_list": [],
+  "topics": [],
+  "ssh_url_to_repo": "ssh://git.gitlab.example.com/group/project.git",
+  "http_url_to_repo": "https://gitlab.example.com/group/project.git",
+  "web_url": "https://gitlab.example.com/group/project",
+  "readme_url": "https://gitlab.example.com/group/project/-/blob/main/README.md",
+  "forks_count": 0,
+  "star_count": 0,
+  "last_activity_at": "2026-11-02T10:00:00.000Z",
+  "visibility": "private",
+  "namespace": {
+    "id": 3,
+    "name": "group",
+    "path": "group",
+    "kind": "group",
+    "full_path": "group",
+    "parent_id": null,
+    "web_url": "https://gitlab.example.com/groups/group"
+  },
+  "archived": false,
+  "open_issues_count": 2,
+  "merge_requests_enabled": true,
+  "issues_enabled": true
+}

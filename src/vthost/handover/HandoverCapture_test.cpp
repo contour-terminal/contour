@@ -217,7 +217,7 @@ TEST_CASE("a live upgrade capture names a keeper child as KeeperChild", "[vthost
         return std::make_unique<KeeperHeldProcess>(
             vtpty::testing::execInfo("/bin/sh", { "-c", vthost::testing::CatScript }),
             vtpty::createPty(size, std::nullopt),
-            /*escapeSandbox=*/false,
+            vtpty::SandboxEscape::Contained,
             std::make_shared<vtpty::NoPlacement>());
     } };
     h.spawnTwo();
@@ -345,7 +345,7 @@ TEST_CASE("a session that ended is dropped from the capture, and ended first",
             vtpty::testing::execInfo("/bin/sh",
                                      { "-c", "stty raw -echo; printf ready; head -c 1 >/dev/null; exit 0" }),
             vtpty::createPty(size, std::nullopt),
-            /*escapeSandbox=*/false,
+            vtpty::SandboxEscape::Contained,
             std::make_shared<vtpty::NoPlacement>());
     } };
     h.spawnTwo();

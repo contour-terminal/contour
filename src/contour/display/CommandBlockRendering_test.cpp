@@ -12,6 +12,7 @@
 // (scripts/run-display-tests.sh runs them under a headless weston).
 
 #include <contour/config/Actions.hpp>
+#include <contour/config/Config.hpp>
 #include <contour/config/ConfigFwd.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/display/TerminalDisplay.hpp>
@@ -440,7 +441,13 @@ TEST_CASE("display: a restored pane's divider is dimmed, and the line after it i
     for (auto const& variant: allVariants())
     {
         INFO(nameOf(variant));
-        auto const h = makeHarness(variant);
+        // The cursor goes from the page's corner to the end of the line after the divider, and its motion
+        // runs past the frame grabbed here: its bar, in the scheme's own ink where the cursor's colour is the
+        // foreground's, would cross the divider's left rule mid-flight. What is measured is the settled page.
+        auto const h = makeHarness(variant, [](contour::config::Config& config) {
+            config.profiles.value().at("main").cursorMotionAnimationDuration.value() =
+                std::chrono::milliseconds { 0 };
+        });
         h->display->forceActiveFocus();
         auto const endedAt = std::chrono::local_days { std::chrono::year { 2026 } / 10 / 25 } + 9h + 41min;
         auto const divider =

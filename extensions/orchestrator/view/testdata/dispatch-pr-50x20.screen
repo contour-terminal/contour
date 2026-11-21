@@ -1,0 +1,20 @@
+╭─ Dispatch an agent ────────────────────────────╮
+│ item      #2375 · Say why the stdio relay fai… │
+│ task      ‹ fix CI › f                         │
+│ model     ‹ sonnet ›                           │
+│ note      optional; tab to type one            │
+│ prompt    /contour-workflows:fix-ci            │
+│             https://github.com/contour-termina │
+│             l/contour/pull/2375                │
+│ checkout  gh pr checkout 2375 --branch         │
+│             agent/pr-2375-…                    │
+│ worktree  /home/u/worktrees/contour/pr-2375-…  │
+│ command   claude --model sonnet --session-id   │
+│             00000001-0000-4000-8000-0000000000 │
+│             00 '/contour-workflows:fix-ci      │
+│             https://github.com/contour-termina │
+│             l/contour/pull/2375'               │
+│                                                │
+│ 0 of 4 running                                 │
+│ enter dispatch · tab next field · esc cancel   │
+╰────────────────────────────────────────────────╯

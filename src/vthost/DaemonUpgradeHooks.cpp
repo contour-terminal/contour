@@ -3,6 +3,8 @@
 
 #include <utility>
 
+#include <vthost/SessionHost.hpp>
+
 namespace vthost
 {
 
@@ -27,6 +29,16 @@ void DaemonUpgradeHooks::closeClients()
     for (auto* const observer: std::vector<UpgradeObserver*>(_observers))
         observer->closeForUpgrade();
     _connections.closeAll();
+}
+
+void DaemonUpgradeHooks::closeServedSessions()
+{
+    _host.closeServedSessions();
+}
+
+void DaemonUpgradeHooks::admitServedSessions() noexcept
+{
+    _host.admitServedSessions();
 }
 
 void DaemonUpgradeHooks::abortClients()

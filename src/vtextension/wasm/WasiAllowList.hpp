@@ -26,6 +26,8 @@ inline constexpr auto AllowedWasiFunctions = std::to_array<std::string_view>({
     "clock_time_get",      // reads a clock; never waits
     "clock_res_get",       //
     "fd_write",            // to the null device
+    "fd_read",             // from the null device: end of file; libc++'s standard streams link it (to be
+                           // dropped once core-cpp's assertions stop writing to std::cerr)
     "fd_close",            //
     "fd_fdstat_get",       // what a standard stream is; Rust's std asks before it prints
     "fd_prestat_get",      // finds no preopened directory

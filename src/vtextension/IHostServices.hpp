@@ -19,6 +19,10 @@
 namespace vtextension
 {
 
+/// An extension's configuration: its settings as name and value pairs, in the user's order. Also the
+/// worlds' `list<tuple<string, string>>`, the arguments of a command.
+using ConfigMap = std::vector<std::pair<std::string, std::string>>;
+
 /// How loud a message an extension logs is; the world's `log-level`.
 enum class LogLevel : uint8_t
 {

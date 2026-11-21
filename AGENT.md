@@ -153,8 +153,8 @@ order the caller must know, and a not-yet-configured state every method must tol
 **Configuration is not state.** This governs how an object is *set up*, not what it does
 afterwards. A setter that mutates the domain state the object exists to manage is fine:
 `CellProxy::setForegroundColor()` is the cell's data; `InputGenerator::setCursorKeysMode()` is VT
-state driven by DECCKM at runtime. `BoxDrawingRenderer::setBrailleStyle()` — a *static*
-rendering-policy knob written once from `Config.cpp` — is the thing to avoid. Ask: *would two
+state driven by DECCKM at runtime. A *static* rendering-policy knob written once from `Config.cpp`
+— as box drawing's styles once were — is the thing to avoid. Ask: *would two
 differently-configured instances be two different objects, or one object in two states?*
 Different objects → constructor.
 

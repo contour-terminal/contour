@@ -1,0 +1,330 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/// The contract between a terminal's daemon and an extension that runs with no window attached.
+///
+/// The package is terminal-neutral: any terminal can implement the host side, and any language with
+/// a wit-bindgen generator can implement the extension side. README.md describes the lifecycle, the
+/// guarantees a host gives, and the binary contract.
+package terminal-extensions:daemon@0.1.0;
+
+/// The vocabulary the world's exports are called with.
+interface types {
+    /// Why the host calls `update`: what changed since the last call. A hint carries no payload; the
+    /// extension asks the host for the current state through the matching import.
+    enum hint {
+        /// The time asked for with `wake` has come.
+        wake,
+        /// A process the extension started has finished; `procs` lists it.
+        procs,
+        /// A pane the extension owns changed; `panes` lists it.
+        panes,
+        /// A tab the extension serves changed; `tabs` lists it.
+        tabs,
+        /// The user invoked one of the extension's actions; `actions-take` returns it.
+        actions,
+    }
+
+    /// A root the user granted, resolved by the host.
+    record root {
+        /// The label the extension's manifest declares the root under.
+        label: string,
+        /// The root's directories: absolute, normalised, symlinks resolved.
+        paths: list<string>,
+    }
+
+    /// A program a declared command may name that the host runs as its own executable.
+    record self-program {
+        /// The program as a command's argv names it, such as `contour`.
+        name: string,
+        /// The executable the host runs for it: absolute, whatever the daemon's PATH holds.
+        path: string,
+    }
+
+    /// What the host tells the extension once, when it loads.
+    record host-info {
+        /// Every root the manifest declares, resolved.
+        roots: list<root>,
+        /// The user's home directory.
+        home: string,
+        /// How far local time is ahead of UTC at load, daylight saving included.
+        utc-offset-minutes: s32,
+        /// The programs a declared command names that the host runs as its own executable: what a person
+        /// who runs such a command by hand should run too.
+        self-programs: list<self-program>,
+    }
+}
+
+/// What an extension may ask of the host. Every call is synchronous and returns at once, but for the
+/// durable `store-set` and `store-remove`, which return once the store is synced.
+interface host {
+    /// How loud a message the extension logs is.
+    enum log-level { trace, debug, info, warn, error }
+
+    /// Why the host refused a call.
+    enum host-error {
+        /// The user has not granted what the call needs.
+        not-granted,
+        /// The pane, tab or process belongs to another extension.
+        not-owned,
+        /// An argument is not what the manifest declares, or not what the call accepts.
+        bad-argument,
+        /// A limit of the host is reached: processes in flight, bytes kept, store size, the per-callback
+        /// durable budget (see `store-set`), a summary's length.
+        limit,
+        /// The pane, tab or process no longer exists.
+        gone,
+        /// The host does not serve this import yet: a capability the extension does not have, never a fault.
+        not-supported-yet,
+        /// The working directory is no directory, or one that may not be opened.
+        not-a-directory,
+        /// The extension has as many panes as it may: one must close before another opens.
+        too-many,
+        /// The program a pane template runs is not found on the PATH the pane would start it with.
+        program-missing,
+    }
+
+    /// Why the host did not read a file.
+    enum file-error {
+        /// The root is not declared readable, or the user has not granted it.
+        not-granted,
+        /// The path is not relative, normalised and free of `..`.
+        bad-argument,
+        /// A directory on the path does not exist: the root's own, or one beneath it.
+        directory-gone,
+        /// The path names no regular file.
+        not-regular,
+        /// The file exists but cannot be read.
+        unreadable,
+        /// The file is larger than one call may return.
+        too-large,
+        /// The path leaves the root, through a symlink or otherwise.
+        escapes,
+        /// The host does not serve this import yet.
+        not-supported-yet,
+    }
+
+    /// The host's clocks, read at once: the extension's only time.
+    record clock-reading {
+        /// Milliseconds on a clock that never goes back; intervals are measured on it.
+        monotonic-ms: u64,
+        /// Milliseconds since the Unix epoch, as the wall clock says.
+        wall-ms: u64,
+    }
+
+    /// A process the extension started; valid until `proc-release`.
+    type proc-handle = u32;
+
+    /// One of a process's two output streams.
+    enum proc-stream { stdout, stderr }
+
+    /// How a process ended.
+    enum completion {
+        /// It exited; `exit-code` says with what.
+        exited,
+        /// A signal ended it.
+        signalled,
+        /// The host ended it when its declared timeout passed.
+        timed-out,
+    }
+
+    /// Whether the host kept a stream whole.
+    enum extent {
+        /// Everything the process wrote is kept.
+        whole,
+        /// The process wrote more than the host keeps; the rest is lost.
+        truncated,
+    }
+
+    /// What a finished process left behind.
+    record proc-result {
+        /// How it ended.
+        completion: completion,
+        /// Its exit code, when it exited.
+        exit-code: option<s32>,
+        /// How many bytes of its standard output are kept.
+        stdout-bytes: u32,
+        /// Whether its standard output is kept whole.
+        stdout-extent: extent,
+        /// How many bytes of its standard error are kept.
+        stderr-bytes: u32,
+        /// Whether its standard error is kept whole.
+        stderr-extent: extent,
+    }
+
+    /// Whether a process is still running.
+    variant proc-state {
+        /// It has not finished yet.
+        running,
+        /// It has finished, with this result.
+        finished(proc-result),
+    }
+
+    /// A process the extension started and has not released.
+    record proc-info {
+        /// The handle `proc-start` returned.
+        handle: proc-handle,
+        /// The extension's own label, as it passed it to `proc-start`.
+        tag: string,
+        /// The declared command it runs.
+        command: string,
+        /// Whether it is still running.
+        state: proc-state,
+    }
+
+    /// A page of a finished process's output.
+    record chunk {
+        /// The bytes from the requested offset, at most 64 KiB.
+        bytes: list<u8>,
+        /// How many bytes of the stream follow this page.
+        remaining: u32,
+    }
+
+    /// What the program in a pane reports about its work.
+    enum agent-status { idle, working, done, blocked, error }
+
+    /// Whether the program the host spawned in a pane is still the pane's program.
+    enum program {
+        /// It is.
+        alive,
+        /// It exited, or another program replaced it.
+        gone,
+    }
+
+    /// A pane the extension opened.
+    record pane-info {
+        /// The pane's id.
+        pane: string,
+        /// The extension's own label, as it passed it to `pane-open`.
+        tag: string,
+        /// What the pane's program last reported, if anything.
+        status: option<agent-status>,
+        /// Whether the spawned program is still the pane's program.
+        program: program,
+    }
+
+    /// The connection an action came from: places a tab in the window that asked.
+    type origin = u32;
+
+    /// A tab the extension serves.
+    record tab-info {
+        /// The tab's id.
+        tab: string,
+        /// The scheme it was opened with.
+        scheme: string,
+        /// Its width, in cells.
+        cols: u32,
+        /// Its height, in cells.
+        rows: u32,
+    }
+
+    /// An action the user invoked; it carries no arguments.
+    record action {
+        /// The action's declared id.
+        id: string,
+        /// The connection that invoked it.
+        origin: origin,
+    }
+
+    /// A file's bytes, as `file-read` read them.
+    record file-content {
+        /// The file's contents.
+        bytes: list<u8>,
+        /// When it was last modified, in milliseconds since the Unix epoch.
+        modified-unix-ms: u64,
+    }
+
+    /// Logs a message to the host's log.
+    log: func(level: log-level, message: string);
+    /// Asks for one `wake` hint after this many milliseconds, replacing any earlier request.
+    wake: func(after-ms: u32);
+    /// Reads the host's clocks.
+    now: func() -> clock-reading;
+    /// Starts a declared command, with its declared arguments, in a directory inside one of its roots.
+    proc-start: func(command: string, args: list<tuple<string, string>>, cwd: string, tag: string) -> result<proc-handle, host-error>;
+    /// Lists the processes the extension started and has not released, running and finished.
+    procs: func() -> result<list<proc-info>, host-error>;
+    /// Reads a page of a finished process's output, from a byte offset.
+    proc-take: func(handle: proc-handle, output: proc-stream, offset: u32) -> result<chunk, host-error>;
+    /// Frees a finished process's output; its handle is no longer valid.
+    proc-release: func(handle: proc-handle) -> result<_, host-error>;
+    /// Reads a value from the extension's store; `none` if the key holds none.
+    ///
+    /// A key, for every store call, is at most 128 bytes of `[a-z0-9/._-]` and is the same on every host:
+    /// it does not start with `/`; no `/`-separated component is empty, ends in `.` (so none is `.` or
+    /// `..`), contains `.tmp-`, or is a device name some systems reserve (`con`, `prn`, `aux`, `nul`,
+    /// `com1`-`com9`, `lpt1`-`lpt9`), alone or before a `.`. Any other key is `bad-argument`.
+    store-get: func(key: string) -> result<option<list<u8>>, host-error>;
+    /// Writes a value to the extension's store; it is durable when the call returns. The key is as for
+    /// `store-get`, else `bad-argument`; the value is at most 64 KiB, and the store holds at most 1024 keys:
+    /// a larger value, or a new key past the last, is `limit`.
+    ///
+    /// `store-set` and `store-remove` are durable calls: the call's deadline is paused across them, and one
+    /// callback (`load`, or one `update`) may make at most 64 of them and spend at most 2 s in them. Past
+    /// that budget, the next durable call of the callback answers `limit` and writes nothing. That `limit`
+    /// means "try again in a later callback", which starts with a fresh budget, not "the store is full".
+    store-set: func(key: string, value: list<u8>) -> result<_, host-error>;
+    /// Removes a value from the extension's store; it is durable when the call returns, and a key that holds
+    /// none is removed already. The key is as for `store-get`, else `bad-argument`. Past the callback's
+    /// durable budget (see `store-set`) it is `limit`, and nothing is removed.
+    store-remove: func(key: string) -> result<_, host-error>;
+    /// Lists the store's keys that start with a prefix, sorted. Any prefix is accepted; one no key of the
+    /// grammar of `store-get` can start with lists nothing.
+    store-keys: func(prefix: string) -> result<list<string>, host-error>;
+    /// Opens a pane from a declared template; `near` names a served tab whose workspace it opens in.
+    pane-open: func(template: string, args: list<tuple<string, string>>, cwd: string, title: string, tag: string, near: option<string>) -> result<string, host-error>;
+    /// Closes a pane the extension owns.
+    pane-close: func(pane: string) -> result<_, host-error>;
+    /// Lists the panes the extension owns.
+    panes: func() -> result<list<pane-info>, host-error>;
+    /// Opens a served tab in the origin's workspace, or answers the one open there. It is shown -- activated,
+    /// its window raised -- as `tab-reveal` shows one: an origin counts once, and only for 2 s after the user
+    /// invoked the action it came with. Otherwise a new tab opens in the background: no window raised,
+    /// nothing activated, no focus taken.
+    tab-open: func(scheme: string, origin: origin) -> result<string, host-error>;
+    /// Closes a served tab.
+    tab-close: func(tab: string) -> result<_, host-error>;
+    /// Activates a served tab already open in the origin's workspace, as `pane-reveal` reveals a pane: an
+    /// origin counts once, and only for 2 s after the user invoked the action it came with.
+    tab-reveal: func(tab: string, origin: origin) -> result<_, host-error>;
+    /// Lists the served tabs.
+    tabs: func() -> result<list<tab-info>, host-error>;
+    /// Reads what the user typed into a served tab since the last read: at most 64 KiB, in whole chunks.
+    tab-read: func(tab: string) -> result<list<u8>, host-error>;
+    /// Writes output to a served tab: at most 64 KiB per call (more answers `limit`); write a larger frame in
+    /// pieces.
+    tab-write: func(tab: string, bytes: list<u8>) -> result<_, host-error>;
+    /// Takes the actions the user invoked since the last call.
+    actions-take: func() -> result<list<action>, host-error>;
+    /// Sets the extension's summary: a short line for a status line, and its detail. The short line is at
+    /// most 120 characters (code points) and the detail at most 16 KiB, both counted as given; past either
+    /// the call is `limit` and the previous summary stays. The host shows both neutralised: every control,
+    /// bidirectional, zero-width or otherwise disguising character as its code point (`<U+001B>`); the
+    /// detail's line breaks (`\n`) are kept. Neutralising can make a text up to eight times longer, so a
+    /// detail as shown is at most 128 KiB.
+    summary-set: func(short: string, detail: string) -> result<_, host-error>;
+    /// Shows a pane the extension owns in the origin's window: activated where that window shows its
+    /// workspace, the user asked first when it is in another. An origin counts once, and only for 2 s after
+    /// the user invoked the action it came with: the first reveal consumes it. Within 2 s of a key typed or
+    /// a mouse button pressed into one of the extension's served tabs, a reveal without such an origin (0
+    /// included) goes to the window that key or click came from. Otherwise -- an origin never handed to the
+    /// extension (0, another extension's), one gone stale or consumed, one whose window has gone -- it is
+    /// `gone`, and raises and activates nothing; so is a pane it closed, until its session ended
+    /// (`not-owned` after).
+    pane-reveal: func(pane: string, origin: origin) -> result<_, host-error>;
+    /// Reads a regular file inside a root declared readable.
+    file-read: func(root: string, path: string) -> result<file-content, file-error>;
+}
+
+/// An extension that runs in a terminal's daemon.
+world daemon {
+    use types.{hint, host-info};
+
+    /// The host's services.
+    import host;
+
+    /// Called once, first, with the extension's configuration as JSON and what the host resolved.
+    export load: func(config-json: string, info: host-info);
+    /// Called once per coalesced hint. Pending hints are delivered in a fixed order, that of `hint`'s cases
+    /// (`wake`, `procs`, `panes`, `tabs`, `actions`), not in the order they were raised.
+    export update: func(ev: hint);
+}

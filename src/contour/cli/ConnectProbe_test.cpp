@@ -29,6 +29,12 @@ namespace
 class FakeSpawner final: public vthost::DaemonSpawner
 {
   public:
+    [[nodiscard]] std::expected<std::unique_ptr<vthost::DaemonSpawnLock>, vthost::SpawnLockError>
+    tryLockSpawn(std::filesystem::path const&) override
+    {
+        return std::make_unique<vthost::DaemonSpawnLock>(); // no other client starts one
+    }
+
     explicit FakeSpawner(vthost::DaemonPresence presence): _presence(presence) {}
 
     [[nodiscard]] std::expected<void, std::string> spawn(std::span<std::string const> /*argv*/,

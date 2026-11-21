@@ -1,0 +1,40 @@
+Claude Code's status hooks are missing: blocked and permission states may not show; run `contour agent setup`           
+╭─ Agents ─────────────────────────────────────────────────────────────╮ ╭─ Details ───────────────────────────────────╮
+│ MY PULL REQUESTS                                                     │ │ Say why the stdio relay failed, and send a… │
+│ ▾ contour · 5                                                        │ │                                             │
+│ ● #2375 Say why the stdio relay failed, and send a hello before hal… │ │ branch    fix/stdio-attach-starter-hello →  │
+│ ✓ #2369 examples: add donut-animation, a full-screen animation done… │ │             master                          │
+│ ✓ #2346 contour: tab_style — shapes, fills, materials and widths fo… │ │ checks    running                           │
+│ ✗ #2114 vtbackend: WIP -- DEC mode 44 and a partial margin-bell tri… │ │ url       https://github.com/contour-termin │
+│ ✗ #1847 Adds ability to set Contour as default terminal on Windows … │ │             al/contour/pull/2375            │
+│                                                                      │ │                                             │
+│ ISSUES WITHOUT A PR                                                  │ │                                             │
+│ ▾ contour · 5     ╭─ Dispatch an agent ──────────────────────────────────────────────────────────╮                   │
+│   #2356 Report the│ item      #2375 · Say why the stdio relay failed, and send a hello before h… │                   │
+│   #2338 Flaky on W│ task      ‹ fix CI › f                                                       │                   │
+│   #2253 Switch `da│ model     ‹ sonnet ›                                                         │                   │
+│   #2163 OSC 133: o│ note      optional; tab to type one                                          │                   │
+│   #2162 OSC 9;9 (C│ prompt    /contour-workflows:fix-ci                                          │                   │
+│                   │             https://github.com/contour-terminal/contour/pull/2375            │                   │
+│ AGENTS · 0 OF 4 RU│ checkout  gh pr checkout 2375 --branch agent/pr-2375-…                       │                   │
+│ no agents         │ worktree  /home/u/worktrees/contour/pr-2375-…                                │                   │
+│                   │ command   claude --model sonnet --session-id                                 │                   │
+│ FINISHED · 0 NEW  │             00000001-0000-4000-8000-000000000000 '/contour-workflows:fix-ci  │                   │
+│ nothing finished  │             https://github.com/contour-terminal/contour/pull/2375'           │                   │
+│                   │                                                                              │                   │
+│                   │ 0 of 4 running                                                               │                   │
+│                   │ Claude Code's status hooks are not installed: agents may not show as blocked │                   │
+│                   │   or waiting for permission (contour agent setup)                            │                   │
+│                   │ enter dispatch · tab next field · esc cancel                                 │                   │
+│                   ╰──────────────────────────────────────────────────────────────────────────────╯                   │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
+ ↑↓ move · enter open · d dispatch · ? help · b board · t transcript · / filter · z fold · R refresh · e end run        
+ ⬢ agents 0/4 · ✗2                                                                                                      

@@ -50,6 +50,10 @@ pane.
 | `contour switch [--workspace W] (--to-name N \| --to-host H \| --to-workspace W2) [--to-workspace W2]` | Asks one window to switch to another workspace or daemon, in place. See [Switching a window](#switching-a-window). |
 | `contour wait [BLOCK] [--pane P] [--timeout SECONDS]` | Waits for a block to finish and exits with the command's own status. |
 | `contour events [--follow] [--kind K[,K...]] [--pane P]` | Prints the first matching event and exits, or with `--follow` every event until Ctrl+C (exit status 130). |
+| `contour extension list` | Lists the daemon's extensions with their state (`running`, `pending`, `denied`, `disabled`, `failed`, `stopped`), and beneath a pending one the question its windows ask. |
+| `contour extension grant NAME` | Asks the attached Contour windows again for `NAME`'s pending grant; only a window grants it. Fails with `notPending` when nothing is pending. See [Daemon extensions: granting](extensions.md#daemon-extensions-granting). |
+| `contour extension revoke NAME` | Forgets `NAME`'s grant and stops it; it asks again. |
+| `contour extension status NAME` | Prints the summary and detail `NAME` last published of itself. Exits 1 when it does not run, saying why on standard error -- for a `failed` one, why it could not run. See [Daemon extensions: what they show](extensions.md#daemon-extensions-what-they-show). |
 | `contour api list [-q]` | Lists the API's methods and events; `-q` prints names only. |
 | `contour api describe NAME` | Prints one method's or event's schemas and examples. |
 | `contour api call NAME [JSON\|@FILE\|-]` | Calls any method with the given request, sent as is and without context. The output is indented on a terminal and one line otherwise. |
@@ -265,6 +269,18 @@ client can tell what it may call before it tries.
 A connection holds at most 64 subscriptions and 256 pending waits; one more is refused as `limitReached`
 (exit status 1). Each verb opens a connection of its own, so only a script driving `contour api call` over one
 connection meets it.
+
+### Served panes
+
+A tab that a daemon extension draws, such as the agent dashboard, is a served pane. It is listed like any
+pane, and `pane.close`, `tab.close` and `tab.move` of the whole tab work on it. Its content belongs to the
+extension: `pane.send` (and so MCP's `pane_type`), `pane.capture`, `block.list`, `block.read` and
+`block.wait`, and the status verbs `pane.reportStatus` and `pane.clearStatus`, are refused as forbidden (exit
+status 1), naming the extension. A served tab also stays whole: `pane.split` of its pane, and `pane.move` of its
+pane into another tab or of another pane into its tab, are refused the same way, as are the same changes dragged
+in a window; its one pane moved to a workspace takes the whole tab along. A window attached over the native
+protocol, or a tmux control-mode client, still reads and types into a served pane: it is an interactive front
+end, whose user is the one the extension draws for, so the keys reach the extension.
 
 ## Reporting a pane's status
 

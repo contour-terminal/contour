@@ -22,12 +22,13 @@
 #include <vtextension/Instance.hpp>
 #include <vtextension/Placement.hpp>
 #include <vtextension/Runner.hpp>
+#include <vtextension/World.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 
 namespace vtextension
 {
 
-/// Hands out the process's Engine: the one that is alive, or a new one if none is.
+/// Hands out the process's Engine of one world: the one that is alive, or a new one if none is.
 class IEngineProvider
 {
   public:
@@ -46,9 +47,10 @@ class IEngineProvider
     virtual void releaseRetired() noexcept = 0;
 };
 
-/// The production IEngineProvider: shares one Engine among all its users while any of them holds
-/// it, and creates it on the first acquire(), so that a process without extensions never starts the
-/// runtime. It keeps only a weak reference: the engine goes away with its last user.
+/// The production IEngineProvider: shares one Engine of its world among all its users while any of them
+/// holds it, and creates it on the first acquire(), so that a process without extensions never starts the
+/// runtime. It keeps only a weak reference: the engine goes away with its last user. Each world has a
+/// provider of its own.
 ///
 /// It is also the runners' IRetirementSink: what a runner retires on its lane waits here until an owner
 /// thread calls acquire() or releaseRetired() (an ExtensionHost does on construction and destruction),
@@ -58,10 +60,11 @@ class EngineProvider final: public IEngineProvider, public IRetirementSink
   public:
     /// @param backend What engines are created from; must outlive the provider and every engine it hands
     ///        out.
+    /// @param world The world every engine it hands out serves.
     /// @param limits What engines are created with: the limits every pane's extensions are configured
     ///        with too (ExtensionHostConfig::limits), which instances must match.
-    EngineProvider(wasm::IWasmBackend& backend, ExtensionLimits limits):
-        _backend { backend }, _limits { limits }
+    EngineProvider(wasm::IWasmBackend& backend, World world, ExtensionLimits limits):
+        _backend { backend }, _world { world }, _limits { limits }
     {
     }
 
@@ -86,6 +89,7 @@ class EngineProvider final: public IEngineProvider, public IRetirementSink
     static void release(std::unique_ptr<RetiredExtension> list) noexcept;
 
     wasm::IWasmBackend& _backend;
+    World _world;
     ExtensionLimits _limits;
     std::mutex _mutex;
     std::weak_ptr<Engine> _engine;              ///< Guarded by _mutex.

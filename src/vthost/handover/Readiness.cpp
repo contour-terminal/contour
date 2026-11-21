@@ -34,8 +34,10 @@ namespace vthost::handover
 
 namespace
 {
-    /// Read leniently about what a later release adds, strictly about what this one needs.
-    constexpr auto ReadOptions = glz::opts { .error_on_unknown_keys = false, .error_on_missing_keys = true };
+    /// Read leniently about what a later release adds, strictly about what this one needs, and from a view
+    /// with nothing after it: no terminating NUL is looked for.
+    constexpr auto ReadOptions =
+        glz::opts { .null_terminated = false, .error_on_unknown_keys = false, .error_on_missing_keys = true };
 
     /// @return Whether @p range names a non-empty range.
     [[nodiscard]] constexpr bool isRange(std::array<uint32_t, 2> const& range) noexcept

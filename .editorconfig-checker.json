@@ -4,7 +4,13 @@
   "IgnoreDefaults": false,
   "SpacesAfterTabs": false,
   "NoColor": false,
-  "Exclude": ["docs.*", "website/theme/assets/theme/fonts/.*"],
+  "Exclude": [
+    "docs.*",
+    "website/theme/assets/theme/fonts/.*",
+    "extensions/orchestrator/view/testdata/.*\\.screen$",
+    "extensions/orchestrator/contract/manifest-v2/invalid/title-control-character\\.manifest$",
+    "src/contour/cli/testdata/agent-transcript/synthetic/torn-tail\\.jsonl$"
+  ],
   "AllowedContentTypes": [],
   "PassedFiles": [],
   "Disable": {

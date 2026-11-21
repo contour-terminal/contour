@@ -170,6 +170,8 @@ A peer of any of them gets only the readable refusal; no old codec is kept for t
 | `LaunchFirstTab` | 31 | `launch-first-tab` | `OpenFirstTab` (tag 61, client->server, body: the workspace id the client saw empty): a launch that named a workspace holding no tab (`contour --workspace N`) asks the daemon, once its layout shows the workspace empty, to open the first tab there (only if that workspace still exists, is still selected by the connection and still holds none), in the directory the hello stated; without it (an older daemon) the launch waits for a tab, as it did, and the hello is the same `Select` either way |
 | `Names` | 32 | `names` | The peer speaks the control API's `name` spelling: `name` keys, `object.rename`, `object.renamed`, `toName`. Without it the other end speaks the old one to it (`label` keys, `object.setLabel`, `workspace.rename`, `workspace.labelChanged`, `toLabel`) through vtcontrol's legacy spelling table (`LegacySpelling.hpp`); removed before 0.9.0 |
 | `WorkspaceColor` | 33 | `workspace-color` | `SetWorkspaceColor` (tag 62, client->server, body: the workspace id, a has-colour byte and a `u32` `0xRRGGBB`, 0 when cleared) sets or clears a workspace's colour in the daemon's model, and `WorkspaceMeta`'s colour field (the fourth presence bit, after `position`) states it: in full and as a delta on each change. Without it (an older daemon) a client sends nothing and keeps the workspace uncoloured; an older client is stated no colour, so its `WorkspaceMeta` bytes are what they were |
+| `DaemonExtensionConsent` | 34 | `daemon-extension-consent` | `ExtensionPermissionRequest` / `ExtensionPermissionReply` / `ExtensionPermissionSettled` / `ConsentProof` (tags 63-66): a daemon-scoped extension's grant is asked only of a window that proved the daemon's consent key |
+| `ExtensionPresence` | 35 | `extension-presence` | The daemon extensions' palette rows and what invoking one does (see [Extension presence](#extension-presence)): `ExtensionPresence` (tag 67, server->client), `InvokeExtensionAction` (tag 68, client->server), `RevealPane` (tag 69, server->client), and the served tabs trailing `LayoutState`. A client without it is never sent the rows or the served tabs, and an invocation from it is dropped |
 
 A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
 costs an older one nothing. A protocol version step is reserved for a change to an existing PDU's
@@ -958,6 +960,52 @@ error preamble (`Refused`).
 Every failure path ends the child before `connect()` returns, and every `connect()` spawns a fresh
 ssh: a dropped connection's child is reaped when its `Connection` goes, and the next attempt starts
 anew.
+
+
+## Extension presence
+
+A window's command palette shows the actions each daemon-scoped extension declares (its manifest's
+`action <id> = title` lines), and invoking one reaches the extension, all behind `Capability::ExtensionPresence`
+(35). Three PDUs carry it:
+
+| PDU | Tag | Direction | Body |
+|-----|-----|-----------|------|
+| `ExtensionPresence` | 67 | server->client | `varint count`, per extension `string extension, string title, u8 state, varint count`, per row `string id, string title` |
+| `InvokeExtensionAction` | 68 | client->server | `string extension, string action` |
+| `RevealPane` | 69 | server->client | `varint session` |
+
+`ExtensionPresence` is the whole set each time: sent to every connection sharing the capability as it
+attaches, and again whenever an extension's state or rows change, coalesced to one per loop turn. The title
+is the manifest's `title`, else the extension's name. The state (`WirePresenceState`: `Running`, `Stopped`,
+`AwaitingGrant`, `Disabled`, `Unavailable` -- denied or failed, and any byte no enumerator has) decides the
+palette's rows: running or stopped, one per declared action; waiting for its grant, one "grant access…" row;
+disabled, one "restart extension" row; unavailable, none. The grant and restart rows name no action (their
+`action` is empty).
+
+`InvokeExtensionAction` carries no argument: the body is the two names, and bytes a newer peer appends are
+never read, so nothing but a declared action's id reaches the extension. The daemon drops an invocation for an
+unknown extension, or for an action the extension does not declare (an empty one only where the row names
+none), and otherwise does what one table (`vthost::InvocationRows`) says for the extension's state: running,
+the action is queued for its `actions-take` with the connection's origin and the extension is told; stopped,
+it is started first; waiting for its grant, the invoking window is sent the grant question again (only if it
+proved the consent key); disabled, it is restarted with a fresh fault window; denied or failed, nothing. An
+invocation needs no consent proof: a native client acts as the user, and a restarted extension runs only under
+the grant it already holds. Each connection's origin is minted once and dropped at its detach; at most 32
+actions are queued per extension, the oldest dropped first. Every delivery tells the extension (its runner
+coalesces them), and so does every change that finds it running with actions still queued: one that faulted
+before it took them is told again once it is back.
+
+`RevealPane` asks the window to raise itself and focus a pane whose tab the daemon has already made active.
+
+The same capability tells a window which of its tabs an extension draws. `LayoutState` gains, after
+`servedEdit`, a trailing list: `varint count`, per served tab `varint tabId, string extension, string title,
+string moduleDigest` (`WireServedTab`). It is written only when not empty, and then `servedEdit` is written
+before it whether or not `TabEditAcks` is shared (0 then), so that the list's place is fixed; a connection
+without `ExtensionPresence` is never sent it, and a body that ends before it reads as no served tab. A count
+above the layout's tab count is malformed. The window marks those tabs (`window::servedChromeOf`): the tab
+carries the served glyph, and its pane's header a strip naming the title, the extension and the first 12
+digits of the module's digest. The mark comes from the daemon alone, never from a tab's title, so a program
+cannot dress its own tab as served.
 
 ## The GUI seams (`contour client`, `contour client --tmux`)
 
@@ -2002,6 +2050,123 @@ Windows' built-in ConPTY and the bundled `conpty.dll` with `OpenConsole.exe`:
 | `ClosePseudoConsole` on the rebuilt `HPCON` ends the console host | pass | pass |
 | An AF_UNIX listener accepts in the successor what connected during and after the gap (`WSADuplicateSocketW` and handle inheritance alike) | pass | |
 | The same for a listener bound to the first process's completion port, once released | pass | |
+
+### Served sessions
+
+A *served session* is a hosted session that runs no program: a daemon-scoped extension draws its screen. Its
+device is a host-owned `vtpty::ChannelPty` that `ServedSessions` (one per `SessionHost`) makes: what the
+extension feeds it is the terminal's output, and what the terminal writes to it -- keys, mouse reports,
+replies -- is buffered for the extension, up to `MaxServedTransferBytes` (64 KiB, one read). A chunk the terminal
+writes that does not fit whole is dropped whole, never cut, so that the extension never reads half a sequence.
+A spawn names it with `SessionSpawnRequest::served`; the session carries `ServedBy` (the extension, its scheme,
+the module's digest), and its tab holds that one pane.
+
+A served session is **disposable**: nothing of it survives the daemon, and its extension opens it again.
+
+- **A live upgrade closes it.** `LiveUpgrade::run` calls `UpgradeHooks::closeServedSessions()` right before it
+  checks that the sessions can be captured (`checkCapturable`), which therefore never meets one and keeps
+  refusing every *other* device no new image could adopt. The close is of its own kind,
+  `SessionEnd::Upgrade`: `LastSessionWatcher` does not count it, so an upgrade whose only session was a served
+  tab neither fails nor ends a daemon that exits with its last session -- one rolled back after the close serves
+  on with no session, exactly as the new image would.
+- **The upgrade latch.** The close also latches `ServedAdmission::Closed`: until the upgrade ends, a served
+  spawn is refused (logged), so that none is opened in place of the ones closed. `ServedAdmissionGuard`, armed
+  in `run` just before the close, calls `UpgradeHooks::admitServedSessions()` on every way out of `run` -- a
+  capture refusal, a failed quiesce, an oversized image, a keeper refusal, a failed exec. It is independent of
+  `UpgradeRollback`, which is built only after the capture check. After an exec that succeeded, the image that
+  held the latch is gone. A refused upgrade leaves the served tabs closed.
+- **A keeper recovery drops it.** It has no process, so the structure names it `SessionDevice::PtyOnly`, and
+  recovery adopts only the sessions the keeper held (`KeeperChild`); restoring the image closes its pane.
+- **It is revealed as a served tab is (`pane-reveal`).** The walk is one, `revealSession` (`RevealOnLoop.hpp`):
+  activated where the window shows it, else that window asked to switch first, and nothing activated when it
+  refuses. The window is the origin's, claimed once (`IExtensionActions::claimReveal`, bound to the extension
+  it was handed to): `ExtensionActions::deliver` stamps each invoked action on the sessions' steady clock, and
+  a claim answers only within `ServedInputGrace` of it, consuming it -- a reveal hours after "Agents: Refresh
+  now" would steal the focus while the user types a password elsewhere. An origin whose connection detached,
+  went stale or was claimed already reveals nothing, and activates nothing. `tab-open` claims alike: a new
+  served tab is always created in the background (`TabActivation::Background`), and shown by that walk only
+  when a fresh origin stood behind the open; a pending tab a reveal claims for meanwhile is shown once created
+  (`ServedSessions::Tab::shownIn`). A key typed or a mouse button
+  pressed into one of the extension's served tabs is a user action as well: for
+  `ServedInputGrace` (2 s, on the sessions' steady clock) after it, a reveal without an attached origin --
+  pane-reveal and tab-reveal alike -- goes to the window it came from (`ServedSessions::noteUserInput`, keyboard
+  input and button presses only -- no motion, wheel or focus report -- from `writeInputAs`), which is how a
+  dashboard whose guest restarted still reveals on Enter.
+  Otherwise an origin never handed to it -- 0, made up, another extension's -- answers `gone` and raises
+  nothing: an extension never raises a window without a user action behind it. The
+  session is looked up on the loop, so a pending pane is revealed once created; a closed one answers `gone`.
+- **A workspace snapshot leaves it out.** A cold restart brings panes back as shells, which would bring a
+  dashboard back as a shell tab, so `captureWorkspace` skips every tab that holds a served leaf at any depth,
+  and remaps the workspace's active tab to the captured ones: an active served tab maps to the tab that would
+  become active were it closed -- the one after it, else the one before.
+
+What reaches a served session is held to what the extension means it to be:
+
+- **It executes only what draws.** `seedSession` gives its terminal `SequenceAllowance::ServedTab`, and the
+  terminal drops every function, DEC private mode and C0 control that `vt/ServedTabSequences.hpp` does not list:
+  no title, clipboard, notification, working directory, image, bell, reply or character set reaches past the grid.
+- **Its tab stays whole.** `SessionHost::servedRestructuring` is the one place a split, a merge or a move is
+  judged, and `splitActivePane`, `mergeTabIntoSplit` and `moveNode` -- the only paths the native protocol, the
+  control API and tmux control mode take -- ask it first. A served pane neither splits nor leaves its tab, and no
+  pane enters one; the whole tab still moves to another workspace, and so does its one pane, which moves as the
+  tab. `performOperation` refuses the operations that write to its grid (`OperationError::Served`).
+- **The control API cannot read or drive it** (`ServedPaneContentMethods`): `pane.send`, `pane.capture`, the
+  block verbs and the status verbs answer `Forbidden`. That API is the automation surface -- a script, an
+  agent, another extension's `callControl` -- and the extension's content is not theirs to read or type into.
+- **A tmux control-mode client still reads and types into it**, as a native client does: `capture-pane` and
+  `send-keys` stay allowed. Such a client is an interactive front end -- iTerm2 or `contour client --tmux`
+  showing the session to the user the extension draws for -- and its keys are that user's, just as a native
+  client's are. Refusing them would make the dashboard unusable from that front end while protecting nothing
+  the user does not already see.
+
+### Owned panes
+
+An *owned pane* is a tab a daemon-scoped extension opened for an agent (`pane-open`): an ordinary hosted
+session running the program of one of its manifest's `pane` templates. `OwnedPanes` (one per `SessionHost`)
+keeps which pane is whose: a mutex-guarded mirror the extensions' lane reads and writes, every model change --
+creation, close -- posted to the loop, as `ServedSessions` does for served tabs. It is also persisted, one file
+per extension beside its store (`owned-panes`, `<pane-uuid> <tag>` per line, written whole and durably, at most
+32 read back), so that an extension that runs again after a live upgrade or a keeper recovery finds the panes its
+runs recorded. The loop never waits for that disk: `AsyncOwnedPaneStore` hands each save to a writer thread, the
+newest records of an extension replacing those still waiting, and the host's destruction writes what waits. A
+live upgrade's exec runs no destructor, so `LiveUpgrade` flushes the writer after the capture and before it
+announces the exec: a save still queued then would leave the next image reconciling without the pane.
+
+- **It opens out of focus, where it was dispatched.** The creation resolves the workspace from the dashboard
+  `near` names (the served tabs' mirror, and only for the extension's own tab), else from the window focused
+  last (`ConnectionWorkspaces`, which `noteFocus` stamps and the selection publishes), else the first
+  workspace, and opens the tab there with `TabActivation::Background`: no `activeTabChanged`, and the active and
+  previous tabs stay the user's. A pane-open accepted just before a live upgrade closed the served sessions
+  creates nothing: the creation checks the admission again on the loop, and fails the pane.
+- **It runs where it was told, or not at all.** The spawn is `StartDirectory::Required` with the directory the
+  policy opened held in `ExecInfo::directory`, which the spawn trampoline enters by `fchdir()`: a worktree
+  removed since fails the spawn instead of starting the agent in the profile's directory. `pane-open` refuses
+  before any pane exists where that cannot hold: `not-supported-yet` where the program would run through
+  `flatpak-spawn` or on Windows (`Process::heldDirectorySpawn`, asked of the policy the agent's spawn takes:
+  the default profile's where profiles spawn, else the daemon's, again after a profile reload), `gone` (`CwdMissing`) for a directory whose last
+  link went (`DirectoryHandle::isRemoved`, a worktree removed and made again at its path). The spawn lets
+  its handle go once the trampoline holds a copy.
+- **It is listed from `pane-open` until its session ended**: `Pending` until created, `Cancelled` when closed
+  before that (its creation then spawns nothing), `Open` after, `Closing` once an open pane was closed; that
+  close posts the session's end, and the entry goes only with `sessionEnded`. The extension's engine reconciles its runs against that list, so a
+  pane missing from it is a run that ends.
+- **A workspace snapshot leaves it out.** `captureWorkspace` prunes an agent's pane from its tab's split tree
+  (its sibling takes the split's place; a tab left with no pane is left out, and the active tab is remapped as
+  past a served tab), so a cold restart never brings an agent back as a shell nor re-runs it. A live upgrade and
+  a keeper recovery keep it, as every process.
+- **Its status is named, not newest.** `PaneStatusSources` picks the `claude-code` record (the hooks'), then the
+  root record, from the session's OSC 7501 records; `program` is `gone` while a session whose child exited
+  waits for its status.
+
+**The construction order.** `_ownedPanes` is built in `SessionHost`'s member-initializer list, before the
+constructor body restores a handover image (a live upgrade or a keeper recovery) or a snapshot, and before
+`_daemonWorld`, whose boot extensions may call `panes` at once. It therefore starts from the raw files,
+`Unreconciled`, and `list` and `open` answer `NotReconciled` (WIT `limit`, "retry later") until
+`OwnedPanes::reconcile` has run. The constructor posts that reconciliation on **both** of its exits -- the early
+return after `restoreHandover`, and the end of the normal path -- with every pane the host then holds: an entry
+whose pane is not there is dropped (a cold restart empties the registry), the files are saved, and `Panes` is
+raised for every extension that had entries or was told to retry. Listing earlier would tell an extension its running agent's pane
+is gone, and the removal checks that follow could remove a worktree under a running agent.
 
 ## Binary imsg IPC (the real tmux binary as a client)
 

@@ -47,4 +47,15 @@ class LocalTimeConverter
     Function _convert;
 };
 
+/// How far local civil time is ahead of UTC at an instant, as @p localTime reads it.
+/// @param localTime The time zone.
+/// @param when The instant; its offset may differ from another instant's, across daylight saving.
+/// @return The offset, to the minute; negative west of Greenwich.
+[[nodiscard]] inline std::chrono::minutes utcOffsetAt(LocalTimeConverter localTime,
+                                                      std::chrono::system_clock::time_point when) noexcept
+{
+    auto const utc = std::chrono::floor<std::chrono::seconds>(when).time_since_epoch();
+    return std::chrono::round<std::chrono::minutes>(localTime(when).time_since_epoch() - utc);
+}
+
 } // namespace vtbackend

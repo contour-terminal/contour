@@ -13,17 +13,19 @@ namespace vtextension
 {
 
 std::expected<std::shared_ptr<Engine>, ExtensionError> Engine::create(wasm::IWasmBackend& backend,
-                                                                      ExtensionLimits limits)
+                                                                      World world,
+                                                                      ExtensionLimits limits,
+                                                                      IThreadCpuClock const& cpuClock)
 {
     auto runtime = backend.createRuntime(
         wasm::RuntimeLimits { .memoryBytes = limits.memoryBytes, .stackBytes = limits.stackBytes },
-        detail::hostFunctions());
+        detail::hostFunctions(world));
     if (!runtime)
         return std::unexpected(ExtensionError::RuntimeUnavailable);
 
     try
     {
-        return std::make_shared<Engine>(PrivateTag {}, backend, limits, std::move(*runtime));
+        return std::make_shared<Engine>(PrivateTag {}, backend, world, limits, cpuClock, std::move(*runtime));
     }
     catch (std::system_error const&)
     {
@@ -35,10 +37,14 @@ std::expected<std::shared_ptr<Engine>, ExtensionError> Engine::create(wasm::IWas
 
 Engine::Engine(PrivateTag /*unused*/,
                wasm::IWasmBackend& backend,
+               World world,
                ExtensionLimits limits,
+               IThreadCpuClock const& cpuClock,
                std::shared_ptr<wasm::IWasmRuntime> runtime):
     _backend { backend },
+    _world { world },
     _limits { limits },
+    _cpuClock { cpuClock },
     _runtime { std::move(runtime) },
     _watchdog { [this] { watchdogLoop(); } }
 {
@@ -65,17 +71,48 @@ void Engine::removeDeadline(WatchToken token)
         std::ranges::make_heap(_deadlines, expiresLater);
 }
 
+std::chrono::nanoseconds Engine::unspentAt(Deadline const& deadline, TimePoint now) const noexcept
+{
+    auto const consumed = deadline.thread ? _cpuClock.consumed(*deadline.thread) : std::nullopt;
+    auto const spent = consumed ? *consumed - deadline.cpuAtArm
+                                : std::chrono::duration_cast<std::chrono::nanoseconds>(now - deadline.armed);
+    auto const left = std::min(deadline.budget - spent,
+                               std::chrono::duration_cast<std::chrono::nanoseconds>(deadline.latest - now));
+    return std::max(left, std::chrono::nanoseconds::zero());
+}
+
 void Engine::armDeadline(WatchToken token, std::chrono::milliseconds timeout)
 {
     Require(token.instance != nullptr && token.state != nullptr);
-    auto const expiry = std::chrono::steady_clock::now() + timeout;
+    // Read before the lock: the clock is the calling thread's, which is the guarded one.
+    auto const thread = _cpuClock.currentThread();
+    auto const cpuAtArm = thread ? _cpuClock.consumed(*thread) : std::nullopt;
+    auto const now = std::chrono::steady_clock::now();
+    auto deadline = Deadline {
+        // A thread spends CPU time no faster than real time: its budget cannot be spent any earlier.
+        .expiry = now + timeout,
+        .armed = now,
+        .latest = now + (timeout * _limits.deadlineRealTimeFactor),
+        .budget = timeout,
+        .thread = cpuAtArm ? thread : std::nullopt,
+        .cpuAtArm = cpuAtArm.value_or(std::chrono::nanoseconds::zero()),
+        .token = token,
+    };
     {
         auto const lock = std::scoped_lock { _mutex };
         removeDeadline(token);
-        _deadlines.push_back(Deadline { .expiry = expiry, .token = token });
+        _deadlines.push_back(deadline);
         std::ranges::push_heap(_deadlines, expiresLater);
     }
     _wakeup.notify_one();
+}
+
+std::chrono::nanoseconds Engine::unspent(WatchToken token)
+{
+    auto const lock = std::scoped_lock { _mutex };
+    auto const found = std::ranges::find(_deadlines, token, &Deadline::token);
+    return found != _deadlines.end() ? unspentAt(*found, std::chrono::steady_clock::now())
+                                     : std::chrono::nanoseconds::zero();
 }
 
 void Engine::disarm(WatchToken token)
@@ -108,6 +145,14 @@ void Engine::watchdogLoop()
         while (!_deadlines.empty() && _deadlines.front().expiry <= now)
         {
             std::ranges::pop_heap(_deadlines, expiresLater);
+            // A deadline whose thread waited for a CPU has budget left: the watchdog looks again once
+            // that could be spent, if it ran from now on without waiting.
+            if (auto const left = unspentAt(_deadlines.back(), now); left > std::chrono::nanoseconds::zero())
+            {
+                _deadlines.back().expiry = now + left;
+                std::ranges::push_heap(_deadlines, expiresLater);
+                continue;
+            }
             auto const token = _deadlines.back().token;
             _deadlines.pop_back();
             token.state->store(DeadlineState::Expired, std::memory_order_release);

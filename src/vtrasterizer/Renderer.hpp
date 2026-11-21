@@ -88,6 +88,8 @@ class Renderer
              text::FontLocator& fontLocator,
              Decorator hyperlinkNormal,
              Decorator hyperlinkHover,
+             /// How the builtin box drawing draws its configurable glyphs (@see setBoxDrawingStyle).
+             BoxDrawingStyle boxDrawingStyle,
              // Must match Config's `text_scaling_method` default. When these disagreed, every
              // renderer test silently exercised the method the app does NOT ship.
              GlyphScalingMethod textScalingMethod = GlyphScalingMethod::Rerasterize);
@@ -167,6 +169,28 @@ class Renderer
     ///
     /// @param dpi  the new device pixels-per-inch to apply to the font configuration.
     void setFontDPI(DPI dpi);
+
+    /// Stages a new box-drawing style; the render thread applies it in applyPendingReconfig().
+    ///
+    /// The narrow exception to "configuration at construction time" that live configuration reload is:
+    /// the style is otherwise fixed at construction, and a reload keeps this renderer. Staged rather than
+    /// applied, because the box-drawing renderer is read by the render thread every frame. Tiles drawn
+    /// under the previous style are not reused: the style is part of each box-drawing tile's atlas key.
+    /// Stages nothing when @p style is the one last staged or applied, so an unchanged reload costs no
+    /// reconfiguration.
+    /// @param style The style to draw box-drawing, git-graph and Braille glyphs with from now on.
+    void setBoxDrawingStyle(BoxDrawingStyle style);
+
+    /// The box-drawing style last staged by setBoxDrawingStyle(), or the one constructed with.
+    ///
+    /// The style the next frame draws with, so a caller can tell a change from a repeat before asking for a
+    /// redraw.
+    /// @return The requested box-drawing style.
+    [[nodiscard]] BoxDrawingStyle boxDrawingStyle() const noexcept
+    {
+        auto const l = std::scoped_lock { _reconfigMutex };
+        return _requestedBoxDrawingStyle;
+    }
 
     /// Returns the most recently *published* grid metrics.
     ///
@@ -563,6 +587,7 @@ class Renderer
         std::optional<text::FontSize> fontSize;           //!< Set when only the font size changed.
         std::optional<FontDescriptions> fontDescriptions; //!< Set when the full font config changed.
         std::optional<Geometry> geometry;                 //!< Set when a geometry change is pending.
+        std::optional<BoxDrawingStyle> boxDrawingStyle;   //!< Set when the box-drawing style changed.
     };
 
     /// Protects _pendingReconfig and _publishedMetrics, and serializes the render-thread apply.
@@ -604,6 +629,10 @@ class Renderer
     /// mutex by UI-thread hot paths. The cell size only changes via font/DPI reconfiguration, never via
     /// geometry writers, so this stays consistent with _publishedMetrics.cellSize.
     std::atomic<ImageSize> _publishedCellSize;
+
+    /// The box-drawing style last staged, or the one constructed with: what the next frame draws with.
+    /// Lets setBoxDrawingStyle() drop a repeat. Guarded by _reconfigMutex.
+    BoxDrawingStyle _requestedBoxDrawingStyle;
 
     /// The staged reconfiguration awaiting application by the render thread. Guarded by _reconfigMutex.
     std::optional<PendingReconfig> _pendingReconfig;

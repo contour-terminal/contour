@@ -64,7 +64,7 @@ std::expected<std::shared_ptr<Engine>, ExtensionError> EngineProvider::acquire()
         auto const lock = std::scoped_lock { _mutex };
         if (auto cached = _engine.lock())
             return std::expected<std::shared_ptr<Engine>, ExtensionError> { std::move(cached) };
-        return Engine::create(_backend, _limits).transform([&](std::shared_ptr<Engine> created) {
+        return Engine::create(_backend, _world, _limits).transform([&](std::shared_ptr<Engine> created) {
             _engine = created;
             return created;
         });

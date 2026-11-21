@@ -121,12 +121,11 @@ std::string serializeExtensionGrants(ExtensionGrants const& grants)
     return text;
 }
 
-std::string daemonExtensionGrantsFileName(DaemonIdentity const& daemon)
+std::string daemonExtensionGrantsFileName(DaemonIdentity const& daemon, std::string_view baseName)
 {
     constexpr auto Suffix = std::string_view { ".txt" };
-    static_assert(DaemonExtensionGrantsFileName.ends_with(Suffix));
-    auto name = std::string { DaemonExtensionGrantsFileName.substr(
-        0, DaemonExtensionGrantsFileName.size() - Suffix.size()) };
+    auto name = std::string { baseName.ends_with(Suffix) ? baseName.substr(0, baseName.size() - Suffix.size())
+                                                         : baseName };
     if (!daemon.name.empty() && daemon.name != daemon.defaultName)
     {
         auto const keep = [](char c) {

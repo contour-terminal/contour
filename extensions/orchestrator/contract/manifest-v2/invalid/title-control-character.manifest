@@ -1,0 +1,4 @@
+# A title holds no control character.
+name = titled
+version = 2
+title = Agents

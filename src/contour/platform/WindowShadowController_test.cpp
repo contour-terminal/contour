@@ -127,12 +127,12 @@ TEST_CASE("WindowShadowController re-renders only when the size changes", "[cont
     SECTION("a different size produces a different shadow")
     {
         harness.controller.refresh(WindowPresentation::Windowed, WindowDecoration::Client, ShadowSize::Small);
-        auto const small = harness.recorder->lastOffsets;
+        auto const smallOffsets = harness.recorder->lastOffsets;
 
         harness.controller.refresh(
             WindowPresentation::Windowed, WindowDecoration::Client, ShadowSize::VeryLarge);
 
-        CHECK(harness.recorder->lastOffsets.bottom > small.bottom);
+        CHECK(harness.recorder->lastOffsets.bottom > smallOffsets.bottom);
     }
 }
 

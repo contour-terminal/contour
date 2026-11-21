@@ -1,0 +1,5 @@
+# A carriage return right before a line feed belongs to the line end: a manifest written with CRLF line ends.
+name = crlf
+version = 2
+root repos = config:repos/*/path
+command gh-auth short @repos = gh auth status

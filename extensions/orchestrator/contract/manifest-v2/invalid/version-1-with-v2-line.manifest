@@ -1,0 +1,4 @@
+# A version-1 manifest knows none of the version-2 lines.
+name = old
+version = 1
+root repos = config:repos/*/path

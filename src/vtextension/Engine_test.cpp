@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <expected>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string_view>
@@ -23,6 +24,7 @@
 
 #include <vtextension/DeadlineGuard.hpp>
 #include <vtextension/Engine.hpp>
+#include <vtextension/ThreadCpuClock.hpp>
 #include <vtextension/testing/FakeWasmBackend.hpp>
 #include <vtextension/wasm/DefaultBackend.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
@@ -32,6 +34,8 @@ using vtextension::DeadlineState;
 using vtextension::Engine;
 using vtextension::ExtensionError;
 using vtextension::ExtensionLimits;
+using vtextension::IThreadCpuClock;
+using vtextension::ThreadCpuId;
 using vtextension::WatchToken;
 using vtextension::testing::FakeWasmBackend;
 using vtextension::testing::FakeWasmInstance;
@@ -52,7 +56,46 @@ constexpr auto Eventually = std::chrono::seconds { 2 };
 [[nodiscard]] std::shared_ptr<Engine> createEngine(vtextension::wasm::IWasmBackend& backend,
                                                    ExtensionLimits limits = {})
 {
-    auto engine = Engine::create(backend, limits);
+    auto engine = Engine::create(backend, vtextension::World::StatusLine, limits);
+    REQUIRE(engine.has_value());
+    return std::move(*engine);
+}
+
+/// A thread CPU clock the test sets: every thread reads what the test stored, or none can be named.
+class FakeThreadCpuClock final: public IThreadCpuClock
+{
+  public:
+    [[nodiscard]] std::optional<ThreadCpuId> currentThread() const noexcept override
+    {
+        if (!isReadable)
+            return std::nullopt;
+        return ThreadCpuId { .value = 1 };
+    }
+
+    [[nodiscard]] std::optional<std::chrono::nanoseconds> consumed(
+        ThreadCpuId /*thread*/) const noexcept override
+    {
+        return cpu.load();
+    }
+
+    std::atomic<std::chrono::nanoseconds> cpu { std::chrono::nanoseconds::zero() };
+    bool isReadable = true;
+};
+
+/// @return Limits whose deadlines may last @p factor times as long in real time.
+[[nodiscard]] ExtensionLimits realTimeFactorOf(std::uint32_t factor)
+{
+    auto limits = ExtensionLimits {};
+    limits.deadlineRealTimeFactor = factor;
+    return limits;
+}
+
+/// @return An engine on @p backend whose deadlines @p cpuClock measures, which must be created.
+[[nodiscard]] std::shared_ptr<Engine> createEngine(vtextension::wasm::IWasmBackend& backend,
+                                                   ExtensionLimits limits,
+                                                   IThreadCpuClock const& cpuClock)
+{
+    auto engine = Engine::create(backend, vtextension::World::Daemon, limits, cpuClock);
     REQUIRE(engine.has_value());
     return std::move(*engine);
 }
@@ -272,6 +315,129 @@ TEST_CASE("Engine.deadline.endToEnd")
         CHECK(again.has_value());
         CHECK(state == DeadlineState::Running);
     }
+}
+
+TEST_CASE("Engine.deadline.waitingForCpuIsNotCharged")
+{
+    // A thread that spent none of its CPU budget is not interrupted when the budget has passed in real
+    // time; it is once it spends the budget.
+    auto backend = FakeWasmBackend {};
+    auto cpuClock = FakeThreadCpuClock {};
+    auto const engine = createEngine(backend, realTimeFactorOf(100), cpuClock);
+    auto instance = FakeWasmInstance {};
+    auto state = std::atomic<DeadlineState> { DeadlineState::Running };
+    constexpr auto Budget = std::chrono::milliseconds { 20 };
+
+    engine->armDeadline(WatchToken { .instance = &instance, .state = &state }, Budget);
+    std::this_thread::sleep_for(5 * Budget);
+    CHECK(instance.interrupts.load() == 0);
+    CHECK(state.load() == DeadlineState::Running);
+
+    cpuClock.cpu = Budget;
+    REQUIRE(awaitInterrupt(instance));
+    CHECK(instance.interrupts.load() == 1);
+    CHECK(state.load() == DeadlineState::Expired);
+}
+
+TEST_CASE("Engine.deadline.realTimeBound")
+{
+    // A thread that never gets a CPU is interrupted all the same, once its deadline times the real-time
+    // factor has passed, and not before.
+    auto backend = FakeWasmBackend {};
+    auto cpuClock = FakeThreadCpuClock {};
+    constexpr auto Factor = 4U;
+    auto const engine = createEngine(backend, realTimeFactorOf(Factor), cpuClock);
+    auto instance = FakeWasmInstance {};
+    auto state = std::atomic<DeadlineState> { DeadlineState::Running };
+    constexpr auto Budget = std::chrono::milliseconds { 20 };
+
+    auto const start = std::chrono::steady_clock::now();
+    engine->armDeadline(WatchToken { .instance = &instance, .state = &state }, Budget);
+    REQUIRE(awaitInterrupt(instance));
+    auto const elapsed = std::chrono::steady_clock::now() - start;
+
+    INFO("interrupted after " << toMilliseconds(elapsed) << " ms");
+    CHECK(elapsed >= Factor * Budget);
+    CHECK(state.load() == DeadlineState::Expired);
+}
+
+TEST_CASE("Engine.deadline.unreadableClockIsRealTime")
+{
+    // Where the thread's clock cannot be read, the deadline is spent in real time, factor or not.
+    auto backend = FakeWasmBackend {};
+    auto cpuClock = FakeThreadCpuClock {};
+    cpuClock.isReadable = false;
+    auto const engine = createEngine(backend, realTimeFactorOf(100), cpuClock);
+    auto instance = FakeWasmInstance {};
+    auto state = std::atomic<DeadlineState> { DeadlineState::Running };
+
+    auto const start = std::chrono::steady_clock::now();
+    engine->armDeadline(WatchToken { .instance = &instance, .state = &state },
+                        std::chrono::milliseconds { 20 });
+    REQUIRE(awaitInterrupt(instance));
+    CHECK(std::chrono::steady_clock::now() - start < Eventually);
+}
+
+TEST_CASE("Engine.unspent")
+{
+    // What is left is the CPU budget less what the thread spent; nothing once disarmed.
+    auto backend = FakeWasmBackend {};
+    auto cpuClock = FakeThreadCpuClock {};
+    auto const engine = createEngine(backend, realTimeFactorOf(100), cpuClock);
+    auto instance = FakeWasmInstance {};
+    auto state = std::atomic<DeadlineState> { DeadlineState::Running };
+    auto const token = WatchToken { .instance = &instance, .state = &state };
+
+    CHECK(engine->unspent(token) == std::chrono::nanoseconds::zero());
+    engine->armDeadline(token, std::chrono::milliseconds { 100 });
+    cpuClock.cpu = std::chrono::milliseconds { 30 };
+    CHECK(engine->unspent(token) == std::chrono::milliseconds { 70 });
+    engine->disarm(token);
+    CHECK(engine->unspent(token) == std::chrono::nanoseconds::zero());
+}
+
+TEST_CASE("Engine.deadline.endToEndInCpuTime")
+{
+    // On the native thread clock, a guest spinning in an endless loop spends its budget and is stopped, real
+    // time ten times as long as its budget notwithstanding.
+    auto const backend = vtextension::wasm::makeDefaultBackend();
+    auto const engine = createEngine(*backend, realTimeFactorOf(10), vtextension::nativeThreadCpuClock());
+    auto module = engine->runtime().load(hostOnlyModule());
+    REQUIRE(module.has_value());
+    auto host = NoHost {};
+    auto const instance = (*module)->instantiate(host);
+    REQUIRE(instance.has_value());
+    auto const function = (*instance)->function("spin");
+    REQUIRE(function.has_value());
+
+    constexpr auto Budget = std::chrono::milliseconds { 50 };
+    auto state = std::atomic<DeadlineState> { DeadlineState::Running };
+    auto const token = WatchToken { .instance = instance->get(), .state = &state };
+    engine->armDeadline(token, Budget);
+    auto const called = (*instance)->call(*function, {});
+    engine->disarm(token);
+
+    REQUIRE_FALSE(called.has_value());
+    CHECK(called.error() == vtextension::wasm::CallFailure::Interrupted);
+    CHECK(state.load() == DeadlineState::Expired);
+}
+
+TEST_CASE("Engine.nativeThreadCpuClock")
+{
+    // The calling thread's clock can be named and read, and it advances while the thread computes.
+    auto const& clock = vtextension::nativeThreadCpuClock();
+    auto const thread = clock.currentThread();
+    REQUIRE(thread.has_value());
+    auto const before = clock.consumed(*thread);
+    REQUIRE(before.has_value());
+    auto const until = std::chrono::steady_clock::now() + std::chrono::milliseconds { 50 };
+    auto spins = std::uint64_t { 0 };
+    while (std::chrono::steady_clock::now() < until)
+        ++spins;
+    auto const after = clock.consumed(*thread);
+    REQUIRE(after.has_value());
+    CHECK(spins > 0);
+    CHECK(*after > *before);
 }
 
 TEST_CASE("Engine.errorText")

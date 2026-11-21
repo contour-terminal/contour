@@ -1,0 +1,4 @@
+# The inbox line is reserved: no version of the manifest supports it yet.
+name = messenger
+version = 2
+inbox status-board = A status board has been requested for this run.

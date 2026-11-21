@@ -1,0 +1,10 @@
+#! /bin/sh
+# SPDX-License-Identifier: Apache-2.0
+#
+# A stand-in for `git` (see ./gh): the worktree list is the recorded core/testdata/git/ fixture; every other
+# declared command succeeds and prints nothing.
+testdata="$(dirname "$0")/../../core/testdata"
+case "$1 $2" in
+    "worktree list") exec cat "$testdata/git/worktree-list.porcelain-z" ;;
+    *) exit 0 ;;
+esac

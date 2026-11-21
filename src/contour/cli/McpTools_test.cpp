@@ -12,8 +12,10 @@
 #include <format>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include <testing/ExactBuffer.hpp>
 #include <vtcontrol/Describe.hpp>
 #include <vtcontrol/Json.hpp>
 
@@ -257,4 +259,19 @@ TEST_CASE("McpTools.object_setLabel_stays_an_alias_of_object_rename", "[mcp-tool
     auto const json = toolsListJson(std::nullopt, McpAccess::Full, TabScope::OwnTab);
     CHECK(lists(json, "object_setLabel"));
     CHECK_FALSE(lists(toolsListJson(std::nullopt, McpAccess::ReadOnly, TabScope::OwnTab), "object_setLabel"));
+}
+
+TEST_CASE("McpTools.inlineSchemaRefs reads no byte past the schema", "[mcp-tools]")
+{
+    using contour::cli::detail::inlineSchemaRefs;
+    auto const whole = std::string_view { R"({"type":"object"})" };
+    CHECK(inlineSchemaRefs(contour::testing::ExactBuffer { whole }.view()).has_value());
+    // Each is cut off, most of them right after a complete value.
+    for (auto const cutOff: { whole.substr(0, whole.size() - 1),
+                              std::string_view { R"({"a": 1)" },
+                              std::string_view { "[1, 2" } })
+    {
+        CAPTURE(cutOff);
+        CHECK_FALSE(inlineSchemaRefs(contour::testing::ExactBuffer { cutOff }.view()).has_value());
+    }
 }

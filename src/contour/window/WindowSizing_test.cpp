@@ -123,6 +123,28 @@ TEST_CASE("a controller outliving its window reads no destroyed window", "[conto
     CHECK(controller->windowCornerRadius() == windowedRadius);
 }
 
+TEST_CASE("a controller outliving its window keeps no destroyed display", "[contour][sizing]")
+{
+    TestApp app;
+    ScopedController controller { app.manager() };
+    // Held in an optional for the same reason as the window above: the destroyed display's address still
+    // names storage, so a controller that kept it is caught by comparison, not only by a sanitizer.
+    std::optional<contour::display::TerminalDisplay> display;
+    auto* const focused = &display.emplace();
+    controller->focusDisplay(focused);
+    REQUIRE(controller->activeDisplay() == focused);
+
+    // Closing the window unregisters the controller before the QML tree destroys its displays, so the
+    // manager's detachDisplay() fan-out no longer reaches it; the band then still reports its widths into
+    // the controller while it awaits its deferred delete.
+    controller->closeWindow();
+    display.reset();
+    REQUIRE(controller->activeDisplay() == nullptr);
+
+    controller->setBandWidths(QVariantMap { { QStringLiteral("chip"), 120 } }, 1);
+    controller->setChromeHeight(34);
+}
+
 TEST_CASE("first window restores its location and saves normal moves", "[contour][sizing][window-position]")
 {
     SKIP_WHEN_WINDOWS_CANNOT_BE_PLACED();

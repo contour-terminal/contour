@@ -3,6 +3,7 @@
 
 #include <vtpty/ControllingTerminal.hpp>
 
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -22,7 +23,7 @@ namespace vtpty
 inline constexpr std::string_view SpawnTrampolineMarker = "--vtpty-spawn-trampoline=";
 
 /// The wire-format version the marker's suffix must carry.
-inline constexpr std::uint32_t SpawnTrampolineProtocolVersion = 1;
+inline constexpr std::uint32_t SpawnTrampolineProtocolVersion = 2;
 
 /// The file descriptor the spec socket has in the trampoline.
 inline constexpr int SpawnSpecFd = 3;
@@ -72,10 +73,11 @@ enum class TrampolineSlot : std::uint8_t
     FastPipe,
     Input,
     Output,
+    WorkingDirectory, ///< An open directory a terminal launch enters by fchdir() instead of its path.
 };
 
 /// The number of TrampolineSlot enumerators.
-inline constexpr std::uint8_t TrampolineSlotCount = std::to_underlying(TrampolineSlot::Output) + 1;
+inline constexpr std::uint8_t TrampolineSlotCount = std::to_underlying(TrampolineSlot::WorkingDirectory) + 1;
 
 /// The file descriptor number a slot has in the trampoline.
 /// @param slot The slot.
@@ -125,6 +127,20 @@ class TrampolineSlots
 
     std::uint8_t _bits = 0;
 };
+
+/// Every slot a terminal launch (Process::start(), and a PTY keeper's spawn of it) fills, at most: the
+/// placement gate, the settle signal, the terminal, the stdout fast pipe, and the directory it starts in.
+/// Input and Output are a detached launch's only.
+inline constexpr auto TerminalLaunchSlots = TrampolineSlots {}
+                                                .with(TrampolineSlot::Gate)
+                                                .with(TrampolineSlot::Settle)
+                                                .with(TrampolineSlot::Terminal)
+                                                .with(TrampolineSlot::FastPipe)
+                                                .with(TrampolineSlot::WorkingDirectory);
+
+/// The number of slots in TerminalLaunchSlots.
+inline constexpr std::size_t TerminalLaunchSlotCount = 5;
+static_assert(static_cast<std::size_t>(std::popcount(TerminalLaunchSlots.raw())) == TerminalLaunchSlotCount);
 
 /// How a program on a terminal is started: a session's shell, the tmux control client.
 struct TerminalLaunch

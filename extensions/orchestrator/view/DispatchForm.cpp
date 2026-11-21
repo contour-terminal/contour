@@ -1,0 +1,509 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <orchestrator/view/DispatchForm.hpp>
+
+#include <core/tui/Canvas.hpp>
+#include <core/tui/KeyCode.hpp>
+#include <core/tui/Modifier.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <expected>
+#include <format>
+#include <optional>
+#include <ranges>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <variant>
+#include <vector>
+
+#include <orchestrator/core/Commands.hpp>
+#include <orchestrator/core/Naming.hpp>
+#include <orchestrator/core/Overloaded.hpp>
+#include <orchestrator/core/Utf8.hpp>
+#include <orchestrator/view/Keys.hpp>
+#include <orchestrator/view/Sections.hpp>
+#include <orchestrator/view/Theme.hpp>
+
+using namespace std::string_view_literals;
+
+namespace orchestrator::view
+{
+
+namespace
+{
+    // {{{ what the form says
+
+    /// What each refusal tells the user, indexed by DispatchRefusal.
+    constexpr auto RefusalTexts = std::array {
+        "the orchestrator is not configured: the line above says why"sv,            // NotConfigured
+        "max_agents agents are running: end one first"sv,                           // AgentLimit
+        "max_agents_per_repo agents run in this repository: end one first"sv,       // RepoLimit
+        "the repository is no longer configured"sv,                                 // UnknownRepo
+        "the task does not apply to this item"sv,                                   // UnknownTask
+        "the model is not one of models"sv,                                         // UnknownModel
+        "an agent already works on this item"sv,                                    // AlreadyRunning
+        "the base branch is not known yet: it is read with the next refresh (R)"sv, // BaseUnknown
+        "the prompt or the note cannot be passed to the agent"sv,                   // BadPrompt
+    };
+    static_assert(RefusalTexts.size() == std::to_underlying(DispatchRefusal::BadPrompt) + 1U,
+                  "RefusalTexts has one row per DispatchRefusal");
+
+    /// What Enter does, indexed by HooksWarning: once the warning is confirmed, it asks for a second Enter.
+    constexpr auto EnterHints =
+        std::array { "enter dispatch"sv, "enter dispatch"sv, "enter again to dispatch"sv };
+    static_assert(EnterHints.size() == std::to_underlying(HooksWarning::Confirmed) + 1U);
+
+    /// The form's other keys, in the order the hint line shows them after Enter's.
+    constexpr auto OtherHints = std::array { "tab next field"sv, "esc cancel"sv };
+
+    /// Why a note is refused: the agent would read it as an option.
+    constexpr auto LeadingDashText = "a note may not start with -"sv;
+
+    /// The cells a line's label takes, its padding included.
+    constexpr auto LabelColumns = 10;
+    /// How far a value's continuation lines are indented past its first.
+    constexpr auto ContinuationIndent = 2;
+    /// The cells the box and its padding take on either side.
+    constexpr auto SideColumns = 2;
+
+    /// The form's fields in the order Tab moves through them.
+    constexpr auto FieldOrder = std::array { FormField::Task, FormField::Model, FormField::Note };
+
+    // }}}
+    // {{{ the item
+
+    /// The url and title the engine last listed for an item.
+    struct Listed
+    {
+        std::string url;
+        std::string title;
+    };
+
+    [[nodiscard]] std::optional<Listed> listedItem(Engine const& engine,
+                                                   std::string_view repo,
+                                                   ItemRef const& item)
+    {
+        if (auto const* const request = std::get_if<ChangeRequestRef>(&item))
+        {
+            auto const requests = engine.changeRequests(repo);
+            auto const found = std::ranges::find(requests, request->number, &ChangeRequest::number);
+            if (found != requests.end())
+                return Listed { .url = found->url, .title = found->title };
+            return std::nullopt;
+        }
+        auto const issues = engine.unclaimedIssues(repo);
+        auto const found =
+            std::ranges::find_if(issues, [&](Issue const& issue) { return issue.item == item; });
+        if (found != issues.end())
+            return Listed { .url = found->url, .title = found->title };
+        return std::nullopt;
+    }
+
+    /// @return The index after (or before, by @p step) @p from among @p count, wrapping around, whose entry
+    ///         @p accepts; @p from when no other does.
+    template <typename Accepts>
+    [[nodiscard]] std::size_t cycled(std::size_t from, std::size_t count, int step, Accepts accepts)
+    {
+        if (count == 0)
+            return from;
+        auto index = from;
+        for ([[maybe_unused]] auto const attempt: std::views::iota(std::size_t { 0 }, count))
+        {
+            index = step > 0 ? (index + 1) % count : (index + count - 1) % count;
+            if (accepts(index))
+                return index;
+        }
+        return from;
+    }
+
+    /// @return Whether the note would be read as an option.
+    [[nodiscard]] bool startsWithDash(DispatchFormState const& form) noexcept
+    {
+        return form.note.starts_with('-');
+    }
+
+    // }}}
+    // {{{ the lines
+
+    /// One drawn line of the form.
+    struct FormLine
+    {
+        std::string_view label = {}; ///< Its label on a value's first line; empty otherwise.
+        std::string text = {};       ///< Sanitised and fitted to its cells.
+        Role role = Role::Text;      ///< How it is drawn.
+        int start = LabelColumns;    ///< The cells it starts past the box's padding: 0 for a line that is
+                                     ///< no field's value.
+    };
+
+    /// Appends a value, word-wrapped to the cells it has, continuation lines indented.
+    /// @param start Where its first line starts past the box's padding: LabelColumns for a field's value, 0
+    /// for
+    ///        a line of its own.
+    /// @param width The cells the box's padding leaves.
+    void appendWrapped(std::vector<FormLine>& lines,
+                       std::string_view label,
+                       std::string_view value,
+                       Role role,
+                       int start,
+                       int width)
+    {
+        auto wrapped = wrap(value, width - start, width - start - ContinuationIndent);
+        if (wrapped.empty())
+            wrapped.emplace_back();
+        for (auto const index: std::views::iota(std::size_t { 0 }, wrapped.size()))
+            lines.push_back(FormLine { .label = index == 0 ? label : ""sv,
+                                       .text = std::move(wrapped[index]),
+                                       .role = role,
+                                       .start = index == 0 ? start : start + ContinuationIndent });
+    }
+
+    /// @return @p text with the run's stamp, which is known only once the form is confirmed, shown as `…`.
+    [[nodiscard]] std::string withoutStamp(std::string_view text, Run const& run)
+    {
+        auto const slug = itemSlug(run.item);
+        auto const at = text.find(run.id);
+        if (!slug || at == std::string_view::npos)
+            return std::string { text };
+        return std::format("{}{}-…{}", text.substr(0, at), *slug, text.substr(at + run.id.size()));
+    }
+
+    /// @return How the form checks the item out into the run's worktree.
+    [[nodiscard]] std::string checkoutText(Run const& run)
+    {
+        auto const branch = withoutStamp(run.branch, run);
+        if (auto const* const request = std::get_if<ChangeRequestRef>(&run.item))
+            return std::format("gh pr checkout {} --branch {}", request->number, branch);
+        return std::format("new branch {}", branch);
+    }
+
+    /// @return A field's value between the arrows that say ←/→ change it.
+    [[nodiscard]] std::string choice(std::string_view value)
+    {
+        return std::format("‹ {} ›", value);
+    }
+
+    /// @return The task field: its label between the arrows, then the key that opens the form on it.
+    [[nodiscard]] std::string taskChoice(TaskDef const& task)
+    {
+        return std::format("{} {}", choice(task.label), task.key);
+    }
+
+    /// @return The role a field's value is drawn in: the selection's while it has the focus.
+    [[nodiscard]] Role fieldRole(DispatchFormState const& form,
+                                 FormField field,
+                                 Role otherwise = Role::Text) noexcept
+    {
+        return form.focus == field ? Role::Selection : otherwise;
+    }
+
+    /// The form's lines above its hint line.
+    struct FormBody
+    {
+        std::vector<FormLine> lines;  ///< Every line, in order.
+        std::size_t detailsBegin = 0; ///< The first line of what the dispatch runs: the part cut first.
+        std::size_t detailsEnd = 0;   ///< One past its last.
+    };
+
+    /// @return The form's lines above its hint line, in @p width cells.
+    [[nodiscard]] FormBody bodyLines(DispatchFormState const& form, Engine const& engine, int width)
+    {
+        auto const columns = width - LabelColumns;
+        auto lines = std::vector<FormLine> {};
+        auto const* const config = engine.config();
+        auto const tasks = config != nullptr ? config->tasks() : std::span<TaskDef const> {};
+        auto const models = config != nullptr ? config->models() : std::span<std::string const> {};
+
+        lines.push_back(
+            FormLine { .label = "item"sv,
+                       .text = cut(std::format("{} · {}", itemLabel(form.item), form.title), columns) });
+        lines.push_back(FormLine {
+            .label = "task"sv,
+            .text = cut(form.task < tasks.size() ? taskChoice(tasks[form.task]) : choice("?"), columns),
+            .role = fieldRole(form, FormField::Task) });
+        lines.push_back(FormLine {
+            .label = "model"sv,
+            .text = cut(choice(form.model < models.size() ? std::string_view { models[form.model] } : "?"sv),
+                        columns),
+            .role = fieldRole(form, FormField::Model) });
+        auto const noteRole = startsWithDash(form) ? Role::Failing : Role::Text;
+        if (form.note.empty() && form.focus != FormField::Note)
+            lines.push_back(
+                FormLine { .label = "note"sv, .text = "optional; tab to type one", .role = Role::Dim });
+        else
+            appendWrapped(lines,
+                          "note"sv,
+                          form.focus == FormField::Note ? std::format("{}▏", form.note) : form.note,
+                          fieldRole(form, FormField::Note, noteRole),
+                          LabelColumns,
+                          width);
+
+        auto const detailsBegin = lines.size();
+        auto const preview = previewOf(form, engine);
+        if (preview)
+        {
+            appendWrapped(lines, "prompt"sv, preview->run.prompt, Role::Text, LabelColumns, width);
+            appendWrapped(lines, "checkout"sv, checkoutText(preview->run), Role::Text, LabelColumns, width);
+            appendWrapped(lines,
+                          "worktree"sv,
+                          withoutStamp(preview->run.worktree, preview->run),
+                          Role::Text,
+                          LabelColumns,
+                          width);
+            appendWrapped(
+                lines, "command"sv, shellQuoted(preview->agentArgv), Role::Dim, LabelColumns, width);
+        }
+        else
+            appendWrapped(
+                lines, "refused"sv, refusalText(preview.error()), Role::Failing, LabelColumns, width);
+
+        auto const detailsEnd = lines.size();
+        lines.emplace_back();
+        if (startsWithDash(form))
+            lines.push_back(
+                FormLine { .text = std::string { LeadingDashText }, .role = Role::Failing, .start = 0 });
+        if (config != nullptr)
+            lines.push_back(
+                FormLine { .text = std::format("{} of {} running", engine.activeRuns(), config->maxAgents()),
+                           .role = Role::Dim,
+                           .start = 0 });
+        if (engine.hooks() == HooksState::Missing)
+            appendWrapped(lines, ""sv, HooksMissingWarning, Role::Warning, 0, width);
+        return FormBody { .lines = std::move(lines), .detailsBegin = detailsBegin, .detailsEnd = detailsEnd };
+    }
+
+    /// @return The lines of @p body that fit @p room rows: what the dispatch runs is cut first, from its end,
+    ///         so that the fields, the limits and a warning stay; a cut part's last line ends in `…`.
+    [[nodiscard]] std::vector<FormLine> fitted(FormBody body, std::size_t room)
+    {
+        auto& lines = body.lines;
+        if (lines.size() <= room)
+            return std::move(lines);
+        auto const details = body.detailsEnd - body.detailsBegin;
+        auto const dropped = std::min(lines.size() - room, details > 0 ? details - 1 : 0);
+        if (dropped > 0)
+        {
+            auto const keptEnd = body.detailsEnd - dropped;
+            lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(keptEnd),
+                        lines.begin() + static_cast<std::ptrdiff_t>(body.detailsEnd));
+            lines[keptEnd - 1].text += "…";
+        }
+        lines.resize(std::min(lines.size(), room));
+        return std::move(lines);
+    }
+
+    /// @return Whether Enter does something now: not while the note starts with `-` or the engine would
+    /// refuse.
+    [[nodiscard]] bool enterActs(DispatchFormState const& form, Engine const& engine)
+    {
+        return !startsWithDash(form) && previewOf(form, engine).has_value();
+    }
+
+    /// @return The hint line in @p columns cells: what Enter does, while it does something, then the form's
+    ///         other keys.
+    [[nodiscard]] std::string hintLine(DispatchFormState const& form, Engine const& engine, int columns)
+    {
+        auto hints = std::vector<std::string_view> {};
+        if (enterActs(form, engine))
+            hints.push_back(EnterHints[std::to_underlying(form.hooks)]);
+        hints.insert(hints.end(), OtherHints.begin(), OtherHints.end());
+        return joinHints(hints, columns);
+    }
+
+    // }}}
+} // namespace
+
+std::string_view refusalText(DispatchRefusal refusal) noexcept
+{
+    return RefusalTexts[std::to_underlying(refusal)];
+}
+
+std::optional<DispatchFormState> openDispatchForm(Engine const& engine,
+                                                  std::string_view repo,
+                                                  ItemRef const& item,
+                                                  std::string_view task,
+                                                  std::string session)
+{
+    auto const* const config = engine.config();
+    if (config == nullptr)
+        return std::nullopt;
+    auto const tasks = config->tasks();
+    auto const found = std::ranges::find(tasks, task, &TaskDef::id);
+    if (found == tasks.end() || found->appliesTo != appliesToOf(item))
+        return std::nullopt;
+    auto listed = listedItem(engine, repo, item);
+    if (!listed)
+        return std::nullopt;
+    auto const models = config->models();
+    auto const model = std::ranges::find(models, found->model);
+    return DispatchFormState {
+        .repo = std::string { repo },
+        .item = item,
+        .url = std::move(listed->url),
+        .title = std::move(listed->title),
+        .task = static_cast<std::size_t>(std::ranges::distance(tasks.begin(), found)),
+        .model = model != models.end()
+                     ? static_cast<std::size_t>(std::ranges::distance(models.begin(), model))
+                     : 0,
+        .note = {},
+        .session = std::move(session),
+        .focus = FormField::Task,
+        .hooks = engine.hooks() == HooksState::Missing ? HooksWarning::Shown : HooksWarning::None,
+    };
+}
+
+DispatchAction actionOf(DispatchFormState const& form, Engine const& engine, std::string_view nearTab)
+{
+    auto const* const config = engine.config();
+    auto const tasks = config != nullptr ? config->tasks() : std::span<TaskDef const> {};
+    auto const models = config != nullptr ? config->models() : std::span<std::string const> {};
+    return DispatchAction {
+        .repo = form.repo,
+        .item = form.item,
+        .url = form.url,
+        .task = form.task < tasks.size() ? tasks[form.task].id : std::string {},
+        .model = form.model < models.size() ? models[form.model] : std::string {},
+        .note = form.note.empty() ? std::nullopt : std::optional { form.note },
+        .session = form.session,
+        .nearTab = std::string { nearTab },
+    };
+}
+
+std::expected<DispatchPreview, DispatchRefusal> previewOf(DispatchFormState const& form, Engine const& engine)
+{
+    auto action = actionOf(form, engine, {});
+    // The wall time only stamps the names, which the form shows without their stamp.
+    return engine.preview(Dispatch { .repo = std::move(action.repo),
+                                     .item = std::move(action.item),
+                                     .url = std::move(action.url),
+                                     .task = std::move(action.task),
+                                     .model = std::move(action.model),
+                                     .note = std::move(action.note),
+                                     .session = std::move(action.session),
+                                     .nearTab = std::nullopt,
+                                     .wallMs = 0,
+                                     .monoMs = 0 });
+}
+
+std::optional<DispatchAction> applyFormKey(core::tui::KeyEvent const& key,
+                                           std::optional<DispatchFormState>& form,
+                                           Engine const& engine,
+                                           HooksWarning hooksAtInput,
+                                           std::string_view nearTab)
+{
+    if (!form)
+        return std::nullopt;
+    auto const* const config = engine.config();
+    auto& state = *form;
+    auto const move = [&](int step) {
+        auto const at = std::ranges::find(FieldOrder, state.focus);
+        auto const index = static_cast<std::size_t>(std::ranges::distance(FieldOrder.begin(), at));
+        state.focus = FieldOrder[cycled(index, FieldOrder.size(), step, [](std::size_t) { return true; })];
+    };
+    auto const change = [&](int step) {
+        if (config == nullptr)
+            return;
+        if (state.focus == FormField::Task)
+        {
+            auto const tasks = config->tasks();
+            state.task = cycled(state.task, tasks.size(), step, [&](std::size_t index) {
+                return tasks[index].appliesTo == appliesToOf(state.item);
+            });
+            // A task comes with its own model.
+            auto const models = config->models();
+            if (auto const model = std::ranges::find(models, tasks[state.task].model); model != models.end())
+                state.model = static_cast<std::size_t>(std::ranges::distance(models.begin(), model));
+        }
+        else if (state.focus == FormField::Model)
+            state.model =
+                cycled(state.model, config->models().size(), step, [](std::size_t) { return true; });
+    };
+
+    // A key with Alt is how an Esc reads when the next key follows it in the same read: the user pressed Esc,
+    // and the form is cancelled, not acted on (Alt+Enter never dispatches). A Ctrl chord does nothing here.
+    if (core::tui::hasModifier(key.modifiers, core::tui::Modifier::Alt))
+    {
+        form.reset();
+        return std::nullopt;
+    }
+    if (core::tui::hasModifier(key.modifiers, core::tui::Modifier::Ctrl))
+        return std::nullopt;
+    switch (key.key)
+    {
+        case core::tui::KeyCode::Escape: form.reset(); return std::nullopt;
+        case core::tui::KeyCode::Tab:
+            move(core::tui::hasModifier(key.modifiers, core::tui::Modifier::Shift) ? -1 : 1);
+            return std::nullopt;
+        case core::tui::KeyCode::Up: move(-1); return std::nullopt;
+        case core::tui::KeyCode::Down: move(1); return std::nullopt;
+        case core::tui::KeyCode::Left: change(-1); return std::nullopt;
+        case core::tui::KeyCode::Right: change(1); return std::nullopt;
+        case core::tui::KeyCode::Backspace:
+            if (state.focus == FormField::Note)
+                dropLastCodepoint(state.note);
+            return std::nullopt;
+        case core::tui::KeyCode::Enter: {
+            if (!enterActs(state, engine))
+                return std::nullopt;
+            if (engine.hooks() == HooksState::Missing)
+            {
+                // The first Enter confirms the warning; only an Enter of a later input dispatches, so a paste
+                // or a held key cannot click through it.
+                if (state.hooks != HooksWarning::Confirmed)
+                {
+                    state.hooks = HooksWarning::Confirmed;
+                    return std::nullopt;
+                }
+                if (hooksAtInput != HooksWarning::Confirmed)
+                    return std::nullopt;
+            }
+            auto action = actionOf(state, engine, nearTab);
+            form.reset();
+            return action;
+        }
+        default: break;
+    }
+    if (state.focus != FormField::Note)
+        return std::nullopt;
+    if (auto const printable = printableOf(key))
+        appendUtf8(state.note, *printable);
+    return std::nullopt;
+}
+
+void DispatchFormView::render(core::tui::Canvas& canvas)
+{
+    if (!_form)
+        return;
+    auto const& theme = canvas.theme();
+    canvas.clear(styleOf(theme, Role::Text));
+    drawFrame(canvas, "Dispatch an agent");
+    auto inside = insideFrame(canvas);
+    auto const width = inside.width() - SideColumns;
+    // The hint line stays on the last row; the body is cut to fit above it.
+    auto const room = static_cast<std::size_t>(std::max(0, inside.height() - 1));
+    auto const lines = fitted(bodyLines(*_form, _engine, width), room);
+    for (auto const index: std::views::iota(std::size_t { 0 }, lines.size()))
+    {
+        auto const& line = lines[index];
+        auto const y = static_cast<int>(index);
+        auto const text = cut(line.text, width - line.start);
+        auto const x = 1 + line.start;
+        inside.putString(y, 1, line.label, styleOf(theme, Role::Dim));
+        inside.putString(y, x, text, styleOf(theme, line.role));
+    }
+    if (inside.height() > 0)
+        inside.putString(inside.height() - 1, 1, hintLine(*_form, _engine, width), styleOf(theme, Role::Dim));
+}
+
+int DispatchFormView::heightAt(int width) const
+{
+    if (!_form)
+        return 0;
+    auto const inner = width - 2 - SideColumns;
+    // The box's two rows and the hint line.
+    return static_cast<int>(bodyLines(*_form, _engine, inner).lines.size()) + 3;
+}
+
+} // namespace orchestrator::view

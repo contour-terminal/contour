@@ -1,0 +1,4 @@
+# The version comes before every line but the name.
+name = late
+root worktrees = config:worktree_root
+version = 2

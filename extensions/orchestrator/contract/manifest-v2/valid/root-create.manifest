@@ -1,0 +1,5 @@
+# A root the host creates if it is missing: one directory, never a list.
+name = creator
+version = 2
+root worktrees create = config:worktree_root
+root repos = config:repos/*/path

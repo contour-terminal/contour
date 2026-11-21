@@ -36,6 +36,7 @@
 
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 
 #include <fcntl.h>
@@ -180,6 +181,14 @@ namespace
             ::close(fd);
     }
 } // namespace
+
+bool isExecutableIn(int directory, std::string const& candidate) noexcept
+{
+    auto const base = directory < 0 ? AT_FDCWD : directory;
+    struct stat status {};
+    return ::fstatat(base, candidate.c_str(), &status, 0) == 0 && S_ISREG(status.st_mode)
+           && ::faccessat(base, candidate.c_str(), X_OK, 0) == 0;
+}
 
 int openDescriptorLimit() noexcept
 {

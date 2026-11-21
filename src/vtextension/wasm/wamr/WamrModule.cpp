@@ -225,7 +225,9 @@ std::expected<std::shared_ptr<IWasmModule>, ExtensionError> loadModule(
 
     // No directories, no environment, no arguments, and standard streams that lead nowhere: the
     // guest's standard library works, but reaches nothing outside the module. WAMR applies these per
-    // module, at instantiation.
+    // module, at instantiation; without this call, WAMR's default would hand the guest the host's own
+    // standard streams, which fd_read (allow-listed) would then read. The contract cases
+    // wasiStdioGoesNowhere and wasiStdinReadsNothing fail if it is ever dropped.
     auto const nullDevice = runtime->nullDevice();
     wasm_runtime_set_wasi_args_ex(
         module.get(), nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 0, nullDevice, nullDevice, nullDevice);

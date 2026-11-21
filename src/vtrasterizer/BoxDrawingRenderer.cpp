@@ -8,6 +8,7 @@
 #include <core/log/Assert.hpp>
 #include <core/log/LogStore.hpp>
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cmath>
@@ -18,7 +19,6 @@
 
 using namespace std::string_view_literals;
 
-using std::clamp;
 using std::min;
 using std::nullopt;
 using std::optional;
@@ -27,7 +27,6 @@ using std::string_view;
 
 using crispy::Point;
 
-namespace Ranges = std::ranges;
 namespace Views = std::views;
 
 namespace vtrasterizer
@@ -113,59 +112,77 @@ namespace detail
         // As for Line: keeps the definition tables readable.
         using enum Diagonal;
 
-        void drawArcElliptic(atlas::Buffer& buffer, ImageSize imageSize, unsigned thickness, Arc arc)
+        /// The pixels a straight line's stroke covers across the cell, in buffer coordinates (row 0 is
+        /// the cell's bottom): columns [x0, x1) for a vertical line, rows [y0, y1) for a horizontal one.
+        struct StrokeBounds
         {
-            if (thickness == 0)
-                return;
+            size_t x0; ///< The first column of a vertical line's stroke.
+            size_t x1; ///< One past its last column.
+            size_t y0; ///< The first row of a horizontal line's stroke.
+            size_t y1; ///< One past its last row.
+        };
 
-            // Used to record all the pixel coordinates that have been written to per scanline.
-            //
-            // The vector index represents the y-axis.
-            //
-            // The element-array for each y-coordinate represent the x-coordinates that
-            // have been written to at that line.
-            //
-            // This is needed in order to fill the gaps.
-            using GapFills = std::vector<std::vector<unsigned>>;
-            GapFills gaps;
-            gaps.resize(unbox<size_t>(imageSize.height));
+        /// Draws a quarter-elliptic rounded corner.
+        ///
+        /// The arc is the ring between two quarter ellipses centred on the cell corner it bends around,
+        /// sized so that on each cell edge it ends on, it covers exactly the stroke of the straight line
+        /// continuing it into the neighbouring cell: no step and no notch where ─ or │ takes over. A pixel
+        /// is lit where its centre lies within the ring. The last @p straightEnd pixels at either end run
+        /// straight, as at the arc's tangent point, so the cell's edge pixels carry no anti-aliased fringe.
+        /// @param buffer The glyph's alpha buffer, bottom-up.
+        /// @param imageSize The size of @p buffer.
+        /// @param stroke The stroke of the lines the arc continues into.
+        /// @param straightEnd How many pixels at each end run straight: one device pixel when supersampled.
+        /// @param arc The corner the arc bends around.
+        void drawArcElliptic(
+            atlas::Buffer& buffer, ImageSize imageSize, StrokeBounds stroke, size_t straightEnd, Arc arc)
+        {
+            auto const width = unbox<size_t>(imageSize.width);
+            auto const height = unbox<size_t>(imageSize.height);
+            auto const onLeft = arc == Arc::BL || arc == Arc::UL;
+            auto const onBottom = arc == Arc::BL || arc == Arc::BR;
 
-            auto const w = unbox(imageSize.width);
-            auto const h = unbox(imageSize.height);
+            // Distances from the corner to the stroke's near and far side, along each axis: measured from 0
+            // for a corner at the origin, from the extent for one at the far side.
+            auto const spanFromOrigin = [](size_t from, size_t to) {
+                return std::pair { static_cast<double>(from), static_cast<double>(to) };
+            };
+            auto const spanFromExtent = [](size_t extent, size_t from, size_t to) {
+                return std::pair { static_cast<double>(extent - to), static_cast<double>(extent - from) };
+            };
+            auto const [innerX, outerX] =
+                onLeft ? spanFromOrigin(stroke.x0, stroke.x1) : spanFromExtent(width, stroke.x0, stroke.x1);
+            auto const [innerY, outerY] = onBottom ? spanFromOrigin(stroke.y0, stroke.y1)
+                                                   : spanFromExtent(height, stroke.y0, stroke.y1);
+            auto const cornerX = onLeft ? 0.0 : static_cast<double>(width);
+            auto const cornerY = onBottom ? 0.0 : static_cast<double>(height);
+            auto const hasInner = innerX > 0 && innerY > 0;
 
-            // std::cout << std::format("{}.drawArc: size={}\n", arc, imageSize);
-            auto const putpixel = [&](int x, int y, uint8_t alpha = 0xFFu) {
-                auto const fy = clamp((unsigned) y, 0u, h - 1);
-                auto const fx = clamp((unsigned) x, 0u, w - 1);
-                buffer[(fy * w) + fx] = alpha;
-                gaps[fy].push_back(fx);
+            // A point lies on an ellipse of radii (rx, ry) about the corner where (dx/rx)^2 + (dy/ry)^2 is 1.
+            auto const squared = [](double d, double r) {
+                return (d * d) / (r * r);
             };
 
-            // inner circle
-            drawEllipseArc(putpixel,
-                           imageSize,
-                           crispy::Point { // radius
-                                           .x = (unbox<int>(imageSize.width) / 2) - (int(thickness) / 2),
-                                           .y = (unbox<int>(imageSize.height) / 2) - (int(thickness) / 2) },
-                           arc);
+            // The arc ends on the two cell edges through its corner; within straightEnd of one, it is
+            // evaluated on that edge itself.
+            auto const band = static_cast<double>(straightEnd);
+            auto const offset = [band](size_t pixel, double corner) {
+                auto const d = static_cast<double>(pixel) + 0.5 - corner;
+                return std::abs(d) < band ? 0.0 : d;
+            };
 
-            // outer circle
-            drawEllipseArc(
-                putpixel,
-                imageSize,
-                crispy::Point { // radius
-                                .x = (unbox<int>(imageSize.width) / 2) + (int(thickness) / 2) - 1,
-                                .y = (unbox<int>(imageSize.height) / 2) + (int(thickness) / 2) - 1 },
-                arc);
-
-            // fill gap
-            for (size_t y = 0; y < gaps.size(); ++y)
+            for (auto const y: Views::iota(0zu, height))
             {
-                if (auto& gap = gaps[y]; !gap.empty())
+                auto const dy = offset(y, cornerY);
+                auto const outerDy = squared(dy, outerY);
+                auto const innerDy = hasInner ? squared(dy, innerY) : 0.0;
+                for (auto const x: Views::iota(0zu, width))
                 {
-                    Ranges::sort(gap);
-                    for (auto const xi: Views::iota(gap.front(), gap.back()))
-                        buffer.at((y * unbox<size_t>(imageSize.width)) + xi) = 0xFF;
+                    auto const dx = offset(x, cornerX);
+                    auto const withinOuter = squared(dx, outerX) + outerDy <= 1.0;
+                    auto const withinInner = hasInner && squared(dx, innerX) + innerDy < 1.0;
+                    if (withinOuter && !withinInner)
+                        buffer[(y * width) + x] = 0xFF;
                 }
             }
         }
@@ -887,24 +904,65 @@ namespace detail
                 /*U+F60D  */ Box {}.circle(Line::Light).horizontal(branchLine).vertical(branchLine),
             };
         }
-        // constinit: guarantees constant initialization, so no dynamic (and possibly throwing)
-        // initializer runs at static-init time. Still mutable -- setGitStyles() reassigns it.
-        constinit auto branchDrawingDefinitions = getBranchBoxes();
+        using BranchBoxes = decltype(getBranchBoxes());
+        using GitDrawingsStyle = BoxDrawingStyle::GitDrawingsStyle;
 
-        constexpr bool isGitBranchDrawing(char32_t codepoint)
+        constexpr auto MergeCommitLines = std::array {
+            std::pair { GitDrawingsStyle::MergeCommitStyle::Solid, Line::Heavy },
+            std::pair { GitDrawingsStyle::MergeCommitStyle::Bullet, Line::Double },
+        };
+
+        constexpr auto BranchLines = std::array {
+            std::pair { GitDrawingsStyle::BranchStyle::None, Line::NoLine },
+            std::pair { GitDrawingsStyle::BranchStyle::Thin, Line::Light },
+            std::pair { GitDrawingsStyle::BranchStyle::Double, Line::Double },
+            std::pair { GitDrawingsStyle::BranchStyle::Thick, Line::Heavy },
+        };
+
+        /// Whether @p table pairs every value of its enumeration, from zero up to @p last, with its line, in
+        /// order -- so that the enumerator indexes the table.
+        template <typename Table, typename Enum>
+        constexpr bool indexedByEnum(Table const& table, Enum last) noexcept
         {
-            bool const gitBranchBox =
-                codepoint >= 0xF5D0 && codepoint < 0xF5D0 + branchDrawingDefinitions.size();
-            return gitBranchBox && branchDrawingDefinitions[0].rightval != Line::NoLine;
+            return table.size() == static_cast<size_t>(last) + 1
+                   && std::ranges::all_of(std::views::iota(0zu, table.size()), [&table](size_t index) {
+                          return static_cast<size_t>(table[index].first) == index;
+                      });
         }
-        constexpr auto getBoxDrawing(char32_t codepoint) -> std::optional<Box>
-        {
-            auto const standardBox = codepoint >= 0x2500 && codepoint <= 0x257F;
-            if (!(standardBox || isGitBranchDrawing(codepoint)))
-                return std::nullopt;
+        static_assert(indexedByEnum(MergeCommitLines, GitDrawingsStyle::MergeCommitStyle::Bullet));
+        static_assert(indexedByEnum(BranchLines, GitDrawingsStyle::BranchStyle::Thick));
 
-            return standardBox ? BoxDrawingDefinitions[codepoint - 0x2500]
-                               : branchDrawingDefinitions[codepoint - 0xF5D0];
+        /// The git-graph glyphs for every merge-commit and branch style, built at compile time, so a
+        /// renderer only ever selects one table and nothing is rebuilt (or shared and mutated) at run time.
+        constexpr auto BranchBoxTables = [] {
+            auto tables = std::array<BranchBoxes, MergeCommitLines.size() * BranchLines.size()> {};
+            for (auto const& [mergeCommitStyle, mergeCommitLine]: MergeCommitLines)
+                for (auto const& [branchStyle, branchLine]: BranchLines)
+                    tables[(static_cast<size_t>(mergeCommitStyle) * BranchLines.size())
+                           + static_cast<size_t>(branchStyle)] = getBranchBoxes(mergeCommitLine, branchLine);
+            return tables;
+        }();
+
+        /// The git-graph glyph table @p style draws with.
+        constexpr BranchBoxes const& branchBoxesFor(GitDrawingsStyle style) noexcept
+        {
+            return BranchBoxTables[(static_cast<size_t>(style.mergeCommitStyle) * BranchLines.size())
+                                   + static_cast<size_t>(style.branchStyle)];
+        }
+
+        /// Whether @p codepoint is one of Contour's git-graph glyphs, whatever the style.
+        constexpr bool isGitBranchCodepoint(char32_t codepoint) noexcept
+        {
+            return codepoint >= 0xF5D0 && codepoint < 0xF5D0 + std::tuple_size_v<BranchBoxes>;
+        }
+
+        constexpr auto getBoxDrawing(char32_t codepoint, GitDrawingsStyle gitStyle) -> std::optional<Box>
+        {
+            if (codepoint >= 0x2500 && codepoint <= 0x257F)
+                return BoxDrawingDefinitions[codepoint - 0x2500];
+            if (isGitBranchCodepoint(codepoint))
+                return branchBoxesFor(gitStyle)[codepoint - 0xF5D0];
+            return std::nullopt;
         }
 
         // {{{ block element construction
@@ -1828,35 +1886,32 @@ namespace detail
             // 2 5
             // 6 7
 
-            static bool isBraille(char32_t codepoint)
+            /// Whether @p codepoint is a Braille pattern, whatever the style.
+            static constexpr bool isBraille(char32_t codepoint) noexcept
             {
-                return CurrentStyle != Style::Font and codepoint >= 0x2800 and codepoint <= 0x28FF;
+                return codepoint >= 0x2800 and codepoint <= 0x28FF;
             }
 
-            using Style = BoxDrawingRenderer::BrailleStyle;
-            inline static Style CurrentStyle = Style::Circle;
-            static void setStyle(Style newStyle) { CurrentStyle = newStyle; }
+            using Style = BoxDrawingStyle::BrailleStyle;
 
-            static auto build(char32_t codepoint,
+            static auto build(Style style,
+                              char32_t codepoint,
                               ImageSize size,
                               [[maybe_unused]] size_t th,
                               [[maybe_unused]] size_t ss)
             {
                 uint8_t const value = codepoint - 0x2800;
-                switch (CurrentStyle)
+                switch (style)
                 {
                     using enum Style;
                     case Solid: return buildSolid(value, size);
                     case Circle: [[fallthrough]];
-                    case CircleEmpty: return buildCircle(value, size, th, ss, CurrentStyle == CircleEmpty);
+                    case CircleEmpty: return buildCircle(value, size, th, ss, style == CircleEmpty);
                     case Square: [[fallthrough]];
-                    case SquareEmpty: return buildSquare(value, size, th, 1, CurrentStyle == SquareEmpty);
+                    case SquareEmpty: return buildSquare(value, size, th, 1, style == SquareEmpty);
                     case AASquare: [[fallthrough]];
-                    case AASquareEmpty:
-                        return buildSquare(value, size, th, ss, CurrentStyle == AASquareEmpty);
-                    case Font:
-                        (void) SoftRequire(false);
-                        return atlas::Buffer(static_cast<std::size_t>(*size.width * *size.height));
+                    case AASquareEmpty: return buildSquare(value, size, th, ss, style == AASquareEmpty);
+                    case Font: break; // Left to the font: render() declines it before a tile is built.
                 }
                 (void) SoftRequire(false);
                 return atlas::Buffer(static_cast<std::size_t>(*size.width * *size.height));
@@ -2056,41 +2111,32 @@ namespace detail
     } // namespace
 } // namespace detail
 
-void BoxDrawingRenderer::setGitDrawingsStyle(BoxDrawingRenderer::GitDrawingsStyle newStyle)
+BoxDrawingRenderer::BoxDrawingRenderer(GridMetrics const& gridMetrics, BoxDrawingStyle style):
+    Renderable { gridMetrics }, _resolved { resolve(style) }
 {
-    using GitBranchStyle = BoxDrawingRenderer::GitDrawingsStyle::BranchStyle;
-    using MergeCommitStyle = BoxDrawingRenderer::GitDrawingsStyle::MergeCommitStyle;
+}
 
-    if (DefaultArcStyle == ArcStyle::Elliptic && newStyle.branchStyle != GitBranchStyle::Thin)
-    {
-        // log warning ??
-        newStyle.arcStyle = ArcStyle::Round;
-    }
-    auto mcLine = [&] {
-        switch (newStyle.mergeCommitStyle)
-        {
-            case MergeCommitStyle::Solid: return detail::Line::Heavy;
-            case MergeCommitStyle::Bullet: return detail::Line::Double;
-            default: assert(false); return detail::Line::Double;
-        }
-    }();
-    auto branchLine = [&] {
-        switch (newStyle.branchStyle)
-        {
-            case GitBranchStyle::Thin: return detail::Line::Light;
-            case GitBranchStyle::Thick: return detail::Line::Heavy;
-            case GitBranchStyle::Double: return detail::Line::Double;
-            case GitBranchStyle::None: return detail::Line::NoLine;
-            default: assert(false); return detail::Line::Light;
-        }
-    }();
-    DefaultGitArcStyle = newStyle.arcStyle;
-    detail::branchDrawingDefinitions = detail::getBranchBoxes(mcLine, branchLine);
-}
-void BoxDrawingRenderer::setBrailleStyle(BoxDrawingRenderer::BrailleStyle newStyle)
+auto BoxDrawingRenderer::resolve(BoxDrawingStyle style) noexcept -> ResolvedStyle
 {
-    detail::Braille::setStyle(newStyle);
+    // The style takes lanes of its own, its high word in the second and its low word in the third: mixed
+    // into the glyph's lane (the fourth), it would flip its subIndex and flag bits, and a style change would
+    // find another tile of the same glyph.
+    auto const key = style.atlasKey();
+    return ResolvedStyle { .style = style,
+                           .atlasLane = crispy::StrongHash {
+                               0, static_cast<uint32_t>(key >> 32U), static_cast<uint32_t>(key), 0 } };
 }
+
+bool BoxDrawingRenderer::leavesToFont(char32_t codepoint) const noexcept
+{
+    if (detail::Braille::isBraille(codepoint))
+        return _resolved.style.brailleStyle == BoxDrawingStyle::BrailleStyle::Font;
+    if (detail::isGitBranchCodepoint(codepoint))
+        return _resolved.style.gitDrawings.branchStyle
+               == BoxDrawingStyle::GitDrawingsStyle::BranchStyle::None;
+    return false;
+}
+
 void BoxDrawingRenderer::setRenderTarget(RenderTarget& renderTarget,
                                          DirectMappingAllocator& directMappingAllocator)
 {
@@ -2110,8 +2156,11 @@ bool BoxDrawingRenderer::render(vtbackend::LineOffset line,
                                 vtbackend::LineFlags flags,
                                 vtbackend::RGBColor color)
 {
+    if (leavesToFont(codepoint))
+        return false;
+
     auto const width = flags & vtbackend::LineFlag::DoubleWidth ? 2 : 1;
-    for (int i = 0; i < width; ++i)
+    for (auto const i: std::views::iota(0, width))
     {
         Renderable::AtlasTileAttributes const* data = getOrCreateCachedTileAttributes(codepoint, flags, i);
         if (!data)
@@ -2270,7 +2319,8 @@ Renderable::AtlasTileAttributes const* BoxDrawingRenderer::getOrCreateCachedTile
     // Layout: [Codepoint 21][Flags 8][SubIndex 1] -> 30 bits used.
     auto const cacheKey = (static_cast<uint32_t>(codepoint) << 9)
                           | (static_cast<uint32_t>(cacheKeyFlags) << 1) | static_cast<uint32_t>(subIndex);
-    return textureAtlas().getOrTryEmplace(crispy::StrongHash { 31, 13, 8, cacheKey },
+    auto const atlasKey = crispy::StrongHash { 31, 13, 8, cacheKey } * _resolved.atlasLane;
+    return textureAtlas().getOrTryEmplace(atlasKey,
                                           [this, codepoint, flags, subIndex](atlas::TileLocation tileLocation)
                                               -> optional<TextureAtlas::TileCreateData> {
                                               return createTileData(codepoint, flags, tileLocation, subIndex);
@@ -2294,21 +2344,21 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) noexcept
         return a <= codepoint && codepoint <= b;
     };
 
-    return ascending(0x239B, 0x23B3)                // mathematical brackets and symbols
-           || ascending(0x2500, 0x259F)             // box drawing, block elements, shades
-           || codepoint == 0x25B6                   // ▶ BLACK RIGHT-POINTING TRIANGLE
-           || codepoint == 0x25BC                   // ▼ BLACK DOWN-POINTING TRIANGLE
-           || isContourGlyph(codepoint)             // Contour's own: the fold column, gutter status marks
-           || ascending(0x1FB00, 0x1FBAF)           // more block sextants
-           || ascending(0x1FBF0, 0x1FBF9)           // digits
-           || ascending(0xEE00, 0xEE05)             // progress bar (Fira Code)
-           || detail::isGitBranchDrawing(codepoint) //
-           || detail::Braille::isBraille(codepoint) //
-           || ascending(0xE0B0, 0xE0B4)             // solid and thin dividers, right half circle
-           || codepoint == 0xE0B6                   // 
-           || ascending(0xE0B8, 0xE0BF)             // corner triangles and diagonal separators
-           || codepoint == 0xE0D6                   // 
-           || codepoint == 0xE0D7                   // 
+    return ascending(0x239B, 0x23B3)                  // mathematical brackets and symbols
+           || ascending(0x2500, 0x259F)               // box drawing, block elements, shades
+           || codepoint == 0x25B6                     // ▶ BLACK RIGHT-POINTING TRIANGLE
+           || codepoint == 0x25BC                     // ▼ BLACK DOWN-POINTING TRIANGLE
+           || isContourGlyph(codepoint)               // Contour's own: the fold column, gutter status marks
+           || ascending(0x1FB00, 0x1FBAF)             // more block sextants
+           || ascending(0x1FBF0, 0x1FBF9)             // digits
+           || ascending(0xEE00, 0xEE05)               // progress bar (Fira Code)
+           || detail::isGitBranchCodepoint(codepoint) // git graph, unless the style leaves it to the font
+           || detail::Braille::isBraille(codepoint)   // Braille, unless the style leaves it to the font
+           || ascending(0xE0B0, 0xE0B4)               // solid and thin dividers, right half circle
+           || codepoint == 0xE0B6                     // 
+           || ascending(0xE0B8, 0xE0BF)               // corner triangles and diagonal separators
+           || codepoint == 0xE0D6                     // 
+           || codepoint == 0xE0D7                     // 
         ;
 }
 
@@ -2349,7 +2399,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
     };
 
     if (detail::Braille::isBraille(codepoint))
-        return Braille::build(codepoint, size, lineThickness, 4);
+        return Braille::build(_resolved.style.brailleStyle, codepoint, size, lineThickness, 4);
 
     // TODO: just check notcurses-info to get an idea what may be missing
     // clang-format off
@@ -2995,13 +3045,7 @@ static auto buildBox(detail::Box box,
                         : 1U;
 
     auto const getZeros = [=](detail::Line value) {
-        struct Center
-        {
-            size_t x0;
-            size_t x1;
-            size_t y0;
-            size_t y1;
-        };
+        using Center = detail::StrokeBounds;
         switch (value)
         {
             using enum detail::Line;
@@ -3089,15 +3133,27 @@ static auto buildBox(detail::Box box,
             }
         };
 
+        // The last device pixel at either end runs straight, as at the arc's tangent point, so on the cell
+        // edge the arc covers exactly the stroke of the line continuing it, with no anti-aliased fringe.
+        auto const band = static_cast<int>(ss);
+        auto const endsRight = arc == Arc::UR or arc == Arc::BR;
+        auto const endsUp = arc == Arc::UR or arc == Arc::UL;
+        auto const inXBand = [=](int xi) {
+            return endsRight ? xi >= width - band : xi < band;
+        };
+        auto const inYBand = [=](int yi) {
+            return endsUp ? yi >= height - band : yi < band;
+        };
+
         for (auto const yi: Views::iota(0, height))
         {
-            auto y = static_cast<double>(yi) - dcy + 0.5;
+            auto y = inYBand(yi) ? 0.0 : static_cast<double>(yi) - dcy + 0.5;
             if (not yQuadrant(y))
                 continue;
             y *= y;
             for (auto const xi: Views::iota(0, width))
             {
-                auto x = static_cast<double>(xi) - dcx + 0.5;
+                auto x = inXBand(xi) ? 0.0 : static_cast<double>(xi) - dcx + 0.5;
                 if (not xQuadrant(x))
                     continue;
                 x *= x;
@@ -3276,14 +3332,15 @@ static auto buildBox(detail::Box box,
 
     if (useEllipticArcs)
     {
-        if (box.arcURval != Line::NoLine)
-            detail::drawArcElliptic(image, size * double(ss), getThickness(Line::Light), Arc::UR);
-        if (box.arcULval != Line::NoLine)
-            detail::drawArcElliptic(image, size * double(ss), getThickness(Line::Light), Arc::UL);
-        if (box.arcBLval != Line::NoLine)
-            detail::drawArcElliptic(image, size * double(ss), getThickness(Line::Light), Arc::BL);
-        if (box.arcBRval != Line::NoLine)
-            detail::drawArcElliptic(image, size * double(ss), getThickness(Line::Light), Arc::BR);
+        // Elliptic arcs are drawn with a thin stroke only.
+        auto const stroke = getZeros(Line::Light);
+        auto const superSize = size * double(ss);
+        for (auto const& [arcLine, arc]: { std::pair { box.arcURval, Arc::UR },
+                                           std::pair { box.arcULval, Arc::UL },
+                                           std::pair { box.arcBLval, Arc::BL },
+                                           std::pair { box.arcBRval, Arc::BR } })
+            if (arcLine != Line::NoLine)
+                detail::drawArcElliptic(image, superSize, stroke, ss, arc);
     }
 
     return downsample(image, 1, size * double(ss), size);
@@ -3292,13 +3349,15 @@ static auto buildBox(detail::Box box,
 optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
                                                              ImageSize size,
                                                              int lineThickness,
-                                                             size_t supersampling)
+                                                             size_t supersampling) const
 {
-    auto box = detail::getBoxDrawing(codepoint);
+    auto const box = detail::getBoxDrawing(codepoint, _resolved.style.gitDrawings);
     if (not box)
         return std::nullopt;
-    auto lArcStyle = detail::isGitBranchDrawing(codepoint) ? DefaultGitArcStyle : DefaultArcStyle;
-    auto image = buildBox(*box, size, lineThickness, supersampling, lArcStyle == ArcStyle::Elliptic);
+    auto const arcStyle = detail::isGitBranchCodepoint(codepoint) ? _resolved.style.effectiveGitArcStyle()
+                                                                  : _resolved.style.arcStyle;
+    auto image =
+        buildBox(*box, size, lineThickness, supersampling, arcStyle == BoxDrawingStyle::ArcStyle::Elliptic);
     boxDrawingLog()("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(codepoint), size);
     return image;
 }

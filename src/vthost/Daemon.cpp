@@ -82,6 +82,7 @@
 #include <vthost/NativeSession.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/SessionSnapshotStore.hpp>
+#include <vthost/ShellPtyFactory.hpp>
 #include <vthost/ShutdownFunnel.hpp>
 #include <vthost/ShutdownSignals.hpp>
 #include <vthost/SocketFileListener.hpp>
@@ -129,74 +130,6 @@ namespace
         for (auto* server: servers)
             accepts.push_back(server->serve());
         co_await core::async::whenAll(std::move(accepts));
-    }
-
-    /// Makes the device a hosted shell runs on, at the size given: its process on a fresh PTY, whoever is its
-    /// parent. Shared by the daemon's PTY factories, so that one decides who spawns for both.
-    using ShellDevices = std::function<std::unique_ptr<vtpty::Pty>(
-        vtbackend::PageSize, vtpty::Process::ExecInfo, SandboxEscape)>;
-
-    /// @param placement Moves each hosted shell into its own resource domain.
-    /// @return Shell devices this daemon spawns itself, each a child of its own (vtpty::Process).
-    [[nodiscard]] ShellDevices ownShellDevices(std::shared_ptr<vtpty::ProcessPlacement> placement)
-    {
-        return [placement = std::move(placement)](vtbackend::PageSize pageSize,
-                                                  vtpty::Process::ExecInfo const& exec,
-                                                  SandboxEscape sandbox) -> std::unique_ptr<vtpty::Pty> {
-            return std::make_unique<vtpty::Process>(
-                exec, vtpty::createPty(pageSize, std::nullopt), sandbox == SandboxEscape::Escapes, placement);
-        };
-    }
-
-    /// The daemon's PTY factory: every session spawns the configured shell over a
-    /// fresh PTY. Shared by the POSIX and Windows runDaemon paths.
-    ///
-    /// @param shell         What to spawn; a spawn's override (a layout pane's command and directory) is
-    ///                      laid over it. A host with profiles spawns through makeProfilePtyFactory.
-    /// @param escapeSandbox Whether the spawned shell escapes its sandbox (Flatpak), from the
-    ///                      resolved profile's `escape_sandbox`. Was hardcoded `true` before this
-    ///                      parameter existed, silently ignoring a profile's `escape_sandbox: false`.
-    /// @param socketPath    The daemon's control socket, which every hosted shell is told about so
-    ///                      it can reach back. Merged in here rather than by the caller, so that
-    ///                      every entry into runDaemon() hosts shells that can find their own daemon.
-    /// @param devices       Makes each shell's device: spawned by this daemon, or by its PTY keeper.
-    [[nodiscard]] PtyFactory makeShellPtyFactory(vtpty::Process::ExecInfo shell,
-                                                 bool escapeSandbox,
-                                                 std::filesystem::path const& socketPath,
-                                                 ShellDevices devices)
-    {
-        return [shell = std::move(shell),
-                hosted = hostedShellEnvironment(socketPath),
-                sandbox = vtpty::sandboxEscapeFromConfig(escapeSandbox),
-                devices = std::move(devices)](vtbackend::PageSize pageSize,
-                                              std::optional<vtpty::Process::ExecInfo> const& commandOverride)
-                   -> std::unique_ptr<vtpty::Pty> {
-            // A fresh shell per spawn: `shell` is captured by the closure and reused for every session
-            // this factory spawns, so writing one session's override back into it would leak that pane's
-            // command/directory into every later session. Mirrors AppSessionFactory::createPty.
-            return devices(
-                pageSize, hostedShellFor(shell, commandOverride, ShellOverride::Overlays, hosted), sandbox);
-        };
-    }
-
-    /// The PTY factory of a daemon with profiles: each session runs its resolved profile's whole shell, with
-    /// that profile's own environment and sandbox policy, as the in-process GUI spawns that profile
-    /// (SessionFactory takes `escape_sandbox` from the session's own profile).
-    /// @param shell      The daemon's default shell, whose program runs when a profile names none.
-    /// @param socketPath The daemon's control socket, which every hosted shell is told about.
-    /// @param devices    Makes each shell's device: spawned by this daemon, or by its PTY keeper.
-    [[nodiscard]] ProfilePtyFactory makeProfilePtyFactory(vtpty::Process::ExecInfo shell,
-                                                          std::filesystem::path const& socketPath,
-                                                          ShellDevices devices)
-    {
-        return [base = std::move(shell),
-                hosted = hostedShellEnvironment(socketPath),
-                devices = std::move(devices)](vtbackend::PageSize pageSize,
-                                              vtpty::Process::ExecInfo const& profileShell,
-                                              SandboxEscape sandbox) -> std::unique_ptr<vtpty::Pty> {
-            return devices(
-                pageSize, hostedShellFor(base, profileShell, ShellOverride::Replaces, hosted), sandbox);
-        };
     }
 
     /// Reads the whole file at @p path, or nullopt if it cannot be opened.
@@ -1253,12 +1186,14 @@ namespace
     /// @param runtime The daemon (not owned; outlives every connection).
     /// @param control The daemon's control API (not owned; outlives every connection).
     /// @param config The daemon's configuration: with profiles, the handshake offers ProfileByName too.
+    /// @param consent The consent key a window proves; none for a daemon that keeps none.
     /// @param acceptedTokens The tokens a client may present, with their grants; empty for the unix endpoint,
     ///        whose socket permissions are the gate.
     /// @return The services.
     [[nodiscard]] NativeSessionServices daemonNativeServices(DaemonRuntime& runtime,
                                                              vtcontrol::ControlApi& control,
                                                              DaemonConfig const& config,
+                                                             std::optional<ConsentGate> const& consent,
                                                              std::vector<AcceptedToken> acceptedTokens = {})
     {
         auto capabilities = proto::CapabilitySet::of({ proto::Capability::ExtensionPermissions,
@@ -1288,10 +1223,16 @@ namespace
                                                        proto::Capability::WorkspaceColor,
                                                        // compat(0.9.0): Names may stay; the legacy
                                                        // branches taken without it go.
-                                                       proto::Capability::Names });
+                                                       proto::Capability::Names,
+                                                       // Every daemon sends its extensions' palette rows
+                                                       // (none without extensions) and takes invocations.
+                                                       proto::Capability::ExtensionPresence });
         // Only a daemon with profiles resolves a name; one without keeps honouring a client's settings.
         if (config.profiles)
             capabilities.idents.push_back(std::to_underlying(proto::Capability::ProfileByName));
+        // Only a daemon holding a consent key asks windows a daemon extension's question: one that proves it.
+        if (consent)
+            capabilities.idents.push_back(std::to_underlying(proto::Capability::DaemonExtensionConsent));
         // Only a daemon that keeps its workspace brings it back after a restart.
         if (!config.persistence.snapshotPath.empty())
             capabilities.idents.push_back(std::to_underlying(proto::Capability::WorkspaceRestore));
@@ -1300,10 +1241,48 @@ namespace
             capabilities.idents.push_back(std::to_underlying(proto::Capability::LiveUpgrade));
         return NativeSessionServices {
             .handshake = { .acceptedTokens = std::move(acceptedTokens),
+                           .consent = consent,
                            .capabilities = std::move(capabilities) },
             .daemon = runtime,
             .control = control,
         };
+    }
+
+    /// Makes this run's consent key where DaemonConfig::consentKeys says, once the daemon holds its socket.
+    /// @param config The daemon's configuration.
+    /// @param instance The run its hellos name (DaemonLineage::instance), which the key file is named by.
+    /// @param listener The control socket, bound or adopted; none makes no key.
+    /// @return The key and the hold on its file, which the run keeps for as long as it serves; nullopt,
+    ///         logged, when no key could be kept.
+    template <typename Listener>
+    [[nodiscard]] std::optional<HeldConsentKey> consentKeyOf(DaemonConfig const& config,
+                                                             uint64_t instance,
+                                                             Listener const& listener)
+    {
+        // Only a daemon that holds its socket: one that lost the bind serves nobody.
+        if (!config.consentKeys || !listener)
+            return std::nullopt;
+        auto const& keys = *config.consentKeys;
+        auto key = createDaemonConsentKey(keys.files, keys.random, keys.directory, keys.socket, instance);
+        if (!key)
+        {
+            errorLog()("{}; no window can grant the daemon's extensions", key.error());
+            return std::nullopt;
+        }
+        return std::move(*key);
+    }
+
+    /// @param config The daemon's configuration.
+    /// @param key consentKeyOf()'s.
+    /// @return The gate a window's proof is checked at; nullopt for no key.
+    [[nodiscard]] std::optional<ConsentGate> consentGateOf(DaemonConfig const& config,
+                                                           std::optional<HeldConsentKey> const& key)
+    {
+        if (!key || !config.consentKeys)
+            return std::nullopt;
+        return ConsentGate { .key = key->key,
+                             .socket = core::pathToUtf8(config.consentKeys->socket),
+                             .random = config.consentKeys->random };
     }
 
     /// @param config The daemon's configuration.
@@ -1429,6 +1408,12 @@ namespace
                                                              vtpty::ProcessPlacement& placement) override
         {
             return spawnDetachedDaemon(argv, _environment, placement);
+        }
+
+        [[nodiscard]] std::expected<std::unique_ptr<DaemonSpawnLock>, SpawnLockError> tryLockSpawn(
+            std::filesystem::path const& socketPath) override
+        {
+            return tryLockDaemonSpawn(daemonSpawnLockPath(socketPath));
         }
 
         [[nodiscard]] DaemonPresence probe(std::filesystem::path const& socketPath) override
@@ -1711,6 +1696,12 @@ int runDaemon(DaemonConfig const& config,
     auto recovery = recoveredSnapshotOf(continuity, store, config.persistence, wallClock);
     // The same run of the daemon goes on across a live upgrade, one upgrade further, and across a crash.
     auto const lineage = lineageOf(config, image, continuity);
+    // The consent key, made only now that this process holds the socket, in a file of the run its hellos
+    // name: a start that never serves -- a --background parent, a second daemon that lost the bind -- never
+    // replaces the key of the daemon that does.
+    // Its file is held for the whole run, so that no clean-up of another run at this socket removes it.
+    auto const consentKey = consentKeyOf(config, lineage.instance, listener);
+    auto const consentGate = consentGateOf(config, consentKey);
 
     // The workspaces' git state: looked up by a `git` this daemon starts on a thread of its own, so a slow
     // repository stalls the sidebar's branch and nothing else. Declared before the host, so the host goes
@@ -1726,7 +1717,10 @@ int runDaemon(DaemonConfig const& config,
     auto const shellDevices = daemonKeeper.shellDevices(config.placement);
     auto host = SessionHost {
         loop,
-        makeShellPtyFactory(config.shell, config.escapeSandbox, config.socketPath, shellDevices),
+        makeShellPtyFactory(config.shell,
+                            vtpty::sandboxEscapeFromConfig(config.escapeSandbox),
+                            config.socketPath,
+                            shellDevices),
         config.settings,
         core::defaultEnvironment(),
         SessionHostConfig {
@@ -1737,6 +1731,7 @@ int runDaemon(DaemonConfig const& config,
             .identity = thisHostIdentity(),
             .workspaceGit = WorkspaceGitServices { .probe = *gitProbe, .executor = gitExecutor },
             .extensions = config.extensions ? config.extensions() : nullptr,
+            .daemonWorld = config.daemonWorld,
             .profiles = config.profiles,
             .profilePtys = config.profiles
                                ? makeProfilePtyFactory(config.shell, config.socketPath, shellDevices)
@@ -1745,7 +1740,11 @@ int runDaemon(DaemonConfig const& config,
             .restore = std::move(restore),
             .handover = std::exchange(image, std::nullopt),
             .adoptChild = daemonKeeper.childAdopter(),
-            .seedRecovered = std::move(recovery.seeder) }
+            .seedRecovered = std::move(recovery.seeder),
+            .ownedPaneStore = config.ownedPanes,
+            .ptySandbox = vtpty::sandboxEscapeFromConfig(config.escapeSandbox),
+            .heldDirectorySpawn = &vtpty::Process::heldDirectorySpawn,
+            .programFound = &vtpty::Process::findsProgram }
     };
     // Destroyed before the host: an end the daemon did not announce (an exception during the setup, every
     // listener gone on its own) leaves the sessions to the keeper, not their Releases.
@@ -1778,7 +1777,8 @@ int runDaemon(DaemonConfig const& config,
     // before the runtime that holds the hooks and the drain that unwinds the tracked connections.
     auto const connections = ConnectionRegistry {};
     auto upgradeHooks =
-        DaemonUpgradeHooks { connections,
+        DaemonUpgradeHooks { host,
+                             connections,
                              persistence
                                  ? std::function<void()> { [&persistence] { persistence->writeNow(); } }
                                  : std::function<void()> {} };
@@ -1808,7 +1808,11 @@ int runDaemon(DaemonConfig const& config,
     // drain unwinds drop their subscriptions and waits in it, and its own subscriptions to the host end
     // before the host goes.
     auto controlService =
-        control::ControlService { host, controlServiceConfig(config, wallClock, loop, runtime) };
+        control::ControlService { host, [&] {
+                                     auto service = controlServiceConfig(config, wallClock, loop, runtime);
+                                     service.extensions = host.daemonExtensionControl();
+                                     return service;
+                                 }() };
     // An auto-spawned daemon ends when it has nothing left to serve; a user-started one persists.
     // Declared after `host`, so it unsubscribes while the host is still alive, and before the drain, so
     // it outlives it: a sessionClosed in the loop's last turn leaves a post capturing a watcher queued,
@@ -1864,7 +1868,8 @@ int runDaemon(DaemonConfig const& config,
             "native",
             nativePath,
             [&] {
-                return makeNativeHandler(loop, host, daemonNativeServices(runtime, controlService, config));
+                return makeNativeHandler(
+                    loop, host, daemonNativeServices(runtime, controlService, config, consentGate));
             });
         !served)
         return served.error();
@@ -1910,7 +1915,8 @@ int runDaemon(DaemonConfig const& config,
             loop,
             host,
             tls,
-            daemonNativeServices(runtime, controlService, config, acceptedTokensOf(*config.nativeTcp)),
+            daemonNativeServices(
+                runtime, controlService, config, consentGate, acceptedTokensOf(*config.nativeTcp)),
             *config.nativeTcp);
         auto listened = std::optional<std::unique_ptr<core::net::IListener>> {};
         if (handler)
@@ -2013,6 +2019,13 @@ int runDaemon(DaemonConfig const& config,
     return EXIT_SUCCESS;
 }
 
+std::filesystem::path daemonSpawnLockPath(std::filesystem::path const& socketPath)
+{
+    auto lockFile = socketPath;
+    lockFile += ".spawn.lock";
+    return lockFile;
+}
+
 DaemonPresence awaitDaemon(DaemonSpawner& spawner,
                            std::filesystem::path const& socketPath,
                            std::chrono::milliseconds timeout)
@@ -2113,10 +2126,41 @@ int ensureDaemon(AttachEndpoint const& endpoint,
     // `--lifecycle=exit-when-idle` and ends once nothing needs it any more; one the user named is persistent.
     // The image is asked for only now, and held until the daemon serves: by then the daemon has leased it
     // itself.
-    auto const image = binary.imageForSpawn();
-    auto const args =
-        daemonSpawnArgs(core::pathToUtf8(image.executable), unixEp.socketPath, spawnOptions, lifecycle);
-    return spawnAndAwaitDaemon(spawner, args, placement, unixEp.socketPath, timeout);
+    auto const spawn = [&] {
+        auto const image = binary.imageForSpawn();
+        auto const args =
+            daemonSpawnArgs(core::pathToUtf8(image.executable), unixEp.socketPath, spawnOptions, lifecycle);
+        return spawnAndAwaitDaemon(spawner, args, placement, unixEp.socketPath, timeout);
+    };
+
+    // Under the socket's spawn lock, so that clients starting at once start one daemon. Whoever holds it is
+    // starting one: its daemon is waited for, and the lock taken only once it is free and none serves.
+    auto const deadline = std::chrono::steady_clock::now() + timeout;
+    auto delay = std::optional<core::platform::SteadyDuration> {};
+    while (true)
+    {
+        auto const lock = spawner.tryLockSpawn(unixEp.socketPath);
+        if (lock)
+            // The client that held it before may have started one.
+            return spawner.probe(unixEp.socketPath) == DaemonPresence::Serving ? EXIT_SUCCESS : spawn();
+        if (lock.error() == SpawnLockError::Io)
+        {
+            daemonLog()("cannot take the spawn lock '{}'; starting the daemon without it",
+                        core::pathToUtf8(daemonSpawnLockPath(unixEp.socketPath)));
+            return spawn();
+        }
+        if (spawner.probe(unixEp.socketPath) == DaemonPresence::Serving)
+            return EXIT_SUCCESS;
+        auto const remaining = deadline - std::chrono::steady_clock::now();
+        if (remaining <= core::platform::SteadyDuration::zero())
+        {
+            daemonLog()("another client kept the spawn lock '{}' and no daemon came to serve",
+                        core::pathToUtf8(daemonSpawnLockPath(unixEp.socketPath)));
+            return EXIT_FAILURE;
+        }
+        delay = nextProbeDelay(delay);
+        std::this_thread::sleep_for(std::min<core::platform::SteadyDuration>(*delay, remaining));
+    }
 }
 
 int ensureDaemon(AttachEndpoint const& endpoint,

@@ -1989,7 +1989,7 @@ TEST_CASE("DaemonLink: a window switched to another workspace and back shows the
     // The one tab split in two on the daemon.
     daemon.onDaemon([&] {
         auto* const tab = daemon.host->model().workspace(vtworkspace::WorkspaceId { ids[0] })->tabAt(0);
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+        std::ignore = daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return 0;
     });
     auto const displayed = [&] {
@@ -2203,7 +2203,7 @@ struct OneDaemonTwoWindows
     });
     vtworkspace::SessionId right = daemon.onDaemon([this] {
         auto* tab = daemon.host->model().workspace(vtworkspace::WorkspaceId { workspaces[0] })->tabAt(0);
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+        std::ignore = daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         auto const id = tab->activePane()->session();
         daemon.host->terminal(id)->writeToScreen("right-text");
         return id;

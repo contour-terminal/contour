@@ -9,6 +9,7 @@
 #include <contour/config/ConfigDocumentationTags.hpp>
 #include <contour/config/ConfigEnum.hpp>
 #include <contour/config/ConfigFwd.hpp>
+#include <contour/config/DaemonExtensionConfig.hpp>
 #include <contour/config/DefaultsEdition.hpp>
 #include <contour/config/FinishNotificationConfig.hpp>
 #include <contour/config/GpuSelector.hpp>
@@ -48,7 +49,7 @@
 #include <vtpty/Process.hpp>
 #include <vtpty/SshSession.hpp>
 
-#include <vtrasterizer/BoxDrawingRenderer.hpp>
+#include <vtrasterizer/BoxDrawingStyle.hpp>
 #include <vtrasterizer/Decorator.hpp>
 #include <vtrasterizer/FontDescriptions.hpp>
 #include <vtrasterizer/GlyphScaling.hpp>
@@ -881,6 +882,10 @@ struct DaemonSettings
 
     /// How the PTY keeper keeps the daemon (`daemon.keeper`).
     DaemonKeeperConfig keeper {};
+
+    /// The extensions the daemon runs with no window attached (`daemon.extensions.<name>`), in the file's
+    /// order. Read when the daemon starts: a change takes effect at its next start.
+    std::vector<DaemonExtensionConfig> extensions {};
 };
 
 struct HorizontalMarginTag
@@ -1378,13 +1383,15 @@ struct Config
     /// variant's copy constructor in every file that includes this header, where a prvalue is moved in.
     ConfigEntry<InputMappings, documentation::InputMappings> inputMappings { makeDefaultInputMappings(
         defaultsEdition, keyboardPlatformKind) };
-    ConfigEntry<vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle, documentation::GitDrawings>
-        gitDrawings {};
-    ConfigEntry<vtrasterizer::BoxDrawingRenderer::ArcStyle, documentation::BoxArcStyle> boxArcStyle {
-        vtrasterizer::BoxDrawingRenderer::ArcStyle::Round
+    // The defaults are BoxDrawingStyle's own, so the two cannot disagree.
+    ConfigEntry<vtrasterizer::BoxDrawingStyle::GitDrawingsStyle, documentation::GitDrawings> gitDrawings {
+        vtrasterizer::BoxDrawingStyle {}.gitDrawings
     };
-    ConfigEntry<vtrasterizer::BoxDrawingRenderer::BrailleStyle, documentation::BrailleStyle> brailleStyle {
-        vtrasterizer::BoxDrawingRenderer::BrailleStyle::Circle
+    ConfigEntry<vtrasterizer::BoxDrawingStyle::ArcStyle, documentation::BoxArcStyle> boxArcStyle {
+        vtrasterizer::BoxDrawingStyle {}.arcStyle
+    };
+    ConfigEntry<vtrasterizer::BoxDrawingStyle::BrailleStyle, documentation::BrailleStyle> brailleStyle {
+        vtrasterizer::BoxDrawingStyle {}.brailleStyle
     };
 
     /// Looks up a profile by name, returning nullptr if none exists — the FALLIBLE lookup for
@@ -1531,6 +1538,17 @@ void compareEntries(Config& config, auto const& output);
 /// @return The gutter settings vtbackend draws with.
 [[nodiscard]] vtbackend::GutterSettings gutterSettingsFor(Config const& config,
                                                           vtbackend::BlockColumnForm form);
+
+/// How the renderer draws box-drawing, git-graph and Braille glyphs under @p config: `box_arc_style`,
+/// `git_drawings` and `braille_style`, as one value.
+/// @param config The loaded configuration.
+/// @return The style a renderer built from @p config draws with.
+[[nodiscard]] inline vtrasterizer::BoxDrawingStyle boxDrawingStyleFor(Config const& config)
+{
+    return vtrasterizer::BoxDrawingStyle { .arcStyle = config.boxArcStyle.value(),
+                                           .gitDrawings = config.gitDrawings.value(),
+                                           .brailleStyle = config.brailleStyle.value() };
+}
 
 /// One profile's @ref emulationSettings, from a configuration already loaded in memory -- what
 /// `contour client` needs, whose new sessions follow the configuration as a reload left it.

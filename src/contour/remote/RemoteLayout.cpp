@@ -3,6 +3,7 @@
 #include <contour/remote/RemoteLayout.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/window/ServedChrome.hpp>
 #include <contour/window/WorkspaceDirectory.hpp>
 
 #include <core/Utils.hpp>
@@ -549,6 +550,19 @@ namespace
         }
     }
 
+    /// @return Who draws the daemon's tab @p tabId, as @p layout says; nullopt for a tab whose panes run
+    ///         programs, and for every tab of a daemon that does not say.
+    [[nodiscard]] std::optional<window::ServedMark> servedMarkOf(vthost::proto::LayoutState const& layout,
+                                                                 uint64_t tabId)
+    {
+        auto const found = std::ranges::find(layout.served, tabId, &vthost::proto::WireServedTab::tabId);
+        if (found == layout.served.end())
+            return std::nullopt;
+        return window::ServedMark { .extension = found->mark.extension,
+                                    .title = found->mark.title,
+                                    .moduleDigest = found->mark.moduleDigest };
+    }
+
     /// Closes every pane of @p window whose remote session no layout of @p alive names: a pane closed on the
     /// daemon (by this or another client), or that exited. Collected first (closing mutates the model), then
     /// each target pane is activated and closed (closeActivePane removes the tab's ACTIVE pane).
@@ -579,7 +593,8 @@ namespace
         }
     }
 
-    /// Realizes ONE whole daemon tab (no leaf yet bound) via the shared realizer.
+    /// Realizes ONE whole daemon tab (no leaf yet bound) via the shared realizer, in the background: whether
+    /// it becomes the window's active tab is the daemon's to say, as applyPresentation() takes it.
     void realizeWholeTab(contour::session::TerminalSessionManager& manager,
                          vtworkspace::WorkspaceId window,
                          NativeController& controller,
@@ -590,11 +605,15 @@ namespace
         single.tabs.push_back(wireTab);
         auto const wl = vthost::client::wireToLayout(single);
         manager.applyLayoutToWindow(
-            window, wl.layout, pageSize, [&](contour::config::LayoutPane const& leaf) {
+            window,
+            wl.layout,
+            pageSize,
+            [&](contour::config::LayoutPane const& leaf) {
                 auto const it = wl.leafSession.find(&leaf);
                 if (it != wl.leafSession.end())
                     controller.setNextBindSession(it->second);
-            });
+            },
+            vtworkspace::TabActivation::Background);
     }
 } // namespace
 
@@ -673,11 +692,15 @@ void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
         gatherMovedPanes(manager, controller, bound, window, layout);
     }
 
+    // The daemon tabs this pass shows for the first time: how each is presented, whether it is the active tab
+    // included, is the daemon's -- a tab the user opened is activated there, an extension's agent tab is not.
+    auto realizedNow = std::unordered_set<uint64_t> {};
     for (auto const& wireTab: layout.tabs)
     {
         if (!anyLeafClaimed(wireTab.root, controller))
         {
             realizeWholeTab(manager, window, controller, wireTab, pageSize);
+            realizedNow.insert(wireTab.tabId);
             continue;
         }
         // The tab is already shown: catch up any new splits inside it, one at a
@@ -750,7 +773,9 @@ void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
                           std::cmp_equal(index, layout.activeTab) ? vthost::client::TabActivity::Active
                                                                   : vthost::client::TabActivity::Inactive,
                           *tab,
-                          selection);
+                          realizedNow.contains(wireTab.tabId) ? TabSelection::Seed : selection);
+        // Who draws the tab is the daemon's to say, never its title's: the window marks what it is told.
+        manager.noteServedTab(*tab, servedMarkOf(layout, wireTab.tabId));
     }
 
     controller.setRealizingLayout(false);

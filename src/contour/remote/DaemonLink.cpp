@@ -18,10 +18,12 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QPointer>
 #include <QtCore/QThread>
+#include <QtCore/QTimer>
 
 #include <algorithm>
 #include <chrono>
 #include <format>
+#include <iterator>
 #include <ranges>
 #include <set>
 #include <span>
@@ -213,6 +215,15 @@ DaemonLink::DaemonLink(Id id,
     _host(host),
     _sessions(sessions),
     _hostLabel(config.hostLabel),
+    _consent(
+        [this](std::string name, std::string grantDigest, vthost::GrantState answer) {
+            if (_controller != nullptr)
+                _controller->answerDaemonExtension(std::move(name), std::move(grantDigest), answer);
+        },
+        core::platform::defaultSteadyClock(),
+        [](QObject* context, std::chrono::milliseconds delay, std::function<void()> job) {
+            QTimer::singleShot(delay, context, std::move(job));
+        }),
     _locality(config.locality),
     _upkeep(config.upkeep),
     _clientRelease(config.clientRelease),
@@ -358,6 +369,16 @@ void DaemonLink::connectController()
             // realize them again beside the ended ones.
             _sessions.rebindDisconnected(*this);
             followLayout();
+            followPaneReveals();
+        },
+        Qt::QueuedConnection);
+    QObject::connect(
+        _controller.get(),
+        &NativeController::paneRevealRequested,
+        &_receiver,
+        [this] {
+            if (!isStopped())
+                followPaneReveals();
         },
         Qt::QueuedConnection);
     // The daemon's restore is told once, ahead of the layout it restored: the manager holds it until a
@@ -452,6 +473,16 @@ void DaemonLink::connectController()
                 answerSwitchRequests();
         },
         Qt::QueuedConnection);
+    // The daemon's own extensions ask in every window of the link, whether or not this client runs any.
+    QObject::connect(
+        _controller.get(),
+        &NativeController::daemonExtensionConsentChanged,
+        &_receiver,
+        [this] {
+            if (!isStopped())
+                followDaemonConsent();
+        },
+        Qt::QueuedConnection);
 #ifdef CONTOUR_EXTENSIONS
     QObject::connect(
         _controller.get(),
@@ -470,12 +501,12 @@ void DaemonLink::connectController()
     _controller->startConnecting();
 }
 
-std::optional<std::expected<void, std::string>> DaemonLink::pollAttached(vthost::AttachBudget budget)
+std::optional<std::expected<void, std::string>> DaemonLink::pollAttached(vthost::AttachBudget const& budget)
 {
     requireGuiThread();
     if (_controller == nullptr)
         return std::unexpected(std::string { "the attach was given up" });
-    auto polled = _controller->pollConnected(std::move(budget));
+    auto polled = _controller->pollConnected(budget);
     if (!polled)
         return std::nullopt;
     if (!*polled)
@@ -523,6 +554,17 @@ void DaemonLink::stopForDaemonRestart()
     _controller->stop();
 }
 
+void DaemonLink::followDaemonConsent()
+{
+    for (auto const& event: _controller->takeDaemonConsentEvents())
+    {
+        if (auto const* request = std::get_if<vthost::proto::ExtensionPermissionRequest>(&event))
+            _consent.show(*request);
+        else if (auto const* settled = std::get_if<vthost::proto::ExtensionPermissionSettled>(&event))
+            _consent.settle(settled->name, settled->grantDigest);
+    }
+}
+
 void DaemonLink::showDaemonDrift()
 {
     auto const& controller = *_controller;
@@ -536,6 +578,20 @@ void DaemonLink::showDaemonDrift()
     _drift.show(offer == window::DriftOffer::None ? vthost::client::DriftNotice {}
                                                   : std::move(assessed.notice),
                 offer);
+}
+
+vthost::proto::ExtensionPresence DaemonLink::extensionPresence() const
+{
+    return _controller ? _controller->extensionPresence() : vthost::proto::ExtensionPresence {};
+}
+
+session::ExtensionInvocation DaemonLink::invokeExtensionAction(std::string const& extension,
+                                                               std::string const& id)
+{
+    if (!_controller)
+        return session::ExtensionInvocation::NoDaemon;
+    _controller->invokeExtensionAction(extension, id);
+    return session::ExtensionInvocation::Sent;
 }
 
 std::expected<void, std::string> DaemonLink::upgradeDaemonOnCommand()
@@ -1191,7 +1247,12 @@ void DaemonLink::connectReconnectSignals()
             _sessions.setHostConnection(*this, _controller->connectionState());
             // What a given-up switch selected again is the connection's own: the one sought now resumes it.
             if (_controller->connectionState() != vthost::client::ConnectionState::Connected)
+            {
                 _revertTo.reset();
+                // The questions were the lost connection's: a reconnect is asked again what is still open,
+                // and a restarted daemon what it asks now.
+                _consent.clear();
+            }
             // A switch fails when the connection goes before the workspace it waits for is shown.
             if (_switch || arrivalDue())
             {
@@ -1366,6 +1427,23 @@ void DaemonLink::askHostedExtensions()
                        request.hostId);
     }
 #endif
+}
+
+void DaemonLink::followPaneReveals()
+{
+    if (!isLive())
+        return;
+    // A reveal may outrun the layout that brings its tab (a tab just opened, a window just switched): it
+    // waits a few looks, and RevealPatience at most -- reveals that arrived while this link was not live
+    // included -- then is dropped rather than steal the focus later.
+    std::ranges::move(_controller->takePaneReveals(), std::back_inserter(_pendingReveals));
+    _pendingReveals = followReveals(_pendingReveals, _controller->now(), [this](uint64_t session) {
+        auto* const shown = _sessions.sessionShownBy(*this, session);
+        if (shown == nullptr)
+            return false;
+        _sessions.revealSession(*shown);
+        return true;
+    });
 }
 
 void DaemonLink::answerSwitchRequests()

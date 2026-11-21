@@ -12,6 +12,8 @@
 #include <ranges>
 #include <vector>
 
+#include <vtcontrol/Json.hpp>
+
 using namespace std::string_view_literals;
 
 namespace contour::cli
@@ -126,7 +128,7 @@ namespace
         auto document = nodeOf(Object {});
         if (isBlank(json))
             return document;
-        if (glz::read_json(document, json) || document.get_if<Object>() == nullptr)
+        if (glz::read<vtcontrol::ViewReadOptions>(document, json) || document.get_if<Object>() == nullptr)
             return std::nullopt;
         return document;
     }

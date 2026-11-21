@@ -93,6 +93,7 @@
 #include <vthost/client/LayoutReconstruction.hpp>
 #include <vthost/proto/Negotiation.hpp>
 #include <vthost/testing/FakeDaemonControl.hpp>
+#include <vthost/testing/FakeDaemonWorldHosting.hpp>
 #include <vthost/testing/FakeExtensionHosting.hpp>
 #include <vthost/testing/FakeProfileCatalog.hpp>
 #include <vthost/testing/SoftwareKeySource.hpp>
@@ -644,6 +645,59 @@ TEST_CASE("attach realizes a split daemon layout as a 2-pane tab", "[attach][con
     ac->stop();
 }
 
+TEST_CASE("attach marks the tab a daemon extension serves, and that tab alone",
+          "[attach][controller][served]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("shell");
+    daemon.onDaemon([&daemon] {
+        auto& host = *daemon.host;
+        auto const device = host.served().makeDevice(
+            vtbackend::PageSize { vtbackend::LineCount(24), vtbackend::ColumnCount(80) });
+        std::ignore = host.createTabIn(host.workspaceId(),
+                                       { .served = vthost::ServedSpawn { .extension = "orchestrator",
+                                                                         .scheme = "agents",
+                                                                         .moduleDigest = "3f9a0c1d2e4b5a69",
+                                                                         .device = device,
+                                                                         .title = "Agents" } });
+        return 0;
+    });
+
+    auto timeline = TestTimeline {};
+    auto acOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto* ac = acOwned.get();
+    contour::test::TestApp app { std::move(acOwned) };
+    contour::test::ScopedController const win { app.manager() };
+
+    requireConnected(*ac);
+    for (auto i = 0; i < 200; ++i)
+    {
+        auto const l = ac->settledLayout();
+        if (l && l->tabs.size() == 2 && l->served.size() == 1)
+            break;
+        std::this_thread::sleep_for(5ms);
+    }
+    auto const settled = ac->settledLayout();
+    REQUIRE(settled != nullptr);
+    REQUIRE(settled->served.size() == 1);
+
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
+
+    using Roles = contour::window::WindowController::Roles;
+    auto const roleOf = [&](int row, Roles role) {
+        return win.controller->data(win.controller->index(row), static_cast<int>(role)).toString();
+    };
+    REQUIRE(win.controller->rowCount() == 2);
+    // The shell's tab first, as the daemon opened it, then the extension's.
+    CHECK(roleOf(0, Roles::ServedByRole).isEmpty());
+    CHECK(roleOf(0, Roles::ServedStripRole).isEmpty());
+    CHECK(roleOf(1, Roles::ServedByRole) == QStringLiteral("Served by Agents"));
+    CHECK(roleOf(1, Roles::ServedStripRole)
+          == QStringLiteral("◈ Agents · orchestrator, module 3f9a0c1d2e4b · draws this tab"));
+
+    ac->stop();
+}
+
 // B3-Qt: a split authored on the daemon AFTER attach reconciles into the already-
 // shown tab as a second pane (intra-tab incremental reconciliation), rather than
 // only whole new tabs.
@@ -822,7 +876,7 @@ TEST_CASE("attach reconciles a pane closed on the daemon by removing it locally"
     std::ignore = daemon.seedSession("first");
     auto const second = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
         auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+        std::ignore = daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->activePane()->session(); // the new (active) pane's session
     });
 
@@ -2396,6 +2450,69 @@ TEST_CASE("attach authors a tab on the daemon and reconciles it locally", "[atta
     ac->stop();
 }
 
+// A window that already shows the workspace keeps its own tab selection (TabSelection::Keep), so a tab it
+// realizes for the first time is the one place the daemon's activation still decides: a tab the daemon opened
+// in the background (an extension's agent pane) stays behind the active one, while a tab the user asked for
+// (which the daemon activates) is shown.
+TEST_CASE("a daemon tab is shown in the window only if the daemon activated it", "[attach][controller]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+
+    auto timeline = TestTimeline {};
+    auto acOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto* ac = acOwned.get();
+    contour::test::TestApp app { std::move(acOwned) };
+    contour::test::ScopedController const win { app.manager() };
+    auto const reconcile = [&] {
+        contour::remote::applyRemoteLayout(app.manager(),
+                                           win.id,
+                                           *ac,
+                                           ac->settledLayouts(),
+                                           std::nullopt,
+                                           std::nullopt,
+                                           contour::remote::TabSelection::Keep);
+    };
+    auto const waitForTabs = [&](std::size_t count) {
+        return waitUntil([&] {
+            auto const layout = ac->settledLayout();
+            return layout && layout->tabs.size() == count;
+        });
+    };
+
+    requireConnected(*ac);
+    REQUIRE(waitForTabs(1));
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
+    auto const* const window = app.manager().model().workspace(win.id);
+    REQUIRE(window->tabCount() == 1);
+    auto const* const first = window->tabAt(0);
+
+    SECTION("a tab the daemon opened in the background")
+    {
+        auto const* const agentTab = daemon.onDaemon([&] {
+            return daemon.host->createTabIn(
+                daemon.host->workspaceId(),
+                vthost::SessionSpawnRequest { .activation = vtworkspace::TabActivation::Background });
+        });
+        REQUIRE(agentTab != nullptr);
+        REQUIRE(waitForTabs(2));
+        reconcile();
+        REQUIRE(window->tabCount() == 2);
+        CHECK(window->activeTab() == first);
+    }
+
+    SECTION("a tab the user opened")
+    {
+        app.manager().createNewTab(win.id);
+        REQUIRE(waitForTabs(2));
+        reconcile();
+        REQUIRE(window->tabCount() == 2);
+        CHECK(window->activeTab() == window->tabAt(1));
+    }
+
+    ac->stop();
+}
+
 namespace
 {
 /// Writes a configuration file naming @p profile with @p terminalId, as a user saving it would.
@@ -3005,7 +3122,7 @@ TEST_CASE("a pane dragged out of its tab leaves the other pane in that tab",
     auto const stays = daemon.seedSession("stays");
     auto const dragged = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
         auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+        std::ignore = daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->activePane()->session();
     });
 
@@ -3475,7 +3592,7 @@ TEST_CASE("a swap within one tab pushed by the daemon keeps both TerminalSession
     auto const left = daemon.seedSession("left");
     auto const right = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
         auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+        std::ignore = daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->activePane()->session();
     });
 
@@ -3770,7 +3887,7 @@ TEST_CASE("a swap across two tabs pushed by the daemon keeps every TerminalSessi
     auto const splitActive = [&daemon] {
         return daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
             auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
-            daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+            std::ignore = daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
             return tab->activePane()->session();
         });
     };
@@ -3942,7 +4059,7 @@ TEST_CASE("a pane moved into another GUI process's window appears there, on ever
             auto const first = daemon.seedSession("first");
             auto const second = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
                 auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
-                daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+                std::ignore = daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
                 return tab->activePane()->session();
             });
             auto const receiving = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
@@ -4075,7 +4192,7 @@ TEST_CASE("a pane dropped on an edge of its only sibling over a daemon re-splits
             auto const first = daemon.seedSession("first");
             auto const second = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
                 auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
-                daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+                std::ignore = daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
                 return tab->activePane()->session();
             });
             auto const followed = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
@@ -4126,7 +4243,7 @@ TEST_CASE("a split orientation toggled over a daemon is kept by the next layout 
     auto const first = daemon.seedSession("first");
     auto const tabId = daemon.onDaemon([&daemon]() -> vtworkspace::TabId {
         auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+        std::ignore = daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->id();
     });
     auto const followed = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
@@ -4168,7 +4285,7 @@ TEST_CASE("a daemon that does not end its pushes is reconciled frame by frame, a
     std::ignore = daemon.seedSession("first");
     auto const second = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
         auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+        std::ignore = daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->activePane()->session();
     });
 
@@ -7140,4 +7257,165 @@ TEST_CASE("a launch of a workspace holding no tab asks for a shell there, when t
         CHECK_FALSE(waitUntil([&] { return !workspaceOf(controller, empty).tabs.empty(); }, 300));
         CHECK(daemon.clientFrames.count(vthost::proto::PduType::OpenFirstTab) == 0);
     }
+}
+
+TEST_CASE("only NativeController advertises daemon-extension consent", "[attach][controller][consent]")
+{
+    // Only a window can grant a daemon extension: the GUI's connection offers to be asked, the CLI's clients
+    // never do, so the daemon neither asks them nor takes a reply from them.
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline, ControllerOptions {});
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    auto const hellos = daemon.clientFrames.hellos();
+    REQUIRE(hellos.size() == 1);
+    CHECK(hellos.front().capabilities.contains(vthost::proto::Capability::DaemonExtensionConsent));
+
+    // A NativeClient's hello offers what its composition root names, which the CLI never does.
+    CHECK_FALSE(vthost::client::NativeClient::HandshakeOptions {}.capabilities.contains(
+        vthost::proto::Capability::DaemonExtensionConsent));
+}
+
+TEST_CASE("NativeController shows a daemon extension's palette rows and invokes them",
+          "[attach][controller][remote][presence]")
+{
+    auto const journal = std::make_shared<std::vector<std::string>>();
+    auto world = std::shared_ptr<vthost::testing::FakeDaemonWorldHosting> {};
+    auto daemon = DaemonFixture { {},
+                                  {},
+                                  1,
+                                  {},
+                                  std::nullopt,
+                                  {},
+                                  vthost::ClientSizePolicy::Latest,
+                                  {},
+                                  [&](vthost::DaemonWorldEvents events,
+                                      vthost::OwnerPost post,
+                                      vthost::DaemonWorldWiring const& /*wiring*/) {
+                                      world = std::make_shared<vthost::testing::FakeDaemonWorldHosting>(
+                                          journal, std::move(post), std::move(events));
+                                      world->rows = { vthost::ExtensionActionRows {
+                                          .extension = "orchestrator",
+                                          .title = "Agents",
+                                          .state = vthost::DaemonExtensionState::Running,
+                                          .rows = { { "open", "Open Agents" } } } };
+                                      return world;
+                                  } };
+    std::ignore = daemon.seedSession("first");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline, ControllerOptions {});
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+
+    // The window's hello offers to show the rows; the daemon sends them as it attaches.
+    auto const hellos = daemon.clientFrames.hellos();
+    REQUIRE(hellos.size() == 1);
+    CHECK(hellos.front().capabilities.contains(vthost::proto::Capability::ExtensionPresence));
+    REQUIRE(waitUntil([&] { return !controller.extensionPresence().extensions.empty(); }));
+    CHECK(controller.extensionPresence()
+          == vthost::proto::ExtensionPresence {
+              .extensions = { vthost::proto::WireExtensionPresence {
+                  .extension = "orchestrator",
+                  .title = "Agents",
+                  .state = vthost::proto::WirePresenceState::Running,
+                  .rows = { vthost::proto::WireActionRow { .id = "open", .title = "Open Agents" } } } } });
+
+    // A change reaches the window too.
+    std::ignore = daemon.onDaemon([&] {
+        world->changePresence({ vthost::ExtensionActionRows { .extension = "orchestrator",
+                                                              .title = "Agents",
+                                                              .state = vthost::DaemonExtensionState::Disabled,
+                                                              .rows = { { "open", "Open Agents" } } } });
+        return true;
+    });
+    REQUIRE(waitUntil([&] {
+        auto const presence = controller.extensionPresence();
+        return !presence.extensions.empty()
+               && presence.extensions.front().state == vthost::proto::WirePresenceState::Disabled;
+    }));
+
+    // Invoking a row sends one InvokeExtensionAction.
+    controller.invokeExtensionAction("orchestrator", "open");
+    REQUIRE(waitUntil(
+        [&] { return daemon.clientFrames.count(vthost::proto::PduType::InvokeExtensionAction) == 1; }));
+    CHECK_FALSE(waitUntil(
+        [&] { return daemon.clientFrames.count(vthost::proto::PduType::InvokeExtensionAction) > 1; }, 100));
+}
+
+TEST_CASE("NativeController hands the GUI the pane a daemon extension revealed",
+          "[attach][controller][remote][presence]")
+{
+    auto const journal = std::make_shared<std::vector<std::string>>();
+    auto world = std::shared_ptr<vthost::testing::FakeDaemonWorldHosting> {};
+    auto* tabs = static_cast<vthost::IServedTabs*>(nullptr);
+    auto* actions = static_cast<vthost::IExtensionActions*>(nullptr);
+    auto daemon = DaemonFixture { {},
+                                  {},
+                                  1,
+                                  {},
+                                  std::nullopt,
+                                  {},
+                                  vthost::ClientSizePolicy::Latest,
+                                  {},
+                                  [&](vthost::DaemonWorldEvents events,
+                                      vthost::OwnerPost post,
+                                      vthost::DaemonWorldWiring const& wiring) {
+                                      tabs = &wiring.tabs;
+                                      actions = &wiring.actions;
+                                      world = std::make_shared<vthost::testing::FakeDaemonWorldHosting>(
+                                          journal, std::move(post), std::move(events));
+                                      world->rows = { vthost::ExtensionActionRows {
+                                          .extension = "orchestrator",
+                                          .title = "Agents",
+                                          .state = vthost::DaemonExtensionState::Running,
+                                          .rows = { { "open", "Open Agents" } } } };
+                                      return world;
+                                  } };
+    std::ignore = daemon.seedSession("first");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline, ControllerOptions {});
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return !controller.extensionPresence().extensions.empty(); }));
+    REQUIRE(tabs != nullptr);
+    REQUIRE(actions != nullptr);
+    auto revealsSignalled = std::atomic<int> { 0 };
+    QObject::connect(
+        &controller, &contour::remote::NativeController::paneRevealRequested, [&] { ++revealsSignalled; });
+
+    // The window invokes the row; the extension takes it, with the window as its origin, and opens its tab
+    // there -- as a guest does, from its own thread.
+    controller.invokeExtensionAction("orchestrator", "open");
+    auto taken = std::vector<std::pair<std::string, vthost::Origin>> {};
+    REQUIRE(waitUntil([&] {
+        auto more = actions->take("orchestrator");
+        taken.insert(taken.end(), more.begin(), more.end());
+        return !taken.empty();
+    }));
+    auto const origin = taken.front().second;
+    auto const opened = tabs->open("orchestrator", "Agents", "", "agents", origin);
+    REQUIRE(opened.has_value());
+    REQUIRE(waitUntil([&] {
+        auto const listed = tabs->list("orchestrator");
+        return !listed.empty() && listed.front().state == vthost::ServedTabState::Open;
+    }));
+    // Opened on the user's action just now, the new tab is shown: the window raises and focuses its pane.
+    auto revealed = std::vector<uint64_t> {};
+    REQUIRE(waitUntil([&] {
+        for (auto const& reveal: controller.takePaneReveals())
+            revealed.push_back(reveal.session);
+        return !revealed.empty();
+    }));
+    CHECK(revealed.size() == 1);
+    CHECK(revealed.front() != 0);
+    CHECK(revealsSignalled.load() >= 1);
+
+    // The origin counted once: a reveal on it raises nothing more.
+    CHECK(tabs->reveal("orchestrator", *opened, origin)
+          == std::expected<void, vthost::ServedTabError> { std::unexpect, vthost::ServedTabError::Gone });
 }

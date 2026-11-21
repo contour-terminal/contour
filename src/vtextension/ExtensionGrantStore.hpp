@@ -42,8 +42,11 @@ struct DaemonIdentity
 /// socket's path (lexically normalized) before `.txt` where a socket other than the name's own is named.
 /// @param daemon The daemon. Every character of its name but ASCII letters, digits, `.`, `-` and `_` is
 ///        spelled `_`, so the name never leaves the directory; an empty name is the default one.
+/// @param baseName The default name's file at its own socket, ending in `.txt`: the status-line extensions'
+///        DaemonExtensionGrantsFileName, or the daemon-scoped extensions' own.
 /// @return The file's name.
-[[nodiscard]] std::string daemonExtensionGrantsFileName(DaemonIdentity const& daemon);
+[[nodiscard]] std::string daemonExtensionGrantsFileName(
+    DaemonIdentity const& daemon, std::string_view baseName = DaemonExtensionGrantsFileName);
 
 /// The line a grants file starts with, naming the only format revision there is.
 inline constexpr auto ExtensionGrantsHeader = std::string_view { "contour-extension-grants 1" };

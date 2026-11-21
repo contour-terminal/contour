@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/cli/AgentRecord.hpp>
 #include <contour/cli/AgentReport.hpp>
 #include <contour/cli/AgentSkill.hpp>
+#include <contour/cli/AgentStats.hpp>
+#include <contour/cli/AgentTranscript.hpp>
 #include <contour/cli/BackgroundExecutor.hpp>
 #include <contour/cli/CaptureScreen.hpp>
 #include <contour/cli/CatImageArgs.hpp>
@@ -27,9 +30,12 @@
 
 #include <vtparser/Parser.hpp>
 
+#include <vtpty/BeneathRead.hpp>
 #include <vtpty/CommandCapture.hpp>
+#include <vtpty/DirectoryHandle.hpp>
 #include <vtpty/ExecutablePath.hpp>
 #include <vtpty/Process.hpp>
+#include <vtpty/ProcessRunner.hpp>
 #include <vtpty/ProgramLookup.hpp>
 
 #include <crispy/StackTrace.hpp>
@@ -46,6 +52,7 @@
 #include <core/net/SshAgentEndpoint.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/platform/NativeFileSystem.hpp>
+#include <core/platform/UserPaths.hpp>
 
 #include <algorithm>
 #include <array>
@@ -62,7 +69,9 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -78,11 +87,16 @@
     #include <contour/config/ExtensionDeclarations.hpp>
 
     #include <vtextension/BundledExtensions.hpp>
+    #include <vtextension/DaemonExtensionRuntime.hpp>
     #include <vtextension/ExtensionGrantStore.hpp>
     #include <vtextension/ExtensionWorkerPool.hpp>
+    #include <vtextension/FileLocker.hpp>
+    #include <vtextension/SelfPrograms.hpp>
     #include <vtextension/wasm/DefaultBackend.hpp>
     #include <vtextension/wasm/WasmRuntime.hpp>
+    #include <vthost/DaemonConsentKey.hpp>
     #include <vthost/DaemonExtensions.hpp>
+    #include <vthost/DaemonWorldExtensions.hpp>
 #endif
 #include <vthost/AccessFile.hpp>
 #include <vthost/AuthorizedKeys.hpp>
@@ -96,6 +110,7 @@
 #include <vthost/FilePrivacy.hpp>
 #include <vthost/KnownDaemons.hpp>
 #include <vthost/Linger.hpp>
+#include <vthost/OwnedPaneStore.hpp>
 #include <vthost/PlatformStreams.hpp>
 #include <vthost/ServiceControl.hpp>
 #include <vthost/SessionSnapshotStore.hpp>
@@ -523,7 +538,72 @@ namespace
                                     CLI::Value { false },
                                     "Removes the status hooks instead; the skill is left as it is." },
                                 CLI::Option { "json", CLI::Value { false }, "Prints the outcomes as JSON." },
-                            } } },
+                            } },
+                    CLI::Command {
+                        .name = "transcript",
+                        .helpText =
+                            "Prints one page of a Claude Code session's transcript: its prompts, replies, "
+                            "tool calls and their results, sanitised. The session's log must have been "
+                            "written in --cwd or beneath it.",
+                        .options =
+                            CLI::OptionList {
+                                CLI::Option { "session", CLI::Value { ""s }, "The session's UUID.", "UUID" },
+                                CLI::Option { "cwd",
+                                              CLI::Value { ""s },
+                                              "The directory the session ran in: its worktree.",
+                                              "DIRECTORY" },
+                                CLI::Option { "page", CLI::Value { 1u }, "The 1-based page to print.", "N" },
+                                CLI::Option { "format",
+                                              CLI::Value { 1u },
+                                              "The JSON format to print; this contour prints format 1 only.",
+                                              "N" },
+                                CLI::Option { "json",
+                                              CLI::Value { false },
+                                              "Prints the page as JSON instead of text." },
+                            } },
+                    CLI::Command { .name = "stats",
+                                   .helpText = "Prints what a Claude Code session cost and did: its tokens, "
+                                               "API calls, tool calls, "
+                                               "turns, subagents and the pull requests it opened, and the "
+                                               "cost Claude Code "
+                                               "recorded when it exited. The session's log must have been "
+                                               "written in --cwd or "
+                                               "beneath it.",
+                                   .options =
+                                       CLI::OptionList {
+                                           CLI::Option {
+                                               "session", CLI::Value { ""s }, "The session's UUID.", "UUID" },
+                                           CLI::Option { "cwd",
+                                                         CLI::Value { ""s },
+                                                         "The directory the session ran in: its worktree.",
+                                                         "DIRECTORY" },
+                                           CLI::Option { "format",
+                                                         CLI::Value { 1u },
+                                                         "The JSON format to print; this contour prints "
+                                                         "format 1 only.",
+                                                         "N" },
+                                           CLI::Option { "json",
+                                                         CLI::Value { false },
+                                                         "Prints the statistics as JSON instead of text." },
+                                       } },
+                    CLI::Command { .name = "record",
+                                   .helpText = "Appends one finished agent run, as the agent orchestrator "
+                                               "describes it, to "
+                                               "agent-runs.jsonl in the daemon's state directory, for "
+                                               "analysis afterwards.",
+                                   .options =
+                                       CLI::OptionList {
+                                           CLI::Option { "line",
+                                                         CLI::Value { ""s },
+                                                         "The run, as one JSON object.",
+                                                         "JSON" },
+                                           CLI::Option { "format",
+                                                         CLI::Value { 1u },
+                                                         "The format the line is written in; this contour "
+                                                         "writes format 1 "
+                                                         "only.",
+                                                         "N" },
+                                       } } },
         };
     }
 
@@ -634,6 +714,9 @@ ContourApp::ContourApp(core::Environment const& env):
     link("contour.daemon", bind(&ContourApp::daemonAction, this));
     link("contour.agent.report", bind(&ContourApp::agentReportAction, this));
     link("contour.agent.setup", bind(&ContourApp::agentSetupAction, this));
+    link("contour.agent.transcript", bind(&ContourApp::agentTranscriptAction, this));
+    link("contour.agent.stats", bind(&ContourApp::agentStatsAction, this));
+    link("contour.agent.record", bind(&ContourApp::agentRecordAction, this));
     link("contour.mcp", bind(&ContourApp::mcpAction, this));
     for (auto const& verb: contour::cli::controlVerbs())
         link(std::format("contour.{}", verb.path), [this, &verb] { return controlVerbAction(verb); });
@@ -1062,6 +1145,42 @@ namespace
     }
 
 #ifdef CONTOUR_EXTENSIONS
+    /// A ThreadedProcessRunner made on the first start(): a daemon whose extensions never run a command
+    /// starts no thread for them.
+    class OnFirstStartProcessRunner final: public vtpty::IProcessRunner
+    {
+      public:
+        [[nodiscard]] std::expected<vtpty::ProcessToken, vtpty::ProcessStartError> start(
+            vtpty::ProcessSpec spec, vtpty::CompletionHandler done) override
+        {
+            auto const lock = std::scoped_lock { _mutex };
+            if (!_runner)
+            {
+                auto made = vtpty::ThreadedProcessRunner::create(core::platform::defaultSteadyClock(), {});
+                if (!made)
+                {
+                    errorLog()(
+                        "daemon.extensions: no process runner can be started; the command is refused.");
+                    return std::unexpected(vtpty::ProcessStartError::SpawnFailed);
+                }
+                _runner = std::move(*made);
+            }
+            return _runner->start(std::move(spec), std::move(done));
+        }
+
+        void cancel(vtpty::ProcessToken token) override
+        {
+            auto const lock = std::scoped_lock { _mutex };
+            if (_runner)
+                _runner->cancel(token);
+        }
+
+      private:
+        std::mutex _mutex;
+        std::unique_ptr<vtpty::ThreadedProcessRunner>
+            _runner; ///< Null until the first start; guarded by _mutex.
+    };
+
     /// What a daemon's status-line extensions borrow. Made before the daemon runs, so that it outlives the
     /// extensions the daemon's session host owns.
     struct DaemonExtensionResources
@@ -1082,6 +1201,9 @@ namespace
         vtpty::SystemCommandCapture capture;
         core::platform::SystemWallClock wallClock;
         vtbackend::LocalTimeConverter localTime { &vtbackend::systemLocalTime };
+        /// What the daemon-scoped extensions' declared processes run on.
+        OnFirstStartProcessRunner processRunner;
+        vtextension::NativeFileLocker locker;
     };
 
     /// @param resolved The daemon's profile, resolved.
@@ -1125,6 +1247,109 @@ namespace
                             .fileSystem = core::platform::NativeFileSystem::instance() },
                     .commandShutdown = services.commandShutdown }) };
         };
+    }
+    /// @return This process's environment, `NAME=value` each: what the daemon-scoped extensions' commands
+    ///         inherit, less what ChildEnvironment withholds.
+    [[nodiscard]] std::vector<std::string> inheritedEnvironment()
+    {
+    #ifdef _WIN32
+        return {}; // No declared process runs on Windows: the runner answers Unsupported.
+    #else
+        return vthost::keeper::processEnvironmentEntries();
+    #endif
+    }
+
+    /// @param extensions The daemon's `daemon.extensions`.
+    /// @param configFile The configuration the daemon was started with, beside which its grants are kept.
+    /// @param daemon The socket the daemon serves, which names its grants file and its stores.
+    /// @param executableDirectory Where the running executable is, beside which bundled extensions may be.
+    /// @param env The environment the state directory and the home directory are read from.
+    /// @param services What the extensions borrow.
+    /// @return What makes the daemon-scoped extensions; empty when none is declared.
+    [[nodiscard]] vthost::DaemonWorldFactory daemonWorldOf(
+        std::span<config::DaemonExtensionConfig const> extensions,
+        std::filesystem::path const& configFile,
+        vtextension::DaemonIdentity const& daemon,
+        std::filesystem::path const& executableDirectory,
+        core::Environment const& env,
+        DaemonExtensionResources& services)
+    {
+        if (extensions.empty())
+            return {};
+
+        auto const stateDirectory = vthost::daemonStateDirectory(env);
+        auto config = vtextension::DaemonExtensionRuntimeConfig {
+            .declarations = {},
+            // The daemon's own side file, apart from its status-line extensions' file.
+            .grantsFile =
+                configFile.parent_path()
+                / vtextension::daemonExtensionGrantsFileName(daemon, vtextension::DaemonScopedGrantsFileName),
+            .home = core::platform::homeDirectory(env)
+                        .transform([](std::filesystem::path const& home) { return core::pathToUtf8(home); })
+                        .value_or(std::string {}),
+            .inheritedEnvironment = inheritedEnvironment(),
+            // `contour` in a declared command is this executable, whatever the daemon's PATH holds: a .dmg,
+            // an AppImage or a launchd agent puts none on it.
+            .selfPrograms = vtpty::currentExecutablePath()
+                                .transform([](std::filesystem::path const& executable) {
+                                    return vtextension::selfProgramsOf(executable);
+                                })
+                                .value_or(std::vector<vtextension::SelfProgram> {}),
+            .bundledDirectories =
+                vtextension::bundledExtensionDirectories(vtextension::nativeBundledExtensionPlatform(),
+                                                         core::defaultEnvironment(),
+                                                         executableDirectory),
+        };
+        for (auto const& extension: extensions)
+        {
+            // Named exactly as the daemon's snapshot is, so that two daemons sharing a state directory never
+            // share a store; a daemon or extension name no file can be named for leaves it without one.
+            auto store = vthost::daemonExtensionStoreDirectory(
+                stateDirectory, daemon.name, daemon.socketPath, daemon.nameSocketPath, extension.name);
+            config.declarations.push_back(
+                config::daemonExtensionDeclarationOf(extension, store.value_or(std::filesystem::path {})));
+        }
+        return [&services, config = std::move(config)](vthost::DaemonWorldEvents events,
+                                                       vthost::OwnerPost const& post,
+                                                       vthost::DaemonWorldWiring wiring) {
+            return std::shared_ptr<vthost::IDaemonWorldHosting> {
+                std::make_shared<vthost::DaemonWorldExtensions>(
+                    config,
+                    vthost::DaemonWorldServices { .backend = *services.backend,
+                                                  .runner = services.processRunner,
+                                                  .directories = vtpty::nativeDirectoryOpener(),
+                                                  .files = vtpty::nativeBeneathReader(),
+                                                  .fileSystem = core::platform::NativeFileSystem::instance(),
+                                                  .locker = services.locker,
+                                                  .wallClock = services.wallClock,
+                                                  .localTime = services.localTime },
+                    std::move(events),
+                    post,
+                    wiring)
+            };
+        };
+    }
+
+    /// @param extensions The daemon-scoped extensions the profile declares.
+    /// @param daemon The socket the daemon serves, which names each extension's files.
+    /// @param env The environment the state directory is read from.
+    /// @return The registry of the agent panes they open, a file beside each one's store; null when none is
+    ///         declared.
+    [[nodiscard]] std::shared_ptr<vthost::IOwnedPaneStore> ownedPaneStoreOf(
+        std::span<config::DaemonExtensionConfig const> extensions,
+        vtextension::DaemonIdentity const& daemon,
+        core::Environment const& env)
+    {
+        if (extensions.empty())
+            return nullptr;
+        auto const stateDirectory = vthost::daemonStateDirectory(env);
+        auto files = std::map<std::string, std::filesystem::path, std::less<>> {};
+        for (auto const& extension: extensions)
+            if (auto file = vthost::daemonExtensionPanesFile(
+                    stateDirectory, daemon.name, daemon.socketPath, daemon.nameSocketPath, extension.name))
+                files.emplace(extension.name, std::move(*file));
+        return std::make_shared<vthost::FileOwnedPaneStore>(core::platform::NativeFileSystem::instance(),
+                                                            std::move(files));
     }
 #endif
 
@@ -1553,6 +1778,8 @@ int ContourApp::serveDaemon(DaemonVerbOptions const& options,
     // Read before the configuration moves into the catalog. Not reloaded: a running daemon keeps the file
     // and the schedule it started with.
     auto const daemonName = vthost::daemonNameFromOption(options.name).name;
+    // Read once: an edit of daemon.extensions takes effect at the next daemon start.
+    auto const daemonExtensions = hostConfig->daemon.value().extensions;
     if (auto snapshotPath = snapshotPathOf(processEnvironment(), daemonName, config.socketPath))
         config.persistence =
             workspacePersistenceOf(hostConfig->daemon.value().restore, *std::move(snapshotPath));
@@ -1566,9 +1793,13 @@ int ContourApp::serveDaemon(DaemonVerbOptions const& options,
         core::platform::NativeFileSystem::instance(),
         resolved.configFile,
         [configPath = options.config,
-         daemonProfile]() -> std::expected<std::shared_ptr<vthost::ProfileCatalog const>, std::string> {
+         daemonProfile,
+         daemonExtensions]() -> std::expected<std::shared_ptr<vthost::ProfileCatalog const>, std::string> {
             return config::tryLoadConfigNamed(configPath)
                 .and_then([&](config::Config loaded) {
+                    if (loaded.daemon.value().extensions != daemonExtensions)
+                        errorLog()(
+                            "daemon.extensions changed; the change takes effect at the next daemon start.");
                     // The daemon's own profile must survive the edit, as it had to for the daemon to start.
                     return config::resolvedSessionConfigFor(loaded, daemonProfile)
                         .transform([&](auto const&) {
@@ -1589,21 +1820,40 @@ int ContourApp::serveDaemon(DaemonVerbOptions const& options,
     config.placement = vtpty::makeDefaultProcessPlacement();
     config.startupLayout = resolved.startupLayout;
 #ifdef CONTOUR_EXTENSIONS
+    // Where this run keeps its consent key, once it holds the socket -- a directory no pane's environment
+    // names. Only a daemon that declares an extension has a grant to ask for: one without makes no key,
+    // offers no window the question, and has nothing to log when its state directory is unwritable.
+    if (!daemonExtensions.empty())
+        config.consentKeys = vthost::DaemonConsentKeys {
+            .directory =
+                vthost::daemonConsentKeyDirectory(vthost::daemonStateDirectory(processEnvironment())),
+            .socket = core::platform::NativeFileSystem::instance().weaklyCanonical(config.socketPath),
+            .files = vthost::nativeConsentKeyFiles(),
+            .random = core::systemRandom(),
+        };
+
     // The extensions' modules and configuration are resolved here, on the daemon's side, as its sessions'
     // shells are; they run in the daemon, where each session's terminal is.
     auto extensionServices = DaemonExtensionResources { childDescriptorLimitOf(keeper) };
     auto const& fileSystem = core::platform::NativeFileSystem::instance();
-    config.extensions = daemonExtensionsOf(
-        resolved,
+    auto const daemonIdentity =
         vtextension::DaemonIdentity { .name = daemonName,
                                       .defaultName = vthost::DefaultDaemonName,
                                       .socketPath = fileSystem.weaklyCanonical(config.socketPath),
                                       .nameSocketPath =
-                                          fileSystem.weaklyCanonical(vthost::namedSocketPath(daemonName)) },
+                                          fileSystem.weaklyCanonical(vthost::namedSocketPath(daemonName)) };
+    auto const executableDirectory =
         std::filesystem::absolute(
             core::pathFromUtf8(commandLine().front()).value_or(std::filesystem::path {}))
-            .parent_path(),
-        extensionServices);
+            .parent_path();
+    config.extensions = daemonExtensionsOf(resolved, daemonIdentity, executableDirectory, extensionServices);
+    config.daemonWorld = daemonWorldOf(daemonExtensions,
+                                       resolved.configFile,
+                                       daemonIdentity,
+                                       executableDirectory,
+                                       processEnvironment(),
+                                       extensionServices);
+    config.ownedPanes = ownedPaneStoreOf(daemonExtensions, daemonIdentity, processEnvironment());
 #endif
 
     if (auto label = options.tmuxCompatSocket; !label.empty())
@@ -2016,6 +2266,59 @@ int ContourApp::agentReportAction()
     auto const payload = makeHandlePayloadReader(core::platform::standardInput(), clock);
     auto const& env = processEnvironment();
     return runAgentReport(*integration, *payload, env, makeDaemonChannelFactory(env), clock);
+}
+
+int ContourApp::agentTranscriptAction()
+{
+    constexpr auto Prefix = "contour.agent.transcript"sv;
+    auto const key = [&](std::string_view option) {
+        return std::format("{}.{}", Prefix, option);
+    };
+    auto const request = TranscriptRequest {
+        .session = parameters().get<string>(key("session")),
+        .cwd = parameters().get<string>(key("cwd")),
+        .page = parameters().get<unsigned>(key("page")),
+        .format = parameters().get<unsigned>(key("format")),
+        .output = parameters().get<bool>(key("json")) ? TranscriptOutput::Json : TranscriptOutput::Text,
+    };
+    auto const opener = makeNativeSessionLogOpener();
+    return runAgentTranscript(request,
+                              processEnvironment(),
+                              core::platform::NativeFileSystem::instance(),
+                              *opener,
+                              &vtbackend::systemLocalTime,
+                              cout,
+                              cerr);
+}
+
+int ContourApp::agentStatsAction()
+{
+    constexpr auto Prefix = "contour.agent.stats"sv;
+    auto const key = [&](std::string_view option) {
+        return std::format("{}.{}", Prefix, option);
+    };
+    auto const request = StatsRequest {
+        .session = parameters().get<string>(key("session")),
+        .cwd = parameters().get<string>(key("cwd")),
+        .format = parameters().get<unsigned>(key("format")),
+        .output = parameters().get<bool>(key("json")) ? StatsOutput::Json : StatsOutput::Text,
+    };
+    auto const opener = makeNativeSessionLogOpener();
+    return runAgentStats(
+        request, processEnvironment(), core::platform::NativeFileSystem::instance(), *opener, cout, cerr);
+}
+
+int ContourApp::agentRecordAction()
+{
+    constexpr auto Prefix = "contour.agent.record"sv;
+    auto const key = [&](std::string_view option) {
+        return std::format("{}.{}", Prefix, option);
+    };
+    auto const request = RecordRequest { .line = parameters().get<string>(key("line")),
+                                         .format = parameters().get<unsigned>(key("format")) };
+    auto const appender = makeNativeRecordAppender();
+    return runAgentRecord(
+        request, vthost::daemonStateDirectory(processEnvironment()) / AgentRunsFileName, *appender, cerr);
 }
 
 int ContourApp::agentSetupAction()

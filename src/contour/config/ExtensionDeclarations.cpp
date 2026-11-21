@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <utility>
 
 namespace contour::config
 {
@@ -14,6 +15,20 @@ namespace
     {
         Permission configured;
         vtextension::CommandPermission runtime;
+    };
+
+    /// One row of the configuration-to-runtime autostart table.
+    struct AutostartMapping
+    {
+        DaemonExtensionAutostart configured;
+        vtextension::ExtensionAutostart runtime;
+    };
+
+    constexpr auto AutostartMappings = std::array {
+        AutostartMapping { .configured = DaemonExtensionAutostart::OnDemand,
+                           .runtime = vtextension::ExtensionAutostart::OnDemand },
+        AutostartMapping { .configured = DaemonExtensionAutostart::AtDaemonStart,
+                           .runtime = vtextension::ExtensionAutostart::AtDaemonStart },
     };
 
     constexpr auto PermissionMappings = std::array {
@@ -54,6 +69,23 @@ vtextension::DeclaredExtensions declaredExtensionsOf(std::span<ExtensionConfig c
 vtextension::DeclaredExtensions declaredExtensionsOf(TerminalProfile const& profile)
 {
     return declaredExtensionsOf(profile.extensions.value(), profile.statusLine.value().extension);
+}
+
+vtextension::ExtensionAutostart toExtensionAutostart(DaemonExtensionAutostart autostart) noexcept
+{
+    auto const mapping = std::ranges::find(AutostartMappings, autostart, &AutostartMapping::configured);
+    // Unreachable for a valid value; on demand is the safe answer for anything else.
+    return mapping != AutostartMappings.end() ? mapping->runtime : vtextension::ExtensionAutostart::OnDemand;
+}
+
+vtextension::DaemonExtensionDeclaration daemonExtensionDeclarationOf(DaemonExtensionConfig const& extension,
+                                                                     std::filesystem::path storeDirectory)
+{
+    return vtextension::DaemonExtensionDeclaration { .name = extension.name,
+                                                     .modulePath = extension.path,
+                                                     .autostart = toExtensionAutostart(extension.autostart),
+                                                     .configJson = extension.configJson,
+                                                     .storeDirectory = std::move(storeDirectory) };
 }
 
 } // namespace contour::config

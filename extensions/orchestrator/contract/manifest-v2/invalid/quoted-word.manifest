@@ -1,0 +1,5 @@
+# Words are split at spaces and never unquoted: a quote is an attempt at a word with a space.
+name = quoter
+version = 2
+root repos = config:repos/*/path
+command commit short @repos = git commit -m "two words"

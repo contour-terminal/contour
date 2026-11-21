@@ -47,3 +47,28 @@ charset = unset
 
 [src/vtbackend/screen/ScreenTestFixtures.hpp]
 charset = unset
+
+# The orchestrator's manifest-v2 conformance corpus pins how a parser reads a manifest's bytes, line ends
+# and blanks included: each of these files is evidence of the rule it is named after, and tidying it would
+# remove what it tests: a manifest written with CRLF line ends, a carriage return in mid-line, a line that
+# begins with a blank, and one that ends with one.
+[extensions/orchestrator/contract/manifest-v2/valid/crlf.manifest]
+end_of_line = crlf
+
+[extensions/orchestrator/contract/manifest-v2/invalid/stray-cr.manifest]
+end_of_line = unset
+
+[extensions/orchestrator/contract/manifest-v2/invalid/indented-line.manifest]
+indent_style = unset
+indent_size = unset
+
+[extensions/orchestrator/contract/manifest-v2/invalid/trailing-blank.manifest]
+trim_trailing_whitespace = false
+
+# `git … -z` output the orchestrator's parsers are tested against: NUL-separated records, replayed byte for
+# byte. The NULs make the checker read them as binary, and the last record ends in a NUL, not a newline;
+# both are the format, not a typo.
+[extensions/orchestrator/core/testdata/git/*.porcelain-z]
+charset = unset
+end_of_line = unset
+insert_final_newline = unset

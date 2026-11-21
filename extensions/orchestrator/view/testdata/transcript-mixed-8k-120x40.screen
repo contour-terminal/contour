@@ -1,0 +1,40 @@
+╭─ Transcript · pr-2375-20261113-150847 · page 1 of 1 ─────────────────────────────────────────────────────────────────╮
+│ you · 18:00 UTC                                                                                                      │
+│   日本語のテキストを折り返してください。漢字とかなが混ざった長い一文です。                                           │
+│                                                                                                                      │
+│ claude · 18:01 UTC                                                                                                   │
+│   Done 🎉 — the build is green ✅, and the 🐛 is gone. 中文也可以。                                                  │
+│                                                                                                                      │
+│ tool Read · 18:02 UTC                                                                                                │
+│   {"file_path":"/home/user/proj/src/main.cpp"}                                                                       │
+│                                                                                                                      │
+│ result · 18:03 UTC                                                                                                   │
+│   int main()                                                                                                         │
+│   {                                                                                                                  │
+│       for (auto const x: xs)                                                                                         │
+│           std::println("{}", x);                                                                                     │
+│   }                                                                                                                  │
+│                                                                                                                      │
+│ error · 18:04 UTC                                                                                                    │
+│   File does not exist.                                                                                               │
+│                                                                                                                      │
+│ note · 18:05 UTC                                                                                                     │
+│   conversation compacted                                                                                             │
+│                                                                                                                      │
+│ claude · 18:06 UTC                                                                                                   │
+│   abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij      │
+│   abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij      │
+│   abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij      │
+│   abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij      │
+│   abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij      │
+│   abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij      │
+│   abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij      │
+│   abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij      │
+│   abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij      │
+│   abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij      │
+│   abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij      │
+│   abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij      │
+│ written by Claude Code 2.1.328                                                                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ ←→ page · ↑↓ scroll · b board · d new run · enter agent tab · esc back                                                 
+ ⬢ agents 1/4 · ✗2                                                                                                      

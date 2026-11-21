@@ -21,6 +21,10 @@
 # code; it would need gcc-toolset on top of EPEL's yaml-cpp and libutempter), and EL10 is untried: no job
 # builds either, so none is claimed.
 %bcond_with daemon
+# `rpmbuild --with orchestrator` also builds the agent orchestrator's WebAssembly guest and installs it with
+# the bundled extensions. It needs a wasi-sdk (>= 34) in /opt/wasi-sdk, which Fedora does not package, so it
+# is off unless asked for; CI's image installs one.
+%bcond_with orchestrator
 
 # The source tarball, its top-level directory and the project URL are named after the project, not after
 # the package: the daemon package is called contour-daemon, but the sources it is built from are contour's.
@@ -123,6 +127,10 @@ cmake . \
     -DCMAKE_DISABLE_FIND_PACKAGE_Qt6=ON \
     -DCONTOUR_PACKAGE_TERMINFO=OFF \
     -DCONTOUR_LINK_JOBS=1 \
+%endif
+%if %{with orchestrator}
+    -DCONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST=ON \
+    -DWASI_SDK_PREFIX=/opt/wasi-sdk \
 %endif
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \

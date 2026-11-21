@@ -50,6 +50,22 @@ namespace vthost::testing
 
 /// One example of every catalog alternative, so the tests below can sweep the whole variant
 /// instead of naming alternatives one at a time (and silently missing the 18th).
+/// A LayoutState in its other shape: the catalog's, with the served tabs trailing it
+/// (Capability::ExtensionPresence).
+[[nodiscard]] inline proto::LayoutState servedLayoutState()
+{
+    return proto::LayoutState {
+        .workspace = 1,
+        .activeTab = 0,
+        .tabs = std::vector<proto::WireTab>(2),
+        .servedEdit = 3,
+        .served = { proto::WireServedTab { .tabId = 0,
+                                           .mark = proto::WireServedMark { .extension = "orchestrator",
+                                                                           .title = "Agents",
+                                                                           .moduleDigest = "3f9a" } } },
+    };
+}
+
 [[nodiscard]] inline std::vector<std::pair<proto::PduType, proto::DecodedPdu>> everyAlternative()
 {
     return {
@@ -261,6 +277,31 @@ namespace vthost::testing
         { proto::PduType::CloseWorkspace, proto::DecodedPdu { proto::CloseWorkspace { .workspace = 3 } } },
         { proto::PduType::Goodbye, proto::DecodedPdu { proto::Goodbye {} } },
         { proto::PduType::OpenFirstTab, proto::DecodedPdu { proto::OpenFirstTab { .workspace = 4 } } },
+        { proto::PduType::ExtensionPermissionRequest,
+          proto::DecodedPdu { proto::ExtensionPermissionRequest {
+              .name = "orchestrator",
+              .grantDigest = "9a1b",
+              .title = "secret-title",
+              .lines = { proto::WireConsentLine { .text = "secret-command", .weight = 1 } } } } },
+        { proto::PduType::ExtensionPermissionReply,
+          proto::DecodedPdu { proto::ExtensionPermissionReply {
+              .name = "orchestrator", .grantDigest = "9a1b", .grantState = 1 } } },
+        { proto::PduType::ConsentProof,
+          proto::DecodedPdu { proto::ConsentProof { .mac = { std::byte { 0x5e }, std::byte { 0xc4 } } } } },
+        { proto::PduType::ExtensionPermissionSettled,
+          proto::DecodedPdu {
+              proto::ExtensionPermissionSettled { .name = "orchestrator", .grantDigest = "9a1b" } } },
+        { proto::PduType::ExtensionPresence,
+          proto::DecodedPdu { proto::ExtensionPresence {
+              .extensions = { proto::WireExtensionPresence {
+                  .extension = "orchestrator",
+                  .title = "secret-title",
+                  .state = proto::WirePresenceState::Running,
+                  .rows = { proto::WireActionRow { .id = "open", .title = "secret-row" } } } } } } },
+        { proto::PduType::InvokeExtensionAction,
+          proto::DecodedPdu {
+              proto::InvokeExtensionAction { .extension = "orchestrator", .action = "open" } } },
+        { proto::PduType::RevealPane, proto::DecodedPdu { proto::RevealPane { .session = 4 } } },
         { proto::PduType::SetWorkspaceName,
           proto::DecodedPdu { proto::SetWorkspaceName { .workspace = 3, .name = "secret-label" } } },
         { proto::PduType::SetWorkspaceColor,

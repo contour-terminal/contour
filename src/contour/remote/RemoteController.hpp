@@ -230,7 +230,7 @@ class RemoteController
     /// @param budget How long the attach may take (@see vthost::AttachBudget); a plain duration bounds the
     ///        whole of it, from startConnecting().
     /// @return Nothing on success; a human-readable reason on failure.
-    [[nodiscard]] std::expected<void, std::string> awaitConnected(vthost::AttachBudget budget);
+    [[nodiscard]] std::expected<void, std::string> awaitConnected(vthost::AttachBudget const& budget);
 
     /// The non-blocking form of awaitConnected(): looks at where the attach stands and returns at once, so
     /// the caller's event loop goes on serving whatever the connect needs it for (ssh's prompts are answered
@@ -239,23 +239,26 @@ class RemoteController
     /// On expiry it stops, as awaitConnected() does.
     /// @param budget How long the attach may take (@see vthost::AttachBudget).
     /// @return Nothing while the attach is still going; else what awaitConnected() would return.
-    [[nodiscard]] std::optional<std::expected<void, std::string>> pollConnected(vthost::AttachBudget budget);
+    [[nodiscard]] std::optional<std::expected<void, std::string>> pollConnected(
+        vthost::AttachBudget const& budget);
 
     /// @param budget As for pollConnected().
     /// @return How long from now until pollConnected() would give the attach up, or none while that is not
     ///         known yet (no connect bound, and the transport has not returned its connection). The caller
     ///         arms a timer for it and looks again on the controller's own progress signals meanwhile.
-    [[nodiscard]] std::optional<std::chrono::milliseconds> untilAttachDeadline(vthost::AttachBudget budget);
+    [[nodiscard]] std::optional<std::chrono::milliseconds> untilAttachDeadline(
+        vthost::AttachBudget const& budget);
 
   private:
     /// @return When pollConnected() gives the attach up; none while not known yet.
-    [[nodiscard]] std::optional<core::platform::SteadyTimePoint> attachDeadline(vthost::AttachBudget budget);
+    [[nodiscard]] std::optional<core::platform::SteadyTimePoint> attachDeadline(
+        vthost::AttachBudget const& budget);
 
   public:
     /// startConnecting(), then awaitConnected(): for a caller with nothing to do meanwhile.
     /// @param timeout How long to wait before giving up.
     /// @return Nothing on success; a human-readable reason on failure.
-    [[nodiscard]] std::expected<void, std::string> connectAndWait(vthost::AttachBudget timeout);
+    [[nodiscard]] std::expected<void, std::string> connectAndWait(vthost::AttachBudget const& timeout);
 
     /// @return What the attach of the current attempt is waiting for now. Safe from any thread.
     [[nodiscard]] AttachPhase attachPhase() const;

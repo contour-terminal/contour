@@ -115,7 +115,8 @@ namespace
 Tab* realizeLayoutTab(SessionModel& model,
                       WorkspaceId workspace,
                       LayoutTab const& tab,
-                      PaneSeeder const& seed)
+                      PaneSeeder const& seed,
+                      TabActivation activation)
 {
     // Refuse before creating: seeding spawns a real backing session, so an unknown workspace must be
     // rejected BEFORE the first seed() runs — otherwise that session is orphaned when createTab
@@ -127,7 +128,7 @@ Tab* realizeLayoutTab(SessionModel& model,
     // tab at all (nothing was allocated to back).
     if (!seed(leftmostLeaf(tab.root)))
         return nullptr;
-    auto* modelTab = model.createTab(workspace);
+    auto* modelTab = model.createTab(workspace, activation);
     if (modelTab == nullptr)
         return nullptr;
 

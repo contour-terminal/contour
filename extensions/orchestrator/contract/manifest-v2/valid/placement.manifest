@@ -1,0 +1,4 @@
+# A version-2 manifest may name where the extension runs.
+name = placed
+version = 2
+placement daemon

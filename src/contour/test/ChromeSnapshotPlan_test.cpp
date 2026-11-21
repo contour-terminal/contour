@@ -20,6 +20,7 @@
 #include <set>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 using vtbackend::operator""_rgb;
@@ -180,11 +181,12 @@ TEST_CASE("snapshot.scriptTable.densityAndPaneEnd", "[snapshot]")
     for (auto const& row: SnapshotScripts)
     {
         CAPTURE(row.name);
-        // Every row names a density, and only the three Minimal rows leave Comfortable.
+        // Every row names a density, and only the four Minimal rows leave Comfortable.
         CHECK(static_cast<std::size_t>(row.density) < contour::config::ChromeDensityCount);
         CHECK((row.density == ChromeDensity::Minimal)
               == (row.script == SnapshotScript::SplitMinimal || row.script == SnapshotScript::SingleTabMinimal
-                  || row.script == SnapshotScript::QuickTerminal));
+                  || row.script == SnapshotScript::QuickTerminal
+                  || row.script == SnapshotScript::ServedTabMinimal));
         // Only pane-exited ends a pane and only pane-interrupted restores one over a stopped command; either
         // is one of several.
         CHECK((row.paneEnd == SnapshotPaneEnd::Exited) == (row.script == SnapshotScript::PaneExited));
@@ -833,6 +835,9 @@ TEST_CASE("ChromeSnapshotPlan: the switcher's eight scripts precede the location
           == static_cast<int>(SnapshotScript::SwitcherHover) + 1);
     CHECK(static_cast<int>(SnapshotScript::DaemonLocalSingleTab)
           == static_cast<int>(SnapshotScript::DaemonLocal) + 1);
+    // The daemon extension's consent scripts follow the sidebar's, whose last is its tab colour picker.
+    CHECK(static_cast<int>(SnapshotScript::DaemonConsentHeld)
+          == static_cast<int>(SnapshotScript::SidebarTabColorPicker) + 1);
     for (auto const script: { SnapshotScript::DaemonLocal, SnapshotScript::DaemonLocalSingleTab })
         CHECK(scriptRow(script).connection == HostConnection::LocalDaemon);
     for (auto const& [script, name, action]: std::array {
@@ -913,4 +918,40 @@ TEST_CASE("snapshot plan: the sidebar tree is drawn at each row spacing", "[snap
     CHECK(compact.tabCount == comfortable.tabCount);
     CHECK(compact.sidebarColor == comfortable.sidebarColor);
     CHECK(compact.action == comfortable.action);
+}
+
+TEST_CASE("ChromeSnapshotPlan: the daemon consent dialog is pictured held, armed and with long roots",
+          "[snapshot][consent]")
+{
+    using namespace contour::test::snapshot;
+    for (auto const& [script, consent]: std::array {
+             std::pair { SnapshotScript::DaemonConsentHeld, SnapshotDaemonConsent::Held },
+             std::pair { SnapshotScript::DaemonConsentArmed, SnapshotDaemonConsent::Armed },
+             std::pair { SnapshotScript::DaemonConsentLong, SnapshotDaemonConsent::LongRoots },
+         })
+    {
+        CHECK(scriptRow(script).action == ScriptAction::OpenDaemonConsent);
+        CHECK(scriptRow(script).daemonConsent == consent);
+        CHECK(scriptRow(script).connection == HostConnection::LocalDaemon);
+    }
+}
+
+TEST_CASE("ChromeSnapshotPlan: a served tab is pictured active and at rest, beside a shell tab",
+          "[snapshot][served]")
+{
+    using namespace contour::test::snapshot;
+    CHECK(SnapshotScripts.back().script == SnapshotScript::ServedTabMinimal);
+    for (auto const& [script, active]: std::array { std::pair { SnapshotScript::ServedTab, 0 },
+                                                    std::pair { SnapshotScript::ServedTabInactive, 1 },
+                                                    std::pair { SnapshotScript::ServedTabMinimal, 0 } })
+    {
+        CHECK(scriptRow(script).served == ServedDecor::FirstTab);
+        CHECK(scriptRow(script).tabCount == 2);
+        CHECK(scriptRow(script).activeTab == active);
+        CHECK(scriptRow(script).panes == PaneShape::SingleLeaf);
+    }
+    // Every other script serves no tab.
+    CHECK(std::ranges::count_if(SnapshotScripts,
+                                [](SnapshotScriptRow const& row) { return row.served != ServedDecor::None; })
+          == 3);
 }

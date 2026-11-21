@@ -1,0 +1,24 @@
+╭─ Agents ─────────────────────────────────────────────────────────────────────╮
+│ ✗ #1847 Adds ability to set Contour as default terminal on Windows OS · dra… │
+│                                                                              │
+│ ISSUES WITHOUT A PR                                                          │
+│ ▾ contour · 5                                                                │
+│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key presses, then… │
+│   #2338 Flaky on Windows: SessionHost.extension.controlVerb requires the pe… │
+│   #2253 Switch `daemon` Same `client`                                        │
+│   #2163 OSC 133: optional nonce to reject forged command lines and marks     │
+│   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead of settin… │
+│                                                                              │
+│ AGENTS · 1 OF 4 RUNNING                                                      │
+│ ○ pr-2375 · fix CI · sonnet                                       working 6m │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Details ────────────────────────────────────────────────────────────────────╮
+│ pr-2375 · fix CI · sonnet                                                    │
+│                                                                              │
+│ task      fix CI                                                             │
+│ model     sonnet                                                             │
+│ state     running                                                            │
+│ branch    agent/pr-2375-20261113-150847…                                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ ↑↓ move · enter open · d dispatch · ? help · b board · t transcript · / filter 
+ end pr-2375-20261113-150847? e to confirm · esc to keep                        

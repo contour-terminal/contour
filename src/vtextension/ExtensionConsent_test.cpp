@@ -3,7 +3,11 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <map>
+#include <ranges>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -11,6 +15,8 @@
 #include <vector>
 
 #include <vtextension/ExtensionConsent.hpp>
+#include <vtextension/Manifest.hpp>
+#include <vtextension/RootPointer.hpp>
 
 using vtextension::ConsentAnswer;
 using vtextension::ConsentPrompt;
@@ -23,6 +29,7 @@ using vtextension::ExtensionConsentRequest;
 using vtextension::GrantState;
 using vtextension::Manifest;
 using vtextension::neutralizedForDisplay;
+using vtextension::ResolvedRoot;
 
 namespace
 {
@@ -322,4 +329,177 @@ TEST_CASE("ExtensionConsent: a guest's log line reads as what it is", "[vtextens
           == "git [warning]: dirty<U+001B>[2J");
     CHECK(vtextension::extensionLogLine("git", vtextension::LogLevel::Trace, "x") == "git [trace]: x");
     CHECK(vtextension::extensionLogLine("git", static_cast<vtextension::LogLevel>(99), "x") == "git [?]: x");
+}
+
+namespace
+{
+/// @return The whole of @p path, which must exist.
+[[nodiscard]] std::string readWhole(std::filesystem::path const& path)
+{
+    auto file = std::ifstream(path, std::ios::binary);
+    REQUIRE(file);
+    auto text = std::ostringstream {};
+    text << file.rdbuf();
+    return std::move(text).str();
+}
+
+/// @return The orchestrator's manifest's text, from the conformance corpus.
+[[nodiscard]] std::string orchestratorManifestText()
+{
+    return readWhole(std::filesystem::path { VTEXTENSION_MANIFEST_CORPUS_DIR } / "valid"
+                     / "orchestrator.manifest");
+}
+
+/// @return The orchestrator's manifest, from the conformance corpus.
+[[nodiscard]] Manifest orchestratorManifest()
+{
+    auto manifest = vtextension::parseManifestText(orchestratorManifestText());
+    REQUIRE(manifest.has_value());
+    return std::move(*manifest);
+}
+
+/// The orchestrator's roots, as a user's configuration resolves them.
+[[nodiscard]] std::vector<ResolvedRoot> orchestratorRoots()
+{
+    return { ResolvedRoot { .label = "worktrees", .paths = { "/home/u/worktrees" } },
+             ResolvedRoot { .label = "repos", .paths = { "/home/u/repo/contour" } } };
+}
+
+/// @return @p question's title and lines, one per line.
+[[nodiscard]] std::string joined(ConsentQuestion const& question)
+{
+    auto text = question.title + "\n";
+    for (auto const& line: question.lines)
+        text += line.text + "\n";
+    return text;
+}
+} // namespace
+
+TEST_CASE("ExtensionConsent: the daemon question for the orchestrator", "[vtextension][consent][daemon]")
+{
+    auto const roots = orchestratorRoots();
+    auto const question = vtextension::daemonConsentQuestion(vtextension::DaemonConsentRequest {
+        .hostId = "orchestrator@/usr/lib/contour/extensions/orchestrator.wasm",
+        .manifest = orchestratorManifest(),
+        .roots = roots,
+        .grantDigest = "g" });
+
+    // The consent text lives beside the manifest it renders, so that the two change in one commit.
+    CHECK(joined(question)
+          == readWhole(std::filesystem::path { VTEXTENSION_MANIFEST_CORPUS_DIR } / "valid"
+                       / "orchestrator.consent.txt"));
+
+    auto commandLines = question.lines | std::views::filter([](vtextension::ConsentLine const& line) {
+                            return line.text.contains("short, in ") || line.text.contains("long, in ");
+                        });
+    // One line per declared command: as many as the manifest has `command` lines.
+    auto const manifestText = orchestratorManifestText();
+    auto const declared = std::ranges::count_if(std::views::split(manifestText, '\n'), [](auto const& line) {
+        return std::string_view { line }.starts_with("command ");
+    });
+    CHECK(std::ranges::distance(commandLines) == declared);
+    CHECK(std::ranges::all_of(commandLines, [](vtextension::ConsentLine const& line) {
+        return line.weight == vtcontrol::ConsentWeight::CanRunCommands;
+    }));
+    CHECK(std::ranges::none_of(question.lines, [](vtextension::ConsentLine const& line) {
+        return line.text.starts_with("It may send");
+    }));
+    auto const prs = std::ranges::find_if(question.lines, [](vtextension::ConsentLine const& line) {
+        return line.text.starts_with("gh-prs ");
+    });
+    REQUIRE(prs != question.lines.end());
+    CHECK(prs->text.ends_with(
+        "--jq "
+        "[.[]|[.number,.title,.url,.headRefName,.baseRefName,.isDraft,.isCrossRepository,.reviewDecision,"
+        "[.closingIssuesReferences[]|[.number,.url]],[.statusCheckRollup[]|[.__typename,.name,.context,."
+        "status,"
+        ".conclusion,.state]]]]"));
+    CHECK(
+        std::ranges::find(question.lines,
+                          std::string_view { "Directory (worktrees, created if missing): /home/u/worktrees" },
+                          &vtextension::ConsentLine::text)
+        != question.lines.end());
+    CHECK(std::ranges::find(question.lines,
+                            std::string_view { "Directory (repos): /home/u/repo/contour" },
+                            &vtextension::ConsentLine::text)
+          != question.lines.end());
+}
+
+TEST_CASE("ExtensionConsent: guest and configuration text in the daemon question is neutralized",
+          "[vtextension][consent][daemon]")
+{
+    auto manifest = orchestratorManifest();
+    manifest.name = "orch\x1b[2J";
+    auto const question = vtextension::daemonConsentQuestion(vtextension::DaemonConsentRequest {
+        .hostId = "h",
+        .manifest = std::move(manifest),
+        .roots = { ResolvedRoot { .label = "repos", .paths = { "/r\x1b]0;x\x07" } } },
+        .grantDigest = "g" });
+    CHECK(question.title == "“orch<U+001B>[2J” wants to run in the background");
+    CHECK(std::ranges::find(question.lines,
+                            std::string_view { "Directory (repos): /r<U+001B>]0;x<U+0007>" },
+                            &vtextension::ConsentLine::text)
+          != question.lines.end());
+}
+
+TEST_CASE("ExtensionConsent: the daemon question shows every variable a command or pane is given",
+          "[vtextension][consent][daemon][environment]")
+{
+    auto manifest = orchestratorManifest();
+    auto const question = vtextension::daemonConsentQuestion(vtextension::DaemonConsentRequest {
+        .hostId = "h", .manifest = manifest, .roots = orchestratorRoots(), .grantDigest = "g" });
+    auto const shows = [&](std::string_view text) {
+        return std::ranges::contains(question.lines, text, &vtextension::ConsentLine::text);
+    };
+    // What a granted program runs with is part of what is granted: every entry, one line each.
+    auto const& shown = question.lines;
+    auto const environmentLines = static_cast<std::size_t>(std::ranges::count_if(
+        shown, [](vtextension::ConsentLine const& line) { return line.text.starts_with("  "); }));
+    auto declared = manifest.commandEnvironment.size();
+    for (auto const& command: manifest.commands)
+        declared += command.environment.size();
+    for (auto const& pane: manifest.panes)
+        declared += pane.environment.size();
+    REQUIRE(declared > 0);
+    CHECK(environmentLines == declared);
+    CHECK(shows("  GIT_CONFIG_KEY_1=core.hooksPath"));
+    CHECK(shows("  GIT_CONFIG_KEY_0=push.default"));
+    // Beneath what it is set for: the pane's variables follow the pane's line.
+    auto const pane = std::ranges::find_if(shown, [](vtextension::ConsentLine const& line) {
+        return line.text.starts_with("It may open tabs");
+    });
+    REQUIRE(pane != shown.end());
+    REQUIRE(std::next(pane) != shown.end());
+    CHECK(std::next(pane)->text == "  GIT_CONFIG_COUNT=2");
+    CHECK(std::ranges::all_of(shown, [](vtextension::ConsentLine const& line) {
+        return !line.text.starts_with("  ") || line.weight == vtcontrol::ConsentWeight::CanRunCommands;
+    }));
+
+    // And as text: a value cannot disguise itself.
+    manifest.panes.front().environment.push_back(
+        vtextension::EnvironmentEntry { .name = "LC_ALL", .value = "C\x1b[2K\nGIT_CONFIG_KEY_0=x" });
+    auto const disguised = vtextension::daemonConsentQuestion(vtextension::DaemonConsentRequest {
+        .hostId = "h", .manifest = std::move(manifest), .roots = orchestratorRoots(), .grantDigest = "g" });
+    CHECK(std::ranges::contains(disguised.lines,
+                                std::string_view { "  LC_ALL=C<U+001B>[2K<U+000A>GIT_CONFIG_KEY_0=x" },
+                                &vtextension::ConsentLine::text));
+}
+
+TEST_CASE("ExtensionConsent: a grant for the old roots does not cover new ones",
+          "[vtextension][consent][daemon]")
+{
+    auto grants = MemoryGrants {};
+    auto const hostId = std::string { "orchestrator@/usr/lib/contour/extensions/orchestrator.wasm" };
+    auto const manifestDigest = std::string { "d" };
+    auto const rootsA = orchestratorRoots();
+    grants.record(hostId, vtextension::grantDigestOf(manifestDigest, rootsA), GrantState::Granted);
+    REQUIRE(grants.lookup(hostId, vtextension::grantDigestOf(manifestDigest, rootsA)) == GrantState::Granted);
+
+    auto moved = rootsA;
+    moved[0].paths = { "/home/u/elsewhere" };
+    CHECK(grants.lookup(hostId, vtextension::grantDigestOf(manifestDigest, moved)) == GrantState::Pending);
+
+    auto added = rootsA;
+    added[1].paths.emplace_back("/home/u/repo/other");
+    CHECK(grants.lookup(hostId, vtextension::grantDigestOf(manifestDigest, added)) == GrantState::Pending);
 }

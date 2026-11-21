@@ -1,0 +1,4 @@
+# Every command is bound to one root.
+name = unbound
+version = 2
+command git-status short = git status --porcelain

@@ -1,0 +1,7 @@
+# A pane template: a bound root and an argv with whole-word placeholders.
+name = panes
+version = 2
+root worktrees = config:worktree_root
+arg model = name
+arg prompt = text
+pane agent @worktrees = claude --model {model} {prompt}

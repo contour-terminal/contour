@@ -31,6 +31,11 @@ class RecordingWatchdog final: public IDeadlineWatchdog
 
     void disarm(WatchToken token) override { disarmed.push_back(token); }
 
+    [[nodiscard]] std::chrono::nanoseconds unspent(WatchToken /*token*/) override
+    {
+        return std::chrono::nanoseconds::zero();
+    }
+
     std::vector<WatchToken> armed;
     std::vector<WatchToken> disarmed;
     bool failArming = false;

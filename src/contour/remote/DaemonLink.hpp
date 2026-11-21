@@ -16,6 +16,7 @@
 #include <contour/session/WindowSwitching.hpp>
 #include <contour/window/DaemonDriftChoice.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
+#include <contour/window/DaemonExtensionConsentModel.hpp>
 #include <contour/window/WindowId.hpp>
 #include <contour/window/WorkspaceDirectorySource.hpp>
 
@@ -334,15 +335,25 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
 
     /// @return What the drift badge of each window it serves shows: its own drift.
     [[nodiscard]] window::DaemonDriftModel* daemonDrift() noexcept override { return &_drift; }
+
+    /// @return What the consent dialog of each window it serves shows: its daemon's extensions' questions.
+    [[nodiscard]] window::DaemonExtensionConsentModel* daemonExtensionConsent() noexcept override
+    {
+        return &_consent;
+    }
     /// Upgrades the daemon in place when window::upgradeVerdictFor() allows it for this link's daemon.
     [[nodiscard]] std::expected<void, std::string> upgradeDaemonOnCommand() override;
+    [[nodiscard]] vthost::proto::ExtensionPresence extensionPresence() const override;
+    [[nodiscard]] session::ExtensionInvocation invokeExtensionAction(std::string const& extension,
+                                                                     std::string const& id) override;
 
     /// Looks at the connect the constructor began, with what remains of @p budget, and returns at once, so
     /// the event loop serves whatever the connect needs the GUI thread for (ssh's prompts). On failure the
     /// controller is given up (@see abandonConnect()), and with it the attach-window binder.
     /// @param budget How long the attach may take since the link was built.
     /// @return Nothing while it is still going; else nothing once attached, or why not.
-    [[nodiscard]] std::optional<std::expected<void, std::string>> pollAttached(vthost::AttachBudget budget);
+    [[nodiscard]] std::optional<std::expected<void, std::string>> pollAttached(
+        vthost::AttachBudget const& budget);
 
     /// Shows the drift badge when the daemon runs another release than this client, and wires its actions to
     /// the host's upgrade and restart, for a local daemon. Follows the daemon through an upgrade: the badge
@@ -507,9 +518,14 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
 
     void showDaemonDrift();
     void askHostedExtensions();
+    /// Shows the daemon-scoped extensions' questions the daemon sent, and closes those answered elsewhere.
+    void followDaemonConsent();
     /// Answers the switch requests the daemon sent: each behind the guard (runGuardedSwitch()), in the window
     /// showing its workspace, or Failed when no window of this link shows it.
     void answerSwitchRequests();
+    /// Raises and focuses the panes the daemon revealed (paneRevealRequested()), and those revealed before
+    /// their pane was realized here, once the layouts that bring them have.
+    void followPaneReveals();
     void requireGuiThread() const;
 
     Id _id;
@@ -517,10 +533,17 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     session::TerminalSessionManager& _sessions;
     std::string _hostLabel;
     window::DaemonDriftModel _drift; ///< Declared before the controllers: destroyed after them.
+    /// The daemon-scoped extensions' questions, for this link's windows. Declared before the controllers,
+    /// through which it answers: destroyed after them.
+    window::DaemonExtensionConsentModel _consent;
     window::DaemonLocality _locality;
     window::DaemonUpkeep _upkeep;
     std::string _clientRelease;
     AttachState _state = AttachState::Connecting;
+
+    /// The panes the daemon revealed that no window of this link showed yet, oldest first: each tab arrives
+    /// with a layout, for a few looks or RevealPatience at most (followReveals()).
+    std::vector<PendingReveal> _pendingReveals;
 
     /// The live controller; null once given up. Remote-backed sessions hold ptys that unregister from it.
     std::unique_ptr<NativeController> _controller;

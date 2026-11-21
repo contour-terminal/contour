@@ -39,6 +39,13 @@ struct DaemonExtensionServices
     core::async::StopSource& commandShutdown;
 };
 
+/// Writes what an extension logs to the daemon's log (`vthost.extension`); nothing while that is disabled.
+/// Called on the extension's lane.
+/// @param name What the configuration calls the extension.
+/// @param level How severe the message is.
+/// @param message What it logged.
+void logExtensionMessage(std::string_view name, vtextension::LogLevel level, std::string_view message);
+
 /// @param manifest An extension's manifest.
 /// @param hostId The host id the daemon assigned the installed extension.
 /// @return The question it asks, as the wire carries it; naming no session yet.

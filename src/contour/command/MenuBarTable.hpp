@@ -214,6 +214,9 @@ inline constexpr std::array MenuReachabilityExemptions {
                                 .reason =
                                     "reached from the palette and key bindings; a window with no daemon "
                                     "has nothing to upgrade" },
+    MenuReachabilityExemption { .action = "ExtensionAction",
+                                .reason = "reached from the palette, one row per action a daemon extension "
+                                          "declares, and key bindings" },
 };
 
 } // namespace contour::command

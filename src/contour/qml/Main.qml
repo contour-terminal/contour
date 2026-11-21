@@ -831,6 +831,16 @@ ThemedWindow
         function onPendingPromptChanged() { askpassDialog.present(askpassDialog.host.pendingPrompt) }
     }
 
+    // The window's daemon asks here whether one of its own extensions may run in the background
+    // (WindowController.daemonExtensionConsent). Only a window can grant it; Return is Deny.
+    // `!== undefined` for a lightweight mock `win` without one.
+    DaemonExtensionConsentDialog {
+        id: daemonExtensionConsentDialog
+        model: appWindow.win && appWindow.win.daemonExtensionConsent !== undefined
+               ? appWindow.win.daemonExtensionConsent : null
+        focusTarget: paneContentLoader.item
+    }
+
     Connections {
         target: appWindow.win
         function onCommandPaletteRequested() { commandPalette.open(); }

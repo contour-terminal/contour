@@ -207,10 +207,14 @@ TEST_CASE("SpawnSpec.classifyInvocation", "[vtpty][spawnspec]")
         return classifyInvocation(argv);
     };
     CHECK(classify({ "contour" }) == TrampolineInvocation::NotRequested);
-    CHECK(classify({ "x", "--vtpty-spawn-trampoline=1" }) == TrampolineInvocation::Supported);
-    CHECK(classify({ "x", "--vtpty-spawn-trampoline=2" }) == TrampolineInvocation::UnsupportedVersion);
+    // Version 2 added the WorkingDirectory slot: a version-1 trampoline would start in the parent's
+    // directory.
+    CHECK(SpawnTrampolineProtocolVersion == 2);
+    CHECK(classify({ "x", "--vtpty-spawn-trampoline=2" }) == TrampolineInvocation::Supported);
+    CHECK(classify({ "x", "--vtpty-spawn-trampoline=1" }) == TrampolineInvocation::UnsupportedVersion);
+    CHECK(classify({ "x", "--vtpty-spawn-trampoline=3" }) == TrampolineInvocation::UnsupportedVersion);
     CHECK(classify({ "x", "--vtpty-spawn-trampoline=" }) == TrampolineInvocation::UnsupportedVersion);
-    CHECK(classify({ "x", "--vtpty-spawn-trampoline=1", "extra" }) == TrampolineInvocation::Supported);
+    CHECK(classify({ "x", "--vtpty-spawn-trampoline=2", "extra" }) == TrampolineInvocation::Supported);
     CHECK(classify({ "x", "other" }) == TrampolineInvocation::NotRequested);
 }
 
@@ -218,6 +222,10 @@ TEST_CASE("SpawnSpec.trampolineFd", "[vtpty][spawnspec]")
 {
     CHECK(trampolineFd(TrampolineSlot::Gate) == 4);
     CHECK(trampolineFd(TrampolineSlot::Output) == 9);
-    for (auto const slot: { TrampolineSlot::Gate, TrampolineSlot::Output, TrampolineSlot::Terminal })
+    CHECK(trampolineFd(TrampolineSlot::WorkingDirectory) == 10);
+    for (auto const slot: { TrampolineSlot::Gate,
+                            TrampolineSlot::Output,
+                            TrampolineSlot::Terminal,
+                            TrampolineSlot::WorkingDirectory })
         CHECK(trampolineFd(slot) != SpawnSpecFd);
 }

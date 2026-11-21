@@ -53,6 +53,7 @@
 
 #include <vthost/Daemon.hpp>
 #include <vthost/DaemonBinary.hpp>
+#include <vthost/DaemonConsentKey.hpp>
 #include <vthost/DaemonIdentity.hpp>
 #include <vthost/DaemonImage.hpp>
 #include <vthost/DaemonLifecycle.hpp>
@@ -69,6 +70,7 @@
 #include <vthost/handover/ImageHandoff.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vthost/proto/Wire.hpp>
+#include <vthost/testing/CountingRandom.hpp>
 #include <vthost/testing/FakeHandoverMemory.hpp>
 #include <vthost/testing/FakeImageLeases.hpp>
 #include <vthost/testing/FakeProcessImageReplacer.hpp>
@@ -363,6 +365,51 @@ TEST_CASE("a StopDaemon ends runDaemon with a StopRequested shutdown", "[vthost]
     REQUIRE(hello != nullptr);
     CHECK(hello->capabilities.contains(vthost::proto::Capability::DaemonControl));
     CHECK(hello->capabilities.contains(vthost::proto::Capability::ExtensionPermissions));
+    // With no consent key there is no grant a window could prove, so none is asked for.
+    CHECK_FALSE(hello->capabilities.contains(vthost::proto::Capability::DaemonExtensionConsent));
+}
+
+TEST_CASE("a daemon that never serves leaves the serving daemon's consent key alone",
+          "[vthost][daemon][afunix][consent]")
+{
+    // Two daemons on one socket -- two clients auto-spawning one each: the second loses the bind, and must
+    // not replace the key every window of the first proves. The key is made only once the socket is held, in
+    // a file of that run's own.
+    auto const tmp = TempDir {};
+    auto random = vthost::testing::CountingRandom {};
+    auto const keysAt = [&](uint64_t instance, std::shared_ptr<ManualShutdownSignals> const& signals) {
+        auto config = vthost::DaemonConfig {};
+        config.instance = instance;
+        config.socketPath = tmp.path / "control";
+        config.shutdownSignals = signals;
+        config.consentKeys = vthost::DaemonConsentKeys { .directory = tmp.path / "state" / "consent",
+                                                         .socket = tmp.path / "control",
+                                                         .files = vthost::nativeConsentKeyFiles(),
+                                                         .random = random };
+        return config;
+    };
+    auto const firstSignals = std::make_shared<ManualShutdownSignals>();
+    auto const first = keysAt(1, firstSignals);
+    auto daemon = std::async(std::launch::async, [&first] { return vthost::runDaemon(first); });
+    auto const stopOnExit = StopOnExit { *firstSignals };
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    REQUIRE(awaitAccepting(loop, core::pathToUtf8(vthost::nativeSocketPath(first.socketPath))));
+
+    auto const directory = tmp.path / "state" / "consent";
+    auto const key =
+        vthost::readDaemonConsentKey(vthost::nativeConsentKeyFiles(), directory, first.socketPath, 1);
+    REQUIRE(key.has_value());
+
+    auto const second = keysAt(2, std::make_shared<ManualShutdownSignals>());
+    CHECK(vthost::runDaemon(second) != EXIT_SUCCESS);
+    CHECK(vthost::readDaemonConsentKey(vthost::nativeConsentKeyFiles(), directory, first.socketPath, 1)
+          == key);
+    CHECK_FALSE(fs::exists(directory / vthost::daemonConsentKeyName(first.socketPath, 2)));
+
+    firstSignals->fire();
+    REQUIRE(daemon.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+    CHECK(daemon.get() == EXIT_SUCCESS);
 }
 
 namespace
@@ -831,7 +878,7 @@ struct RestartHarness
         auto host = startHost(std::nullopt);
         auto* const tab = host->createTab();
         REQUIRE(tab != nullptr);
-        host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical);
+        std::ignore = host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical);
         REQUIRE(tab->paneCount() == 2);
         auto persistence = vthost::DaemonPersistence { loop,
                                                        *host,

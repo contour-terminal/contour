@@ -52,6 +52,30 @@ TEST_CASE("paneHeader.singlePaneNeverHasAHeader", "[paneheader]")
                 }
 }
 
+TEST_CASE("paneHeader.aServedPaneAlwaysSaysWhoDrawsIt", "[paneheader][served]")
+{
+    // Alone, under either density and with nothing revealing it: inline, name only, no actions.
+    for (auto const density: { ChromeDensity::Comfortable, ChromeDensity::Minimal })
+    {
+        auto inputs = Base;
+        inputs.density = density;
+        inputs.visiblePanes = 1;
+        inputs.pointer = PointerPresence::Hovering;
+        inputs.focus = PaneFocus::KeyboardFocused;
+        inputs.source = PaneSource::Served;
+        CHECK(resolvePaneHeader(inputs)
+              == PaneHeader { .content = PaneHeaderContent::Name,
+                              .actions = HeaderActions::Hidden,
+                              .placement = HeaderPlacement::Inline,
+                              .emphasis = HeaderEmphasis::Primary });
+        inputs.focus = PaneFocus::Unfocused;
+        CHECK(resolvePaneHeader(inputs).emphasis == HeaderEmphasis::Secondary);
+        // Too short for its row and a row of cells, it gives way as any inline header does.
+        inputs.height = 30;
+        CHECK(resolvePaneHeader(inputs).content == PaneHeaderContent::Hidden);
+    }
+}
+
 TEST_CASE("paneHeader.comfortableSplit", "[paneheader]")
 {
     CHECK(resolvePaneHeader(Base)

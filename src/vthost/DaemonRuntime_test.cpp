@@ -260,7 +260,7 @@ TEST_CASE("a second upgrade request while one runs is refused InProgress", "[vth
     auto clock = core::platform::ManualClock {};
     auto h = RuntimeHarness {};
     auto const connections = vthost::ConnectionRegistry {};
-    auto hooks = vthost::DaemonUpgradeHooks { connections, {} };
+    auto hooks = vthost::DaemonUpgradeHooks { h.host, connections, {} };
     auto state = UpgradeState::Idle;
     auto targets = std::vector<std::string> {};
     auto runtime = vthost::DaemonRuntime { {},
@@ -350,7 +350,7 @@ TEST_CASE("an upgrade that fails after its announcement is recorded at the same 
     auto clock = core::platform::ManualClock {};
     auto h = RuntimeHarness {};
     auto const connections = vthost::ConnectionRegistry {};
-    auto hooks = vthost::DaemonUpgradeHooks { connections, {} };
+    auto hooks = vthost::DaemonUpgradeHooks { h.host, connections, {} };
     auto state = UpgradeState::Idle;
     auto targets = std::vector<std::string> {};
     auto announcing = true;
@@ -425,7 +425,7 @@ TEST_CASE("an upgrade that throws after its announcement is recorded as an exec 
     auto clock = core::platform::ManualClock {};
     auto h = RuntimeHarness {};
     auto const connections = vthost::ConnectionRegistry {};
-    auto hooks = vthost::DaemonUpgradeHooks { connections, {} };
+    auto hooks = vthost::DaemonUpgradeHooks { h.host, connections, {} };
     auto state = UpgradeState::Idle;
     auto runtime = vthost::DaemonRuntime { {},
                                            h.host,

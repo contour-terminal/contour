@@ -6,8 +6,11 @@
 
 #include <core/platform/Clock.hpp>
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <functional>
@@ -15,6 +18,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -33,6 +38,44 @@
 
 namespace vthost::control
 {
+
+/// What a call does with the pane it names.
+enum class PaneUse : uint8_t
+{
+    Address = 0, ///< Names it, to close, rename, list or move it.
+    Content,     ///< Reads or drives what the pane shows: refused on a served pane.
+};
+
+/// The methods that read or drive what a pane shows, or what its chrome reports of it. A served pane's
+/// content belongs to the extension that draws it, so these are refused on one (`Forbidden`); MCP's
+/// `pane_type` is built on `pane.send`. Every handler derives its PaneUse from this table (paneUseOf()).
+inline constexpr auto ServedPaneContentMethods = std::to_array<std::string_view>({
+    "pane.send",
+    "pane.capture",
+    "block.list",
+    "block.read",
+    "block.wait",
+    "pane.reportStatus",
+    "pane.clearStatus",
+});
+
+/// @tparam Request A method's request type.
+/// @return Content for a method of ServedPaneContentMethods, else Address.
+template <typename Request>
+[[nodiscard]] consteval PaneUse paneUseOf() noexcept
+{
+    return std::apply(
+        [](auto const&... method) {
+            auto use = PaneUse::Address;
+            (((std::is_same_v<typename std::remove_cvref_t<decltype(method)>::Request, Request>
+               && std::ranges::contains(ServedPaneContentMethods, method.name))
+                  ? (void) (use = PaneUse::Content)
+                  : (void) 0),
+             ...);
+            return use;
+        },
+        vtcontrol::Methods);
+}
 
 /// The most event subscriptions one connection may hold at once, by default.
 inline constexpr std::size_t DefaultMaxSubscriptionsPerConnection = 64;
@@ -66,6 +109,9 @@ struct ControlServiceConfig
     /// How `daemon.upgrade` starts an upgrade; empty for a service of no daemon, which refuses it
     /// `notSupported`.
     UpgradeStarter upgrade {};
+    /// What the `extension.*` verbs reach: never anything that records an answer. Borrowed; null for a daemon
+    /// without daemon-scoped extensions, which answers every `extension.*` verb unsupported.
+    IDaemonExtensionControl* extensions = nullptr;
 };
 
 /// Implements the control API over a SessionHost: one method per catalog row.
@@ -112,6 +158,10 @@ class ControlService final:
     void handle(vtcontrol::CallContext& context, vtcontrol::MoveTabRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::MovePaneRequest const& request, vtcontrol::Completion<vtcontrol::MovePaneReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::SwitchWorkspaceRequest const& request, vtcontrol::Completion<vtcontrol::SwitchWorkspaceReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::ExtensionListRequest const& request, vtcontrol::Completion<vtcontrol::ExtensionListReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::ExtensionGrantRequest const& request, vtcontrol::Completion<vtcontrol::ExtensionGrantReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::ExtensionRevokeRequest const& request, vtcontrol::Completion<vtcontrol::ExtensionRevokeReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::ExtensionStatusRequest const& request, vtcontrol::Completion<vtcontrol::ExtensionStatusReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::ObjectRenameRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::ReportStatusRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::ClearStatusRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
@@ -197,9 +247,16 @@ class ControlService final:
     /// the host's workspace.
     /// @param context The call.
     /// @param spec What the request named; empty for the default.
-    /// @return The pane, or `NotFound` naming what was asked for.
+    /// @param use What the call does with the pane.
+    /// @return The pane, `NotFound` naming what was asked for, or `Forbidden` for a served pane's content.
     [[nodiscard]] std::expected<PaneTarget, vtcontrol::ControlError> resolvePane(
-        vtcontrol::CallContext const& context, std::string_view spec) const;
+        vtcontrol::CallContext const& context, std::string_view spec, PaneUse use) const;
+
+    /// @param pane A live pane.
+    /// @param use What the call does with it.
+    /// @return @p pane, or `Forbidden` naming the extension when @p use reads or drives a served pane.
+    [[nodiscard]] std::expected<PaneTarget, vtcontrol::ControlError> reachable(PaneTarget const& pane,
+                                                                               PaneUse use) const;
 
     /// The tab a call is about: @p spec, else the caller pane's tab.
     [[nodiscard]] std::expected<vtworkspace::TabId, vtcontrol::ControlError> resolveTab(
@@ -226,9 +283,13 @@ class ControlService final:
     /// @param context The call.
     /// @param block A block id; empty for the last finished block of @p pane.
     /// @param pane The pane, when @p block is empty.
-    /// @return The block's pane and serial, or `NotFound` naming the block.
+    /// @param use What the call does with the block's pane.
+    /// @return The block's pane and serial, `NotFound` naming the block, or `Forbidden` (@see resolvePane).
     [[nodiscard]] std::expected<BlockTarget, vtcontrol::ControlError> resolveBlock(
-        vtcontrol::CallContext const& context, std::string_view block, std::string_view pane) const;
+        vtcontrol::CallContext const& context,
+        std::string_view block,
+        std::string_view pane,
+        PaneUse use) const;
 
     /// @param context The call.
     /// @param object `<kind>:<spec>`, e.g. `pane:logs` or a full id.

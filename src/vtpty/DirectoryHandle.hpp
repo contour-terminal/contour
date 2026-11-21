@@ -1,0 +1,113 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <vtpty/OwnedFd.hpp>
+
+#include <cstdint>
+#include <expected>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
+
+// A directory held open, so that a child entered by it runs there even if its name is replaced in the
+// meantime -- the guard against a working directory swapped for a symlink between the check and the spawn.
+namespace vtpty
+{
+
+/// Why a directory could not be opened, resolved or created.
+enum class DirectoryError : uint8_t
+{
+    Missing,       ///< Nothing exists at the path (or a component of it is a dangling or looping link).
+    NotADirectory, ///< Something exists there, but it is not a directory.
+    AccessDenied,  ///< The directory exists but may not be opened, or the system refused for another reason.
+    Unsupported,   ///< This platform has no directory handles.
+};
+
+/// An open directory: a child entered by it runs there even if the path is replaced afterwards.
+class DirectoryHandle
+{
+  public:
+    /// @param descriptor The open directory; -1 for none (see unbacked()).
+    /// @param resolvedPath The directory's canonical path, as read from @p descriptor when it was opened.
+    DirectoryHandle(OwnedFd descriptor, std::string resolvedPath) noexcept:
+        _descriptor { std::move(descriptor) }, _resolvedPath { std::move(resolvedPath) }
+    {
+    }
+
+    /// A handle that holds no descriptor, for test doubles that never enter it.
+    /// @param resolvedPath The path it stands for.
+    /// @return The handle; its descriptor() is -1.
+    [[nodiscard]] static DirectoryHandle unbacked(std::string resolvedPath) noexcept
+    {
+        return DirectoryHandle { OwnedFd {}, std::move(resolvedPath) };
+    }
+
+    /// @return The open directory's descriptor; -1 when unbacked.
+    [[nodiscard]] int descriptor() const noexcept { return _descriptor.get(); }
+
+    /// @return The directory's canonical path, read from the descriptor when it was opened.
+    [[nodiscard]] std::string const& resolvedPath() const noexcept { return _resolvedPath; }
+
+    /// @return Whether the open directory has been removed since -- no name links to it any more, whatever
+    ///         stands at its path now; false for an unbacked handle, and where it cannot be told (Windows).
+    [[nodiscard]] bool isRemoved() const noexcept;
+
+  private:
+    OwnedFd _descriptor;
+    std::string _resolvedPath;
+};
+
+/// Opens directories by handle, resolves paths, and creates directories one component at a time beneath a
+/// handle: the seam the filesystem is reached through where a working directory is chosen.
+class IDirectoryOpener
+{
+  public:
+    IDirectoryOpener() = default;
+    IDirectoryOpener(IDirectoryOpener const&) = delete;
+    IDirectoryOpener(IDirectoryOpener&&) = delete;
+    IDirectoryOpener& operator=(IDirectoryOpener const&) = delete;
+    IDirectoryOpener& operator=(IDirectoryOpener&&) = delete;
+    virtual ~IDirectoryOpener() = default;
+
+    /// Opens the directory at @p path, following symlinks.
+    /// @return The open directory, its resolved path read from the descriptor; or why it could not be opened.
+    [[nodiscard]] virtual std::expected<DirectoryHandle, DirectoryError> open(std::string_view path) = 0;
+
+    /// @param existingPath A path that exists.
+    /// @return Its canonical form, every symlink resolved; or why it could not be resolved.
+    [[nodiscard]] virtual std::expected<std::string, DirectoryError> canonical(
+        std::string_view existingPath) = 0;
+
+    /// Creates one directory beneath an open one, following no link: a name that is already a directory is
+    /// opened, a symlink or anything else in its place is refused.
+    /// @param parent The open directory to create in.
+    /// @param name One path component: not empty, not `.` or `..`, without `/`.
+    /// @return The new (or existing) directory, opened; `NotADirectory` if a symlink or a non-directory is in
+    ///         the way.
+    [[nodiscard]] virtual std::expected<DirectoryHandle, DirectoryError> createBeneath(
+        DirectoryHandle const& parent, std::string_view name) = 0;
+};
+
+/// Where an opened directory's path is read from.
+enum class DescriptorPaths : uint8_t
+{
+    /// Nowhere: the name's canonical form is opened again one component at a time from `/`, following no
+    /// link, so the path given is the descriptor's however the name changes meanwhile.
+    Unavailable = 0,
+    /// The kernel, from the descriptor (`/proc/self/fd/N` on Linux, `fcntl(F_GETPATH)` on macOS), where it
+    /// can tell; Unavailable's walk where it cannot.
+    FromKernel,
+};
+
+/// @param paths Where an opened directory's path is read from.
+/// @return An opener over this machine's filesystem; Windows: one whose every call answers `Unsupported`.
+[[nodiscard]] std::unique_ptr<IDirectoryOpener> makeDirectoryOpener(DescriptorPaths paths);
+
+/// @return The opener over this machine's filesystem. POSIX: a directory is opened
+///         `O_RDONLY | O_DIRECTORY | O_CLOEXEC`, and its resolved path read from the descriptor
+///         (DescriptorPaths::FromKernel). A directory deleted by the time it is opened is `Missing`. Windows:
+///         every call answers `Unsupported`.
+[[nodiscard]] IDirectoryOpener& nativeDirectoryOpener() noexcept;
+
+} // namespace vtpty

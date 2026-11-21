@@ -4,6 +4,7 @@
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/Primitives.hpp>
 
+#include <vtrasterizer/GridMetrics.hpp>
 #include <vtrasterizer/RenderTarget.hpp>
 #include <vtrasterizer/TextureAtlas.hpp>
 
@@ -12,6 +13,7 @@
 #include <chrono>
 #include <cstddef>
 #include <format>
+#include <memory>
 #include <optional>
 #include <ostream>
 #include <ranges>
@@ -202,6 +204,45 @@ class MockRenderTarget: public vtrasterizer::RenderTarget
     MockAtlasBackend _textureScheduler;
     MockImageTextureBackend _imageScheduler;
 };
+
+/// A minimal GridMetrics for a renderer drawing @p cellSize cells: an 80x24 page, baseline 0, and an
+/// underline one pixel up.
+/// @param cellSize The cell size.
+/// @param underlineThickness The underline's thickness, which is the light line thickness box drawing uses.
+/// @return The grid metrics.
+[[nodiscard]] inline GridMetrics gridMetricsFor(vtbackend::ImageSize cellSize, int underlineThickness)
+{
+    return GridMetrics { .pageSize =
+                             vtbackend::PageSize { vtbackend::LineCount(24), vtbackend::ColumnCount(80) },
+                         .cellSize = cellSize,
+                         .baseline = 0,
+                         .underline = { .position = 1, .thickness = underlineThickness } };
+}
+
+/// A texture atlas a Renderable under test draws into, uploading to @p renderTarget's mock backend.
+///
+/// @p renderTarget must outlive the atlas, and the atlas the Renderable's use of it.
+/// @param renderTarget The target whose mock backend receives the atlas' commands.
+/// @param allocator The direct-mapping allocator the Renderable was handed with @p renderTarget.
+/// @param tileSize The size of one tile.
+/// @param format The tiles' pixel format.
+/// @param tileCount How many tiles the atlas holds.
+/// @return The atlas.
+[[nodiscard]] inline std::unique_ptr<Renderable::TextureAtlas> makeTestAtlas(
+    MockRenderTarget& renderTarget,
+    Renderable::DirectMappingAllocator const& allocator,
+    vtbackend::ImageSize tileSize,
+    atlas::Format format,
+    crispy::LRUCapacity tileCount)
+{
+    return std::make_unique<Renderable::TextureAtlas>(
+        renderTarget.textureScheduler(),
+        atlas::AtlasProperties { .format = format,
+                                 .tileSize = tileSize,
+                                 .hashCount = crispy::StrongHashtableSize { 64 },
+                                 .tileCount = tileCount,
+                                 .directMappingCount = allocator.currentlyAllocatedCount });
+}
 
 /// Renders @p tileData as one '#' (ink) / '.' (clear) string per row, top-origin, the way the bitmap
 /// is stored.

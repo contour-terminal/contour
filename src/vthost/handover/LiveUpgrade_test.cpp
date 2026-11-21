@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #ifndef _WIN32
+    #include <vtpty/DirectoryHandle.hpp>
     #include <vtpty/Process.hpp>
     #include <vtpty/ProcessPlacement.hpp>
     #include <vtpty/test/ProcessTesting.hpp>
@@ -19,6 +20,7 @@
     #include <cstddef>
     #include <cstring>
     #include <exception>
+    #include <expected>
     #include <filesystem>
     #include <format>
     #include <functional>
@@ -31,6 +33,7 @@
     #include <stdexcept>
     #include <string>
     #include <string_view>
+    #include <thread>
     #include <tuple>
     #include <utility>
     #include <variant>
@@ -42,6 +45,8 @@
     #include <vthost/DaemonBinary.hpp>
     #include <vthost/DaemonImage.hpp>
     #include <vthost/LoopDrain.hpp>
+    #include <vthost/OwnedPaneStore.hpp>
+    #include <vthost/OwnedPanes.hpp>
     #include <vthost/SessionHost.hpp>
     #include <vthost/handover/HandoverCodec.hpp>
     #include <vthost/handover/HandoverRestore.hpp>
@@ -61,6 +66,7 @@
     #include <vthost/testing/HandoverTesting.hpp>
     #include <vthost/testing/KeeperFixture.hpp>
     #include <vthost/testing/LiveUpgradeTesting.hpp>
+    #include <vthost/testing/ServedTesting.hpp>
     #include <vthost/testing/StagingFileSystem.hpp>
     #include <vthost/testing/TestHelpers.hpp>
 
@@ -135,8 +141,11 @@ struct Upgrade: vthost::testing::UpgradeBench
 {
     /// @param devices The device of each session the host spawns.
     /// @param settings The sessions' terminal settings.
-    explicit Upgrade(LiveHost::Devices devices = catDevice, vtbackend::Settings settings = {}):
-        UpgradeBench { std::move(devices), std::move(settings) }
+    /// @param config How the host is set up.
+    explicit Upgrade(LiveHost::Devices devices = catDevice,
+                     vtbackend::Settings settings = {},
+                     SessionHostConfig config = LiveHost::sequentialIds()):
+        UpgradeBench { std::move(devices), std::move(settings), std::move(config) }
     {
     }
 
@@ -256,6 +265,38 @@ struct AdoptingHost
 
     SessionHost host;
     LoopDrain drain;
+};
+
+/// A registry whose every save takes a while, as a slow disk's does: a save still on its way when the process
+/// image is replaced never lands.
+class SlowOwnedPaneStore final: public IOwnedPaneStore
+{
+  public:
+    static constexpr auto SaveTime = std::chrono::milliseconds { 1500 };
+
+    [[nodiscard]] std::vector<std::pair<std::string, std::vector<OwnedPaneRecord>>> loadAll() const override
+    {
+        return _records.loadAll();
+    }
+
+    [[nodiscard]] std::expected<void, OwnedPaneStoreError> save(
+        std::string_view extension, std::span<OwnedPaneRecord const> records) override
+    {
+        std::this_thread::sleep_for(SaveTime);
+        return _records.save(extension, records);
+    }
+
+    /// @return The records saved of @p extension so far.
+    [[nodiscard]] std::vector<OwnedPaneRecord> savedOf(std::string_view extension) const
+    {
+        for (auto const& [name, records]: _records.loadAll())
+            if (name == extension)
+                return records;
+        return {};
+    }
+
+  private:
+    InMemoryOwnedPaneStore _records;
 };
 
 /// The keeper a daemon runs behind, as a test sets its answers.
@@ -400,6 +441,45 @@ TEST_CASE("an exception after the keeper was told of the exec leaves the keeper 
     REQUIRE(u.live->eventually([&] { return u.allShow("ready"); }));
     CHECK(u.live->host.sessionCount() == 3);
     CHECK(k.keeper.launches().size() == 1);
+}
+
+TEST_CASE("a live upgrade writes the owned-pane registry before the exec",
+          "[vthost][handover][upgrade][panes]")
+{
+    constexpr auto Owner = std::string_view { "orchestrator" };
+    auto const store = std::make_shared<SlowOwnedPaneStore>();
+    auto config = LiveHost::sequentialIds();
+    config.ownedPaneStore = store;
+    auto u = Upgrade { catDevice, {}, std::move(config) };
+    u.live->spawnTwo();
+    auto& panes = u.live->host.ownedPanes();
+    REQUIRE(u.live->eventually([&] { return panes.list(Owner).has_value(); }));
+    auto const directory = std::make_shared<vtpty::DirectoryHandle const>(
+        vtpty::DirectoryHandle::unbacked(std::filesystem::temp_directory_path().string()));
+    auto const opened = panes.open(OwnedPaneSpawn { .extension = std::string(Owner),
+                                                    .argv = { "claude" },
+                                                    .directory = directory,
+                                                    .cwd = directory->resolvedPath(),
+                                                    .title = "run-1",
+                                                    .tag = "run-1" });
+    REQUIRE(opened.has_value());
+    REQUIRE(u.live->eventually([&] {
+        auto const listed = panes.list(Owner);
+        return listed && listed->size() == 1 && listed->front().state == OwnedPaneState::Open;
+    }));
+    REQUIRE(u.live->eventually([&] { return u.allShow("ready"); }));
+
+    // What the store holds at the exec is all the next image finds: nothing runs after it, no destructor.
+    auto atExec = std::optional<std::vector<OwnedPaneRecord>> {};
+    u.replacer.onReplace = [&] {
+        atExec = store->savedOf(Owner);
+        throw ImageReplaced {};
+    };
+    auto upgrade = u.orchestrator();
+    REQUIRE_THROWS_AS(std::ignore = u.run(upgrade, UpgradeTarget { .imageId = u.imageId }), ImageReplaced);
+    REQUIRE(atExec.has_value());
+    CHECK(*atExec
+          == std::vector { OwnedPaneRecord { .pane = *vtcontrol::parseUuid(*opened), .tag = "run-1" } });
 }
 
 TEST_CASE("an exception after the exec was announced calls it off with the keeper",
@@ -1187,5 +1267,98 @@ TEST_CASE("a daemon running in place upgrades to its installed executable",
 
     // An image name means nothing to a store that stages nothing.
     CHECK(refusedWith(u.run(upgrade, UpgradeTarget { .imageId = u.imageId }), UpgradeRefusal::NotStaged));
+}
+
+TEST_CASE("the served sessions are closed before the capture is checked",
+          "[vthost][handover][upgrade][served]")
+{
+    auto u = Upgrade {};
+    u.live->spawnTwo();
+    auto const shells = u.live->host.sessionIds();
+    auto const served = vthost::testing::openServedTab(u.live->host);
+    REQUIRE(served.has_value());
+    REQUIRE(u.live->eventually([&] {
+        return std::ranges::all_of(shells,
+                                   [&](SessionId id) { return u.live->pageText(id).contains("ready"); });
+    }));
+
+    // Asked before anything else: nothing announced, nothing captured, the served session still there.
+    u.hooks.onCloseServed = [&] {
+        CHECK(u.hooks.events.empty());
+        CHECK(u.replacer.replacements.empty());
+        CHECK(u.live->host.servedBy(*served) != nullptr);
+    };
+    auto image = std::optional<HandoverImage> {};
+    u.replacer.onReplace = [&] {
+        image = readHandover(u.memory, handoverFdOf(u.replacer.replacements.back().second)).value();
+        throw ImageReplaced {};
+    };
+    auto upgrade = u.orchestrator();
+    REQUIRE_THROWS_AS(std::ignore = u.run(upgrade, UpgradeTarget { .imageId = u.imageId }), ImageReplaced);
+
+    REQUIRE(image.has_value());
+    CHECK(
+        std::ranges::to<std::vector<SessionId>>(image->sessions | std::views::transform(&HandoverSession::id))
+        == shells);
+    REQUIRE_FALSE(u.hooks.served.empty());
+    CHECK(u.hooks.served.front() == "close");
+    CHECK(u.live->host.servedBy(*served) == nullptr);
+}
+
+TEST_CASE("every refused upgrade admits served sessions again", "[vthost][handover][upgrade][served]")
+{
+    /// One way an upgrade ends without an exec, after the served sessions were closed.
+    struct Refusal
+    {
+        std::string_view name;
+        LiveHost::Devices shell; ///< The device of the session beside the served one.
+        std::string_view ready;  ///< What its screen shows once it can be captured.
+        uint64_t maxImageSize;   ///< LiveUpgradeConfig::maxImageSize.
+        std::function<bool(std::expected<void, UpgradeError> const&)> expected;
+    };
+    auto const refusals = std::vector<Refusal> {
+        // The path UpgradeRollback never covers: nothing is stopped yet.
+        { .name = "a session no new image could adopt",
+          .shell = [](vtpty::PageSize size) -> std::unique_ptr<vtpty::Pty> {
+              return std::make_unique<vthost::testing::StallingPty>(size);
+          },
+          .ready = "",
+          .maxImageSize = MaxHandoverImageSize,
+          .expected =
+              [](auto const& result) { return refusedWith(result, UpgradeRefusal::UnsupportedSession); } },
+        { .name = "an oversized image",
+          .shell = catDevice,
+          .ready = "ready",
+          .maxImageSize = 1,
+          .expected = [](auto const& result) { return refusedWith(result, UpgradeRefusal::ImageTooLarge); } },
+        { .name = "a failed exec",
+          .shell = catDevice,
+          .ready = "ready",
+          .maxImageSize = MaxHandoverImageSize,
+          .expected =
+              [](auto const& result) {
+                  return !result.has_value() && std::holds_alternative<ExecFailure>(result.error());
+              } },
+    };
+    for (auto const& refusal: refusals)
+    {
+        DYNAMIC_SECTION(refusal.name)
+        {
+            auto u = Upgrade { refusal.shell };
+            REQUIRE(u.live->host.createTab() != nullptr);
+            auto const shell = u.live->host.sessionIds().front();
+            REQUIRE(vthost::testing::openServedTab(u.live->host).has_value());
+            REQUIRE(u.live->eventually([&] { return u.live->pageText(shell).contains(refusal.ready); }));
+
+            auto config = Upgrade::config();
+            config.maxImageSize = refusal.maxImageSize;
+            auto upgrade = u.orchestrator(std::move(config));
+            CHECK(refusal.expected(u.run(upgrade, UpgradeTarget { .imageId = u.imageId })));
+
+            CHECK(u.hooks.served == std::vector<std::string> { "close", "admit" });
+            CHECK(u.live->host.servedAdmission() == ServedAdmission::Open);
+            CHECK(u.live->host.sessionIds() == std::vector { shell });
+        }
+    }
 }
 #endif

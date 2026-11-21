@@ -49,6 +49,9 @@ void ChannelPty::append(std::string_view data, ReadOrigin origin)
 {
     {
         auto const lock = std::lock_guard { _mutex };
+        // What is left before the close still drains; what comes after it has no reader.
+        if (_closed)
+            return;
         // Reclaim the already-read prefix before appending. Reclaiming ONLY on a full drain
         // bounded nothing: a pane streaming continuously is fed from one thread while the parser
         // pump reads on another, so at feed time the buffer is essentially never exactly drained

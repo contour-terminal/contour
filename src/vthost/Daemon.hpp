@@ -25,6 +25,7 @@
 #include <vthost/AccessFile.hpp>
 #include <vthost/AuthorizedKeys.hpp>
 #include <vthost/CellPixelBounds.hpp>
+#include <vthost/DaemonConsentKey.hpp>
 #include <vtworkspace/LayoutTree.hpp>
 // Supplies DaemonConfig::settings' default, plus DefaultSessionHistoryLineCount and
 // defaultSessionSettings(), which used to be DECLARED here. They moved down because SessionHost.h
@@ -34,6 +35,7 @@
 #include <vthost/DaemonLifecycle.hpp>
 #include <vthost/ExtensionHosting.hpp>
 #include <vthost/KeeperSettings.hpp>
+#include <vthost/OwnedPaneStore.hpp>
 #include <vthost/ProfileCatalog.hpp>
 #include <vthost/RelocationRequest.hpp>
 #include <vthost/SessionSettings.hpp>
@@ -131,12 +133,27 @@ inline constexpr auto NativeTcpTlsOptions =
 [[nodiscard]] std::vector<AcceptedToken> acceptedTokensOf(NativeTcpListenerConfig const& listener);
 
 /// Everything `contour daemon` needs to serve.
+/// Where and how a daemon keeps its consent key (DaemonConsentKey.hpp). Borrowed references: they outlive the
+/// daemon.
+struct DaemonConsentKeys
+{
+    std::filesystem::path directory; ///< daemonConsentKeyDirectory() of the daemon's state directory.
+    std::filesystem::path socket;    ///< The daemon's socket, canonical.
+    std::reference_wrapper<IConsentKeyFiles const> files; ///< The consent directory's files.
+    std::reference_wrapper<core::IRandom> random;         ///< Where the key and every nonce come from.
+};
+
 struct DaemonConfig
 {
     /// Which run of the daemon this is, as every ServerHello states it (proto::ServerHello::daemonInstance).
     /// Supplied by the composition root -- drawDaemonInstance() once per daemon process -- rather than drawn
     /// here, so a test states a fixed one; 0 states none. A configuration reload keeps it: the run goes on.
     uint64_t instance = 0;
+    /// Where this run keeps the consent key a window proves before it is asked a daemon extension's question;
+    /// nullopt for none, and the daemon then offers proto::Capability::DaemonExtensionConsent to nobody. The
+    /// key is made only once the daemon holds its socket, in a file of this run's own: a start that never
+    /// serves never replaces the serving daemon's.
+    std::optional<DaemonConsentKeys> consentKeys = std::nullopt;
     /// When set, ALSO serves the native protocol over TCP (opt-in; see the struct).
     std::optional<NativeTcpListenerConfig> nativeTcp;
     /// The control-socket file (see muxSocketPath for derivation).
@@ -190,6 +207,13 @@ struct DaemonConfig
     /// daemon's event loop: runDaemon() makes them once that exists, and its session host destroys them
     /// before it goes. `contour daemon` sets it from the profile, which `src/vthost` cannot reach.
     std::function<std::shared_ptr<IExtensionHosting>()> extensions {};
+    /// Makes the daemon-scoped extensions that run beside the sessions; empty for none, which constructs
+    /// nothing of them. Called once, by the session host, once the daemon's loop exists. `contour daemon`
+    /// sets it from `daemon.extensions`, which `src/vthost` cannot reach.
+    DaemonWorldFactory daemonWorld {};
+    /// The registry of the agent panes the daemon-scoped extensions open, one file per extension beside its
+    /// store; null for one in memory, which no restart keeps. `contour daemon` sets it with @ref daemonWorld.
+    std::shared_ptr<IOwnedPaneStore> ownedPanes {};
     /// The release this daemon states in every ServerHello and status reply; empty when unknown.
     std::string releaseVersion {};
     /// The image this daemon runs from, as its status reply states it.

@@ -24,6 +24,7 @@ add_library(contour_config STATIC
     ConfigEnumReader.hpp
     ConfigReader.hpp
     ControlsStyle.hpp
+    DaemonExtensionConfig.cpp DaemonExtensionConfig.hpp
     DefaultBindings.cpp DefaultBindings.hpp
     DefaultsEdition.hpp
     DesktopButtonLayout.cpp DesktopButtonLayout.hpp

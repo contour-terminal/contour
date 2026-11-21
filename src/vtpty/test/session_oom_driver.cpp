@@ -136,7 +136,7 @@ int drive(std::string_view placementName)
     auto process = vtpty::Process {
         vtpty::testing::execInfo(std::filesystem::read_symlink("/proc/self/exe").string(), { "--hog" }),
         vtpty::createPty(vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) }, std::nullopt),
-        /*escapeSandbox=*/false,
+        vtpty::SandboxEscape::Contained,
         placement
     };
     if (auto const started = process.start(); !started)
@@ -324,7 +324,7 @@ int reportPlacements(std::string_view unitPrefix)
                                             vtpty::createPty(vtpty::PageSize { vtpty::LineCount(24),
                                                                                vtpty::ColumnCount(80) },
                                                              std::nullopt),
-                                            /*escapeSandbox=*/false,
+                                            vtpty::SandboxEscape::Contained,
                                             placement };
             if (auto const started = process.start(); !started)
             {

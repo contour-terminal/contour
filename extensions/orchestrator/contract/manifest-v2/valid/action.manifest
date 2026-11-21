@@ -1,0 +1,5 @@
+# A palette row: an id and a title, which may hold spaces and ':'.
+name = actor
+version = 2
+action open = Open Agents
+action refresh = Agents: Refresh now

@@ -625,6 +625,105 @@ struct SwitchWorkspaceReply
     std::string detail {}; ///< A sentence for the user; empty on success.
 };
 
+/// `extension.list` request.
+struct ExtensionListRequest
+{
+    using ApiRecordTag = void;
+};
+
+/// One line of a daemon extension's question.
+struct ExtensionQuestionLine
+{
+    using ApiRecordTag = void;
+
+    std::string text {}; ///< Plain text, guest text neutralized.
+    uint8_t weight = 0;  ///< 1 when the line names something that can run commands, else 0.
+};
+
+/// The question a daemon extension waits on, as a window shows it.
+struct ExtensionQuestion
+{
+    using ApiRecordTag = void;
+
+    std::string title {};                        ///< The question's title.
+    std::vector<ExtensionQuestionLine> lines {}; ///< Its lines, in order.
+};
+
+/// One daemon-scoped extension.
+struct ExtensionInfo
+{
+    using ApiRecordTag = void;
+
+    std::string name {};        ///< What the daemon's configuration calls it.
+    std::string state {};       ///< `running`, `pending`, `denied`, `disabled`, `failed` or `stopped`.
+    std::string grantDigest {}; ///< What its grant is recorded for: its manifest and resolved roots.
+    std::optional<ExtensionQuestion> question {}; ///< Its question, while it is pending.
+};
+
+/// `extension.list` reply.
+struct ExtensionListReply
+{
+    using ApiRecordTag = void;
+
+    std::vector<ExtensionInfo> extensions {}; ///< In the configuration's order.
+};
+
+/// `extension.grant` request: ask the windows again. It grants nothing itself.
+struct ExtensionGrantRequest
+{
+    using ApiRecordTag = void;
+
+    std::string name {}; ///< The extension.
+};
+
+/// `extension.grant` reply.
+struct ExtensionGrantReply
+{
+    using ApiRecordTag = void;
+
+    bool asked =
+        false; ///< Always true: the question was sent again (nothing pending is an error). Wire field.
+    uint32_t windows = 0; ///< How many windows that can answer it were sent it.
+};
+
+/// `extension.revoke` request.
+struct ExtensionRevokeRequest
+{
+    using ApiRecordTag = void;
+
+    std::string name {}; ///< The extension.
+};
+
+/// `extension.revoke` reply.
+struct ExtensionRevokeReply
+{
+    using ApiRecordTag = void;
+
+    bool revoked = false; ///< Always true: the answer is forgotten and the extension stopped. Wire field.
+};
+
+/// `extension.status` request.
+struct ExtensionStatusRequest
+{
+    using ApiRecordTag = void;
+
+    std::string name {}; ///< The extension.
+};
+
+/// `extension.status` reply: what a daemon extension last published of itself (`summary-set`).
+struct ExtensionStatusReply
+{
+    using ApiRecordTag = void;
+
+    std::string name {};    ///< The extension.
+    std::string state {};   ///< As `extension.list` names it.
+    std::string summary {}; ///< Its one-line summary, neutralized; empty before the first.
+    std::string
+        detail {}; ///< Its longer text, neutralized, `\n` between its lines; at most 16 KiB as published.
+    std::string problem {};   ///< Why it could not run, neutralized, while it is `failed`; empty otherwise.
+    std::string lastFault {}; ///< Its latest fault, neutralized, one line; empty if its run never faulted.
+};
+
 /// `object.rename` request.
 struct ObjectRenameRequest
 {

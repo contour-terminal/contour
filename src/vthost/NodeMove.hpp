@@ -9,6 +9,7 @@
 #include <expected>
 #include <functional>
 #include <optional>
+#include <string>
 
 #include <vthost/NodeMoveError.hpp>
 #include <vthost/proto/Pdu.hpp>
@@ -23,6 +24,7 @@ struct NodeMoveFailure
 {
     NodeMoveError error = NodeMoveError::UnknownSession; ///< Why nothing changed.
     std::optional<vtworkspace::MoveError> model = {};    ///< Set exactly when @c error is Model.
+    std::string extension = {}; ///< The extension serving the tab, set exactly when @c error is Served.
 };
 
 /// How applyMoveNode makes the workspace a NewWorkspace target lands in, and removes a workspace a move
@@ -37,6 +39,20 @@ struct MoveWorkspaceHooks
     /// workspace the move took its last tab out of.
     std::function<void(vtworkspace::WorkspaceId)> discard;
 };
+
+/// What a client's MoveNode names, as the model names it.
+struct NodeMoveRequest
+{
+    vtworkspace::MoveSource source; ///< What moves.
+    vtworkspace::MoveTarget target; ///< Where it goes.
+};
+
+/// Reads both ends of @p move against @p model, touching nothing.
+/// @param model The daemon's model.
+/// @param move The client's request.
+/// @return What it names, or why it names nothing this host can move.
+[[nodiscard]] std::expected<NodeMoveRequest, NodeMoveFailure> readMoveNode(vtworkspace::SessionModel& model,
+                                                                           proto::MoveNode const& move);
 
 /// Moves the pane or tab @p move names to the target it names. No session is spawned or closed; the
 /// model's observers are told, so every client is pushed the new layout -- the workspace the move emptied, if

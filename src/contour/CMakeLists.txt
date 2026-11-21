@@ -26,6 +26,14 @@ endif()
 
 option(CONTOUR_MACOS_DEPLOY "Run macdeployqt + prune/verify/sign on the macOS app bundle" ON)
 
+# The agent orchestrator's module, when CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST builds it, is installed with the
+# bundled extensions (see "Bundled status-line extensions" below). Installed is not running: the daemon loads
+# it only for a `daemon.extensions.orchestrator` entry, and runs it only once the user has granted it.
+if(TARGET orchestrator_wasm)
+    list(APPEND CONTOUR_BUNDLED_EXTENSIONS orchestrator)
+    list(APPEND CONTOUR_BUNDLED_EXTENSION_MODULES "${CONTOUR_ORCHESTRATOR_WASM_MODULE}")
+endif()
+
 # {{{ Setup QT_COMPONENTS
 # QT_COMPONENTS is the list of Qt libraries Contour requires for building.
 # NB: Widgets is required for SystemTrayIcon's fallback implementation
@@ -205,6 +213,7 @@ set_property(SOURCE
         "${CMAKE_CURRENT_SOURCE_DIR}/ContourGuiApp.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/cli/ShellIntegration_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/config/Config_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/display/DashboardCornersRendering_test.cpp"
     APPEND PROPERTY COMPILE_DEFINITIONS ${_per_checkout_definitions})
 if(CONTOUR_FRONTEND_GUI)
     target_compile_definitions(contour_config PUBLIC CONTOUR_FRONTEND_GUI)
@@ -395,6 +404,7 @@ if(CONTOUR_FRONTEND_GUI)
         remote/DaemonLink.hpp
         remote/DaemonLinkHost.hpp
         remote/NativeController.hpp
+        remote/PaneReveals.hpp
         remote/RemoteController.hpp
         remote/ReactorThread.hpp
         remote/RemoteLayout.hpp
@@ -412,6 +422,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/CommandPaletteModel.cpp
         window/ContextMenuModel.cpp
         window/DaemonDriftModel.cpp
+        window/DaemonExtensionConsentModel.cpp
         window/PromptHost.cpp
         window/BootstrapPrompt.cpp
         window/NewDefaultsNotice.cpp
@@ -613,6 +624,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/KitShortcutField.qml
         qml/KitFontPicker.qml
         qml/PermissionDialog.qml
+        qml/DaemonExtensionConsentDialog.qml
         qml/AskpassDialog.qml
         qml/PromptWindow.qml
     )
@@ -1010,6 +1022,7 @@ if(CONTOUR_FRONTEND_GUI)
             askpass/AskpassPromptRouter_test.cpp
             window/PromptHost_test.cpp
             remote/StartupAttach_test.cpp
+            remote/PaneReveals_test.cpp
             remote/SwitchTrust_test.cpp
             remote/WorkspaceLister_test.cpp
             remote/RemoteController_test.cpp
@@ -1048,6 +1061,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/SpeechSynthesizer_test.cpp
             display/ContentScale_test.cpp
             display/InGridVisualsRendering_test.cpp
+            display/DashboardCornersRendering_test.cpp
             session/ExitCode_test.cpp
             session/WindowSwitching_test.cpp
             session/ShellIntegrationCard_test.cpp
@@ -1132,6 +1146,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/TabLabel_test.cpp
             window/TabGlassShapes_test.cpp
             window/DaemonDriftModel_test.cpp
+            window/DaemonExtensionConsentModel_test.cpp
             window/DaemonDriftChoice_test.cpp
             window/NewDefaultsNotice_test.cpp
             geometry/CellRectangle_test.cpp
@@ -1160,6 +1175,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/QmlToolTip_test.cpp
             test/QmlDialogs_test.cpp
             window/CommandPaletteModel_test.cpp
+            window/ExtensionPaletteRows_test.cpp
             window/SettingsController_test.cpp
             window/SettingsPreview_test.cpp
             window/SettingsBackdrop_test.cpp
@@ -1731,6 +1747,9 @@ if(CONTOUR_TESTING)
         cli/AgentIntegrations_test.cpp
         cli/AgentReport_test.cpp
         cli/AgentSkill_test.cpp
+        cli/AgentRecord_test.cpp
+        cli/AgentStats_test.cpp
+        cli/AgentTranscript_test.cpp
         cli/BackgroundExecutor_test.cpp
         cli/McpCommand_test.cpp
         cli/McpScope_test.cpp
@@ -1804,6 +1823,7 @@ if(CONTOUR_TESTING)
         window/SplitChrome_test.cpp
         window/ProgramStatusBadge_test.cpp
         window/RemoteChrome_test.cpp
+        window/ServedChrome_test.cpp
         window/SecureInputPolicy_test.cpp
         window/SecureLockPlacement_test.cpp
         window/HostChipState_test.cpp
@@ -1879,8 +1899,16 @@ if(CONTOUR_TESTING)
     target_compile_definitions(contour_test PRIVATE
         CONTOUR_CONTROL_WIT="${PROJECT_SOURCE_DIR}/wit/control/world.wit"
         CONTOUR_CONTROL_API_DOC="${PROJECT_SOURCE_DIR}/docs/control-api.md"
-        CONTOUR_CONFIG_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/config/testdata")
+        CONTOUR_CONFIG_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/config/testdata"
+        CONTOUR_AGENT_TRANSCRIPT_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/cli/testdata/agent-transcript"
+        # The pages the orchestrator reads, printed by `contour agent transcript`: its goldens, read in place.
+        CONTOUR_AGENT_TRANSCRIPT_CONTRACT="${PROJECT_SOURCE_DIR}/extensions/orchestrator/contract/agent-transcript"
+        CONTOUR_AGENT_STATS_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/cli/testdata/agent-stats"
+        # The reports the orchestrator reads, printed by `contour agent stats`: its goldens, read in place.
+        CONTOUR_AGENT_STATS_CONTRACT="${PROJECT_SOURCE_DIR}/extensions/orchestrator/contract/agent-stats")
     if(NOT WIN32)
+        # Real files: a FIFO and a symbolic link where a session log should be.
+        target_sources(contour_test PRIVATE cli/SessionLogOpener_test.cpp)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
         target_compile_options(contour_test PRIVATE -Wno-c2y-extensions)
     endif()
@@ -1963,6 +1991,10 @@ if(CONTOUR_TESTING)
         if(CONTOUR_BUNDLED_EXTENSIONS)
             set(_packaging_extensions ON)
         endif()
+        set(_packaging_orchestrator OFF)
+        if("orchestrator" IN_LIST CONTOUR_BUNDLED_EXTENSIONS)
+            set(_packaging_orchestrator ON)
+        endif()
         set(_packaging_terminfo OFF)
         if(CONTOUR_PACKAGE_TERMINFO)
             set(_packaging_terminfo ON)
@@ -1972,6 +2004,7 @@ if(CONTOUR_TESTING)
                     -D "FRONTEND=${_frontend_kind}"
                     -D "WITH_SYSTEMD_UNITS=${_packaging_systemd}"
                     -D "WITH_EXTENSIONS=${_packaging_extensions}"
+                    -D "WITH_ORCHESTRATOR=${_packaging_orchestrator}"
                     -D "WITH_TERMINFO=${_packaging_terminfo}"
                     -D "INSTALL_SCRIPT=${CMAKE_CURRENT_BINARY_DIR}/cmake_install.cmake"
                     -D "CPACK_CONFIG=${CMAKE_BINARY_DIR}/CPackConfig.cmake"
@@ -2255,10 +2288,12 @@ function(contour_install_bundled_extensions destination)
         install(FILES "${_module}" DESTINATION "${destination}" RENAME "${_name}.wasm")
     endforeach()
 endfunction()
-if(TARGET contour_bundled_extensions)
-    # Building contour builds what installing it installs, also when only the contour target is built.
-    add_dependencies(contour contour_bundled_extensions)
-endif()
+# Building contour builds what installing it installs, also when only the contour target is built.
+foreach(_bundle IN ITEMS contour_bundled_extensions orchestrator_wasm)
+    if(TARGET ${_bundle})
+        add_dependencies(contour ${_bundle})
+    endif()
+endforeach()
 # }}}
 
 # {{{ Qt bundle installation helpers

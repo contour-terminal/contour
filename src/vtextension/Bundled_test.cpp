@@ -16,6 +16,7 @@
 #include <expected>
 #include <filesystem>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -23,9 +24,15 @@
 #include <vector>
 
 #include <vtextension/CommandLine.hpp>
+#include <vtextension/CompiledExtension.hpp>
+#include <vtextension/DaemonInstance.hpp>
+#include <vtextension/DaemonLimits.hpp>
+#include <vtextension/Engine.hpp>
 #include <vtextension/ExtensionComposition.hpp>
 #include <vtextension/Manifest.hpp>
 #include <vtextension/Runner.hpp>
+#include <vtextension/World.hpp>
+#include <vtextension/testing/FakeDaemonHostServices.hpp>
 #include <vtextension/testing/Harness.hpp>
 #include <vtextension/testing/RunnerHarness.hpp>
 #include <vtextension/testing/TestModules.hpp>
@@ -42,7 +49,8 @@ namespace
 struct BundledExtension
 {
     std::string_view name;                  ///< `<name>.wasm` in the bundled directory.
-    std::string_view artifact;              ///< What cargo calls the module it builds.
+    std::string_view artifact;              ///< What cargo calls the module it builds; empty if not cargo's.
+    std::string_view modulePath;            ///< Where a module built outside cargo lies; empty if cargo's.
     std::vector<std::string_view> commands; ///< The commands its manifest declares.
 };
 
@@ -50,11 +58,40 @@ struct BundledExtension
 [[nodiscard]] std::vector<BundledExtension> bundledExtensions()
 {
     return {
-        { .name = "clock", .artifact = "clock.wasm", .commands = {} },
-        { .name = "git", .artifact = "git.wasm", .commands = { "status" } },
-        { .name = "sysload", .artifact = "sysload.wasm", .commands = { "uptime", "cpu-windows" } },
-        { .name = "agent-status", .artifact = "agent_status.wasm", .commands = {} },
-        { .name = "plasma", .artifact = "plasma.wasm", .commands = {} },
+        { .name = "clock", .artifact = "clock.wasm", .modulePath = {}, .commands = {} },
+        { .name = "git", .artifact = "git.wasm", .modulePath = {}, .commands = { "status" } },
+        { .name = "sysload",
+          .artifact = "sysload.wasm",
+          .modulePath = {},
+          .commands = { "uptime", "cpu-windows" } },
+        { .name = "agent-status", .artifact = "agent_status.wasm", .modulePath = {}, .commands = {} },
+        { .name = "plasma", .artifact = "plasma.wasm", .modulePath = {}, .commands = {} },
+#ifdef VTEXTENSION_ORCHESTRATOR_MODULE
+        // Built with the WASI C++ toolchain, when CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST is on.
+        { .name = "orchestrator",
+          .artifact = {},
+          .modulePath = VTEXTENSION_ORCHESTRATOR_MODULE,
+          .commands = { "gh-auth",
+                        "gh-default-branch",
+                        "gh-prs",
+                        "gh-issues",
+                        "git-fetch",
+                        "git-worktree-add",
+                        "git-worktree-add-branch",
+                        "git-worktree-list",
+                        "gh-pr-checkout",
+                        "git-common-dir",
+                        "git-status",
+                        "git-head-reachable",
+                        "git-operation-state",
+                        "git-index-flags",
+                        "git-clean",
+                        "git-worktree-remove",
+                        "agent-setup-check",
+                        "agent-transcript",
+                        "agent-record",
+                        "agent-stats" } },
+#endif
     };
 }
 
@@ -92,6 +129,7 @@ TEST_CASE("Bundled: an installed extension loads only when a profile declares it
 }
 
 #ifdef VTEXTENSION_TEST_MODULE_DIR
+using vtextension::testing::LoadedModule;
 using vtextension::testing::loadModule;
 using vtextension::testing::readTestModule;
 using vtextension::testing::RunningGuest;
@@ -179,6 +217,35 @@ constexpr auto DaylightSavingEnds =
     return runner.latest()->lines[0];
 }
 
+/// @return The module the build made for @p extension.
+[[nodiscard]] std::vector<std::byte> moduleOf(BundledExtension const& extension)
+{
+    if (extension.modulePath.empty())
+        return readTestModule(extension.artifact);
+    return vtextension::testing::readModuleFile(std::string(extension.modulePath));
+}
+
+/// @return Where @p module's manifest, which must parse, places the extension.
+[[nodiscard]] ManifestPlacement placementOf(std::span<std::byte const> module)
+{
+    auto const manifest = parseManifest(module);
+    REQUIRE(manifest.has_value());
+    return manifest->placement;
+}
+
+/// Loads @p module on an engine of its own, of the world its manifest places it in.
+/// @return The engine and the module loaded on it.
+[[nodiscard]] LoadedModule loadInItsWorld(wasm::IWasmBackend& backend, std::vector<std::byte> module)
+{
+    if (placementOf(module) == ManifestPlacement::StatusLine)
+        return loadModule(backend, std::move(module));
+    auto engine = Engine::create(backend, World::Daemon, daemonWorldLimits());
+    REQUIRE(engine.has_value());
+    auto compiled = CompiledExtension::load(**engine, std::move(module));
+    REQUIRE(compiled.has_value());
+    return LoadedModule { .engine = std::move(*engine), .compiled = std::move(*compiled) };
+}
+
 /// What `git status --porcelain=v2 --branch` prints in a repository on `main` with one change.
 constexpr auto DirtyMain = std::string_view { "# branch.oid 0123456789abcdef\n"
                                               "# branch.head main\n"
@@ -192,7 +259,7 @@ TEST_CASE("Bundled: every module declares what it is", "[vtextension][bundled][g
     for (auto const& extension: bundledExtensions())
     {
         INFO(extension.name);
-        auto const module = loadModule(*backend, readTestModule(extension.artifact));
+        auto const module = loadInItsWorld(*backend, moduleOf(extension));
         auto const& manifest = module.compiled->manifest();
         REQUIRE(manifest.has_value());
         CHECK(manifest->name == extension.name);
@@ -203,15 +270,20 @@ TEST_CASE("Bundled: every module declares what it is", "[vtextension][bundled][g
     }
 }
 
-TEST_CASE("Bundled: every declared command can be written for both shells", "[vtextension][bundled][guest]")
+TEST_CASE("Bundled: a status-line extension's commands can be written for both shells",
+          "[vtextension][bundled][guest]")
 {
-    // A command runs through the platform shell (CommandCapture takes one command line), and an argument the
-    // shell would interpret is refused rather than quoted: cmd.exe's metacharacters cannot be. So a declared
-    // argv must survive both dialects, or the command can never run on that platform.
+    // A status-line command runs through the platform shell (CommandCapture takes one command line), and an
+    // argument the shell would interpret is refused rather than quoted: cmd.exe's metacharacters cannot be.
+    // So a declared argv must survive both dialects, or the command can never run on that platform. The
+    // daemon spawns its extensions' argv directly, through no shell.
     auto const backend = vtextension::wasm::makeDefaultBackend();
     for (auto const& extension: bundledExtensions())
     {
-        auto const module = loadModule(*backend, readTestModule(extension.artifact));
+        auto bytes = moduleOf(extension);
+        if (placementOf(bytes) == ManifestPlacement::Daemon)
+            continue;
+        auto const module = loadModule(*backend, std::move(bytes));
         auto const& manifest = module.compiled->manifest();
         REQUIRE(manifest.has_value());
         for (auto const& command: manifest->commands)
@@ -232,12 +304,14 @@ TEST_CASE("Bundled: every declared command can be written for both shells", "[vt
 TEST_CASE("Bundled: together they follow every event kind", "[vtextension][bundled][guest]")
 {
     // The bundle doubles as the first conformance suite: some extension of it subscribes to each kind.
-    // plasma follows the ones its text names.
+    // plasma follows the ones its text names. The events are a status line's: a daemon extension gets none.
     auto harness = RunnerHarness {};
     auto kinds = EventKinds {};
     for (auto const& extension: bundledExtensions())
     {
         INFO(extension.name);
+        if (placementOf(moduleOf(extension)) == ManifestPlacement::Daemon)
+            continue;
         auto config = ConfigMap {};
         if (extension.name == "plasma")
             config.emplace_back("text", "{mode} {title} {tabs}");
@@ -748,5 +822,25 @@ TEST_CASE("Bundled: plasma", "[vtextension][bundled][guest]")
 TEST_CASE("Bundled: the bundled modules", "[vtextension][bundled][guest]")
 {
     SKIP("the bundled extensions are not built (CONTOUR_EXTENSIONS_BUNDLED=OFF)");
+}
+#endif
+
+#ifdef VTEXTENSION_ORCHESTRATOR_MODULE
+TEST_CASE("Bundled: the orchestrator loads with the linked runtime", "[vtextension][bundled][guest]")
+{
+    // The guest is built with bulk-memory, sign-extension and saturating conversion; a runtime without them
+    // refuses it here, at load, which is why a build with the guest links the bundled WAMR.
+    auto const backend = vtextension::wasm::makeDefaultBackend();
+    auto const limits = daemonWorldLimits();
+    auto const engine = Engine::create(*backend, World::Daemon, limits);
+    REQUIRE(engine.has_value());
+    auto const compiled = CompiledExtension::load(
+        **engine, vtextension::testing::readModuleFile(VTEXTENSION_ORCHESTRATOR_MODULE));
+    REQUIRE(compiled.has_value());
+    REQUIRE((*compiled)->manifest().has_value());
+    CHECK((*compiled)->manifest()->placement == ManifestPlacement::Daemon);
+
+    auto services = vtextension::testing::FakeDaemonHostServices {};
+    CHECK(DaemonInstance::create(*compiled, services, **engine, limits).has_value());
 }
 #endif

@@ -86,9 +86,10 @@ component; here the module is used as it is and is not componentized. Any langua
 - The target is `wasm32-wasip1`. The host provides WASI preview 1 with no preopened directories and
   no sockets, so a language's standard library works but has no reach beyond the module. Only the
   WASI functions that return at once and reach nothing outside the module may be imported: the
-  arguments and environment (both empty), clocks (`clock_time_get`, `clock_res_get`), writing to
-  and describing the standard streams (`fd_write`, `fd_close`, `fd_fdstat_get`, `fd_seek`,
-  `fd_prestat_get`, `fd_prestat_dir_name`), `random_get`, `proc_exit` and `sched_yield`. A module
+  arguments and environment (both empty), clocks (`clock_time_get`, `clock_res_get`), writing to,
+  reading from and describing the standard streams, all three the null device (`fd_write`, `fd_read`,
+  `fd_close`, `fd_fdstat_get`, `fd_seek`, `fd_prestat_get`, `fd_prestat_dir_name`), `random_get`,
+  `proc_exit` and `sched_yield`. A module
   that imports any other, such as `poll_oneoff` (which a sleep compiles to), a `sock_*` or a
   `path_*` function, does not load. An extension never sleeps: it asks for a `timer` event with
   `request-frame`.

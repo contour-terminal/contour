@@ -9,9 +9,15 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <format>
+#include <fstream>
 #include <iterator>
+#include <optional>
 #include <ranges>
+#include <set>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -24,7 +30,9 @@
 
 using namespace std::string_view_literals;
 using vtextension::ExtensionError;
+using vtextension::ManifestFault;
 using vtextension::parseManifest;
+using vtextension::parseManifestText;
 
 namespace
 {
@@ -102,7 +110,7 @@ TEST_CASE("Manifest.digest", "[vtextension]")
 {
     auto const result = parseManifest(moduleWith(Example));
     REQUIRE(result.has_value());
-    auto const expected = core::toLowerHexString(core::Sha256::hash(Example));
+    auto const expected = core::toLowerHexString(core::Sha256::hash(moduleWith(Example)));
     CHECK(result->digest == expected);
     CHECK(result->digest.size() == 64);
 
@@ -320,7 +328,7 @@ TEST_CASE("Manifest.invalidText", "[vtextension]")
                                "name = a\nversion = 1\ncommand c = x\ncommand c = y\n",
                                "name = a\nversion = 99999999999\n",
                                "name = a\nversion = 0\n",
-                               "name = a\nversion = 2\n");
+                               "name = a\nversion = 3\n");
     CAPTURE(text);
     auto const result = parseManifest(moduleWith(text));
     REQUIRE_FALSE(result.has_value());
@@ -453,3 +461,411 @@ TEST_CASE("Manifest.fromGuest", "[vtextension][guest]")
     SKIP("the Rust test guests are not built (CONTOUR_EXTENSIONS_BUNDLED=OFF)");
 }
 #endif
+
+// {{{ version 2
+
+namespace
+{
+
+/// The manifest-v2 conformance corpus the orchestrator extension ships and tests against too.
+[[nodiscard]] std::filesystem::path corpusDirectory()
+{
+    return { VTEXTENSION_MANIFEST_CORPUS_DIR };
+}
+
+[[nodiscard]] std::string readCorpusFile(std::filesystem::path const& path)
+{
+    auto file = std::ifstream(path, std::ios::binary);
+    REQUIRE(file);
+    auto text = std::ostringstream {};
+    text << file.rdbuf();
+    return std::move(text).str();
+}
+
+/// The names of the `.manifest` files in one corpus directory, without their extension.
+[[nodiscard]] std::set<std::string> corpusFiles(std::string_view directory)
+{
+    auto names = std::set<std::string> {};
+    for (auto const& entry: std::filesystem::directory_iterator(corpusDirectory() / directory))
+        if (entry.path().extension() == ".manifest")
+            names.insert(entry.path().stem().string());
+    return names;
+}
+
+struct InvalidRow
+{
+    std::string_view file;
+    ManifestFault fault;
+};
+
+constexpr auto InvalidRows = std::array {
+    InvalidRow { .file = "brace-inside-word", .fault = ManifestFault::BraceInsideWord },
+    InvalidRow { .file = "command-without-root", .fault = ManifestFault::CommandWithoutRoot },
+    InvalidRow { .file = "duplicate-command", .fault = ManifestFault::Duplicate },
+    InvalidRow { .file = "empty-argv", .fault = ManifestFault::EmptyArgv },
+    InvalidRow { .file = "empty-head", .fault = ManifestFault::MissingKeyword },
+    InvalidRow { .file = "empty-name", .fault = ManifestFault::EmptyName },
+    InvalidRow { .file = "env-for-undeclared-command", .fault = ManifestFault::EnvForUndeclared },
+    InvalidRow { .file = "path-of-undeclared-root", .fault = ManifestFault::UndeclaredRoot },
+    InvalidRow { .file = "placeholder-program", .fault = ManifestFault::PlaceholderProgram },
+    InvalidRow { .file = "quoted-word", .fault = ManifestFault::QuotedWord },
+    InvalidRow { .file = "read-undeclared-root", .fault = ManifestFault::UndeclaredRoot },
+    InvalidRow { .file = "root-out-of-place", .fault = ManifestFault::RootOutOfPlace },
+    InvalidRow { .file = "root-unknown-flag", .fault = ManifestFault::UnknownRootFlag },
+    InvalidRow { .file = "root-create-over-list", .fault = ManifestFault::CreateOverList },
+    InvalidRow { .file = "undeclared-placeholder", .fault = ManifestFault::UndeclaredPlaceholder },
+    InvalidRow { .file = "unknown-kind", .fault = ManifestFault::UnknownKind },
+    InvalidRow { .file = "unknown-line", .fault = ManifestFault::UnknownLine },
+    InvalidRow { .file = "version-1-with-v2-line", .fault = ManifestFault::Version2LineInVersion1 },
+    InvalidRow { .file = "version-not-first", .fault = ManifestFault::VersionNotFirst },
+    InvalidRow { .file = "forward-reference", .fault = ManifestFault::UndeclaredRoot },
+    InvalidRow { .file = "environment-name", .fault = ManifestFault::MalformedEnvironmentName },
+    InvalidRow { .file = "root-empty-step", .fault = ManifestFault::MalformedRoot },
+    InvalidRow { .file = "root-partial-wildcard", .fault = ManifestFault::MalformedRoot },
+    InvalidRow { .file = "tab-in-line", .fault = ManifestFault::TabCharacter },
+    InvalidRow { .file = "indented-line", .fault = ManifestFault::SurroundingBlank },
+    InvalidRow { .file = "trailing-blank", .fault = ManifestFault::SurroundingBlank },
+    InvalidRow { .file = "stray-cr", .fault = ManifestFault::NotUtf8 },
+    InvalidRow { .file = "inbox-reserved", .fault = ManifestFault::UnsupportedLine },
+    InvalidRow { .file = "title-too-long", .fault = ManifestFault::BadTitle },
+    // The whole text is refused before any line is read: a control character never reaches the title.
+    InvalidRow { .file = "title-control-character", .fault = ManifestFault::NotUtf8 },
+    InvalidRow { .file = "title-repeated", .fault = ManifestFault::Repeated },
+    InvalidRow { .file = "title-bidi-override", .fault = ManifestFault::BadTitle },
+    InvalidRow { .file = "action-title-too-long", .fault = ManifestFault::BadTitle },
+};
+
+[[nodiscard]] std::optional<ManifestFault> faultOf(std::string_view text)
+{
+    auto const parsed = parseManifestText(text);
+    return parsed ? std::nullopt : std::optional { parsed.error() };
+}
+
+[[nodiscard]] vtextension::DeclaredCommand const* commandNamed(vtextension::Manifest const& manifest,
+                                                               std::string_view name)
+{
+    auto const found = std::ranges::find(manifest.commands, name, &vtextension::DeclaredCommand::name);
+    return found != manifest.commands.end() ? &*found : nullptr;
+}
+
+} // namespace
+
+TEST_CASE("Manifest v2: every corpus file under valid/ is accepted", "[vtextension][manifest][corpus]")
+{
+    auto const files = corpusFiles("valid");
+    REQUIRE(files.contains("orchestrator"));
+    for (auto const& file: files)
+    {
+        CAPTURE(file);
+        auto const parsed =
+            parseManifestText(readCorpusFile(corpusDirectory() / "valid" / (file + ".manifest")));
+        auto const why = parsed ? std::string_view {} : vtextension::manifestFaultText(parsed.error());
+        CAPTURE(why);
+        CHECK(parsed.has_value());
+    }
+}
+
+TEST_CASE("Manifest v2: every corpus file under invalid/ is refused with its fault",
+          "[vtextension][manifest][corpus]")
+{
+    for (auto const& row: InvalidRows)
+    {
+        CAPTURE(row.file);
+        auto const fault =
+            faultOf(readCorpusFile(corpusDirectory() / "invalid" / (std::string(row.file) + ".manifest")));
+        REQUIRE(fault.has_value());
+        CAPTURE(vtextension::manifestFaultText(*fault));
+        CHECK(*fault == row.fault);
+    }
+    // A new corpus file forces a row.
+    auto rows = std::set<std::string> {};
+    for (auto const& row: InvalidRows)
+        rows.emplace(row.file);
+    CHECK(corpusFiles("invalid") == rows);
+}
+
+TEST_CASE("Manifest v2: blanks around a line are refused, never trimmed", "[vtextension][manifest]")
+{
+    // A line of nothing but blanks is a blank line; a CR before the LF is the line end.
+    auto const accepted = parseManifestText("name = spaced\r\n   \nversion = 2\r\n#  a comment \n"sv);
+    REQUIRE(accepted.has_value());
+    CHECK(accepted->name == "spaced");
+    // A comment starts in the first column, like every other line.
+    CHECK(faultOf("name = x\nversion = 2\n # indented\n"sv) == ManifestFault::SurroundingBlank);
+    CHECK(faultOf("name = x\nversion = 2 \n"sv) == ManifestFault::SurroundingBlank);
+    CHECK(faultOf("name = x \nversion = 2\n"sv) == ManifestFault::SurroundingBlank);
+    // A CR anywhere but right before the LF is still a stray control character.
+    CHECK(faultOf("name = x\nversion = 2\r \n"sv) == ManifestFault::NotUtf8);
+    // Version 1 keeps trimming.
+    CHECK(parseManifestText("  name = x \nversion = 1 \n"sv).has_value());
+}
+
+TEST_CASE("Manifest v2: the orchestrator's manifest", "[vtextension][manifest][corpus]")
+{
+    using vtextension::ArgumentKind;
+    using vtextension::CommandTimeout;
+    using vtextension::EnvironmentEntry;
+    using vtextension::RootCreation;
+
+    auto const text = readCorpusFile(corpusDirectory() / "valid" / "orchestrator.manifest");
+    auto const parsed = parseManifestText(text);
+    REQUIRE(parsed.has_value());
+    auto const& manifest = *parsed;
+    // The corpus grows with the extension: the counts are its own lines', every one of them parsed.
+    auto const linesStartingWith = [&](std::string_view keyword) {
+        return static_cast<std::size_t>(
+            std::ranges::count_if(std::views::split(text, '\n'), [&](auto const& line) {
+                return std::string_view { line }.starts_with(keyword);
+            }));
+    };
+    CHECK(manifest.name == "orchestrator");
+    CHECK(manifest.title == "Agents");
+    CHECK(manifest.version == 2);
+    CHECK(manifest.placement == vtextension::ManifestPlacement::Daemon);
+    CHECK(manifest.digest.empty());
+
+    REQUIRE(manifest.roots.size() == 2);
+    CHECK(manifest.roots[0].label == "worktrees");
+    CHECK(manifest.roots[0].pointer == "worktree_root");
+    CHECK(manifest.roots[0].creation == RootCreation::CreateIfMissing);
+    CHECK(manifest.roots[1].label == "repos");
+    CHECK(manifest.roots[1].pointer == "repos/*/path");
+    CHECK(manifest.roots[1].creation == RootCreation::Existing);
+    CHECK(manifest.readableRoots == std::vector<std::string> { "worktrees" });
+
+    REQUIRE(manifest.arguments.size() == linesStartingWith("arg "));
+    REQUIRE(manifest.arguments.size() >= 9);
+    auto const path = std::ranges::find(manifest.arguments, "path", &vtextension::ArgumentDecl::name);
+    REQUIRE(path != manifest.arguments.end());
+    CHECK(path->kind == ArgumentKind::Path);
+    CHECK(path->root == "worktrees");
+    CHECK(std::ranges::all_of(manifest.arguments, [](vtextension::ArgumentDecl const& argument) {
+        return argument.kind == ArgumentKind::Path || argument.root.empty();
+    }));
+
+    CHECK(manifest.commandEnvironment.size() == 7);
+    CHECK(manifest.commands.size() == linesStartingWith("command "));
+    CHECK(manifest.commands.size() >= 17);
+    auto const* const prs = commandNamed(manifest, "gh-prs");
+    REQUIRE(prs != nullptr);
+    CHECK(prs->timeout == CommandTimeout::Long);
+    CHECK(prs->root == "repos");
+    CHECK(prs->environment.empty());
+    auto const* const status = commandNamed(manifest, "git-status");
+    REQUIRE(status != nullptr);
+    CHECK(status->timeout == CommandTimeout::Short);
+    CHECK(status->root == "worktrees");
+    CHECK(status->environment.size() == 9);
+    CHECK(std::ranges::contains(status->environment,
+                                EnvironmentEntry { .name = "GIT_CONFIG_COUNT", .value = "3" }));
+    CHECK(std::ranges::contains(
+        status->environment,
+        EnvironmentEntry { .name = "GIT_ATTR_SOURCE", .value = "4b825dc642cb6eb9a060e54bf8d69288fbee4904" }));
+
+    REQUIRE(manifest.panes.size() == 1);
+    CHECK(manifest.panes[0].name == "agent");
+    CHECK(manifest.panes[0].root == "worktrees");
+    CHECK(manifest.panes[0].argvTemplate.front() == "claude");
+    CHECK(manifest.panes[0].environment.size() == 5);
+
+    CHECK(manifest.servedScheme == "orchestrator");
+    CHECK(manifest.actions.size() == 3);
+    CHECK(manifest.control.empty());
+}
+
+TEST_CASE("Manifest v2: a version-2 line is refused under version 1", "[vtextension][manifest]")
+{
+    auto const line = GENERATE(as<std::string_view> {},
+                               "placement daemon",
+                               "root r = config:x",
+                               "root r create = config:x",
+                               "read r",
+                               "arg a = name",
+                               "command c short @r = git",
+                               "command-env A = 1",
+                               "command-env-for c A = 1",
+                               "pane p @r = sh",
+                               "pane-env p A = 1",
+                               "inbox i = text",
+                               "serve s",
+                               "action a = Title",
+                               "title = Title");
+    CAPTURE(line);
+    CHECK(faultOf(std::format("name = x\nversion = 1\n{}\n", line)) == ManifestFault::Version2LineInVersion1);
+}
+
+TEST_CASE("Manifest v2: title is a version-2 line", "[vtextension][manifest]")
+{
+    auto const titled = parseManifestText(
+        "name = agents\nversion = 2\ntitle = Agents \xC2\xB7 all forty characters of it, ok!\n"sv);
+    REQUIRE(titled.has_value());
+    CHECK(titled->title == "Agents \xC2\xB7 all forty characters of it, ok!");
+    CHECK(vtextension::displayTitleOf(*titled) == titled->title);
+    CHECK(faultOf("name = agents\nversion = 1\ntitle = Agents\n"sv) == ManifestFault::Version2LineInVersion1);
+    CHECK(faultOf("name = agents\ntitle = Agents\nversion = 2\n"sv) == ManifestFault::VersionNotFirst);
+    CHECK(faultOf("name = agents\nversion = 2\ntitle =\n"sv) == ManifestFault::EmptyName);
+    CHECK(faultOf("name = agents\nversion = 2\ntitle x = Agents\n"sv) == ManifestFault::UnknownLine);
+
+    CHECK(faultOf("name = agents\nversion = 2\ntitle = Agents \xC2\xB7 one character beyond forty, sad!\n"sv)
+          == ManifestFault::BadTitle);
+    CHECK(faultOf("name = agents\nversion = 2\ntitle = Agents\ntitle = Others\n"sv)
+          == ManifestFault::Repeated);
+
+    // What would disguise a title in the chrome is refused, in an action's title too, as is a long one.
+    CHECK(faultOf("name = agents\nversion = 2\ntitle = Age\xE2\x80\xAEnts\n"sv) == ManifestFault::BadTitle);
+    CHECK(faultOf("name = agents\nversion = 2\ntitle = Age\xE2\x80\x8B"
+                  "nts\n"sv)
+          == ManifestFault::BadTitle);
+    CHECK(faultOf("name = agents\nversion = 2\ntitle = Agents\xE2\x80\xA8\n"sv) == ManifestFault::BadTitle);
+    CHECK(faultOf("name = agents\nversion = 2\naction open = Open \xE2\x81\xA6"
+                  "Agents\n"sv)
+          == ManifestFault::BadTitle);
+    CHECK(
+        faultOf(
+            "name = agents\nversion = 2\naction open = Open Agents \xC2\xB7 one character too many, ok!\n"sv)
+        == ManifestFault::BadTitle);
+    CHECK(parseManifestText(
+              "name = agents\nversion = 2\naction open = Open Agents \xC2\xB7 exactly forty characters!!\n"sv)
+              .has_value());
+
+    SECTION("absent, the name stands in")
+    {
+        auto const untitled = parseManifestText("name = agents\nversion = 2\n"sv);
+        REQUIRE(untitled.has_value());
+        CHECK(untitled->title.empty());
+        CHECK(vtextension::displayTitleOf(*untitled) == untitled->name);
+    }
+}
+
+TEST_CASE("Manifest v1: unchanged", "[vtextension][manifest]")
+{
+    auto const parsed = parseManifestText("name = x\nversion = 1\ncommand st = git status");
+    REQUIRE(parsed.has_value());
+    CHECK(parsed->version == 1);
+    CHECK(parsed->placement == vtextension::ManifestPlacement::StatusLine);
+    REQUIRE(parsed->commands.size() == 1);
+    CHECK(parsed->commands[0].timeout == vtextension::CommandTimeout::Short);
+    CHECK(parsed->commands[0].root.empty());
+    CHECK(parsed->commands[0].environment.empty());
+    CHECK(parsed->roots.empty());
+}
+
+TEST_CASE("Manifest v2: the faults of the line grammar", "[vtextension][manifest]")
+{
+    struct Row
+    {
+        std::string_view body; ///< What follows `name = x` and `version = 2`.
+        std::optional<ManifestFault> fault;
+    };
+    constexpr auto Rooted = "root r = config:x\n"sv;
+    auto const rows = std::vector<Row> {
+        { .body = "", .fault = std::nullopt },
+        { .body = "placement status-line", .fault = std::nullopt },
+        { .body = "placement daemon\nplacement daemon", .fault = ManifestFault::Repeated },
+        { .body = "placement everywhere", .fault = ManifestFault::UnknownLine },
+        { .body = "serve a\nserve b", .fault = ManifestFault::Repeated },
+        { .body = "root r = x", .fault = ManifestFault::MalformedRoot },
+        { .body = "root r = config:", .fault = ManifestFault::MalformedRoot },
+        { .body = "root r = config:a//b", .fault = ManifestFault::MalformedRoot },
+        { .body = "root r = config:a/b*/c", .fault = ManifestFault::MalformedRoot },
+        { .body = "root r = config:a\nroot r = config:b", .fault = ManifestFault::Duplicate },
+        { .body = "root r create extra = config:a", .fault = ManifestFault::UnknownLine },
+        { .body = "command c short @s = git", .fault = ManifestFault::UndeclaredRoot },
+        { .body = "command c sometimes @r = git", .fault = ManifestFault::UnknownTimeout },
+        { .body = "command c @r short = git", .fault = ManifestFault::RootOutOfPlace },
+        { .body = "command c short @r extra = git", .fault = ManifestFault::UnknownLine },
+        { .body = "command c short @r = git  status", .fault = ManifestFault::UnknownLine },
+        { .body = "command c short @r = git sta'tus", .fault = ManifestFault::QuotedWord },
+        { .body = "pane p = sh", .fault = ManifestFault::CommandWithoutRoot },
+        { .body = "pane p @r =", .fault = ManifestFault::EmptyArgv },
+        { .body = "arg a = name\narg a = ref", .fault = ManifestFault::Duplicate },
+        { .body = "arg a = path:", .fault = ManifestFault::UnknownKind },
+        { .body = "command-env A = 1\ncommand-env A = 2", .fault = ManifestFault::Duplicate },
+        { .body = "command-env A=B = 1", .fault = ManifestFault::MalformedEnvironmentName },
+        { .body = "command-env 1A = 1", .fault = ManifestFault::MalformedEnvironmentName },
+        { .body = "command-env\tA = 1", .fault = ManifestFault::TabCharacter },
+        { .body = "inbox i = text", .fault = ManifestFault::UnsupportedLine },
+        { .body = "command c short @r = git {a}\narg a = name",
+          .fault = ManifestFault::UndeclaredPlaceholder },
+        { .body = "command-env-for c A = 1\ncommand c short @r = git",
+          .fault = ManifestFault::EnvForUndeclared },
+        { .body = "arg p = path:q\nroot q = config:y", .fault = ManifestFault::UndeclaredRoot },
+        { .body = "command-env A =", .fault = ManifestFault::EmptyName },
+        { .body = "pane-env p A = 1", .fault = ManifestFault::EnvForUndeclared },
+        { .body = "action a = One\naction a = Two", .fault = ManifestFault::Duplicate },
+        { .body = "control frobnicate", .fault = ManifestFault::UnknownPermission },
+        { .body = "control read\ncontrol read", .fault = ManifestFault::UnknownPermission },
+        { .body = "name = y", .fault = ManifestFault::Repeated },
+    };
+    for (auto const& row: rows)
+    {
+        auto const text = std::format("name = x\nversion = 2\n{}{}\n", Rooted, row.body);
+        CAPTURE(text);
+        CHECK(faultOf(text) == row.fault);
+    }
+    // A name is declared before it is used.
+    CHECK_FALSE(
+        faultOf("name = x\nversion = 2\nroot r = config:x\narg a = name\ncommand c short @r = git {a}\n"));
+    CHECK(faultOf("name = x\nversion = 2\ncommand c short @r = git\nroot r = config:x\n")
+          == ManifestFault::UndeclaredRoot);
+    // Version 2 wants its version line before every line but the name; version 1 takes any order, as before.
+    CHECK_FALSE(faultOf("version = 2\nname = x\n"));
+    CHECK(faultOf("name = x\nserve s\nversion = 2\n") == ManifestFault::VersionNotFirst);
+    CHECK_FALSE(faultOf("command c = git\nname = x\nversion = 1\n"));
+    // Version 1 still reads a tab as a blank.
+    CHECK_FALSE(faultOf("name = x\nversion = 1\ncommand c =\tgit\tstatus\n"));
+    CHECK(faultOf("version = 2\n") == ManifestFault::MissingName);
+    CHECK(faultOf("name = x\n") == ManifestFault::MissingVersion);
+    CHECK(faultOf("name = x\nversion = 3\n") == ManifestFault::UnsupportedVersion);
+    CHECK(faultOf("name = x\nversion = 2\nversion = 2\n") == ManifestFault::Repeated);
+    CHECK(faultOf("name = x\nversion = 2\n\x01\n") == ManifestFault::NotUtf8);
+}
+
+TEST_CASE("Manifest: every fault has a text", "[vtextension][manifest]")
+{
+    for (auto const index:
+         std::views::iota(uint8_t { 0 }, static_cast<uint8_t>(vtextension::ManifestFaultTexts.size())))
+    {
+        auto const fault = static_cast<ManifestFault>(index);
+        CHECK_FALSE(vtextension::manifestFaultText(fault).empty());
+    }
+}
+
+TEST_CASE("Manifest v2: parseManifest refuses any fault as ManifestInvalid", "[vtextension][manifest]")
+{
+    auto const result = parseManifest(moduleWith("name = x\nversion = 2\nread nowhere\n"));
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error() == ExtensionError::ManifestInvalid);
+}
+
+TEST_CASE("Manifest: the digest covers the whole section", "[vtextension][manifest]")
+{
+    constexpr auto Head = "name = x\nversion = 2\nplacement daemon\n"sv;
+    auto const one = parseManifest(moduleWith(std::format("{}action open = Open Agents\n", Head)));
+    auto const two = parseManifest(moduleWith(std::format("{}action open = Open agents\n", Head)));
+    REQUIRE(one.has_value());
+    REQUIRE(two.has_value());
+    REQUIRE(one->actions.size() == 1);
+    REQUIRE(two->actions.size() == 1);
+    CHECK(one->actions[0].title != two->actions[0].title);
+    CHECK(one->digest != two->digest);
+}
+
+// }}}
+
+TEST_CASE("Manifest: the digest covers the whole module, its code too", "[vtextension][manifest]")
+{
+    // The same manifest over different code is another module, and is asked about anew.
+    auto const plain = moduleWith(Example);
+    auto withCode = plain;
+    // A custom section `x` holding one byte: code the manifest says nothing about.
+    for (auto const byte: { 0x00, 0x03, 0x01, 0x78, 0x2A })
+        withCode.push_back(static_cast<std::byte>(byte));
+    auto const one = parseManifest(plain);
+    auto const two = parseManifest(withCode);
+    REQUIRE(one.has_value());
+    REQUIRE(two.has_value());
+    CHECK(one->name == two->name);
+    CHECK(one->commands.size() == two->commands.size());
+    CHECK(one->digest != two->digest);
+}

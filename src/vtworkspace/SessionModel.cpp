@@ -343,7 +343,7 @@ Workspace* SessionModel::workspace(WorkspaceId id) const noexcept
 // }}}
 // {{{ Tabs
 
-Tab* SessionModel::createTab(WorkspaceId workspaceId)
+Tab* SessionModel::createTab(WorkspaceId workspaceId, TabActivation activation)
 {
     auto* win = workspace(workspaceId);
     assert(win != nullptr);
@@ -352,11 +352,16 @@ Tab* SessionModel::createTab(WorkspaceId workspaceId)
     auto const rootPaneId = _nextPaneId++;
     auto const session = _allocateSession();
 
-    return insertTab(
-        *win, static_cast<int>(win->_tabs.size()), std::make_unique<Tab>(tabId, rootPaneId, session));
+    return insertTab(*win,
+                     static_cast<int>(win->_tabs.size()),
+                     std::make_unique<Tab>(tabId, rootPaneId, session),
+                     activation);
 }
 
-Tab* SessionModel::insertTab(Workspace& workspace, int requestedIndex, std::unique_ptr<Tab> tab)
+Tab* SessionModel::insertTab(Workspace& workspace,
+                             int requestedIndex,
+                             std::unique_ptr<Tab> tab,
+                             TabActivation activation)
 {
     auto const workspaceId = workspace.id();
     auto const tabId = tab->id();
@@ -366,6 +371,13 @@ Tab* SessionModel::insertTab(Workspace& workspace, int requestedIndex, std::uniq
     // requires rowCount() to still report the old count at that point) and endInsertRows() after.
     _events.tabAboutToBeAdded(workspaceId, index);
     workspace.insertTabAt(index, std::move(tab));
+    // A tab opened in the background leaves the active and previous slots as the insertion shifted them --
+    // unless there was no active tab to leave.
+    if (activation == TabActivation::Background && workspace._activeTabIndex >= 0)
+    {
+        _events.tabAdded(workspaceId, tabId, index);
+        return workspace._tabs[static_cast<size_t>(index)].get();
+    }
     // A new tab is a genuine activation: the outgoing active slot, which the insertion has already shifted,
     // becomes the previous tab. Both are settled before any event, so that an observer reading the workspace
     // from inside tabAdded() finds its indices in range.

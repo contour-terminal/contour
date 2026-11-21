@@ -31,6 +31,7 @@
 #include <vtbackend/vt/RectangularAreaChecksum.hpp>
 #include <vtbackend/vt/SemanticBlockQuery.hpp>
 #include <vtbackend/vt/SemanticPrompt.hpp>
+#include <vtbackend/vt/ServedTabSequences.hpp>
 #include <vtbackend/vt/SgrWriter.hpp>
 #include <vtbackend/vt/UserVar.hpp>
 #include <vtbackend/vt/VTType.hpp>
@@ -5102,6 +5103,8 @@ void Screen::executeControlCode(char controlCode)
 #endif
 
     _terminal->incrementInstructionCounter();
+    if (_settings->sequences == SequenceAllowance::ServedTab && !servedTabExecutesControl(controlCode))
+        return;
     switch (controlCode)
     {
         case 0x00: // NUL
@@ -5913,7 +5916,7 @@ void Screen::processAPC(std::string_view body)
     ZoneScoped;
     // APC carries application-defined protocols that share no grammar, so each is recognised by its
     // own introducer. 'G' is the kitty graphics protocol; anything else is not ours to interpret.
-    if (body.empty() || body.front() != 'G')
+    if (body.empty() || body.front() != 'G' || _settings->sequences == SequenceAllowance::ServedTab)
         return;
 
     processKittyGraphics(body.substr(1));
@@ -7014,6 +7017,11 @@ void Screen::renderKittyImage(kitty_graphics::Command const& command,
                 placementId);
 }
 
+bool Screen::admitsDECMode(unsigned mode) const noexcept
+{
+    return _settings->sequences == SequenceAllowance::Everything || servedTabSetsMode(mode);
+}
+
 void Screen::processSequence(Sequence const& seq)
 {
     ZoneScoped;
@@ -7033,13 +7041,19 @@ void Screen::processSequence(Sequence const& seq)
     //         seq.functionDefinition() ? seq.functionDefinition()->comment : ""sv);
 
     _terminal->incrementInstructionCounter();
+    Function const* funcSpec = seq.functionDefinition(_terminal->supportedSequences());
+    // A served session executes only what draws, so it is asked first: no designation, soft font or
+    // level-gated sequence slips past it.
+    if (_settings->sequences == SequenceAllowance::ServedTab
+        && (funcSpec == nullptr || !servedTabExecutes(*funcSpec)))
+        return;
+
     // A loaded soft font takes over its designator, a standard one included (DEC STD 070: a downloaded set
     // is selected by the Dscs it was loaded under), so it is asked before the function table is.
     if (seq.category() == FunctionCategory::ESC && tryDesignateSoftFont(seq))
         return;
 
-    if (Function const* funcSpec = seq.functionDefinition(_terminal->supportedSequences());
-        funcSpec != nullptr)
+    if (funcSpec != nullptr)
     {
         // Name the zone after the sequence it is executing, so the timeline reads SGR/CUP/ED rather
         // than a wall of identical processSequence rows. The mnemonic is a string_view over a
@@ -8384,7 +8398,8 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case DECRM: {
             ApplyResult r = ApplyResult::Ok;
             for (auto const i: core::times(seq.parameterCount()))
-                r = std::max(r, impl::setModeDEC(seq, i, false, *_terminal));
+                if (admitsDECMode(seq.param<unsigned>(i)))
+                    r = std::max(r, impl::setModeDEC(seq, i, false, *_terminal));
             return r;
         }
         break;
@@ -8533,7 +8548,8 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case DECSM: {
             ApplyResult r = ApplyResult::Ok;
             for (auto const i: core::times(seq.parameterCount()))
-                r = std::max(r, impl::setModeDEC(seq, i, true, *_terminal));
+                if (admitsDECMode(seq.param<unsigned>(i)))
+                    r = std::max(r, impl::setModeDEC(seq, i, true, *_terminal));
             return r;
         }
         case DECST8C:
