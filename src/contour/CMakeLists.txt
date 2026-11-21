@@ -1747,6 +1747,7 @@ if(CONTOUR_TESTING)
         cli/AgentIntegrations_test.cpp
         cli/AgentReport_test.cpp
         cli/AgentSkill_test.cpp
+        cli/AgentRecord_test.cpp
         cli/AgentStats_test.cpp
         cli/AgentTranscript_test.cpp
         cli/BackgroundExecutor_test.cpp

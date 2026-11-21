@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/cli/AgentRecord.hpp>
 #include <contour/cli/AgentReport.hpp>
 #include <contour/cli/AgentSkill.hpp>
 #include <contour/cli/AgentStats.hpp>
@@ -584,6 +585,24 @@ namespace
                                            CLI::Option { "json",
                                                          CLI::Value { false },
                                                          "Prints the statistics as JSON instead of text." },
+                                       } },
+                    CLI::Command { .name = "record",
+                                   .helpText = "Appends one finished agent run, as the agent orchestrator "
+                                               "describes it, to "
+                                               "agent-runs.jsonl in the daemon's state directory, for "
+                                               "analysis afterwards.",
+                                   .options =
+                                       CLI::OptionList {
+                                           CLI::Option { "line",
+                                                         CLI::Value { ""s },
+                                                         "The run, as one JSON object.",
+                                                         "JSON" },
+                                           CLI::Option { "format",
+                                                         CLI::Value { 1u },
+                                                         "The format the line is written in; this contour "
+                                                         "writes format 1 "
+                                                         "only.",
+                                                         "N" },
                                        } } },
         };
     }
@@ -697,6 +716,7 @@ ContourApp::ContourApp(core::Environment const& env):
     link("contour.agent.setup", bind(&ContourApp::agentSetupAction, this));
     link("contour.agent.transcript", bind(&ContourApp::agentTranscriptAction, this));
     link("contour.agent.stats", bind(&ContourApp::agentStatsAction, this));
+    link("contour.agent.record", bind(&ContourApp::agentRecordAction, this));
     link("contour.mcp", bind(&ContourApp::mcpAction, this));
     for (auto const& verb: contour::cli::controlVerbs())
         link(std::format("contour.{}", verb.path), [this, &verb] { return controlVerbAction(verb); });
@@ -2286,6 +2306,19 @@ int ContourApp::agentStatsAction()
     auto const opener = makeNativeSessionLogOpener();
     return runAgentStats(
         request, processEnvironment(), core::platform::NativeFileSystem::instance(), *opener, cout, cerr);
+}
+
+int ContourApp::agentRecordAction()
+{
+    constexpr auto Prefix = "contour.agent.record"sv;
+    auto const key = [&](std::string_view option) {
+        return std::format("{}.{}", Prefix, option);
+    };
+    auto const request = RecordRequest { .line = parameters().get<string>(key("line")),
+                                         .format = parameters().get<unsigned>(key("format")) };
+    auto const appender = makeNativeRecordAppender();
+    return runAgentRecord(
+        request, vthost::daemonStateDirectory(processEnvironment()) / AgentRunsFileName, *appender, cerr);
 }
 
 int ContourApp::agentSetupAction()

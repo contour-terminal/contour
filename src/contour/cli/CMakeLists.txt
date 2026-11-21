@@ -43,6 +43,7 @@ add_library(contour_cli STATIC
     AgentReport.cpp AgentReport.hpp
     AgentSkill.cpp AgentSkill.hpp
     AgentSessionLog.cpp AgentSessionLog.hpp
+    AgentRecord.cpp AgentRecord.hpp RecordAppender_native.cpp
     AgentStats.cpp AgentStats.hpp AgentStatsJson.hpp
     AgentTranscript.cpp AgentTranscript.hpp AgentTranscriptJson.hpp
     BackgroundExecutor.cpp BackgroundExecutor.hpp
