@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/Image.hpp>
+
 #include <core/cli/App.hpp>
 
 #include <cstdint>
@@ -63,7 +65,9 @@ class ContourApp: public core::cli::App
 {
   public:
     /// @param env The process environment every part of the application reads through.
-    explicit ContourApp(core::Environment const& env);
+    /// @param imageDecoder What a daemon this process serves decodes its sessions' PNG images with: the GUI
+    ///        build's (this library is Qt-free and has none of its own). None, and those images are refused.
+    explicit ContourApp(core::Environment const& env, vtbackend::ImageDecoder imageDecoder = {});
 
     [[nodiscard]] core::cli::Command parameterDefinition() const override;
 
@@ -182,6 +186,8 @@ class ContourApp: public core::cli::App
     /// The daemon's log destination (installDaemonLogging()): categories hold a reference into it, so it
     /// lives as long as the app.
     std::unique_ptr<core::log::ScopedOutput> _daemonLogOutput;
+    /// @see ContourApp::ContourApp
+    vtbackend::ImageDecoder _imageDecoder;
 };
 
 } // namespace contour::cli

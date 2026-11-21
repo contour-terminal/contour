@@ -6,6 +6,7 @@
 #ifdef CONTOUR_FRONTEND_GUI
     #include <contour/BenignQtMessages.hpp>
     #include <contour/ContourGuiApp.hpp>
+    #include <contour/display/ImageDecoding.hpp>
 
     #include <QtCore/QByteArray>
     #include <QtCore/QString>
@@ -324,7 +325,8 @@ int main(int argc, char const* argv[])
     // construction starts threads, which the PTY keeper `contour daemon` becomes may not have (@see
     // vthost::keeper::runKeeperProcess).
     if (contour::cli::isDaemonInvocation(std::span { argv, static_cast<std::size_t>(argc) }))
-        return contour::cli::ContourApp { environment }.run(argc, argv);
+        // The daemon's sessions decode PNG images as a window's do: the decoder is the GUI build's.
+        return contour::cli::ContourApp { environment, contour::display::decodeImage }.run(argc, argv);
     #endif
 
     qInstallMessageHandler(qtCustomMessageOutput);

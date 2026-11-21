@@ -162,3 +162,6 @@ list, set `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` in the environment of the sessio
   refuse file media until this is designed.
 - **Windows file media.** The rules for file owners, hidden files and reparse points are not defined
   there yet.
+- **PNG in a daemon built without the GUI.** A daemon decodes PNG images (`f=100`) with the GUI
+  build's image decoder. A `contour daemon` built with `CONTOUR_FRONTEND_GUI=OFF` has none and refuses
+  PNG transmissions; raw RGB and RGBA (`f=24`, `f=32`) work everywhere.

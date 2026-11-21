@@ -1758,6 +1758,7 @@ int runDaemon(DaemonConfig const& config,
                 vtbackend::kitty_graphics::KittyMediumServices {
                     .source = *kittyMediumSource,
                     .policy = kittyMediaPolicyOf(core::defaultEnvironment(), config.kittyMedia) },
+            .imageDecoder = config.imageDecoder,
             .extensions = config.extensions ? config.extensions() : nullptr,
             .profiles = config.profiles,
             .profilePtys = config.profiles

@@ -1073,6 +1073,7 @@ class Terminal: public IStatusLinePublishTarget
     ///                        absent, every file medium is refused. Given only by a composition root whose
     ///                        bytes come from a local process. Its source is borrowed: it must outlive the
     ///                        terminal.
+    /// @param imageDecoder    What PNG transmissions are decoded with; absent, they are refused.
     Terminal(Events& eventListener,
              core::Environment const& env,
              core::platform::FileSystem const& fileSystem,
@@ -1084,7 +1085,8 @@ class Terminal: public IStatusLinePublishTarget
              std::optional<LinkDetectionServices> linkServices = std::nullopt,
              std::optional<StatusLineExtensionServices> extensionServices = std::nullopt,
              std::optional<GitHeadServices> gitServices = std::nullopt,
-             std::optional<kitty_graphics::KittyMediumServices> kittyMedia = std::nullopt);
+             std::optional<kitty_graphics::KittyMediumServices> kittyMedia = std::nullopt,
+             ImageDecoder imageDecoder = {});
 
     /// Revokes the extensions' publish sink first, waiting for a delivery in flight, so that none reaches a
     /// terminal whose members are being destroyed.
@@ -4353,16 +4355,11 @@ class Terminal: public IStatusLinePublishTarget
     ImagePool& imagePool() noexcept { return _imagePool; }
     ImagePool const& imagePool() const noexcept { return _imagePool; }
 
-    /// Callback for decoding encoded images (e.g. PNG) to RGBA pixel data.
-    ///
-    /// @param format   The source image format.
-    /// @param data     The raw encoded image data.
-    /// @param size     [in/out] For PNG: the size is extracted during decoding.
-    ///                 For RGB/RGBA: the size is already known.
-    /// @returns Decoded RGBA pixel data, or std::nullopt on failure.
-    using ImageDecoderCallback = std::function<std::optional<Image::Data>(
-        ImageFormat format, std::span<uint8_t const> data, ImageSize& size)>;
+    /// @see vtbackend::ImageDecoder.
+    using ImageDecoderCallback = ImageDecoder;
 
+    /// Replaces the image decoder. A rebinding seam for the in-process GUI, whose display supplies the
+    /// decoder when it attaches; a terminal hosted by a daemon gets its decoder at construction.
     void setImageDecoder(ImageDecoderCallback decoder) noexcept { _imageDecoder = std::move(decoder); }
     ImageDecoderCallback const& imageDecoder() const noexcept { return _imageDecoder; }
 
@@ -5839,7 +5836,7 @@ class Terminal: public IStatusLinePublishTarget
     /// terminal's own default. A pop landing there restores the former and signals a reset only for
     /// the latter. @see popPointerShape.
     bool _pointerShapeBaseSetByApplication = false;
-    /// Not captured: wiring.
+    /// Not captured: wiring. @see vtbackend::ImageDecoder.
     ImageDecoderCallback _imageDecoder;
 
     TabStops _tabs;

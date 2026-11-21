@@ -6095,3 +6095,98 @@ TEST_CASE("a hosted session reads kitty file media with the host's own services"
           == (row.read ? "\033_Gi=31;OK\033\\"sv : "\033_Gi=31;EBADF:file not readable\033\\"sv));
     CHECK(source.reads == (row.read ? 1 : 0));
 }
+
+namespace
+{
+/// The eight bytes every PNG file starts with, and some more: what the fakes below stand a PNG with.
+constexpr auto FakePng = std::string_view { "\x89PNG\r\n\x1a\nIHDR" };
+
+/// A kitty medium source that serves FakePng for any path.
+class PngMediumSource final: public vtbackend::kitty_graphics::KittyMediumSource
+{
+  public:
+    [[nodiscard]] std::expected<std::vector<uint8_t>, vtbackend::kitty_graphics::MediaRefusal> read(
+        std::string_view /*path*/,
+        vtbackend::kitty_graphics::Medium /*medium*/,
+        vtbackend::kitty_graphics::MediaPolicy const& /*policy*/) const override
+    {
+        return std::vector<uint8_t>(FakePng.begin(), FakePng.end());
+    }
+};
+
+/// A decoder that takes any PNG for one opaque white pixel, and counts its calls.
+struct OnePixelDecoder
+{
+    std::shared_ptr<int> calls = std::make_shared<int>(0);
+
+    [[nodiscard]] vtbackend::ImageDecoder decoder() const
+    {
+        return [calls = calls](vtbackend::ImageFormat format,
+                               std::span<uint8_t const> /*data*/,
+                               vtbackend::ImageSize& size) -> std::optional<vtbackend::Image::Data> {
+            ++*calls;
+            if (format != vtbackend::ImageFormat::PNG)
+                return std::nullopt;
+            size = vtbackend::ImageSize { vtbackend::Width(1), vtbackend::Height(1) };
+            return vtbackend::Image::Data { 255, 255, 255, 255 };
+        };
+    }
+};
+} // namespace
+
+TEST_CASE("a hosted session decodes PNG images with the host's decoder", "[vthost][host][media]")
+{
+    // vthost decodes no file format: the daemon's composition root hands its sessions the GUI build's
+    // decoder. Without one, a PNG is refused as before -- the file medium's one refusal, or the direct one's
+    // EINVAL.
+    auto const source = PngMediumSource {};
+    auto const decoder = OnePixelDecoder {};
+    auto const given = GENERATE(true, false);
+    auto config = vthost::SessionHostConfig {
+        .pumping = vthost::SessionPumping::Manual,
+        .kittyMedia =
+            vtbackend::kitty_graphics::KittyMediumServices {
+                .source = source,
+                .policy = { .transmission = vtbackend::kitty_graphics::FileTransmission::Enabled,
+                            .temporaryRoots = { "/tmp" },
+                            .temporaryFileOnlyRoots = {},
+                            .allowedRoots = {},
+                            .userId = 0,
+                            .sizeLimit = 1024 } },
+        .imageDecoder = given ? decoder.decoder() : vtbackend::ImageDecoder {}
+    };
+    auto const backend = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *backend };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              std::move(config) };
+
+    REQUIRE(host.createTab() != nullptr);
+    auto const session = host.model().workspace(host.workspaceId())->activeTab()->rootPane()->session();
+    auto* terminal = host.terminal(session);
+    REQUIRE(terminal != nullptr);
+    auto& mock = dynamic_cast<vtpty::MockPty&>(dynamic_cast<vthost::TappingPty&>(terminal->device()).inner());
+    mock.setForegroundProcessName("bash");
+
+    using namespace std::string_view_literals;
+    SECTION("from a file")
+    {
+        mock.appendStdOutBuffer(
+            std::format("\033_Ga=t,i=5,f=100,t=f;{}\033\\", core::base64::encode("/tmp/picture.png")));
+        REQUIRE(terminal->processInputOnce());
+        CHECK(terminal->peekInput()
+              == (given ? "\033_Gi=5;OK\033\\"sv : "\033_Gi=5;EBADF:file not readable\033\\"sv));
+    }
+    SECTION("sent directly")
+    {
+        mock.appendStdOutBuffer(std::format("\033_Ga=t,i=5,f=100;{}\033\\", core::base64::encode(FakePng)));
+        REQUIRE(terminal->processInputOnce());
+        CHECK(terminal->peekInput()
+              == (given ? "\033_Gi=5;OK\033\\"sv : "\033_Gi=5;EINVAL:could not decode image\033\\"sv));
+    }
+    CHECK(*decoder.calls == (given ? 1 : 0));
+}

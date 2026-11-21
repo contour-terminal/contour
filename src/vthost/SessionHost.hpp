@@ -436,6 +436,7 @@ class HostedSession
     /// @param git Where the terminal's `{Git}` looks up its branch; none shows no branch.
     /// @param kittyMedia What the terminal's kitty graphics read files with; none refuses every file medium.
     ///        The source is borrowed: it must outlive the session.
+    /// @param imageDecoder What the terminal decodes PNG transmissions with; none refuses them.
     HostedSession(vtworkspace::SessionId id,
                   core::Environment const& env,
                   std::unique_ptr<vtpty::Pty> pty,
@@ -454,7 +455,8 @@ class HostedSession
                   std::string profileName = {},
                   SettingsOrigin settingsOrigin = SettingsOrigin::Profile,
                   std::optional<vtbackend::GitHeadServices> git = std::nullopt,
-                  std::optional<vtbackend::kitty_graphics::KittyMediumServices> kittyMedia = std::nullopt);
+                  std::optional<vtbackend::kitty_graphics::KittyMediumServices> kittyMedia = std::nullopt,
+                  vtbackend::ImageDecoder imageDecoder = {});
 
     /// Closes the PTY, as terminate(TerminationReason::Teardown) does, and joins the pump thread.
     ~HostedSession();
@@ -1054,6 +1056,9 @@ struct SessionHostConfig
     /// client widens it (it is never part of WireSessionSettings). nullopt refuses every file medium. The
     /// source is borrowed: it must outlive the host.
     std::optional<vtbackend::kitty_graphics::KittyMediumServices> kittyMedia {};
+    /// What every session's terminal decodes PNG images (kitty `f=100`, GIP) with; none refuses them. The
+    /// daemon itself is Qt-free, so its composition root supplies one where it has a decoder to give.
+    vtbackend::ImageDecoder imageDecoder {};
     /// Where a connection's reads pause while its input backs up in a session, and resume.
     InputWatermarks inputWatermarks {};
     /// The status-line extensions every session it spawns runs; null for none, which constructs, polls and
@@ -2306,6 +2311,8 @@ class SessionHost final: public vtworkspace::ModelEvents
     HostGitLookups _git;
     /// What every session's kitty file media are read with. @see SessionHostConfig::kittyMedia
     std::optional<vtbackend::kitty_graphics::KittyMediumServices> _kittyMedia;
+    /// What every session's terminal decodes PNG images with. @see SessionHostConfig::imageDecoder
+    vtbackend::ImageDecoder _imageDecoder;
     /// The host's profiles; null for none. @see SessionHostConfig::profiles
     std::shared_ptr<ProfileCatalog const> _profiles;
     /// What each attached client reported it can display, keyed by its stream subscription so the
