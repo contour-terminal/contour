@@ -10,11 +10,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <format>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <vector>
 
 using namespace std::string_view_literals;
 using namespace vtbackend;
@@ -530,4 +532,26 @@ TEST_CASE("KittyPlaceholders.screen.source_rect_is_ignored", "[kitty][placeholde
     CHECK(placement->raster->imageSubSize() == ImageSize {});
     CHECK(placement->raster->cellSpan().lines == LineCount(2));
     CHECK(placement->raster->cellSpan().columns == ColumnCount(2));
+}
+
+TEST_CASE("KittyPlaceholders.screen.late_resolve_in_history_is_a_reported_change", "[kitty][placeholder]")
+{
+    // A consumer following the grid's changes (the daemon's delta stream) must see history rows a late
+    // transmit resolves: nothing scrolls, so only the rows' own revisions can tell it.
+    auto mock = PlaceholderTerm { PageSize { LineCount(10), ColumnCount(20) }, LineCount(100) };
+    mock.writeToScreen(placeholderPicture() + std::string(9, '\n'));
+    REQUIRE(mock.screen().historyLineCount() == LineCount(2));
+
+    auto& grid = mock.screen().grid();
+    auto cursor = GridDeltaCursor {};
+    grid.anchorCursorToHead(cursor);
+    mock.writeToScreen(transmitVirtual());
+    REQUIRE(mock.screen().at(LineOffset(-2), ColumnOffset(0)).imageFragment());
+
+    auto reported = std::vector<int> {};
+    CHECK(grid.forEachLineChangedSince(cursor, [&](LineOffset offset, Line const&) {
+        reported.push_back(unbox<int>(offset));
+    }) == GridDeltaResult::Delta);
+    CHECK(std::ranges::contains(reported, -2));
+    CHECK(std::ranges::contains(reported, -1));
 }

@@ -73,6 +73,7 @@
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/DaemonControl.hpp>
 #include <vthost/FlushPolicy.hpp>
+#include <vthost/ImageWire.hpp>
 #include <vthost/KeyAuth.hpp>
 #include <vthost/ObjectRegistry.hpp>
 #include <vthost/PduPump.hpp>
@@ -500,6 +501,8 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
         /// HyperlinkId counter wraps and reuses ids, so an id whose URI changed
         /// must be resent — keyed by id alone the mirror would keep the stale URI.
         std::unordered_map<uint16_t, std::string> sentHyperlinks;
+        /// The ordinal each image placement on this grid travels under (ImageCellEntry::placement).
+        ImagePlacementOrdinals placementOrdinals;
         std::vector<uint32_t> lastModes;     ///< Mirrored DEC-mode set as last sent.
         std::vector<uint32_t> lastAnsiModes; ///< Mirrored ANSI-mode set as last sent.
         /// The cursor position last sent to the mirror. A cursor-only move (no cell

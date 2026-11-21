@@ -49,46 +49,43 @@ namespace
         return it != screen.rows.end() ? &it->second : nullptr;
     }
 
-    /// One image's placement, accumulated from the cells it covers.
-    struct Placement
+    /// What names one placement on the wire: its image, and the sender's ordinal for the placement.
+    using PlacementKey = std::pair<uint32_t, uint32_t>;
+
+    /// Picks, for each placement @p screen shows, one of its cells: every cell carries the whole
+    /// placement's geometry, so any one of them describes it -- the top-left one need not be held at all.
+    [[nodiscard]] std::map<PlacementKey, proto::ImageCellEntry const*> placementsOf(
+        RemoteScreen const& screen)
     {
-        int64_t anchorRow = 0;     ///< Stable id of the image's top-left cell.
-        uint16_t anchorColumn = 0; ///< Column of that cell.
-        uint32_t rows = 0;         ///< Cell rows the image spans.
-        uint32_t columns = 0;      ///< Cell columns the image spans.
-        uint8_t layer = 0;
-        uint8_t alignment = 0;
-        uint8_t resize = 0;
-        bool anchored = false; ///< The (0,0) tile is among the cells seen.
+        auto placements = std::map<PlacementKey, proto::ImageCellEntry const*> {};
+        for (auto const& columns: screen.imageCells | std::views::values)
+            for (auto const& entry: columns | std::views::values)
+                placements.try_emplace(PlacementKey { entry.imageId, entry.placement }, &entry);
+        return placements;
+    }
+
+    /// The part of an image a placement shows.
+    struct SourceRect
+    {
+        vtbackend::PixelCoordinate offset;
+        vtbackend::ImageSize size; ///< Zero: the whole image.
     };
 
-    /// Groups @p screen's image cells by image, recovering each placement's extent and anchor.
-    ///
-    /// The wire describes images per COVERED CELL, so the placement is not stated anywhere — it is
-    /// the bounding box of the offsets, and the anchor is the cell whose offset is (0,0).
-    [[nodiscard]] std::unordered_map<uint32_t, Placement> placementsOf(RemoteScreen const& screen)
+    /// @return The source rectangle @p entry names, or the whole image when it does not lie within an image
+    ///         of @p width x @p height pixels: these are a peer's numbers, and the renderer samples by them.
+    [[nodiscard]] SourceRect sourceRectOf(proto::ImageCellEntry const& entry, uint32_t width, uint32_t height)
     {
-        auto placements = std::unordered_map<uint32_t, Placement> {};
-        for (auto const& [stableId, columns]: screen.imageCells)
-        {
-            for (auto const& [column, entry]: columns)
-            {
-                auto& placement = placements[entry.imageId];
-                placement.layer = entry.layer;
-                placement.alignment = entry.alignment;
-                placement.resize = entry.resize;
-                placement.rows = std::max(placement.rows, static_cast<uint32_t>(entry.offsetLine) + 1);
-                placement.columns =
-                    std::max(placement.columns, static_cast<uint32_t>(entry.offsetColumn) + 1);
-                if (entry.offsetLine == 0 && entry.offsetColumn == 0)
-                {
-                    placement.anchorRow = stableId;
-                    placement.anchorColumn = column;
-                    placement.anchored = true;
-                }
-            }
-        }
-        return placements;
+        auto const right = uint64_t { entry.sourceX } + (entry.sourceWidth != 0 ? entry.sourceWidth : width);
+        auto const bottom =
+            uint64_t { entry.sourceY } + (entry.sourceHeight != 0 ? entry.sourceHeight : height);
+        if (right > width || bottom > height)
+            return {};
+        return SourceRect {
+            .offset = vtbackend::PixelCoordinate { .x = { static_cast<int>(entry.sourceX) },
+                                                   .y = { static_cast<int>(entry.sourceY) } },
+            .size = vtbackend::ImageSize { vtbackend::Width::cast_from(entry.sourceWidth),
+                                           vtbackend::Height::cast_from(entry.sourceHeight) },
+        };
     }
 
     /// The eviction count that numbers the mirror's rows as the server numbers them.
@@ -922,19 +919,16 @@ void ScreenMirror::applyImages(RemoteScreen const& screen)
     if (screen.imageCells.empty() && _images.empty())
         return;
 
-    auto& page = activePage();
-    auto const base = pageTop();
-    auto const lines = unbox<int64_t>(page.pageSize().lines);
-
-    for (auto const& [imageId, placement]: placementsOf(screen))
+    // One RasterizedImage per placement, as the host holds them: rasterized from the geometry the wire
+    // states rather than inferred from whichever of its cells happen to be in view.
+    auto rasters = std::map<PlacementKey, std::shared_ptr<vtbackend::RasterizedImage const>> {};
+    for (auto const& [key, entry]: placementsOf(screen))
     {
-        if (!placement.anchored)
-            continue; // the image's top scrolled out of what the mirror holds; a resync re-places it
-        auto const* data = screen.imageData(imageId);
+        auto const* data = screen.imageData(key.first);
         if (data == nullptr)
             continue; // pixels not fetched yet; the image handler places it once they land
 
-        auto local = _images.find(imageId);
+        auto local = _images.find(key.first);
         if (local == _images.end())
         {
             // The wire types pixels as std::byte, the image pool as unsigned char; same bits,
@@ -949,47 +943,62 @@ void ScreenMirror::applyImages(RemoteScreen const& screen)
                 std::move(pixels));
             if (!image)
                 continue;
-            local = _images.emplace(imageId, std::move(image)).first;
+            local = _images.emplace(key.first, std::move(image)).first;
         }
 
         // Rasterized against OUR cell size, not the sender's: the pixels are the shared truth, the
-        // grid they are cut into is per-display. The alignment and resize policies DO come off the
-        // wire — they decide how the source is cropped and stretched into the cells, so deriving
-        // them locally would show a differently framed image.
+        // grid they are cut into is per-display. Everything else that frames the image DOES come off
+        // the wire -- span, source rectangle, policies, gap colour, origin -- since deriving any of it
+        // locally would show a differently cropped, sized or framed image.
         //
         // Through vthost/ImageWire.h rather than a cast: these bytes are unvalidated wire input (the
         // codec carries them unjudged, exactly as it does the mouse state), and the switches they
         // reach in Image.cpp end in std::unreachable() — once per frame, on the render thread, for
         // every attached pane. A peer's byte becomes an enumerator in one place, or not at all.
-        auto rasterized =
-            vtbackend::rasterize(local->second,
-                                 imageAlignmentOf(placement.alignment),
-                                 imageResizeOf(placement.resize),
-                                 _terminal->colorPalette().defaultBackground,
-                                 vtbackend::GridSize { vtbackend::LineCount::cast_from(placement.rows),
-                                                       vtbackend::ColumnCount::cast_from(placement.columns) },
-                                 _terminal->cellPixelSize(),
-                                 imageLayerOf(placement.layer));
+        auto const source = sourceRectOf(*entry, data->width, data->height);
+        rasters.emplace(
+            key,
+            std::make_shared<vtbackend::RasterizedImage>(
+                local->second,
+                imageAlignmentOf(entry->alignment),
+                imageResizeOf(entry->resize),
+                vtbackend::RGBAColor { entry->gapColor },
+                vtbackend::GridSize { .lines = vtbackend::LineCount::cast_from(entry->spanLines),
+                                      .columns = vtbackend::ColumnCount::cast_from(entry->spanColumns) },
+                _terminal->cellPixelSize(),
+                imageLayerOf(entry->layer),
+                source.offset,
+                source.size,
+                vtbackend::KittyPlacementId {},
+                imageOriginOf(entry->origin)));
+    }
 
-        for (auto const& [stableId, columns]: screen.imageCells)
+    // Every row the mirror holds, its history included: a picture straddling the page top has cells
+    // there, and a late transmit resolves placeholder rows that scrolled off long ago.
+    auto& page = activePage();
+    auto const base = pageTop();
+    auto const lines = unbox<int64_t>(page.pageSize().lines);
+    auto const history = unbox<int64_t>(page.grid().historyLineCount());
+    for (auto const& [stableId, columns]: screen.imageCells)
+    {
+        auto const target = stableId - base;
+        // Above the aligned floor the offset no longer names the row the id does (@see apply()).
+        if (target >= lines || target < -history || (target < 0 && stableId < _alignedFloor))
+            continue;
+        auto& line = page.grid().lineAt(vtbackend::LineOffset::cast_from(target));
+        // Shifted as the row it lies on is (@see writeRow).
+        auto const firstColumn = stableId < screen.viewportBase ? vtbackend::ColumnOffset(0) : _origin.column;
+        for (auto const& [column, entry]: columns)
         {
-            auto const target = stableId - base;
-            if (target < 0 || target >= lines)
+            auto const raster = rasters.find(PlacementKey { entry.imageId, entry.placement });
+            auto const at = vtbackend::ColumnOffset::cast_from(column) - firstColumn;
+            if (raster == rasters.end() || at < vtbackend::ColumnOffset(0)
+                || at >= vtbackend::ColumnOffset::cast_from(line.size()))
                 continue;
-            auto& line = page.grid().lineAt(vtbackend::LineOffset::cast_from(target));
-            for (auto const& [column, entry]: columns)
-            {
-                // Shifted as the page row it lies on is (@see writeRow).
-                auto const at = vtbackend::ColumnOffset::cast_from(column) - _origin.column;
-                if (entry.imageId != imageId || at < vtbackend::ColumnOffset(0)
-                    || at >= vtbackend::ColumnOffset::cast_from(line.size()))
-                    continue;
-                line.useCellAt(at).setImageFragment(
-                    rasterized,
-                    vtbackend::CellLocation { .line = vtbackend::LineOffset::cast_from(entry.offsetLine),
-                                              .column =
-                                                  vtbackend::ColumnOffset::cast_from(entry.offsetColumn) });
-            }
+            line.useCellAt(at).setImageFragment(
+                raster->second,
+                vtbackend::CellLocation { .line = vtbackend::LineOffset::cast_from(entry.offsetLine),
+                                          .column = vtbackend::ColumnOffset::cast_from(entry.offsetColumn) });
         }
     }
 }

@@ -3028,6 +3028,50 @@ std::function<bool()> mirrorShows(MirrorHarness* h, std::string needle)
     return false;
 }
 
+/// kitty's Unicode placeholder, U+10EEEE, in UTF-8.
+constexpr auto KittyPlaceholder = std::string_view { "\xF4\x8E\xBB\xAE" };
+
+/// kitty's first row/column diacritics in UTF-8: index n encodes n + 1.
+constexpr auto KittyDiacritics =
+    std::array<std::string_view, 4> { "\xCC\x85", "\xCC\x8D", "\xCC\x8E", "\xCC\x90" };
+
+/// @return Image row @p row of a placeholder picture @p columns cells wide, as Claude Code prints it: the
+///         image id as the foreground (@p sgr), each cell with both diacritics, an SGR reset, a newline.
+[[nodiscard]] std::string kittyPlaceholderRow(std::string_view sgr, std::size_t row, std::size_t columns)
+{
+    auto text = std::format("\033[{}m", sgr);
+    for (auto const column: std::views::iota(std::size_t { 0 }, columns))
+        text += std::format("{}{}{}", KittyPlaceholder, KittyDiacritics.at(row), KittyDiacritics.at(column));
+    text += "\033[m\r\n";
+    return text;
+}
+
+/// @return A direct kitty transmission of a 2x2 RGB image as @p id, with a virtual placement of @p rows x
+///         @p columns cells and the extra keys @p keys (a placement id, say).
+[[nodiscard]] std::string kittyVirtualTransmit(int id, int rows, int columns, std::string_view keys = {})
+{
+    auto const pixels = std::string { "\xff\x00\x00\x00\xff\x00\x00\x00\xff\xff\xff\xff", 12 };
+    return std::format("\033_Ga=T,U=1,i={},c={},r={},f=24,s=2,v=2,q=2{};{}\033\\",
+                       id,
+                       columns,
+                       rows,
+                       keys,
+                       core::base64::encode(pixels));
+}
+
+/// @return The image fragment the server or mirror @p terminal shows at (@p row, @p column), or nullptr.
+[[nodiscard]] vtbackend::ImageFragment const* fragmentAt(vtbackend::Terminal const& terminal,
+                                                         int row,
+                                                         int column)
+{
+    auto const& fragments =
+        terminal.primaryScreen().grid().lineAt(vtbackend::LineOffset(row)).storage().imageFragments;
+    if (!fragments)
+        return nullptr;
+    auto const it = fragments->find(static_cast<uint16_t>(column));
+    return it != fragments->end() ? it->second.get() : nullptr;
+}
+
 /// Writes @p bytes, then resizes BOTH ends and records the gaps once they settle.
 ///
 /// This is the case the whole design rests on. Reflow runs twice — once on the daemon's grid, once
@@ -3301,6 +3345,141 @@ TEST_CASE("PARITY an inline image", "[vthost][parity]")
                                 mirrorShows(&h, "below-image"));
     REQUIRE(serverHasImage(&h, session));
     checkParity(gaps);
+}
+
+TEST_CASE("PARITY kitty placeholders with the top image row scrolled into history", "[vthost][parity][image]")
+{
+    // The wire used to carry no placement span: the mirror took the bounding box of the offsets it could
+    // see and dropped an image whose (0,0) cell it did not hold. Row 0 sits in history here, which the
+    // mirror's image pass did not reach either, so both halves of the picture are under test.
+    auto h = MirrorHarness {};
+    auto const session = newSession(h.host);
+    auto bytes = kittyVirtualTransmit(7, 2, 4) + kittyPlaceholderRow("38;5;7", 0, 4)
+                 + kittyPlaceholderRow("38;5;7", 1, 4);
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 23))
+        bytes += "\r\n";
+    bytes += "tail";
+    auto const gaps = gapsAfter(&h, session, std::move(bytes), mirrorShows(&h, "tail"));
+
+    auto const* serverRowOne = fragmentAt(*h.serverTerminal(session), 0, 3);
+    REQUIRE(serverRowOne != nullptr);
+    REQUIRE(serverRowOne->offset()
+            == vtbackend::CellLocation { .line = vtbackend::LineOffset(1),
+                                         .column = vtbackend::ColumnOffset(3) });
+    REQUIRE(fragmentAt(*h.serverTerminal(session), -1, 0) != nullptr);
+    auto const* mirrorRowOne = fragmentAt(*h.mirror, 0, 3);
+    REQUIRE(mirrorRowOne != nullptr);
+    CHECK(mirrorRowOne->rasterizedImage().cellSpan().lines == vtbackend::LineCount(2));
+    CHECK(mirrorRowOne->rasterizedImage().cellSpan().columns == vtbackend::ColumnCount(4));
+    CHECK(mirrorRowOne->rasterizedImage().origin() == vtbackend::ImageOrigin::Placeholder);
+    checkParity(gaps);
+}
+
+TEST_CASE("PARITY kitty placeholders with the bottom image row not on the page", "[vthost][parity][image]")
+{
+    // Only image row 0 is printed: the placement still spans two rows, which no visible offset says.
+    auto h = MirrorHarness {};
+    auto const session = newSession(h.host);
+    auto const gaps = gapsAfter(&h,
+                                session,
+                                kittyVirtualTransmit(7, 2, 4) + kittyPlaceholderRow("38;5;7", 0, 4) + "tail",
+                                mirrorShows(&h, "tail"));
+    REQUIRE(fragmentAt(*h.serverTerminal(session), 0, 0) != nullptr);
+    auto const* mirrored = fragmentAt(*h.mirror, 0, 0);
+    REQUIRE(mirrored != nullptr);
+    CHECK(mirrored->rasterizedImage().cellSpan().lines == vtbackend::LineCount(2));
+    CHECK(mirrored->rasterizedImage().cellSpan().columns == vtbackend::ColumnCount(4));
+    checkParity(gaps);
+}
+
+TEST_CASE("PARITY kitty placeholders in the attach snapshot", "[vthost][parity][image]")
+{
+    // The snapshot streams history through the page (ScreenMirror::fullReplay), a different route from
+    // the incremental one; the picture straddles the page top on it.
+    auto h = MirrorHarness {};
+    auto const session = newSession(h.host);
+    auto bytes = kittyVirtualTransmit(7, 2, 4) + kittyPlaceholderRow("38;5;7", 0, 4)
+                 + kittyPlaceholderRow("38;5;7", 1, 4);
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 23))
+        bytes += "\r\n";
+    bytes += "tail";
+    h.serverTerminal(session)->writeToScreen(bytes);
+    auto const gaps = gapsAfter(&h, session, "", [&h] {
+        return h.mirror->primaryScreen().grid().renderMainPageText().contains("tail")
+               && fragmentAt(*h.mirror, 0, 0) != nullptr;
+    });
+    REQUIRE(fragmentAt(*h.serverTerminal(session), -1, 0) != nullptr);
+    checkParity(gaps);
+}
+
+TEST_CASE("two kitty placements of one image mirror as two placements", "[vthost][mirror][image]")
+{
+    // Same image, same geometry, two placement ids: the host holds two RasterizedImages, and so must the
+    // mirror -- keyed by image id alone they collapsed into one.
+    auto h = MirrorHarness {};
+    auto const session = newSession(h.host);
+    auto const bytes = kittyVirtualTransmit(7, 1, 2, ",p=2") + "\033_Ga=p,U=1,i=7,p=3,c=2,r=1,q=2\033\\"
+                       + kittyPlaceholderRow("38;5;7;58;5;2", 0, 2)
+                       + kittyPlaceholderRow("38;5;7;58;5;3", 0, 2) + "tail";
+    auto const gaps = gapsAfter(&h, session, bytes, [&h] {
+        return h.mirror->primaryScreen().grid().renderMainPageText().contains("tail")
+               && fragmentAt(*h.mirror, 0, 0) != nullptr && fragmentAt(*h.mirror, 1, 0) != nullptr;
+    });
+    auto const* serverFirst = fragmentAt(*h.serverTerminal(session), 0, 0);
+    auto const* serverSecond = fragmentAt(*h.serverTerminal(session), 1, 0);
+    REQUIRE(serverFirst != nullptr);
+    REQUIRE(serverSecond != nullptr);
+    REQUIRE(&serverFirst->rasterizedImage() != &serverSecond->rasterizedImage());
+
+    auto const* first = fragmentAt(*h.mirror, 0, 0);
+    auto const* second = fragmentAt(*h.mirror, 1, 0);
+    REQUIRE(first != nullptr);
+    REQUIRE(second != nullptr);
+    CHECK(&first->rasterizedImage() != &second->rasterizedImage());
+    // Each row's two cells still share their own placement's raster.
+    CHECK(&first->rasterizedImage() == &fragmentAt(*h.mirror, 0, 1)->rasterizedImage());
+    checkParity(gaps);
+}
+
+TEST_CASE("a late kitty transmit resolves placeholder rows the client holds in history",
+          "[vthost][mirror][image]")
+{
+    // The cells arrive first and scroll into history unresolved; the image comes afterwards. The host
+    // resolves its history rows, and that change has to reach a client that already has those rows.
+    auto h = MirrorHarness {};
+    auto const session = newSession(h.host);
+    auto bytes = kittyPlaceholderRow("38;5;7", 0, 4) + kittyPlaceholderRow("38;5;7", 1, 4);
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 30))
+        bytes += "\r\n";
+    bytes += "tail";
+
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session, std::string bytes) -> Task<void> {
+        serverWrites(h, session, bytes);
+        co_await waitUntil(&h->loop, mirrorShows(h, "tail"));
+        auto const& serverGrid = h->serverTerminal(session)->primaryScreen().grid();
+        auto const history = unbox<int>(serverGrid.historyLineCount());
+        auto const pictureTop = [&] {
+            for (auto const row: std::views::iota(-history, 0))
+                if (serverGrid.lineAt(vtbackend::LineOffset(row))
+                        .isFlagEnabled(vtbackend::LineFlag::ImagePlaceholders))
+                    return row;
+            return 0;
+        }();
+        REQUIRE(pictureTop < 0);
+        REQUIRE(fragmentAt(*h->mirror, pictureTop, 0) == nullptr);
+
+        serverWrites(h, session, kittyVirtualTransmit(7, 2, 4));
+        co_await waitUntil(&h->loop, [&] {
+            return fragmentAt(*h->mirror, pictureTop, 0) != nullptr
+                   && fragmentAt(*h->mirror, pictureTop + 1, 3) != nullptr;
+        });
+        REQUIRE(fragmentAt(*h->serverTerminal(session), pictureTop + 1, 3) != nullptr);
+        auto const gaps = vthost::testing::compareGrids(*h->serverTerminal(session), *h->mirror);
+        checkParity(gaps);
+        h->client->detach();
+    }(&h, session, std::move(bytes));
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
 }
 
 TEST_CASE("PARITY a DEC page the user is not looking at", "[vthost][parity]")

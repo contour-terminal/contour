@@ -228,9 +228,11 @@ namespace
     }
 
     /// Collects the image-cell side-table entries of one row.
+    /// @param ordinals Numbers each cell's placement, the same for every delta of this connection.
     void appendImageCells(std::vector<proto::ImageCellEntry>& out,
                           int64_t stableId,
-                          vtbackend::Line const& line)
+                          vtbackend::Line const& line,
+                          ImagePlacementOrdinals& ordinals)
     {
         auto const& fragments = line.storage().imageFragments;
         if (!fragments)
@@ -249,6 +251,15 @@ namespace
                 .layer = std::to_underlying(rasterized.layer()),
                 .alignment = std::to_underlying(rasterized.alignmentPolicy()),
                 .resize = std::to_underlying(rasterized.resizePolicy()),
+                .placement = ordinals.ordinalOf(rasterized),
+                .spanLines = static_cast<uint16_t>(unbox<int>(rasterized.cellSpan().lines)),
+                .spanColumns = static_cast<uint16_t>(unbox<int>(rasterized.cellSpan().columns)),
+                .sourceX = static_cast<uint32_t>(std::max(0, rasterized.imageOffset().x.value)),
+                .sourceY = static_cast<uint32_t>(std::max(0, rasterized.imageOffset().y.value)),
+                .sourceWidth = unbox<uint32_t>(rasterized.imageSubSize().width),
+                .sourceHeight = unbox<uint32_t>(rasterized.imageSubSize().height),
+                .origin = std::to_underlying(rasterized.origin()),
+                .gapColor = rasterized.defaultColor().value,
             });
         }
     }
@@ -1740,10 +1751,11 @@ std::expected<NativeSession::BuiltPush, NativeSession::BuildFailure> NativeSessi
         // not needing a snapshot, and Forced never needs anything else.
         auto const snapshot = mode == SnapshotMode::Forced;
 
+        follow.placementOrdinals.prune();
         auto const sharesSoftFonts = mirrorsSoftFonts();
         auto const collect = [&](vtbackend::LineOffset offset, vtbackend::Line const& line) {
             delta.lines.push_back(toWireLine(grid, offset, line));
-            appendImageCells(delta.imageCells, delta.lines.back().stableId, line);
+            appendImageCells(delta.imageCells, delta.lines.back().stableId, line, follow.placementOrdinals);
             if (sharesSoftFonts)
                 appendSoftGlyphCells(delta.softGlyphCells, delta.lines.back().stableId, line);
             // Collect every referenced id (deduped within this delta), NOT only

@@ -796,10 +796,11 @@ struct HyperlinkEntry
 
 /// One image-covered cell: which row/column shows which part of which image.
 ///
-/// The last three fields describe the whole PLACEMENT rather than this cell, and are repeated per
-/// cell for the same reason `layer` always was: a receiver meets the cells first and has to be able
-/// to rebuild the placement from any one of them. They are what turn source pixels into the cells
-/// they cover, so a receiver that rasterizes without them gets a differently cropped image.
+/// Every field from `layer` on describes the whole PLACEMENT rather than this cell, and is repeated
+/// per cell: a receiver meets the cells first and has to be able to rebuild the placement from any
+/// one of them -- including when the placement's top-left cell is in no row it holds, as for a
+/// picture straddling the page top. They are what turn source pixels into the cells they cover, so a
+/// receiver that rasterizes without them gets a differently cropped, sized or framed image.
 struct ImageCellEntry
 {
     int64_t stableId = 0; ///< Row.
@@ -810,6 +811,18 @@ struct ImageCellEntry
     uint8_t layer = 0;     ///< vtbackend::ImageLayer's underlying value.
     uint8_t alignment = 0; ///< vtbackend::ImageAlignment's underlying value.
     uint8_t resize = 0;    ///< vtbackend::ImageResize's underlying value.
+    /// Which placement of the image this is: a sender-chosen ordinal, distinct for each of its
+    /// RasterizedImages for as long as the connection lasts. Two placements of one image with the same
+    /// geometry are still two placements.
+    uint32_t placement = 0;
+    uint16_t spanLines = 0;    ///< The placement's cell span: rows.
+    uint16_t spanColumns = 0;  ///< The placement's cell span: columns.
+    uint32_t sourceX = 0;      ///< The source rectangle's left edge, in image pixels.
+    uint32_t sourceY = 0;      ///< The source rectangle's top edge, in image pixels.
+    uint32_t sourceWidth = 0;  ///< The source rectangle's width in image pixels; 0 is the whole image.
+    uint32_t sourceHeight = 0; ///< The source rectangle's height in image pixels; 0 is the whole image.
+    uint8_t origin = 0;        ///< vtbackend::ImageOrigin's underlying value.
+    uint32_t gapColor = 0;     ///< The alignment gap's colour, as vtbackend::RGBAColor's value.
     bool operator==(ImageCellEntry const&) const = default;
 };
 

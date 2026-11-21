@@ -6803,7 +6803,10 @@ void Screen::resolveKittyPlaceholderLine(LineOffset line)
         if (unchanged)
             continue;
         auto const at = ColumnOffset::cast_from(column);
-        auto cell = _grid.lineAt(line).useCellAt(at);
+        // A history row is changed through the accessor that has the revision stamping and the daemon's
+        // delta scan reach that deep: a late transmit resolves rows a client mirrored long ago.
+        auto& changed = line < LineOffset(0) ? _grid.changingLineAt(line) : _grid.lineAt(line);
+        auto cell = changed.useCellAt(at);
         if (wanted.raster)
             cell.setImageFragment(wanted.raster, wanted.offset);
         else

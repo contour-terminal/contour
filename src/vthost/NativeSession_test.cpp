@@ -4558,7 +4558,7 @@ TEST_CASE("a codec 3 client is refused in a layout it reads", "[vthost][negotiat
 
     CHECK(vthost::testing::codec3ServerHelloVersion(body) == proto::NegotiatingHelloMarker);
     CHECK(capture.contains("handshake rejected: the client speaks protocol 3, from a release before version "
-                           "negotiation; this daemon speaks 4-4"));
+                           "negotiation; this daemon speaks 5-5"));
 }
 
 TEST_CASE("a wrong token is refused with the bytes of a version refusal", "[vthost][negotiation]")

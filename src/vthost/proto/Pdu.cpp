@@ -793,6 +793,15 @@ namespace
             out.u8(entry.layer);
             out.u8(entry.alignment);
             out.u8(entry.resize);
+            out.varint(entry.placement);
+            out.varint(entry.spanLines);
+            out.varint(entry.spanColumns);
+            out.varint(entry.sourceX);
+            out.varint(entry.sourceY);
+            out.varint(entry.sourceWidth);
+            out.varint(entry.sourceHeight);
+            out.u8(entry.origin);
+            out.u32(entry.gapColor);
         }
 
         out.varint(pdu.setModes.size());
@@ -1937,7 +1946,16 @@ namespace
                                      || !assign(reader.u16(), entry.offsetColumn, error)
                                      || !assign(reader.u8(), entry.layer, error)
                                      || !assign(reader.u8(), entry.alignment, error)
-                                     || !assign(reader.u8(), entry.resize, error))
+                                     || !assign(reader.u8(), entry.resize, error)
+                                     || !assign(reader.varint(), entry.placement, error)
+                                     || !assign(reader.varint(), entry.spanLines, error)
+                                     || !assign(reader.varint(), entry.spanColumns, error)
+                                     || !assign(reader.varint(), entry.sourceX, error)
+                                     || !assign(reader.varint(), entry.sourceY, error)
+                                     || !assign(reader.varint(), entry.sourceWidth, error)
+                                     || !assign(reader.varint(), entry.sourceHeight, error)
+                                     || !assign(reader.u8(), entry.origin, error)
+                                     || !assign(reader.u32(), entry.gapColor, error))
                                      return std::unexpected(error);
                                  return entry;
                              });

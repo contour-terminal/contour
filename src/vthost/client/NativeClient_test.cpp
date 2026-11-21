@@ -2102,7 +2102,8 @@ TEST_CASE("the client reports an old daemon's refusal with both versions", "[vth
                                                return vthost::testing::codec3ServerHello(serial);
                                            })));
 
-    CHECK(client->refusal() == proto::HandshakeRefusal { .ours = { 4, 4 }, .theirs = { 3, 3 } });
+    CHECK(client->refusal()
+          == proto::HandshakeRefusal { .ours = proto::SupportedVersions, .theirs = { 3, 3 } });
     CHECK_FALSE(client->negotiated().has_value());
     CHECK_FALSE(client->connected());
 }
