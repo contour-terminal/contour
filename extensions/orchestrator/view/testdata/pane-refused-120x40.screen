@@ -3,18 +3,19 @@
 │ no open pull requests                                                │ │                                             │
 │                                                                      │ │ task      fix CI                            │
 │ ISSUES WITHOUT A PR                                                  │ │ model     sonnet                            │
-│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │ state     preparation failed, worktree      │
-│   #2338 Flaky on Windows: SessionHost.extension.controlVerb require… │ │             removed, new: pane:             │
-│   #2253 Switch `daemon` Same `client`                                │ │             not-supported-yet               │
-│   #2163 OSC 133: optional nonce to reject forged command lines and … │ │ branch    agent/pr-2366-20261113-140211     │
-│   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead o… │ │ worktree  /home/u/worktrees/contour/pr-2366 │
-│                                                                      │ │             -20261113-140211                │
-│ TIMELINE · LAST 24 HOURS, AN HOUR A BAR                              │ │ url       https://github.com/contour-termin │
-│ agents active  ························               peak 0 · now 0 │ │             al/contour/pull/2366            │
-│ tokens out     ························                     0 in 24h │ │ failure   agents can't start here yet       │
-│ runs started   ·······················█          1 started · 1 ended │ │           a Flatpak or Windows build, or an │
-│                                                                      │ │             older host, opens no agent tab  │
-│ AGENTS · 0 OF 4 RUNNING                                              │ │             in a worktree                   │
+│ ▾ contour · 5                                                        │ │ state     preparation failed, worktree      │
+│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │             removed, new: pane:             │
+│   #2338 Flaky on Windows: SessionHost.extension.controlVerb require… │ │             not-supported-yet               │
+│   #2253 Switch `daemon` Same `client`                                │ │ branch    agent/pr-2366-20261113-140211     │
+│   #2163 OSC 133: optional nonce to reject forged command lines and … │ │ worktree  /home/u/worktrees/contour/pr-2366 │
+│   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead o… │ │             -20261113-140211                │
+│                                                                      │ │ url       https://github.com/contour-termin │
+│ TIMELINE · LAST 24 HOURS, AN HOUR A BAR                              │ │             al/contour/pull/2366            │
+│ agents active  ························               peak 0 · now 0 │ │ failure   agents can't start here yet       │
+│ tokens out     ························                     0 in 24h │ │           a Flatpak or Windows build, or an │
+│ runs started   ·······················█          1 started · 1 ended │ │             older host, opens no agent tab  │
+│                                                                      │ │             in a worktree                   │
+│ AGENTS · 0 OF 4 RUNNING                                              │ │                                             │
 │ no agents                                                            │ │                                             │
 │                                                                      │ │                                             │
 │ FINISHED · 1 NEW                                                     │ │                                             │
@@ -34,7 +35,6 @@
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
-│                                                                      │ │                                             │
 ╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
- ↑↓ move · enter open · d dispatch · ? help · b board · t transcript · / filter · R refresh · e end run                 
+ ↑↓ move · enter open · d dispatch · ? help · b board · t transcript · / filter · z fold · R refresh · e end run        
  ⬢ agents 0/4 · ✓1 new                                                                                                  

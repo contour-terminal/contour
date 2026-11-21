@@ -3,6 +3,7 @@
 │ no open pull requests                                                        │
 │                                                                              │
 │ ISSUES WITHOUT A PR                                                          │
+│ ▾ contour · 5                                                                │
 │   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key presses, then… │
 │   #2338 Flaky on Windows: SessionHost.extension.controlVerb requires the pe… │
 │   #2253 Switch `daemon` Same `client`                                        │
@@ -10,7 +11,6 @@
 │   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead of settin… │
 │                                                                              │
 │ AGENTS · 1 OF 4 RUNNING                                                      │
-│ ○ pr-2375 · fix CI · sonnet                                       working 6m │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Details ────────────────────────────────────────────────────────────────────╮
 │ Report the Qt macOS bug that drops Ctrl+Cmd+arrow key presses, then remove … │

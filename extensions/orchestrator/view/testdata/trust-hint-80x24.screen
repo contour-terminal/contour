@@ -1,8 +1,8 @@
 ╭─ Agents ─────────────────────────────────────────────────────────────────────╮
-│ MY PULL REQUESTS                                                             │
 │ no open pull requests                                                        │
 │                                                                              │
 │ ISSUES WITHOUT A PR                                                          │
+│ ▾ contour · 5                                                                │
 │   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key presses, then… │
 │   #2338 Flaky on Windows: SessionHost.extension.controlVerb requires the pe… │
 │   #2253 Switch `daemon` Same `client`                                        │

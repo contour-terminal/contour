@@ -571,6 +571,37 @@ namespace
                        std::string_view placeholder,
                        std::vector<Row> items);
 
+    /// Appends one repository's @p items as a group: its header, which folds them, then the items, each
+    /// marked with the group and whether it is folded. A repository with no items has no group.
+    void appendGroup(std::vector<Row>& rows,
+                     Engine const& engine,
+                     std::string group,
+                     std::string_view repo,
+                     std::vector<Row> items)
+    {
+        if (items.empty())
+            return;
+        auto const fold = engine.isFolded(group) ? Fold::Folded : Fold::Open;
+        rows.push_back(
+            Row { .kind = RowKind::Group,
+                  .mark = fold == Fold::Folded ? "▸" : "▾",
+                  .markRole = Role::Dim,
+                  .text = clean(std::format("{} · {}", repo, items.size())),
+                  .repo = std::string { repo },
+                  .group = group,
+                  .fold = fold,
+                  .title = clean(repo),
+                  .details = { DetailLine {
+                      .label = "", .value = "folded: enter or z shows its items", .role = Role::Dim } } });
+        for (auto& item: items)
+        {
+            item.prefix.clear();
+            item.group = group;
+            item.fold = fold;
+            rows.push_back(std::move(item));
+        }
+    }
+
     /// Appends the timeline of the last day, when a run was active or dispatched in it.
     void appendTimeline(std::vector<Row>& rows, Engine const& engine)
     {
@@ -918,14 +949,19 @@ std::vector<Row> buildRows(Engine const& engine, uint64_t nowMonoMs)
                                .prefix = repos.size() > 1 ? RepoPrefix::Shown : RepoPrefix::Omitted,
                                .nowMonoMs = nowMonoMs };
 
+    // One group per repository: its header names the repository, so its items do not.
     auto pullRequests = std::vector<Row> {};
     auto issues = std::vector<Row> {};
     for (auto const& repo: repos)
     {
+        auto requestRows = std::vector<Row> {};
         for (auto const& request: engine.changeRequests(repo))
-            pullRequests.push_back(pullRequestRow(lists, repo, request));
+            requestRows.push_back(pullRequestRow(lists, repo, request));
+        appendGroup(pullRequests, engine, std::format("prs/{}", repo), repo, std::move(requestRows));
+        auto issueRows = std::vector<Row> {};
         for (auto const& issue: engine.unclaimedIssues(repo))
-            issues.push_back(issueRow(lists, repo, issue));
+            issueRows.push_back(issueRow(lists, repo, issue));
+        appendGroup(issues, engine, std::format("issues/{}", repo), repo, std::move(issueRows));
     }
 
     auto rows = std::vector<Row> {};
@@ -943,6 +979,16 @@ std::vector<Row> buildRows(Engine const& engine, uint64_t nowMonoMs)
         appendSection(rows, "LEFTOVER WORKTREES", {}, std::move(orphans));
     return rows;
 }
+
+namespace
+{
+    /// @return Whether @p row holds @p filter, ignoring ASCII case: in its text, its repository, or its
+    /// group.
+    [[nodiscard]] bool matchesFilter(Row const& row, std::string_view filter)
+    {
+        return containsIgnoringCase(std::format("{} {} {}", row.prefix, row.repo, row.text), filter);
+    }
+} // namespace
 
 std::vector<std::size_t> visibleRows(std::span<Row const> rows,
                                      std::string_view filter,
@@ -966,8 +1012,16 @@ std::vector<std::size_t> visibleRows(std::span<Row const> rows,
             && (row.kind == RowKind::Chart || headsChart(index)
                 || (row.kind == RowKind::Spacer && headsChart(index + 1))))
             continue;
-        if (row.isSelectable() && !filter.empty()
-            && !containsIgnoringCase(std::format("{} {}", row.prefix, row.text), filter))
+        // A folded group lists its header only, but while a filter is typed, which looks inside it.
+        if (row.kind != RowKind::Group && row.fold == Fold::Folded && filter.empty())
+            continue;
+        // Under a filter a group's header stays while one of its items does.
+        if (row.kind == RowKind::Group && !filter.empty() && !std::ranges::any_of(rows, [&](Row const& item) {
+                return item.kind != RowKind::Group && item.group == row.group && matchesFilter(item, filter);
+            }))
+            continue;
+        if (row.isSelectable() && row.kind != RowKind::Group && !filter.empty()
+            && !matchesFilter(row, filter))
             continue;
         kept.push_back(index);
     }

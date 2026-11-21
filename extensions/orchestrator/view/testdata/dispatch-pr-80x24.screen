@@ -1,16 +1,16 @@
 ╭─ Agents ─────────────────────────────────────────────────────────────────────╮
 │ MY PULL REQUESTS                                                             │
-│ ● #2375 Say why the stdio relay failed, and send a hello before half-closin… │
-│ ✓ ╭─ Dispatch an agent ──────────────────────────────────────────────────╮   │
-│ ✓ │ item      #2375 · Say why the stdio relay failed, and send a hello … │a… │
-│ ✗ │ task      ‹ fix CI › f                                               │d… │
-│ ✗ │ model     ‹ sonnet ›                                                 │a… │
-│   │ note      optional; tab to type one                                  │   │
-│ IS│ prompt    /contour-workflows:fix-ci                                  │   │
-│   │             https://github.com/contour-terminal/contour/pull/2375    │n… │
-│   │ checkout  gh pr checkout 2375 --branch agent/pr-2375-…               │e… │
-│   │ worktree  /home/u/worktrees/contour/pr-2375-…                        │   │
-│   │ command   claude --model sonnet --session-id                         │   │
+│ ▾ contour · 5                                                                │
+│ ● ╭─ Dispatch an agent ──────────────────────────────────────────────────╮n… │
+│ ✓ │ item      #2375 · Say why the stdio relay failed, and send a hello … │   │
+│ ✓ │ task      ‹ fix CI › f                                               │a… │
+│ ✗ │ model     ‹ sonnet ›                                                 │d… │
+│ ✗ │ note      optional; tab to type one                                  │a… │
+│   │ prompt    /contour-workflows:fix-ci                                  │   │
+│ IS│             https://github.com/contour-terminal/contour/pull/2375    │   │
+│ ▾ │ checkout  gh pr checkout 2375 --branch agent/pr-2375-…               │   │
+│   │ worktree  /home/u/worktrees/contour/pr-2375-…                        │n… │
+│   │ command   claude --model sonnet --session-id                         │e… │
 ╰───│             00000001-0000-4000-8000-000000000000                     │───╯
 ╭─ D│             '/contour-workflows:fix-ci                               │───╮
 │ Sa│             https://github.com/contour-terminal/contour/pull/2375'   │e… │

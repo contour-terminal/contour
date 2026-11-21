@@ -203,6 +203,20 @@ struct MarkRunSeen
     uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
 };
 
+/// The user folded or unfolded a group of the dashboard's list, such as one repository's issues.
+struct ToggleFold
+{
+    std::string group;   ///< The group's key, such as `issues/pace`; at most MaxFoldKeyBytes.
+    uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
+};
+
+/// The most bytes of a fold's key, and the most folds kept.
+inline constexpr std::size_t MaxFoldKeyBytes = 200;
+inline constexpr std::size_t MaxFolds = 256;
+
+/// The store key the folded groups are kept under: one JSON array of their keys.
+inline constexpr std::string_view FoldsKey = "view/folds";
+
 /// The user asked for a page of a run's transcript, in a tab: each tab keeps its own page of a run.
 struct ReadTranscript
 {
@@ -254,6 +268,7 @@ using Input = std::variant<Wake,
                            EndRun,
                            DismissRun,
                            MarkRunSeen,
+                           ToggleFold,
                            RefreshNow,
                            ReadTranscript,
                            ShowBoard,
@@ -505,6 +520,10 @@ class Engine
     /// refused.
     [[nodiscard]] Run const* activeRunOn(std::string_view repo, ItemRef const& item) const noexcept;
 
+    /// @param group A group of the dashboard's list, such as `issues/pace`.
+    /// @return Whether the user folded it; kept across restarts.
+    [[nodiscard]] bool isFolded(std::string_view group) const noexcept;
+
     /// @return How many runs count as active (countsAsActive()): what `max_agents` is checked against.
     [[nodiscard]] std::size_t activeRuns() const noexcept;
 
@@ -625,6 +644,10 @@ class Engine
     [[nodiscard]] bool isInFlight(std::string_view tag) const noexcept;
     [[nodiscard]] bool isPending(std::string_view tag) const noexcept;
     [[nodiscard]] bool isTracked(Run const& run) const noexcept;
+    /// Reads the folded groups the store kept; what is not a list of bounded keys is left out.
+    void loadFolds(std::string_view json);
+    /// Folds @p group, or unfolds it, and stores the folds.
+    void toggleFold(std::string_view group, std::vector<Effect>& out);
     void endStep(std::vector<Effect>& out, uint64_t revision);
     [[nodiscard]] std::optional<uint64_t> nextWake() const;
     void rebuildProblems();
@@ -738,6 +761,8 @@ class Engine
     std::vector<std::string> _statsFinalAsked;
     /// The finished runs this instance asked contour to append to the file of finished runs, once each.
     std::vector<std::string> _recordAsked;
+    /// The groups of the dashboard's list the user folded, kept under FoldsKey.
+    std::vector<std::string> _folds;
     std::vector<InFlightCall> _inFlight;
     std::vector<InFlightCall> _paneOpenings; ///< The tabs asked for and not yet answered for, by run id.
     /// When each run that is done became so, by run id; monotonic, never persisted: after a restart the wait

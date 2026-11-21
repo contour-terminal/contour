@@ -36,6 +36,7 @@ enum class RowKind : uint8_t
     Placeholder, ///< What an empty section says; furniture.
     Chart,       ///< One line of a chart, such as the timeline's; furniture, drawn in the Wide band only.
     Notice,      ///< What the dashboard says when it has nothing to list, such as what to configure.
+    Group,       ///< One repository's items in a section, such as its issues; selectable while folded.
     PullRequest, ///< One of the user's open pull requests.
     Issue,       ///< An open issue no pull request of the user's claims.
     Agent,       ///< A run that has not finished.
@@ -71,6 +72,13 @@ struct DetailLine
     [[nodiscard]] bool operator==(DetailLine const&) const = default;
 };
 
+/// Whether a group of the list shows its items.
+enum class Fold : uint8_t
+{
+    Open = 0,
+    Folded,
+};
+
 /// One row of the list and the details it opens. Every text is sanitised: no control character, one line.
 struct Row
 {
@@ -87,11 +95,20 @@ struct Row
     std::vector<KeyCommand> offers = {};  ///< The run commands it accepts: Board, Transcript, Dispatch,
                                           ///< EndRun, RetryRemoval, Dismiss.
     OpenEffect onOpen = OpenEffect::None; ///< What opening its details tells the engine.
+    std::string group = {};               ///< The group it heads or belongs to, such as `issues/pace`; empty:
+                                          ///< none. A group's key is what the engine keeps folded.
+    Fold fold = Fold::Open;               ///< Whether that group is folded: a folded group's items are not
+                                          ///< listed but while a filter is typed.
     std::string title = {};               ///< The details' first line.
     std::vector<DetailLine> details = {}; ///< The details' other lines.
 
     /// @return Whether the row can be selected: it stands for an item, not for the list's furniture.
-    [[nodiscard]] bool isSelectable() const noexcept { return kind >= RowKind::PullRequest; }
+    /// A group's header only while folded: an open group is navigated through its items, as an ungrouped
+    /// list.
+    [[nodiscard]] bool isSelectable() const noexcept
+    {
+        return kind > RowKind::Group || (kind == RowKind::Group && fold == Fold::Folded);
+    }
     /// @return Whether the row is furniture, which a collapsed layout leaves out.
     [[nodiscard]] bool isFurniture() const noexcept { return kind <= RowKind::Chart; }
 };

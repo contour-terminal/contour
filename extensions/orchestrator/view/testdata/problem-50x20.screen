@@ -5,6 +5,7 @@ contour: the pull request list is incomplete
 │ no open pull requests                          │
 │                                                │
 │ ISSUES WITHOUT A PR                            │
+│ ▾ contour · 5                                  │
 │   #2356 Report the Qt macOS bug that drops Ct… │
 │   #2338 Flaky on Windows: SessionHost.extensi… │
 │   #2253 Switch `daemon` Same `client`          │
@@ -14,7 +15,6 @@ contour: the pull request list is incomplete
 │ AGENTS · 0 OF 4 RUNNING                        │
 │ no agents                                      │
 │                                                │
-│ FINISHED · 0 NEW                               │
 ╰────────────────────────────────────────────────╯
  ↑↓ move · enter open · d dispatch · ? help       
  ⬢ agents 0/4                                     

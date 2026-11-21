@@ -1,5 +1,6 @@
 ╭─ Agents ─────────────────────────────────────────────────────────────────────╮
 │ MY PULL REQUESTS                                                             │
+│ ▾ contour · 5                                                                │
 │ ● #2375 Say why the stdio relay failed, and send a hello before half-closin… │
 │ ✓ #2369 examples: add donut-animation, a full-screen animation done right    │
 │ ✓ #2346 contour: tab_style — shapes, fills, materials and widths for the ta… │
@@ -7,10 +8,9 @@
 │ ✗ #1847 Adds ability to set Contour as default terminal on Windows OS · dra… │
 │                                                                              │
 │ ISSUES WITHOUT A PR                                                          │
+│ ▾ contour · 5                                                                │
 │   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key presses, then… │
 │   #2338 Flaky on Windows: SessionHost.extension.controlVerb requires the pe… │
-│   #2253 Switch `daemon` Same `client`                                        │
-│   #2163 OSC 133: optional nonce to reject forged command lines and marks     │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Details ────────────────────────────────────────────────────────────────────╮
 │ contour: tab_style — shapes, fills, materials and widths for the tab bar, o… │

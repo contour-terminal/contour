@@ -1,16 +1,16 @@
 ╭─ Agents ─────────────────────────────────────────────────────────────────────╮
 │ MY PULL REQUESTS                                                             │
+│ ▾ contour · 5                                                                │
 │ ● #2375 Say why the stdio relay failed, and send a hello before half-closin… │
 │ ✓ #2369 examples: add donut-animation, a full-screen animat… ○ agent working │
 │ ✓ #2346 contour: tab_style — shapes, fills, materials and w… ○ agent working │
 │ ✗ #2114 vtbackend: WIP -- DEC mode 44 and a partial margin-… ○ agent working │
-│ ✗ #1847 Adds ability to set Contour as default terminal on … ○ agent working │
-│   ╭─ Dispatch an agent ──────────────────────────────────────────────────╮   │
-│ IS│ item      #2375 · Say why the stdio relay failed, and send a hello … │   │
-│   │ task      ‹ fix CI › f                                               │n… │
-│   │ model     ‹ sonnet ›                                                 │e… │
-│   │ note      optional; tab to type one                                  │   │
-│   │ refused   max_agents agents are running: end one first               │   │
+│ ✗ ╭─ Dispatch an agent ──────────────────────────────────────────────────╮ng │
+│   │ item      #2375 · Say why the stdio relay failed, and send a hello … │   │
+│ IS│ task      ‹ fix CI › f                                               │   │
+│ ▾ │ model     ‹ sonnet ›                                                 │   │
+│   │ note      optional; tab to type one                                  │n… │
+│   │ refused   max_agents agents are running: end one first               │e… │
 ╰───│                                                                      │───╯
 ╭─ D│ 4 of 4 running                                                       │───╮
 │ Sa│ tab next field · esc cancel                                          │e… │

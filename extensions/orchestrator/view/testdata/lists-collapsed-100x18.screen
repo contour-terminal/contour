@@ -1,16 +1,16 @@
 ╭─ Agents ─────────────────────────────────────────────────╮ ╭─ Details ───────────────────────────╮
-│ ● #2375 Say why the stdio relay failed, and send a hell… │ │ Say why the stdio relay failed, an… │
-│ ✓ #2369 examples: add donut-animation, a full-screen an… │ │                                     │
-│ ✓ #2346 contour: tab_style — shapes, fills, materials a… │ │ branch    fix/stdio-attach-starter- │
-│ ✗ #2114 vtbackend: WIP -- DEC mode 44 and a partial mar… │ │             hello → master          │
-│ ✗ #1847 Adds ability to set Contour as default terminal… │ │ checks    running                   │
-│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arr… │ │ url       https://github.com/contou │
-│   #2338 Flaky on Windows: SessionHost.extension.control… │ │             r-terminal/contour/pull │
-│   #2253 Switch `daemon` Same `client`                    │ │             /2375                   │
+│ ▾ contour · 5                                            │ │ Say why the stdio relay failed, an… │
+│ ● #2375 Say why the stdio relay failed, and send a hell… │ │                                     │
+│ ✓ #2369 examples: add donut-animation, a full-screen an… │ │ branch    fix/stdio-attach-starter- │
+│ ✓ #2346 contour: tab_style — shapes, fills, materials a… │ │             hello → master          │
+│ ✗ #2114 vtbackend: WIP -- DEC mode 44 and a partial mar… │ │ checks    running                   │
+│ ✗ #1847 Adds ability to set Contour as default terminal… │ │ url       https://github.com/contou │
+│ ▾ contour · 5                                            │ │             r-terminal/contour/pull │
+│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arr… │ │             /2375                   │
+│   #2338 Flaky on Windows: SessionHost.extension.control… │ │                                     │
+│   #2253 Switch `daemon` Same `client`                    │ │                                     │
 │   #2163 OSC 133: optional nonce to reject forged comman… │ │                                     │
 │   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notificati… │ │                                     │
-│                                                          │ │                                     │
-│                                                          │ │                                     │
 │                                                          │ │                                     │
 │                                                          │ │                                     │
 │                                                          │ │                                     │

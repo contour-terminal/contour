@@ -1,14 +1,16 @@
 ╭─ Agents ─────────────────────────────────────────────────────────────╮ ╭─ Details ───────────────────────────────────╮
 │ MY PULL REQUESTS                                                     │ │ pr-2375 · fix CI · sonnet                   │
-│ ● #2375 Say why the stdio relay failed, and send a … ○ agent working │ │                                             │
-│ ✓ #2369 examples: add donut-animation, a full-screen animation done… │ │ task      fix CI                            │
-│ ✓ #2346 contour: tab_style — shapes, fills, materials and widths fo… │ │ model     sonnet                            │
-│ ✗ #2114 vtbackend: WIP -- DEC mode 44 and a partial margin-bell tri… │ │ state     running                           │
-│ ✗ #1847 Adds ability to set Contour as default terminal on Windows … │ │ branch    agent/pr-2375-20261113-150847     │
-│                                                                      │ │ worktree  /home/u/worktrees/contour/pr-2375 │
-│ ISSUES WITHOUT A PR                                                  │ │             -20261113-150847                │
-│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │ url       https://github.com/contour-termin │
-│   #2338 Flaky on Windows: SessionHost.extension.controlVerb require… │ │             al/contour/pull/2375            │
+│ ▾ contour · 5                                                        │ │                                             │
+│ ● #2375 Say why the stdio relay failed, and send a … ○ agent working │ │ task      fix CI                            │
+│ ✓ #2369 examples: add donut-animation, a full-screen animation done… │ │ model     sonnet                            │
+│ ✓ #2346 contour: tab_style — shapes, fills, materials and widths fo… │ │ state     running                           │
+│ ✗ #2114 vtbackend: WIP -- DEC mode 44 and a partial margin-bell tri… │ │ branch    agent/pr-2375-20261113-150847     │
+│ ✗ #1847 Adds ability to set Contour as default terminal on Windows … │ │ worktree  /home/u/worktrees/contour/pr-2375 │
+│                                                                      │ │             -20261113-150847                │
+│ ISSUES WITHOUT A PR                                                  │ │ url       https://github.com/contour-termin │
+│ ▾ contour · 5                                                        │ │             al/contour/pull/2375            │
+│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │                                             │
+│   #2338 Flaky on Windows: SessionHost.extension.controlVerb require… │ │                                             │
 │   #2253 Switch `daemon` Same `client`                                │ │                                             │
 │   #2163 OSC 133: optional nonce to reject forged command lines and … │ │                                             │
 │   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead o… │ │                                             │
@@ -33,8 +35,6 @@
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
 ╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
- ↑↓ move · enter open · d dispatch · ? help · b board · t transcript · / filter · R refresh · e end run                 
+ ↑↓ move · enter open · d dispatch · ? help · b board · t transcript · / filter · z fold · R refresh · e end run        
  end pr-2375-20261113-150847? e to confirm · esc to keep                                                                

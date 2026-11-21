@@ -58,7 +58,48 @@ TEST_CASE("the sections come in order, each item under its heading", "[orchestra
     CHECK(textsOf(rows, RowKind::Placeholder)
           == std::vector<std::string> { "no agents", "nothing finished" });
     CHECK(rows.front().kind == RowKind::Heading);
-    CHECK(rows[1].text.starts_with("#2375 "));
+    // Each section's items come under one group per repository, its header naming it and their count.
+    CHECK(rows[1].kind == RowKind::Group);
+    CHECK(rows[1].text == "contour · 5");
+    CHECK(rows[1].group == "prs/contour");
+    CHECK(rows[2].text.starts_with("#2375 "));
+    CHECK(rows[2].group == "prs/contour");
+}
+
+TEST_CASE("a folded group lists its header, and its items only under a filter", "[orchestrator][view]")
+{
+    auto const header = [](Fold fold) {
+        return Row {
+            .kind = RowKind::Group, .text = "pace · 2", .repo = "pace", .group = "issues/pace", .fold = fold
+        };
+    };
+    auto const item = [](std::string text, Fold fold) {
+        return Row { .kind = RowKind::Issue,
+                     .text = std::move(text),
+                     .repo = "pace",
+                     .group = "issues/pace",
+                     .fold = fold };
+    };
+    auto const open = std::vector { header(Fold::Open),
+                                    item("#1 crash on start", Fold::Open),
+                                    item("#2 docs", Fold::Open) };
+    auto const folded = std::vector { header(Fold::Folded),
+                                      item("#1 crash on start", Fold::Folded),
+                                      item("#2 docs", Fold::Folded) };
+
+    // Open, the header is no stop for the selection; folded, it is the only one.
+    CHECK(visibleRows(open, "", Furniture::Shown, ChartRows::Shown) == std::vector<std::size_t> { 0, 1, 2 });
+    CHECK(selectableCount(open, visibleRows(open, "", Furniture::Shown, ChartRows::Shown)) == 2);
+    CHECK(visibleRows(folded, "", Furniture::Shown, ChartRows::Shown) == std::vector<std::size_t> { 0 });
+    CHECK(selectableCount(folded, visibleRows(folded, "", Furniture::Shown, ChartRows::Shown)) == 1);
+
+    // A filter looks inside a folded group; a group none of whose items holds it goes, header and all.
+    CHECK(visibleRows(folded, "crash", Furniture::Shown, ChartRows::Shown)
+          == std::vector<std::size_t> { 0, 1 });
+    CHECK(visibleRows(folded, "nothing", Furniture::Shown, ChartRows::Shown).empty());
+    // The repository's name finds its items, now that they no longer carry it.
+    CHECK(visibleRows(open, "pace", Furniture::Shown, ChartRows::Shown)
+          == std::vector<std::size_t> { 0, 1, 2 });
 }
 
 TEST_CASE("an unconfigured engine says what to configure", "[orchestrator][view]")
@@ -213,7 +254,7 @@ TEST_CASE("a refused configuration labels no run outside, and the trust hint sti
     CHECK(nextRowChange(engine, StartMonoMs + 29'000) == StartMonoMs + 30'000);
 }
 
-TEST_CASE("with more than one repository a row names its own", "[orchestrator][view]")
+TEST_CASE("with more than one repository each has its own group, which names it", "[orchestrator][view]")
 {
     auto const engine = bootEngine({
         .repos = R"([ { "name": "contour", "path": "~/projects/contour", "forge": "github", "issues": [] },
@@ -221,13 +262,18 @@ TEST_CASE("with more than one repository a row names its own", "[orchestrator][v
         .repoPaths = { std::string { ContourPath }, std::string { OtherPath } },
     });
     auto const rows = buildRows(engine, StartMonoMs);
-    auto prefixes = std::vector<std::string> {};
+    auto groups = std::vector<std::string> {};
     for (auto const& row: rows)
         if (row.kind == RowKind::PullRequest)
-            prefixes.push_back(row.prefix);
-    CHECK(std::ranges::count(prefixes, "contour") == 5);
-    CHECK(std::ranges::count(prefixes, "other") == 5);
-    CHECK(std::ranges::is_sorted(prefixes)); // in the configured order: contour first
+        {
+            groups.push_back(row.group);
+            // The group's header names the repository; the row no longer does.
+            CHECK(row.prefix.empty());
+        }
+    CHECK(std::ranges::count(groups, "prs/contour") == 5);
+    CHECK(std::ranges::count(groups, "prs/other") == 5);
+    CHECK(std::ranges::is_sorted(groups)); // in the configured order: contour first
+    CHECK(textsOf(rows, RowKind::Group) == std::vector<std::string> { "contour · 5", "other · 5" });
 }
 
 TEST_CASE("a filter keeps the items that hold it; a collapsed layout drops the furniture",

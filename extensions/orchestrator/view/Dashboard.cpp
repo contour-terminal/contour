@@ -298,9 +298,22 @@ namespace
             // The selected row is never the first one shown with its section's heading hidden right above
             // it, where both fit: not after scrolling up to it, nor when rows arrive above it (a list
             // answered after the rows the selection first scrolled to).
-            if (selected < rows.size() && selected == top && top > 0 && height > 1
-                && _state.rows[rows[top - 1]].kind == RowKind::Heading)
-                --top;
+            // An open group's header counts as part of the heading above it: both come into view.
+            if (selected < rows.size() && selected >= top)
+            {
+                auto const isHeader = [&](std::size_t at) {
+                    auto const& row = _state.rows[rows[at]];
+                    return row.kind == RowKind::Heading
+                           || (row.kind == RowKind::Group && !row.isSelectable());
+                };
+                // Only headers stand between the top and the selection: the one above them comes into view
+                // too.
+                auto const onlyHeadersAbove = [&] {
+                    return std::ranges::all_of(std::views::iota(top, selected), isHeader);
+                };
+                while (top > 0 && selected - top + 1 < height && isHeader(top - 1) && onlyHeadersAbove())
+                    --top;
+            }
             top = std::min(top, rows.size() > height ? rows.size() - height : 0);
             for (auto const line: std::views::iota(std::size_t { 0 }, std::min(height, rows.size() - top)))
                 drawRow(inside,
@@ -699,6 +712,25 @@ void Dashboard::State::refilter()
     visibleCharts = charts;
     auto const selectable = selectableCount(rows, visible);
     interaction.selected = selectable == 0 ? 0 : std::min(interaction.selected, selectable - 1);
+    // A group just folded selects its header, its items gone; one just unfolded, its first item.
+    if (!interaction.followGroup.empty())
+    {
+        auto ordinal = std::size_t { 0 };
+        for (auto const index: visible)
+        {
+            if (!rows[index].isSelectable())
+                continue;
+            // Whichever of the header and the first item is selectable now: folded, the header; else the
+            // item.
+            if (rows[index].group == interaction.followGroup)
+            {
+                interaction.selected = ordinal;
+                break;
+            }
+            ++ordinal;
+        }
+        interaction.followGroup.clear();
+    }
 }
 
 Row const* Dashboard::State::selectedRow() const noexcept

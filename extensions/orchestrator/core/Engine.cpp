@@ -237,6 +237,7 @@ std::vector<Effect> Engine::step(Input const& input)
                     feed(dismiss.run, Dismiss {}, out);
             },
             [&](MarkRunSeen const& seen) { feed(seen.run, MarkSeen {}, out); },
+            [&](ToggleFold const& toggle) { toggleFold(toggle.group, out); },
             [&](ReadTranscript const& request) { readTranscript(request, out); },
             [&](ShowBoard const& request) { showBoard(request, out); },
             [&](HideBoard const& request) { hideBoard(request.tab); },
@@ -347,6 +348,11 @@ void Engine::loadStore(std::span<StoredEntry const> stored)
 {
     for (auto const& entry: stored)
     {
+        if (entry.key == FoldsKey)
+        {
+            loadFolds(entry.value);
+            continue;
+        }
         if (!entry.key.starts_with(RunKeyPrefix))
             continue;
         auto run = runFromJson(entry.value);

@@ -47,6 +47,10 @@ Problems — a failing `gh`,
 a list cut at its limit, a configuration that does not parse — sit above the lists, one line each, and
 the line at the bottom is the summary the status line shows.
 
+MY PULL REQUESTS and ISSUES WITHOUT A PR list one group per repository, under a header such as `▾ pace · 100`.
+`z` folds the group of the selected item into its header (`▸`), which is then selected; `z` or Enter on a
+folded header unfolds it. The folds are kept across restarts. A filter (`/`) looks inside folded groups too.
+
 Above the agents, in a tab 100 columns or wider, a timeline charts the last 24 hours, an hour a bar: how many
 agents were active, their output tokens (a run's spread evenly over the time it was active, its statistics
 being totals), and how many runs started, each line with what it adds up to. It is drawn from the runs' state
@@ -70,7 +74,7 @@ request's title is shown as text and does nothing.
 | Key | Does |
 | --- | --- |
 | `↑` `↓` `j` `k` `Home` `End` | move the selection |
-| `Enter` | on a pull request or an issue, open the dispatch form on the first task that applies to it, or show its agent's tab if one runs; on an agent, show its tab; on a finished run, open its details (and mark it seen); on a leftover worktree, open its details on the whole width |
+| `Enter` | on a pull request or an issue, open the dispatch form on the first task that applies to it, or show its agent's tab if one runs; on an agent, show its tab; on a finished run, open its details (and mark it seen); on a leftover worktree, open its details on the whole width; on a folded group, unfold it |
 | `d` | open the dispatch form on the selected item; on a finished run, on its item, for a new run |
 | `b` | show the selected run's board (below) |
 | `t` | show the selected run's transcript (below) |
@@ -78,6 +82,7 @@ request's title is shown as text and does nothing.
 | `Esc` | close the help, the details page or the filter |
 | `Tab` | swap the details in for the list, and back (below 100 columns) |
 | `/` | filter the rows by text; Enter keeps the filter, Esc drops it |
+| `z` | fold the selected item's repository group, or unfold a folded one |
 | `?` | show the keys |
 | `R` | read the lists again now |
 | `e` | end the selected agent's run |

@@ -44,6 +44,7 @@ namespace
         KeyRow { .key = "b"sv, .command = KeyCommand::Board, .hint = "b board"sv },
         KeyRow { .key = "t"sv, .command = KeyCommand::Transcript, .hint = "t transcript"sv },
         KeyRow { .key = "/"sv, .command = KeyCommand::Filter, .hint = "/ filter"sv },
+        KeyRow { .key = "z"sv, .command = KeyCommand::Fold, .hint = "z fold"sv },
         KeyRow { .key = "R"sv, .command = KeyCommand::Refresh, .hint = "R refresh"sv },
         KeyRow { .key = "e"sv, .command = KeyCommand::EndRun, .hint = "e end run"sv },
         KeyRow { .key = "x"sv, .command = KeyCommand::RetryRemoval, .hint = "x retry removal"sv },
@@ -420,6 +421,9 @@ namespace
                     return std::nullopt;
                 switch (row->kind)
                 {
+                    case RowKind::Group:
+                        interaction.followGroup = row->group;
+                        return UiAction { ToggleFoldAction { .group = row->group } };
                     case RowKind::Agent: return UiAction { RevealAgentAction { .run = row->run } };
                     case RowKind::PullRequest:
                     case RowKind::Issue:
@@ -495,6 +499,18 @@ namespace
                              interaction.overlay == Overlay::Help ? Overlay::None : Overlay::Help;
                          return std::nullopt;
                      } },
+        // `z` folds the group of the selected row, an item's or its header's, and selects the header: the
+        // item
+        // it was on is gone from the list.
+        CommandRow {
+            .command = KeyCommand::Fold,
+            .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
+                auto const* const row = context.selected;
+                if (interaction.screen != Screen::Dashboard || row == nullptr || row->group.empty())
+                    return std::nullopt;
+                interaction.followGroup = row->group;
+                return UiAction { ToggleFoldAction { .group = row->group } };
+            } },
         CommandRow { .command = KeyCommand::Refresh,
                      .handler = [](Interaction&, KeyContext const&) -> std::optional<UiAction> {
                          return UiAction { RefreshNowAction {} };

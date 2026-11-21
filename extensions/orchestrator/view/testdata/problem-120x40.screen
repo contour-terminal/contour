@@ -5,7 +5,8 @@ contour: the pull request list is incomplete
 │ no open pull requests                                                │ │                                             │
 │                                                                      │ │ issue     #2356                             │
 │ ISSUES WITHOUT A PR                                                  │ │ url       https://github.com/contour-termin │
-│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │             al/contour/issues/2356          │
+│ ▾ contour · 5                                                        │ │             al/contour/issues/2356          │
+│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │                                             │
 │   #2338 Flaky on Windows: SessionHost.extension.controlVerb require… │ │                                             │
 │   #2253 Switch `daemon` Same `client`                                │ │                                             │
 │   #2163 OSC 133: optional nonce to reject forged command lines and … │ │                                             │
@@ -34,7 +35,6 @@ contour: the pull request list is incomplete
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
-│                                                                      │ │                                             │
 ╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
- ↑↓ move · enter open · d dispatch · ? help · b board · t transcript · / filter · R refresh · e end run                 
+ ↑↓ move · enter open · d dispatch · ? help · b board · t transcript · / filter · z fold · R refresh · e end run        
  ⬢ agents 0/4                                                                                                           

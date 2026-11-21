@@ -45,6 +45,7 @@ add_library(orchestrator_core STATIC
     core/Engine.hpp
     core/EngineDetail.hpp
     core/EngineDispatch.cpp
+    core/EngineFolds.cpp
     core/EnginePoll.cpp
     core/EngineStats.cpp
     core/EngineTranscript.cpp

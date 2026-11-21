@@ -5,12 +5,12 @@ contour: the pull request list is incomplete
 │ no open pull requests                                                        │
 │                                                                              │
 │ ISSUES WITHOUT A PR                                                          │
+│ ▾ contour · 5                                                                │
 │   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key presses, then… │
 │   #2338 Flaky on Windows: SessionHost.extension.controlVerb requires the pe… │
 │   #2253 Switch `daemon` Same `client`                                        │
 │   #2163 OSC 133: optional nonce to reject forged command lines and marks     │
 │   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead of settin… │
-│                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Details ────────────────────────────────────────────────────────────────────╮
 │ Report the Qt macOS bug that drops Ctrl+Cmd+arrow key presses, then remove … │

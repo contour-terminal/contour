@@ -1,8 +1,8 @@
 ╭─ Agents ─────────────────────────────────────────────────────────────────────╮
-│ ✗ #2114 vtbackend: WIP -- DEC mode 44 and a partial margin-bell trigger · d… │
 │ ✗ #1847 Adds ability to set Contour as default terminal on Windows OS · dra… │
 │                                                                              │
 │ ISSUES WITHOUT A PR                                                          │
+│ ▾ contour · 5                                                                │
 │   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key presses, then… │
 │   #2338 Flaky on Windows: SessionHost.extension.controlVerb requires the pe… │
 │   #2253 Switch `daemon` Same `client`                                        │

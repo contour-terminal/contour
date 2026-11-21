@@ -197,6 +197,11 @@ namespace
         return MarkRunSeen { .run = seen.run, .monoMs = monoMs };
     }
 
+    [[nodiscard]] Input inputOf(view::ToggleFoldAction const& toggle, uint64_t monoMs)
+    {
+        return ToggleFold { .group = toggle.group, .monoMs = monoMs };
+    }
+
     /// @return A listed tab's size, as the dashboard takes it.
     [[nodiscard]] core::tui::Size sizeOf(TabInfo const& tab) noexcept
     {

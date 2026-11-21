@@ -767,17 +767,19 @@ TEST_CASE("the rows are built once per input, not once per key", "[orchestrator]
 TEST_CASE("the selected row is drawn in the selection's style", "[orchestrator][view]")
 {
     auto fixture = Fixture { World {} };
-    // Row 0 is the frame, row 1 the first heading; the first pull request is on row 2.
+    // Row 0 is the frame, row 1 the first heading, row 2 its repository's group; the first pull request is on
+    // row 3.
     static_cast<void>(fixture.screen());
     auto const isSelected = [&](int row) {
         return core::tui::test::styleAt(fixture.dashboard.rendered(), row, 3).inverse;
     };
-    CHECK(isSelected(2));
-    CHECK(!isSelected(3));
-    CHECK(fixture.dashboard.input("j").empty());
-    static_cast<void>(fixture.screen());
     CHECK(!isSelected(2));
     CHECK(isSelected(3));
+    CHECK(!isSelected(4));
+    CHECK(fixture.dashboard.input("j").empty());
+    static_cast<void>(fixture.screen());
+    CHECK(!isSelected(3));
+    CHECK(isSelected(4));
 }
 
 TEST_CASE("a second frame with nothing changed emits nothing", "[orchestrator][view]")
@@ -1004,4 +1006,43 @@ TEST_CASE("scrolling back up to a section's first item shows its heading", "[orc
     CHECK(!fixture.screen().contains("MY PULL REQUESTS"));
     CHECK(fixture.dashboard.input("\x1b[H"sv).empty());
     CHECK(fixture.screen().contains("MY PULL REQUESTS"));
+}
+
+TEST_CASE("z folds the selected item's group and selects its header; enter unfolds it",
+          "[orchestrator][view]")
+{
+    auto fixture = Fixture { World {} };
+    static_cast<void>(fixture.screen());
+    REQUIRE(fixture.dashboard.selectedRun().empty());
+    auto const toggle = std::vector<UiAction> { ToggleFoldAction { .group = "prs/contour" } };
+
+    CHECK(fixture.dashboard.input("z") == toggle);
+    static_cast<void>(fixture.engine.step(ToggleFold { .group = "prs/contour", .monoMs = StartMonoMs }));
+    fixture.dashboard.engineChanged();
+    auto const folded = fixture.screen();
+    CHECK(folded.contains("▸ contour · 5"));
+    CHECK_FALSE(folded.contains("#2375"));
+
+    // The header is selected now: Enter unfolds the group, and the selection moves to its first item.
+    CHECK(fixture.dashboard.input("\r") == toggle);
+    static_cast<void>(fixture.engine.step(ToggleFold { .group = "prs/contour", .monoMs = StartMonoMs }));
+    fixture.dashboard.engineChanged();
+    auto const open = fixture.screen();
+    CHECK(open.contains("▾ contour · 5"));
+    CHECK(open.contains("#2375"));
+    CHECK(fixture.dashboard.input("z") == toggle);
+}
+
+TEST_CASE("a section's heading stays in view above its first group's header", "[orchestrator][view]")
+{
+    // Scrolled so that the first group's header is the top row, the selection on the item below it: the
+    // section's heading comes back into view, above the header.
+    auto fixture = Fixture { World {}, Size { .width = 80, .height = 24 } };
+    static_cast<void>(fixture.screen());
+    CHECK(fixture.dashboard.input(std::string(12, 'j')).empty());
+    static_cast<void>(fixture.screen());
+    CHECK(fixture.dashboard.input("\x1b[H").empty());
+    auto const screen = fixture.screen();
+    CHECK(screen.contains("MY PULL REQUESTS"));
+    CHECK(screen.contains("▾ contour · 5"));
 }

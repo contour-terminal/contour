@@ -532,6 +532,9 @@ class Harness
                     [&](OpenPane const& pane) { checkPane(pane); },
                     [&](StoreSet const& set) {
                         CAPTURE(set.key);
+                        // The folds are the one entry that is no run.
+                        if (set.key == FoldsKey)
+                            return;
                         REQUIRE(set.key.starts_with("run/"));
                         CHECK(set.value.size() <= MaxStoredRunBytes);
                         CHECK(runFromJson(set.value));
@@ -4060,6 +4063,39 @@ TEST_CASE("statistics are read one at a time", "[orchestrator][engine][stats]")
     CHECK(reads() == 1);
     harness.finish("agent-stats", ok(statsReport("running.json")));
     CHECK(reads() == 0);
+}
+
+// }}}
+
+// {{{ folds
+
+TEST_CASE("a group the user folds is stored, and unfolded again", "[orchestrator][engine][folds]")
+{
+    auto harness = booted();
+    CHECK_FALSE(harness.engine().isFolded("issues/contour"));
+    auto const folded = harness.feed(ToggleFold { .group = "issues/contour", .monoMs = harness.now() });
+    CHECK(harness.engine().isFolded("issues/contour"));
+    REQUIRE(countOf<StoreSet>(folded) == 1);
+    CHECK(all<StoreSet>(folded).front().key == FoldsKey);
+    CHECK(all<StoreSet>(folded).front().value == R"(["issues/contour"])");
+    CHECK(countOf<Redraw>(folded) == 1);
+
+    auto const unfolded = harness.feed(ToggleFold { .group = "issues/contour", .monoMs = harness.now() });
+    CHECK_FALSE(harness.engine().isFolded("issues/contour"));
+    REQUIRE(countOf<StoreSet>(unfolded) == 1);
+    CHECK(all<StoreSet>(unfolded).front().value == "[]");
+}
+
+TEST_CASE("the folds a previous instance stored are folded again", "[orchestrator][engine][folds]")
+{
+    auto context = contextFor({});
+    context.stored = { StoredEntry { .key = std::string { FoldsKey },
+                                     .value = R"(["prs/contour","bad key\n",""])" } };
+    auto harness = Harness { std::move(context) };
+    CHECK(harness.engine().isFolded("prs/contour"));
+    CHECK_FALSE(harness.engine().isFolded("bad key\n"));
+    // The store's other keys are not runs it cannot read: nothing is reported.
+    CHECK(harness.engine().problems().empty());
 }
 
 // }}}

@@ -78,6 +78,13 @@ struct HideBoardAction
     [[nodiscard]] bool operator==(HideBoardAction const&) const = default;
 };
 
+/// Fold or unfold a group of the list, such as one repository's issues.
+struct ToggleFoldAction
+{
+    std::string group = {}; ///< The group's key.
+    [[nodiscard]] bool operator==(ToggleFoldAction const&) const = default;
+};
+
 /// Read a page of a run's transcript, for the dashboard's tab to show.
 struct ReadTranscriptAction
 {
@@ -99,7 +106,8 @@ using UiAction = std::variant<RefreshNowAction,
                               DispatchAction,
                               ShowBoardAction,
                               HideBoardAction,
-                              ReadTranscriptAction>;
+                              ReadTranscriptAction,
+                              ToggleFoldAction>;
 
 // }}}
 // {{{ the key table
@@ -131,6 +139,7 @@ enum class KeyCommand : uint8_t
     NextPage,       ///< Show the transcript's next page.
     FirstPage,      ///< Show the transcript's first page.
     LastPage,       ///< Show the transcript's last page.
+    Fold,           ///< Fold or unfold the group of the selected row, and select its header.
 };
 
 /// What the dashboard's tab shows.
@@ -229,6 +238,8 @@ struct Interaction
                                        ///< opened from.
     uint32_t page = 1;                 ///< The transcript's 1-based page.
     std::size_t scroll = 0;            ///< The first line a board or a transcript shows.
+    std::string followGroup = {}; ///< A group whose header the selection moves to once the rows are built
+                                  ///< again, as folding from one of its items asks; empty: none.
     [[nodiscard]] bool operator==(Interaction const&) const = default;
 };
 
