@@ -228,9 +228,14 @@ TEST_CASE("the scaled run hits the same button", "[native][win32][caption][hitte
     if (!contour::platform::onNativeWindowsPlatform())
         SKIP("Requires the native Windows platform.");
     auto fixture = CaptionWindow {};
-    // contour_windows_native_scaled_test runs this under QT_SCALE_FACTOR=1.5.
+    // contour_windows_native_scaled_test runs this under QT_SCALE_FACTOR=1.5, which multiplies the monitor's
+    // own scale: 1.5 on a 100% display, 1.875 on a 125% one.
     if (qEnvironmentVariable("QT_SCALE_FACTOR") == QStringLiteral("1.5"))
-        CHECK(fixture.window.devicePixelRatio() == 1.5);
+    {
+        auto const monitorDpi = static_cast<double>(GetDpiForWindow(fixture.hwnd()));
+        auto const monitorScale = monitorDpi / USER_DEFAULT_SCREEN_DPI;
+        CHECK(std::abs(fixture.window.devicePixelRatio() - (1.5 * monitorScale)) < 1e-9);
+    }
 
     CHECK(fixture.hitTest(fixture.centreOf(WindowControlKind::Maximize)) == HTMAXBUTTON);
     CHECK(fixture.hitTest(fixture.centreOf(WindowControlKind::Minimize)) != HTMAXBUTTON);
