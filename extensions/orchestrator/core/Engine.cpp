@@ -720,6 +720,8 @@ bool Engine::isPending(std::string_view tag) const noexcept
 
 void Engine::endStep(std::vector<Effect>& out, uint64_t revision)
 {
+    trackDoneRuns();
+    endDoneRuns(out);
     relistAfterFinishedRuns(out);
     drainQueue(out);
     forgetSettledPaneOpenings();
@@ -740,6 +742,40 @@ void Engine::endStep(std::vector<Effect>& out, uint64_t revision)
     if (wake && (wake != _wakeAt || *wake <= _monoMs))
         out.emplace_back(WakeAt { *wake });
     _wakeAt = wake;
+}
+
+void Engine::trackDoneRuns()
+{
+    auto const inside = std::span(_runs).first(_insideCount);
+    std::erase_if(_doneSinceMs, [&](auto const& entry) {
+        auto const run = std::ranges::find(inside, entry.first, &Run::id);
+        return run == inside.end() || !std::holds_alternative<Done>(run->state);
+    });
+    for (auto const& run: inside)
+        if (std::holds_alternative<Done>(run.state))
+            _doneSinceMs.try_emplace(run.id, _monoMs);
+}
+
+std::optional<uint64_t> Engine::endsWhenDoneAt(Run const& run) const
+{
+    auto const after = _config ? static_cast<uint64_t>(_config->endDoneAfter().count()) : 0;
+    auto const since = _doneSinceMs.find(run.id);
+    if (after == 0 || since == _doneSinceMs.end())
+        return std::nullopt;
+    return since->second + after;
+}
+
+void Engine::endDoneRuns(std::vector<Effect>& out)
+{
+    auto due = std::vector<std::string> {};
+    for (auto const& run: std::span(_runs).first(_insideCount))
+        if (auto const at = endsWhenDoneAt(run); at && *at <= _monoMs)
+            due.push_back(run.id);
+    for (auto const& id: due)
+    {
+        _doneSinceMs.erase(id);
+        feed(id, EndWhenDone {}, out);
+    }
 }
 
 std::optional<uint64_t> Engine::nextWake() const
@@ -766,6 +802,9 @@ std::optional<uint64_t> Engine::nextWake() const
         if (auto const run = std::ranges::find(_runs, shown.board.run, &Run::id);
             run != _runs.end() && isUnfinished(*run))
             consider(shown.nextReadMs);
+    for (auto const& run: inside)
+        if (auto const due = endsWhenDoneAt(run))
+            consider(*due);
     for (auto const& call: _inFlight)
         consider(call.deadlineMs);
     for (auto const& opening: _paneOpenings)

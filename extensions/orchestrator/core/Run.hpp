@@ -245,6 +245,11 @@ struct EndByUser
 {
 };
 
+/// The agent stayed done for `end_done_after`: a done run ends as completed; any other state ignores it.
+struct EndWhenDone
+{
+};
+
 /// A kept worktree is checked again: by the user, or on a poll.
 struct RetryRemoval
 {
@@ -276,6 +281,7 @@ using RunInput = std::variant<CommandOk,
                               StatusReported,
                               PaneGone,
                               EndByUser,
+                              EndWhenDone,
                               RetryRemoval,
                               CheckoutListed,
                               Dismiss,

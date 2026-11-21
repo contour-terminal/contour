@@ -1106,6 +1106,51 @@ TEST_CASE("a reported run ends as completed", "[orchestrator][engine]")
     CHECK(finished->fate == Fate::Removed);
 }
 
+TEST_CASE("end_done_after ends a run that stayed done that long", "[orchestrator][engine]")
+{
+    auto harness = booted({ .limits = R"("end_done_after": "10m",)" });
+    harness.runToRunning(prDispatch());
+    harness.list({ paneOf(PrId, "p1", ProgramLiveness::Alive, AgentStatus::Done) });
+    REQUIRE(holds<Done>(harness.run(PrId)));
+
+    // Not before: the engine asks to be woken when the wait ends.
+    CHECK(countOf<ClosePane>(harness.wake((10 * Minute) - 1'000)) == 0);
+    CHECK(holds<Done>(harness.run(PrId)));
+    auto const ended = harness.wake(1'000);
+    CHECK(countOf<ClosePane>(ended) == 1);
+    REQUIRE(holds<Ending>(harness.run(PrId)));
+
+    // It then ends as a run whose tab went after it reported: completed, and its worktree checked as ever.
+    harness.endCleanly(PrId);
+    auto const finished = finishedOf(harness.run(PrId));
+    REQUIRE(finished);
+    CHECK(finished->ended == Ended::Completed);
+    CHECK(finished->fate == Fate::Removed);
+}
+
+TEST_CASE("end_done_after waits again for an agent that went back to work", "[orchestrator][engine]")
+{
+    auto harness = booted({ .limits = R"("end_done_after": "10m",)" });
+    harness.runToRunning(prDispatch());
+    harness.list({ paneOf(PrId, "p1", ProgramLiveness::Alive, AgentStatus::Done) });
+    harness.wake(5 * Minute);
+    // The user answered it: it works again, then reports done once more.
+    harness.list({ paneOf(PrId, "p1", ProgramLiveness::Alive, AgentStatus::Working) });
+    harness.list({ paneOf(PrId, "p1", ProgramLiveness::Alive, AgentStatus::Done) });
+    CHECK(countOf<ClosePane>(harness.wake(9 * Minute)) == 0);
+    CHECK(holds<Done>(harness.run(PrId)));
+    CHECK(countOf<ClosePane>(harness.wake(1 * Minute)) == 1);
+}
+
+TEST_CASE("without end_done_after a done run waits for the user", "[orchestrator][engine]")
+{
+    auto harness = booted();
+    harness.runToRunning(prDispatch());
+    harness.list({ paneOf(PrId, "p1", ProgramLiveness::Alive, AgentStatus::Done) });
+    CHECK(countOf<ClosePane>(harness.wake(24 * 60 * Minute)) == 0);
+    CHECK(holds<Done>(harness.run(PrId)));
+}
+
 TEST_CASE("a modified worktree is kept, then removed once clean", "[orchestrator][engine]")
 {
     struct Row

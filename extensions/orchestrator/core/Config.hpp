@@ -157,6 +157,9 @@ inline constexpr auto MinPollEvery = std::chrono::milliseconds { std::chrono::se
 /// How long an agent runs before its status board is looked for, unless `status_board_after` says otherwise;
 /// 0 disables the board.
 inline constexpr auto DefaultStatusBoardAfter = std::chrono::milliseconds { std::chrono::minutes { 15 } };
+/// How long an agent stays done before its run is ended, unless `end_done_after` says otherwise; 0: never,
+/// the user ends it.
+inline constexpr auto DefaultEndDoneAfter = std::chrono::milliseconds { 0 };
 /// How long a finished run is kept, unless `finished_retention` says otherwise.
 inline constexpr auto DefaultFinishedRetention = std::chrono::milliseconds { std::chrono::days { 30 } };
 
@@ -187,6 +190,8 @@ class Config
     [[nodiscard]] std::chrono::milliseconds pollEvery() const noexcept { return _pollEvery; }
     /// @return How long an agent runs before its status board is looked for; 0: never.
     [[nodiscard]] std::chrono::milliseconds statusBoardAfter() const noexcept { return _statusBoardAfter; }
+    /// @return How long an agent stays done before its run is ended; 0: never.
+    [[nodiscard]] std::chrono::milliseconds endDoneAfter() const noexcept { return _endDoneAfter; }
     /// @return How long a finished run is kept.
     [[nodiscard]] std::chrono::milliseconds finishedRetention() const noexcept { return _finishedRetention; }
     /// @return The repositories, in the configured order.
@@ -216,6 +221,7 @@ class Config
         uint32_t maxAgentsPerRepo = DefaultMaxAgentsPerRepo;
         std::chrono::milliseconds pollEvery = DefaultPollEvery;
         std::chrono::milliseconds statusBoardAfter = DefaultStatusBoardAfter;
+        std::chrono::milliseconds endDoneAfter = DefaultEndDoneAfter;
         std::chrono::milliseconds finishedRetention = DefaultFinishedRetention;
         std::vector<Repo> repos = {};
         std::vector<TaskDef> tasks = {};
@@ -230,6 +236,7 @@ class Config
     uint32_t _maxAgentsPerRepo;
     std::chrono::milliseconds _pollEvery;
     std::chrono::milliseconds _statusBoardAfter;
+    std::chrono::milliseconds _endDoneAfter;
     std::chrono::milliseconds _finishedRetention;
     std::vector<Repo> _repos;
     std::vector<TaskDef> _tasks;

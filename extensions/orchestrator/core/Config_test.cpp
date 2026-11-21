@@ -173,6 +173,7 @@ TEST_CASE("Config.defaults", "[config]")
     CHECK(config->maxAgentsPerRepo() == 2);
     CHECK(config->pollEvery() == 2min);
     CHECK(config->statusBoardAfter() == 15min);
+    CHECK(config->endDoneAfter() == 0ms);
     CHECK(config->finishedRetention() == std::chrono::days { 30 });
     CHECK(std::ranges::equal(config->models(), std::array { "opus"sv, "sonnet"sv, "haiku"sv }));
     CHECK(config->repos()[0].remote == "origin");
@@ -213,6 +214,23 @@ constexpr auto AcceptRows = std::array {
 };
 
 } // namespace
+
+TEST_CASE("Config.endDoneAfter", "[config]")
+{
+    // Absent or 0, a done run waits for the user; a duration ends it once it stayed done that long.
+    auto const withDuration =
+        parse(Input { .find = R"("15m")", .replace = R"("15m", "end_done_after": "10m")" });
+    REQUIRE(withDuration.has_value());
+    CHECK(withDuration->endDoneAfter() == 10min);
+    auto const never = parse(Input { .find = R"("15m")", .replace = R"("15m", "end_done_after": "0")" });
+    REQUIRE(never.has_value());
+    CHECK(never->endDoneAfter() == 0ms);
+    auto const malformed =
+        parse(Input { .find = R"("15m")", .replace = R"("15m", "end_done_after": "soon")" });
+    REQUIRE_FALSE(malformed.has_value());
+    CHECK(malformed.error().key == "end_done_after");
+    CHECK(malformed.error().problem == ConfigProblem::NotADuration);
+}
 
 TEST_CASE("Config.accepts", "[config]")
 {

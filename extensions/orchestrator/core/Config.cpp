@@ -51,6 +51,8 @@ struct glz::meta<orchestrator::config::detail::JsonConfig>
                                               &T::pollEvery,
                                               "status_board_after",
                                               &T::statusBoardAfter,
+                                              "end_done_after",
+                                              &T::endDoneAfter,
                                               "finished_retention",
                                               &T::finishedRetention,
                                               "repos",
@@ -315,6 +317,7 @@ namespace
         Field { .key = "max_agents_per_repo", .type = JsonType::Count },
         Field { .key = "poll_every", .type = JsonType::Duration },
         Field { .key = "status_board_after", .type = JsonType::Duration },
+        Field { .key = "end_done_after", .type = JsonType::Duration },
         Field { .key = "finished_retention", .type = JsonType::Duration },
         Field { .key = "repos", .type = JsonType::Objects, .object = ObjectKind::Repo },
         Field { .key = "tasks", .type = JsonType::Objects, .object = ObjectKind::Task },
@@ -910,6 +913,10 @@ std::expected<Config, ConfigError> Config::parse(std::string_view json,
                 durationOf(
                     document.statusBoardAfter, "status_board_after", DefaultStatusBoardAfter, NoMinimum)))
             return e;
+        if (auto e =
+                assign(values.endDoneAfter,
+                       durationOf(document.endDoneAfter, "end_done_after", DefaultEndDoneAfter, NoMinimum)))
+            return e;
         if (auto e = assign(
                 values.finishedRetention,
                 durationOf(
@@ -931,6 +938,7 @@ Config::Config(Values values) noexcept:
     _maxAgentsPerRepo { values.maxAgentsPerRepo },
     _pollEvery { values.pollEvery },
     _statusBoardAfter { values.statusBoardAfter },
+    _endDoneAfter { values.endDoneAfter },
     _finishedRetention { values.finishedRetention },
     _repos { std::move(values.repos) },
     _tasks { std::move(values.tasks) },

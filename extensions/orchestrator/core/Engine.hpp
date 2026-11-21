@@ -640,6 +640,13 @@ class Engine
     /// Lists a repository's worktrees again where a run finished after its listing was asked for, so that
     /// a worktree the run removed stops being shown before the next poll.
     void relistAfterFinishedRuns(std::vector<Effect>& out);
+    /// Notes when each run became done, and forgets it for a run that is no longer done.
+    void trackDoneRuns();
+    /// Ends each run whose agent stayed done for `end_done_after`; with 0, none.
+    void endDoneRuns(std::vector<Effect>& out);
+    /// @return When @p run is ended for having stayed done; std::nullopt when it is not done, or
+    ///         `end_done_after` is 0.
+    [[nodiscard]] std::optional<uint64_t> endsWhenDoneAt(Run const& run) const;
     [[nodiscard]] bool isResumable(std::string_view tag) const noexcept;
     [[nodiscard]] bool isForgePoll(std::string_view tag) const noexcept;
     [[nodiscard]] Issued issuePoll(std::string tag,
@@ -713,6 +720,9 @@ class Engine
     std::map<std::string, TranscriptCall, std::less<>> _transcriptCalls; ///< The page in flight, by run id.
     std::vector<InFlightCall> _inFlight;
     std::vector<InFlightCall> _paneOpenings; ///< The tabs asked for and not yet answered for, by run id.
+    /// When each run that is done became so, by run id; monotonic, never persisted: after a restart the wait
+    /// starts again, so a run is never ended sooner than `end_done_after` says.
+    std::map<std::string, uint64_t, std::less<>> _doneSinceMs;
     std::deque<Queued> _queue;
     std::vector<std::string> _answeredAtStart; ///< During start(): the poll tags whose results it takes in.
     std::vector<std::string> _startProblems;   ///< The configuration's, the store's and the outside runs'.

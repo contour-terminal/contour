@@ -705,6 +705,12 @@ std::vector<RunEffect> advance(Run& run, RunInput const& input, StepContext cons
             return toVerify(
                 run, endingFor(run.lastStatus ? Ended::Completed : Ended::NeverReported), context);
         },
+        [&](Done const&, EndWhenDone const&) -> Effects {
+            // As the user's end does, but it ends as the agent's own: its tab goes after it reported done.
+            run.state =
+                Ending { .step = EndStep::ClosePane, .cause = Ended::Completed, .resumedFrom = std::nullopt };
+            return { Persist {}, CloseAgentPane {} };
+        },
         [&](AgentState auto const&, EndByUser const&) -> Effects {
             // Nothing touches the worktree until the tab is gone.
             run.state = Ending { .step = EndStep::ClosePane,
