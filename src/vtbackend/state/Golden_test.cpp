@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/state/ImageState.hpp>
 #include <vtbackend/state/StateFields.hpp>
 #include <vtbackend/state/TerminalStateCodec.hpp>
 #include <vtbackend/state/golden/GoldenSession.hpp>
@@ -137,8 +138,10 @@ TEST_CASE("a format v2 stream from before the program-status generation still de
 
 TEST_CASE("the encoder still writes the format v2 golden byte for byte", "[StateGolden]")
 {
-    // The current format is the one the checked-in stream was written in; a change of its bytes is a new
-    // format version, with a new golden, not an edit of this one.
+    // The current format is the one the checked-in stream was written in. A change an older reader cannot
+    // skip over is a new format version, with a new golden (@see TerminalStateFormatVersion); a field added
+    // or dropped is not, and regenerates this one -- keeping the stream a released daemon wrote as a
+    // decode-only -prior golden.
     STATIC_REQUIRE(TerminalStateFormatVersion == 2);
     auto const mock = test::goldenSetup().makeTerminal();
     mock->writeToScreen(test::goldenSession());
@@ -237,4 +240,51 @@ TEST_CASE("a terminal stream from an older writer, without an area added since, 
     auto target = setup.makeTerminal(*settingsFor(*decoded, setup.settings()));
     REQUIRE(target->terminal.restoreState(*decoded).has_value());
     CHECK(target->terminal.desktopNotificationManager().activeNotifications().empty());
+}
+
+namespace
+{
+/// @return The kitty golden's file with @p extension. @see goldenKittySession
+std::string kittyGolden(std::string_view extension)
+{
+    auto const path = std::filesystem::path { VTBACKEND_GOLDEN_DIR }
+                      / std::format("terminal-state-v{}-kitty.{}", TerminalStateFormatVersion, extension);
+    auto file = std::ifstream { path, std::ios::binary };
+    REQUIRE(file);
+    return std::string { std::istreambuf_iterator<char> { file }, std::istreambuf_iterator<char> {} };
+}
+} // namespace
+
+TEST_CASE("the kitty golden decodes and restores to the recorded screen", "[StateGolden]")
+{
+    // Frozen bytes for the kitty placeholder state: the virtual placements, the image numbers and the
+    // placeholder origin of a raster.
+    auto const text = kittyGolden("bin");
+    auto const decoded = decodeTerminalState(std::vector<uint8_t> { text.begin(), text.end() });
+    REQUIRE(decoded.has_value());
+    REQUIRE_FALSE(decoded->pages.empty());
+    auto const& kitty = decoded->pages.front().kitty;
+    CHECK(kitty.virtualPlacements.size() == 1);
+    CHECK(kitty.imageNumbers.size() == 1);
+    CHECK(std::ranges::any_of(decoded->images.rasterized, [](RasterizedImageState const& raster) {
+        return raster.origin == ImageOrigin::Placeholder;
+    }));
+
+    auto const setup = test::goldenSetup();
+    auto target = setup.makeTerminal(*settingsFor(*decoded, setup.settings()));
+    REQUIRE(target->terminal.restoreState(*decoded).has_value());
+    CHECK(test::describeTerminal(*target) == kittyGolden("txt"));
+    // The row whose image had not arrived still resolves once it does.
+    target->writeToScreen("\033_Ga=T,U=1,i=9,c=4,r=1,f=24,s=1,v=1,q=2;AAAA\033\\");
+    CHECK(target->terminal.primaryScreen().at(LineOffset(3), ColumnOffset(0)).imageFragment());
+}
+
+TEST_CASE("the encoder still writes the kitty golden byte for byte", "[StateGolden]")
+{
+    auto const mock = test::goldenSetup().makeTerminal();
+    mock->writeToScreen(test::goldenKittySession());
+    mock->terminal.flushInput();
+    auto const text = kittyGolden("bin");
+    CHECK(encodeTerminalState(mock->terminal.captureState())
+          == std::vector<uint8_t> { text.begin(), text.end() });
 }

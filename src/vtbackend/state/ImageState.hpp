@@ -56,6 +56,7 @@ struct RasterizedImageState
     PixelCoordinate offset {};                           ///< @see RasterizedImage::imageOffset
     ImageSize subSize {};                                ///< @see RasterizedImage::imageSubSize
     KittyPlacementId kittyPlacementId {};                ///< @see RasterizedImage::kittyPlacementId
+    ImageOrigin origin = ImageOrigin::Cursor;            ///< @see RasterizedImage::origin
 
     [[nodiscard]] bool operator==(RasterizedImageState const& other) const noexcept
     {
@@ -64,7 +65,7 @@ struct RasterizedImageState
                && cellSpan.columns == other.cellSpan.columns && cellSize == other.cellSize
                && layer == other.layer && offset.x.value == other.offset.x.value
                && offset.y.value == other.offset.y.value && subSize == other.subSize
-               && kittyPlacementId == other.kittyPlacementId;
+               && kittyPlacementId == other.kittyPlacementId && origin == other.origin;
     }
 
     /// Lists the fields for the state codec.
@@ -82,6 +83,7 @@ struct RasterizedImageState
         visitor(10, self.offset.y.value);
         visitor(11, self.subSize);
         visitor(12, self.kittyPlacementId);
+        visitor(13, self.origin);
     }
 };
 
@@ -204,12 +206,49 @@ struct KittyChunkState
     }
 };
 
+/// One kitty virtual placement (`U=1`), which Unicode placeholder cells name.
+struct KittyVirtualPlacementState
+{
+    uint32_t imageId = 0;            ///< The kitty image id it places.
+    KittyPlacementId placementId {}; ///< `p=`; zero for none.
+    uint64_t rasterized = 0;         ///< Its raster: an index into the image table's rasterized images.
+
+    bool operator==(KittyVirtualPlacementState const&) const = default;
+
+    /// Lists the fields for the state codec.
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.imageId);
+        visitor(2, self.placementId);
+        visitor(3, self.rasterized);
+    }
+};
+
+/// The kitty images stored under one image number (`I=`).
+struct KittyImageNumberState
+{
+    uint32_t number = 0;       ///< The image number.
+    std::vector<uint32_t> ids; ///< The ids of the images under it, in transmission order.
+
+    bool operator==(KittyImageNumberState const&) const = default;
+
+    /// Lists the fields for the state codec.
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.number);
+        visitor(2, self.ids);
+    }
+};
+
 /// The kitty graphics tables of one screen.
 struct KittyScreenState
 {
     std::vector<std::pair<uint32_t, ImageId>> images; ///< Transmitted images by kitty id, ascending.
     std::vector<KittyAnimationState> animations;      ///< Animations, ascending by id.
     std::optional<KittyChunkState> chunked;           ///< The transmission in flight, if any.
+    /// Virtual placements ascending by image id, and in the order they were made within one image.
+    std::vector<KittyVirtualPlacementState> virtualPlacements;
+    std::vector<KittyImageNumberState> imageNumbers; ///< Image numbers, ascending.
 
     bool operator==(KittyScreenState const&) const = default;
 
@@ -219,6 +258,8 @@ struct KittyScreenState
         visitor(1, self.images);
         visitor(2, self.animations);
         visitor(3, self.chunked);
+        visitor(4, self.virtualPlacements);
+        visitor(5, self.imageNumbers);
     }
 };
 
@@ -239,6 +280,11 @@ class ImageTableBuilder final: public ImageFragmentNamer
     ImageId addImage(std::shared_ptr<Image const> const& image);
 
     [[nodiscard]] uint64_t fragmentId(std::shared_ptr<ImageFragment> const& fragment) override;
+
+    /// Files @p raster, and the image it shows, unless it was filed already.
+    /// @param raster A rasterized image a table other than the cells refers to.
+    /// @return Its index within the table: the same one every fragment showing it refers to.
+    [[nodiscard]] uint64_t rasterizedId(RasterizedImage const& raster) { return rasterizedIndexOf(raster); }
 
     /// Finishes the table.
     /// @return The table: images ascending by id.
@@ -272,6 +318,7 @@ class RestoredImageTable final: public ImageFragmentResolver
 
     [[nodiscard]] std::shared_ptr<ImageFragment> fragment(uint64_t id) const override;
     [[nodiscard]] std::shared_ptr<Image const> image(ImageId id) const override;
+    [[nodiscard]] std::shared_ptr<RasterizedImage const> rasterized(uint64_t id) const override;
 
     /// Continues the pool's numbering after the table's and relinks its names. Cannot fail.
     /// @param pool The pool build() adopted the images into.
@@ -280,13 +327,18 @@ class RestoredImageTable final: public ImageFragmentResolver
   private:
     RestoredImageTable(ImageTableState const& table,
                        std::unordered_map<uint32_t, std::shared_ptr<Image const>> images,
+                       std::vector<std::shared_ptr<RasterizedImage const>> rasterized,
                        std::vector<std::shared_ptr<ImageFragment>> fragments):
-        _table { &table }, _images { std::move(images) }, _fragments { std::move(fragments) }
+        _table { &table },
+        _images { std::move(images) },
+        _rasterized { std::move(rasterized) },
+        _fragments { std::move(fragments) }
     {
     }
 
     ImageTableState const* _table;
     std::unordered_map<uint32_t, std::shared_ptr<Image const>> _images;
+    std::vector<std::shared_ptr<RasterizedImage const>> _rasterized;
     std::vector<std::shared_ptr<ImageFragment>> _fragments;
 };
 
@@ -334,6 +386,8 @@ namespace detail
         visitor(35, command.composeSourceY);
         visitor(36, command.composeDestinationX);
         visitor(37, command.composeDestinationY);
+        visitor(38, command.placementKind);
+        visitor(39, command.queryFeature);
     }
 } // namespace detail
 
