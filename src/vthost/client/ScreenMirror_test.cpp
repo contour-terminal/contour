@@ -3046,6 +3046,15 @@ constexpr auto KittyDiacritics =
     return text;
 }
 
+/// @return @p count line breaks: what scrolls a picture up the page and into the history.
+[[nodiscard]] std::string lineBreaks(int count)
+{
+    auto text = std::string {};
+    for ([[maybe_unused]] auto const _: std::views::iota(0, count))
+        text += "\r\n";
+    return text;
+}
+
 /// @return A direct kitty transmission of a 2x2 RGB image as @p id, with a virtual placement of @p rows x
 ///         @p columns cells and the extra keys @p keys (a placement id, say).
 [[nodiscard]] std::string kittyVirtualTransmit(int id, int rows, int columns, std::string_view keys = {})
@@ -3356,8 +3365,7 @@ TEST_CASE("PARITY kitty placeholders with the top image row scrolled into histor
     auto const session = newSession(h.host);
     auto bytes = kittyVirtualTransmit(7, 2, 4) + kittyPlaceholderRow("38;5;7", 0, 4)
                  + kittyPlaceholderRow("38;5;7", 1, 4);
-    for ([[maybe_unused]] auto const _: std::views::iota(0, 23))
-        bytes += "\r\n";
+    bytes += lineBreaks(23);
     bytes += "tail";
     auto const gaps = gapsAfter(&h, session, std::move(bytes), mirrorShows(&h, "tail"));
 
@@ -3400,8 +3408,7 @@ TEST_CASE("PARITY kitty placeholders in the attach snapshot", "[vthost][parity][
     auto const session = newSession(h.host);
     auto bytes = kittyVirtualTransmit(7, 2, 4) + kittyPlaceholderRow("38;5;7", 0, 4)
                  + kittyPlaceholderRow("38;5;7", 1, 4);
-    for ([[maybe_unused]] auto const _: std::views::iota(0, 23))
-        bytes += "\r\n";
+    bytes += lineBreaks(23);
     bytes += "tail";
     h.serverTerminal(session)->writeToScreen(bytes);
     auto const gaps = gapsAfter(&h, session, "", [&h] {
@@ -3449,8 +3456,7 @@ TEST_CASE("a late kitty transmit resolves placeholder rows the client holds in h
     auto h = MirrorHarness {};
     auto const session = newSession(h.host);
     auto bytes = kittyPlaceholderRow("38;5;7", 0, 4) + kittyPlaceholderRow("38;5;7", 1, 4);
-    for ([[maybe_unused]] auto const _: std::views::iota(0, 30))
-        bytes += "\r\n";
+    bytes += lineBreaks(30);
     bytes += "tail";
 
     auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session, std::string bytes) -> Task<void> {
@@ -3480,6 +3486,102 @@ TEST_CASE("a late kitty transmit resolves placeholder rows the client holds in h
     }(&h, session, std::move(bytes));
 
     h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
+namespace
+{
+/// Whether a test asks for an image's pixels while only a virtual placement refers to it.
+enum class FetchBeforeCells : uint8_t
+{
+    No,  ///< The client fetches when the cells arrive, as a mirror does.
+    Yes, ///< The client fetches before any cell names the image.
+};
+
+/// Runs Claude Code's exact bytes for a picture through a hosted session and its mirror.
+///
+/// A direct RGB transmission as id 300 with a 3x4 virtual placement, quiet except for errors, then three rows
+/// of placeholder cells naming the id as a 24-bit foreground (300 = 0x00012C), each cell with its row and
+/// column diacritic -- preceded by @p before and followed by @p after, which move the picture partly off the
+/// page.
+/// @param before The bytes that place the cursor for the picture.
+/// @param after The bytes that move the picture, ending in "tail".
+/// @param fetch Whether the image is fetched before the cells exist.
+/// @param checkServer Checks the server holds the clipped picture the test is about.
+void mirrorClaudePicture(std::string before,
+                         std::string after,
+                         FetchBeforeCells fetch,
+                         std::function<void(vtbackend::Terminal const&)> checkServer)
+{
+    auto h = MirrorHarness {};
+    auto const session = newSession(h.host);
+
+    auto scenario = [](MirrorHarness* h,
+                       vtworkspace::SessionId session,
+                       std::string before,
+                       std::string after,
+                       FetchBeforeCells fetch,
+                       std::function<void(vtbackend::Terminal const&)> checkServer) -> Task<void> {
+        serverWrites(h, session, "$ claude\r\n");
+        co_await waitUntil(&h->loop, mirrorShows(h, "claude"));
+
+        serverWrites(
+            h,
+            session,
+            std::format("\033_Ga=T,U=1,i=300,c=4,r=3,f=24,s=4,v=3,q=2;{}\033\\", std::string(48, 'A')));
+        auto const image = h->serverTerminal(session)->primaryScreen().kittyImage(300);
+        REQUIRE(image);
+        auto const poolId = unbox<uint32_t>(image->id());
+        auto const fetched = [h, session, poolId] {
+            auto const& screens = h->client->screens();
+            auto const screen = screens.find(session.value);
+            return screen != screens.end() && screen->second.images.contains(poolId);
+        };
+        if (fetch == FetchBeforeCells::Yes)
+        {
+            // No cell names the image yet: only its virtual placement does, and the daemon serves it anyway.
+            h->client->fetchImage(session.value, poolId);
+            co_await waitUntil(&h->loop, fetched);
+            CHECK(fetched());
+        }
+
+        auto bytes = before + kittyPlaceholderRow("38;2;0;1;44", 0, 4)
+                     + kittyPlaceholderRow("38;2;0;1;44", 1, 4) + kittyPlaceholderRow("38;2;0;1;44", 2, 4);
+        serverWrites(h, session, bytes + after);
+        co_await waitUntil(&h->loop, [h, session] {
+            return mirrorShows(h, "tail")()
+                   && vthost::testing::compareGrids(*h->serverTerminal(session), *h->mirror, {}, 1).empty();
+        });
+        checkServer(*h->serverTerminal(session));
+        // Fetched once the cells name it, when it was not before.
+        CHECK(fetched());
+        checkParity(vthost::testing::compareGrids(*h->serverTerminal(session), *h->mirror));
+        h->client->detach();
+    }(&h, session, std::move(before), std::move(after), fetch, std::move(checkServer));
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+} // namespace
+
+TEST_CASE("Claude Code's kitty picture mirrors with its first row above the page", "[vthost][parity][image]")
+{
+    mirrorClaudePicture(
+        "", lineBreaks(22) + "tail", FetchBeforeCells::Yes, [](vtbackend::Terminal const& server) {
+            auto const* top = fragmentAt(server, -1, 0);
+            REQUIRE(top != nullptr);
+            CHECK(top->offset().line == vtbackend::LineOffset(0));
+        });
+}
+
+TEST_CASE("Claude Code's kitty picture mirrors with its last row below the page", "[vthost][parity][image]")
+{
+    // Printed on the page's last three lines (the cursor homed there first), then scrolled down two (SD):
+    // the bottom image row falls off the page.
+    mirrorClaudePicture(
+        "\033[22;1H", "\033[2T\033[1;1Htail", FetchBeforeCells::No, [](vtbackend::Terminal const& server) {
+            auto const* bottom = fragmentAt(server, 24, 0);
+            REQUIRE(bottom != nullptr);
+            CHECK(bottom->offset().line == vtbackend::LineOffset(1));
+        });
 }
 
 TEST_CASE("PARITY a DEC page the user is not looking at", "[vthost][parity]")
