@@ -13,6 +13,7 @@
 #include <vthost/Daemon.hpp>
 
 #include <vtbackend/core/TerminalContext.hpp>
+#include <vtbackend/graphics/KittyMediaDefaults.hpp>
 #include <vtbackend/screen/GitHead.hpp>
 
 #include <vtpty/DetachedProcess.hpp>
@@ -1621,6 +1622,21 @@ namespace
             return std::nullopt;
         return std::pair { std::string { host }, static_cast<std::uint16_t>(port) };
     }
+
+    /// The policy every hosted session's kitty file media are read under: @p settings, from the daemon's
+    /// configuration, completed by the daemon's own -- its `$TMPDIR`, its user, its home -- since files are
+    /// read where the application wrote them.
+    /// @param env The daemon's environment.
+    /// @param settings What the daemon's configuration says.
+    [[nodiscard]] vtbackend::kitty_graphics::MediaPolicy kittyMediaPolicyOf(
+        core::Environment const& env, vtbackend::kitty_graphics::MediaSettings const& settings)
+    {
+        return vtbackend::kitty_graphics::mediaPolicy(
+            env,
+            settings,
+            std::filesystem::path { env.get("HOME").value_or(std::string {}) },
+            vtbackend::kitty_graphics::currentUserId());
+    }
 } // namespace
 
 std::optional<std::pair<std::string, std::uint16_t>> parseHostPort(std::string_view spec)
@@ -1724,6 +1740,8 @@ int runDaemon(DaemonConfig const& config,
 
     // Behind a keeper, every shell is the keeper's child, spawned through it; otherwise this daemon's own.
     auto const shellDevices = daemonKeeper.shellDevices(config.placement);
+    // What every hosted session's kitty graphics read files with. Declared before the host, which borrows it.
+    auto const kittyMediumSource = vtbackend::kitty_graphics::makePlatformMediumSource();
     auto host = SessionHost {
         loop,
         makeShellPtyFactory(config.shell, config.escapeSandbox, config.socketPath, shellDevices),
@@ -1736,6 +1754,11 @@ int runDaemon(DaemonConfig const& config,
             .startupLayout = config.startupLayout,
             .identity = thisHostIdentity(),
             .workspaceGit = WorkspaceGitServices { .probe = *gitProbe, .executor = gitExecutor },
+            .kittyMedia =
+                vtbackend::kitty_graphics::KittyMediumServices {
+                    .source = *kittyMediumSource,
+                    .policy = kittyMediaPolicyOf(core::defaultEnvironment(), config.kittyMedia) },
+            .imageDecoder = config.imageDecoder,
             .extensions = config.extensions ? config.extensions() : nullptr,
             .profiles = config.profiles,
             .profilePtys = config.profiles

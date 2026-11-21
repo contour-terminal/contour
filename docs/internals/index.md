@@ -33,6 +33,9 @@ The daemon and its protocols are documented separately in
 The sanitizer builds, and which leaks their reports leave out, are in [Sanitizers and leak
 checking](sanitizers.md).
 
+How kitty Unicode placeholders are resolved, and why a kitty file medium is judged by its descriptor,
+is in [Kitty Unicode placeholders and file media](kitty-placeholders.md).
+
 The application's own chrome (title band, tabs, panes, menus, Settings) and the token tables behind it
 are described in [The native chrome](native-chrome.md).
 

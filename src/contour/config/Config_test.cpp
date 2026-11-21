@@ -2560,6 +2560,78 @@ profiles:
           == vtbackend::SixelScrolling::Enabled);
 }
 
+TEST_CASE("Config: kitty file transmission settings", "[config][kitty]")
+{
+    using vtbackend::kitty_graphics::FileTransmission;
+    auto const home = std::filesystem::path { "/home/someone" };
+
+    SECTION("defaults")
+    {
+        auto const defaults = contour::config::Config {};
+        CHECK(defaults.images.value().kittyFileTransmission);
+        CHECK(defaults.images.value().kittyFileAllowList
+              == std::vector<std::string> { "~/.claude/plugins/data" });
+        auto const settings = contour::config::kittyMediaSettings(defaults.images.value(), home);
+        CHECK(settings.transmission == FileTransmission::Enabled);
+        CHECK(settings.allowList == std::vector<std::filesystem::path> { home / ".claude/plugins/data" });
+    }
+
+    SECTION("both keys load, `~` resolves against the home directory")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+images:
+    kitty_file_transmission: false
+    kitty_file_allow_list: ['~/pictures', '/srv/plots']
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+        auto const& images = config.images.value();
+        CHECK_FALSE(images.kittyFileTransmission);
+        CHECK(images.kittyFileAllowList == std::vector<std::string> { "~/pictures", "/srv/plots" });
+        auto const settings = contour::config::kittyMediaSettings(images, home);
+        CHECK(settings.transmission == FileTransmission::Disabled);
+        CHECK(settings.allowList
+              == std::vector<std::filesystem::path> { home / "pictures",
+                                                      std::filesystem::path { "/srv/plots" } });
+    }
+
+    SECTION("an empty allow-list leaves the temp directories alone")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(
+            dir, contour::test::profileConfigYaml("main", "images:\n    kitty_file_allow_list: []\n"));
+        CHECK(config.images.value().kittyFileAllowList.empty());
+    }
+
+    SECTION("an allow-list that is not a list keeps the default")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(
+            dir, contour::test::profileConfigYaml("main", "images:\n    kitty_file_allow_list: /srv\n"));
+        CHECK(config.images.value().kittyFileAllowList
+              == std::vector<std::string> { "~/.claude/plugins/data" });
+    }
+
+    SECTION("written back")
+    {
+        auto config = contour::config::Config {};
+        config.images.value().kittyFileTransmission = false;
+        config.images.value().kittyFileAllowList = { "~/a b", "/srv/plots" };
+        auto const written =
+            YAML::Load(contour::config::createString<contour::config::YAMLConfigWriter>(config));
+        CHECK(written["images"]["kitty_file_transmission"].as<bool>() == false);
+        CHECK(written["images"]["kitty_file_allow_list"].as<std::vector<std::string>>()
+              == std::vector<std::string> { "~/a b", "/srv/plots" });
+        auto const generated = YAML::Load(contour::config::defaultConfigString());
+        CHECK(generated["images"]["kitty_file_transmission"].as<bool>());
+        CHECK(generated["images"]["kitty_file_allow_list"].as<std::vector<std::string>>()
+              == std::vector<std::string> { "~/.claude/plugins/data" });
+    }
+}
+
 TEST_CASE("Config: cursor, bell, mouse and modes load from YAML", "[config]")
 {
     QTemporaryDir dir;

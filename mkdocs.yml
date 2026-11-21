@@ -81,6 +81,7 @@ plugins:
         internals/CODING_STYLE.md: https://github.com/contour-terminal/contour/blob/master/docs/internals/CODING_STYLE.md
         internals/build-times.md: https://github.com/contour-terminal/contour/blob/master/docs/internals/build-times.md
         internals/index.md: https://github.com/contour-terminal/contour/blob/master/docs/internals/index.md
+        internals/kitty-placeholders.md: https://github.com/contour-terminal/contour/blob/master/docs/internals/kitty-placeholders.md
         internals/keyboard-input.md: https://github.com/contour-terminal/contour/blob/master/docs/internals/keyboard-input.md
         internals/latency.md: https://github.com/contour-terminal/contour/blob/master/docs/internals/latency.md
         internals/macos-code-signing.md: https://github.com/contour-terminal/contour/blob/master/docs/internals/macos-code-signing.md
@@ -147,6 +148,7 @@ nav:
       - vertical line marks: vt-extensions/vertical-line-marks.md
       - palette notifications: vt-extensions/color-palette-update-notifications.md
       - font settings: vt-extensions/font-settings.md
+      - kitty graphics placeholders: vt-extensions/kitty-graphics.md
       - line reflow mode: vt-extensions/line-reflow-mode.md
       - private-use glyphs: vt-extensions/private-use-glyphs.md
       - save and restore sgr: vt-extensions/save-and-restore-sgr-attributes.md

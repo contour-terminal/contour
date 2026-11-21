@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/grid/LineSoA.hpp>
 
+#include <vtbackend/core/KittyPlaceholderCodepoint.hpp>
+
 #include <libunicode/width.h>
 
 #include <algorithm>
@@ -400,8 +402,9 @@ int appendCodepointToCluster(LineSoA& line, size_t col, char32_t codepoint, Clus
             buffer[count++] = cp;
     });
     // Under FirstCodepoint the codepoint still joins the cluster -- it is part of the text, and must
-    // round-trip through a copy -- but it may not change how many columns the cluster occupies.
-    if (policy == ClusterWidthPolicy::FirstCodepoint)
+    // round-trip through a copy -- but it may not change how many columns the cluster occupies. Nor may
+    // a kitty Unicode placeholder's diacritics: a placeholder cell is one column, whatever follows it.
+    if (policy == ClusterWidthPolicy::FirstCodepoint || buffer[0] == kitty_graphics::PlaceholderCodepoint)
         return 0;
 
     // A cluster always occupies at least one column. grapheme_cluster_width answers 0 for a cluster

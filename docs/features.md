@@ -81,6 +81,8 @@ If your font supports them, Contour will render them.
 ## Images
 
 Contour implements first-class [Sixel](https://en.wikipedia.org/wiki/Sixel) image support, as well as the kitty graphics protocol and [ReGIS vector graphics](demo/regis-graphics.md).
+The kitty graphics protocol includes [Unicode placeholders and file media](vt-extensions/kitty-graphics.md),
+which is what Claude Code draws its pictures, such as Mermaid diagrams, with.
 
 Most notably supporting libraries,
 are [notcurses](https://github.com/dankamongmen/notcurses/)

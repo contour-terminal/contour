@@ -116,6 +116,30 @@ TEST_CASE("KittyGraphics.parse.defaults", "[kitty]")
     CHECK_FALSE(command->moreChunksFollow);
 }
 
+TEST_CASE("KittyGraphics.parse.unicode_placement", "[kitty][placeholder]")
+{
+    auto const command = parseCommand("a=T,U=1,i=5,c=4,r=2"sv);
+    REQUIRE(command.has_value());
+    CHECK(command->placementKind == PlacementKind::Virtual);
+    CHECK(command->columns == 4);
+    CHECK(command->rows == 2);
+
+    CHECK(parseCommand("a=T,i=5"sv)->placementKind == PlacementKind::Cursor);
+    CHECK(parseCommand("a=T,U=0,i=5"sv)->placementKind == PlacementKind::Cursor);
+    // kitty takes any non-zero U as a virtual placement.
+    CHECK(parseCommand("a=T,U=2,i=5"sv)->placementKind == PlacementKind::Virtual);
+}
+
+TEST_CASE("KittyGraphics.parse.feature_query", "[kitty][placeholder]")
+{
+    auto const command = parseCommand("a=q,i=31,e=T,U=1"sv);
+    REQUIRE(command.has_value());
+    CHECK(command->action == Action::Query);
+    CHECK(command->queryFeature == 'T');
+    CHECK(parseCommand("a=q,i=31"sv)->queryFeature == 0);
+    CHECK_FALSE(parseCommand("a=q,i=31,e=TT"sv).has_value());
+}
+
 TEST_CASE("KittyGraphics.parse.payload_may_contain_semicolons", "[kitty]")
 {
     // Only the FIRST semicolon separates control data from payload; base64 never contains one, but a
@@ -176,10 +200,10 @@ TEST_CASE("KittyGraphics.query_validates_what_a_transmission_would_reject", "[ki
     // to: its feature probe already said yes.
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
 
-    SECTION("unsupported medium")
+    SECTION("a file medium on a terminal that reads none")
     {
         mock.writeToScreen("\033_Gi=31,s=1,v=1,a=q,t=t,f=24;AAAA\033\\"sv);
-        CHECK(mock.terminal.peekInput().contains("ENOTSUP"));
+        CHECK(mock.terminal.peekInput() == "\033_Gi=31;EBADF:file not readable\033\\");
     }
 
     SECTION("compressed payload is supported")
@@ -396,11 +420,11 @@ TEST_CASE("KittyGraphics.a_png_is_decoded_before_it_is_stored", "[kitty]")
 
 TEST_CASE("KittyGraphics.unsupported_media_are_refused_not_ignored", "[kitty]")
 {
-    // Reading a path the application names would let it point the terminal at any file the user can
-    // read; saying ENOTSUP is both safer and more useful than silence.
+    // A terminal given no medium services reads no path the application names, and says so rather than
+    // staying silent: the application then falls back to direct transmission.
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
     mock.writeToScreen("\033_Ga=T,f=32,s=1,v=1,t=f,i=3;L3RtcC94\033\\"sv);
-    CHECK(mock.terminal.peekInput().contains("ENOTSUP"));
+    CHECK(mock.terminal.peekInput() == "\033_Gi=3;EBADF:file not readable\033\\");
 }
 
 TEST_CASE("KittyGraphics.chunked_transmission_is_reassembled", "[kitty]")
@@ -2657,5 +2681,214 @@ TEST_CASE("KittyGraphics.unknown_cell_size_is_dropped_unless_c_and_r_are_given",
         auto mock = MockTerm<vtpty::MockPty> { pageSize };
         mock.writeToScreen(std::format("\033_Ga=T,f=32,s=20,v=40,i=1,c=2,r=2;{}\033\\", pixels));
         CHECK(countFragments(mock) == 4);
+    }
+}
+
+namespace
+{
+/// A 2x2 RGB image (`f=24,s=2,v=2`), base64-encoded.
+[[nodiscard]] std::string rgbPixels2x2()
+{
+    return core::base64::encode(std::string(12, '\x7F'));
+}
+
+/// @return How many cells of @p screen's page carry an image fragment.
+[[nodiscard]] int countImageCells(Screen const& screen)
+{
+    auto count = 0;
+    for (auto const line: std::views::iota(0, *screen.pageSize().lines))
+        for (auto const column: std::views::iota(0, *screen.pageSize().columns))
+            if (screen.at(LineOffset(line), ColumnOffset(column)).imageFragment())
+                ++count;
+    return count;
+}
+} // namespace
+
+TEST_CASE("KittyGraphics.virtual_placement_writes_no_cells", "[kitty][placeholder]")
+{
+    auto mock = KittyTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[3;5H"sv);
+    auto const cursorBefore = mock.terminal.primaryScreen().cursor().position;
+
+    mock.writeToScreen(std::format("\033_Ga=T,U=1,i=7,c=4,r=2,f=24,s=2,v=2;{}\033\\", rgbPixels2x2()));
+
+    CHECK(mock.terminal.peekInput() == "\033_Gi=7;OK\033\\");
+    CHECK(mock.terminal.primaryScreen().cursor().position == cursorBefore);
+    CHECK(countImageCells(mock.terminal.primaryScreen()) == 0);
+
+    auto const* const placement =
+        mock.terminal.primaryScreen().findKittyVirtualPlacement(7, KittyPlacementId {});
+    REQUIRE(placement != nullptr);
+    CHECK(placement->raster->origin() == ImageOrigin::Placeholder);
+    CHECK(placement->raster->cellSpan().lines == LineCount(2));
+    CHECK(placement->raster->cellSpan().columns == ColumnCount(4));
+    CHECK(placement->raster->resizePolicy() == ImageResize::ResizeToFit);
+    CHECK(placement->raster->alignmentPolicy() == ImageAlignment::MiddleCenter);
+}
+
+TEST_CASE("KittyGraphics.virtual_placement_by_put", "[kitty][placeholder]")
+{
+    auto mock = KittyTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    auto const& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen(std::format("\033_Ga=t,i=7,f=24,s=2,v=2;{}\033\\", rgbPixels2x2()));
+
+    SECTION("a=p,U=1 creates one, without cells")
+    {
+        mock.writeToScreen("\033_Ga=p,U=1,i=7,p=3,c=6,r=3\033\\"sv);
+        auto const* const placement = screen.findKittyVirtualPlacement(7, KittyPlacementId { 3 });
+        REQUIRE(placement != nullptr);
+        CHECK(placement->raster->cellSpan().lines == LineCount(3));
+        CHECK(placement->raster->cellSpan().columns == ColumnCount(6));
+        CHECK(countImageCells(screen) == 0);
+        CHECK(screen.cursor().position == CellLocation {});
+    }
+
+    SECTION("placement id 0 finds the first one")
+    {
+        mock.writeToScreen("\033_Ga=p,U=1,i=7,p=3,c=6,r=3\033\\"sv);
+        mock.writeToScreen("\033_Ga=p,U=1,i=7,p=4,c=2,r=1\033\\"sv);
+        auto const* const first = screen.findKittyVirtualPlacement(7, KittyPlacementId {});
+        REQUIRE(first != nullptr);
+        CHECK(first->placementId == KittyPlacementId { 3 });
+    }
+
+    SECTION("the same (i, p) replaces")
+    {
+        mock.writeToScreen("\033_Ga=p,U=1,i=7,p=3,c=6,r=3\033\\"sv);
+        mock.writeToScreen("\033_Ga=p,U=1,i=7,p=3,c=2,r=1\033\\"sv);
+        auto const* const placement = screen.findKittyVirtualPlacement(7, KittyPlacementId { 3 });
+        REQUIRE(placement != nullptr);
+        CHECK(placement->raster->cellSpan().lines == LineCount(1));
+        CHECK(placement->raster->cellSpan().columns == ColumnCount(2));
+    }
+
+    SECTION("the span follows the pixel size without c= and r=")
+    {
+        mock.writeToScreen("\033_Ga=p,U=1,i=7\033\\"sv);
+        auto const* const placement = screen.findKittyVirtualPlacement(7, KittyPlacementId {});
+        REQUIRE(placement != nullptr);
+        CHECK(placement->raster->cellSpan().lines == LineCount(2));
+        CHECK(placement->raster->cellSpan().columns == ColumnCount(2));
+    }
+
+    SECTION("re-transmission drops the image's virtual placements")
+    {
+        mock.writeToScreen("\033_Ga=p,U=1,i=7,c=6,r=3\033\\"sv);
+        mock.writeToScreen(std::format("\033_Ga=t,i=7,f=24,s=2,v=2;{}\033\\", rgbPixels2x2()));
+        CHECK(screen.findKittyVirtualPlacement(7, KittyPlacementId {}) == nullptr);
+    }
+
+    SECTION("RIS drops them")
+    {
+        mock.writeToScreen("\033_Ga=p,U=1,i=7,c=6,r=3\033\\"sv);
+        mock.writeToScreen("\033c"sv);
+        CHECK(mock.terminal.primaryScreen().findKittyVirtualPlacement(7, KittyPlacementId {}) == nullptr);
+    }
+}
+
+TEST_CASE("KittyGraphics.virtual_placements_are_per_screen", "[kitty][placeholder]")
+{
+    auto mock = KittyTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[?1049h"sv);
+    mock.writeToScreen(std::format("\033_Ga=T,U=1,i=7,c=4,r=2,f=24,s=2,v=2;{}\033\\", rgbPixels2x2()));
+    CHECK(mock.terminal.alternateScreen().findKittyVirtualPlacement(7, KittyPlacementId {}) != nullptr);
+    mock.writeToScreen("\033[?1049l"sv);
+    CHECK(mock.terminal.primaryScreen().findKittyVirtualPlacement(7, KittyPlacementId {}) == nullptr);
+}
+
+TEST_CASE("KittyGraphics.feature_query", "[kitty][placeholder]")
+{
+    auto mock = KittyTerm { PageSize { LineCount(4), ColumnCount(8) } };
+
+    SECTION("Unicode placeholders, as kitty documents the probe")
+    {
+        mock.writeToScreen("\033_Ga=q,i=31,e=T,U=1\033\\"sv);
+        CHECK(mock.terminal.peekInput() == "\033_Gi=31,e=T,U=1;OK\033\\");
+    }
+
+    SECTION("several supported keys")
+    {
+        mock.writeToScreen("\033_Ga=q,i=31,e=T,U=1,C=1\033\\"sv);
+        CHECK(mock.terminal.peekInput() == "\033_Gi=31,e=T,C=1,U=1;OK\033\\");
+    }
+
+    SECTION("an unsupported key is left out")
+    {
+        mock.writeToScreen("\033_Ga=q,i=31,e=T,U=1,P=4\033\\"sv);
+        CHECK(mock.terminal.peekInput() == "\033_Gi=31,e=T,U=1;OK\033\\");
+    }
+
+    SECTION("an unknown action is not echoed")
+    {
+        mock.writeToScreen("\033_Ga=q,i=31,e=Z\033\\"sv);
+        CHECK(mock.terminal.peekInput() == "\033_Gi=31;OK\033\\");
+    }
+
+    SECTION("no reply without an id")
+    {
+        mock.writeToScreen("\033_Ga=q,e=T,U=1\033\\"sv);
+        CHECK(mock.terminal.peekInput().empty());
+    }
+
+    SECTION("it leaves a chunked transmission alone")
+    {
+        mock.writeToScreen("\033_Ga=t,i=9,f=24,s=2,v=2,m=1;AAAA\033\\"sv);
+        mock.writeToScreen("\033_Ga=q,i=31,e=T,U=1\033\\"sv);
+        CHECK(mock.terminal.peekInput() == "\033_Gi=31,e=T,U=1;OK\033\\");
+        mock.terminal.flushInput();
+        mock.writeToScreen("\033_Gm=0;AAAAAAAAAAAA\033\\"sv);
+        CHECK(mock.terminal.peekInput() == "\033_Gi=9;OK\033\\");
+    }
+}
+
+TEST_CASE("KittyGraphics.image_number", "[kitty][placeholder]")
+{
+    auto mock = KittyTerm { PageSize { LineCount(4), ColumnCount(8) } };
+
+    SECTION("a transmission by number is given the next free id")
+    {
+        mock.writeToScreen(std::format("\033_Ga=t,i=1,f=24,s=2,v=2,q=2;{}\033\\", rgbPixels2x2()));
+        mock.writeToScreen(std::format("\033_Ga=t,I=13,f=24,s=2,v=2;{}\033\\", rgbPixels2x2()));
+        CHECK(mock.terminal.peekInput() == "\033_Gi=2,I=13;OK\033\\");
+        CHECK(mock.terminal.primaryScreen().kittyImage(2) != nullptr);
+    }
+
+    SECTION("a put by number places its newest image")
+    {
+        mock.writeToScreen(std::format("\033_Ga=t,I=13,f=24,s=2,v=2,q=2;{}\033\\", rgbPixels2x2()));
+        mock.writeToScreen("\033_Ga=p,U=1,I=13,c=2,r=1\033\\"sv);
+        CHECK(mock.terminal.peekInput() == "\033_Gi=1,I=13;OK\033\\");
+        CHECK(mock.terminal.primaryScreen().findKittyVirtualPlacement(1, KittyPlacementId {}) != nullptr);
+    }
+
+    SECTION("an id and a number together are refused")
+    {
+        mock.writeToScreen(std::format("\033_Ga=t,i=4,I=13,f=24,s=2,v=2;{}\033\\", rgbPixels2x2()));
+        CHECK(mock.terminal.peekInput().starts_with("\033_Gi=4,I=13;EINVAL"));
+        CHECK(mock.terminal.primaryScreen().kittyImage(4) == nullptr);
+    }
+
+    SECTION("the feature query echoes an explicit d=a")
+    {
+        mock.writeToScreen("\033_Ga=q,i=31,e=d,d=a\033\\"sv);
+        CHECK(mock.terminal.peekInput() == "\033_Gi=31,e=d,d=a;OK\033\\");
+    }
+
+    SECTION("a feature query without d= echoes no d= key")
+    {
+        mock.writeToScreen("\033_Ga=q,i=31,e=d\033\\"sv);
+        CHECK(mock.terminal.peekInput() == "\033_Gi=31,e=d;OK\033\\");
+    }
+
+    SECTION("a feature query naming an id and a number is refused, as kitty checks that first")
+    {
+        mock.writeToScreen("\033_Ga=q,i=31,I=3,e=T\033\\"sv);
+        CHECK(mock.terminal.peekInput().starts_with("\033_Gi=31,I=3;EINVAL"));
+    }
+
+    SECTION("the feature query names the new delete targets")
+    {
+        mock.writeToScreen("\033_Ga=q,i=31,e=d,d=N\033\\"sv);
+        CHECK(mock.terminal.peekInput() == "\033_Gi=31,e=d,d=N;OK\033\\");
     }
 }

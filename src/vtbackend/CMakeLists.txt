@@ -68,6 +68,7 @@ set(vtbackend_HEADERS
     core/Hyperlink.hpp
     core/UntrustedText.hpp
     core/Image.hpp
+    core/KittyPlaceholderCodepoint.hpp
     input/ClickCounter.hpp
     input/InputBinding.hpp
     input/InputGenerator.hpp
@@ -79,6 +80,10 @@ set(vtbackend_HEADERS
     graphics/KittyAnimation.hpp
     graphics/KittyGraphics.hpp
     graphics/KittyInflate.hpp
+    graphics/KittyMediaDefaults.hpp
+    graphics/KittyMediaPolicy.hpp
+    graphics/KittyMediumSource.hpp
+    graphics/KittyPlaceholders.hpp
     grid/Line.hpp
     core/LineFlags.hpp
     grid/LineSoA.hpp
@@ -240,6 +245,9 @@ set(vtbackend_SOURCES
     graphics/KittyAnimation.cpp
     graphics/KittyGraphics.cpp
     graphics/KittyInflate.cpp
+    graphics/KittyMediaDefaults.cpp
+    graphics/KittyMediaPolicy.cpp
+    graphics/KittyPlaceholders.cpp
     vt/TextSizing.cpp
     screen/LinkDetector.cpp
     links/LinkIndex.cpp
@@ -288,6 +296,11 @@ set(vtbackend_SOURCES
     core/Primitives.cpp
     core/Search.cpp
 )
+
+# Kitty file media (`t=f`, `t=t`) are read on POSIX only; Windows builds just the refusing source.
+if(NOT WIN32)
+    list(APPEND vtbackend_SOURCES graphics/KittyMediumSource_posix.cpp)
+endif()
 
 add_library(vtbackend STATIC ${vtbackend_SOURCES} ${vtbackend_HEADERS})
 # The version string embeds the branch name and HEAD sha. The compile cache keys on the command line,
@@ -375,6 +388,7 @@ if(LIBTERMINAL_TESTING)
         screen/Terminal_programStatus_test.cpp
         vt/JsonString_test.cpp
         screen/Screen_context_test.cpp
+        screen/Screen_kitty_media_test.cpp
         shell/MarkArbiter_test.cpp
         core/WorkingDirectory_test.cpp
         shell/BlockChipPlacement_test.cpp
@@ -434,6 +448,10 @@ if(LIBTERMINAL_TESTING)
         graphics/KittyAnimation_test.cpp
         graphics/KittyGraphics_test.cpp
         graphics/KittyInflate_test.cpp
+        graphics/KittyMediaDefaults_test.cpp
+        graphics/KittyMediaPolicy_test.cpp
+        graphics/KittyMediumSource_test.cpp
+        graphics/KittyPlaceholders_test.cpp
         vt/TextSizing_test.cpp
         screen/ScreenTestFixtures.cpp
         screen/TerminalTestFixtures.cpp
@@ -446,6 +464,7 @@ if(LIBTERMINAL_TESTING)
         screen/Screen_softfont_test.cpp
         screen/Screen_macros_test.cpp
         screen/Screen_multipage_test.cpp
+        screen/Screen_kitty_placeholders_test.cpp
         core/Image_test.cpp
         core/Search_test.cpp
         screen/SearchQuery_test.cpp

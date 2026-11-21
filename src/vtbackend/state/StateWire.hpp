@@ -332,6 +332,15 @@ struct StateEnumWire<vtbackend::ImageLayer>
 };
 
 template <>
+struct StateEnumWire<vtbackend::ImageOrigin>
+{
+    static constexpr auto Values = std::array {
+        vtbackend::ImageOrigin::Cursor,
+        vtbackend::ImageOrigin::Placeholder,
+    };
+};
+
+template <>
 struct StateEnumWire<vtbackend::ImageResize>
 {
     static constexpr auto Values = std::array {
@@ -734,6 +743,15 @@ struct StateEnumWire<vtbackend::kitty_graphics::AnimationState>
 };
 
 template <>
+struct StateEnumWire<vtbackend::kitty_graphics::PlacementKind>
+{
+    static constexpr auto Values = std::array {
+        vtbackend::kitty_graphics::PlacementKind::Cursor,
+        vtbackend::kitty_graphics::PlacementKind::Virtual,
+    };
+};
+
+template <>
 struct StateEnumWire<vtbackend::kitty_graphics::CompositionMode>
 {
     static constexpr auto Values = std::array {
@@ -848,6 +866,7 @@ struct StateFlagWire<vtbackend::LineFlag>
         vtbackend::LineFlag::CommandEnd,
         vtbackend::LineFlag::PromptEnd,
         vtbackend::LineFlag::UserMark,
+        vtbackend::LineFlag::ImagePlaceholders,
     };
 };
 

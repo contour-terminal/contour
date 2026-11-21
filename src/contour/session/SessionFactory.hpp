@@ -5,6 +5,7 @@
 #include <contour/platform/Notifier.hpp>
 #include <contour/session/EndReason.hpp>
 #include <contour/session/HostedOperation.hpp>
+#include <contour/session/MediaAccess.hpp>
 #include <contour/window/DropZonePolicy.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -312,6 +313,18 @@ class SessionFactory
     [[nodiscard]] virtual std::optional<uint64_t> hostSessionIdOf(vtpty::Pty const& /*pty*/) const noexcept
     {
         return std::nullopt;
+    }
+
+    /// How the bytes of the session backed by @p pty reach its terminal, which decides what kitty graphics
+    /// may read for it (mediaAccessFor()).
+    /// @param pty A pty this factory handed out.
+    /// @return A daemon's replica for a remote factory; for a local one, Unknown unless the factory
+    /// identifies
+    ///         its ptys itself -- fail closed, so a factory that hands out a new kind of pty grants nothing.
+    [[nodiscard]] virtual SessionTransport transportOf(vtpty::Pty const& /*pty*/) const noexcept
+    {
+        return hosting() == SessionHosting::Local ? SessionTransport::Unknown
+                                                  : SessionTransport::DaemonReplica;
     }
 
     /// The notifier a new session raises its notifications through.
@@ -647,6 +660,10 @@ class AppSessionFactory final: public SessionFactory
         std::optional<vtbackend::PageSize> pageSize = std::nullopt,
         std::optional<vtpty::Process::ExecInfo> commandOverride = std::nullopt,
         std::optional<std::string> profileName = std::nullopt) override;
+
+    /// Identified by what the pty is: a vtpty::Process is a local process, a vtpty::SshSession an SSH
+    /// profile's session on another host, and anything else Unknown.
+    [[nodiscard]] SessionTransport transportOf(vtpty::Pty const& pty) const noexcept override;
 
   private:
 #ifdef VTPTY_LIBSSH2

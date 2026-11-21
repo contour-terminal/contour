@@ -6,6 +6,8 @@
 #include <vtbackend/core/LineFlags.hpp>
 #include <vtbackend/core/RowMove.hpp>
 #include <vtbackend/graphics/KittyInflate.hpp>
+#include <vtbackend/graphics/KittyMediaPolicy.hpp>
+#include <vtbackend/graphics/KittyPlaceholders.hpp>
 #include <vtbackend/graphics/MessageParser.hpp>
 #include <vtbackend/graphics/SixelParser.hpp>
 #include <vtbackend/graphics/regis/ReGISContext.hpp>
@@ -312,6 +314,14 @@ namespace // {{{ helper
     }
 
     /// Common parameters shared by GIP render and oneshot operations.
+    /// Most kitty virtual placements (`U=1`) one screen holds. A virtual placement covers no cell, so
+    /// unlike a placement at the cursor nothing else bounds them: every new placement id is another one.
+    constexpr auto MaxKittyVirtualPlacements = size_t { 4096 };
+
+    /// Largest span, in cells along either axis, a kitty virtual placement may ask for. Not the page: a
+    /// picture taller than the page is shown in parts as its placeholder rows scroll by.
+    constexpr auto MaxKittyVirtualPlacementSpan = uint32_t { 0xFFFF };
+
     /// Clamps an application-supplied cell count to what the page can actually hold.
     ///
     /// Every image protocol lets the application state the display size in cells, and every one of them
@@ -391,21 +401,31 @@ namespace // {{{ helper
         return bytes;
     }
 
-    /// Base64-decodes a kitty graphics payload and, for `o=z`, inflates it.
-    ///
-    /// @param command The command carrying the payload.
-    /// @param maxInflatedBytes Largest inflated size to accept; a compressed payload claiming more is
-    ///        refused before it is materialised.
-    /// @param tooLargeReply Reply for a payload that inflates past @p maxInflatedBytes.
-    /// @return The pixel (or PNG file) bytes, or the reply to send instead.
-    [[nodiscard]] std::expected<Image::Data, std::string_view> decodeKittyPayload(
-        kitty_graphics::Command const& command, size_t maxInflatedBytes, std::string_view tooLargeReply)
+    /// Base64-decodes @p text into bytes.
+    [[nodiscard]] Image::Data decodeBase64(std::string_view text)
     {
         // Decoded into bytes rather than kept as the std::string base64::decode() returns: `char` is
         // signed here, so reading a pixel through it turns an opaque 0xFF alpha into 4294967295 and
         // the blend arithmetic into nonsense. Straight into the vector, so the payload is held once.
-        auto bytes = Image::Data(core::base64::decodeLength(command.payload));
-        bytes.resize(core::base64::decode(command.payload, bytes.data()));
+        auto bytes = Image::Data(core::base64::decodeLength(text));
+        bytes.resize(core::base64::decode(text, bytes.data()));
+        return bytes;
+    }
+
+    /// For `o=z`, inflates a kitty graphics payload's bytes (Screen::kittyPayloadBytes()).
+    ///
+    /// @param command The command carrying the payload.
+    /// @param bytes The payload's bytes, as they arrived.
+    /// @param maxInflatedBytes Largest inflated size to accept; a compressed payload claiming more is
+    ///        refused before it is materialised.
+    /// @param tooLargeReply Reply for a payload that inflates past @p maxInflatedBytes.
+    /// @return The pixel (or PNG file) bytes, or the reply to send instead.
+    [[nodiscard]] std::expected<Image::Data, std::string_view> inflateKittyPayload(
+        kitty_graphics::Command const& command,
+        Image::Data bytes,
+        size_t maxInflatedBytes,
+        std::string_view tooLargeReply)
+    {
         if (command.compression == kitty_graphics::Compression::None)
             return bytes;
 
@@ -414,6 +434,14 @@ namespace // {{{ helper
                 return error == kitty_graphics::InflateError::TooLarge ? tooLargeReply
                                                                        : "EINVAL:corrupt compressed payload";
             });
+    }
+
+    /// @return @p reply for a payload that came in the escape sequence; for one read from a file, the one
+    ///         refusal every failure of a file medium gets, a decode failure included.
+    [[nodiscard]] std::string_view payloadFailure(kitty_graphics::Command const& command,
+                                                  std::string_view reply)
+    {
+        return command.medium == kitty_graphics::Medium::Direct ? reply : kitty_graphics::MediaRefusalReply;
     }
 
 } // namespace
@@ -549,6 +577,14 @@ void Screen::applyPageSizeToMainDisplay(PageSize mainDisplayPageSize)
     // Rows the resize brought back from the history hold the frame they left with.
     if (sizeChanged)
         resyncKittyAnimations();
+
+    // A reflow moves placeholder cells to other rows, a continuation row among them, where a cell may now
+    // start its run. Resolved now: a resize is no parse batch.
+    if (sizeChanged)
+    {
+        rescanKittyPlaceholdersEverywhere();
+        resolveKittyPlaceholders();
+    }
 
     verifyState();
 }
@@ -801,7 +837,12 @@ bool Screen::joinsLastCluster(char32_t codepoint) const noexcept
 
 void Screen::appendToLastCluster(char32_t codepoint)
 {
-    auto const widthChange = usePreviousCell().appendCharacter(codepoint, clusterWidthPolicy());
+    auto previousCell = usePreviousCell();
+    // A placeholder's diacritics may arrive in a later read than the placeholder: its line is resolved
+    // again once they have.
+    if (previousCell.codepoint(0) == kitty_graphics::PlaceholderCodepoint) [[unlikely]]
+        notePlaceholderCell(_lastCursorPosition.line);
+    auto const widthChange = previousCell.appendCharacter(codepoint, clusterWidthPolicy());
     applyClusterWidthChange(widthChange);
     _terminal->markCellDirty(_lastCursorPosition);
 }
@@ -1001,8 +1042,12 @@ Screen::CharacterPlacement Screen::placeWideCharacter(int width) noexcept
 
 void Screen::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
 {
-    // Measured once: the placement, the room IRM makes and the cell itself all take the same width.
-    auto const width = unicode::width(codepoint);
+    // The one comparison ordinary text pays for kitty Unicode placeholders.
+    auto const isPlaceholder = codepoint == kitty_graphics::PlaceholderCodepoint;
+
+    // Measured once: the placement, the room IRM makes and the cell itself all take the same width. A
+    // placeholder is one column, which its Ambiguous width only happens to measure.
+    auto const width = isPlaceholder ? 1u : unicode::width(codepoint);
 
     // A character wider than the room left before the margin goes to the next row, as in xterm, foot
     // and kitty, or, without autowrap, is dropped, as xterm drops it (measured).
@@ -1053,6 +1098,8 @@ void Screen::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
     cell.write(_cursor.graphicsRendition, codepoint, static_cast<uint8_t>(width), _cursor.hyperlink);
 
     _lastCursorPosition = _cursor.position;
+    if (isPlaceholder) [[unlikely]]
+        notePlaceholderCell(_cursor.position.line);
 
     clearAndAdvance(oldWidth, cell.width());
 
@@ -1678,7 +1725,8 @@ Line& Screen::eraseRowInPlace(LineOffset line, LineFlags flags, GraphicsAttribut
     auto& row = _grid.lineAt(line);
     auto const block = row.blockId();
     auto const before = row.flags();
-    row.reset(flags, attributes);
+    // A derived flag describes the cells, and the erase takes them all.
+    row.reset(flags.without(DerivedLineFlags), attributes);
     if (line == _cursor.position.line)
         row.adoptProvenance(_stamp);
 
@@ -1731,6 +1779,7 @@ void Screen::forgetCursorRowErasedWhole() noexcept
     auto& row = currentLine();
     auto const before = row.flags();
     row.flags().disable(LineRenditionFlags);
+    row.flags().disable(DerivedLineFlags);
     row.flags().disable(LineFlag::UserMark);
     noteUserMarkChange(_cursor.position.line, before);
 }
@@ -5923,7 +5972,9 @@ void Screen::processAPC(std::string_view body)
     publishKittyAnimationDue();
 }
 
-void Screen::replyKittyGraphics(kitty_graphics::Command const& command, std::string_view status)
+void Screen::replyKittyGraphics(kitty_graphics::Command const& command,
+                                std::string_view status,
+                                std::string_view keys)
 {
     auto const isError = !status.starts_with("OK");
     if (command.quietAlways || (command.quietOnSuccess && !isError))
@@ -5934,10 +5985,12 @@ void Screen::replyKittyGraphics(kitty_graphics::Command const& command, std::str
     if (command.imageId == 0 && command.imageNumber == 0 && !isError)
         return;
 
+    // kitty puts the extra keys only on a success.
+    auto const extra = isError ? std::string_view {} : keys;
     if (command.imageNumber != 0)
-        reply("\033_Gi={},I={};{}\033\\", command.imageId, command.imageNumber, status);
+        reply("\033_Gi={},I={}{};{}\033\\", command.imageId, command.imageNumber, extra, status);
     else
-        reply("\033_Gi={};{}\033\\", command.imageId, status);
+        reply("\033_Gi={}{};{}\033\\", command.imageId, extra, status);
 }
 
 std::optional<std::string_view> Screen::validateKittyTransmission(
@@ -5950,11 +6003,6 @@ std::optional<std::string_view> Screen::validateKittyTransmission(
     // continuation chunk legitimately carries no dimensions -- only the reassembled command has them.
     if (command.transmissionFormat() != Format::Png && (command.pixelWidth == 0 || command.pixelHeight == 0))
         return "EINVAL:missing image dimensions";
-
-    if (command.medium != Medium::Direct)
-        // Reading a path or a shared-memory object the application names would let it point the
-        // terminal at any file the user can read. Not implemented deliberately.
-        return "ENOTSUP:only direct transmission is supported";
 
     return std::nullopt;
 }
@@ -5973,10 +6021,15 @@ void Screen::updateKittyFragments(std::predicate<ImageFragment const&> auto cons
             continue;
         for (auto const column: std::views::iota(0, *pageSize().columns))
         {
-            auto cell = at(LineOffset(line), ColumnOffset(column));
-            auto const fragment = cell.imageFragment();
+            // Read first: only a cell the walk changes is handed out for writing, so a walk over the history
+            // announces exactly the rows it changes (@see Grid::changingLineAt) to the delta stream.
+            auto const fragment =
+                ConstCellProxy(std::as_const(_grid).lineAt(LineOffset(line)).storage(), column)
+                    .imageFragment();
             if (!fragment || !selects(*fragment))
                 continue;
+            auto& row = line < 0 ? _grid.changingLineAt(LineOffset(line)) : _grid.lineAt(LineOffset(line));
+            auto cell = row.useCellAt(ColumnOffset(column));
             update(cell, *fragment);
             // Only the page is on display; a scrollback cell has nothing to repaint.
             if (line >= 0)
@@ -5988,10 +6041,15 @@ void Screen::updateKittyFragments(std::predicate<ImageFragment const&> auto cons
 
 void Screen::removeAllKittyPlacements()
 {
-    // Only the fragments: the text sharing the cells is not the placement's to erase.
-    updateKittyFragments([](ImageFragment const&) { return true; },
-                         [](CellProxy& cell, ImageFragment const&) { cell.clearImageFragment(); },
-                         KittyScan::PageOnly);
+    // Only the fragments: the text sharing the cells is not the placement's to erase. And only those placed
+    // at the cursor: a placeholder cell's picture is its virtual placement's, which `d=a` leaves alone, as
+    // kitty's clear_filter_func_noncell does.
+    updateKittyFragments(
+        [](ImageFragment const& fragment) {
+            return fragment.rasterizedImage().origin() == ImageOrigin::Cursor;
+        },
+        [](CellProxy& cell, ImageFragment const&) { cell.clearImageFragment(); },
+        KittyScan::PageOnly);
 }
 
 std::expected<void, std::string_view> Screen::deleteKittyGraphics(kitty_graphics::Command const& command)
@@ -6000,8 +6058,13 @@ std::expected<void, std::string_view> Screen::deleteKittyGraphics(kitty_graphics
     // the transmitted data resident, upper case additionally frees it. Ignoring the distinction broke
     // the protocol's standard redraw idiom -- `a=d,d=a` to clear placements, then `a=p,i=1` to place
     // the image already transmitted -- because the data the re-placement needs had been destroyed.
-    auto const freesData = static_cast<bool>(std::isupper(static_cast<unsigned char>(command.deleteTarget)));
-    auto const target = static_cast<char>(std::tolower(static_cast<unsigned char>(command.deleteTarget)));
+    // An absent `d=` means `a`, as in kitty, where it is 0 on the wire too.
+    auto const deleteTarget = command.deleteTarget != 0 ? command.deleteTarget : 'a';
+    auto const freesData = static_cast<bool>(std::isupper(static_cast<unsigned char>(deleteTarget)));
+    auto const target = static_cast<char>(std::tolower(static_cast<unsigned char>(deleteTarget)));
+
+    auto const reach = freesData ? KittyDeleteReach::PlacementsAndData : KittyDeleteReach::Placements;
+    auto const placementId = KittyPlacementId { command.placementId };
 
     switch (target)
     {
@@ -6011,32 +6074,36 @@ std::expected<void, std::string_view> Screen::deleteKittyGraphics(kitty_graphics
             {
                 // The frames go with the image they were composited from: they are full copies of
                 // it, and far larger than the map holding them, so freeing the image without them
-                // reclaims almost nothing.
-                _kittyImages.clear();
-                _kittyAnimations.clear();
+                // reclaims almost nothing. An image a virtual placement still shows is still in use, and
+                // kitty frees no image that has a placement left.
+                auto const unreferenced = [&](auto const& entry) {
+                    return !_kittyVirtualPlacements.contains(entry.first);
+                };
+                std::erase_if(_kittyImages, unreferenced);
+                std::erase_if(_kittyAnimations, unreferenced);
+                forgetFreedKittyImageNumbers();
             }
             return {};
 
         case 'i':
-            // Nothing transmitted under that id, nothing placed from it either. This includes `d=i`
-            // with no `i=`, which names id 0 and so no image at all -- not every image.
-            if (!_kittyImages.contains(command.imageId))
-                return {};
-            // Once a frame has been made current the cells hold that frame, not the base image, so
-            // matching on the base alone leaves the placement on screen -- and, for an upper-case
-            // delete, leaves the frame alive in the grid where no quota can see it.
-            if (command.placementId != 0)
-                removeKittyPlacementOf(command.imageId, KittyPlacementId { command.placementId });
-            else
-                removeKittyPlacementsOf(command.imageId);
-            // With `p=` only that placement went; the image data is freed only once no placement of
-            // it remains, which is what kitty's free_only_matched does.
-            if (freesData && (command.placementId == 0 || !hasKittyPlacementOf(command.imageId)))
-            {
-                _kittyImages.erase(command.imageId);
-                _kittyAnimations.erase(command.imageId);
-            }
+            // `d=i` with no `i=` names id 0 and so no image at all -- not every image.
+            deleteKittyImages(std::array { command.imageId }, placementId, reach);
             return {};
+
+        case 'n':
+            // The newest image transmitted under that number, as kitty's img_by_client_number() finds it.
+            deleteKittyImages(std::array { kittyImageIdOfNumber(command.imageNumber) }, placementId, reach);
+            return {};
+
+        case 'r': {
+            // Every image whose id lies in `x=`..`y=`, both ends included. Placement ids do not enter.
+            auto inRange = std::vector<uint32_t> {};
+            for (auto const id: _kittyImages | std::views::keys)
+                if (command.sourceX <= id && id <= command.sourceY)
+                    inRange.push_back(id);
+            deleteKittyImages(inRange, KittyPlacementId {}, reach);
+            return {};
+        }
 
         case 'f': {
             // `d=f`/`d=F` deletes an image's animation frames, leaving the image itself.
@@ -6055,9 +6122,11 @@ std::expected<void, std::string_view> Screen::deleteKittyGraphics(kitty_graphics
         }
 
         default:
-            // The positional targets ('n', 'p', 'c', 'q', 'r', 'x', 'y', 'z') are not implemented.
-            // Doing nothing is far better than the wholesale clear they once fell through to, but
-            // answering OK would tell the client its placement is gone while it is still on screen.
+            // The positional targets ('p', 'c', 'q', 'x', 'y', 'z') are not implemented. Doing nothing is
+            // far better than the wholesale clear they once fell through to, but answering OK would tell
+            // the client its placement is gone while it is still on screen. Implemented, they must skip
+            // placeholder-origin fragments: kitty's positional filters never match a virtual placement or
+            // the cells that show one.
             return std::unexpected { "ENOTSUP:delete target not supported" };
     }
 }
@@ -6076,19 +6145,22 @@ bool Screen::hasKittyPlacementOf(uint32_t imageId)
         for (auto const column: std::views::iota(0, *pageSize().columns))
         {
             auto const fragment = at(LineOffset(line), ColumnOffset(column)).imageFragment();
-            if (fragment && wanted.contains(fragment->rasterizedImage().imagePointer().get()))
+            // A placeholder cell is the virtual placement's, which the caller asks about on its own.
+            if (fragment && fragment->rasterizedImage().origin() == ImageOrigin::Cursor
+                && wanted.contains(fragment->rasterizedImage().imagePointer().get()))
                 return true;
         }
     }
     return false;
 }
 
-void Screen::removeKittyPlacementsOf(uint32_t imageId)
+void Screen::removeKittyPlacementsOf(std::span<uint32_t const> imageIds)
 {
     // Every frame counts as "this image": after an advance the cells hold a frame Image, and matching
-    // only the base would skip them.
+    // only the base would skip them. One walk for all of them: a range delete may name many.
     auto wanted = KittyFrameSwaps {};
-    addKittyFrameSwaps(wanted, imageId, nullptr);
+    for (auto const imageId: imageIds)
+        addKittyFrameSwaps(wanted, imageId, nullptr);
 
     updateKittyFragments(
         [&](ImageFragment const& fragment) {
@@ -6105,11 +6177,85 @@ void Screen::removeKittyPlacementOf(uint32_t imageId, KittyPlacementId placement
 
     updateKittyFragments(
         [&](ImageFragment const& fragment) {
-            return wanted.contains(fragment.rasterizedImage().imagePointer().get())
+            // A placeholder cell's fragment is the resolver's alone: it goes by the rescan the erase of its
+            // virtual placement asks for.
+            return fragment.rasterizedImage().origin() == ImageOrigin::Cursor
+                   && wanted.contains(fragment.rasterizedImage().imagePointer().get())
                    && fragment.rasterizedImage().kittyPlacementId() == placementId;
         },
         [](CellProxy& cell, ImageFragment const&) { cell.clearImageFragment(); },
         KittyScan::PageAndHistory);
+}
+
+void Screen::deleteKittyImages(std::span<uint32_t const> imageIds,
+                               KittyPlacementId placementId,
+                               KittyDeleteReach reach)
+{
+    // Nothing transmitted under an id, nothing placed from it either.
+    auto stored = std::vector<uint32_t> {};
+    for (auto const id: imageIds)
+        if (_kittyImages.contains(id))
+            stored.push_back(id);
+    if (stored.empty())
+        return;
+
+    // Once a frame has been made current the cells hold that frame, not the base image, so matching on
+    // the base alone leaves the placement on screen -- and, for an upper-case delete, leaves the frame
+    // alive in the grid where no quota can see it. Virtual placements go too: the pair, or the image,
+    // names them as much as the placements at the cursor. Their placeholder cells on the page go with the
+    // walk; those in the history are cleared by the rescan the erase asks for.
+    auto erasedVirtual = false;
+    if (placementId != KittyPlacementId {})
+        for (auto const id: stored)
+        {
+            removeKittyPlacementOf(id, placementId);
+            erasedVirtual = eraseKittyVirtualPlacement(id, placementId) == Erased::Yes || erasedVirtual;
+        }
+    else
+    {
+        removeKittyPlacementsOf(stored);
+        for (auto const id: stored)
+            erasedVirtual = _kittyVirtualPlacements.erase(id) != 0 || erasedVirtual;
+    }
+    if (erasedVirtual)
+        rescanKittyPlaceholdersEverywhere();
+
+    if (reach != KittyDeleteReach::PlacementsAndData)
+        return;
+    // With `p=` only that placement went; the image data is freed only once no placement of it remains,
+    // a virtual one included, which is what kitty's free_only_matched does.
+    for (auto const id: stored)
+        if (placementId == KittyPlacementId {}
+            || (!hasKittyPlacementOf(id) && !_kittyVirtualPlacements.contains(id)))
+            freeKittyImage(id);
+}
+
+void Screen::freeKittyImage(uint32_t imageId)
+{
+    _kittyImages.erase(imageId);
+    _kittyAnimations.erase(imageId);
+    forgetFreedKittyImageNumbers();
+}
+
+void Screen::forgetFreedKittyImageNumbers()
+{
+    std::erase_if(_kittyImageNumbers, [this](auto& entry) {
+        std::erase_if(entry.second, [this](uint32_t id) { return !_kittyImages.contains(id); });
+        return entry.second.empty();
+    });
+}
+
+uint32_t Screen::kittyImageIdOfNumber(uint32_t imageNumber) const noexcept
+{
+    auto const found = _kittyImageNumbers.find(imageNumber);
+    return found != _kittyImageNumbers.end() && !found->second.empty() ? found->second.back() : 0;
+}
+
+uint32_t Screen::freeKittyImageId() const
+{
+    // The smallest id no stored image holds, as kitty's get_free_client_id() picks it.
+    return *std::ranges::find_if(std::views::iota(uint32_t { 1 }),
+                                 [this](uint32_t id) { return !_kittyImages.contains(id); });
 }
 
 void Screen::resetKittyState() noexcept
@@ -6124,6 +6270,8 @@ void Screen::resetKittyState() noexcept
     // The frames are full copies of the image, and far larger than the map holding them. Leaving them
     // behind would make RIS reclaim the base image and none of the animation built on it.
     _kittyAnimations.clear();
+    _kittyVirtualPlacements.clear();
+    _kittyImageNumbers.clear();
     _terminal->kittyClipboardWrite().clear();
     _terminal->kittyClipboardWriteOpen() = false;
 }
@@ -6155,6 +6303,22 @@ void Screen::processKittyGraphics(std::string_view body)
         return;
     }
     auto command = std::move(parsed.value());
+
+    // An image is named by its id or by its number, never both: kitty refuses the command before anything
+    // else, which could otherwise name two different images at once.
+    if (command.imageId != 0 && command.imageNumber != 0)
+    {
+        replyKittyGraphics(command, "EINVAL:Must not specify both image id and image number");
+        return;
+    }
+
+    // A feature query (`a=q,e=`) transmits nothing and performs nothing, so it is answered before the
+    // chunk stitching below: kitty requires that it leave a chunked transmission in progress alone.
+    if (command.action == Action::Query && command.queryFeature != 0)
+    {
+        replyKittyGraphics(command, "OK", supportedFeatureKeys(command));
+        return;
+    }
 
     // A chunked transmission carries its control data only in the FIRST chunk; the rest is payload
     // that has to be stitched onto it before anything can be decided.
@@ -6197,8 +6361,15 @@ void Screen::processKittyGraphics(std::string_view body)
             // A query must be validated exactly as a transmission would be -- answering OK to a
             // command we could not actually honour is worse than answering the error. An application
             // probes with `a=q` precisely so that it can fall back; telling it yes and then failing
-            // the real transmission leaves it with nothing to fall back to.
-            replyKittyGraphics(command, validateKittyTransmission(command).value_or("OK"));
+            // the real transmission leaves it with nothing to fall back to. A file is read (and a `t=t` one
+            // deleted) and decoded as a transmission would, then dropped: Claude Code probes with one.
+            if (command.medium == Medium::Direct)
+                replyKittyGraphics(command, validateKittyTransmission(command).value_or("OK"));
+            else
+            {
+                auto const prepared = prepareKittyImage(command);
+                replyKittyGraphics(command, prepared ? "OK"sv : prepared.error());
+            }
             return;
         case Action::Delete: {
             auto const deleted = deleteKittyGraphics(command);
@@ -6210,43 +6381,47 @@ void Screen::processKittyGraphics(std::string_view body)
             replyKittyGraphics(command, deleted ? "OK"sv : deleted.error());
             return;
         }
-        case Action::Put: {
-            auto const it = _kittyImages.find(command.imageId);
-            if (it == _kittyImages.end())
-            {
-                replyKittyGraphics(command, "ENOENT:no such image");
-                return;
-            }
-            // The image's CURRENT frame, not its root: placing an animated image after advancing it
-            // would otherwise show frame 1 while the terminal still records a later frame as current,
-            // and a subsequent a=a for that same frame would be a no-op from the client's view.
-            auto const animation = _kittyAnimations.find(command.imageId);
-            auto const current =
-                animation != _kittyAnimations.end() ? animation->second.currentImage() : nullptr;
-            // Placing again under an existing (i, p) pair replaces that placement rather than adding one;
-            // placements without `p=` are each their own, and `p=` means nothing without an `i=`.
-            if (command.imageId != 0 && command.placementId != 0)
-                removeKittyPlacementOf(command.imageId, KittyPlacementId { command.placementId });
-            renderKittyImage(command, current ? current : it->second);
-            // A playing animation that held for want of a placement has one again. Only here: a=T replaces
-            // the image under its id, and its animation with it.
-            if (animation != _kittyAnimations.end() && animation->second.isHeld())
-                animation->second.arm(_terminal->steadyTimeNow());
-            replyKittyGraphics(command, "OK");
-            return;
-        }
+        case Action::Put: putKittyImage(command); return;
         case Action::Transmit:
-        case Action::TransmitAndDisplay: break;
+        case Action::TransmitAndDisplay: transmitKittyImage(std::move(command)); return;
         case Action::Frame: transmitKittyFrame(command); return;
         case Action::Animate: controlKittyAnimation(command); return;
         case Action::Compose: composeKittyFrames(command); return;
     }
+}
+
+std::expected<Image::Data, std::string_view> Screen::kittyPayloadBytes(
+    kitty_graphics::Command const& command) const
+{
+    using namespace kitty_graphics;
+
+    auto bytes = decodeBase64(command.payload);
+    if (command.medium == Medium::Direct)
+        return bytes;
+
+    // Any other medium names a file (or a shared-memory object): read only for bytes a local process wrote
+    // to the PTY, and only through the source and under the policy the composition root gave.
+    // A policy that reads no file, or `t=s`, which is never read, refuses before any source is asked.
+    auto const* const media = _terminal->kittyMediaForCurrentBatch();
+    if (media == nullptr || !checkMedium(media->policy, command.medium))
+        return std::unexpected(MediaRefusalReply);
+    auto const path = std::string_view { reinterpret_cast<char const*>(bytes.data()), bytes.size() };
+    return media->source.read(path, command.medium, media->policy).transform_error([&](MediaRefusal refusal) {
+        // The reason is the log's alone: the application learns only the uniform refusal.
+        terminalLog()("Refused kitty file medium t={} (reason {}).",
+                      static_cast<char>(command.medium),
+                      static_cast<unsigned>(refusal));
+        return MediaRefusalReply;
+    });
+}
+
+std::expected<Screen::PreparedKittyImage, std::string_view> Screen::prepareKittyImage(
+    kitty_graphics::Command const& command) const
+{
+    using namespace kitty_graphics;
 
     if (auto const rejection = validateKittyTransmission(command))
-    {
-        replyKittyGraphics(command, *rejection);
-        return;
-    }
+        return std::unexpected(*rejection);
 
     auto format = toImageFormat(command.transmissionFormat());
     auto pixelSize =
@@ -6265,32 +6440,30 @@ void Screen::processKittyGraphics(std::string_view body)
                                          bytesPerPixel(command.transmissionFormat()),
                                          _settings->kittyImageStorageQuota);
     if (format != ImageFormat::PNG && !bounded)
-    {
-        replyKittyGraphics(command, "EINVAL:image dimensions too large");
-        return;
-    }
+        return std::unexpected("EINVAL:image dimensions too large");
     auto const expected = bounded.value_or(0);
     // Everything stored except this id's image and frames, which a re-transmission replaces.
     auto const storedByOthers = storedKittyBytes() - storedKittyBytesOf(command.imageId);
     auto const quota = _settings->kittyImageStorageQuota;
+
+    // From here on every failure concerns the payload: for a file, the one refusal (payloadFailure()).
+    auto bytes = kittyPayloadBytes(command);
+    if (!bytes)
+        return std::unexpected(bytes.error());
     auto payload =
         format == ImageFormat::PNG
-            ? decodeKittyPayload(command,
-                                 storedByOthers < quota ? quota - storedByOthers : size_t { 0 },
-                                 "ENOSPC:image storage quota exceeded")
-            : decodeKittyPayload(command, expected, "EINVAL:payload size does not match dimensions");
+            ? inflateKittyPayload(command,
+                                  std::move(*bytes),
+                                  storedByOthers < quota ? quota - storedByOthers : size_t { 0 },
+                                  "ENOSPC:image storage quota exceeded")
+            : inflateKittyPayload(
+                  command, std::move(*bytes), expected, "EINVAL:payload size does not match dimensions");
     if (!payload)
-    {
-        replyKittyGraphics(command, payload.error());
-        return;
-    }
+        return std::unexpected(payloadFailure(command, payload.error()));
     auto pixmap = std::move(*payload);
 
     if (format != ImageFormat::PNG && pixmap.size() != expected)
-    {
-        replyKittyGraphics(command, "EINVAL:payload size does not match dimensions");
-        return;
-    }
+        return std::unexpected(payloadFailure(command, "EINVAL:payload size does not match dimensions"));
 
     // A PNG is stored as the pixels it decodes to, under the size the file itself states: the bytes
     // that arrived are a file, which nothing downstream can draw, and `s=`/`v=` are optional for one
@@ -6300,15 +6473,32 @@ void Screen::processKittyGraphics(std::string_view body)
     {
         auto decoded = decodePng(pixmap, pixelSize);
         if (!decoded)
-        {
-            replyKittyGraphics(command, "EINVAL:could not decode image");
-            return;
-        }
+            return std::unexpected(payloadFailure(command, "EINVAL:could not decode image"));
         pixmap = std::move(*decoded);
         format = ImageFormat::RGBA;
     }
+    return PreparedKittyImage { .format = format, .size = pixelSize, .pixels = std::move(pixmap) };
+}
 
-    auto image = _terminal->imagePool().create(format, pixelSize, std::move(pixmap));
+void Screen::transmitKittyImage(kitty_graphics::Command command)
+{
+    using namespace kitty_graphics;
+
+    // A transmission by number leaves the id to the terminal, which picks one no stored image holds and
+    // tells it in the reply.
+    if (command.imageId == 0 && command.imageNumber != 0)
+        command.imageId = freeKittyImageId();
+
+    auto prepared = prepareKittyImage(command);
+    if (!prepared)
+    {
+        replyKittyGraphics(command, prepared.error());
+        return;
+    }
+    // Everything stored except this id's image and frames, which a re-transmission replaces.
+    auto const storedByOthers = storedKittyBytes() - storedKittyBytesOf(command.imageId);
+    auto const quota = _settings->kittyImageStorageQuota;
+    auto image = _terminal->imagePool().create(prepared->format, prepared->size, std::move(prepared->pixels));
 
     if (command.imageId != 0)
     {
@@ -6323,7 +6513,7 @@ void Screen::processKittyGraphics(std::string_view body)
         // the replacement is accepted -- a refused re-transmission leaves the image as it was.
         if (storedByOthers + image->data().size() > quota)
         {
-            replyKittyGraphics(command, "ENOSPC:image storage quota exceeded");
+            replyKittyGraphics(command, payloadFailure(command, "ENOSPC:image storage quota exceeded"));
             return;
         }
         // Swapping the image out would leave the old placement showing a picture no id leads to, out of
@@ -6332,13 +6522,309 @@ void Screen::processKittyGraphics(std::string_view body)
         if (command.action == Action::TransmitAndDisplay && command.placementId != 0)
             removeKittyPlacementOf(command.imageId, KittyPlacementId { command.placementId });
         _kittyAnimations.erase(command.imageId);
+        // A re-transmission ends every placement of the image it replaces that has no cell of its own,
+        // as kitty's free_image_resources() does: the virtual placements were fitted to the old pixels.
+        if (_kittyVirtualPlacements.erase(command.imageId) != 0)
+            rescanKittyPlaceholdersEverywhere();
         _kittyImages[command.imageId] = image;
+        if (command.imageNumber != 0)
+            _kittyImageNumbers[command.imageNumber].push_back(command.imageId);
     }
 
     if (command.action == Action::TransmitAndDisplay)
+    {
+        if (command.placementKind == PlacementKind::Virtual)
+        {
+            auto const created = createKittyVirtualPlacement(command, image);
+            replyKittyGraphics(command, created ? "OK"sv : created.error());
+            return;
+        }
+        if (command.imageId != 0 && command.placementId != 0)
+            dropKittyVirtualPlacement(command.imageId, KittyPlacementId { command.placementId });
         renderKittyImage(command, image);
+    }
 
     replyKittyGraphics(command, "OK");
+}
+
+void Screen::putKittyImage(kitty_graphics::Command command)
+{
+    using namespace kitty_graphics;
+
+    // A put by number places the newest image transmitted under it.
+    if (command.imageNumber != 0)
+        command.imageId = kittyImageIdOfNumber(command.imageNumber);
+    auto const it = _kittyImages.find(command.imageId);
+    if (it == _kittyImages.end())
+    {
+        replyKittyGraphics(command, "ENOENT:no such image");
+        return;
+    }
+    // The image's CURRENT frame, not its root: placing an animated image after advancing it
+    // would otherwise show frame 1 while the terminal still records a later frame as current,
+    // and a subsequent a=a for that same frame would be a no-op from the client's view.
+    auto const animation = _kittyAnimations.find(command.imageId);
+    auto const current = animation != _kittyAnimations.end() ? animation->second.currentImage() : nullptr;
+    // Placing again under an existing (i, p) pair replaces that placement rather than adding one;
+    // placements without `p=` are each their own, and `p=` means nothing without an `i=`. The pair
+    // names one placement whichever kind it is, so a virtual one replaces one at the cursor and
+    // the other way round, as in kitty.
+    if (command.imageId != 0 && command.placementId != 0)
+        removeKittyPlacementOf(command.imageId, KittyPlacementId { command.placementId });
+    if (command.placementKind == PlacementKind::Virtual)
+    {
+        auto const created = createKittyVirtualPlacement(command, current ? current : it->second);
+        replyKittyGraphics(command, created ? "OK"sv : created.error());
+        return;
+    }
+    if (command.placementId != 0)
+        dropKittyVirtualPlacement(command.imageId, KittyPlacementId { command.placementId });
+    renderKittyImage(command, current ? current : it->second);
+    // A playing animation that held for want of a placement has one again. Only here: a=T replaces
+    // the image under its id, and its animation with it.
+    if (animation != _kittyAnimations.end() && animation->second.isHeld())
+        animation->second.arm(_terminal->steadyTimeNow());
+    replyKittyGraphics(command, "OK");
+}
+
+Screen::KittyVirtualPlacement const* Screen::findKittyVirtualPlacement(uint32_t imageId,
+                                                                       KittyPlacementId placementId) const
+{
+    auto const placements = _kittyVirtualPlacements.find(imageId);
+    if (placements == _kittyVirtualPlacements.end() || placements->second.empty())
+        return nullptr;
+    if (placementId == KittyPlacementId {})
+        return &placements->second.front();
+    auto const found =
+        std::ranges::find(placements->second, placementId, &KittyVirtualPlacement::placementId);
+    return found != placements->second.end() ? &*found : nullptr;
+}
+
+void Screen::dropKittyVirtualPlacement(uint32_t imageId, KittyPlacementId placementId)
+{
+    if (eraseKittyVirtualPlacement(imageId, placementId) == Erased::Yes)
+        rescanKittyPlaceholdersEverywhere();
+}
+
+Screen::Erased Screen::eraseKittyVirtualPlacement(uint32_t imageId, KittyPlacementId placementId)
+{
+    auto const placements = _kittyVirtualPlacements.find(imageId);
+    if (placements == _kittyVirtualPlacements.end())
+        return Erased::No;
+    auto const erased = std::erase_if(placements->second, [&](KittyVirtualPlacement const& placement) {
+        return placement.placementId == placementId;
+    });
+    if (placements->second.empty())
+        _kittyVirtualPlacements.erase(placements);
+    return erased != 0 ? Erased::Yes : Erased::No;
+}
+
+std::expected<void, std::string_view> Screen::createKittyVirtualPlacement(
+    kitty_graphics::Command const& command, std::shared_ptr<Image const> const& image)
+{
+    // A placeholder cell names its image by id, so a virtual placement of an anonymous image could never
+    // be shown.
+    if (command.imageId == 0)
+        return std::unexpected { "EINVAL:virtual placement without image id"sv };
+
+    auto const placementId = KittyPlacementId { command.placementId };
+    auto& placements = _kittyVirtualPlacements[command.imageId];
+    auto const existing = std::ranges::find(placements, placementId, &KittyVirtualPlacement::placementId);
+
+    // A virtual placement occupies no cell, so nothing else bounds how many an application can make: each
+    // new placement id is another one.
+    if (existing == placements.end())
+    {
+        auto total = size_t { 0 };
+        for (auto const& perImage: _kittyVirtualPlacements | std::views::values)
+            total += perImage.size();
+        if (total >= MaxKittyVirtualPlacements)
+        {
+            if (placements.empty())
+                _kittyVirtualPlacements.erase(command.imageId);
+            return std::unexpected { "ENOSPC:too many virtual placements"sv };
+        }
+    }
+
+    // The whole image, whatever `x=`, `y=`, `w=`, `h=` say: kitty's grman_put_cell_image fits the image
+    // itself into a virtual placement's cells, not a part of it.
+    auto const imageWidth = unbox<uint32_t>(image->width());
+    auto const imageHeight = unbox<uint32_t>(image->height());
+
+    auto const cellSize = _terminal->cellPixelSize();
+    if ((command.columns == 0 || command.rows == 0) && cellSize.area() == 0)
+    {
+        logImageDroppedForUnknownCellSize("kitty", image->size());
+        if (placements.empty())
+            _kittyVirtualPlacements.erase(command.imageId);
+        return {};
+    }
+
+    // `c=`/`r=` state the span in cells; without them it follows from the image's size, rounded up. Unlike a
+    // placement at the cursor the span is not bounded by the page: a picture taller than the page is shown
+    // in parts as its placeholder rows scroll by. It is bounded all the same, so that the count stays a
+    // positive one whatever arrived on the wire.
+    auto const spanOf = [](uint32_t requested, uint32_t pixels, int cellPixels) {
+        auto const derived = requested != 0 ? requested
+                                            : (pixels + static_cast<uint32_t>(cellPixels) - 1)
+                                                  / static_cast<uint32_t>(cellPixels);
+        return std::min(derived, MaxKittyVirtualPlacementSpan);
+    };
+    auto const span = GridSize {
+        .lines = LineCount::cast_from(spanOf(command.rows, imageHeight, unbox<int>(cellSize.height))),
+        .columns = ColumnCount::cast_from(spanOf(command.columns, imageWidth, unbox<int>(cellSize.width))),
+    };
+
+    // kitty fits a virtual placement aspect-preserved and centred in its span. The gap is transparent, so
+    // the cell's own background shows around the picture.
+    auto raster = std::make_shared<RasterizedImage const>(image,
+                                                          ImageAlignment::MiddleCenter,
+                                                          ImageResize::ResizeToFit,
+                                                          RGBAColor {},
+                                                          span,
+                                                          cellSize,
+                                                          ImageLayer::Replace,
+                                                          PixelCoordinate {},
+                                                          ImageSize {},
+                                                          placementId,
+                                                          ImageOrigin::Placeholder);
+
+    if (existing != placements.end())
+        existing->raster = std::move(raster);
+    else
+        placements.push_back(
+            KittyVirtualPlacement { .placementId = placementId, .raster = std::move(raster) });
+
+    // Placeholder cells printed before the placement existed -- or naming the one it replaces -- may be
+    // anywhere, scrolled into the history included.
+    rescanKittyPlaceholdersEverywhere();
+    return {};
+}
+
+void Screen::notePlaceholderCell(LineOffset line) noexcept
+{
+    _grid.lineAt(line).setFlag(LineFlag::ImagePlaceholders, true);
+    if (_kittyPlaceholders == PlaceholderScan::Idle)
+    {
+        _kittyPlaceholders = PlaceholderScan::Pending;
+        _kittyPlaceholderScrollMark = _linesScrolledIntoHistory;
+    }
+}
+
+void Screen::rescanKittyPlaceholdersEverywhere() noexcept
+{
+    _kittyPlaceholders = PlaceholderScan::Everywhere;
+}
+
+void Screen::resolveKittyPlaceholders()
+{
+    if (_kittyPlaceholders == PlaceholderScan::Idle)
+        return;
+
+    // Pending walks the page and whatever scrolled off it since the first placeholder was written.
+    auto const historyLines = unbox<uint64_t>(_grid.historyLineCount());
+    auto const scrolledOff =
+        _kittyPlaceholders == PlaceholderScan::Everywhere
+            ? historyLines
+            : std::min(_linesScrolledIntoHistory - _kittyPlaceholderScrollMark, historyLines);
+    auto const firstLine = -static_cast<int>(scrolledOff);
+    _kittyPlaceholders = PlaceholderScan::Idle;
+    _kittyPlaceholderLinesWalked = static_cast<size_t>(scrolledOff) + unbox<size_t>(pageSize().lines);
+    // Only the flag of each line is read: an unflagged line, the history's bulk, is never materialised.
+    for (auto const line: std::views::iota(firstLine, *pageSize().lines))
+        if (std::as_const(_grid).lineAt(LineOffset(line)).isFlagEnabled(LineFlag::ImagePlaceholders))
+            resolveKittyPlaceholderLine(LineOffset(line));
+}
+
+void Screen::resolveKittyPlaceholderLine(LineOffset line)
+{
+    using namespace kitty_graphics;
+
+    auto const& row = std::as_const(_grid).lineAt(line);
+    if (row.isBlank())
+    {
+        _grid.lineAt(line).setFlag(LineFlag::ImagePlaceholders, false);
+        return;
+    }
+
+    auto const columns = std::min(unbox<size_t>(row.size()), unbox<size_t>(pageSize().columns));
+    auto const diacriticAt = [](ConstCellProxy const& cell, size_t index) -> uint32_t {
+        return index < cell.codepointCount() ? diacriticOrdinal(cell.codepoint(index)) : 0;
+    };
+    auto cells = std::vector<PlaceholderCell>(columns);
+    auto holdsPlaceholders = false;
+    for (auto const [column, placeholder]: core::views::enumerate(cells))
+    {
+        auto const cell = ConstCellProxy(row.storage(), column);
+        if (cell.codepointCount() == 0 || cell.codepoint(0) != PlaceholderCodepoint)
+            continue;
+        holdsPlaceholders = true;
+        placeholder = PlaceholderCell {
+            .presence = CellPresence::Placeholder,
+            .idLow = placeholderIdOf(cell.foregroundColor()),
+            .placementId = placeholderIdOf(cell.underlineColor()),
+            .row = diacriticAt(cell, 1),
+            .column = diacriticAt(cell, 2),
+            .idHigh = diacriticAt(cell, 3),
+        };
+    }
+
+    // What each column should show: the raster of the virtual placement its run names, and where in it.
+    struct Shown
+    {
+        std::shared_ptr<RasterizedImage const> raster;
+        CellLocation offset;
+    };
+    auto shown = std::vector<Shown>(columns);
+    for (auto const& run: resolvePlaceholderRuns(cells))
+    {
+        auto const* const placement =
+            findKittyVirtualPlacement(run.imageId, KittyPlacementId { run.placementId });
+        if (!placement)
+            continue;
+        auto const span = placement->raster->cellSpan();
+        for (auto const k: std::views::iota(uint32_t { 0 }, uint32_t { run.length }))
+        {
+            auto const imageColumn = run.imageColumn + k;
+            if (std::cmp_greater_equal(run.imageRow, unbox(span.lines))
+                || std::cmp_greater_equal(imageColumn, unbox(span.columns)))
+                continue;
+            shown[run.firstColumn + k] = Shown {
+                .raster = placement->raster,
+                .offset = CellLocation { .line = LineOffset::cast_from(run.imageRow),
+                                         .column = ColumnOffset::cast_from(imageColumn) },
+            };
+        }
+    }
+
+    for (auto const [column, wanted]: core::views::enumerate(shown))
+    {
+        auto const current =
+            ConstCellProxy(std::as_const(_grid).lineAt(line).storage(), column).imageFragment();
+        // A fragment some protocol placed at the cursor is not the placeholder's to replace or remove.
+        if (current && current->rasterizedImage().origin() != ImageOrigin::Placeholder)
+            continue;
+        // Unchanged cells are left alone: re-attaching them would dirty every resolved line each batch.
+        auto const unchanged =
+            current ? wanted.raster.get() == &current->rasterizedImage() && wanted.offset == current->offset()
+                    : !wanted.raster;
+        if (unchanged)
+            continue;
+        auto const at = ColumnOffset::cast_from(column);
+        // A history row is changed through the accessor that has the revision stamping and the daemon's
+        // delta scan reach that deep: a late transmit resolves rows a client mirrored long ago.
+        auto& changed = line < LineOffset(0) ? _grid.changingLineAt(line) : _grid.lineAt(line);
+        auto cell = changed.useCellAt(at);
+        if (wanted.raster)
+            cell.setImageFragment(wanted.raster, wanted.offset);
+        else
+            cell.clearImageFragment();
+        if (line >= LineOffset(0))
+            _terminal->markCellDirty(CellLocation { .line = line, .column = at });
+    }
+
+    if (!holdsPlaceholders)
+        _grid.lineAt(line).setFlag(LineFlag::ImagePlaceholders, false);
 }
 
 size_t Screen::storedKittyBytes() const
@@ -6457,6 +6943,22 @@ auto Screen::showKittyFrame(uint32_t imageId,
     return showKittyFrames(swaps).empty() ? Placed::No : Placed::Yes;
 }
 
+std::shared_ptr<RasterizedImage> Screen::rasterizeKittyFrame(RasterizedImage const& previous,
+                                                             std::shared_ptr<Image const> next)
+{
+    return std::make_shared<RasterizedImage>(std::move(next),
+                                             previous.alignmentPolicy(),
+                                             previous.resizePolicy(),
+                                             previous.defaultColor(),
+                                             previous.cellSpan(),
+                                             previous.cellSize(),
+                                             previous.layer(),
+                                             previous.imageOffset(),
+                                             previous.imageSubSize(),
+                                             previous.kittyPlacementId(),
+                                             previous.origin());
+}
+
 std::unordered_set<uint32_t> Screen::showKittyFrames(KittyFrameSwaps const& swaps)
 {
     // Deliberately NOT driven from a recorded placement. A placement is the fragments in the cells,
@@ -6474,6 +6976,21 @@ std::unordered_set<uint32_t> Screen::showKittyFrames(KittyFrameSwaps const& swap
     // owning pointers so that a raster freed mid-walk cannot have its address reused by a replacement.
     auto replacements =
         std::unordered_map<std::shared_ptr<RasterizedImage const>, std::shared_ptr<RasterizedImage>> {};
+
+    // A virtual placement shows the frame its cells show: the resolver attaches the placement's raster, so
+    // left on the old frame it would put that frame back the next time the cells are resolved. Its raster
+    // and its cells' share one replacement, as they shared the raster it replaces.
+    for (auto& placement: _kittyVirtualPlacements | std::views::values | std::views::join)
+    {
+        auto const swap = swaps.find(placement.raster->imagePointer().get());
+        if (swap == swaps.end() || placement.raster->imagePointer() == swap->second.next)
+            continue;
+        auto& replacement = replacements[placement.raster];
+        if (!replacement)
+            replacement = rasterizeKittyFrame(*placement.raster, swap->second.next);
+        placement.raster = replacement;
+    }
+
     updateKittyFragments(
         [&](ImageFragment const& fragment) {
             auto const& shown = fragment.rasterizedImage().imagePointer();
@@ -6493,16 +7010,7 @@ std::unordered_set<uint32_t> Screen::showKittyFrames(KittyFrameSwaps const& swap
             auto const& previousRaster = fragment.rasterizedImage();
             auto& replacement = replacements[previousRaster.shared_from_this()];
             if (!replacement)
-                replacement = std::make_shared<RasterizedImage>(next,
-                                                                previousRaster.alignmentPolicy(),
-                                                                previousRaster.resizePolicy(),
-                                                                previousRaster.defaultColor(),
-                                                                previousRaster.cellSpan(),
-                                                                previousRaster.cellSize(),
-                                                                previousRaster.layer(),
-                                                                previousRaster.imageOffset(),
-                                                                previousRaster.imageSubSize(),
-                                                                previousRaster.kittyPlacementId());
+                replacement = rasterizeKittyFrame(previousRaster, next);
             cell.setImageFragment(replacement, fragment.offset());
         },
         KittyScan::PageOnly);
@@ -6651,13 +7159,8 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
     using namespace kitty_graphics;
 
     // A frame carries a payload exactly as a transmission does, so it owes the same honest answers
-    // about how that payload arrives: a medium we do not read is refused as such, and a compressed
-    // payload is inflated before its size is checked, never composited as if it were raw pixels.
-    if (command.medium != Medium::Direct)
-    {
-        replyKittyGraphics(command, "ENOTSUP:only direct transmission is supported");
-        return;
-    }
+    // about how that payload arrives: a file is read under the same policy (kittyPayloadBytes()), and a
+    // compressed payload is inflated before its size is checked, never composited as if it were raw pixels.
     auto const stored = _kittyImages.find(command.imageId);
     if (stored == _kittyImages.end())
     {
@@ -6714,17 +7217,23 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
         return;
     }
     auto const expectedBytes = *bounded;
-    auto const payload =
-        decodeKittyPayload(command, expectedBytes, "EINVAL:payload size does not match dimensions");
+    auto bytes = kittyPayloadBytes(command);
+    if (!bytes)
+    {
+        replyKittyGraphics(command, bytes.error());
+        return;
+    }
+    auto const payload = inflateKittyPayload(
+        command, std::move(*bytes), expectedBytes, "EINVAL:payload size does not match dimensions");
     if (!payload)
     {
-        replyKittyGraphics(command, payload.error());
+        replyKittyGraphics(command, payloadFailure(command, payload.error()));
         return;
     }
     auto const& pixmap = *payload;
     if (pixmap.size() != expectedBytes)
     {
-        replyKittyGraphics(command, "EINVAL:payload size does not match dimensions");
+        replyKittyGraphics(command, payloadFailure(command, "EINVAL:payload size does not match dimensions"));
         return;
     }
 
@@ -6803,7 +7312,7 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
     auto const supersededBytes = superseded ? superseded->data().size() : 0;
     if (storedKittyBytes() - supersededBytes + frame->data().size() > _settings->kittyImageStorageQuota)
     {
-        replyKittyGraphics(command, "ENOSPC:image storage quota exceeded");
+        replyKittyGraphics(command, payloadFailure(command, "ENOSPC:image storage quota exceeded"));
         return;
     }
 

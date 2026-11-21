@@ -83,9 +83,10 @@ namespace
     ///
     /// A description rather than a field-by-field comparison, because an image's IDENTITY is not
     /// comparable across terminals (pool ids are per-terminal counters) while its shape is: the source
-    /// pixels' size and format, the cell box it was rasterized into, the placement policies, and which
-    /// tile of it this cell shows. `cellSize` is deliberately absent — the pixel size of a cell is a
-    /// property of the DISPLAY, so two faithful mirrors on different screens legitimately differ.
+    /// pixels' size and format, the cell box it was rasterized into, the placement policies, what placed
+    /// it, the source rectangle it shows, its gap colour, and which tile of it this cell shows. `cellSize` is
+    /// deliberately absent — the pixel size of a cell is a property of the DISPLAY, so two faithful mirrors
+    /// on different screens legitimately differ.
     [[nodiscard]] std::string describeImage(vtbackend::LineSoA const& soa, std::size_t column)
     {
         if (!soa.imageFragments.has_value())
@@ -96,7 +97,8 @@ namespace
         auto const& fragment = *it->second;
         auto const& rasterized = fragment.rasterizedImage();
         auto const& image = rasterized.image();
-        return std::format("{}x{} fmt={} span={}x{} layer={} align={} resize={} tile={},{}",
+        return std::format("{}x{} fmt={} span={}x{} layer={} align={} resize={} origin={} src={},{},{}x{} "
+                           "gap={:08X} tile={},{}",
                            unbox<int>(image.width()),
                            unbox<int>(image.height()),
                            std::to_underlying(image.format()),
@@ -105,6 +107,12 @@ namespace
                            std::to_underlying(rasterized.layer()),
                            std::to_underlying(rasterized.alignmentPolicy()),
                            std::to_underlying(rasterized.resizePolicy()),
+                           std::to_underlying(rasterized.origin()),
+                           rasterized.imageOffset().x.value,
+                           rasterized.imageOffset().y.value,
+                           unbox<int>(rasterized.imageSubSize().width),
+                           unbox<int>(rasterized.imageSubSize().height),
+                           rasterized.defaultColor().value,
                            unbox<int>(fragment.offset().line),
                            unbox<int>(fragment.offset().column));
     }

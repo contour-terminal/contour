@@ -1009,3 +1009,42 @@ TEST_CASE("RenderBufferBuilder.aPreeditCellNeverTakesTheCursorsColours", "[rende
         CHECK(cell.attributes.backgroundColor == palette.defaultBackground);
     }
 }
+
+TEST_CASE("RenderBufferBuilder.aKittyPlaceholderDrawsNoGlyph", "[renderbuffer][kitty]")
+{
+    // U+10EEEE and its row/column diacritics only address an image; shaping them would draw a
+    // missing-glyph box (or a fallback font's glyph) over the picture, or over the blank an unresolved
+    // placeholder must render as. The grid keeps the cluster as written; only the drawn cell drops it.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(4) }, LineCount(0) };
+    mock.terminal.setCellPixelSize(ImageSize { Width(1), Height(1) });
+    auto const now = std::chrono::steady_clock::now();
+    auto const placeholderCells = std::string { "\033[38;5;7m"
+                                                "\U0010EEEE\u0305\u0305"
+                                                "\U0010EEEE\u0305\u030D"
+                                                "\033[mx" };
+
+    SECTION("unresolved")
+    {
+        mock.writeToScreen(placeholderCells);
+        CHECK_FALSE(drawnCellAt(mock, now, ColumnOffset(0)).image);
+    }
+    SECTION("resolved")
+    {
+        mock.writeToScreen("\033_Ga=T,U=1,i=7,c=2,r=1,f=24,s=2,v=1,q=2;f39/f39/\033\\");
+        mock.writeToScreen(placeholderCells);
+        CHECK(drawnCellAt(mock, now, ColumnOffset(0)).image);
+    }
+
+    SECTION("bare, on an otherwise uniform line")
+    {
+        // No diacritics and no image: the line stays uniform, which must not route it to the
+        // batched path that would shape U+10EEEE as text.
+        mock.writeToScreen("\U0010EEEE\U0010EEEEx");
+        CHECK(mock.terminal.primaryScreen().grid().lineAt(LineOffset(0)).isTrivialBuffer());
+    }
+
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).codepoint(0) == U'\U0010EEEE');
+    CHECK(drawnCellAt(mock, now, ColumnOffset(0)).codepoints.empty());
+    CHECK(drawnCellAt(mock, now, ColumnOffset(1)).codepoints.empty());
+    CHECK(drawnCellAt(mock, now, ColumnOffset(2)).codepoints == U"x");
+}

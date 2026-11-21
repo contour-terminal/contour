@@ -15,6 +15,7 @@
 
 #include <vtbackend/core/ClipboardTarget.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
+#include <vtbackend/graphics/KittyMediumSource.hpp>
 #include <vtbackend/screen/GitHead.hpp>
 #include <vtbackend/screen/Settings.hpp>
 #include <vtbackend/screen/Terminal.hpp>
@@ -433,6 +434,9 @@ class HostedSession
     /// @param profileName The host profile the session was spawned under; empty for none named.
     /// @param settingsOrigin Where @p settings came from.
     /// @param git Where the terminal's `{Git}` looks up its branch; none shows no branch.
+    /// @param kittyMedia What the terminal's kitty graphics read files with; none refuses every file medium.
+    ///        The source is borrowed: it must outlive the session.
+    /// @param imageDecoder What the terminal decodes PNG transmissions with; none refuses them.
     HostedSession(vtworkspace::SessionId id,
                   core::Environment const& env,
                   std::unique_ptr<vtpty::Pty> pty,
@@ -450,7 +454,9 @@ class HostedSession
                   HostedSessionExtensions extensions = {},
                   std::string profileName = {},
                   SettingsOrigin settingsOrigin = SettingsOrigin::Profile,
-                  std::optional<vtbackend::GitHeadServices> git = std::nullopt);
+                  std::optional<vtbackend::GitHeadServices> git = std::nullopt,
+                  std::optional<vtbackend::kitty_graphics::KittyMediumServices> kittyMedia = std::nullopt,
+                  vtbackend::ImageDecoder imageDecoder = {});
 
     /// Closes the PTY, as terminate(TerminationReason::Teardown) does, and joins the pump thread.
     ~HostedSession();
@@ -1045,6 +1051,14 @@ struct SessionHostConfig
     /// Where each workspace's git branch and ahead/behind are looked up, for a sidebar to show; nullopt for
     /// none, which tracks nothing. Borrowed: it outlives the host.
     std::optional<WorkspaceGitServices> workspaceGit {};
+    /// What every session's kitty graphics read files (`t=f`, `t=t`) with, and under which policy: the
+    /// daemon's own, chosen where it is composed -- files are read where the application wrote them, and no
+    /// client widens it (it is never part of WireSessionSettings). nullopt refuses every file medium. The
+    /// source is borrowed: it must outlive the host.
+    std::optional<vtbackend::kitty_graphics::KittyMediumServices> kittyMedia {};
+    /// What every session's terminal decodes PNG images (kitty `f=100`, GIP) with; none refuses them. The
+    /// daemon itself is Qt-free, so its composition root supplies one where it has a decoder to give.
+    vtbackend::ImageDecoder imageDecoder {};
     /// Where a connection's reads pause while its input backs up in a session, and resume.
     InputWatermarks inputWatermarks {};
     /// The status-line extensions every session it spawns runs; null for none, which constructs, polls and
@@ -2295,6 +2309,10 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Where every session's `{Git}` looks up its branch. Declared before _sessions, so that its probe thread
     /// is joined after every session's terminal stopped asking it.
     HostGitLookups _git;
+    /// What every session's kitty file media are read with. @see SessionHostConfig::kittyMedia
+    std::optional<vtbackend::kitty_graphics::KittyMediumServices> _kittyMedia;
+    /// What every session's terminal decodes PNG images with. @see SessionHostConfig::imageDecoder
+    vtbackend::ImageDecoder _imageDecoder;
     /// The host's profiles; null for none. @see SessionHostConfig::profiles
     std::shared_ptr<ProfileCatalog const> _profiles;
     /// What each attached client reported it can display, keyed by its stream subscription so the

@@ -31,7 +31,7 @@ struct VersionRange
 constexpr uint32_t NegotiatingHelloMarker = 4;
 
 /// The version range this build speaks.
-constexpr VersionRange SupportedVersions { .min = 4, .max = 4 };
+constexpr VersionRange SupportedVersions { .min = 5, .max = 5 };
 
 /// An optional feature a peer may offer on top of the negotiated version.
 enum class Capability : uint8_t

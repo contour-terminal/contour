@@ -48,7 +48,8 @@ uint64_t ImageTableBuilder::rasterizedIndexOf(RasterizedImage const& raster)
                                       .layer = raster.layer(),
                                       .offset = raster.imageOffset(),
                                       .subSize = raster.imageSubSize(),
-                                      .kittyPlacementId = raster.kittyPlacementId() });
+                                      .kittyPlacementId = raster.kittyPlacementId(),
+                                      .origin = raster.origin() });
     return it->second;
 }
 
@@ -105,14 +106,15 @@ std::expected<RestoredImageTable, StateDecodeError> RestoredImageTable::build(Im
                                                                raster.layer,
                                                                raster.offset,
                                                                raster.subSize,
-                                                               raster.kittyPlacementId));
+                                                               raster.kittyPlacementId,
+                                                               raster.origin));
 
     auto fragments = std::vector<std::shared_ptr<ImageFragment>> {};
     fragments.reserve(table.fragments.size());
     for (auto const& fragment: table.fragments)
         fragments.push_back(
             std::make_shared<ImageFragment>(rasterized.at(fragment.rasterized), fragment.offset));
-    return RestoredImageTable { table, std::move(images), std::move(fragments) };
+    return RestoredImageTable { table, std::move(images), std::move(rasterized), std::move(fragments) };
 }
 
 std::shared_ptr<ImageFragment> RestoredImageTable::fragment(uint64_t id) const
@@ -124,6 +126,11 @@ std::shared_ptr<Image const> RestoredImageTable::image(ImageId id) const
 {
     auto const it = _images.find(unbox<uint32_t>(id));
     return it != _images.end() ? it->second : nullptr;
+}
+
+std::shared_ptr<RasterizedImage const> RestoredImageTable::rasterized(uint64_t id) const
+{
+    return id < _rasterized.size() ? _rasterized[static_cast<size_t>(id)] : nullptr;
 }
 
 void RestoredImageTable::commit(ImagePool& pool) const
@@ -162,6 +169,17 @@ KittyScreenState Screen::captureKittyState(ImageTableBuilder& images) const
     std::ranges::sort(state.animations, {}, &KittyAnimationState::id);
     if (_kittyChunkedCommand)
         state.chunked = KittyChunkState { .payload = _kittyChunkedPayload, .command = *_kittyChunkedCommand };
+    // Each raster by its index in the image table, so the placement and every placeholder cell showing it
+    // get the one object back -- which is also what lets the resolver see those cells as unchanged.
+    for (auto const& [imageId, placements]: _kittyVirtualPlacements)
+        for (auto const& placement: placements)
+            state.virtualPlacements.push_back({ .imageId = imageId,
+                                                .placementId = placement.placementId,
+                                                .rasterized = images.rasterizedId(*placement.raster) });
+    std::ranges::stable_sort(state.virtualPlacements, {}, &KittyVirtualPlacementState::imageId);
+    for (auto const& [number, ids]: _kittyImageNumbers)
+        state.imageNumbers.push_back({ .number = number, .ids = ids });
+    std::ranges::sort(state.imageNumbers, {}, &KittyImageNumberState::number);
     return state;
 }
 
@@ -190,7 +208,17 @@ std::expected<void, StateDecodeError> Screen::validateKittyState(KittyScreenStat
                                     return std::ranges::all_of(
                                         animation.frames, isKnown, &KittyFrameState::image);
                                 })
-        || !std::ranges::all_of(state.animations, isRebasable, &KittyAnimationState::nextFrameDueIn))
+        || !std::ranges::all_of(state.animations, isRebasable, &KittyAnimationState::nextFrameDueIn)
+        || !isUnique(state.imageNumbers | std::views::transform(&KittyImageNumberState::number))
+        || !std::ranges::all_of(state.virtualPlacements, [&](KittyVirtualPlacementState const& placement) {
+               return resolver.rasterized(placement.rasterized) != nullptr;
+           }))
+        return StateFailure { StateDecodeError::InvalidValue };
+    // A placement is unique per (image, placement id), as the table the restore builds keys it.
+    auto placements = std::set<std::pair<uint32_t, uint32_t>> {};
+    if (!std::ranges::all_of(state.virtualPlacements, [&](KittyVirtualPlacementState const& placement) {
+            return placements.emplace(placement.imageId, unbox<uint32_t>(placement.placementId)).second;
+        }))
         return StateFailure { StateDecodeError::InvalidValue };
     return {};
 }
@@ -222,6 +250,13 @@ std::expected<void, StateDecodeError> Screen::restoreKittyState(KittyScreenState
                 { .image = resolver.image(frame.image), .gapMilliseconds = frame.gapMilliseconds });
         _kittyAnimations.insert_or_assign(captured.id, std::move(animation));
     }
+    _kittyVirtualPlacements.clear();
+    for (auto const& placement: state.virtualPlacements)
+        _kittyVirtualPlacements[placement.imageId].push_back(KittyVirtualPlacement {
+            .placementId = placement.placementId, .raster = resolver.rasterized(placement.rasterized) });
+    _kittyImageNumbers.clear();
+    for (auto const& [number, ids]: state.imageNumbers)
+        _kittyImageNumbers.insert_or_assign(number, ids);
     if (state.chunked)
     {
         _kittyChunkedPayload = state.chunked->payload;

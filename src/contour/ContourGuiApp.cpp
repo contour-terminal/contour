@@ -24,6 +24,7 @@
 #include <contour/display/ContentScale.hpp>
 #include <contour/display/FirstFrameWatchdog.hpp>
 #include <contour/display/GpuInventory.hpp>
+#include <contour/display/ImageDecoding.hpp>
 #include <contour/display/LatencyProbeDriver.hpp>
 #ifdef CONTOUR_WITH_GPU_SELECTION
     #include <contour/display/GraphicsDeviceSelector.hpp>
@@ -84,6 +85,7 @@
 #include <contour/window/WindowController.hpp>
 #include <contour/window/WindowLivenessQt.hpp>
 
+#include <vtbackend/graphics/KittyMediaDefaults.hpp>
 #include <vtbackend/vt/Capabilities.hpp>
 #include <vtbackend/vt/DesktopNotification.hpp>
 
@@ -515,7 +517,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::unique_ptr<remote::IWorkspaceLister> startupLister,
                              std::unique_ptr<vthost::IGitStatusProbe> workspaceGitProbe,
                              platform::ApplicationReadiness::State applicationAtStart):
-    ContourApp { env },
+    ContourApp { env, display::decodeImage },
     _startupTimeline { core::platform::defaultSteadyClock(), processStart },
     _exitEventLoop { exitEventLoop ? std::move(exitEventLoop)
                                    : std::function<void(int)> { exitQtEventLoop } },
@@ -532,6 +534,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _linkProbeExecutor(cli::makeBackgroundExecutor(LinkProbeThreads)),
     _workspaceGitExecutor(cli::makeBackgroundExecutor(GitProbeThreads)),
     _injectedLinkServices { std::move(linkServices) },
+    _kittyMediumSource { vtbackend::kitty_graphics::makePlatformMediumSource() },
     _sessionFactory(sessionFactory ? std::move(sessionFactory)
                                    : std::make_unique<session::AppSessionFactory>(
                                          *this, _processPlacement, makeSshTerminfoInstaller())),
@@ -667,6 +670,21 @@ std::optional<vtbackend::GitHeadServices> ContourGuiApp::gitHeadServices() noexc
     if (&_fileSystem != &core::platform::NativeFileSystem::instance())
         return std::nullopt;
     return vtbackend::GitHeadServices { .executor = _linkProbeExecutor, .fileSystem = _gitFileSystem };
+}
+
+vtbackend::kitty_graphics::KittyMediumServices ContourGuiApp::kittyMediumServices() const
+{
+    // From the configuration as it is now, so an edit reaches the sessions started after it; the app's own
+    // environment (its `$TMPDIR`), home and user complete it.
+    auto const home = fs::path { QDir::homePath().toStdU16String() };
+    return vtbackend::kitty_graphics::KittyMediumServices {
+        .source = *_kittyMediumSource,
+        .policy =
+            vtbackend::kitty_graphics::mediaPolicy(processEnvironment(),
+                                                   config::kittyMediaSettings(_config.images.value(), home),
+                                                   home,
+                                                   vtbackend::kitty_graphics::currentUserId())
+    };
 }
 
 std::optional<vthost::WorkspaceGitServices> ContourGuiApp::workspaceGitServices() noexcept

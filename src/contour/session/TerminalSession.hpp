@@ -22,6 +22,7 @@
 #include <contour/session/GutterChrome.hpp>
 #include <contour/session/HostedOperation.hpp>
 #include <contour/session/HyperlinkTooltip.hpp>
+#include <contour/session/MediaAccess.hpp>
 #include <contour/session/PastePreview.hpp>
 #include <contour/session/Permission.hpp>
 #include <contour/session/PermissionPrompt.hpp>
@@ -875,6 +876,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
      *        for its profile's policy -- and again whenever a profile change replaces that policy. Empty (the
      *        default) means the build host's, @c app.keyboardPlatformFactory(); a test passes another kind's
      *        to run that platform's key path on any machine.
+     * @param mediaAccess what kitty graphics may read for the session (@see mediaAccessFor). None (the
+     *        default) refuses every file medium; the manager grants local files to a local process only.
      */
     TerminalSession(TerminalSessionManager* manager,
                     std::unique_ptr<vtpty::Pty> pty,
@@ -885,7 +888,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
                     std::unique_ptr<platform::Notifier> notifier = nullptr,
                     SessionRole role = SessionRole::Shell,
                     SessionHosting hosting = SessionHosting::Local,
-                    input::KeyboardPlatformFactory keyboardPlatforms = {});
+                    input::KeyboardPlatformFactory keyboardPlatforms = {},
+                    MediaAccess mediaAccess = MediaAccess::None);
     ~TerminalSession() override;
 
     int id() const noexcept { return _id; }

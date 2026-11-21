@@ -323,3 +323,37 @@ TEST_CASE("ImagePool.idIndexSurvivesIdWrapReuse", "[image]")
     second.reset();
     CHECK(pool.findImageById(reusedId) == nullptr);
 }
+
+TEST_CASE("RasterizedImage.placeholderOriginIsNotPreservedOnTextWrite", "[RasterizedImage][kitty]")
+{
+    auto const image = makeCoordinateImage(ImageSize { Width(2), Height(2) });
+
+    SECTION("a cursor placement above the text survives a write")
+    {
+        auto const raster = rasterize(image,
+                                      ImageAlignment::TopStart,
+                                      ImageResize::ResizeToFit,
+                                      TestBackground,
+                                      GridSize { .lines = LineCount(1), .columns = ColumnCount(1) },
+                                      ImageSize { Width(2), Height(2) },
+                                      ImageLayer::Above);
+        CHECK(raster->origin() == ImageOrigin::Cursor);
+        auto const fragment = std::make_shared<ImageFragment>(raster, CellLocation {});
+        CHECK(shouldPreserveImageOnTextWrite(fragment));
+    }
+
+    SECTION("a placeholder cell is the text it replaces")
+    {
+        auto const raster = rasterize(image,
+                                      ImageAlignment::MiddleCenter,
+                                      ImageResize::ResizeToFit,
+                                      TestBackground,
+                                      GridSize { .lines = LineCount(1), .columns = ColumnCount(1) },
+                                      ImageSize { Width(2), Height(2) },
+                                      ImageLayer::Above,
+                                      ImageOrigin::Placeholder);
+        CHECK(raster->origin() == ImageOrigin::Placeholder);
+        auto const fragment = std::make_shared<ImageFragment>(raster, CellLocation {});
+        CHECK_FALSE(shouldPreserveImageOnTextWrite(fragment));
+    }
+}

@@ -1352,9 +1352,12 @@ template <typename RendererT>
     auto const renderRow = [&](Line const& line, LineOffset y) {
         // Fast path: uniform-attribute line — render as a single batch. Blank lines have no
         // codepoints, so no search pattern can match them; always use the trivial path for
-        // blanks to avoid constructing ConstCellProxy on un-materialized SoA arrays.
+        // blanks to avoid constructing ConstCellProxy on un-materialized SoA arrays. A line holding a kitty
+        // placeholder takes the per-cell path even when uniform: only that path drops U+10EEEE from the
+        // drawn text, and a bare, unresolved one is otherwise plain text to the batched path.
         if (line.isBlank()
-            || (line.isTrivialBuffer() && highlightSearchMatches == HighlightSearchMatches::No))
+            || (line.isTrivialBuffer() && highlightSearchMatches == HighlightSearchMatches::No
+                && !line.isFlagEnabled(LineFlag::ImagePlaceholders)))
         {
             std::u32string trivialText;
             auto const tb = line.trivialBuffer(trivialText);

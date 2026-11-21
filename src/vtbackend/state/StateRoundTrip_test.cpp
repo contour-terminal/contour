@@ -159,6 +159,27 @@ std::string imageSession()
         "\033_Ga=p,i=7,c=3,r=1\033\\after\r\n"
     };
 }
+
+/// Claude Code showing a picture through kitty Unicode placeholders: the transmission with its virtual
+/// placement, three image rows of placeholder cells, a row naming an image that only arrives at the end, and
+/// that image.
+std::string placeholderSession()
+{
+    auto const row = [](std::string_view sgr, std::string_view rowMark) {
+        auto text = std::format("\033[{}m", sgr);
+        for (auto const column: { "\xCC\x85", "\xCC\x8D", "\xCC\x8E", "\xCC\x90" })
+            text += std::format("\xF4\x8E\xBB\xAE{}{}", rowMark, column);
+        return text + "\033[m\r\n";
+    };
+    auto session = std::string { "$ claude\r\n\033_Ga=T,U=1,i=300,c=4,r=3,f=24,s=4,v=3,q=2;" };
+    session += std::string(48, 'A');
+    session += "\033\\";
+    for (auto const rowMark: { "\xCC\x85", "\xCC\x8D", "\xCC\x8E" })
+        session += row("38;2;0;1;44", rowMark);
+    session += row("38;5;9", "\xCC\x85");
+    session += "\033_Ga=T,U=1,i=9,c=4,r=1,f=24,s=2,v=1,q=2;AAAA/wAA\033\\done\r\n";
+    return session;
+}
 } // namespace
 
 TEST_CASE("terminal state round-trips at sampled offsets of the Workloads corpus", "[StateRoundTrip]")
@@ -185,6 +206,20 @@ TEST_CASE("terminal state round-trips at every offset of Sixel and kitty images"
     auto source = setup.makeTerminal();
     source->writeToScreen(imageSession());
     CHECK_FALSE(source->terminal.captureState().images.images.empty());
+}
+
+TEST_CASE("terminal state round-trips at every offset of a kitty placeholder picture", "[StateRoundTrip]")
+{
+    // The virtual placement, the image numbers and the placeholder origin all have to cross: a handover
+    // between the cells and their late image must still let that image resolve them.
+    auto const setup = workloadSetup();
+    requireExactAtSampledOffsets(placeholderSession(), setup);
+
+    auto source = setup.makeTerminal();
+    source->writeToScreen(placeholderSession());
+    auto const state = source->terminal.captureState();
+    REQUIRE_FALSE(state.pages.empty());
+    CHECK(state.pages.front().kitty.virtualPlacements.size() == 2);
 }
 
 TEST_CASE("captureState is deterministic", "[StateRoundTrip]")

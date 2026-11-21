@@ -16,6 +16,8 @@
 #include <expected>
 #include <functional>
 #include <memory>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -78,6 +80,13 @@ class TappingPty final: public vtpty::Pty
     /// @return What the wrapped PTY's terminal does with typed text: the hosted program's echo, which
     ///         NativeSession reports to its viewers (Capability::InputEcho).
     [[nodiscard]] vtpty::InputEcho inputEcho() const noexcept override { return _inner->inputEcho(); }
+
+    /// @return The wrapped PTY's foreground process, which the terminal asks before it reads a kitty file
+    ///         medium (vtbackend::kitty_graphics::isRemoteShellClient()).
+    [[nodiscard]] std::optional<std::string> foregroundProcessName() const override
+    {
+        return _inner->foregroundProcessName();
+    }
 
     /// @return The wrapped PTY (for diagnostics/tests reaching the concrete type).
     [[nodiscard]] vtpty::Pty& inner() noexcept { return *_inner; }

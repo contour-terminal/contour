@@ -5,10 +5,14 @@
 
 #include <core/Base64.hpp>
 
+#include <libunicode/convert.h>
+
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <format>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 
@@ -353,6 +357,8 @@ TEST_CASE("kitty command fields all survive the codec", "[ImageState]")
     command.composeSourceY = 22;
     command.composeDestinationX = 23;
     command.composeDestinationY = 24;
+    command.placementKind = kitty_graphics::PlacementKind::Virtual;
+    command.queryFeature = 'T';
     command.payload = "payload";
     state.chunked = KittyChunkState { .payload = "so far", .command = command };
 
@@ -374,5 +380,74 @@ TEST_CASE("kitty command fields all survive the codec", "[ImageState]")
     CHECK(copy.payload == "payload");
     CHECK(copy.loopCount == 17);
     CHECK(copy.animationState == command.animationState);
+    CHECK(copy.placementKind == kitty_graphics::PlacementKind::Virtual);
+    CHECK(copy.queryFeature == 'T');
     CHECK(copy == command);
+}
+
+namespace
+{
+/// @return Image row @p row of a placeholder picture of image @p id (by palette index), @p columns cells
+/// wide,
+///         as Claude Code prints it.
+std::string placeholderRow(int id, size_t row, size_t columns)
+{
+    constexpr auto Diacritics = std::array { U'̅', U'̍', U'̎', U'̐' };
+    auto text = std::u32string {};
+    for (auto const column: std::views::iota(size_t { 0 }, columns))
+        text += std::u32string { U'\U0010EEEE', Diacritics.at(row), Diacritics.at(column) };
+    return std::format(
+        "\033[38;5;{}m{}\033[m\r\n", id, unicode::convert_to<char>(std::u32string_view { text }));
+}
+} // namespace
+
+TEST_CASE("kitty virtual placements and image numbers survive a restore", "[ImageState][state]")
+{
+    // A live upgrade in the middle of a Claude Code session: a resolved placeholder picture, a placeholder
+    // line whose image has not arrived yet, and an image stored under a number.
+    auto source = makeTerminal();
+    source->writeToScreen(
+        std::format("\033_Ga=T,U=1,i=7,c=4,r=2,f=32,s=2,v=2,q=2;{}\033\\", encodedPixels()));
+    source->writeToScreen(std::format("\033_Ga=t,I=5,f=32,s=2,v=2,q=2;{}\033\\", encodedPixels()));
+    source->writeToScreen(placeholderRow(7, 0, 4) + placeholderRow(7, 1, 4) + placeholderRow(8, 0, 4));
+    REQUIRE(source->terminal.primaryScreen().at(LineOffset(1), ColumnOffset(3)).imageFragment());
+    REQUIRE_FALSE(source->terminal.primaryScreen().at(LineOffset(2), ColumnOffset(0)).imageFragment());
+
+    auto const captured = throughBytes(capture(*source));
+    auto target = makeTerminal();
+    auto const keepAlive = restoreInto(*target, captured);
+    auto& screen = target->terminal.primaryScreen();
+
+    SECTION("the virtual placement is back, and the picture's cells show its very raster")
+    {
+        auto const* placement = screen.findKittyVirtualPlacement(7, KittyPlacementId {});
+        REQUIRE(placement != nullptr);
+        CHECK(placement->raster->origin() == ImageOrigin::Placeholder);
+        for (auto const row: std::views::iota(0, 2))
+            for (auto const column: std::views::iota(0, 4))
+            {
+                INFO(std::format("cell ({}, {})", row, column));
+                auto const fragment = screen.at(LineOffset(row), ColumnOffset(column)).imageFragment();
+                REQUIRE(fragment);
+                CHECK(&fragment->rasterizedImage() == placement->raster.get());
+                CHECK(fragment->offset()
+                      == CellLocation { .line = LineOffset(row), .column = ColumnOffset(column) });
+            }
+    }
+
+    SECTION("the unresolved line resolves once its image arrives")
+    {
+        target->writeToScreen(
+            std::format("\033_Ga=T,U=1,i=8,c=4,r=1,f=32,s=2,v=2,q=2;{}\033\\", encodedPixels()));
+        auto const fragment = screen.at(LineOffset(2), ColumnOffset(3)).imageFragment();
+        REQUIRE(fragment);
+        CHECK(fragment->rasterizedImage().origin() == ImageOrigin::Placeholder);
+    }
+
+    SECTION("the image number still names its image")
+    {
+        // This partial restore brings back no cursor, so the place is chosen explicitly.
+        target->writeToScreen("\033[4;1H\033_Ga=p,I=5,c=1,r=1,C=1,q=2\033\\");
+        CHECK(screen.at(LineOffset(3), ColumnOffset(0)).imageFragment());
+    }
 }
