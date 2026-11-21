@@ -511,6 +511,9 @@ class Engine
     /// @return What the host resolved: the view reads the local time's offset from it.
     [[nodiscard]] HostInfo const& host() const noexcept { return _host; }
 
+    /// @return Now, in wall-clock milliseconds, as the last wake said: what a timeline is drawn up to.
+    [[nodiscard]] uint64_t wallMs() const noexcept { return _wallMs; }
+
     /// @param tab A tab.
     /// @param run A run's id.
     /// @return The run's transcript as @p tab last asked for it (ReadTranscript); nullptr when it did not, or

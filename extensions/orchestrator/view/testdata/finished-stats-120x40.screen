@@ -9,16 +9,16 @@
 │   #2163 OSC 133: optional nonce to reject forged command lines and … │ │ tokens    42.3k out · 152 in · 12.9M cache  │
 │   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead o… │ │             read · 192.7k cache write       │
 │                                                                      │ │ cache     98.5% hit                         │
-│ AGENTS · 0 OF 4 RUNNING                                              │ │ cost      $0.12, as Claude Code reports it  │
-│ no agents                                                            │ │ calls     4 API calls · 2 prompts · 1 API   │
-│                                                                      │ │             error                           │
-│ FINISHED · 0 NEW                                                     │ │ tools     Bash 2 · Read 1 · 1 failed        │
-│   pr-2379 · fix CI · completed                               removed │ │ agents    2 subagents (3.1k out) · 1        │
-│                                                                      │ │             compaction                      │
-│                                                                      │ │ opened    #7 https://github.com/o/r/pull/7  │
+│ TIMELINE · LAST 24 HOURS, AN HOUR A BAR                              │ │ cost      $0.12, as Claude Code reports it  │
+│ agents active  ························               peak 0 · now 0 │ │ calls     4 API calls · 2 prompts · 1 API   │
+│ tokens out     ························                     0 in 24h │ │             error                           │
+│ runs started   ·······················█          1 started · 1 ended │ │ tools     Bash 2 · Read 1 · 1 failed        │
+│                                                                      │ │ agents    2 subagents (3.1k out) · 1        │
+│ AGENTS · 0 OF 4 RUNNING                                              │ │             compaction                      │
+│ no agents                                                            │ │ opened    #7 https://github.com/o/r/pull/7  │
 │                                                                      │ │ branch    agent/pr-2379-20261113-150912     │
-│                                                                      │ │ worktree  /home/u/worktrees/contour/pr-2379 │
-│                                                                      │ │             -20261113-150912                │
+│ FINISHED · 0 NEW                                                     │ │ worktree  /home/u/worktrees/contour/pr-2379 │
+│   pr-2379 · fix CI · completed                               removed │ │             -20261113-150912                │
 │                                                                      │ │ url       https://github.com/contour-termin │
 │                                                                      │ │             al/contour/pull/2379            │
 │                                                                      │ │                                             │

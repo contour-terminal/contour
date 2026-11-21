@@ -10,16 +10,16 @@ pr-2375-20261113-150847: outside the current configuration (/home/u/worktrees/re
 │   #2163 OSC 133: optional nonce to reject forged command lines and … │ │ branch    agent/issue-2356-20261113-151001  │
 │   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead o… │ │ worktree  /home/u/worktrees/retired/issue-2 │
 │                                                                      │ │             356-20261113-151001             │
-│ AGENTS · 1 OF 4 RUNNING                                              │ │ url       https://github.com/contour-termin │
-│ ○ pr-2375 · fix CI · sonnet                outside the configuration │ │             al/contour/issues/2356          │
-│                                                                      │ │           M src/vtbackend/Grid.cpp          │
-│ FINISHED · 0 NEW                                                     │ │           ?? notes.txt                      │
+│ TIMELINE · LAST 24 HOURS, AN HOUR A BAR                              │ │ url       https://github.com/contour-termin │
+│ agents active  ·······················█               peak 1 · now 1 │ │             al/contour/issues/2356          │
+│ tokens out     ························                     0 in 24h │ │           M src/vtbackend/Grid.cpp          │
+│ runs started   ·······················█          2 started · 1 ended │ │           ?? notes.txt                      │
+│                                                                      │ │                                             │
+│ AGENTS · 1 OF 4 RUNNING                                              │ │                                             │
+│ ○ pr-2375 · fix CI · sonnet                outside the configuration │ │                                             │
+│                                                                      │ │                                             │
+│ FINISHED · 0 NEW                                                     │ │                                             │
 │   issue-2356 · work on issue · ended by you          kept: 2 entries │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │

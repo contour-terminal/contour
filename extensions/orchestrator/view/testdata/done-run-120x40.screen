@@ -13,17 +13,17 @@
 │   #2163 OSC 133: optional nonce to reject forged command lines and … │ │                                             │
 │   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead o… │ │                                             │
 │                                                                      │ │                                             │
+│ TIMELINE · LAST 24 HOURS, AN HOUR A BAR                              │ │                                             │
+│ agents active  ·······················█               peak 2 · now 2 │ │                                             │
+│ tokens out     ························                     0 in 24h │ │                                             │
+│ runs started   ·······················█          2 started · 0 ended │ │                                             │
+│                                                                      │ │                                             │
 │ AGENTS · 2 OF 4 RUNNING                                              │ │                                             │
 │ ○ pr-2375 · fix CI · sonnet                               working 6m │ │                                             │
 │ ● pr-2379 · fix CI · sonnet                         done · e ends it │ │                                             │
 │                                                                      │ │                                             │
 │ FINISHED · 0 NEW                                                     │ │                                             │
 │ nothing finished                                                     │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │

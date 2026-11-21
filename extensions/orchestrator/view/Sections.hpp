@@ -34,6 +34,7 @@ enum class RowKind : uint8_t
     Heading,     ///< A section's heading; furniture.
     Spacer,      ///< The blank line before a heading; furniture.
     Placeholder, ///< What an empty section says; furniture.
+    Chart,       ///< One line of a chart, such as the timeline's; furniture, drawn in the Wide band only.
     Notice,      ///< What the dashboard says when it has nothing to list, such as what to configure.
     PullRequest, ///< One of the user's open pull requests.
     Issue,       ///< An open issue no pull request of the user's claims.
@@ -92,7 +93,7 @@ struct Row
     /// @return Whether the row can be selected: it stands for an item, not for the list's furniture.
     [[nodiscard]] bool isSelectable() const noexcept { return kind >= RowKind::PullRequest; }
     /// @return Whether the row is furniture, which a collapsed layout leaves out.
-    [[nodiscard]] bool isFurniture() const noexcept { return kind <= RowKind::Placeholder; }
+    [[nodiscard]] bool isFurniture() const noexcept { return kind <= RowKind::Chart; }
 };
 
 /// The rows of the list, in order: per section its heading and its items, the items of every configured
@@ -110,16 +111,28 @@ struct Row
 ///         (TrustPromptHintAfter); std::nullopt when no row changes with time.
 [[nodiscard]] std::optional<uint64_t> nextRowChange(Engine const& engine, uint64_t nowMonoMs);
 
+/// The columns a chart row's label (Row::prefix) takes before its bars (Row::text), so that they line up.
+inline constexpr int ChartLabelColumns = 15;
+
+/// Whether a layout draws the chart rows: they need the Wide band's width to read.
+enum class ChartRows : uint8_t
+{
+    Hidden = 0,
+    Shown,
+};
+
 /// The rows a filter and a layout keep.
 /// @param rows Every row.
 /// @param filter Rows that can be selected and whose text does not hold it, ignoring ASCII case, are left
 /// out;
 ///        empty: none is.
-/// @param furniture Whether headings, spacers and placeholders are kept.
+/// @param furniture Whether headings, spacers, placeholders and charts are kept.
+/// @param charts Whether chart rows are kept, furniture aside.
 /// @return The indices into @p rows of the rows kept, in order.
 [[nodiscard]] std::vector<std::size_t> visibleRows(std::span<Row const> rows,
                                                    std::string_view filter,
-                                                   Furniture furniture);
+                                                   Furniture furniture,
+                                                   ChartRows charts);
 
 /// @param rows Every row.
 /// @param shown Indices into @p rows, such as visibleRows() returns.

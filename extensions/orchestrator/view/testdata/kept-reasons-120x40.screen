@@ -9,16 +9,16 @@
 │   #2163 OSC 133: optional nonce to reject forged command lines and … │ │             checkout's .git; nothing more   │
 │   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead o… │ │             was run there                   │
 │                                                                      │ │ branch    agent/issue-2356-20261113-151001  │
-│ AGENTS · 0 OF 4 RUNNING                                              │ │ worktree  /home/u/worktrees/contour/issue-2 │
-│ no agents                                                            │ │             356-20261113-151001             │
-│                                                                      │ │ url       https://github.com/contour-termin │
-│ FINISHED · 0 NEW                                                     │ │             al/contour/issues/2356          │
-│   issue-2356 · work on issue · ended by you            kept: 1 entry │ │           git uses another directory than   │
-│                                                                      │ │             the main checkout's .git;       │
-│                                                                      │ │             nothing more was run there      │
+│ TIMELINE · LAST 24 HOURS, AN HOUR A BAR                              │ │ worktree  /home/u/worktrees/contour/issue-2 │
+│ agents active  ························               peak 0 · now 0 │ │             356-20261113-151001             │
+│ tokens out     ························                     0 in 24h │ │ url       https://github.com/contour-termin │
+│ runs started   ·······················█          1 started · 1 ended │ │             al/contour/issues/2356          │
+│                                                                      │ │           git uses another directory than   │
+│ AGENTS · 0 OF 4 RUNNING                                              │ │             the main checkout's .git;       │
+│ no agents                                                            │ │             nothing more was run there      │
 │                                                                      │ │           x tries the removal again         │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
+│ FINISHED · 0 NEW                                                     │ │                                             │
+│   issue-2356 · work on issue · ended by you            kept: 1 entry │ │                                             │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │

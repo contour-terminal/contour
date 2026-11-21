@@ -210,6 +210,7 @@ struct Dashboard::State
     std::vector<std::size_t> visible; ///< The indices of the rows the filter and the layout keep.
     std::string visibleFilter;        ///< The filter @ref visible was made with.
     Furniture visibleFurniture = Furniture::Shown; ///< The furniture @ref visible was made with.
+    ChartRows visibleCharts = ChartRows::Shown;    ///< Whether @ref visible kept the chart rows.
     Rows rowsState = Rows::Stale;                  ///< Whether @ref rows must be built again.
     uint64_t rowsBuiltAtMs = 0; ///< When @ref rows was built, in the engine's monotonic milliseconds.
     std::size_t rowBuilds = 0;  ///< How often @ref rows was built.
@@ -323,6 +324,18 @@ namespace
                 case RowKind::Notice:
                     canvas.putString(line, 1, cut(row.text, width - 2), styleOf(theme, Role::Text));
                     return;
+                case RowKind::Chart: {
+                    // The label, the bars from its column on, and what they add up to on the right when it
+                    // fits.
+                    auto const bars = cut(row.text, std::max(0, width - 2 - ChartLabelColumns));
+                    auto const used = 1 + ChartLabelColumns + columnsOf(bars);
+                    auto const status = cut(row.status, std::max(0, width - 1 - used - 2));
+                    canvas.putString(
+                        line, 1, cut(row.prefix, ChartLabelColumns - 1), styleOf(theme, Role::Dim));
+                    canvas.putString(line, 1 + ChartLabelColumns, bars, styleOf(theme, Role::Text));
+                    canvas.putString(line, width - 1 - columnsOf(status), status, styleOf(theme, Role::Dim));
+                    return;
+                }
                 default: break;
             }
             auto const pick = [&](Role role) -> core::tui::Style const& {
@@ -673,12 +686,17 @@ void Dashboard::State::ensureRows()
 
 void Dashboard::State::refilter()
 {
-    auto const furniture = BandBreakpoints[breakpointFor(size)].furniture;
-    if (!visible.empty() && interaction.filter == visibleFilter && furniture == visibleFurniture)
+    auto const& breakpoint = BandBreakpoints[breakpointFor(size)];
+    auto const furniture = breakpoint.furniture;
+    // A chart needs the Wide band's width: its hours would be cut to nothing in a narrower list.
+    auto const charts = breakpoint.band == Band::Wide ? ChartRows::Shown : ChartRows::Hidden;
+    if (!visible.empty() && interaction.filter == visibleFilter && furniture == visibleFurniture
+        && charts == visibleCharts)
         return;
-    visible = visibleRows(rows, interaction.filter, furniture);
+    visible = visibleRows(rows, interaction.filter, furniture, charts);
     visibleFilter = interaction.filter;
     visibleFurniture = furniture;
+    visibleCharts = charts;
     auto const selectable = selectableCount(rows, visible);
     interaction.selected = selectable == 0 ? 0 : std::min(interaction.selected, selectable - 1);
 }

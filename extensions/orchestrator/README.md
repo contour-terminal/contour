@@ -47,6 +47,12 @@ Problems — a failing `gh`,
 a list cut at its limit, a configuration that does not parse — sit above the lists, one line each, and
 the line at the bottom is the summary the status line shows.
 
+Above the agents, in a tab 100 columns or wider, a timeline charts the last 24 hours, an hour a bar: how many
+agents were active, their output tokens (a run's spread evenly over the time it was active, its statistics
+being totals), and how many runs started, each line with what it adds up to. It is drawn from the runs' state
+histories and statistics, so it covers the runs the orchestrator still keeps (`finished_retention`); the file
+of finished runs (below) keeps them all.
+
 The layout follows the tab's size:
 
 | Width | Layout |

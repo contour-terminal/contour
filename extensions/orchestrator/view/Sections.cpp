@@ -34,6 +34,7 @@
 #include <orchestrator/core/Reconcile.hpp>
 #include <orchestrator/core/Run.hpp>
 #include <orchestrator/core/Sanitize.hpp>
+#include <orchestrator/core/Timeline.hpp>
 #include <orchestrator/core/Utf8.hpp>
 
 using namespace std::string_view_literals;
@@ -495,6 +496,98 @@ namespace
     }
 
     // }}}
+    // {{{ the timeline
+
+    /// The bars a chart is drawn with, lowest first; an hour with nothing draws the first.
+    constexpr auto Bars = std::array { "·"sv, "▁"sv, "▂"sv, "▃"sv, "▄"sv, "▅"sv, "▆"sv, "▇"sv, "█"sv };
+
+    /// @return @p values as bars, each scaled to the largest; a value above nothing draws at least the
+    /// lowest.
+    [[nodiscard]] std::string barsOf(std::span<uint64_t const> values)
+    {
+        auto const top = std::ranges::max(values);
+        auto bars = std::string {};
+        for (auto const value: values)
+        {
+            auto const level = value == 0 || top == 0
+                                   ? std::size_t { 0 }
+                                   : std::max<std::size_t>(1, (value * (Bars.size() - 1) + top - 1) / top);
+            bars += Bars[level];
+        }
+        return bars;
+    }
+
+    template <typename T>
+    [[nodiscard]] std::array<uint64_t, TimelineBuckets> widened(std::array<T, TimelineBuckets> const& values)
+    {
+        auto wide = std::array<uint64_t, TimelineBuckets> {};
+        std::ranges::copy(values, wide.begin());
+        return wide;
+    }
+
+    /// One line of the timeline: what it charts, and what that adds up to.
+    struct ChartLine
+    {
+        std::string_view label;
+        std::array<uint64_t, TimelineBuckets> (*series)(Timeline const&);
+        std::string (*summary)(Timeline const&);
+    };
+
+    /// The timeline's lines, in order: a new one is a row here.
+    constexpr auto ChartLines = std::array {
+        ChartLine { .label = "agents active"sv,
+                    .series = [](Timeline const& timeline) { return widened(timeline.active); },
+                    .summary =
+                        [](Timeline const& timeline) {
+                            return std::format(
+                                "peak {} · now {}", std::ranges::max(timeline.active), timeline.activeNow);
+                        } },
+        ChartLine { .label = "tokens out"sv,
+                    .series = [](Timeline const& timeline) { return timeline.tokens; },
+                    .summary =
+                        [](Timeline const& timeline) {
+                            auto total = uint64_t { 0 };
+                            for (auto const tokens: timeline.tokens)
+                                total += tokens;
+                            return std::format("{} in 24h", countText(total));
+                        } },
+        ChartLine { .label = "runs started"sv,
+                    .series = [](Timeline const& timeline) { return widened(timeline.started); },
+                    .summary =
+                        [](Timeline const& timeline) {
+                            auto started = uint64_t { 0 };
+                            auto ended = uint64_t { 0 };
+                            for (auto const index: std::views::iota(std::size_t { 0 }, TimelineBuckets))
+                            {
+                                started += timeline.started[index];
+                                ended += timeline.ended[index];
+                            }
+                            return std::format("{} started · {} ended", started, ended);
+                        } },
+    };
+
+    void appendSection(std::vector<Row>& rows,
+                       std::string heading,
+                       std::string_view placeholder,
+                       std::vector<Row> items);
+
+    /// Appends the timeline of the last day, when a run was active or dispatched in it.
+    void appendTimeline(std::vector<Row>& rows, Engine const& engine)
+    {
+        auto const timeline = timelineOf(engine.runs(), engine.wallMs());
+        if (timeline == Timeline {})
+            return;
+        auto chart = std::vector<Row> {};
+        for (auto const& line: ChartLines)
+            chart.push_back(Row { .kind = RowKind::Chart,
+                                  .prefix = std::string { line.label },
+                                  .text = barsOf(line.series(timeline)),
+                                  .status = line.summary(timeline),
+                                  .statusRole = Role::Dim });
+        appendSection(rows, "TIMELINE · LAST 24 HOURS, AN HOUR A BAR", {}, std::move(chart));
+    }
+
+    // }}}
 
     /// The details every run row shows.
     [[nodiscard]] std::vector<DetailLine> runDetails(Lists const& lists, Run const& run)
@@ -838,6 +931,7 @@ std::vector<Row> buildRows(Engine const& engine, uint64_t nowMonoMs)
     auto rows = std::vector<Row> {};
     appendSection(rows, "MY PULL REQUESTS", "no open pull requests", std::move(pullRequests));
     appendSection(rows, "ISSUES WITHOUT A PR", "no issues without a pull request", std::move(issues));
+    appendTimeline(rows, engine);
     appendRunSections(rows, engine, lists);
 
     // Only while there is one: an orphan is the exception, and an empty section would say nothing.
@@ -850,13 +944,27 @@ std::vector<Row> buildRows(Engine const& engine, uint64_t nowMonoMs)
     return rows;
 }
 
-std::vector<std::size_t> visibleRows(std::span<Row const> rows, std::string_view filter, Furniture furniture)
+std::vector<std::size_t> visibleRows(std::span<Row const> rows,
+                                     std::string_view filter,
+                                     Furniture furniture,
+                                     ChartRows charts)
 {
     auto kept = std::vector<std::size_t> {};
     for (auto const index: std::views::iota(std::size_t { 0 }, rows.size()))
     {
         auto const& row = rows[index];
         if (row.isFurniture() && furniture == Furniture::Collapsed)
+            continue;
+        // A chart that is not drawn takes its heading, and the spacer before that, with it.
+        auto const startsChart = [&](std::size_t at) {
+            return at < rows.size() && rows[at].kind == RowKind::Chart;
+        };
+        auto const headsChart = [&](std::size_t at) {
+            return at < rows.size() && rows[at].kind == RowKind::Heading && startsChart(at + 1);
+        };
+        if (charts == ChartRows::Hidden
+            && (row.kind == RowKind::Chart || headsChart(index)
+                || (row.kind == RowKind::Spacer && headsChart(index + 1))))
             continue;
         if (row.isSelectable() && !filter.empty()
             && !containsIgnoringCase(std::format("{} {}", row.prefix, row.text), filter))

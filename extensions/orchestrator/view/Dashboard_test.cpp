@@ -94,6 +94,38 @@ using Fixture = DashboardFixture;
     return run;
 }
 
+/// A run that was active from @p hoursAgo to @p untilHoursAgo before the fixture's now, spending @p tokens.
+[[nodiscard]] Run pastRun(
+    std::string_view id, uint64_t number, double hoursAgo, double untilHoursAgo, uint64_t tokens)
+{
+    constexpr auto Hour = 3'600'000.0;
+    auto const from = DispatchWallMs - static_cast<uint64_t>(hoursAgo * Hour);
+    auto const to = DispatchWallMs - static_cast<uint64_t>(untilHoursAgo * Hour);
+    auto run = finishedRun(id, ChangeRequestRef { number }, Fate::Removed, Seen::Opened, "fix_ci");
+    run.startedWallMs = from;
+    std::get<Finished>(run.state).endedWallMs = to;
+    run.history = { StateChange { .wallMs = from, .state = "preparing" },
+                    StateChange { .wallMs = from, .state = "running" },
+                    StateChange { .wallMs = to, .state = "ending" },
+                    StateChange { .wallMs = to, .state = "finished" } };
+    run.stats = RunStats {};
+    run.stats->tokens.output = tokens;
+    return run;
+}
+
+/// A day of runs: a quiet night, a busy morning, and one still running.
+[[nodiscard]] std::vector<Run> dayOfRuns()
+{
+    return {
+        pastRun("pr-2001-20261112-160000", 2001, 22.5, 21.0, 30'000),
+        pastRun("pr-2002-20261112-230000", 2002, 9.0, 7.5, 60'000),
+        pastRun("pr-2003-20261113-000000", 2003, 8.5, 6.0, 120'000),
+        pastRun("pr-2004-20261113-010000", 2004, 7.5, 7.0, 15'000),
+        pastRun("pr-2005-20261113-120000", 2005, 3.0, 1.0, 90'000),
+        storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }),
+    };
+}
+
 /// A run whose tab the host refused to open: agents cannot start in a worktree from this sandbox.
 [[nodiscard]] Run paneRefusedRun()
 {
@@ -190,6 +222,11 @@ struct Scene
                 .world = keptReasons,
                 .keys = "\x1b[F\t"sv,
                 .sizes = { Narrow } },
+        // The timeline charts a day of runs, an hour a bar, in the Wide band only.
+        Scene { .name = "timeline",
+                .world = World { .prs = { "github/prs-empty.json" }, .stored = dayOfRuns() },
+                .keys = {},
+                .sizes = { Wide, Medium } },
         // A finished run's details carry what its agent spent and did, and how long it waited for the user.
         Scene { .name = "finished-stats", .world = withStats, .keys = "\x1b[F"sv, .sizes = { Wide } },
         Scene { .name = "finished-stats", .world = withStats, .keys = "\x1b[F\t"sv, .sizes = { Narrow } },

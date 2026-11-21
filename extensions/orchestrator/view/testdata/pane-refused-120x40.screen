@@ -9,16 +9,16 @@
 │   #2163 OSC 133: optional nonce to reject forged command lines and … │ │ branch    agent/pr-2366-20261113-140211     │
 │   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead o… │ │ worktree  /home/u/worktrees/contour/pr-2366 │
 │                                                                      │ │             -20261113-140211                │
-│ AGENTS · 0 OF 4 RUNNING                                              │ │ url       https://github.com/contour-termin │
-│ no agents                                                            │ │             al/contour/pull/2366            │
-│                                                                      │ │ failure   agents can't start here yet       │
-│ FINISHED · 1 NEW                                                     │ │           a Flatpak or Windows build, or an │
-│ ● pr-2366 · fix CI · preparation failed                       failed │ │             older host, opens no agent tab  │
-│                                                                      │ │             in a worktree                   │
+│ TIMELINE · LAST 24 HOURS, AN HOUR A BAR                              │ │ url       https://github.com/contour-termin │
+│ agents active  ························               peak 0 · now 0 │ │             al/contour/pull/2366            │
+│ tokens out     ························                     0 in 24h │ │ failure   agents can't start here yet       │
+│ runs started   ·······················█          1 started · 1 ended │ │           a Flatpak or Windows build, or an │
+│                                                                      │ │             older host, opens no agent tab  │
+│ AGENTS · 0 OF 4 RUNNING                                              │ │             in a worktree                   │
+│ no agents                                                            │ │                                             │
 │                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
+│ FINISHED · 1 NEW                                                     │ │                                             │
+│ ● pr-2366 · fix CI · preparation failed                       failed │ │                                             │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │

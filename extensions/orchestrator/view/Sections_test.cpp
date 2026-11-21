@@ -238,12 +238,12 @@ TEST_CASE("a filter keeps the items that hold it; a collapsed layout drops the f
     auto const at = [&](std::size_t index) -> Row const& {
         return rows[index];
     };
-    auto const filtered = visibleRows(rows, "STDIO", Furniture::Shown);
+    auto const filtered = visibleRows(rows, "STDIO", Furniture::Shown, ChartRows::Shown);
     CHECK(selectableCount(rows, filtered) == 1);
     CHECK(
         std::ranges::count_if(filtered, [&](std::size_t index) { return at(index).kind == RowKind::Heading; })
         == 4);
-    auto const collapsed = visibleRows(rows, "", Furniture::Collapsed);
+    auto const collapsed = visibleRows(rows, "", Furniture::Collapsed, ChartRows::Shown);
     CHECK(std::ranges::none_of(collapsed, [&](std::size_t index) { return at(index).isFurniture(); }));
     CHECK(selectableCount(rows, collapsed)
           == static_cast<std::size_t>(std::ranges::count_if(rows, &Row::isSelectable)));
@@ -520,4 +520,20 @@ TEST_CASE("a 2 KiB unbroken word wraps to the same lines as cluster by cluster",
     CHECK(wrap("ab " + word, 40, 36) == after);
     // A word that is not ASCII alone is still broken between clusters.
     CHECK(wrap("日本語日本語", 4, 4) == std::vector<std::string> { "日本", "語日", "本語" });
+}
+
+TEST_CASE("a chart that is not drawn takes its heading with it", "[orchestrator][view]")
+{
+    auto const rows = std::vector {
+        Row { .kind = RowKind::Heading, .text = "MY PULL REQUESTS" },
+        Row { .kind = RowKind::Placeholder, .text = "no open pull requests" },
+        Row { .kind = RowKind::Spacer },
+        Row { .kind = RowKind::Heading, .text = "TIMELINE" },
+        Row { .kind = RowKind::Chart, .prefix = "agents active", .text = "··█" },
+        Row { .kind = RowKind::Spacer },
+        Row { .kind = RowKind::Heading, .text = "AGENTS" },
+    };
+    CHECK(visibleRows(rows, "", Furniture::Shown, ChartRows::Shown).size() == rows.size());
+    CHECK(visibleRows(rows, "", Furniture::Shown, ChartRows::Hidden)
+          == std::vector<std::size_t> { 0, 1, 5, 6 });
 }
