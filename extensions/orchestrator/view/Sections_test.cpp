@@ -111,6 +111,33 @@ TEST_CASE("an unconfigured engine says what to configure", "[orchestrator][view]
     CHECK(std::ranges::any_of(rows, [](Row const& row) { return row.text.contains("worktree_root"); }));
 }
 
+TEST_CASE("an agent waiting on its own work says what for", "[orchestrator][view]")
+{
+    auto waiting = storedRun(Running {}, RunningId, ChangeRequestRef { 2375 });
+    waiting.lastStatus = AgentStatus::Idle;
+    auto idle = storedRun(Running {}, DoneId, ChangeRequestRef { 2379 });
+    idle.lastStatus = AgentStatus::Idle;
+    auto const engine =
+        bootEngine({ .stored = { waiting, idle },
+                     .paneMessages = { { std::string { RunningId }, "Waiting for Build pace" },
+                                       { std::string { DoneId }, "" } } });
+    auto const rows = buildRows(engine, StartMonoMs + SixMinutes);
+
+    auto const* const row = rowOfRun(rows, RunningId);
+    REQUIRE(row != nullptr);
+    CHECK(row->status == "Waiting for Build pace 6m");
+    // An item's row says it too.
+    auto const item =
+        std::ranges::find_if(rows, [](Row const& candidate) { return candidate.text.starts_with("#2375 "); });
+    REQUIRE(item != rows.end());
+    CHECK(item->status == "○ agent Waiting for Build pace");
+
+    // Idle with nothing to say is idle.
+    auto const* const quiet = rowOfRun(rows, DoneId);
+    REQUIRE(quiet != nullptr);
+    CHECK(quiet->status == "idle 6m");
+}
+
 TEST_CASE("agent and finished rows", "[orchestrator][view]")
 {
     auto kept = storedRun(Finished { .ended = Ended::EndedByYou,
@@ -134,7 +161,7 @@ TEST_CASE("agent and finished rows", "[orchestrator][view]")
 
     auto const* const done = rowOfRun(rows, DoneId);
     REQUIRE(done != nullptr);
-    CHECK(done->status == "done · e ends it");
+    CHECK(done->status == "waiting for you · e ends it");
     CHECK(done->offers == std::vector { KeyCommand::Board, KeyCommand::Transcript, KeyCommand::EndRun });
 
     auto const* const finished = rowOfRun(rows, KeptId);

@@ -285,6 +285,21 @@ namespace
         return lists.prefix == RepoPrefix::Shown ? clean(repo) : std::string {};
     }
 
+    /// What a running run's row says of its agent: the reason line of an agent waiting on its own work (idle,
+    /// such as `Waiting for Build pace`), else the name of what it reported.
+    [[nodiscard]] std::string runningText(Lists const& lists, Run const& run)
+    {
+        auto const status = run.lastStatus.value_or(AgentStatus::Working);
+        if (auto const message = lists.engine->reportedMessageOf(run);
+            status == AgentStatus::Idle && !message.empty())
+            return clean(message);
+        return std::string { agentStatusName(status) };
+    }
+
+    /// What a done run's row says: its agent's turn ended with nothing in flight, so it waits for you,
+    /// whether it finished its task or asked you something.
+    constexpr auto WaitingForYou = "waiting for you"sv;
+
     /// What a pull request's or an issue's row says while an agent works on it.
     struct AgentCue
     {
@@ -306,13 +321,13 @@ namespace
         };
         auto const [mark, role, state] = std::visit(
             Overloaded {
-                [&](Running const&) {
-                    return std::tuple { "○"sv, Role::Accent, reported(AgentStatus::Working) };
-                },
+                [&](Running const&) { return std::tuple { "○"sv, Role::Accent, runningText(lists, *run) }; },
                 [&](Blocked const&) {
                     return std::tuple { "●"sv, Role::Warning, reported(AgentStatus::Blocked) };
                 },
-                [](Done const&) { return std::tuple { "●"sv, Role::Passing, std::string { "done" } }; },
+                [](Done const&) {
+                    return std::tuple { "●"sv, Role::Warning, std::string { WaitingForYou } };
+                },
                 [&](auto const&) { return std::tuple { "◌"sv, Role::Dim, runStateText(*run) }; },
             },
             run->state);
@@ -644,28 +659,27 @@ namespace
         auto const reported = [&](AgentStatus fallback) {
             return agentStatusName(run.lastStatus.value_or(fallback));
         };
-        auto [mark, role, status] =
-            std::visit(Overloaded {
-                           [&](Running const&) {
-                               return std::tuple { "○"sv,
-                                                   Role::Text,
-                                                   std::format("{}{}", reported(AgentStatus::Working), age) };
-                           },
-                           [&](Blocked const&) {
-                               return std::tuple { "●"sv,
-                                                   Role::Warning,
-                                                   std::format("{}{}", reported(AgentStatus::Blocked), age) };
-                           },
-                           [&](Done const&) {
-                               auto const ends =
-                                   lists.config != nullptr && lists.config->endDoneAfter().count() != 0
-                                       ? "done · ends by itself"sv
-                                       : "done · e ends it"sv;
-                               return std::tuple { "●"sv, Role::Passing, std::string { ends } };
-                           },
-                           [&](auto const&) { return std::tuple { "◌"sv, Role::Dim, runStateText(run) }; },
-                       },
-                       run.state);
+        auto [mark, role, status] = std::visit(
+            Overloaded {
+                [&](Running const&) {
+                    return std::tuple { "○"sv,
+                                        Role::Text,
+                                        std::format("{}{}", runningText(lists, run), age) };
+                },
+                [&](Blocked const&) {
+                    return std::tuple { "●"sv,
+                                        Role::Warning,
+                                        std::format("{}{}", reported(AgentStatus::Blocked), age) };
+                },
+                [&](Done const&) {
+                    auto const ends = lists.config != nullptr && lists.config->endDoneAfter().count() != 0
+                                          ? "ends by itself"sv
+                                          : "e ends it"sv;
+                    return std::tuple { "●"sv, Role::Warning, std::format("{} · {}", WaitingForYou, ends) };
+                },
+                [&](auto const&) { return std::tuple { "◌"sv, Role::Dim, runStateText(run) }; },
+            },
+            run.state);
         // An active run outside the configuration stays endable: its cleanup works from what the run stored.
         auto offers = std::vector<KeyCommand> { KeyCommand::Board, KeyCommand::Transcript };
         if (countsAsActive(run))
@@ -695,9 +709,10 @@ namespace
             && lists.config->endDoneAfter().count() != 0)
             details.push_back(DetailLine {
                 .label = "ends",
-                .value = std::format("by itself once done for {} (end_done_after); e ends it now",
-                                     ageText(static_cast<uint64_t>(lists.config->endDoneAfter().count()))),
-                .role = Role::Passing });
+                .value =
+                    std::format("by itself once it waited for you for {} (end_done_after); e ends it now",
+                                ageText(static_cast<uint64_t>(lists.config->endDoneAfter().count()))),
+                .role = Role::Warning });
         std::ranges::move(runDetails(lists, run), std::back_inserter(details));
         // A run whose STATUS.md was found says so: `b` shows it.
         if (lists.engine->hasBoard(run.id))

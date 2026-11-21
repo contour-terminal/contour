@@ -661,7 +661,7 @@ Key                   | Meaning
 `max_agents_per_repo` | The most agents running at once in one repository. Default `2`.
 `poll_every`          | How often the forges are asked for the lists. Default `2m`, at least `30s`.
 `status_board_after`  | How long an agent runs before the orchestrator starts looking for its board, its `STATUS.md`. Default `15m`; `0` never looks, while `b` still shows a board.
-`end_done_after`      | How long an agent stays done before the orchestrator ends its run, as `e` would: its tab closes and its worktree is removed unless it holds work. The run is listed as completed. An agent that goes back to work, because you answered it, waits the whole time again. Default `0`: a done run waits for you.
+`end_done_after`      | How long an agent stays done before the orchestrator ends its run, as `e` would: its tab closes and its worktree is removed unless it holds work. The run is listed as completed. An agent that goes back to work, because you answered it, waits the whole time again. Done is a turn that ended with nothing in flight, which the dashboard shows as *waiting for you*: it also covers an agent that asked you a question in plain text, which this ends unanswered. An agent waiting on its own background work or a scheduled wake-up is not done, and shows what it waits for. Default `0`: a done run waits for you.
 `finished_retention`  | How long a finished run stays in the Finished list. Default `30d`. Every finished run is also appended, for good, to `agent-runs.jsonl` in the daemon's state directory, with what its agent spent and did.
 `repos`               | Required. The repositories, one entry each (below).
 `tasks`               | Required. What the dashboard offers to start on an item, one entry each (below).
