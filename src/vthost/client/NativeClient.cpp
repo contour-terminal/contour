@@ -20,6 +20,7 @@
 #include <vector>
 
 #include <vthost/GracefulClose.hpp>
+#include <vthost/ImageWire.hpp>
 #include <vthost/KeyAuth.hpp>
 #include <vthost/Logging.hpp>
 #include <vthost/PduPump.hpp>
@@ -116,6 +117,19 @@ namespace
         entry->second = MirroredCommandBlock { .wire = wire, .revision = ++screen.commandBlocksRevision };
         screen.commandBlocksByRevision.emplace(entry->second.revision, wire.id);
         return table.size() > maxRecords ? dropCommandBlock(screen, table.begin()->first) : 0;
+    }
+
+    /// @return Whether @p image's pixels are what its format and size claim. The server is not trusted with
+    ///         them: an upload reads `width * height` pixels from the buffer, and a layout divides by the
+    ///         width, so a size of zero, one past `int`, or bytes that do not cover it are refused.
+    [[nodiscard]] bool fitsItsSize(proto::ImageData const& image) noexcept
+    {
+        if (image.width == 0 || image.height == 0 || !std::in_range<int>(image.width)
+            || !std::in_range<int>(image.height))
+            return false;
+        auto const size = vtbackend::ImageSize { vtbackend::Width::cast_from(image.width),
+                                                 vtbackend::Height::cast_from(image.height) };
+        return vtbackend::isConsistentPixmap(imageFormatOf(image.format), size, image.data.size());
     }
 } // namespace
 
@@ -895,7 +909,19 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
         auto const [session, imageId] = it->second;
         _pendingImages.erase(it);
         auto& screen = screenFor(session);
-        screen.images.insert_or_assign(imageId, *image);
+        if (fitsItsSize(*image))
+            screen.images.insert_or_assign(imageId, *image);
+        else
+        {
+            // Answered as gone: an upload reads the declared geometry from the buffer, and a layout divides
+            // by its width.
+            errorLog()("attach: ImageData {} of {}x{} with {} bytes does not fit its size; dropped",
+                       imageId,
+                       image->width,
+                       image->height,
+                       image->data.size());
+            screen.dropImage(imageId);
+        }
         // Withheld mid-run for the same reason a snapshot piece is: the pixels are recorded either
         // way, and the piece that completes the run places every image it holds.
         if (_onImage && !screen.snapshotInProgress)

@@ -2,6 +2,7 @@
 #include <vtpty/MockPty.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
@@ -659,7 +660,11 @@ TEST_CASE("attach fetches image pixels on demand and caches them", "[vthost][att
                                  NativeClient::SessionEventHandler {},
                                  NativeClient::LayoutHandler {} };
 
-    auto reply = proto::ImageData { .imageId = 0, .width = 2, .height = 3, .data = {} };
+    auto reply = proto::ImageData { .imageId = 0,
+                                    .format = std::to_underlying(vtbackend::ImageFormat::RGBA),
+                                    .width = 2,
+                                    .height = 3,
+                                    .data = {} };
     reply.data.resize(static_cast<std::size_t>(2 * 3 * 4), std::byte { 0x80 });
 
     auto seen = false;
@@ -669,6 +674,47 @@ TEST_CASE("attach fetches image pixels on demand and caches them", "[vthost][att
 
     CHECK(seen);
     CHECK(imageEvent);
+}
+
+TEST_CASE("attach drops image pixels that do not fit their declared size", "[vthost][attach]")
+{
+    // The server is not trusted with a pixmap's geometry: an image whose bytes do not match its size, or
+    // that has no size, is answered as gone, so nothing reads past its buffer or divides by its width.
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* serverSock = pair.first.get();
+    auto handled = false;
+    auto client = NativeClient { loop,
+                                 std::move(pair.second),
+                                 NativeClient::HandshakeOptions {},
+                                 vtbackend::CommandBlockStoreLimits {},
+                                 NativeClient::UpdateHandler {},
+                                 NativeClient::ImageHandler { [&](RemoteScreen const&, uint32_t id) {
+                                     if (id == 7)
+                                         handled = true;
+                                 } },
+                                 NativeClient::SessionEventHandler {},
+                                 NativeClient::LayoutHandler {} };
+
+    auto const rgba = std::to_underlying(vtbackend::ImageFormat::RGBA);
+    auto reply = GENERATE_COPY(
+        proto::ImageData { .imageId = 0, .format = rgba, .width = 0, .height = 3, .data = {} },
+        proto::ImageData { .imageId = 0, .format = rgba, .width = 0x8000'0000U, .height = 1, .data = {} },
+        proto::ImageData {
+            .imageId = 0, .format = rgba, .width = 2, .height = 3, .data = std::vector<std::byte>(4) });
+
+    auto scenario = [](core::net::EventLoop* loop, NativeClient* client, bool const* handled) -> Task<void> {
+        co_await core::net::testing::waitUntil(loop, [&] { return *handled; });
+        auto const it = client->screens().find(1);
+        REQUIRE(it != client->screens().end());
+        CHECK(it->second.imageData(7) == nullptr);
+        client->detach();
+    }(&loop, &client, &handled);
+    loop.blockOn(core::net::testing::allOf(
+        client.run(), fakeImageServer(&loop, serverSock, std::move(reply)), std::move(scenario)));
+
+    CHECK(handled);
 }
 
 namespace
