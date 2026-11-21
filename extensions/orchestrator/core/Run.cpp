@@ -810,6 +810,22 @@ std::vector<RunEffect> advance(Run& run, RunInput const& input, StepContext cons
     return effects;
 }
 
+RunTimes timesOf(std::span<StateChange const> history) noexcept
+{
+    auto times = RunTimes {};
+    // From the second entry on; an empty history has none, and iota's bounds must not cross.
+    for (auto const index: std::views::iota(std::size_t { 1 }, std::max(history.size(), std::size_t { 1 })))
+    {
+        auto const& change = history[index - 1];
+        if (change.state == "blocked" && history[index].wallMs >= change.wallMs)
+            times.waitingMs += history[index].wallMs - change.wallMs;
+    }
+    if (!history.empty() && history.back().state == "finished"
+        && history.back().wallMs >= history.front().wallMs)
+        times.wallMs = history.back().wallMs - history.front().wallMs;
+    return times;
+}
+
 std::optional<std::string> stepTag(Run const& run)
 {
     if (auto const* const preparing = std::get_if<Preparing>(&run.state))

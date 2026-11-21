@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <expected>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -171,6 +172,16 @@ struct StateChange
 
 /// The most state changes a run's history keeps: the first, and the latest after it.
 inline constexpr std::size_t MaxHistory = 64;
+
+/// How long a run took, read from its history.
+struct RunTimes
+{
+    std::optional<uint64_t> wallMs; ///< From dispatch to its end; none while it runs, or without a history.
+    uint64_t waitingMs = 0;         ///< Time its agent was blocked, waiting for the user; a wait still going
+                                    ///< on is not counted.
+
+    [[nodiscard]] bool operator==(RunTimes const&) const = default;
+};
 
 /// One agent run, from dispatch to the Finished list.
 struct Run
@@ -465,6 +476,10 @@ inline constexpr uint32_t RunSchema = 3;
 /// A run as stored, without its monotonic fields.
 /// @param run The run.
 /// @return One JSON object with `"v": RunSchema`.
+/// @param history A run's history (Run::history).
+/// @return How long it took, and how long its agent waited for the user.
+[[nodiscard]] RunTimes timesOf(std::span<StateChange const> history) noexcept;
+
 [[nodiscard]] std::string toJson(Run const& run);
 
 /// A stored run.

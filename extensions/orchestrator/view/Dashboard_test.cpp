@@ -18,6 +18,7 @@
 
 #include <orchestrator/core/Fixtures.hpp>
 #include <orchestrator/core/Reconcile.hpp>
+#include <orchestrator/core/Stats.hpp>
 #include <orchestrator/view/Band.hpp>
 #include <orchestrator/view/Dashboard.hpp>
 #include <orchestrator/view/Sections.hpp>
@@ -68,6 +69,28 @@ using Fixture = DashboardFixture;
 {
     auto run = storedRun(Running {}, RunningId, ChangeRequestRef { 2375 });
     run.lastStatus = std::nullopt;
+    return run;
+}
+
+/// A run that finished as completed, its statistics read and its history kept.
+[[nodiscard]] Run finishedWithStats()
+{
+    auto run = finishedRun(DoneId, ChangeRequestRef { 2379 }, Fate::Removed, Seen::Opened, "fix_ci");
+    run.lastStatus = AgentStatus::Done;
+    run.history = {
+        StateChange { .wallMs = DispatchWallMs, .state = "preparing" },
+        StateChange { .wallMs = DispatchWallMs + 20'000, .state = "running" },
+        StateChange { .wallMs = DispatchWallMs + 300'000, .state = "blocked" },
+        StateChange { .wallMs = DispatchWallMs + 395'000, .state = "running" },
+        StateChange { .wallMs = DispatchWallMs + 1'800'000, .state = "done" },
+        StateChange { .wallMs = DispatchWallMs + 1'830'000, .state = "ending" },
+        StateChange { .wallMs = DispatchWallMs + 1'840'000, .state = "finished" },
+    };
+    run.stats = parseStats(readFixture(FixtureRoot::Contract, "agent-stats/format-1/basic.json")).value();
+    run.stats->tokens = StatsTokens {
+        .input = 152, .output = 42'348, .thinking = 16'692, .cacheWrite = 192'679, .cacheRead = 12'895'510
+    };
+    run.stats->subagents = StatsSubagents { .count = 2, .apiCalls = 9, .tokens = { .output = 3'100 } };
     return run;
 }
 
@@ -125,6 +148,7 @@ struct Scene
                                       IssueRef { 2356 },
                                       "issue") } };
     auto const paneRefused = World { .prs = { "github/prs-empty.json" }, .stored = { paneRefusedRun() } };
+    auto const withStats = World { .prs = { "github/prs-empty.json" }, .stored = { finishedWithStats() } };
     return {
         Scene { .name = "empty", .world = World { .configJson = "{}" } },
         Scene { .name = "lists", .world = listsOnly },
@@ -166,6 +190,9 @@ struct Scene
                 .world = keptReasons,
                 .keys = "\x1b[F\t"sv,
                 .sizes = { Narrow } },
+        // A finished run's details carry what its agent spent and did, and how long it waited for the user.
+        Scene { .name = "finished-stats", .world = withStats, .keys = "\x1b[F"sv, .sizes = { Wide } },
+        Scene { .name = "finished-stats", .world = withStats, .keys = "\x1b[F\t"sv, .sizes = { Narrow } },
         Scene { .name = "pane-refused", .world = paneRefused, .keys = "\x1b[F"sv, .sizes = { Wide } },
         Scene { .name = "pane-refused", .world = paneRefused, .keys = "\x1b[F\t"sv, .sizes = { Narrow } },
         Scene { .name = "orphans", .world = orphansWorld(), .keys = "\x1b[F"sv, .sizes = { Medium } },

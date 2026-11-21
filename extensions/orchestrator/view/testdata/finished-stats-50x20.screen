@@ -1,0 +1,20 @@
+╭─ Details ──────────────────────────────────────╮
+│ pr-2379 · fix CI · completed                   │
+│                                                │
+│ task      fix CI                               │
+│ model     sonnet                               │
+│ state     completed, worktree removed, seen    │
+│ time      30m 40s wall · 2m 30s active · 1m    │
+│             35s waiting for you                │
+│ tokens    42.3k out · 152 in · 12.9M cache     │
+│             read · 192.7k cache write          │
+│ cache     98.5% hit                            │
+│ cost      $0.12, as Claude Code reports it     │
+│ calls     4 API calls · 2 prompts · 1 API      │
+│             error                              │
+│ tools     Bash 2 · Read 1 · 1 failed           │
+│ agents    2 subagents (3.1k out) · 1           │
+│             compaction…                        │
+╰────────────────────────────────────────────────╯
+ ↑↓ move · enter open · d dispatch · ? help       
+ ⬢ agents 0/4                                     

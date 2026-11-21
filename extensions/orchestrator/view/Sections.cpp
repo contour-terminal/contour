@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <initializer_list>
 #include <iterator>
 #include <limits>
 #include <optional>
@@ -389,15 +390,126 @@ namespace
                      .details = std::move(details) };
     }
 
+    // {{{ statistics
+
+    /// The most tools a run's details name.
+    constexpr auto MaxShownTools = std::size_t { 5 };
+
+    /// @return Such as `152`, `42.3k` or `12.9M`.
+    [[nodiscard]] std::string countText(uint64_t count)
+    {
+        if (count < 1'000)
+            return std::format("{}", count);
+        if (count < 1'000'000)
+            return std::format("{:.1f}k", static_cast<double>(count) / 1'000);
+        return std::format("{:.1f}M", static_cast<double>(count) / 1'000'000);
+    }
+
+    /// @return Such as `45s`, `14m 47s` or `2h 3m`.
+    [[nodiscard]] std::string spanText(uint64_t ms)
+    {
+        auto const seconds = ms / 1'000;
+        if (seconds < 60)
+            return std::format("{}s", seconds);
+        if (seconds < 3'600)
+            return std::format("{}m {}s", seconds / 60, seconds % 60);
+        return std::format("{}h {}m", seconds / 3'600, (seconds % 3'600) / 60);
+    }
+
+    /// @return Such as `1 prompt` or `2 prompts`.
+    [[nodiscard]] std::string counted(uint64_t count, std::string_view noun)
+    {
+        return std::format("{} {}{}", count, noun, count == 1 ? "" : "s");
+    }
+
+    /// @return @p parts joined with ` · `, the empty ones left out.
+    [[nodiscard]] std::string joined(std::initializer_list<std::string> parts)
+    {
+        auto text = std::string {};
+        for (auto const& part: parts)
+            if (!part.empty())
+                text += text.empty() ? part : std::format(" · {}", part);
+        return text;
+    }
+
+    /// The details a run's statistics add: what its agent spent and did, and how long it waited for the user.
+    [[nodiscard]] std::vector<DetailLine> statsDetails(Run const& run)
+    {
+        if (run.failure)
+            return {};
+        auto const times = timesOf(run.history);
+        // Until the first read a minute in, there is nothing to say: the panel keeps its room for the rest.
+        if (!run.stats)
+            return {};
+        auto const& stats = *run.stats;
+        auto details = std::vector<DetailLine> {};
+        details.push_back(DetailLine {
+            .label = "time",
+            .value =
+                joined({ times.wallMs ? std::format("{} wall", spanText(*times.wallMs)) : std::string {},
+                         std::format("{} active", spanText(stats.activeMs)),
+                         times.waitingMs != 0 ? std::format("{} waiting for you", spanText(times.waitingMs))
+                                              : std::string {} }) });
+        details.push_back(DetailLine {
+            .label = "tokens",
+            .value = joined({ std::format("{} out", countText(stats.tokens.output)),
+                              std::format("{} in", countText(stats.tokens.input)),
+                              std::format("{} cache read", countText(stats.tokens.cacheRead)),
+                              std::format("{} cache write", countText(stats.tokens.cacheWrite)) }) });
+        if (auto const hit = cacheHitOf(stats.tokens))
+            details.push_back(
+                DetailLine { .label = "cache", .value = std::format("{:.1f}% hit", *hit * 100) });
+        details.push_back(
+            stats.cost
+                ? DetailLine { .label = "cost",
+                               .value = std::format("${:.2f}, as Claude Code reports it", stats.cost->usd) }
+                : DetailLine {
+                      .label = "cost", .value = "recorded when the agent exits", .role = Role::Dim });
+        details.push_back(DetailLine {
+            .label = "calls",
+            .value =
+                joined({ counted(stats.apiCalls, "API call"),
+                         counted(stats.prompts, "prompt"),
+                         stats.apiErrors != 0 ? counted(stats.apiErrors, "API error") : std::string {} }),
+            .role = stats.apiErrors != 0 ? Role::Warning : Role::Text });
+        auto tools = std::string {};
+        for (auto const& tool: stats.tools | std::views::take(MaxShownTools))
+            tools += std::format("{}{} {}", tools.empty() ? "" : " · ", tool.name, tool.calls);
+        details.push_back(DetailLine {
+            .label = "tools",
+            .value = clean(joined({ tools.empty() ? counted(stats.toolCalls, "call") : tools,
+                                    stats.toolFailures != 0 ? std::format("{} failed", stats.toolFailures)
+                                                            : std::string {} })) });
+        if (stats.subagents.count != 0 || stats.compactions != 0)
+            details.push_back(DetailLine { .label = "agents",
+                                           .value = std::format("{} ({} out) · {}",
+                                                                counted(stats.subagents.count, "subagent"),
+                                                                countText(stats.subagents.tokens.output),
+                                                                counted(stats.compactions, "compaction")) });
+        for (auto const& pullRequest: stats.pullRequests)
+            details.push_back(
+                DetailLine { .label = "opened",
+                             .value = clean(std::format("#{} {}", pullRequest.number, pullRequest.url)),
+                             .fit = DetailFit::Cut });
+        return details;
+    }
+
+    // }}}
+
     /// The details every run row shows.
     [[nodiscard]] std::vector<DetailLine> runDetails(Lists const& lists, Run const& run)
     {
-        return { DetailLine { .label = "task", .value = clean(taskLabel(lists.config, run)) },
-                 DetailLine { .label = "model", .value = clean(run.model) },
-                 DetailLine { .label = "state", .value = clean(runStateText(run)) },
-                 DetailLine { .label = "branch", .value = clean(run.branch) },
-                 DetailLine { .label = "worktree", .value = clean(run.worktree) },
-                 DetailLine { .label = "url", .value = clean(run.url), .role = Role::Dim } };
+        auto details =
+            std::vector<DetailLine> { DetailLine { .label = "task",
+                                                   .value = clean(taskLabel(lists.config, run)) },
+                                      DetailLine { .label = "model", .value = clean(run.model) },
+                                      DetailLine { .label = "state", .value = clean(runStateText(run)) } };
+        // What the agent spent and did comes before where it worked: it is what a finished run is opened for.
+        std::ranges::move(statsDetails(run), std::back_inserter(details));
+        details.push_back(DetailLine { .label = "branch", .value = clean(run.branch) });
+        details.push_back(DetailLine { .label = "worktree", .value = clean(run.worktree) });
+        details.push_back(DetailLine { .label = "url", .value = clean(run.url), .role = Role::Dim });
+        return details;
     }
 
     [[nodiscard]] Row agentRow(Lists const& lists, Run const& run)

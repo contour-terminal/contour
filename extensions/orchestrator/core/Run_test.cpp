@@ -2363,3 +2363,25 @@ TEST_CASE("a run's history records each state it enters, first kept", "[orchestr
     CHECK(run.history.front().state == "preparing");
     CHECK(run.history.back() == StateChange { .wallMs = NowMs + 100, .state = "running" });
 }
+
+TEST_CASE("a run's times are read from its history", "[orchestrator][run]")
+{
+    using orchestrator::RunTimes;
+    using orchestrator::timesOf;
+    CHECK(timesOf({}) == RunTimes {});
+    auto const once = std::vector { StateChange { .wallMs = 1'000, .state = "preparing" } };
+    CHECK(timesOf(once) == RunTimes {});
+
+    // Blocked twice, the second time until it finished; still running, its wall time is not known.
+    auto history = std::vector {
+        StateChange { .wallMs = 1'000, .state = "preparing" },
+        StateChange { .wallMs = 2'000, .state = "running" },
+        StateChange { .wallMs = 5'000, .state = "blocked" },
+        StateChange { .wallMs = 9'000, .state = "running" },
+        StateChange { .wallMs = 10'000, .state = "blocked" },
+    };
+    CHECK(timesOf(history) == RunTimes { .wallMs = std::nullopt, .waitingMs = 4'000 });
+    history.push_back(StateChange { .wallMs = 12'000, .state = "ending" });
+    history.push_back(StateChange { .wallMs = 13'000, .state = "finished" });
+    CHECK(timesOf(history) == RunTimes { .wallMs = 12'000, .waitingMs = 6'000 });
+}

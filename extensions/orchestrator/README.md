@@ -119,6 +119,17 @@ a parse error. A read that fails shows the command to run by hand.
 Its screens are pinned by golden files in `view/testdata/`, one per scene and size; after a deliberate
 change, `ORCHESTRATOR_UPDATE_GOLDENS=1 orchestrator_test "[view]"` writes them again, to be checked by eye.
 
+## Statistics
+
+A run's details say what its agent spent and did: its wall time from dispatch to end, the time Claude Code
+measured it working, and the time it waited for you (blocked); its tokens by kind and how many were read from
+the cache; the cost Claude Code recorded when the agent exited, as it reports it; its API calls, prompts and
+failed calls; the tools it called most and how many failed; its subagents and compactions; and the pull
+requests it opened. The numbers are read with the declared command `agent-stats` (`contour agent stats …
+--format 1 --json`, contract in `contract/agent-stats/`): a minute after the agent starts and every minute
+after, and once more when its run finishes. They are stored with the run, beside the history of the states it
+entered and when, so a finished run keeps them after its worktree and Claude Code's log are gone.
+
 ## The contract
 
 What the extension and Contour must agree on comes in three parts, each tested from both sides:
