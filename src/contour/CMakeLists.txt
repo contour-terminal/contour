@@ -1075,6 +1075,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/MainWindowControllerMock.hpp
             test/SwitcherHost.hpp
             test/MockMainController.hpp
+            test/ContextMenuRows.hpp
             test/QmlMocks.hpp
             test/RecordingAnnouncer.hpp
             test/PermissionFixtures.hpp

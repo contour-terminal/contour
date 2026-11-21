@@ -21,6 +21,7 @@
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/AppFixture.hpp>
 #include <contour/test/AppearanceFixtures.hpp>
+#include <contour/test/ContextMenuRows.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/RecordingUserNotificationCenter.hpp>
 #include <contour/test/SecureInputFixtures.hpp>
@@ -6442,24 +6443,6 @@ TEST_CASE("TerminalSessionManager: a daemon's window routes the workspace mutati
     manager.releaseBinding(binding);
 }
 
-namespace
-{
-/// @return The row titled @p title in the context menu @p rows, searching submenus too; an empty map for
-/// none.
-[[nodiscard]] QVariantMap contextMenuRowOf(QVariantList const& rows, QString const& title)
-{
-    for (auto const& value: rows)
-    {
-        auto row = value.toMap();
-        if (row["title"].toString() == title)
-            return row;
-        if (auto nested = contextMenuRowOf(row["children"].toList(), title); !nested.isEmpty())
-            return nested;
-    }
-    return {};
-}
-} // namespace
-
 TEST_CASE("TerminalSessionManager: a daemon's window colours a sidebar tab row's tab on its daemon",
           "[manager][sidebar][tabcolor][daemon]")
 {
@@ -6490,7 +6473,7 @@ TEST_CASE("TerminalSessionManager: a daemon's window colours a sidebar tab row's
     };
     auto const colourRow = [&](uint64_t workspace, uint64_t tab, QString const& title) {
         window->sidebar().openContextMenu(rowOfTab(workspace, tab), QPointF {});
-        return contextMenuRowOf(window->sidebarContextMenuModel(), title);
+        return contour::test::menuRowOf(window->sidebarContextMenuModel(), title);
     };
     auto picks =
         QSignalSpy { window.controller, &contour::window::WindowController::sidebarTabColorPickRequested };

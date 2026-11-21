@@ -510,7 +510,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param tab The tab's id, as the window's directory lists it (DirectoryTab::id).
     /// @return The tab; null for a window a daemon serves, whose ids are the daemon's and not the model's,
     ///         and for a tab of a workspace the window does not own.
-    [[nodiscard]] vtworkspace::Tab* ownTabOf(window::WindowController const& window, uint64_t tab) const;
+    [[nodiscard]] vtworkspace::Tab const* ownTabOf(window::WindowController const& window,
+                                                   uint64_t tab) const;
 
     /// Colours the tab @p tab, whichever workspace of @p window's directory holds it, shown or not, as the
     /// user chose: on its daemon for a window a daemon serves (named by a session it holds, as renameTab()
@@ -2230,6 +2231,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @return Whether @p window lists the workspaces of a daemon (or another host), whose labels, order and
     ///         tabs that host owns, rather than its own process's.
     [[nodiscard]] bool listsRemotely(window::WindowController const& window) const noexcept;
+
+    /// @param window A window a daemon serves.
+    /// @param tab A tab's id, as @p window's directory lists it.
+    /// @return A daemon session of that tab, by which the daemon's tab edits name it; none for a tab the
+    ///         directory does not list, or lists without a pane.
+    [[nodiscard]] static std::optional<uint64_t> listedSessionOf(window::WindowController const& window,
+                                                                 uint64_t tab);
 
     /// @return Whether @p window owns one workspace or none: an in-process window keeps its last one, so
     ///         closeWorkspace() and confirmCloseWorkspace() refuse to close it.
