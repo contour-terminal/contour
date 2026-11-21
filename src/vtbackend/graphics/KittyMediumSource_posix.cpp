@@ -137,8 +137,12 @@ namespace
     /// Opens @p path one component at a time down from @p root, following no link below the root: a link's
     /// target is never looked up, so no component reaches an automount or a network filesystem, nor leaves
     /// the root. The root itself is configuration, and its own links (macOS `/tmp`) are followed.
-    [[nodiscard]] std::expected<Walked, MediaRefusal> walkBeneath(std::filesystem::path const& root,
-                                                                  std::filesystem::path const& path)
+    [[nodiscard]] std::expected<Walked, MediaRefusal> walkBeneath(
+        std::filesystem::path const& root,
+        std::filesystem::path const& path,
+        MediaPolicy const& policy,
+        Medium medium,
+        MediumReadInterleavings const& interleavings)
     {
         auto directory = FileDescriptor { ::open(root.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC) };
         if (directory.get() < 0)
@@ -154,14 +158,26 @@ namespace
         if (components.empty())
             return std::unexpected(MediaRefusal::NotRegularFile);
 
+        // No link below the root is followed, so the real path is known once the root is open: judged before
+        // anything below the root is opened -- a root's spelling re-pointed into /dev must open no device.
+        auto real = *walked;
+        for (auto const& component: components)
+            real /= component;
+        if (auto const accepted = checkPath(policy, real, medium); !accepted)
+            return std::unexpected(accepted.error());
+
         for (auto const& component: components | std::views::take(components.size() - 1))
         {
+            if (interleavings.opening)
+                interleavings.opening(*walked / component);
             auto next = openBeneath(directory.get(), component, O_RDONLY | O_DIRECTORY);
             if (!next)
                 return std::unexpected(next.error());
             directory = std::move(*next);
             *walked /= component;
         }
+        if (interleavings.opening)
+            interleavings.opening(*walked / components.back());
         // O_NONBLOCK keeps a FIFO from blocking the open until a writer appears.
         auto file = openBeneath(directory.get(), components.back(), O_RDONLY | O_NONBLOCK);
         if (!file)
@@ -210,13 +226,10 @@ std::expected<std::vector<uint8_t>, MediaRefusal> PosixMediumSource::read(std::s
         _interleavings.pathAccepted(requested);
 
     // Down from the root, following no link: nothing below it is resolved beyond what the path names.
-    auto walked = walkBeneath(*root, requested);
+    auto walked = walkBeneath(*root, requested, policy, medium, _interleavings);
     if (!walked)
         return std::unexpected(walked.error());
     auto const& canonical = walked->path;
-    // The real path, judged again: the root's own links may have led elsewhere than its spelling says.
-    if (auto const accepted = checkPath(policy, canonical, medium); !accepted)
-        return std::unexpected(accepted.error());
     auto const& fd = walked->file;
 
     // Defence in depth: the descriptor must name what was walked.

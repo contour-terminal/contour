@@ -49,20 +49,24 @@ struct MediumReadInterleavings
 {
     /// Called with the requested path once checkPath() accepted it, just before it is walked and opened.
     std::function<void(std::filesystem::path const&)> pathAccepted {};
+    /// Called with each component's real path below the root just before it is opened.
+    std::function<void(std::filesystem::path const&)> opening {};
     /// Called with the canonical path after the read, just before a `t=t` file is unlinked.
     std::function<void(std::filesystem::path const&)> beforeUnlink {};
 };
 
-/// The POSIX (Linux, macOS) source. In this order, refusing at the first step that fails: checkPath() on the
-/// requested path, lexically normal, before anything is looked up -> walk down from its enclosingRoot() one
-/// component at a time with `openat(O_NOFOLLOW)`, refusing any link below the root without looking its target
-/// up (the file itself opened `O_RDONLY|O_NONBLOCK`) -> checkPath() on the real path walked -> the opened
-/// descriptor's own path must be that path -> `fstat` -> checkOpenedFile() -> a read bounded by the size
-/// limit
-/// -> deletionAfterRead() -> `unlinkat` in the walked directory, only if it is still where it was and the
-/// name still names the file read. Nothing outside the roots is resolved, and nothing is opened before the
-/// path policy accepted it: opening a device node has side effects. A FIFO is opened without blocking and
-/// refused.
+/// The POSIX (Linux, macOS) source. In this order, refusing at the first step that fails:
+/// - checkPath() on the requested path, lexically normal, before anything is looked up;
+/// - open its enclosingRoot(), whose own links are followed, and checkPath() on the real path that the root's
+///   real path and the requested components make, before anything below the root is opened;
+/// - walk down one component at a time with `openat(O_NOFOLLOW)`, refusing any link below the root without
+///   looking its target up (the file itself opened `O_RDONLY|O_NONBLOCK`, so a FIFO does not block);
+/// - the opened descriptor's own path must be the real path judged;
+/// - `fstat`, checkOpenedFile(), a read bounded by the size limit;
+/// - deletionAfterRead(), then `unlinkat` in the walked directory, only if it is still where it was and the
+///   name still names the file read.
+/// Nothing outside the roots is resolved, and nothing is opened before the path policy accepted it: opening a
+/// device node has side effects.
 class PosixMediumSource final: public KittyMediumSource
 {
   public:

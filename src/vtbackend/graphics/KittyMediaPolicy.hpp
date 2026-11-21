@@ -60,8 +60,7 @@ enum class MediaRefusal : uint8_t
     MultipleLinks,     ///< The opened file has more than one hard link.
     TooLarge,          ///< The opened file exceeds the size limit.
     Unreadable,        ///< It does not exist, vanished, was swapped, or reading it failed.
-    SymbolicLink, ///< A component below the root is a symbolic link: never followed, nor its target looked
-                  ///< up.
+    SymbolicLink,      ///< A component below the root is a symbolic link, never followed.
 };
 
 /// The one reply every refused file medium gets, whatever the reason: inside the allowed roots it still

@@ -155,4 +155,42 @@ TEST_CASE("KittyMediaPolicy.isRemoteShellClient", "[kitty][media]")
     CHECK_FALSE(isRemoteShellClient(local));
 }
 
+TEST_CASE("KittyMediaPolicy.enclosingRoot", "[kitty][media]")
+{
+    auto policy = testPolicy();
+    policy.temporaryRoots = { "/tmp", "/tmp/a", "/tmp/.h" };
+    policy.allowedRoots = { "/home/u/.claude/plugins/data", "/tmp/a/b" };
+
+    struct RootCase
+    {
+        std::string_view path;
+        Medium medium;
+        std::optional<std::string_view> root;
+    };
+    auto const row = GENERATE(
+        // The deepest root wins.
+        RootCase { "/tmp/a/x", Medium::File, "/tmp/a" },
+        RootCase { "/tmp/a/b/x", Medium::File, "/tmp/a/b" },
+        RootCase { "/tmp/x", Medium::File, "/tmp" },
+        // A root with a hidden component between it and the path is skipped; one below that component is not.
+        RootCase { "/tmp/.h/x", Medium::File, "/tmp/.h" },
+        RootCase { "/tmp/a/.h/x", Medium::File, std::nullopt },
+        // t=t never walks from an allow-list root: /tmp/a/b is one, so /tmp/a encloses.
+        RootCase { "/tmp/a/b/x", Medium::TemporaryFile, "/tmp/a" },
+        RootCase { "/home/u/.claude/plugins/data/x", Medium::TemporaryFile, std::nullopt },
+        RootCase { "/dev/shm/x", Medium::TemporaryFile, "/dev/shm" },
+        RootCase { "/dev/shm/x", Medium::File, std::nullopt },
+        RootCase { "/elsewhere/x", Medium::File, std::nullopt });
+
+    INFO(std::format("{} t={}", row.path, static_cast<char>(row.medium)));
+    auto const root = enclosingRoot(policy, std::filesystem::path { row.path }, row.medium);
+    if (row.root)
+    {
+        REQUIRE(root.has_value());
+        CHECK(*root == std::filesystem::path { *row.root });
+    }
+    else
+        CHECK_FALSE(root.has_value());
+}
+
 #endif

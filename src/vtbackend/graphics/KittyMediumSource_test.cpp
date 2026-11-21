@@ -287,4 +287,57 @@ TEST_CASE("KittyMediumSource.posix.nothing_outside_the_roots_is_resolved", "[kit
         MediaRefusal::OutsideRoots);
 }
 
+TEST_CASE("KittyMediumSource.posix.a_root_spelled_through_a_link", "[kitty][media]")
+{
+    // As macOS spells `/tmp`: the root's own link is followed, and the real path is what the policy judges.
+    auto const root = TestDirectory {};
+    auto const elsewhere = TestDirectory {};
+    auto const spelling = elsewhere.path() / "spelled-root";
+    std::filesystem::create_directory_symlink(root.path(), spelling);
+    auto const file = root.write("tty-graphics-protocol-a", "RGBA");
+    auto const requested = (spelling / "tty-graphics-protocol-a").native();
+    auto const source = PosixMediumSource {};
+    auto policy = policyFor(root);
+
+    SECTION("read through the spelling, the canonical root beside it")
+    {
+        policy.temporaryRoots = { spelling, root.path() };
+        auto const bytes = source.read(requested, Medium::File, policy);
+        REQUIRE(bytes.has_value());
+        CHECK(*bytes == bytesOf("RGBA"));
+    }
+
+    SECTION("the spelling alone does not admit where it leads")
+    {
+        policy.temporaryRoots = { spelling };
+        checkRefused(source.read(requested, Medium::File, policy), MediaRefusal::OutsideRoots);
+    }
+
+    SECTION("t=t through the spelling deletes the file")
+    {
+        policy.temporaryRoots = { spelling, root.path() };
+        REQUIRE(source.read(requested, Medium::TemporaryFile, policy).has_value());
+        CHECK_FALSE(std::filesystem::exists(file));
+    }
+}
+
+TEST_CASE("KittyMediumSource.posix.a_root_relinked_into_a_system_tree_opens_nothing_below_it",
+          "[kitty][media]")
+{
+    // A root's spelling re-pointed into /dev: the real path is judged before anything below the root is
+    // opened, as opening a device node has side effects.
+    auto const elsewhere = TestDirectory {};
+    auto const spelling = elsewhere.path() / "spelled-root";
+    std::filesystem::create_directory_symlink("/dev", spelling);
+    auto opened = std::vector<std::filesystem::path> {};
+    auto const source = PosixMediumSource { { .opening = [&](std::filesystem::path const& path) {
+        opened.push_back(path);
+    } } };
+    auto policy = policyFor(elsewhere);
+    policy.temporaryRoots = { spelling };
+
+    checkRefused(source.read((spelling / "null").native(), Medium::File, policy), MediaRefusal::SystemPath);
+    CHECK(opened.empty());
+}
+
 #endif
