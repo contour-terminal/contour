@@ -1811,6 +1811,15 @@ constexpr StringLiteral ImagesConfig {
     "    {comment} Enable or disable Good Image Protocol (GIP) support (disabled by default).\n"
     "    good_image_protocol: {}\n"
     "\n"
+    "    {comment} Whether kitty graphics may read image files a local program names (t=f, t=t), as Claude\n"
+    "    {comment} Code's pictures do. Only for sessions whose output comes from this machine; never over\n"
+    "    {comment} SSH, in tmux panes, or for a daemon's remote clients. Always off on Windows.\n"
+    "    kitty_file_transmission: {}\n"
+    "\n"
+    "    {comment} Directories, besides the temp directories, that t=f may read files below. A leading ~\n"
+    "    {comment} is your home directory; a directory that would open all of it is ignored.\n"
+    "    kitty_file_allow_list: {}\n"
+    "\n"
 };
 
 constexpr StringLiteral DaemonConfig {
@@ -2678,8 +2687,9 @@ constexpr StringLiteral LiveWeb { "option determines whether the instance should
 constexpr StringLiteral ImagesWeb {
     "section contains configuration options related to inline images. It includes options like "
     "`sixel_scrolling`, `sixel_register_count`, and `good_image_protocol` to control various aspects of "
-    "image rendering. The maximum image size is derived from the screen size; `max_width` and "
-    "`max_height` are deprecated and ignored."
+    "image rendering, and `kitty_file_transmission` and `kitty_file_allow_list` to control which files "
+    "the kitty graphics protocol may read (see the kitty graphics page). The maximum image size is derived "
+    "from the screen size; `max_width` and `max_height` are deprecated and ignored."
 };
 
 constexpr StringLiteral QuickTerminalWeb {

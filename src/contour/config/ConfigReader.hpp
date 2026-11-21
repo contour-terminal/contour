@@ -879,7 +879,16 @@ struct Writer
 
     [[nodiscard]] std::string format(std::string_view doc, ImagesConfig const& v)
     {
-        return format(doc, v.sixelScrolling, v.maxImageColorRegisters, v.goodImageProtocol);
+        auto allowList = std::string { "[" };
+        for (auto const& directory: v.kittyFileAllowList)
+            allowList += std::format("{}{}", allowList.size() > 1 ? ", " : "", SingleQuoted { directory });
+        allowList += "]";
+        return format(doc,
+                      v.sixelScrolling,
+                      v.maxImageColorRegisters,
+                      v.goodImageProtocol,
+                      v.kittyFileTransmission,
+                      allowList);
     }
 
     /// @return @p duration in whole seconds, as the configuration writes it.

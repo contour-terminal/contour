@@ -487,15 +487,6 @@ namespace
     {
         QCoreApplication::exit(status);
     }
-
-    /// The policy every local session's kitty file media are read under: the one place the app chooses it,
-    /// until the configuration supplies one per profile.
-    /// @param env The app's environment, whose `$TMPDIR` is a temp root.
-    [[nodiscard]] vtbackend::kitty_graphics::MediaPolicy kittyMediaDefaults(core::Environment const& env)
-    {
-        return vtbackend::kitty_graphics::defaultMediaPolicy(
-            env, fs::path { QDir::homePath().toStdU16String() }, vtbackend::kitty_graphics::currentUserId());
-    }
 } // namespace
 
 ContourGuiApp::ContourGuiApp(core::Environment const& env,
@@ -543,7 +534,6 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _workspaceGitExecutor(cli::makeBackgroundExecutor(GitProbeThreads)),
     _injectedLinkServices { std::move(linkServices) },
     _kittyMediumSource { vtbackend::kitty_graphics::makePlatformMediumSource() },
-    _kittyMediaPolicy { kittyMediaDefaults(env) },
     _sessionFactory(sessionFactory ? std::move(sessionFactory)
                                    : std::make_unique<session::AppSessionFactory>(
                                          *this, _processPlacement, makeSshTerminfoInstaller())),
@@ -683,8 +673,17 @@ std::optional<vtbackend::GitHeadServices> ContourGuiApp::gitHeadServices() noexc
 
 vtbackend::kitty_graphics::KittyMediumServices ContourGuiApp::kittyMediumServices() const
 {
-    return vtbackend::kitty_graphics::KittyMediumServices { .source = *_kittyMediumSource,
-                                                            .policy = _kittyMediaPolicy };
+    // From the configuration as it is now, so an edit reaches the sessions started after it; the app's own
+    // environment (its `$TMPDIR`), home and user complete it.
+    auto const home = fs::path { QDir::homePath().toStdU16String() };
+    return vtbackend::kitty_graphics::KittyMediumServices {
+        .source = *_kittyMediumSource,
+        .policy =
+            vtbackend::kitty_graphics::mediaPolicy(processEnvironment(),
+                                                   config::kittyMediaSettings(_config.images.value(), home),
+                                                   home,
+                                                   vtbackend::kitty_graphics::currentUserId())
+    };
 }
 
 std::optional<vthost::WorkspaceGitServices> ContourGuiApp::workspaceGitServices() noexcept

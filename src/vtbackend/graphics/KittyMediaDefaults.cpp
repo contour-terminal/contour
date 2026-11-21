@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <ranges>
-#include <string_view>
 #include <system_error>
 
 #ifdef __APPLE__
@@ -19,9 +18,6 @@ namespace vtbackend::kitty_graphics
 
 namespace
 {
-    /// The allow-list root below the home directory: where Claude Code's plugins cache what they render.
-    constexpr auto DefaultAllowedRoot = std::string_view { ".claude/plugins/data" };
-
     /// @return @p path with every link resolved as far as it exists: the policy compares canonical paths.
     [[nodiscard]] std::filesystem::path canonicalRoot(std::filesystem::path const& path)
     {
@@ -98,24 +94,25 @@ std::vector<std::filesystem::path> platformTemporaryFileOnlyRoots()
 #endif
 }
 
-MediaPolicy defaultMediaPolicy(core::Environment const& env,
-                               std::filesystem::path const& homeDirectory,
-                               uint32_t userId)
+MediaPolicy mediaPolicy(core::Environment const& env,
+                        MediaSettings const& settings,
+                        std::filesystem::path const& homeDirectory,
+                        uint32_t userId)
 {
 #ifdef _WIN32
     // The owner, hidden-file and reparse-point rules are not defined there yet.
-    constexpr auto Transmission = FileTransmission::Disabled;
+    auto const transmission = FileTransmission::Disabled;
 #else
-    constexpr auto Transmission = FileTransmission::Enabled;
+    auto const transmission = settings.transmission;
 #endif
-    // A home directory that is not absolute (unset) names no allow-list root: one relative to the working
-    // directory would be wherever the process happened to start.
+    // A home directory that is not absolute (unset) bounds nothing: one relative to the working directory
+    // would be wherever the process happened to start.
     auto const canonicalHome =
         homeDirectory.is_absolute() ? canonicalRoot(homeDirectory) : std::filesystem::path {};
     auto allowedRoots = std::vector<std::filesystem::path> {};
-    if (homeDirectory.is_absolute())
-        addRoot(allowedRoots, homeDirectory / DefaultAllowedRoot);
-    return MediaPolicy { .transmission = Transmission,
+    for (auto const& root: settings.allowList)
+        addRoot(allowedRoots, root);
+    return MediaPolicy { .transmission = transmission,
                          .temporaryRoots = withoutOverBroad(platformTemporaryRoots(env), canonicalHome),
                          .temporaryFileOnlyRoots =
                              withoutOverBroad(platformTemporaryFileOnlyRoots(), canonicalHome),

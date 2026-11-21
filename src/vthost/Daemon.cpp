@@ -1623,14 +1623,17 @@ namespace
         return std::pair { std::string { host }, static_cast<std::uint16_t>(port) };
     }
 
-    /// The policy every hosted session's kitty file media are read under: the one place the daemon chooses
-    /// it, until its configuration supplies one. The daemon's own -- its `$TMPDIR`, its user, its home --
-    /// since files are read where the application wrote them.
+    /// The policy every hosted session's kitty file media are read under: @p settings, from the daemon's
+    /// configuration, completed by the daemon's own -- its `$TMPDIR`, its user, its home -- since files are
+    /// read where the application wrote them.
     /// @param env The daemon's environment.
-    [[nodiscard]] vtbackend::kitty_graphics::MediaPolicy kittyMediaDefaults(core::Environment const& env)
+    /// @param settings What the daemon's configuration says.
+    [[nodiscard]] vtbackend::kitty_graphics::MediaPolicy kittyMediaPolicyOf(
+        core::Environment const& env, vtbackend::kitty_graphics::MediaSettings const& settings)
     {
-        return vtbackend::kitty_graphics::defaultMediaPolicy(
+        return vtbackend::kitty_graphics::mediaPolicy(
             env,
+            settings,
             std::filesystem::path { env.get("HOME").value_or(std::string {}) },
             vtbackend::kitty_graphics::currentUserId());
     }
@@ -1753,7 +1756,8 @@ int runDaemon(DaemonConfig const& config,
             .workspaceGit = WorkspaceGitServices { .probe = *gitProbe, .executor = gitExecutor },
             .kittyMedia =
                 vtbackend::kitty_graphics::KittyMediumServices {
-                    .source = *kittyMediumSource, .policy = kittyMediaDefaults(core::defaultEnvironment()) },
+                    .source = *kittyMediumSource,
+                    .policy = kittyMediaPolicyOf(core::defaultEnvironment(), config.kittyMedia) },
             .extensions = config.extensions ? config.extensions() : nullptr,
             .profiles = config.profiles,
             .profilePtys = config.profiles

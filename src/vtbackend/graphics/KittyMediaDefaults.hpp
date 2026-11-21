@@ -11,9 +11,9 @@
 #include <memory>
 #include <vector>
 
-/// What a composition root grants a local session's kitty file media until configuration supplies its own
-/// (per profile: media on/off and the allow-list). Unlike KittyMediaPolicy, these read the platform: they are
-/// called where the root is wired, never from the terminal.
+/// What a composition root grants a local session's kitty file media: the configuration's say (MediaSettings)
+/// completed by the platform's. Unlike KittyMediaPolicy, these read the platform: they are called where the
+/// root is wired, never from the terminal.
 namespace vtbackend::kitty_graphics
 {
 
@@ -30,18 +30,29 @@ namespace vtbackend::kitty_graphics
 /// @return The roots.
 [[nodiscard]] std::vector<std::filesystem::path> platformTemporaryFileOnlyRoots();
 
-/// The policy by default: file media enabled (disabled on Windows), the platform's temp roots, the allow-list
-/// `~/.claude/plugins/data`, and the size limit of one direct transmission (MaxChunkedPayloadSize). A root
+/// What the configuration decides of the media policy; the platform supplies the rest (mediaPolicy()).
+struct MediaSettings
+{
+    /// Whether file media are read at all. Refused on Windows whatever this says.
+    FileTransmission transmission = FileTransmission::Disabled;
+    /// Further roots `t=f` may read below, home-resolved by the configuration. A relative one is dropped.
+    std::vector<std::filesystem::path> allowList;
+};
+
+/// The policy the configuration's @p settings make on this platform: its temp roots, the allow-list, and the
+/// size limit of one direct transmission (MaxChunkedPayloadSize). File media stay disabled on Windows. A root
 /// that would open the whole home directory -- `/`, the home directory itself or any directory above it,
-/// judged by canonical forms (a `$TMPDIR=$HOME`, a `plugins/data` linked to `~`) -- is dropped.
+/// judged by canonical forms (a `$TMPDIR=$HOME`, an allow-list entry of `~` or one linked to it) -- is
+/// dropped.
 /// @param env The parsing process's environment, for platformTemporaryRoots().
-/// @param homeDirectory The user's home directory, which the allow-list is below; none when it is not
-///        absolute.
+/// @param settings What the configuration says.
+/// @param homeDirectory The user's home directory, which no root may open; ignored when not absolute.
 /// @param userId The reading user, who must own every file read.
 /// @return The policy.
-[[nodiscard]] MediaPolicy defaultMediaPolicy(core::Environment const& env,
-                                             std::filesystem::path const& homeDirectory,
-                                             uint32_t userId);
+[[nodiscard]] MediaPolicy mediaPolicy(core::Environment const& env,
+                                      MediaSettings const& settings,
+                                      std::filesystem::path const& homeDirectory,
+                                      uint32_t userId);
 
 /// @return The id of the user this process runs as: the owner every file read must have. 0 on Windows.
 [[nodiscard]] uint32_t currentUserId() noexcept;
