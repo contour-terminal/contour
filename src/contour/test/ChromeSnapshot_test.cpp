@@ -18,6 +18,7 @@
 #include <contour/test/ChromeSnapshotScene.hpp>
 #include <contour/test/ChromeSnapshotWriter.hpp>
 #include <contour/test/DisplayHarness.hpp>
+#include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMocks.hpp>
 #include <contour/test/TestEnvironment.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
@@ -690,6 +691,31 @@ void checkSwitcherScript(contour::test::snapshot::ChromeSnapshotScene const& sce
     return false;
 }
 
+/// Checks that every tab and pane row a sidebar tree script drew is as tall as the script's
+/// `sidebar.row_spacing` makes it on the row's look.
+/// @param scene The scene the script ran in.
+/// @param variant The picture.
+void checkSidebarRowSpacing(contour::test::snapshot::ChromeSnapshotScene const& scene,
+                            contour::test::snapshot::SnapshotVariant const& variant)
+{
+    using namespace contour::test::snapshot;
+    auto const* context = QQmlEngine::contextForObject(&scene.root());
+    REQUIRE(context != nullptr);
+    auto const twoLines =
+        contour::test::sidebarSpacedToken(*context, "twoLineRowHeight", scriptRow(variant.script).rowSpacing);
+    auto twoLineRows = 0;
+    for (auto const* row:
+         contour::test::itemsNamed(*scene.window().contentItem(), QStringLiteral("sidebarRow")))
+    {
+        if (!row->isVisible() || row->property("isWorkspace").toBool())
+            continue;
+        INFO(row->property("title").toString().toStdString());
+        CHECK(row->height() == twoLines);
+        ++twoLineRows;
+    }
+    CHECK(twoLineRows > 0);
+}
+
 /// Checks what a sidebar colour script drew: the coloured tabs or workspaces wearing their colour in the
 /// script's style, and the uncoloured ones none.
 /// @param scene The scene the script ran in.
@@ -1251,6 +1277,10 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
             case SnapshotScript::ToolTipNewTab:
             case SnapshotScript::ToolTipTab: checkToolTipScript(scene, variant); break;
             case SnapshotScript::SidebarTree:
+            case SnapshotScript::SidebarTreeCompact:
+                static_cast<void>(checkSidebarScript(scene, variant));
+                checkSidebarRowSpacing(scene, variant);
+                break;
             case SnapshotScript::SidebarNeedsYou:
             case SnapshotScript::SidebarCollapsed:
             case SnapshotScript::SidebarTopTabs:
@@ -1320,6 +1350,18 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                     scene.root().findChild<QObject*>(QStringLiteral("sidebarWorkspaceColorFlyout"));
                 REQUIRE(flyout != nullptr);
                 CHECK(flyout->property("opened").toBool());
+                break;
+            }
+            case SnapshotScript::SidebarTabColorPicker: {
+                static_cast<void>(checkSidebarScript(scene, variant));
+                checkSidebarColourScript(scene, variant);
+                auto const* flyout =
+                    scene.root().findChild<QObject*>(QStringLiteral("sidebarTabColorFlyout"));
+                REQUIRE(flyout != nullptr);
+                CHECK(flyout->property("opened").toBool());
+                // It hangs from build's row, not from a tab strip the sidebar placement does not draw.
+                CHECK(flyout->property("parent").value<QQuickItem*>()->property("title").toString()
+                      == QStringLiteral("build"));
                 break;
             }
             case SnapshotScript::QuickTerminal: {

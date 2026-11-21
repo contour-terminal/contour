@@ -440,6 +440,7 @@ class ChromeSnapshotScene
             case ScriptAction::ShowTabToolTip: showToolTips(ToolTipOf::Tab); break;
             case ScriptAction::HoverSidebarRow: hoverSidebarRow(); break;
             case ScriptAction::OpenWorkspaceColorPicker: openWorkspaceColorPicker(); break;
+            case ScriptAction::OpenSidebarTabColorPicker: openSidebarTabColorPicker(); break;
         }
         // The cards announce where the header lives once the panes have their size, which showSticky() reads.
         _incubation.settle();
@@ -1827,6 +1828,19 @@ class ChromeSnapshotScene
         REQUIRE(QTest::qWaitFor([&] { return flyout->property("opened").toBool(); }, PopupSettleMs));
     }
 
+    /// Opens the sidebar's tab colour picker over build's row, as its menu's Custom… does, and waits for it.
+    void openSidebarTabColorPicker()
+    {
+        REQUIRE(QTest::qWaitForWindowExposed(&window(), PopupSettleMs));
+        auto const index = sidebarRowTitled(QStringLiteral("build"))->property("index").toInt();
+        auto const& rows = _controller.sidebarModel().rows();
+        REQUIRE(std::cmp_less(index, rows.size()));
+        auto* flyout = root().findChild<QObject*>(QStringLiteral("sidebarTabColorFlyout"));
+        REQUIRE(flyout != nullptr);
+        emit _controller.sidebarTabColorPickRequested(index, rows[static_cast<std::size_t>(index)].key.tab);
+        REQUIRE(QTest::qWaitFor([&] { return flyout->property("opened").toBool(); }, PopupSettleMs));
+    }
+
     /// Rests the pointer on @p point of the window. Two moves, because a move to where the pointer already
     /// is sends nothing.
     void pointAt(QPoint point) const
@@ -1979,6 +1993,7 @@ class ChromeSnapshotScene
         }
         _controller.setSidebarTabColorStyle(script.tabColorStyle);
         _controller.setSidebarWorkspaceColorStyle(script.workspaceColorStyle);
+        _controller.setSidebarRowSpacing(script.rowSpacing);
 
         auto const shown = sidebar == SnapshotSidebar::NeedsYou || sidebar == SnapshotSidebar::Hidden
                                ? uint64_t { 2 }

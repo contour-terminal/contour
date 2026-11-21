@@ -357,6 +357,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/ToastPlacement.hpp
         window/SaveLayoutCheck.hpp
         window/ChromeTokenObjects.hpp
+        window/QmlEnumIndex.hpp
         window/MenuRouting.hpp
         window/SettingsWindowRules.hpp
         window/NewDefaultsNotice.hpp
@@ -1074,6 +1075,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/MainWindowControllerMock.hpp
             test/SwitcherHost.hpp
             test/MockMainController.hpp
+            test/ContextMenuRows.hpp
             test/QmlMocks.hpp
             test/RecordingAnnouncer.hpp
             test/PermissionFixtures.hpp

@@ -175,6 +175,8 @@ struct SidebarScene
     /// How a coloured workspace shows in the sidebar (`sidebar.workspace_color`).
     contour::config::SidebarWorkspaceColorStyle workspaceColorStyle =
         contour::config::SidebarWorkspaceColorStyle::Tint;
+    /// How much room a tab's or a pane's row takes (`sidebar.row_spacing`).
+    contour::config::SidebarRowSpacing rowSpacing = contour::config::SidebarRowSpacing::Comfortable;
 };
 
 /// Main.qml over a mock whose sidebar lists two workspaces: billing (a pane that asks for a permission and
@@ -235,6 +237,7 @@ struct SidebarWindow
         controller.setTabPlacement(scene.placement);
         controller.setSidebarTabColorStyle(scene.tabColorStyle);
         controller.setSidebarWorkspaceColorStyle(scene.workspaceColorStyle);
+        controller.setSidebarRowSpacing(scene.rowSpacing);
 
         root = contour::test::loadMainWindow(engine, controller, warnings, setupOf(scene.row, scene.motion));
         if (scene.visibility == contour::config::SidebarVisibility::Shown)
@@ -271,6 +274,17 @@ struct SidebarWindow
         auto const* sidebar = style->property("sidebar").value<QObject*>();
         REQUIRE(sidebar != nullptr);
         return sidebar->property(name).toReal();
+    }
+
+    /// The `chromeStyle.sidebar` token @p name that depends on `sidebar.row_spacing`, at the window's
+    /// spacing.
+    /// @param name `twoLineRowHeight` or `lineGap`.
+    [[nodiscard]] qreal spacedToken(char const* name) const
+    {
+        return contour::test::sidebarSpacedToken(
+            *engine.rootContext(),
+            name,
+            static_cast<contour::config::SidebarRowSpacing>(controller.sidebarRowSpacing()));
     }
 
     /// The `chromeStyle` property @p name.
@@ -497,14 +511,65 @@ TEST_CASE("the sidebar shows one row per model row with title, reason and time (
         CHECK(time->isVisible());
         CHECK(time->property("text").toString() == QStringLiteral("0:30"));
         // A tab row is two lines tall, with a reason or without one; a workspace row is one line.
-        CHECK(claude->height() == scene.token("twoLineRowHeight"));
+        CHECK(claude->height() == scene.spacedToken("twoLineRowHeight"));
         auto* notes = scene.rowTitled(QStringLiteral("notes"));
         REQUIRE(notes != nullptr);
-        CHECK(notes->height() == scene.token("twoLineRowHeight"));
+        CHECK(notes->height() == scene.spacedToken("twoLineRowHeight"));
         auto* docs = scene.rowTitled(QStringLiteral("docs"));
         REQUIRE(docs != nullptr);
         CHECK(docs->height() == scene.token("rowHeight"));
         CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+namespace
+{
+/// Both values of `sidebar.row_spacing`.
+constexpr auto RowSpacings = std::array { contour::config::SidebarRowSpacing::Comfortable,
+                                          contour::config::SidebarRowSpacing::Compact };
+
+/// Every row this process draws, at each `sidebar.row_spacing`.
+[[nodiscard]] std::vector<std::pair<ChromeStyle, contour::config::SidebarRowSpacing>> drawnRowsAtEachSpacing()
+{
+    auto cases = std::vector<std::pair<ChromeStyle, contour::config::SidebarRowSpacing>> {};
+    for (auto const row: drawnRows())
+        for (auto const spacing: RowSpacings)
+            cases.emplace_back(row, spacing);
+    return cases;
+}
+} // namespace
+
+TEST_CASE("a two-line row is as tall as sidebar.row_spacing says (offscreen)", "[contour][gui][qml][sidebar]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto heights = std::vector<qreal> {};
+        for (auto const spacing: RowSpacings)
+        {
+            INFO("spacing " << contour::config::configEnumToken(spacing));
+            auto scene = SidebarWindow { { .row = row, .rowSpacing = spacing } };
+            auto const twoLines = scene.spacedToken("twoLineRowHeight");
+            for (auto const* title: { "claude", "build", "notes" })
+            {
+                INFO(title);
+                auto* rowItem = scene.rowTitled(QString::fromUtf8(title));
+                REQUIRE(rowItem != nullptr);
+                CHECK(rowItem->height() == twoLines);
+            }
+            // A workspace's row is one line at either spacing.
+            auto* docs = scene.rowTitled(QStringLiteral("docs"));
+            REQUIRE(docs != nullptr);
+            CHECK(docs->height() == scene.token("rowHeight"));
+            CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
+            heights.push_back(twoLines);
+        }
+        // Comfortable only adds room; the Terminal look's rows are two cells under either.
+        REQUIRE(heights.size() == 2);
+        if (row == ChromeStyle::Terminal)
+            CHECK(heights.front() == heights.back());
+        else
+            CHECK(heights.front() > heights.back());
     }
 }
 
@@ -572,10 +637,10 @@ TEST_CASE("an idle row shows its folder on the second line (offscreen)", "[conto
 TEST_CASE("two-line rows stand further apart than the lines within one (offscreen)",
           "[contour][gui][qml][sidebar]")
 {
-    for (auto const row: drawnRows())
+    for (auto const& [row, spacing]: drawnRowsAtEachSpacing())
     {
-        INFO("row " << static_cast<int>(row));
-        auto scene = SidebarWindow { { .row = row } };
+        INFO("row " << static_cast<int>(row) << ", spacing " << contour::config::configEnumToken(spacing));
+        auto scene = SidebarWindow { { .row = row, .rowSpacing = spacing } };
         if (scene.token("look") == scene.token("cellTree"))
             continue; // whole cell rows: each line is a row of the grid, with no space to share out
         // claude asks, and build under it works in a folder: two rows that both have a second line.
@@ -624,16 +689,16 @@ TEST_CASE("a two-line row keeps its lines inside it, and centres a name with not
     // the line's half height and the name's are each rounded, by at most half a pixel apiece, so with a
     // face whose heights are fractional the name lands less than a pixel from the true centre.
     constexpr auto CentringRounding = qreal { 1 };
-    for (auto const row: drawnRows())
+    for (auto const& [row, spacing]: drawnRowsAtEachSpacing())
     {
-        INFO("row " << static_cast<int>(row));
-        auto scene = SidebarWindow { { .row = row } };
+        INFO("row " << static_cast<int>(row) << ", spacing " << contour::config::configEnumToken(spacing));
+        auto scene = SidebarWindow { { .row = row, .rowSpacing = spacing } };
         // claude asks (a reason), docs/notes is idle in a folder, and build stops working and knows nothing
         // of itself: the three second lines a row can have.
         scene.controller.sidebarSource().listed.workspaces[1].tabs[0].panes[0].cwd = "/src/docs";
         scene.controller.sidebarSource().listed.workspaces[0].tabs[1].panes[0].status = {};
         scene.controller.sidebarModel().refreshNow();
-        auto const twoLines = scene.token("twoLineRowHeight");
+        auto const twoLines = scene.spacedToken("twoLineRowHeight");
         auto const cellTree = scene.token("look") == scene.token("cellTree");
 
         /// @return @p name's box within the row @p rowItem.
@@ -3727,6 +3792,43 @@ TEST_CASE("the sidebar's colour picker opens at the workspace's row and colours 
         REQUIRE(scene.controller.workspaceColorCalls.size() == 2);
         CHECK(scene.controller.workspaceColorCalls[1].workspace == 2);
         CHECK_FALSE(scene.controller.workspaceColorCalls[1].color.has_value());
+    }
+}
+
+TEST_CASE("the sidebar's tab colour picker opens at the tab's row and colours it by id (offscreen)",
+          "[contour][gui][qml][sidebar][tabcolor]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row, .tabColours = TabColours::Coloured } };
+        auto* flyout = scene.window->findChild<QObject*>(QStringLiteral("sidebarTabColorFlyout"));
+        REQUIRE(flyout != nullptr);
+        REQUIRE_FALSE(flyout->property("opened").toBool());
+
+        // build, a tab that is not the current one.
+        auto* build = scene.rowTitled(QStringLiteral("build"));
+        REQUIRE(build != nullptr);
+        constexpr auto BuildTab = quint64 { 11 };
+        emit scene.controller.sidebarTabColorPickRequested(build->property("index").toInt(), BuildTab);
+        REQUIRE(QTest::qWaitFor([&] { return flyout->property("opened").toBool(); }, 2000));
+        build = scene.rowTitled(QStringLiteral("build"));
+        CHECK(flyout->property("parent").value<QQuickItem*>() == build);
+        // Its keyboard cursor starts on the colour the tab has.
+        CHECK(flyout->property("currentColor").value<QColor>()
+              == QColor { BuildTabColour.red, BuildTabColour.green, BuildTabColour.blue });
+
+        auto const picked = QColor { 0x12, 0x34, 0x56 };
+        QMetaObject::invokeMethod(flyout, "colorPicked", Q_ARG(QColor, picked));
+        REQUIRE(scene.controller.tabColorCalls.size() == 1);
+        CHECK(scene.controller.tabColorCalls[0].tab == BuildTab);
+        CHECK(scene.controller.tabColorCalls[0].color == picked);
+
+        QMetaObject::invokeMethod(flyout, "resetRequested");
+        REQUIRE(scene.controller.tabColorCalls.size() == 2);
+        CHECK(scene.controller.tabColorCalls[1].tab == BuildTab);
+        CHECK_FALSE(scene.controller.tabColorCalls[1].color.has_value());
+        CHECK(scene.controller.workspaceColorCalls.empty());
     }
 }
 // }}}

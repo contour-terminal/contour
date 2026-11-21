@@ -3571,6 +3571,8 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     (void) detail::loadConfigEnum(child, "tab_color", keyPathTo(child, "tab_color"), where.tabColor, logger);
     (void) detail::loadConfigEnum(
         child, "workspace_color", keyPathTo(child, "workspace_color"), where.workspaceColor, logger);
+    (void) detail::loadConfigEnum(
+        child, "row_spacing", keyPathTo(child, "row_spacing"), where.rowSpacing, logger);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, GutterConfig& where)

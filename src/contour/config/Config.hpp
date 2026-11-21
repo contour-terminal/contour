@@ -413,6 +413,9 @@ struct SidebarConfig
     /// How a coloured workspace shows its colour in the sidebar: a tint, a group rail or a swatch.
     SidebarWorkspaceColorStyle workspaceColor { SidebarWorkspaceColorStyle::Tint };
 
+    /// How much room a tab's or a pane's two-line row takes: comfortable or compact.
+    SidebarRowSpacing rowSpacing { SidebarRowSpacing::Comfortable };
+
     bool operator==(SidebarConfig const&) const = default;
 };
 

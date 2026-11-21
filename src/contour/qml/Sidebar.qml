@@ -137,20 +137,39 @@ Rectangle {
     function openWorkspaceColorPicker(workspace) {
         if (!root.model)
             return
-        const index = root.model.workspaceRowIndex(workspace)
-        if (index < 0 || index >= tree.count)
-            return
-        // A sidebar shown for the picker has laid out no rows yet.
-        tree.forceLayout()
-        tree.positionViewAtIndex(index, ListView.Contain)
-        const item = tree.itemAtIndex(index)
+        const item = root.colorPickerRow(root.model.workspaceRowIndex(workspace))
         if (!item)
             return
         workspaceColorFlyout.workspace = workspace
-        workspaceColorFlyout.currentColor = item.workspaceColor
+        root.openColorPicker(workspaceColorFlyout, item, item.workspaceColor)
+    }
+
+    /// Opens the colour picker over tab row @p index for tab @p tab (the controller's
+    /// sidebarTabColorPickRequested): "Custom…" in a tab row's menu's Tab Color.
+    function openTabColorPicker(index, tab) {
+        const item = root.colorPickerRow(index)
+        if (!item)
+            return
+        tabColorFlyout.tab = tab
+        root.openColorPicker(tabColorFlyout, item, item.tabColor)
+    }
+
+    /// The laid-out row @p index a colour picker hangs from; null when there is none.
+    function colorPickerRow(index) {
+        if (index < 0 || index >= tree.count)
+            return null
+        // A sidebar shown for the picker has laid out no rows yet.
+        tree.forceLayout()
+        tree.positionViewAtIndex(index, ListView.Contain)
+        return tree.itemAtIndex(index)
+    }
+
+    /// Opens @p flyout hung from row @p item, its keyboard cursor on @p color.
+    function openColorPicker(flyout, item, color) {
+        flyout.currentColor = color
         // It hangs from the row, as the tab strip's hangs from its tab (TabColorFlyout's placement).
-        workspaceColorFlyout.parent = item
-        workspaceColorFlyout.open()
+        flyout.parent = item
+        flyout.open()
     }
 
     /// The editor or the filter let go of the keyboard: the tree takes it while the sidebar holds the chrome
@@ -173,6 +192,7 @@ Rectangle {
         function onSidebarRowRenameRequested(index) { root.renameRow(index) }
         function onSidebarFilterRequested() { root.openFilter() }
         function onWorkspaceColorPickRequested(workspace) { root.openWorkspaceColorPicker(workspace) }
+        function onSidebarTabColorPickRequested(index, tab) { root.openTabColorPicker(index, tab) }
     }
 
     // The one colour picker of the sidebar's workspaces, hung from the row it colours when it opens. A pick
@@ -191,6 +211,26 @@ Rectangle {
         onResetRequested: {
             if (root.controller)
                 root.controller.resetWorkspaceColor(workspaceColorFlyout.workspace)
+        }
+        onClosed: root.returnFocus()
+    }
+
+    // The one colour picker of the sidebar's tabs, as the workspaces' above: a sidebar placement draws no tab
+    // strip to hang the tab's own from. A pick colours that tab by id and leaves the focus where it is.
+    TabColorFlyout {
+        id: tabColorFlyout
+        objectName: "sidebarTabColorFlyout"
+        /// The tab the picker colours, by its id (WindowController::sidebarTabColorPickRequested).
+        property var tab: 0
+        controller: root.controller
+        // Null-guarded: the controller is torn down before this popup on window close.
+        onColorPicked: (c) => {
+            if (root.controller)
+                root.controller.setTabColorOf(tabColorFlyout.tab, c)
+        }
+        onResetRequested: {
+            if (root.controller)
+                root.controller.resetTabColorOf(tabColorFlyout.tab)
         }
         onClosed: root.returnFocus()
     }

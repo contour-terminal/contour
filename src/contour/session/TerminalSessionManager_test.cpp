@@ -11,6 +11,8 @@
 
 #include <contour/config/ConfigFwd.hpp>
 #include <contour/config/SecureInputMode.hpp>
+#include <contour/config/TabBarMode.hpp>
+#include <contour/platform/ColorConversion.hpp>
 #include <contour/platform/FreeDesktopNotifier.hpp>
 #include <contour/platform/QtInvoke.hpp>
 #include <contour/session/EndReason.hpp>
@@ -19,6 +21,7 @@
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/AppFixture.hpp>
 #include <contour/test/AppearanceFixtures.hpp>
+#include <contour/test/ContextMenuRows.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/RecordingUserNotificationCenter.hpp>
 #include <contour/test/SecureInputFixtures.hpp>
@@ -60,6 +63,7 @@
 #include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -6223,6 +6227,12 @@ class RoutingFactory final: public contour::session::SessionFactory
         renamedTabs.emplace_back(session, std::string { name });
         return contour::session::RemoteRouting::Routed;
     }
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteTabColor(
+        uint64_t session, std::optional<vtbackend::RGBColor> color) override
+    {
+        coloredTabs.emplace_back(session, color);
+        return contour::session::RemoteRouting::Routed;
+    }
     [[nodiscard]] contour::session::RemoteRouting requestRemoteMove(
         contour::session::RemoteMove const& move) override
     {
@@ -6250,6 +6260,8 @@ class RoutingFactory final: public contour::session::SessionFactory
     std::vector<std::pair<uint64_t, std::optional<vtbackend::RGBColor>>> colored;
     std::vector<uint64_t> closed;                              ///< The workspaces closed.
     std::vector<std::pair<uint64_t, std::string>> renamedTabs; ///< The tabs renamed, by a session of theirs.
+    /// The tabs coloured, by a session of theirs, each with its colour; none for a reset.
+    std::vector<std::pair<uint64_t, std::optional<vtbackend::RGBColor>>> coloredTabs;
     std::vector<contour::session::RemoteMove> tabMoves;
 };
 
@@ -6428,6 +6440,91 @@ TEST_CASE("TerminalSessionManager: a daemon's window routes the workspace mutati
     manager.confirmCloseWorkspace(*window.controller, 10);
     CHECK(factory.closed == std::vector<uint64_t> { 10 });
 
+    manager.releaseBinding(binding);
+}
+
+TEST_CASE("TerminalSessionManager: a daemon's window colours a sidebar tab row's tab on its daemon",
+          "[manager][sidebar][tabcolor][daemon]")
+{
+    // Whether or not a tab strip is drawn to hang its own picker from.
+    auto const placement =
+        GENERATE(contour::config::TabPlacement::Top, contour::config::TabPlacement::Sidebar);
+    INFO("tab placement " << static_cast<int>(placement));
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    app.app().config().tabPlacement = placement;
+    auto& manager = app.manager();
+    auto factory = RoutingFactory {};
+    auto binding = DaemonDirectoryBinding { factory };
+    contour::test::ScopedController const window { manager, contour::config::MenuPresentation::InScene };
+    manager.bindWindow(window.id, binding);
+
+    // The daemon gave tab 101 (session 1001) a colour; tab 200 (session 2000), in workspace 20, which the
+    // window does not show, has none.
+    auto const plum = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    auto directory = binding.source.directory();
+    directory.workspaces.front().tabs.at(1).color = plum;
+    binding.source.replaced = directory;
+    auto const rowOfTab = [&](uint64_t workspace, uint64_t tab) {
+        window->sidebar().refreshNow();
+        auto const row = window->sidebar().rowIndexOf(
+            { .kind = contour::window::SidebarRowKind::Tab, .workspace = workspace, .tab = tab, .pane = {} });
+        REQUIRE(row >= 0);
+        return row;
+    };
+    auto const colourRow = [&](uint64_t workspace, uint64_t tab, QString const& title) {
+        window->sidebar().openContextMenu(rowOfTab(workspace, tab), QPointF {});
+        return contour::test::menuRowOf(window->sidebarContextMenuModel(), title);
+    };
+    auto picks =
+        QSignalSpy { window.controller, &contour::window::WindowController::sidebarTabColorPickRequested };
+    auto stripPicks =
+        QSignalSpy { window.controller, &contour::window::WindowController::tabColorPickRequested };
+    using Coloured = std::vector<std::pair<uint64_t, std::optional<vtbackend::RGBColor>>>;
+
+    SECTION("Reset is offered exactly where the daemon lists a colour, and drops it there")
+    {
+        CHECK_FALSE(colourRow(20, 200, "Reset")["enabled"].toBool());
+        auto const reset = colourRow(10, 101, "Reset");
+        REQUIRE(reset["enabled"].toBool());
+        window->triggerSidebarContextMenuAction(reset["actionId"].toInt());
+        CHECK(factory.coloredTabs == Coloured { { 1001, std::nullopt } });
+    }
+    SECTION("a swatch colours that tab on the daemon, without showing it")
+    {
+        auto const palette = window->tabColorPalette();
+        REQUIRE_FALSE(palette.isEmpty());
+        auto const swatches = colourRow(20, 200, "Tab Color")["children"].toList();
+        REQUIRE_FALSE(swatches.isEmpty());
+        auto const swatch = swatches.front().toMap()["swatches"].toList().front().toMap();
+        window->triggerSidebarContextMenuAction(swatch["actionId"].toInt());
+        CHECK(factory.coloredTabs
+              == Coloured { { 2000, contour::platform::toRGBColor(palette.front().value<QColor>()) } });
+        CHECK(binding.source.selected.empty());
+        CHECK_FALSE(window->rowActionPending());
+    }
+    SECTION("Custom… opens the sidebar's picker over the row, whose choice colours the tab on the daemon")
+    {
+        auto const custom = colourRow(20, 200, "Custom…");
+        REQUIRE_FALSE(custom.isEmpty());
+        window->triggerSidebarContextMenuAction(custom["actionId"].toInt());
+        REQUIRE(picks.count() == 1);
+        CHECK(picks.at(0).at(0).toInt() == rowOfTab(20, 200));
+        CHECK(picks.at(0).at(1).value<quint64>() == 200);
+        CHECK(stripPicks.count() == 0);
+        CHECK(binding.source.selected.empty());
+        CHECK_FALSE(window->rowActionPending());
+
+        window->setTabColorOf(200, QColor { 0x12, 0x34, 0x56 });
+        window->resetTabColorOf(200);
+        CHECK(factory.coloredTabs
+              == Coloured { { 2000, vtbackend::RGBColor { 0x12, 0x34, 0x56 } }, { 2000, std::nullopt } });
+    }
+    SECTION("a tab the daemon does not list is not asked about")
+    {
+        window->setTabColorOf(999, QColor { 0x12, 0x34, 0x56 });
+        window->resetTabColorOf(999);
+        CHECK(factory.coloredTabs.empty());
+    }
     manager.releaseBinding(binding);
 }
 

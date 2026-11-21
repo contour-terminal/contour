@@ -187,6 +187,8 @@ class MainWindowControllerMock: public QAbstractListModel
     // CONSTANT on the real controller, as the tab colour's style; it notifies here for the same reason.
     Q_PROPERTY(int sidebarWorkspaceColorStyle READ sidebarWorkspaceColorStyle NOTIFY
                    sidebarWorkspaceColorStyleChanged)
+    // CONSTANT on the real controller, as the colour styles; it notifies here for the same reason.
+    Q_PROPERTY(int sidebarRowSpacing READ sidebarRowSpacing NOTIFY sidebarRowSpacingChanged)
     Q_PROPERTY(int otherWorkspacesUrgency READ otherWorkspacesUrgency NOTIFY otherWorkspacesUrgencyChanged)
     Q_PROPERTY(QVariantMap sidebarCommands READ sidebarCommands CONSTANT)
     // }}}
@@ -668,6 +670,8 @@ class MainWindowControllerMock: public QAbstractListModel
     {
         return static_cast<int>(_sidebarWorkspaceColorStyle);
     }
+    /// Mirrors WindowController::sidebarRowSpacing(): a config::SidebarRowSpacing's underlying value.
+    [[nodiscard]] int sidebarRowSpacing() const noexcept { return static_cast<int>(_sidebarRowSpacing); }
     /// Mirrors WindowController::otherWorkspacesUrgency().
     [[nodiscard]] int otherWorkspacesUrgency() const noexcept { return _sidebar.otherWorkspacesUrgency(); }
     /// Mirrors WindowController::sidebarCommands().
@@ -699,6 +703,13 @@ class MainWindowControllerMock: public QAbstractListModel
     {
         _sidebarWorkspaceColorStyle = style;
         emit sidebarWorkspaceColorStyleChanged();
+    }
+
+    /// How much room a tab's or a pane's sidebar row takes, as `sidebar.row_spacing` says.
+    void setSidebarRowSpacing(config::SidebarRowSpacing spacing)
+    {
+        _sidebarRowSpacing = spacing;
+        emit sidebarRowSpacingChanged();
     }
     /// Mirrors WindowController::setSidebarWidth(): records the width the drag ended at, and takes it.
     Q_INVOKABLE void setSidebarWidth(int width)
@@ -857,6 +868,7 @@ class MainWindowControllerMock: public QAbstractListModel
     void tabPlacementChanged();
     void sidebarTabColorStyleChanged();
     void sidebarWorkspaceColorStyleChanged();
+    void sidebarRowSpacingChanged();
     void otherWorkspacesUrgencyChanged();
     void sidebarCommandRequested(int command, QString const& text);
     /// Mirrors WindowController::sidebarFilterRequested().
@@ -941,6 +953,7 @@ class MainWindowControllerMock: public QAbstractListModel
     config::TabPlacement _tabPlacement = config::TabPlacement::Top;
     config::SidebarTabColorStyle _sidebarTabColorStyle = config::SidebarTabColorStyle::Tint;
     config::SidebarWorkspaceColorStyle _sidebarWorkspaceColorStyle = config::SidebarWorkspaceColorStyle::Tint;
+    config::SidebarRowSpacing _sidebarRowSpacing = config::SidebarRowSpacing::Comfortable;
     /// Declared last: it is built from everything above. A derived mock refreshes it once its own state is
     /// set.
     window::LocationChipModel _chip { chipInputs() };

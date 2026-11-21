@@ -8,8 +8,10 @@
 #include <contour/config/GuiStateStore.hpp>
 #include <contour/config/TabBarMode.hpp>
 #include <contour/geometry/SidebarGeometry.hpp>
+#include <contour/platform/ColorConversion.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/test/AppFixture.hpp>
+#include <contour/test/ContextMenuRows.hpp>
 #include <contour/test/CoreFixtures.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/window/SwitcherController.hpp>
@@ -27,6 +29,7 @@
 #include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <optional>
@@ -547,6 +550,26 @@ TEST_CASE("a config reload changes an open window's tab placement", "[contour][s
     CHECK(changes.count() == 1);
 }
 
+TEST_CASE("a window takes sidebar.row_spacing when it opens, and keeps it over a reload",
+          "[contour][sidebar][controller]")
+{
+    using contour::config::SidebarRowSpacing;
+    using contour::test::ConfiguredTestApp;
+    auto app = ConfiguredTestApp {};
+    auto window = contour::test::ScopedController { app.manager() };
+    REQUIRE(window.controller->sidebarRowSpacing() == static_cast<int>(SidebarRowSpacing::Comfortable));
+
+    contour::test::writeConfigFile(
+        app.configFile(),
+        contour::test::profileConfigYaml(app.app().profileName(), "sidebar:\n    row_spacing: compact\n"));
+    REQUIRE(app.manager().reloadAllSessions());
+    REQUIRE(app.app().config().sidebar.value().rowSpacing == SidebarRowSpacing::Compact);
+    // The open window keeps the rows it opened with; the next one opens compact.
+    CHECK(window.controller->sidebarRowSpacing() == static_cast<int>(SidebarRowSpacing::Comfortable));
+    auto next = contour::test::ScopedController { app.manager() };
+    CHECK(next.controller->sidebarRowSpacing() == static_cast<int>(SidebarRowSpacing::Compact));
+}
+
 TEST_CASE("a Terminal-row sidebar width is remembered in cells, not pixels", "[contour][sidebar][geometry]")
 {
     using contour::config::LengthUnit;
@@ -629,19 +652,7 @@ namespace
     return static_cast<int>(std::distance(rows.begin(), at));
 }
 
-/// @return The row titled @p title in @p rows, searching submenus too; an empty map for none.
-[[nodiscard]] QVariantMap menuRowOf(QVariantList const& rows, QString const& title)
-{
-    for (auto const& value: rows)
-    {
-        auto row = value.toMap();
-        if (row["title"].toString() == title)
-            return row;
-        if (auto nested = menuRowOf(row["children"].toList(), title); !nested.isEmpty())
-            return nested;
-    }
-    return {};
-}
+using contour::test::menuRowOf;
 
 /// @return The action ids of the command rows of submenu @p title, in order.
 [[nodiscard]] std::vector<int> submenuActionsOf(QVariantList const& rows, QString const& title)
@@ -989,6 +1000,142 @@ TEST_CASE("the workspace menu's Workspace Color colours its workspace without sh
         QCoreApplication::processEvents();
         CHECK(colorOfOther().alpha() == 0);
         CHECK(window->displayedWorkspace() == shown);
+    }
+}
+
+TEST_CASE("a sidebar tab menu's Tab Color colours its own tab, not the focused one",
+          "[contour][sidebar][controller][tabcolor]")
+{
+    // Whether or not a tab strip is drawn to hang its own picker from.
+    auto const placement = GENERATE(TabPlacement::Top, TabPlacement::Sidebar);
+    INFO("tab placement " << static_cast<int>(placement));
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    app.app().config().tabPlacement = placement;
+    auto& manager = app.manager();
+    auto const window =
+        contour::test::ScopedController { manager, contour::config::MenuPresentation::InScene };
+    auto const made = contour::test::createSessionTabs(manager, *window, 2);
+    auto const activeTab = [&] {
+        return manager.model().workspace(window->displayedWorkspace())->activeTab()->id();
+    };
+    // The window shows the second tab; the menu is opened on the first, as a sidebar's usually is.
+    auto const right = made.tabs.at(0);
+    auto const focused = made.tabs.at(1);
+    REQUIRE(activeTab() == focused);
+    auto const colourRows = [&] {
+        window->sidebar().openContextMenu(tabRowOf(*window, right.value), QPointF {});
+        return submenuRows(window->sidebarContextMenuModel(), "Tab Color");
+    };
+    auto const userColorOf = [&](vtworkspace::TabId tab) {
+        return manager.model().findTab(tab)->color(vtworkspace::TabColorSource::User);
+    };
+    auto picks = QSignalSpy { &*window, &contour::window::WindowController::sidebarTabColorPickRequested };
+    auto stripPicks = QSignalSpy { &*window, &contour::window::WindowController::tabColorPickRequested };
+
+    // Without a colour of the user's, there is nothing to reset.
+    REQUIRE_FALSE(menuRowOf(colourRows(), "Reset").isEmpty());
+    CHECK_FALSE(menuRowOf(colourRows(), "Reset")["enabled"].toBool());
+
+    SECTION("a swatch colours that tab and leaves the focus where it is")
+    {
+        auto const palette = window->tabColorPalette();
+        REQUIRE_FALSE(palette.isEmpty());
+        auto const swatchRow = colourRows().front().toMap();
+        REQUIRE(swatchRow["kind"].toString() == "swatches");
+        auto const swatch = swatchRow["swatches"].toList().front().toMap();
+        window->triggerSidebarContextMenuAction(swatch["actionId"].toInt());
+        QCoreApplication::processEvents();
+        CHECK(userColorOf(right) == contour::platform::toRGBColor(palette.front().value<QColor>()));
+        CHECK_FALSE(userColorOf(focused).has_value());
+        CHECK(activeTab() == focused);
+        CHECK_FALSE(window->rowActionPending());
+    }
+    SECTION("Reset is offered once the tab has a colour, and clears that tab's only")
+    {
+        manager.model().setTabColor(
+            right, vtworkspace::TabColorSource::User, vtbackend::RGBColor { 1, 2, 3 });
+        manager.model().setTabColor(
+            focused, vtworkspace::TabColorSource::User, vtbackend::RGBColor { 4, 5, 6 });
+        auto const reset = menuRowOf(colourRows(), "Reset");
+        REQUIRE(reset["enabled"].toBool());
+        window->triggerSidebarContextMenuAction(reset["actionId"].toInt());
+        QCoreApplication::processEvents();
+        CHECK_FALSE(userColorOf(right).has_value());
+        CHECK(userColorOf(focused) == vtbackend::RGBColor { 4, 5, 6 });
+        CHECK(activeTab() == focused);
+    }
+    SECTION("Custom… asks for the picker over that tab's row")
+    {
+        auto const custom = actionIdOf(colourRows(), "Custom…");
+        REQUIRE(custom.has_value());
+        window->triggerSidebarContextMenuAction(*custom);
+        REQUIRE(picks.count() == 1);
+        CHECK(picks.at(0).at(0).toInt() == tabRowOf(*window, right.value));
+        CHECK(picks.at(0).at(1).value<quint64>() == right.value);
+        CHECK(stripPicks.count() == 0); // not the tab strip's picker, which a sidebar placement does not draw
+        CHECK(activeTab() == focused);
+    }
+    SECTION("the picker's choice and its reset colour that tab by id")
+    {
+        window->setTabColorOf(right.value, QColor { 0x12, 0x34, 0x56 });
+        CHECK(userColorOf(right) == vtbackend::RGBColor { 0x12, 0x34, 0x56 });
+        CHECK_FALSE(userColorOf(focused).has_value());
+        window->resetTabColorOf(right.value);
+        CHECK_FALSE(userColorOf(right).has_value());
+        CHECK(activeTab() == focused);
+    }
+    SECTION("the picker colours none of another window's tabs")
+    {
+        auto const other =
+            contour::test::ScopedController { manager, contour::config::MenuPresentation::InScene };
+        auto const theirs = contour::test::createSessionTabs(manager, *other, 1).tabs.at(0);
+        manager.model().setTabColor(
+            theirs, vtworkspace::TabColorSource::User, vtbackend::RGBColor { 4, 5, 6 });
+        window->setTabColorOf(theirs.value, QColor { 0x12, 0x34, 0x56 });
+        CHECK(userColorOf(theirs) == vtbackend::RGBColor { 4, 5, 6 });
+        window->resetTabColorOf(theirs.value);
+        CHECK(userColorOf(theirs) == vtbackend::RGBColor { 4, 5, 6 });
+    }
+}
+
+TEST_CASE("SetTabColor without a colour opens the sidebar's picker where no tab strip is drawn",
+          "[contour][sidebar][controller][tabcolor]")
+{
+    using contour::config::TabBarVisibility;
+    // Where the tabs live, and whether the strip would be drawn at the top.
+    auto const [placement, visibility] =
+        GENERATE(std::pair { TabPlacement::Top, TabBarVisibility::Always },
+                 std::pair { TabPlacement::Top, TabBarVisibility::Never },
+                 std::pair { TabPlacement::Sidebar, TabBarVisibility::Always });
+    INFO("tab placement " << static_cast<int>(placement) << ", tab bar " << static_cast<int>(visibility));
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    app.app().config().tabPlacement = placement;
+    auto& manager = app.manager();
+    auto const window =
+        contour::test::ScopedController { manager, contour::config::MenuPresentation::InScene };
+    window->setTabBarVisibility(visibility);
+    auto const made = contour::test::createSessionTabs(manager, *window, 2);
+    auto const focused = made.tabs.at(1);
+    auto picks = QSignalSpy { &*window, &contour::window::WindowController::sidebarTabColorPickRequested };
+    auto stripPicks = QSignalSpy { &*window, &contour::window::WindowController::tabColorPickRequested };
+
+    // What the SetTabColor action naming no colour does, from a key binding, the palette or the menu bar.
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+    CHECK((*session)(contour::actions::SetTabColor {}));
+
+    if (placement == TabPlacement::Top && visibility == TabBarVisibility::Always)
+    {
+        // The strip's own picker, over the active tab.
+        CHECK(stripPicks.count() == 1);
+        CHECK(picks.count() == 0);
+    }
+    else
+    {
+        CHECK(stripPicks.count() == 0);
+        REQUIRE(picks.count() == 1);
+        CHECK(picks.at(0).at(0).toInt() == tabRowOf(*window, focused.value));
+        CHECK(picks.at(0).at(1).value<quint64>() == focused.value);
     }
 }
 

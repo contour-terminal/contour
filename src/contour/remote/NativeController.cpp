@@ -1587,17 +1587,36 @@ contour::session::RemoteRouting NativeController::requestRemoteTabRename(uint64_
         return contour::session::RemoteRouting::Refused;
     auto const kind =
         name.empty() ? vthost::proto::TabEditKind::ClearName : vthost::proto::TabEditKind::SetName;
-    auto edit = vthost::proto::EditTab {
+    sendTabEdit(vthost::proto::EditTab {
         .session = session,
         .kind = kind,
         .name = std::string { name },
         .color = 0,
-    };
+    });
+    return contour::session::RemoteRouting::Routed;
+}
+
+contour::session::RemoteRouting NativeController::requestRemoteTabColor(
+    uint64_t session, std::optional<vtbackend::RGBColor> color)
+{
+    if (!negotiated())
+        return contour::session::RemoteRouting::Refused;
+    sendTabEdit(vthost::proto::EditTab {
+        .session = session,
+        .kind = color ? vthost::proto::TabEditKind::SetColor : vthost::proto::TabEditKind::ClearColor,
+        .name = {},
+        .color = color.transform(&vtbackend::RGBColor::value).value_or(0),
+    });
+    return contour::session::RemoteRouting::Routed;
+}
+
+void NativeController::sendTabEdit(vthost::proto::EditTab edit)
+{
+    // The client's send verbs must run on the reactor thread that owns it.
     _reactor.post([this, edit = std::move(edit)] {
         if (_client != nullptr)
             std::ignore = _client->editTab(edit);
     });
-    return contour::session::RemoteRouting::Routed;
 }
 
 contour::session::RemoteRouting NativeController::requestRemoteMoveWorkspace(uint64_t workspace,

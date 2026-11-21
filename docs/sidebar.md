@@ -265,6 +265,7 @@ sidebar:
   width: 240        # logical pixels (cells under ui_style: terminal); omit for the style's own
   tab_color: tint   # tint | bar | name
   workspace_color: tint   # tint | group | swatch
+  row_spacing: comfortable   # comfortable | compact
 tab_placement: sidebar   # sidebar | top
 ```
 
@@ -293,8 +294,17 @@ and it survives a restart and a live upgrade. Against a daemon that predates wor
 Color** is greyed out, and the `SetWorkspaceColor` and `ResetWorkspaceColor` actions only say so in a notice.
 A tab is coloured from **Tab Color** in its menu, as on the tab strip.
 
-`tab_color` and `workspace_color` are read when a window opens: a window that is open when the configuration
-is reloaded keeps the styles it opened with, and a window opened after it uses the new ones.
+`row_spacing` picks how much room a tab's or a pane's two-line row takes; a workspace's row is one line in
+both, and under `ui_style: terminal` a two-line row is two cells in both.
+
+- `comfortable` (the default): 40 px rows on macOS, Windows and Linux. The extra room goes between the rows,
+  not between a row's two lines, so each row's lines read as one.
+- `compact`: 36 px rows, so more of them fit.
+
+It is also in the Settings window, under **Appearance › Tab bar**.
+
+`tab_color`, `workspace_color` and `row_spacing` are read when a window opens: a window that is open when the
+configuration is reloaded keeps the styles it opened with, and a window opened after it uses the new ones.
 
 See [Key mapping](configuration/key-mapping.md#workspace-sidebar) for the actions and their default chords.
 The default width is 220 px on macOS, 240 px on Fluent and ContourLinux, and 28 cells under

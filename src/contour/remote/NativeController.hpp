@@ -542,6 +542,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// SessionFactory: renames the daemon's tab holding @p session (proto::EditTab), mirrored here or not.
     [[nodiscard]] contour::session::RemoteRouting requestRemoteTabRename(uint64_t session,
                                                                          std::string_view name) override;
+    /// SessionFactory: colours the daemon's tab holding @p session, or drops the user's colour
+    /// (proto::EditTab), mirrored here or not.
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteTabColor(
+        uint64_t session, std::optional<vtbackend::RGBColor> color) override;
     [[nodiscard]] contour::session::RemoteRouting requestRemoteCloseWorkspace(uint64_t workspace) override;
 
     /// SessionFactory: the toggle of a split's axis in a daemon-hosted window is made by the daemon, whose
@@ -849,6 +853,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param client The connection.
     /// @param session The session to state it for.
     void stateColorPreference(vthost::client::NativeClient& client, uint64_t session) const;
+
+    /// Sends @p edit to the daemon from the reactor thread, if the connection is still there by then.
+    /// @param edit The tab edit, addressed by a session of the tab.
+    void sendTabEdit(vthost::proto::EditTab edit);
 
     /// Reactor-side, under _mutex: a reconnect was accepted. Judges which workspaces were lost, and makes the
     /// bindings ready for the new connection's snapshots: restarted mirrors when the same daemon answered,

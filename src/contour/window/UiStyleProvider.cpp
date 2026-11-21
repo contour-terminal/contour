@@ -15,6 +15,7 @@
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/PickerAccessory.hpp>
 #include <contour/window/PopupAnchor.hpp>
+#include <contour/window/QmlEnumIndex.hpp>
 #include <contour/window/QtString.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/SecureLockPlacement.hpp>
@@ -233,13 +234,6 @@ namespace
             .stepper = QString::fromUtf8(tokens.stepperGlyph),
             .colorWell = QString::fromUtf8(tokens.colorWellGlyph),
         };
-    }
-
-    /// Whether @p value, as QML passes it, indexes a table of @p count rows (an enum of @p count
-    /// enumerators counted from 0).
-    [[nodiscard]] constexpr bool inRange(int value, size_t count) noexcept
-    {
-        return value >= 0 && std::cmp_less(value, count);
     }
 
     /// @return @p color as a colour a row paints with; none when QML hands a transparent (or invalid) one,

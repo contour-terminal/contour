@@ -253,6 +253,9 @@ class WindowController:
     /// How a coloured workspace shows its colour in the sidebar: a config::SidebarWorkspaceColorStyle's
     /// underlying value, read once from `sidebar.workspace_color` when the window is made.
     Q_PROPERTY(int sidebarWorkspaceColorStyle READ sidebarWorkspaceColorStyle CONSTANT)
+    /// How much room a tab's or a pane's sidebar row takes: a config::SidebarRowSpacing's underlying value,
+    /// read once from `sidebar.row_spacing` when the window is made.
+    Q_PROPERTY(int sidebarRowSpacing READ sidebarRowSpacing CONSTANT)
     /// What the workspaces this window does not show ask of the user: the most urgent of their roll-ups, an
     /// Urgency's underlying value (SidebarModel::otherWorkspacesUrgency).
     Q_PROPERTY(int otherWorkspacesUrgency READ otherWorkspacesUrgency NOTIFY otherWorkspacesUrgencyChanged)
@@ -602,7 +605,9 @@ class WindowController:
     Q_INVOKABLE void beginActiveTabTitleEdit();
     /// Asks the active tab's QML delegate to open its color picker (the keyboard entry point for the
     /// SetTabColor action when it names no color). No-op when this window has no active tab. Emits
-    /// tabColorPickRequested() with the active tab's row so exactly that TabItem opens its flyout.
+    /// tabColorPickRequested() with the active tab's row so exactly that TabItem opens its flyout; where no
+    /// tab strip is drawn (tabs in the sidebar, or the strip hidden), sidebarTabColorPickRequested() for the
+    /// active tab's row instead.
     Q_INVOKABLE void beginActiveTabColorPick();
 
     // {{{ Keyboard focus in the chrome
@@ -724,6 +729,14 @@ class WindowController:
     /// application's color, only the user's own choice.
     /// @param index The tab's row in this window.
     Q_INVOKABLE void resetTabColor(int index);
+    /// Colours tab @p tab on the user's behalf, by id, without showing it: the sidebar's colour picker hands
+    /// its choice here. On its daemon for a window a daemon serves (TerminalSessionManager::colorTab()).
+    /// @param tab The tab's id, as the window's directory lists it.
+    /// @param color The colour the user picked.
+    Q_INVOKABLE void setTabColorOf(quint64 tab, QColor const& color);
+    /// Drops the user's colour from tab @p tab, by id, without showing it; as resetTabColor() otherwise.
+    /// @param tab The tab's id, as the window's directory lists it.
+    Q_INVOKABLE void resetTabColorOf(quint64 tab);
     /// Colours workspace @p workspace on the user's behalf, shown or not, without showing it: the sidebar's
     /// colour picker hands its choice here (TerminalSessionManager::setWorkspaceColor).
     /// @param workspace The workspace's id, as the window's directory lists it.
@@ -1365,6 +1378,10 @@ class WindowController:
         return static_cast<int>(_sidebarWorkspaceColorStyle);
     }
 
+    /// @return How much room a tab's or a pane's sidebar row takes, a config::SidebarRowSpacing as its
+    ///         underlying value.
+    [[nodiscard]] int sidebarRowSpacing() const noexcept { return static_cast<int>(_sidebarRowSpacing); }
+
     /// Tells the window how wide the title band's parts are, so the window is never made narrower than they
     /// fit in: the band's fixed parts, the location chip at its last fit step and one tab-well minimum
     /// (bandMinimumWidth()). It joins the window's minimum-width size hint, so the tab well cannot collapse.
@@ -1701,6 +1718,11 @@ class WindowController:
     /// workspace menu's "Workspace Color", or the SetWorkspaceColor action naming no colour.
     /// @param workspace The workspace's id, as the window's directory lists it.
     void workspaceColorPickRequested(quint64 workspace);
+    /// Requests that the sidebar open its colour picker over tab row @p row: "Custom…" in a sidebar tab
+    /// menu's "Tab Color". The sidebar's own, as a sidebar placement draws no tab strip to hang one from.
+    /// @param row The tab's row in the sidebar's model.
+    /// @param tab The tab's id, which the picker's choice colours (setTabColorOf()).
+    void sidebarTabColorPickRequested(int row, quint64 tab);
     /// Requests that this window show its About dialog.
     void aboutRequested();
     /// Requests that this window show its command palette. Per-window (like tabTitleEditRequested), so
@@ -2439,6 +2461,7 @@ class WindowController:
     config::SidebarTabColorStyle _sidebarTabColorStyle = config::SidebarTabColorStyle::Tint;
     // How a coloured workspace shows in the sidebar; read with the tab colour's style, and as fixed.
     config::SidebarWorkspaceColorStyle _sidebarWorkspaceColorStyle = config::SidebarWorkspaceColorStyle::Tint;
+    config::SidebarRowSpacing _sidebarRowSpacing = config::SidebarRowSpacing::Comfortable;
 
     // Declared title-bar chrome height in logical px (written by Main.qml's binding).
     int _chromeHeight = 0;

@@ -4873,6 +4873,35 @@ TEST_CASE("a window renames a tab of a workspace it does not show, and the direc
     CHECK(waitUntil([&] { return workspaceOf(controller, second.id).tabs.front().name != "logs"; }));
 }
 
+TEST_CASE("a window colours a tab of a workspace it does not show, and the directory follows",
+          "[attach][controller][directory][sidebar][tabcolor]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.directory().workspaces.size() == 2; }));
+    auto const listedColor = [&] {
+        auto const& workspace = workspaceOf(controller, second.id);
+        return workspace.tabs.empty() ? std::nullopt : workspace.tabs.front().color;
+    };
+
+    auto constexpr Orange = vtbackend::RGBColor { 0xE8, 0x85, 0x3A };
+    CHECK(controller.requestRemoteTabColor(second.session.value, Orange)
+          == contour::session::RemoteRouting::Routed);
+    CHECK(waitUntil([&] { return listedColor() == Orange; }));
+
+    // None drops it again.
+    CHECK(controller.requestRemoteTabColor(second.session.value, std::nullopt)
+          == contour::session::RemoteRouting::Routed);
+    CHECK(waitUntil([&] { return !listedColor().has_value(); }));
+}
+
 TEST_CASE("the directory states a workspace's place in the daemon's count, tabless ones included",
           "[attach][controller][directory]")
 {

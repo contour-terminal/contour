@@ -13,6 +13,7 @@
 #include <contour/window/DropZonePolicy.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/PaneState.hpp>
+#include <contour/window/QmlEnumIndex.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/StickyHeaderPlacement.hpp>
 #include <contour/window/TabBadge.hpp>
@@ -27,6 +28,7 @@
 
 #include <array>
 #include <cstddef>
+#include <utility>
 
 namespace contour::window
 {
@@ -854,8 +856,6 @@ class ChromeSidebarTokens: public QObject
     Q_PROPERTY(qreal minWidth READ minWidth CONSTANT)
     Q_PROPERTY(qreal maxWidth READ maxWidth CONSTANT)
     Q_PROPERTY(qreal rowHeight READ rowHeight CONSTANT)
-    Q_PROPERTY(qreal twoLineRowHeight READ twoLineRowHeight CONSTANT)
-    Q_PROPERTY(qreal lineGap READ lineGap CONSTANT)
     Q_PROPERTY(qreal indent READ indent CONSTANT)
     Q_PROPERTY(qreal glyph READ glyph CONSTANT)
     Q_PROPERTY(qreal gitGap READ gitGap CONSTANT)
@@ -908,13 +908,21 @@ class ChromeSidebarTokens: public QObject
     [[nodiscard]] qreal maxWidth() const noexcept { return _tokens.maxWidth * _units.horizontal; }
     /// @return A one-line row's height.
     [[nodiscard]] qreal rowHeight() const noexcept { return _tokens.rowHeight * _units.vertical; }
-    /// @return A two-line row's height.
-    [[nodiscard]] qreal twoLineRowHeight() const noexcept
+    /// A two-line row's height. The spacing is the window's (`sidebar.row_spacing`, read when it opens), not
+    /// the provider's, which every window shares and a configuration reload rebuilds.
+    /// @param spacing A config::SidebarRowSpacing as an int; anything else is the default, Comfortable.
+    /// @return The height of a tab's or a pane's row at @p spacing.
+    [[nodiscard]] Q_INVOKABLE qreal twoLineRowHeight(int spacing) const noexcept
     {
-        return _tokens.twoLineRowHeight * _units.vertical;
+        return twoLineRowAt(spacing).height * _units.vertical;
     }
-    /// @return The gap between a two-line row's name and its second line.
-    [[nodiscard]] qreal lineGap() const noexcept { return _tokens.lineGap * _units.vertical; }
+    /// The gap between a two-line row's name and its second line.
+    /// @param spacing A config::SidebarRowSpacing as an int; anything else is the default, Comfortable.
+    /// @return The gap at @p spacing.
+    [[nodiscard]] Q_INVOKABLE qreal lineGap(int spacing) const noexcept
+    {
+        return twoLineRowAt(spacing).lineGap * _units.vertical;
+    }
     /// @return What a tab row is indented by beneath its workspace.
     [[nodiscard]] qreal indent() const noexcept { return _tokens.indent * _units.horizontal; }
     /// @return A row's glyph, its edge.
@@ -1016,6 +1024,16 @@ class ChromeSidebarTokens: public QObject
     }
 
   private:
+    /// @return The two-line row at @p spacing, a config::SidebarRowSpacing as an int; the default's
+    ///         (Comfortable) for anything else, as QML hands a missing controller's 0 or a stray value.
+    [[nodiscard]] config::SidebarTwoLineRow twoLineRowAt(int spacing) const noexcept
+    {
+        return config::sidebarTwoLineRow(_tokens,
+                                         inRange(spacing, config::SidebarRowSpacingCount)
+                                             ? static_cast<config::SidebarRowSpacing>(spacing)
+                                             : config::SidebarRowSpacing::Comfortable);
+    }
+
     config::SidebarTokens _tokens {};
     config::SidebarLook _look = config::SidebarLook::SourceList;
     ChromeUnits _units {};

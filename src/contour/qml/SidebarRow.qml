@@ -143,11 +143,14 @@ Item {
     // The selection's and the hover fill's inset: the command palette's on the same row, and none on the
     // Terminal row, whose selection is the whole run of cells.
     readonly property real fillInset: row.cellTree ? 0 : chromeStyle.space.paletteInset
+    /// How much room the row takes when it is two lines (`sidebar.row_spacing`), a config::SidebarRowSpacing:
+    /// the window's, read when it opened, and the default (0, comfortable) without a controller.
+    readonly property int rowSpacing: row.controller ? row.controller.sidebarRowSpacing : 0
     // A tab or pane row is always two lines, the reason or the idle line under the name, so a status coming
     // or going changes text and never the row's height. It groups its lines: the second sits a small step
     // (sidebar.lineGap) under the name, and the pair is centred in the row, so the rows stand further apart
-    // than the lines within one.
-    readonly property real lineGap: row.groupsLines ? chromeStyle.sidebar.lineGap : 0
+    // than the lines within one, and whatever room the spacing adds goes between the rows.
+    readonly property real lineGap: row.groupsLines ? chromeStyle.sidebar.lineGap(row.rowSpacing) : 0
     // On the Terminal row each line is a whole cell row, so the first line keeps the row's height there.
     readonly property bool groupsLines: !row.isWorkspace && !row.cellTree
     /// Whether a tab or pane row has anything for its second line (SidebarTree's secondLineOf()). A row that
@@ -172,7 +175,8 @@ Item {
     readonly property bool renaming: renameLoader.active
 
     width: ListView.view ? ListView.view.width : implicitWidth
-    implicitHeight: row.isWorkspace ? chromeStyle.sidebar.rowHeight : chromeStyle.sidebar.twoLineRowHeight
+    implicitHeight: row.isWorkspace ? chromeStyle.sidebar.rowHeight
+                                    : chromeStyle.sidebar.twoLineRowHeight(row.rowSpacing)
     height: implicitHeight
 
     Accessible.role: Accessible.TreeItem

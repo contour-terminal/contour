@@ -1419,6 +1419,42 @@ TEST_CASE("SettingsController: tab placement is a global field offering its tabl
     CHECK(fx.cfg.tabPlacement.value() == config::TabPlacement::Top);
 }
 
+TEST_CASE("SettingsController: the sidebar's row spacing is a global field beside tab placement",
+          "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+
+    auto expected = QStringList {};
+    for (auto const& info: config::configEnumValues<config::SidebarRowSpacing>())
+        expected.push_back(QString::fromUtf8(info.token.data(), static_cast<qsizetype>(info.token.size())));
+
+    // The row offers its table's tokens and shows the configured value, the default until written.
+    auto const row = rowWithKey(fx.controller->globalFields(), "sidebar.row_spacing");
+    REQUIRE_FALSE(row.isEmpty());
+    CHECK(row.value("type").toString() == "enum");
+    CHECK(row.value("options").toStringList() == expected);
+    CHECK(row.value("value").toString() == "comfortable");
+    CHECK(row.value("group").toInt() == static_cast<int>(SettingsGroup::TabBarPlacement));
+
+    // Writing it changes the configuration, and the row shows what was written.
+    fx.commitGlobal("sidebar.row_spacing", "compact");
+    CHECK(fx.cfg.sidebar.value().rowSpacing == config::SidebarRowSpacing::Compact);
+    CHECK(rowWithKey(fx.controller->globalFields(), "sidebar.row_spacing").value("value").toString()
+          == "compact");
+    fx.commitGlobal("sidebar.row_spacing", "comfortable");
+    CHECK(fx.cfg.sidebar.value().rowSpacing == config::SidebarRowSpacing::Comfortable);
+
+    // It sits right after tab placement in its group.
+    auto keys = std::vector<std::string> {};
+    for (auto const& descriptor: fields::globalFieldDescriptors())
+        if (descriptor.group == SettingsGroup::TabBarPlacement)
+            keys.push_back(descriptor.key.toStdString());
+    auto const placement = std::ranges::find(keys, "tab_placement");
+    REQUIRE(placement != keys.end());
+    REQUIRE(std::next(placement) != keys.end());
+    CHECK(*std::next(placement) == "sidebar.row_spacing");
+}
+
 TEST_CASE("SettingsController: the chrome style is a global field offering its table's tokens", "[settings]")
 {
     auto fx = Fixture(BasicConfig);

@@ -754,6 +754,23 @@ class MockMainController: public MainWindowControllerMock
     {
         workspaceColorCalls.push_back({ .workspace = workspace, .color = std::nullopt });
     }
+    /// A tab colour the sidebar's picker asked for by id (setTabColorOf()), or a reset (no colour).
+    struct TabColorCall
+    {
+        quint64 tab = 0;             ///< The tab's id.
+        std::optional<QColor> color; ///< The colour; none for resetTabColorOf().
+    };
+    std::vector<TabColorCall> tabColorCalls; ///< Every setTabColorOf() and resetTabColorOf().
+    /// Mirrors WindowController::setTabColorOf(): records the call.
+    Q_INVOKABLE void setTabColorOf(quint64 tab, QColor const& color)
+    {
+        tabColorCalls.push_back({ .tab = tab, .color = color });
+    }
+    /// Mirrors WindowController::resetTabColorOf(): records the call.
+    Q_INVOKABLE void resetTabColorOf(quint64 tab)
+    {
+        tabColorCalls.push_back({ .tab = tab, .color = std::nullopt });
+    }
     /// Mirrors WindowController::tabWorkingDirectory(): what TabItem's hover tooltip asks for the
     /// hovered tab, which a shown window's tab strip can be. No session runs anywhere, so none.
     Q_INVOKABLE [[nodiscard]] QString tabWorkingDirectory(int /*index*/) const { return {}; }
@@ -879,6 +896,9 @@ class MockMainController: public MainWindowControllerMock
     void tabColorPickRequested(int /*index*/);
     /// Mirrors WindowController::workspaceColorPickRequested(): the sidebar opens its picker over the row.
     void workspaceColorPickRequested(quint64 workspace);
+    /// Mirrors WindowController::sidebarTabColorPickRequested(): the sidebar opens its picker over tab row
+    /// @p row, for tab @p tab.
+    void sidebarTabColorPickRequested(int row, quint64 tab);
 
   private:
     /// Answers a key of the sidebar's tree as the controller does, through the same key table: Escape clears

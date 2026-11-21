@@ -456,6 +456,18 @@ class SessionFactory
         return RemoteRouting::Local;
     }
 
+    /// Attach mode: colours the DAEMON's tab that holds @p session as the user chose, or drops the user's
+    /// colour, whether or not this client mirrors it (proto::EditTab, as requestRemoteTabRename()); the
+    /// daemon's change reaches every window listing it, this one's directory and mirror included.
+    /// @param session A daemon session id of the tab, as a directory lists its panes.
+    /// @param color The new colour; none drops the user's, letting an application's resurface.
+    /// @return As requestRemoteRenameWorkspace().
+    [[nodiscard]] virtual RemoteRouting requestRemoteTabColor(uint64_t /*session*/,
+                                                              std::optional<vtbackend::RGBColor> /*color*/)
+    {
+        return RemoteRouting::Local;
+    }
+
     /// Attach mode: the user renamed the tab whose active pane @p pty backs, which the window has named in
     /// its own model already. A factory whose tabs are another multiplexer's windows (tmux) renames the
     /// window there too, or that multiplexer's next rename of its own overwrites the user's; a daemon's

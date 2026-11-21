@@ -1627,27 +1627,33 @@ void TerminalSessionManager::setWorkspaceColor(window::WindowController& window,
 
 void TerminalSessionManager::renameTab(window::WindowController& window, uint64_t tab, std::string name)
 {
-    auto const* const source = window.directorySource();
-    if (source == nullptr)
-        return;
-    auto const directory = source->directory();
-    auto const listed = window::findTabAnywhere(directory, tab);
-    if (!listed)
-        return;
     if (listsRemotely(window))
     {
-        if (listed->tab->panes.empty())
+        auto const session = listedSessionOf(window, tab);
+        if (!session)
             return;
         // The daemon's rename comes back as the window's new directory and, where it is mirrored, its tab.
-        if (factoryFor(window.displayedWorkspace())
-                .requestRemoteTabRename(listed->tab->panes.front().key.value, name)
+        if (factoryFor(window.displayedWorkspace()).requestRemoteTabRename(*session, name)
             == RemoteRouting::Refused)
             managerLog()("The daemon cannot rename tab {}.", tab);
         return;
     }
-    if (!ownsWorkspace(window, vtworkspace::WorkspaceId { listed->workspace->id }))
-        return;
-    nameTab(vtworkspace::TabId { tab }, std::move(name));
+    if (auto const* const owned = ownTabOf(window, tab))
+        nameTab(owned->id(), std::move(name));
+}
+
+std::optional<uint64_t> TerminalSessionManager::listedSessionOf(window::WindowController const& window,
+                                                                uint64_t tab)
+{
+    auto const* const source = window.directorySource();
+    if (source == nullptr)
+        return std::nullopt;
+    // Held here: what the lookup finds points into it.
+    auto const directory = source->directory();
+    auto const listed = window::findTabAnywhere(directory, tab);
+    if (!listed || listed->tab->panes.empty())
+        return std::nullopt;
+    return listed->tab->panes.front().key.value;
 }
 
 void TerminalSessionManager::nameTab(vtworkspace::TabId tabId, std::string name)
@@ -1667,6 +1673,41 @@ void TerminalSessionManager::nameTab(vtworkspace::TabId tabId, std::string name)
     // As the model holds it: a blank name was cleared.
     std::ignore = factoryFor(_model->workspaceOfTab(tabId))
                       .requestRemoteWindowRename(&session->terminal().device(), tab->name());
+}
+
+vtworkspace::Tab const* TerminalSessionManager::ownTabOf(window::WindowController const& window,
+                                                         uint64_t tab) const
+{
+    if (listsRemotely(window))
+        return nullptr;
+    auto const id = vtworkspace::TabId { tab };
+    return ownsWorkspace(window, _model->workspaceOfTab(id)) ? _model->findTab(id) : nullptr;
+}
+
+void TerminalSessionManager::colorTab(window::WindowController& window,
+                                      uint64_t tab,
+                                      std::optional<vtbackend::RGBColor> color)
+{
+    if (listsRemotely(window))
+    {
+        auto const session = listedSessionOf(window, tab);
+        if (!session)
+            return;
+        // The daemon's colour comes back as the window's new directory and, where it is mirrored, its tab.
+        if (factoryFor(window.displayedWorkspace()).requestRemoteTabColor(*session, color)
+            == RemoteRouting::Refused)
+            managerLog()("The daemon cannot colour tab {}.", tab);
+        return;
+    }
+    auto const* const owned = ownTabOf(window, tab);
+    if (owned == nullptr)
+        return;
+    // The user's own slot, as the tab strip's picker writes it: a reset lets an application's colour
+    // resurface.
+    if (color)
+        _model->setTabColor(owned->id(), vtworkspace::TabColorSource::User, *color);
+    else
+        _model->resetTabColor(owned->id(), vtworkspace::TabColorSource::User);
 }
 
 void TerminalSessionManager::moveWorkspace(window::WindowController& window,

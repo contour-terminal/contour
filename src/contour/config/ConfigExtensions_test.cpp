@@ -2376,6 +2376,60 @@ TEST_CASE("a written configuration documents sidebar.workspace_color", "[config]
     CHECK(rendered.contains("workspace_color: tint"));
 }
 
+TEST_CASE("sidebar.row_spacing picks how much room a two-line sidebar row takes", "[config][sidebar]")
+{
+    using contour::config::SidebarRowSpacing;
+
+    auto const spacingFrom = [](std::string_view sidebarBody) {
+        QTemporaryDir dir;
+        auto const yaml = std::format("default_profile: main\n"
+                                      "sidebar:\n"
+                                      "{}"
+                                      "profiles:\n"
+                                      "    main:\n"
+                                      "        shell: /bin/sh\n",
+                                      sidebarBody);
+        return loadFromYaml(dir, yaml).sidebar.value().rowSpacing;
+    };
+
+    CHECK(contour::config::SidebarConfig {}.rowSpacing == SidebarRowSpacing::Comfortable);
+    CHECK(spacingFrom("    row_spacing: compact\n") == SidebarRowSpacing::Compact);
+    CHECK(spacingFrom("    row_spacing: Compact\n") == SidebarRowSpacing::Compact);
+    CHECK(spacingFrom("    row_spacing: comfortable\n") == SidebarRowSpacing::Comfortable);
+    CHECK(spacingFrom("    row_spacing: COMFORTABLE\n") == SidebarRowSpacing::Comfortable);
+    CHECK(spacingFrom("    width: 260\n") == SidebarRowSpacing::Comfortable);
+    CHECK(spacingFrom("    row_spacing: \"\"\n") == SidebarRowSpacing::Comfortable);
+
+    // An unknown word is reported, as a bad tab_color is, and keeps the default.
+    auto capture = core::log::ScopedCapture { "error" };
+    CHECK(spacingFrom("    row_spacing: roomy\n") == SidebarRowSpacing::Comfortable);
+    INFO("captured error log:\n" << capture.text());
+    CHECK(capture.contains("row_spacing"));
+    CHECK(capture.contains("roomy"));
+}
+
+TEST_CASE("a written configuration documents sidebar.row_spacing and reads back", "[config][sidebar]")
+{
+    auto rendered = std::string {};
+    REQUIRE_NOTHROW(rendered = contour::config::createString<contour::config::YAMLConfigWriter>(
+                        contour::config::Config {}));
+    CHECK(rendered.contains("row_spacing: comfortable"));
+
+    // Each value the writer can emit is one the reader takes back.
+    for (auto const spacing:
+         { contour::config::SidebarRowSpacing::Comfortable, contour::config::SidebarRowSpacing::Compact })
+    {
+        auto config = contour::config::Config {};
+        config.sidebar.value().rowSpacing = spacing;
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+        auto const document = YAML::Load(written);
+        REQUIRE(document["sidebar"]["row_spacing"]);
+        CHECK(contour::config::configEnumFromToken<contour::config::SidebarRowSpacing>(
+                  document["sidebar"]["row_spacing"].as<std::string>())
+              == spacing);
+    }
+}
+
 TEST_CASE("Config.firstLaunchDefaults", "[config]")
 {
     SECTION("a plain Config is the newest edition")

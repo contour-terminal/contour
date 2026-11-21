@@ -874,7 +874,7 @@ TEST_CASE("snapshot plan: the sidebar's colour scripts cover every style, with t
         INFO(row.name);
         if (row.sidebarColor != SnapshotSidebarColor::None)
             CHECK(row.sidebar == SnapshotSidebar::Tree);
-        if (row.sidebarColor == SnapshotSidebarColor::Tabs)
+        if (row.sidebarColor == SnapshotSidebarColor::Tabs && row.action == ScriptAction::None)
             tabStyles.push_back(row.tabColorStyle);
         if (row.sidebarColor == SnapshotSidebarColor::Workspaces && row.action == ScriptAction::None)
             workspaceStyles.push_back(row.workspaceColorStyle);
@@ -889,6 +889,28 @@ TEST_CASE("snapshot plan: the sidebar's colour scripts cover every style, with t
     CHECK(scriptRow(SnapshotScript::SidebarHoverCard).action == ScriptAction::HoverSidebarRow);
     CHECK(scriptRow(SnapshotScript::SidebarWorkspaceColorPicker).action
           == ScriptAction::OpenWorkspaceColorPicker);
+    CHECK(scriptRow(SnapshotScript::SidebarTabColorPicker).action == ScriptAction::OpenSidebarTabColorPicker);
+    CHECK(scriptRow(SnapshotScript::SidebarTabColorPicker).sidebarColor == SnapshotSidebarColor::Tabs);
     // The hover card's status is longer than any row holds, so the card is what shows it whole.
     CHECK(SnapshotLongStatus.size() > contour::window::MaxRowTextLength);
+}
+
+TEST_CASE("snapshot plan: the sidebar tree is drawn at each row spacing", "[snapshot]")
+{
+    using namespace contour::test::snapshot;
+    using contour::config::SidebarRowSpacing;
+    // Every script draws the default, comfortable, but the compact twin of sidebar-tree.
+    for (auto const& row: SnapshotScripts)
+    {
+        INFO(row.name);
+        CHECK((row.rowSpacing == SidebarRowSpacing::Compact)
+              == (row.script == SnapshotScript::SidebarTreeCompact));
+    }
+    auto const& comfortable = scriptRow(SnapshotScript::SidebarTree);
+    auto const& compact = scriptRow(SnapshotScript::SidebarTreeCompact);
+    CHECK(compact.name == std::string_view { "sidebar-tree-compact" });
+    CHECK(compact.sidebar == comfortable.sidebar);
+    CHECK(compact.tabCount == comfortable.tabCount);
+    CHECK(compact.sidebarColor == comfortable.sidebarColor);
+    CHECK(compact.action == comfortable.action);
 }

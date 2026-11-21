@@ -4,6 +4,7 @@
 #include <contour/config/AccessibilityPreferences.hpp>
 #include <contour/config/ChromeDensity.hpp>
 #include <contour/config/MaterialSupport.hpp>
+#include <contour/config/TabBarMode.hpp>
 #include <contour/config/UiStyle.hpp>
 
 #include <vtbackend/core/BlockPill.hpp>
@@ -1086,23 +1087,34 @@ static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SidebarLoo
     return SidebarLookRows[static_cast<std::size_t>(look)];
 }
 
+/// A two-line sidebar row's vertical extents at one `sidebar.row_spacing`, in vertical units.
+struct SidebarTwoLineRow
+{
+    int height = 0;  ///< The row's height.
+    int lineGap = 0; ///< The gap between the row's name and its second line.
+
+    [[nodiscard]] bool operator==(SidebarTwoLineRow const&) const = default;
+};
+
+/// A two-line row's extents at every spacing, indexed by SidebarRowSpacing (Comfortable, then Compact).
+using SidebarTwoLineRows = std::array<SidebarTwoLineRow, SidebarRowSpacingCount>;
+
 /// The workspace sidebar's extents, in the units of the row: logical pixels, and cells on the Terminal row.
 /// Widths, edges, gaps and radii are in horizontal units, heights in vertical ones.
 struct SidebarTokens
 {
-    int width = 0;              ///< The sidebar's default width.
-    int minWidth = 0;           ///< The narrowest it may be dragged to.
-    int maxWidth = 0;           ///< The widest it may be dragged to.
-    int rowHeight = 0;          ///< A one-line row's height.
-    int twoLineRowHeight = 0;   ///< A two-line row's height.
-    int lineGap = 0;            ///< The gap between a two-line row's name and its second line.
-    int indent = 0;             ///< What a tab row is indented by beneath its workspace.
-    int glyph = 0;              ///< A row's glyph, its edge.
-    int gitGap = 0;             ///< The gap between a row's directory and its git state.
-    int footerHeight = 0;       ///< The footer's height.
-    int selectionRadius = 0;    ///< The selected row's corner radius; 0 squares it off.
-    int accentPillWidth = 0;    ///< The accent pill's width; 0 draws none.
-    int hoverCardWidth = 0;     ///< The width of the card a hovered row shows.
+    int width = 0;                     ///< The sidebar's default width.
+    int minWidth = 0;                  ///< The narrowest it may be dragged to.
+    int maxWidth = 0;                  ///< The widest it may be dragged to.
+    int rowHeight = 0;                 ///< A one-line row's height.
+    SidebarTwoLineRows twoLineRows {}; ///< A tab's or a pane's row at each `sidebar.row_spacing`.
+    int indent = 0;                    ///< What a tab row is indented by beneath its workspace.
+    int glyph = 0;                     ///< A row's glyph, its edge.
+    int gitGap = 0;                    ///< The gap between a row's directory and its git state.
+    int footerHeight = 0;              ///< The footer's height.
+    int selectionRadius = 0;           ///< The selected row's corner radius; 0 squares it off.
+    int accentPillWidth = 0;           ///< The accent pill's width; 0 draws none.
+    int hoverCardWidth = 0;            ///< The width of the card a hovered row shows.
     int tabColorBarWidth = 0;   ///< Width of the `bar` style's bar (`sidebar.tab_color`); > 0 on every row.
     int workspaceRailWidth = 0; ///< The `group` style's rail (`sidebar.workspace_color`); > 0 on every row.
     int workspaceSwatchSize =
@@ -1110,6 +1122,17 @@ struct SidebarTokens
 
     [[nodiscard]] bool operator==(SidebarTokens const&) const = default;
 };
+
+/// A tab's or a pane's sidebar row at @p spacing: the row of its look's table that `sidebar.row_spacing`
+/// names.
+/// @param tokens  The look's sidebar tokens.
+/// @param spacing The configured spacing.
+/// @return The row's height and line gap, in the look's vertical units.
+[[nodiscard]] constexpr SidebarTwoLineRow sidebarTwoLineRow(SidebarTokens const& tokens,
+                                                            SidebarRowSpacing spacing) noexcept
+{
+    return tokens.twoLineRows[static_cast<std::size_t>(spacing)];
+}
 
 /// Layout choices that differ per style.
 struct LayoutTokens
