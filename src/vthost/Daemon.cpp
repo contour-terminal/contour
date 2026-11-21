@@ -1623,18 +1623,14 @@ namespace
         return std::pair { std::string { host }, static_cast<std::uint16_t>(port) };
     }
 
-    /// The policy every hosted session's kitty file media are read under: the one place the daemon chooses
-    /// it, until its configuration supplies one. The daemon's own -- its `$TMPDIR`, its user, its home --
-    /// since files are read where the application wrote them.
-    /// @param env The daemon's environment.
-    [[nodiscard]] vtbackend::kitty_graphics::MediaPolicy kittyMediaDefaults(core::Environment const& env)
-    {
-        return vtbackend::kitty_graphics::defaultMediaPolicy(
-            env,
-            std::filesystem::path { env.get("HOME").value_or(std::string {}) },
-            vtbackend::kitty_graphics::currentUserId());
-    }
 } // namespace
+
+vtbackend::kitty_graphics::MediaPolicy kittyMediaPolicyOf(core::Environment const& env,
+                                                          DaemonConfig const& config)
+{
+    return vtbackend::kitty_graphics::mediaPolicy(
+        env, config.kittyMedia, config.homeDirectory, vtbackend::kitty_graphics::currentUserId());
+}
 
 std::optional<std::pair<std::string, std::uint16_t>> parseHostPort(std::string_view spec)
 {
@@ -1753,7 +1749,8 @@ int runDaemon(DaemonConfig const& config,
             .workspaceGit = WorkspaceGitServices { .probe = *gitProbe, .executor = gitExecutor },
             .kittyMedia =
                 vtbackend::kitty_graphics::KittyMediumServices {
-                    .source = *kittyMediumSource, .policy = kittyMediaDefaults(core::defaultEnvironment()) },
+                    .source = *kittyMediumSource,
+                    .policy = kittyMediaPolicyOf(core::defaultEnvironment(), config) },
             .imageDecoder = config.imageDecoder,
             .extensions = config.extensions ? config.extensions() : nullptr,
             .profiles = config.profiles,

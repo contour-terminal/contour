@@ -879,6 +879,34 @@ Config loadConfigNamed(std::string_view configPath)
     return loadConfigFromFile(configFileNamed(configPath));
 }
 
+vtbackend::kitty_graphics::MediaSettings kittyMediaSettings(ImagesConfig const& images,
+                                                            std::filesystem::path const& homeDirectory)
+{
+    auto settings = vtbackend::kitty_graphics::MediaSettings {
+        .transmission = images.kittyFileTransmission ? vtbackend::kitty_graphics::FileTransmission::Enabled
+                                                     : vtbackend::kitty_graphics::FileTransmission::Disabled,
+        .allowList = {}
+    };
+    for (auto const& directory: images.kittyFileAllowList)
+    {
+        // `~name` is not another user's home here: homeResolvedPath() would read it as `~/name`.
+        auto const namesOtherHome =
+            directory.size() > 1 && directory.front() == '~' && directory[1] != '/' && directory[1] != '\\';
+        auto path =
+            namesOtherHome ? fs::path {} : homeResolvedPath(directory, homeDirectory).value_or(fs::path {});
+        // Rooted rather than absolute, which on Windows would also demand a drive the POSIX spellings lack.
+        if (!path.has_root_directory())
+        {
+            errorLog()(
+                "images.kitty_file_allow_list: '{}' is not an absolute directory or `~/…`; ignoring it.",
+                directory);
+            continue;
+        }
+        settings.allowList.push_back(std::move(path));
+    }
+    return settings;
+}
+
 vtbackend::Settings emulationSettings(Config const& config, TerminalProfile const& profile)
 {
     auto settings = vtbackend::Settings {};
@@ -3224,6 +3252,29 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
                            deprecatedKey);
 
         loadFromEntry(child, "good_image_protocol", where.goodImageProtocol);
+        loadFromEntry(child, "kitty_file_transmission", where.kittyFileTransmission);
+
+        if (auto const allowList = child["kitty_file_allow_list"])
+        {
+            if (!allowList.IsSequence())
+                errorLog()("{} ({}) takes a list of directories, such as ['~/.claude/plugins/data']; keeping "
+                           "the previous one.",
+                           keyPathTo(child, "kitty_file_allow_list"),
+                           detail::placeOf(allowList));
+            else
+            {
+                where.kittyFileAllowList.clear();
+                for (auto const& directory: allowList)
+                {
+                    if (directory.IsScalar() && !directory.Scalar().empty())
+                        where.kittyFileAllowList.push_back(directory.Scalar());
+                    else
+                        errorLog()("{} ({}) lists something other than a directory; ignored.",
+                                   keyPathTo(child, "kitty_file_allow_list"),
+                                   detail::placeOf(directory));
+                }
+            }
+        }
     }
 }
 

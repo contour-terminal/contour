@@ -687,9 +687,9 @@ class ContourGuiApp:
     [[nodiscard]] std::optional<vtbackend::GitHeadServices> gitHeadServices() noexcept;
 
     /// What a local session's kitty graphics read files (`t=f`, `t=t`) with: the platform's source and the
-    /// policy chosen at construction (kittyMediaDefaults()). Only for a session whose bytes come from a local
-    /// process (session::mediaAccessFor()).
-    /// @return References valid for the app's lifetime.
+    /// policy the configuration's `images` section makes now (config::kittyMediaSettings()). Only for a
+    /// session whose bytes come from a local process (session::mediaAccessFor()).
+    /// @return The policy, and a source valid for the app's lifetime.
     [[nodiscard]] vtbackend::kitty_graphics::KittyMediumServices kittyMediumServices() const;
 
     /// @return What the in-process windows track their workspaces' git state with: a probe over this
@@ -1577,8 +1577,6 @@ class ContourGuiApp:
     /// What local sessions read kitty file media with (kittyMediumServices()). Declared before
     /// _sessionManager: every session borrows the source.
     std::unique_ptr<vtbackend::kitty_graphics::KittyMediumSource const> _kittyMediumSource;
-    /// The policy every local session's kitty file media are read under. Fixed at construction.
-    vtbackend::kitty_graphics::MediaPolicy _kittyMediaPolicy;
     // Shared by every session's keyboard platform, which holds it by reference; @see keyboardLayout() and
     // keyboardPlatformFactory(). Declared before _sessionManager, so that it outlives every session and the
     // platform each one holds. Built by keyboardLayout() on first use, once the Qt application exists.

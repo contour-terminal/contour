@@ -6,11 +6,13 @@
 /// this Qt-free module so the whole serving path never touches the GUI stack.
 
 #include <vtbackend/core/Image.hpp>
+#include <vtbackend/graphics/KittyMediaDefaults.hpp>
 #include <vtbackend/screen/Settings.hpp>
 
 #include <vtpty/Process.hpp>
 #include <vtpty/SandboxInfo.hpp>
 
+#include <core/Environment.hpp>
 #include <core/net/Tls.hpp>
 
 #include <chrono>
@@ -186,6 +188,14 @@ struct DaemonConfig
     /// remembered or persisted, since only a size a client reported is. See
     /// SessionHostConfig::defaultCellPixelSize.
     vtpty::ImageSize defaultCellPixelSize = DefaultCellPixelSize;
+    /// What the daemon's own configuration says of kitty file media (`images.kitty_file_*`); its environment,
+    /// home and user complete the policy every hosted local session reads files under. Read once, at start:
+    /// a configuration reload leaves it. Never part of a session's settings on the wire, so no client widens
+    /// what the daemon reads. Disabled by default.
+    vtbackend::kitty_graphics::MediaSettings kittyMedia {};
+    /// The daemon user's home: the directory `~` in kittyMedia's allow-list was resolved against, and so the
+    /// one an allow-list entry may not open whole. Empty when it is unknown, which drops only `/`.
+    std::filesystem::path homeDirectory {};
     /// What every hosted session decodes PNG images (kitty `f=100`, GIP) with: vthost is Qt-free and decodes
     /// no file format itself, so `contour daemon` supplies the GUI build's decoder. None refuses PNG images.
     vtbackend::ImageDecoder imageDecoder {};
@@ -244,6 +254,15 @@ struct DaemonConfig
 /// @return Nothing, or why the directory is unusable.
 [[nodiscard]] std::expected<void, std::string> prepareSocketDirectory(
     std::filesystem::path const& socketPath);
+
+/// The policy every hosted session's kitty file media are read under: @p config's settings, completed by
+/// the daemon's own `$TMPDIR` (from @p env), its home (DaemonConfig::homeDirectory, the one `~` was resolved
+/// against) and its user, since files are read where the application wrote them.
+/// @param env The daemon's environment.
+/// @param config The daemon's configuration.
+/// @return The media policy of the daemon's hosted sessions.
+[[nodiscard]] vtbackend::kitty_graphics::MediaPolicy kittyMediaPolicyOf(core::Environment const& env,
+                                                                        DaemonConfig const& config);
 
 /// Runs the daemon: binds the hardened control socket, serves connections until a shutdown is asked
 /// for (see ShutdownCause), then shuts down cleanly. Blocks the calling thread.

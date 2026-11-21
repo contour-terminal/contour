@@ -109,7 +109,7 @@ narrowing cast, so an out-of-range value is a `MalformedPdu` instead of a plausi
 
 The handshake **negotiates**: each hello states the range of protocol versions its end speaks, and the
 daemon agrees on the highest one both ranges contain (`HandshakePolicy::versions`, by default
-`proto::SupportedVersions`, today `{ 4, 4 }`), along with the capabilities both ends offer. The client
+`proto::SupportedVersions`, today `{ 5, 5 }`), along with the capabilities both ends offer. The client
 takes any agreed version inside both ranges; the outcome is `NativeSession::negotiated()` on one end and
 `NativeClient::negotiated()` on the other. A peer whose range does not meet the daemon's is refused, and
 `proto::describe` phrases the refusal for whichever end reports it.
@@ -541,6 +541,13 @@ connection on first reference, immune to the server-side LRU evicting the id
 later) and image-covered cells. Image pixels are never inline: clients fetch
 by stable image id (`FetchImage` → `ImageData`/`ImageGone`), served from
 `ImagePool`'s id→weak_ptr index — eviction stays refcount-driven.
+
+An image-covered cell names a *placement* and its tile offset, not an image: each Delta and snapshot
+piece carries a table of the placements its cells name, once each — the image, its resize and
+alignment policies, its cell span, source rectangle, origin (cursor or kitty Unicode placeholder) and
+gap colour — and the mirror builds one raster per placement. Two placements of one image, or a picture
+clipped at the top of the page, therefore mirror as the host shows them (protocol v5; see
+[Kitty Unicode placeholders](kitty-placeholders.md)).
 
 Full per *sent* cell, that is — a row does not send the trailing columns that already
 match its own fill, and a uniformly-filled row sends no cells at all. A shell line
@@ -2176,8 +2183,8 @@ the transport knows one — so a whole connection reads as one story:
 
 ```
 [vthost.conn]        native#3: accepted
-[vthost.trace.proto] native#3 recv #1 ClientHello versions=4-4 caps=1 token=yes settings=yes (60 bytes)
-[vthost.conn]        native#3: handshake complete (protocol v4)
+[vthost.trace.proto] native#3 recv #1 ClientHello versions=5-5 caps=1 token=yes settings=yes (60 bytes)
+[vthost.conn]        native#3: handshake complete (protocol v5)
 [vthost.trace.proto] native#3 send #0 Delta session=1 gen=3 seq=98 lines=7 (412 bytes)
 [error]              native#3: malformed frame (MalformedVarint); dropping the connection
 ```
