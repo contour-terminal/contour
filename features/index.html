@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>features - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="..">
+<link rel="icon" href="../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../assets/theme/site.css">
+<script type="module" src="../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../assets/contour-logo.png" alt=""><span id="cw-title">features</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href=".." aria-current="true"><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../configuration/"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../vt-sequence/"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour">
+<a class="tab" data-group="" href="..">home</a>
+<a class="tab" data-group="" href="../install/">install</a>
+<a class="tab" data-group="" href="./" aria-current="page">features</a>
+<a class="tab" data-group="" href="../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure" hidden>
+<a class="tab" data-group="" href="../configuration/">config file</a>
+<a class="tab" data-group="" href="../configuration/profiles/">profiles</a>
+<a class="tab" data-group="" href="../configuration/settings/">settings window</a>
+<a class="tab" data-group="" href="../configuration/colors/">colors</a>
+<a class="tab" data-group="" href="../configuration/key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../configuration/layouts/">layouts</a>
+<a class="tab" data-group="more" href="../configuration/links/">links</a>
+<a class="tab" data-group="more" href="../configuration/hosts/">hosts</a>
+<a class="tab" data-group="more" href="../configuration/indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../configuration/paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference" hidden>
+<a class="tab" data-group="" href="../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../vt-extensions/synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>features</summary>
+  <div class="tabsel-list">
+<a href="..">home</a>
+<a href="../install/">install</a>
+<a href="./" aria-current="page">features</a>
+<a href="../release-notes/">release notes</a>
+<a href="../persistent-sessions/">persistent sessions</a>
+<a href="../sidebar/">workspace sidebar</a>
+<a href="../remote-hosts/">remote hosts</a>
+<a href="../control-api/">control api</a>
+<a href="../demo/command-blocks/">command blocks</a>
+<a href="../demo/hint-mode/">hint mode</a>
+<a href="../input-modes/">input modes</a>
+<a href="../demo/drag-and-drop/">drag and drop</a>
+<a href="../extensions/">status-line extensions</a>
+<a href="../quick-terminal/">quick terminal</a>
+<a href="../accessibility/">accessibility</a>
+<a href="../secure-input/">secure input</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="features">Features<a class="headerlink" href="#features" title="Permanent link">#</a></h1>
+<p>Everything Contour does, grouped by what you do with it. A card with a link opens its guide.</p>
+<h2 id="window-and-sessions">Window and sessions<a class="headerlink" href="#window-and-sessions" title="Permanent link">#</a></h2>
+<div class="cards">
+<ul>
+<li><a href="../persistent-sessions/"><strong>Persistent sessions</strong> Daemon mode: sessions survive the window, reattach locally or over the network, and interoperate with tmux in both directions.</a></li>
+<li><a href="../sidebar/"><strong>Workspace sidebar</strong> Workspaces, tabs and panes as a tree.</a></li>
+<li><a href="../remote-hosts/"><strong>Remote hosts</strong> Attach to sessions on another machine.</a></li>
+<li><a href="../quick-terminal/"><strong>Quick terminal</strong> A global hotkey slides a terminal down from the top of the screen.</a></li>
+<li><a href="../configuration/layouts/#tab-colors"><strong>Tabs and split panes</strong> Colored tabs, tab badges and drag-and-drop rearranging of panes and tabs.</a></li>
+<li><a href="../configuration/layouts/"><strong>Layouts</strong> Named sets of tabs and panes that open together.</a></li>
+<li><a href="../demo/drag-and-drop/"><strong>Drag and drop</strong> Drop a tab on a pane edge to split it, or files to type their escaped paths.</a></li>
+<li><strong>Native window chrome</strong> Windows 11, macOS and Linux, in light and dark, with a Settings window, a command palette and a character-cell Terminal style.</li>
+<li><strong>Cross-platform</strong> Linux, macOS, FreeBSD, OpenBSD and Windows.</li>
+<li><strong>GPU-accelerated and high-DPI</strong> GPU-accelerated rendering with high-DPI support.</li>
+<li><strong>Find bar</strong> A live match count, floating over the pane being searched.</li>
+<li><strong>Runtime configuration reload</strong> Change the configuration and see it without a restart.</li>
+<li><strong>Key binding customization</strong></li>
+<li><strong>Color schemes and profiles</strong> A profile groups a color scheme, a login shell and related behaviors.</li>
+<li><strong>Transparent background</strong> Blurred behind the window on Windows 10 and on KDE; a blurrable background image is supported too.</li>
+<li><strong>Read-only mode</strong> Protects the running application from accidental input, such as <kbd>Ctrl</kbd>+<kbd>C</kbd>.</li>
+</ul>
+</div>
+<h2 id="text-and-graphics">Text and graphics<a class="headerlink" href="#text-and-graphics" title="Permanent link">#</a></h2>
+<div class="cards">
+<ul>
+<li><a href="#font-ligatures"><strong>Font ligatures</strong> Rendered out of the box, when your font has them.</a></li>
+<li><strong>Unicode</strong> Colored emoji, including ZWJ, VS15 and VS16 sequences, and grapheme clusters: 🌈 💝 😛 👪</li>
+<li><strong>Bold and italic fonts</strong></li>
+<li><strong>Nerd Font glyphs</strong> Powerline, Font Awesome, Material Design, Devicons and more, with whichever font you choose: a symbols font is bundled.</li>
+<li><strong>256-color and Truecolor</strong></li>
+<li><a href="#images"><strong>Images</strong> Sixel, kitty graphics and ReGIS vector graphics.</a></li>
+<li><a href="#input-method-editor"><strong>Input method editor</strong> Emoji and pinyin input through ibus.</a></li>
+<li><a href="#size-indicator"><strong>Size indicator</strong> The terminal size appears while you resize the window.</a></li>
+<li><a href="../configuration/indicator-statusline/#host-programmable-status-line"><strong>Status line</strong> VT320 host-programmable and indicator status line.</a></li>
+<li><strong>Text reflow</strong> Lines re-wrap when the window resizes; configurable via <code>SM ? 2028</code> / <code>RM ? 2028</code>.</li>
+<li><a href="../vt-extensions/synchronized-output/"><strong>Synchronized rendering</strong> <code>SM ? 2026</code> / <code>RM ? 2026</code>.</a></li>
+<li><strong>Progress bar</strong> A built-in <a href="https://github.com/contour-terminal/contour/issues/521">Fira Code inspired progress bar</a>.</li>
+<li><strong>Clickable links</strong> URLs, file paths and your own patterns in whatever a program prints, opened with <kbd>Ctrl</kbd>+click; hyperlinks via <a href="https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda">OSC 8</a>. See <a href="../configuration/links/">links</a>.</li>
+<li><a href="https://github.com/contour-terminal/vt-extensions/blob/master/clipboard-extension.md"><strong>Clipboard</strong> Set the clipboard and primary selection via OSC 52, advertised as the Clipboard Extension (<code>DA1</code> <code>52</code>).</a></li>
+</ul>
+</div>
+<h2 id="working-in-the-scrollback">Working in the scrollback<a class="headerlink" href="#working-in-the-scrollback" title="Permanent link">#</a></h2>
+<div class="cards">
+<ul>
+<li><a href="../demo/command-blocks/"><strong>Command blocks</strong> Exit-status gutter, line numbers, per-line timestamps, folding, scrollbar marks and a sticky command header.</a></li>
+<li><a href="../demo/command-blocks/#restored-sessions"><strong>Restored sessions</strong> History comes back above a "Restored" divider, with one toast saying what was restored.</a></li>
+<li><a href="../demo/command-blocks/#finish-notifications"><strong>Finish notifications</strong> Know when a long-running command finishes in a tab you are not looking at.</a></li>
+<li><a href="../vt-extensions/osc-133-shell-integration/"><strong>Shell integration</strong> For bash, zsh, fish, tcsh and PowerShell; Contour offers to install it for bash, zsh and fish, showing the one line it adds, also in Settings.</a></li>
+<li><a href="../input-modes/"><strong>Vi-like input modes</strong> Navigation, selection, copy and paste from the keyboard.</a></li>
+<li><a href="../demo/hint-mode/"><strong>Hint mode</strong> Keyboard-driven selection of URLs, file paths, git hashes and more.</a></li>
+<li><a href="../input-modes/#line-marks"><strong>Line marks</strong> Vertical markers: jump quickly between marks in your history.</a></li>
+<li><a href="../vt-extensions/buffer-capture/"><strong>Buffer capture</strong> A VT extension to quickly extract the terminal page's contents.</a></li>
+</ul>
+</div>
+<h2 id="automation">Automation<a class="headerlink" href="#automation" title="Permanent link">#</a></h2>
+<div class="cards">
+<ul>
+<li><a href="../control-api/"><strong>Control API</strong> <code>contour ls</code>, <code>new</code>, <code>split</code>, <code>send</code>, <code>pane capture</code> and <code>block</code> script the daemon's workspaces, tabs, panes and command blocks.</a></li>
+<li><a href="../control-api/"><strong>MCP server</strong> <code>contour mcp</code> lets coding agents such as Claude Code and Codex split panes, run commands and read their output in their own tab.</a></li>
+<li><a href="../extensions/"><strong>Status-line extensions</strong> Sandboxed WebAssembly extensions that draw in the status line.</a></li>
+</ul>
+</div>
+<h2 id="font-ligatures">Font ligatures<a class="headerlink" href="#font-ligatures" title="Permanent link">#</a></h2>
+<p>Contour renders your font ligatures out of the box.
+If your font supports them, Contour will render them.</p>
+<p><img alt="Font ligatures in Contour" class="shot" src="../screenshots/contour-font-ligatures.png"></p>
+<h2 id="images">Images<a class="headerlink" href="#images" title="Permanent link">#</a></h2>
+<p>Contour implements first-class <a href="https://en.wikipedia.org/wiki/Sixel">Sixel</a> image support, as well as the kitty graphics protocol and <a href="../demo/regis-graphics/">ReGIS vector graphics</a>.</p>
+<p>Most notably supporting libraries,
+are <a href="https://github.com/dankamongmen/notcurses/">notcurses</a>
+and <a href="https://github.com/libsixel/libsixel/">libsixel</a>.</p>
+<p>Also, libsixel does provide a CLI to convert well known image formats (like PNG)
+to Sixel format and have them printed to the terminal.</p>
+<p><img alt="Sixel images listed with lsix" class="shot" src="../screenshots/contour-lsix.png">
+<img alt="A Julia REPL plotting a Sixel image" class="shot" src="../screenshots/contour-julia-repl-sixel-image.png"></p>
+<h2 id="input-method-editor">Input method editor<a class="headerlink" href="#input-method-editor" title="Permanent link">#</a></h2>
+<p>An input method (or input method editor, commonly abbreviated IME) is an operating system component or program that enables users to generate characters not natively available on their input devices by using sequences of characters (or mouse operations) that are available to them. Using an input method is usually necessary for languages that have more graphemes than there are keys on the keyboard. More info can be found on <a href="https://en.wikipedia.org/wiki/Input_method">wikipedia</a> and with more info how to setup it and use here <a href="https://wiki.archlinux.org/title/Input_method">wiki.archlinux</a></p>
+<h3 id="example-of-emoji-input-using-ibus">Example of emoji input using ibus<a class="headerlink" href="#example-of-emoji-input-using-ibus" title="Permanent link">#</a></h3>
+<p>List of emoji from <a href="http://unicode.org/emoji/charts/full-emoji-list.html">unicode</a></p>
+<p>You can insert any unicode character using ibus IME by pressing Ctrl+Shift+u (default) and then insert unicode code for the emoji or other character.</p>
+<p><div class="video-container"><video style="width:100%" muted controls alt="type:video"><source src="../demo/ime/demo_ime.mp4" type="video/mp4"></source></video></div></p>
+<h3 id="example-of-input-using-pinyin-via-ibus">Example of input using pinyin via ibus<a class="headerlink" href="#example-of-input-using-pinyin-via-ibus" title="Permanent link">#</a></h3>
+<p><div class="video-container"><video style="width:100%" muted controls alt="type:video"><source src="../demo/ime/pinyin_ime.mp4" type="video/mp4"></source></video></div></p>
+<h2 id="size-indicator">Size indicator<a class="headerlink" href="#size-indicator" title="Permanent link">#</a></h2>
+<p>On resize window with current terminal size will appear</p>
+<p><div class="video-container"><video style="width:100%" muted controls alt="type:video"><source src="../videos/size-indicator.mp4" type="video/mp4"></source></video></div></p></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="window-and-sessions" href="#window-and-sessions">Window and sessions</a><a data-head="text-and-graphics" href="#text-and-graphics">Text and graphics</a><a data-head="working-in-the-scrollback" href="#working-in-the-scrollback">Working in the scrollback</a><a data-head="automation" href="#automation">Automation</a><a data-head="font-ligatures" href="#font-ligatures">Font ligatures</a><a data-head="images" href="#images">Images</a><a data-head="input-method-editor" href="#input-method-editor">Input method editor</a><a data-head="size-indicator" href="#size-indicator">Size indicator</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/features.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">contour › <b>features</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

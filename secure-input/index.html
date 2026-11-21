@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>secure input - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="..">
+<link rel="icon" href="../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../assets/theme/site.css">
+<script type="module" src="../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../assets/contour-logo.png" alt=""><span id="cw-title">secure input</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href=".." aria-current="true"><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../configuration/"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../vt-sequence/"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour">
+<a class="tab" data-group="" href="..">home</a>
+<a class="tab" data-group="" href="../install/">install</a>
+<a class="tab" data-group="" href="../features/">features</a>
+<a class="tab" data-group="" href="../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="./" aria-current="page">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure" hidden>
+<a class="tab" data-group="" href="../configuration/">config file</a>
+<a class="tab" data-group="" href="../configuration/profiles/">profiles</a>
+<a class="tab" data-group="" href="../configuration/settings/">settings window</a>
+<a class="tab" data-group="" href="../configuration/colors/">colors</a>
+<a class="tab" data-group="" href="../configuration/key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../configuration/layouts/">layouts</a>
+<a class="tab" data-group="more" href="../configuration/links/">links</a>
+<a class="tab" data-group="more" href="../configuration/hosts/">hosts</a>
+<a class="tab" data-group="more" href="../configuration/indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../configuration/paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference" hidden>
+<a class="tab" data-group="" href="../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../vt-extensions/synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>secure input</summary>
+  <div class="tabsel-list">
+<a href="..">home</a>
+<a href="../install/">install</a>
+<a href="../features/">features</a>
+<a href="../release-notes/">release notes</a>
+<a href="../persistent-sessions/">persistent sessions</a>
+<a href="../sidebar/">workspace sidebar</a>
+<a href="../remote-hosts/">remote hosts</a>
+<a href="../control-api/">control api</a>
+<a href="../demo/command-blocks/">command blocks</a>
+<a href="../demo/hint-mode/">hint mode</a>
+<a href="../input-modes/">input modes</a>
+<a href="../demo/drag-and-drop/">drag and drop</a>
+<a href="../extensions/">status-line extensions</a>
+<a href="../quick-terminal/">quick terminal</a>
+<a href="../accessibility/">accessibility</a>
+<a href="./" aria-current="page">secure input</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="secure-input">Secure input<a class="headerlink" href="#secure-input" title="Permanent link">#</a></h1>
+<p>While a program in a pane hides what you type, as <code>sudo</code> and <code>ssh</code> do when they ask for a password, Contour
+shows a lock for that pane. On macOS it also turns on Secure Keyboard Entry for as long as that pane has
+focus, which keeps other applications from reading your keystrokes.</p>
+<h2 id="the-setting">The setting<a class="headerlink" href="#the-setting" title="Permanent link">#</a></h2>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">secure_input</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
+</span></code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>auto</code></td>
+<td>Lock and, on macOS, Secure Keyboard Entry while a pane asks for hidden input.</td>
+</tr>
+<tr>
+<td><code>off</code></td>
+<td>Never. <code>false</code> and <code>no</code> read as <code>off</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>A new configuration (<code>defaults_edition: native2026</code>) uses <code>auto</code>; the Classic edition keeps <code>off</code>. Reloading the
+configuration applies the change at once: turning it off releases Secure Keyboard Entry immediately.</p>
+<h2 id="what-counts-as-a-password-prompt">What counts as a password prompt<a class="headerlink" href="#what-counts-as-a-password-prompt" title="Permanent link">#</a></h2>
+<p>A pane is locked when its terminal has <strong>echo off and canonical (line) mode on</strong>: the state <code>sudo</code>,
+<code>readpassphrase(3)</code>, <code>ssh</code> and <code>read -s</code> put it in. A program that clears echo for its own screen, such as an
+editor, <code>htop</code>, <code>less</code> or the line editor of your shell, also turns canonical mode off, so it shows no lock.
+Ghostty reads the same two flags (<code>password_input</code> in its <code>termio/Exec.zig</code>); xterm has no automatic detection and
+only a manual Secure Keyboard menu entry.</p>
+<h3 id="what-it-cannot-see">What it cannot see<a class="headerlink" href="#what-it-cannot-see" title="Permanent link">#</a></h3>
+<p>Contour looks at the terminal's flags and nothing else, so it misses a password reader that clears <strong>both</strong> echo
+and canonical mode. Those readers show no lock and turn nothing on:</p>
+<ul>
+<li><code>sudo</code> with <code>pwfeedback</code>, and sudo-rs with its feedback option</li>
+<li><code>pinentry-curses</code></li>
+<li><code>sudo</code> and similar asked over <code>ssh</code>, where the prompt runs on another machine's terminal</li>
+<li>panes whose program runs on a host Contour cannot read flags from (an SSH pane, a Windows ConPTY pane)</li>
+</ul>
+<p>For these, the lock is simply absent: a lock means the program hides the typing, and no lock means only that
+Contour could not tell.</p>
+<h3 id="how-quickly-it-notices">How quickly it notices<a class="headerlink" href="#how-quickly-it-notices" title="Permanent link">#</a></h3>
+<p>Contour re-reads the flags when output reaches the pane, before each key and paste is sent, and on focus. For two
+seconds after the pane's last output or key it also checks every 100 ms while the pane has focus, then stops: an
+idle pane wakes nothing. A program that turns echo off only after more than two quiet seconds is noticed at the
+first key you type. That key has already reached the system by then, so Secure Keyboard Entry protects the keys
+after it, not that one. The opposite case leans safe: a program that turns echo back on silently, more than two
+seconds after the last key or output, leaves the lock and Secure Keyboard Entry on until the next key or output.</p>
+<p>Panes hosted by a daemon report the same state over the native protocol, so the lock works under
+<code>daemon.mode: auto</code> as well.</p>
+<h2 id="where-the-lock-shows">Where the lock shows<a class="headerlink" href="#where-the-lock-shows" title="Permanent link">#</a></h2>
+<p>Wherever something showing the pane is on screen: in the pane's header, on its tab, in a chip in the title band, and,
+when none of those is on screen, in a small pill over the pane's blank cells at the top right. The pill avoids the
+prompt and yields to the link pill and the find bar; if a full-screen program leaves no blank place, it covers a few
+cells rather than disappear.</p>
+<p>The words beside the lock read <strong>Secure input on</strong> only for the pane the system's Secure Keyboard Entry protects: on
+macOS, the focused pane of the front application. Every other locked pane (an unfocused split, a background tab) and
+every other platform read <strong>Input hidden</strong>, which says only that the terminal hides what you type. Screen readers
+announce the same words.</p></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="the-setting" href="#the-setting">The setting</a><a data-head="what-counts-as-a-password-prompt" href="#what-counts-as-a-password-prompt">What counts as a password prompt</a><a data-head="where-the-lock-shows" href="#where-the-lock-shows">Where the lock shows</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/secure-input.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">contour › <b>secure input</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

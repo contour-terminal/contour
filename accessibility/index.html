@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>accessibility - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="..">
+<link rel="icon" href="../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../assets/theme/site.css">
+<script type="module" src="../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../assets/contour-logo.png" alt=""><span id="cw-title">accessibility</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href=".." aria-current="true"><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../configuration/"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../vt-sequence/"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour">
+<a class="tab" data-group="" href="..">home</a>
+<a class="tab" data-group="" href="../install/">install</a>
+<a class="tab" data-group="" href="../features/">features</a>
+<a class="tab" data-group="" href="../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="./" aria-current="page">accessibility</a>
+<a class="tab" data-group="guides" href="../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure" hidden>
+<a class="tab" data-group="" href="../configuration/">config file</a>
+<a class="tab" data-group="" href="../configuration/profiles/">profiles</a>
+<a class="tab" data-group="" href="../configuration/settings/">settings window</a>
+<a class="tab" data-group="" href="../configuration/colors/">colors</a>
+<a class="tab" data-group="" href="../configuration/key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../configuration/layouts/">layouts</a>
+<a class="tab" data-group="more" href="../configuration/links/">links</a>
+<a class="tab" data-group="more" href="../configuration/hosts/">hosts</a>
+<a class="tab" data-group="more" href="../configuration/indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../configuration/paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference" hidden>
+<a class="tab" data-group="" href="../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../vt-extensions/synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>accessibility</summary>
+  <div class="tabsel-list">
+<a href="..">home</a>
+<a href="../install/">install</a>
+<a href="../features/">features</a>
+<a href="../release-notes/">release notes</a>
+<a href="../persistent-sessions/">persistent sessions</a>
+<a href="../sidebar/">workspace sidebar</a>
+<a href="../remote-hosts/">remote hosts</a>
+<a href="../control-api/">control api</a>
+<a href="../demo/command-blocks/">command blocks</a>
+<a href="../demo/hint-mode/">hint mode</a>
+<a href="../input-modes/">input modes</a>
+<a href="../demo/drag-and-drop/">drag and drop</a>
+<a href="../extensions/">status-line extensions</a>
+<a href="../quick-terminal/">quick terminal</a>
+<a href="./" aria-current="page">accessibility</a>
+<a href="../secure-input/">secure input</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="accessibility">Accessibility<a class="headerlink" href="#accessibility" title="Permanent link">#</a></h1>
+<p>Contour reports where the terminal caret is to the operating system, so assistive technology can follow
+it. This is what makes a screen magnifier keep the cursor in view while you type, and what lets a screen
+reader know where it should be reading.</p>
+<p>There is nothing to switch on. Reporting is always available and costs effectively nothing while no
+assistive client is attached; the platform activates it when one appears.</p>
+<p>Should you ever need to rule the caret reports out — when diagnosing input latency, say — set
+<code>accessibility_caret_reporting: false</code> in <code>contour.yml</code>. That silences the caret reports only; the
+announcements below have their own setting.</p>
+<h2 id="what-is-reported">What is reported<a class="headerlink" href="#what-is-reported" title="Permanent link">#</a></h2>
+<table>
+<thead>
+<tr>
+<th>Reported</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The caret's position and screen rectangle</td>
+<td>Where the cursor is, updated whenever it moves.</td>
+</tr>
+<tr>
+<td>The visible screen's text</td>
+<td>The grid contents, addressed by offset, rows separated by newlines.</td>
+</tr>
+<tr>
+<td>The shell prompt region</td>
+<td>Where the current prompt is — see below.</td>
+</tr>
+</tbody>
+</table>
+<p>The caret is reported whenever it <strong>moves and is visible</strong>, and also whenever it <strong>becomes visible after
+having been hidden</strong> — so an application that hides the cursor while it redraws and then shows it again
+does not leave a client pointing at a stale position.</p>
+<p>A blinking cursor is <em>not</em> reported on every blink. Only the focused pane reports, so a split window does
+not make a magnifier jump between panes.</p>
+<h2 id="the-prompt-region">The prompt region<a class="headerlink" href="#the-prompt-region" title="Permanent link">#</a></h2>
+<p>When your shell has <a href="../vt-extensions/osc-133-shell-integration/">OSC 133 shell integration</a> enabled,
+Contour additionally exposes the <em>live shell prompt</em> — the one you are typing at — as its own focusable
+region. Assistive technology that follows focus (rather than the text caret) uses this to keep the prompt
+itself in view, which is usually what you want while typing a command.</p>
+<p>While a command is running there is no prompt to report, and Contour says so rather than pointing at a
+stale one. Without shell integration, or with a shell that marks only prompt starts, the caret is still
+reported as usual — only the prompt region is unavailable.</p>
+<p>This needs no opt-in beyond the shell integration itself: it is driven by the OSC 133 marks directly and
+does <strong>not</strong> require <a href="../vt-extensions/semantic-block-query/">DEC mode 2034</a>.</p>
+<h2 id="the-window-around-the-terminal">The window around the terminal<a class="headerlink" href="#the-window-around-the-terminal" title="Permanent link">#</a></h2>
+<p>The tab bar is exposed as a tab list whose tabs announce themselves as you switch between them, the
+window and tab buttons say what they do rather than naming the glyph they are drawn with, and every
+field on the settings page carries its own label.</p>
+<h2 id="keyboard-access-to-the-window-chrome">Keyboard access to the window chrome<a class="headerlink" href="#keyboard-access-to-the-window-chrome" title="Permanent link">#</a></h2>
+<p>With <code>defaults_edition: native2026</code>, <strong>Ctrl+F6</strong> moves keyboard focus out of the terminal and into the
+window's chrome, and on through it: the terminal, then the tab bar, then the toolbar (the daemon control that
+heads a shown sidebar or the location chip, the daemon version chip and the new-tab button), then back to the terminal. <strong>Ctrl+Shift+F6</strong> walks the other
+way. On macOS <strong>Ctrl+F5</strong> goes straight to the toolbar and Ctrl+F6 moves between the areas. An area that is
+not shown, such as a tab bar hidden by <code>tab_bar_visibility</code>, is skipped.</p>
+<p>The location chip is a menu button named for what it shows, "Workspace billing on starfive"; the daemon control
+that heads a shown sidebar is named "Daemon local". The description carries the connection state when the daemon
+is not connected, what another workspace asks while the chip's marker shows ("Another workspace needs you"),
+then whether the switcher is open or closed ("Reconnecting, collapsed"), so a screen reader hears the state even
+where the chip has no room to spell it. Space or Return opens the switcher and Escape closes it.</p>
+<p>A ring marks the item that has focus: a 3 pt outline in the accent on macOS and 2 pt on Windows and Linux,
+and a run of selection-coloured cells under <code>ui_style: terminal</code>. It appears for keyboard focus only, so
+clicking a tab never draws it.</p>
+<table>
+<thead>
+<tr>
+<th>Where</th>
+<th>Key</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tab bar</td>
+<td>Left, Right</td>
+<td>Move to the previous or next tab; Home and End jump to the first or last</td>
+</tr>
+<tr>
+<td>Tab bar</td>
+<td>Return, Space</td>
+<td>Activate the tab</td>
+</tr>
+<tr>
+<td>Tab bar</td>
+<td>Backspace, Delete</td>
+<td>Close the tab; Contour asks first when a program may still be running in it</td>
+</tr>
+<tr>
+<td>Tab bar</td>
+<td>Alt+Left, Alt+Right</td>
+<td>Move the tab left or right</td>
+</tr>
+<tr>
+<td>Toolbar</td>
+<td>Left, Right</td>
+<td>Move to the previous or next item</td>
+</tr>
+<tr>
+<td>Toolbar</td>
+<td>Return, Space</td>
+<td>Press the item</td>
+</tr>
+<tr>
+<td>Either</td>
+<td>Escape</td>
+<td>Return to the terminal</td>
+</tr>
+</tbody>
+</table>
+<p>A bare <strong>F6</strong> is never taken: it reaches the shell, so <code>mc</code>, <code>vim</code> and <code>htop</code> keep it. The three actions,
+<code>FocusNextArea</code>, <code>FocusPreviousArea</code> and <code>FocusToolbar</code>, can be bound to other chords, on any key, and
+those chords keep working from inside the chrome. When the window shows no tab bar and no toolbar there is
+nowhere to go, and Ctrl+F6 reaches the program like any other key. Closing a tab asks whenever its
+foreground program is not its shell, and also when Contour cannot tell (every pane of a daemon-hosted
+window), because closing the tab would end whatever runs in it.</p>
+<p>While the chrome has focus, every key binding keeps working, such as the command palette, opening a new tab
+or one of your own, except the keys the chrome takes for itself: the arrow keys, Home, End, Return, Space,
+Escape, Backspace, Delete and Tab, with no modifier or with Shift or Alt alone. A chord with Ctrl on one of
+those keys is still yours. Plain typing is not sent to the shell until you press Escape to return to the
+terminal.</p>
+<h2 id="the-workspace-sidebar">The workspace sidebar<a class="headerlink" href="#the-workspace-sidebar" title="Permanent link">#</a></h2>
+<p>Each row of the <a href="../sidebar/">workspace sidebar</a> is a list item whose name says what a sighted user reads
+off the tree: its title, its kind, whether it is expanded or collapsed, how many panes under it need you or
+work, and whether it is the current tab: <code>billing, workspace, expanded, 1 needs you</code>. Qt's accessibility has
+no expanded state of its own, so it is part of the name. A tab or pane that failed or finished is named
+<code>failed</code> or <code>done</code>. The footer's counts are one text, and the sidebar's list and filter field have their
+own names. <strong>Ctrl+Shift+D</strong> (<strong>⇧⌘E</strong> on macOS) moves keyboard focus into the tree, which then answers the
+arrow keys, Return, F2 and typing as the <a href="../sidebar/#keyboard">sidebar guide</a> lists.</p>
+<p>When a pane in a workspace other than the one you are looking at starts needing you, Contour announces it,
+Polite, once. Reduce Motion is honoured: rows fold and unfold at once.</p>
+<h2 id="things-that-are-only-announced">Things that are only announced<a class="headerlink" href="#things-that-are-only-announced" title="Permanent link">#</a></h2>
+<p>Some of what a terminal does has no representation in the accessibility tree at all — nothing's state
+changed, so nothing is reported unless it is said explicitly. Contour announces:</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Politeness</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The bell</td>
+<td>Polite — it waits for your screen reader to finish its sentence</td>
+</tr>
+<tr>
+<td>A desktop notification (OSC 99, OSC 777 or OSC 9)</td>
+<td>Polite</td>
+</tr>
+<tr>
+<td>A pane in another workspace starts needing you (see <a href="#the-workspace-sidebar">the sidebar</a>)</td>
+<td>Polite</td>
+</tr>
+<tr>
+<td>Read-only mode being switched on or off</td>
+<td>Assertive — it interrupts, because it changes what typing does</td>
+</tr>
+</tbody>
+</table>
+<p>Set <code>accessibility_announcements: false</code> in <code>contour.yml</code> to switch these off. They cost nothing while
+no assistive client is attached.</p>
+<h2 id="reading-a-selection-aloud">Reading a selection aloud<a class="headerlink" href="#reading-a-selection-aloud" title="Permanent link">#</a></h2>
+<p>Select some text and press ++ctrl+shift+s++, or pick <strong>Read Aloud</strong> from the right-click menu, to have
+the operating system's speech synthesizer read it. ++ctrl+shift+s++ again reads the new selection.</p>
+<p>Text is prepared before it is spoken: the blank padding every terminal line carries out to the right
+margin is dropped, runs of empty lines collapse to a single pause, and a very long selection is cut at
+a line boundary so that selecting a build log gives a readable excerpt rather than many minutes of
+speech.</p>
+<div class="admonition note">
+<p class="admonition-title">This needs a speech engine, and it is optional</p>
+<p>Reading aloud needs Qt's TextToSpeech module at build time and a speech engine with an installed
+voice at run time — on Linux that means <code>speech-dispatcher</code> or <code>flite</code>. Where either is missing the
+feature is simply not offered: the menu row does not appear and the shortcut does nothing, rather
+than appearing and staying silent.</p>
+<p>Whether a voice is available is checked once, in the background, as soon as Contour starts, so
+opening a menu never waits for the speech engine. Until that check has answered — usually well
+under a few seconds — the menu row is not offered yet.</p>
+<p>A build that omitted it says so in its own build log, so a packager can see it without having to
+run the application.</p>
+</div>
+<h2 id="platform-notes">Platform notes<a class="headerlink" href="#platform-notes" title="Permanent link">#</a></h2>
+<table>
+<thead>
+<tr>
+<th>Platform</th>
+<th>Technology</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Linux</td>
+<td>AT-SPI 2</td>
+<td>Works with Orca and with KDE Plasma's zoom — see the note below.</td>
+</tr>
+<tr>
+<td>Windows</td>
+<td>UI Automation</td>
+<td>Works with Magnifier's <em>follow keyboard focus</em> / <em>text cursor</em> modes.</td>
+</tr>
+<tr>
+<td>macOS</td>
+<td>NSAccessibility</td>
+<td>Qt maps the text interface to <code>AXTextArea</code>. Not verified.</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition important">
+<p class="admonition-title">KDE Plasma: caret tracking is off by default</p>
+<p>Plasma's zoom (<code>Meta</code>+<code>+</code> / <code>Meta</code>+<code>-</code> / <code>Meta</code>+<code>0</code>) follows the <strong>mouse pointer</strong> out of the box and
+ignores the text caret until you say otherwise. Turn on <strong>Enable caret tracking</strong> in
+<em>System Settings → Accessibility → Screen Magnifier</em>; without it the zoom will not follow the cursor
+in Contour — or in any other application — no matter what the application reports.</p>
+<p>KWin consumes the AT-SPI <code>object:text-caret-moved</code> signal for this. If tracking still does not follow
+after enabling the option, <code>KWIN_WAYLAND_ZOOM_FORCE_LEGACY_TEXT_CARET_TRACKING=1</code> forces KWin onto
+that AT-SPI path rather than its newer one.</p>
+</div>
+<p>Qt's own environment variables apply. In particular <code>QT_ACCESSIBILITY=0</code> disables accessibility for the
+process, and on Linux <code>QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1</code> forces the AT-SPI bridge on even when no client
+has announced itself.</p>
+<h2 id="verifying-it">Verifying it<a class="headerlink" href="#verifying-it" title="Permanent link">#</a></h2>
+<p>To inspect what Contour actually exposes:</p>
+<ul>
+<li><strong>Linux</strong> — <a href="https://gitlab.gnome.org/GNOME/accerciser">Accerciser</a>. Select the Contour window; the
+  terminal appears with a text interface, and the caret offset updates as you type. A <em>shell prompt</em> child
+  appears while you are at a prompt and disappears while a command runs.</li>
+<li><strong>Windows</strong> — Accessibility Insights, or <code>Inspect.exe</code> from the Windows SDK.</li>
+</ul></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="what-is-reported" href="#what-is-reported">What is reported</a><a data-head="the-prompt-region" href="#the-prompt-region">The prompt region</a><a data-head="the-window-around-the-terminal" href="#the-window-around-the-terminal">The window around the terminal</a><a data-head="keyboard-access-to-the-window-chrome" href="#keyboard-access-to-the-window-chrome">Keyboard access to the window chrome</a><a data-head="the-workspace-sidebar" href="#the-workspace-sidebar">The workspace sidebar</a><a data-head="things-that-are-only-announced" href="#things-that-are-only-announced">Things that are only announced</a><a data-head="reading-a-selection-aloud" href="#reading-a-selection-aloud">Reading a selection aloud</a><a data-head="platform-notes" href="#platform-notes">Platform notes</a><a data-head="verifying-it" href="#verifying-it">Verifying it</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/accessibility.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">contour › <b>accessibility</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

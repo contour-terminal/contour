@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>paths - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="../..">
+<link rel="icon" href="../../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../../assets/theme/site.css">
+<script type="module" src="../../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../../assets/contour-logo.png" alt=""><span id="cw-title">paths</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href="../.."><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../" aria-current="true"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../../vt-sequence/"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour" hidden>
+<a class="tab" data-group="" href="../..">home</a>
+<a class="tab" data-group="" href="../../install/">install</a>
+<a class="tab" data-group="" href="../../features/">features</a>
+<a class="tab" data-group="" href="../../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure">
+<a class="tab" data-group="" href="../">config file</a>
+<a class="tab" data-group="" href="../profiles/">profiles</a>
+<a class="tab" data-group="" href="../settings/">settings window</a>
+<a class="tab" data-group="" href="../colors/">colors</a>
+<a class="tab" data-group="" href="../key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../layouts/">layouts</a>
+<a class="tab" data-group="more" href="../links/">links</a>
+<a class="tab" data-group="more" href="../hosts/">hosts</a>
+<a class="tab" data-group="more" href="../indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="./" aria-current="page">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference" hidden>
+<a class="tab" data-group="" href="../../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../../vt-extensions/synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>paths</summary>
+  <div class="tabsel-list">
+<a href="../">config file</a>
+<a href="../profiles/">profiles</a>
+<a href="../settings/">settings window</a>
+<a href="../colors/">colors</a>
+<a href="../key-mapping/">key mapping</a>
+<a href="../layouts/">layouts</a>
+<a href="../links/">links</a>
+<a href="../hosts/">hosts</a>
+<a href="../indicator-statusline/">status line</a>
+<a href="./" aria-current="page">paths</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="path-handling-in-configuration">Path Handling in Configuration<a class="headerlink" href="#path-handling-in-configuration" title="Permanent link">#</a></h1>
+<p>Contour supports special syntax in configuration file paths to make configs portable across machines and platforms.</p>
+<h2 id="tilde-expansion">Tilde Expansion<a class="headerlink" href="#tilde-expansion" title="Permanent link">#</a></h2>
+<p>Use <code>~</code> at the start of a path to refer to the user's home directory:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">main</span><span class="p">:</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nt">shell</span><span class="p">:</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">      </span><span class="nt">initial_working_directory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/workspace</span>
+</span></code></pre></div>
+<p>On Linux/macOS this expands to e.g. <code>/home/user/workspace</code>, on Windows to <code>C:\Users\user\workspace</code>.</p>
+<h2 id="environment-variable-expansion">Environment Variable Expansion<a class="headerlink" href="#environment-variable-expansion" title="Permanent link">#</a></h2>
+<p>Use <code>${VAR_NAME}</code> to reference environment variables:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">background_image</span><span class="p">:</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="s">'${HOME}/Pictures/terminal-bg.png'</span>
+</span></code></pre></div>
+<p>This resolves <code>${HOME}</code> to its value at config load time.</p>
+<h3 id="multiple-variables">Multiple Variables<a class="headerlink" href="#multiple-variables" title="Permanent link">#</a></h3>
+<p>You can use several variables in the same value:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">main</span><span class="p">:</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">shell</span><span class="p">:</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">      </span><span class="nt">program</span><span class="p">:</span><span class="w"> </span><span class="s">'${MY_SHELL_DIR}/${MY_SHELL_NAME}'</span>
+</span></code></pre></div>
+<h3 id="combining-with-tilde">Combining with Tilde<a class="headerlink" href="#combining-with-tilde" title="Permanent link">#</a></h3>
+<p>Environment variables are expanded <strong>before</strong> tilde resolution, so both syntaxes compose correctly:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">main</span><span class="p">:</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">shell</span><span class="p">:</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">      </span><span class="nt">initial_working_directory</span><span class="p">:</span><span class="w"> </span><span class="s">'~/${PROJECT_DIR}'</span>
+</span></code></pre></div>
+<p>This first resolves <code>${PROJECT_DIR}</code> (e.g. to <code>workspace</code>), then resolves <code>~</code> to the home directory, yielding <code>/home/user/workspace</code>.</p>
+<h2 id="where-expansion-applies">Where Expansion Applies<a class="headerlink" href="#where-expansion-applies" title="Permanent link">#</a></h2>
+<p>The following configuration values support both <code>~</code> and <code>${VAR}</code> expansion:</p>
+<table>
+<thead>
+<tr>
+<th>Configuration value</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>background_image.path</code></td>
+<td><code>'${HOME}/Pictures/bg.png'</code></td>
+</tr>
+<tr>
+<td><code>shell.program</code></td>
+<td><code>'${MY_SHELL}'</code></td>
+</tr>
+<tr>
+<td><code>shell.arguments</code> (each entry)</td>
+<td><code>'--config=${XDG_CONFIG_HOME}/shell.conf'</code></td>
+</tr>
+<tr>
+<td><code>shell.initial_working_directory</code></td>
+<td><code>'~/${PROJECT_DIR}'</code></td>
+</tr>
+<tr>
+<td>Any <code>std::filesystem::path</code> config entry</td>
+<td>General file path values</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cross-platform-configuration">Cross-Platform Configuration<a class="headerlink" href="#cross-platform-configuration" title="Permanent link">#</a></h2>
+<p>A primary motivation for environment variable expansion is writing configs that work on multiple operating systems without modification:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Works on both Linux and Windows — no hardcoded paths</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span><span class="nt">background_image</span><span class="p">:</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="s">'${HOME}/Pictures/terminal-bg.png'</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">  </span><span class="nt">main</span><span class="p">:</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">    </span><span class="nt">shell</span><span class="p">:</span>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">      </span><span class="nt">initial_working_directory</span><span class="p">:</span><span class="w"> </span><span class="s">'${HOME}/projects'</span>
+</span></code></pre></div>
+<h2 id="edge-cases">Edge Cases<a class="headerlink" href="#edge-cases" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>Undefined variables</strong> expand to an empty string and a warning is logged.</li>
+<li><strong>Malformed markers</strong> like <code>${UNCLOSED</code> (missing closing <code>}</code>) pass through the string unchanged — no partial substitution occurs.</li>
+<li><strong>No markers</strong> — strings without any <code>${...}</code> syntax are passed through unchanged.</li>
+</ul></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="tilde-expansion" href="#tilde-expansion">Tilde Expansion</a><a data-head="environment-variable-expansion" href="#environment-variable-expansion">Environment Variable Expansion</a><a data-head="where-expansion-applies" href="#where-expansion-applies">Where Expansion Applies</a><a data-head="cross-platform-configuration" href="#cross-platform-configuration">Cross-Platform Configuration</a><a data-head="edge-cases" href="#edge-cases">Edge Cases</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/configuration/paths.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">configure › <b>paths</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>progress (osc 9;4) - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="../..">
+<link rel="icon" href="../../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../../assets/theme/site.css">
+<script type="module" src="../../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../../assets/contour-logo.png" alt=""><span id="cw-title">progress (osc 9;4)</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href="../.."><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../../configuration/"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../../vt-sequence/" aria-current="true"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour" hidden>
+<a class="tab" data-group="" href="../..">home</a>
+<a class="tab" data-group="" href="../../install/">install</a>
+<a class="tab" data-group="" href="../../features/">features</a>
+<a class="tab" data-group="" href="../../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure" hidden>
+<a class="tab" data-group="" href="../../configuration/">config file</a>
+<a class="tab" data-group="" href="../../configuration/profiles/">profiles</a>
+<a class="tab" data-group="" href="../../configuration/settings/">settings window</a>
+<a class="tab" data-group="" href="../../configuration/colors/">colors</a>
+<a class="tab" data-group="" href="../../configuration/key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../../configuration/layouts/">layouts</a>
+<a class="tab" data-group="more" href="../../configuration/links/">links</a>
+<a class="tab" data-group="more" href="../../configuration/hosts/">hosts</a>
+<a class="tab" data-group="more" href="../../configuration/indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../../configuration/paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference">
+<a class="tab" data-group="" href="../../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="./" aria-current="page">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>progress (osc 9;4)</summary>
+  <div class="tabsel-list">
+<a href="../../vt-sequence/">vt sequences</a>
+<a href="../../demo/regis-graphics/">regis graphics</a>
+<a href="../synchronized-output/">synchronized output</a>
+<a href="../osc-133-shell-integration/">shell integration</a>
+<a href="../clickable-links/">clickable links</a>
+<a href="../buffer-capture/">buffer capture</a>
+<a href="../program-status/">program status</a>
+<a href="../semantic-block-query/">semantic block query</a>
+<a href="./" aria-current="page">progress (osc 9;4)</a>
+<a href="../osc-3008-context/">context (osc 3008)</a>
+<a href="../vertical-line-marks/">vertical line marks</a>
+<a href="../color-palette-update-notifications/">palette notifications</a>
+<a href="../font-settings/">font settings</a>
+<a href="../line-reflow-mode/">line reflow mode</a>
+<a href="../private-use-glyphs/">private-use glyphs</a>
+<a href="../save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a href="../unicode-core/">unicode core</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="progress-indicator-osc-94">Progress indicator (OSC 9;4)<a class="headerlink" href="#progress-indicator-osc-94" title="Permanent link">#</a></h1>
+<p>A long-running command — a package install, a build, a large download — knows how far along it is,
+but nothing outside it does. This extension lets an application tell the terminal, which then shows
+it where the user is already looking: the tab strip, the status line, and the OS taskbar.</p>
+<p>The sequence originates with <a href="https://conemu.github.io/">ConEmu</a> and is implemented by Windows
+Terminal, iTerm2 and <a href="https://ghostty.org/docs/vt/osc/conemu">Ghostty</a>. Contour follows the same
+grammar, so an application already emitting it needs no changes.</p>
+<h2 id="syntax">Syntax<a class="headerlink" href="#syntax" title="Permanent link">#</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>OSC 9 ; 4 ; &lt;state&gt; [ ; &lt;progress&gt; ] ST
+</span></code></pre></div>
+<p><code>&lt;state&gt;</code> selects what the indicator says; <code>&lt;progress&gt;</code> is an integer percentage from 0 to 100.</p>
+<table>
+<thead>
+<tr>
+<th><code>&lt;state&gt;</code></th>
+<th>Meaning</th>
+<th>Effect on the percentage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>Withdraw the indicator</td>
+<td>Reset to 0</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td>Running normally</td>
+<td>Set to <code>&lt;progress&gt;</code>, or 0 if omitted</td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>Failed</td>
+<td>Set to <code>&lt;progress&gt;</code> if given, else unchanged</td>
+</tr>
+<tr>
+<td><code>3</code></td>
+<td>Busy, with no known completion</td>
+<td>Unchanged</td>
+</tr>
+<tr>
+<td><code>4</code></td>
+<td>Paused, or warning</td>
+<td>Set to <code>&lt;progress&gt;</code> if given, else unchanged</td>
+</tr>
+</tbody>
+</table>
+<p>The asymmetry is deliberate and matches the other implementations. State <code>1</code> is <em>about</em> the number,
+so omitting it means "at the start". States <code>2</code> and <code>4</code> are about the condition, so an application
+that only wants to mark a failure need not restate a percentage it already sent. State <code>3</code> has no
+meaningful position at all, and carrying the previous one across means an application can go busy
+and come back without losing the bar it had drawn.</p>
+<h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">#</a></h2>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033]9;4;1;40\033\\'</span><span class="w">   </span><span class="c1"># running, 40% complete</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033]9;4;3\033\\'</span><span class="w">      </span><span class="c1"># busy, no percentage</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033]9;4;4;40\033\\'</span><span class="w">   </span><span class="c1"># paused at 40%</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033]9;4;2;80\033\\'</span><span class="w">   </span><span class="c1"># failed at 80%</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033]9;4;0\033\\'</span><span class="w">      </span><span class="c1"># withdraw the indicator</span>
+</span></code></pre></div>
+<p>A shell loop reporting real progress:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">for</span><span class="w"> </span>i<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="k">$(</span>seq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="m">10</span><span class="w"> </span><span class="m">100</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">    </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033]9;4;1;%d\033\\'</span><span class="w"> </span><span class="s2">"</span><span class="nv">$i</span><span class="s2">"</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span>sleep<span class="w"> </span><span class="m">0</span>.2
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="k">done</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033]9;4;0\033\\'</span>
+</span></code></pre></div>
+<h2 id="where-it-shows">Where it shows<a class="headerlink" href="#where-it-shows" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>The tab strip</strong> — a thin bar along the bottom edge of the tab whose active pane reported it.
+  Green while running, amber when paused, red on failure; the busy state pulses. It is drawn under
+  the tab label rather than beside it, so it costs the title no width and tabs do not reflow as
+  applications start and finish.</li>
+<li><strong>The status line</strong> — via the <code>{Progress}</code> placeholder, which renders as <code>45%</code>, <code>BUSY</code>,
+  <code>PAUSED 45%</code> or <code>ERROR 45%</code>, and collapses to nothing while no operation is in flight. Add it to
+  a status line like any other placeholder:</li>
+</ul>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">status_line</span><span class="p">:</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">    </span><span class="nt">indicator</span><span class="p">:</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">        </span><span class="nt">right</span><span class="p">:</span><span class="w"> </span><span class="s">"{Progress:Bold}</span><span class="nv"> </span><span class="s">|</span><span class="nv"> </span><span class="s">{Clock}"</span>
+</span></code></pre></div>
+<ul>
+<li><strong>The OS taskbar or Dock</strong>, on Windows, KDE Plasma and macOS, including while Contour is minimized.
+  No extra setting is required. Progress from all tabs and split panes is combined per window on
+  Windows and across the application's windows on KDE Plasma and macOS:
+  a failure outranks a pause, which outranks
+  a busy session, which outranks a running one — and among equals the <em>least</em> complete percentage
+  wins, so the indicator reflects the work still outstanding.
+  Background tabs and panes also contribute. Moving or closing a tab updates the indicator.
+  KDE Plasma uses the Unity LauncherEntry D-Bus protocol and requires a matching installed desktop
+  file. It shows percentages for running, paused and error states without distinct state colors;
+  busy is represented by a full bar because this protocol has no indeterminate state. Other desktops
+  implementing the same protocol may also display it. macOS overlays a bar on the application Dock
+  icon, with red for errors, orange for paused work and a moving segment while busy.</li>
+</ul>
+<h2 id="show-delay">Show delay<a class="headerlink" href="#show-delay" title="Permanent link">#</a></h2>
+<p>The tab strip and desktop indicators wait 500 milliseconds before showing running or busy progress.
+If the application clears progress in that time, no bar appears. Percentage updates keep the
+original deadline. Paused and error states appear immediately. The status line shows progress as
+soon as it is reported.</p>
+<p>Change <strong>Progress show delay</strong> under <strong>Settings → Appearance → Tab bar</strong>, or set
+<a href="../../configuration/#progress_show_delay"><code>progress_show_delay</code></a> in milliseconds in
+<code>contour.yml</code>. Use <code>0</code> for immediate display.</p>
+<h2 id="withdrawing-a-stale-indicator">Withdrawing a stale indicator<a class="headerlink" href="#withdrawing-a-stale-indicator" title="Permanent link">#</a></h2>
+<p>The terminal cannot tell a genuinely long operation from an application that died holding one, so by
+default the indicator persists until the application clears it with state <code>0</code>. That is what the
+sequence specifies, and what ConEmu and Windows Terminal do. A hard reset (<code>RIS</code>) also withdraws it,
+which covers the common case of a shell reset after a crash.</p>
+<p>If you would rather have the terminal give up on a silent application, set
+<a href="../../configuration/#progress_timeout"><code>progress_timeout</code></a> to a non-zero number of milliseconds.
+Applications using the protocol are expected to refresh it roughly once a second, so a value well
+above that — 15000 or so, which is what Ghostty hardcodes — is the useful range.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># 0 (the default) disables expiry entirely.</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nt">progress_timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">15000</span>
+</span></code></pre></div>
+<h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">#</a></h2>
+<ul>
+<li>A malformed sequence — an unknown state, a non-numeric percentage — is ignored, leaving whatever
+  indicator was already showing. Withdrawing one the application still wants shown would be worse
+  than dropping a sequence the terminal cannot read.</li>
+<li>A percentage above 100 is clamped rather than rejected: an application overshooting still means
+  "finished".</li>
+<li><code>OSC 9</code> <em>without</em> a leading <code>4;</code> is ConEmu's simple desktop notification, and still works:
+  <code>printf '\033]9;Build finished\033\\'</code>. Only a first parameter of exactly <code>4</code> selects the progress
+  indicator, so a notification whose text merely begins with a <code>4</code> is still a notification.</li>
+<li>Progress is per-session state, so it survives detaching and re-attaching in
+  <a href="../../persistent-sessions/">daemon mode</a>: a client that attaches mid-operation adopts the bar
+  already in flight.</li>
+</ul></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="syntax" href="#syntax">Syntax</a><a data-head="examples" href="#examples">Examples</a><a data-head="where-it-shows" href="#where-it-shows">Where it shows</a><a data-head="show-delay" href="#show-delay">Show delay</a><a data-head="withdrawing-a-stale-indicator" href="#withdrawing-a-stale-indicator">Withdrawing a stale indicator</a><a data-head="notes" href="#notes">Notes</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/vt-extensions/osc-9-4-progress.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">reference › <b>progress (osc 9;4)</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

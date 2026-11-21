@@ -1,0 +1,1404 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>vt sequences - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="..">
+<link rel="icon" href="../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../assets/theme/site.css">
+<script type="module" src="../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../assets/contour-logo.png" alt=""><span id="cw-title">vt sequences</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href=".."><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../configuration/"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="./" aria-current="true"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour" hidden>
+<a class="tab" data-group="" href="..">home</a>
+<a class="tab" data-group="" href="../install/">install</a>
+<a class="tab" data-group="" href="../features/">features</a>
+<a class="tab" data-group="" href="../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure" hidden>
+<a class="tab" data-group="" href="../configuration/">config file</a>
+<a class="tab" data-group="" href="../configuration/profiles/">profiles</a>
+<a class="tab" data-group="" href="../configuration/settings/">settings window</a>
+<a class="tab" data-group="" href="../configuration/colors/">colors</a>
+<a class="tab" data-group="" href="../configuration/key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../configuration/layouts/">layouts</a>
+<a class="tab" data-group="more" href="../configuration/links/">links</a>
+<a class="tab" data-group="more" href="../configuration/hosts/">hosts</a>
+<a class="tab" data-group="more" href="../configuration/indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../configuration/paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference">
+<a class="tab" data-group="" href="./" aria-current="page">vt sequences</a>
+<a class="tab" data-group="" href="../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../vt-extensions/synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>vt sequences</summary>
+  <div class="tabsel-list">
+<a href="./" aria-current="page">vt sequences</a>
+<a href="../demo/regis-graphics/">regis graphics</a>
+<a href="../vt-extensions/synchronized-output/">synchronized output</a>
+<a href="../vt-extensions/osc-133-shell-integration/">shell integration</a>
+<a href="../vt-extensions/clickable-links/">clickable links</a>
+<a href="../vt-extensions/buffer-capture/">buffer capture</a>
+<a href="../vt-extensions/program-status/">program status</a>
+<a href="../vt-extensions/semantic-block-query/">semantic block query</a>
+<a href="../vt-extensions/osc-9-4-progress/">progress (osc 9;4)</a>
+<a href="../vt-extensions/osc-3008-context/">context (osc 3008)</a>
+<a href="../vt-extensions/vertical-line-marks/">vertical line marks</a>
+<a href="../vt-extensions/color-palette-update-notifications/">palette notifications</a>
+<a href="../vt-extensions/font-settings/">font settings</a>
+<a href="../vt-extensions/line-reflow-mode/">line reflow mode</a>
+<a href="../vt-extensions/private-use-glyphs/">private-use glyphs</a>
+<a href="../vt-extensions/save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a href="../vt-extensions/unicode-core/">unicode core</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="vt-sequences">VT sequences<a class="headerlink" href="#vt-sequences" title="Permanent link">#</a></h1>
+<p>List of VT sequences supported by Contour Terminal Emulator.</p>
+<h2 id="control-codes">Control Codes<a class="headerlink" href="#control-codes" title="Permanent link">#</a></h2>
+<table>
+<thead>
+<tr>
+<th>Sequence</th>
+<th>Code</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>\x04</code></td>
+<td>EOT</td>
+<td>End of Transmission</td>
+</tr>
+<tr>
+<td><code>\x05</code></td>
+<td>ENQ</td>
+<td>Enquiry; replies with the configured answerback message, if any.</td>
+</tr>
+<tr>
+<td><code>\x07</code></td>
+<td>BEL</td>
+<td>Bell</td>
+</tr>
+<tr>
+<td><code>\x08</code></td>
+<td>BS</td>
+<td>Backspace</td>
+</tr>
+<tr>
+<td><code>\t</code></td>
+<td>TAB</td>
+<td>Tab</td>
+</tr>
+<tr>
+<td><code>\n</code></td>
+<td>LF</td>
+<td>Line Feed</td>
+</tr>
+<tr>
+<td><code>\x0b</code></td>
+<td>VT</td>
+<td>Vertical Tab</td>
+</tr>
+<tr>
+<td><code>\x0c</code></td>
+<td>FF</td>
+<td>Form Feed</td>
+</tr>
+<tr>
+<td><code>\r</code></td>
+<td>CR</td>
+<td>Carriage Return</td>
+</tr>
+<tr>
+<td><code>\x0e</code></td>
+<td>LS1</td>
+<td>Shift Out; Maps G1 into GL.</td>
+</tr>
+<tr>
+<td><code>\x0f</code></td>
+<td>LS0</td>
+<td>Shift In; Maps G0 into GL (the default).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="escape-sequences">Escape Sequences<a class="headerlink" href="#escape-sequences" title="Permanent link">#</a></h2>
+<table>
+<thead>
+<tr>
+<th>Sequence</th>
+<th>Code</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ESC ( 0</code></td>
+<td>SCS_G0_SPECIAL</td>
+<td>Set G0 to DEC Special</td>
+</tr>
+<tr>
+<td><code>ESC ) 0</code></td>
+<td>SCS_G1_SPECIAL</td>
+<td>Set G1 to DEC Special</td>
+</tr>
+<tr>
+<td><code>ESC * 0</code></td>
+<td>SCS_G2_SPECIAL</td>
+<td>Set G2 to DEC Special</td>
+</tr>
+<tr>
+<td><code>ESC + 0</code></td>
+<td>SCS_G3_SPECIAL</td>
+<td>Set G3 to DEC Special</td>
+</tr>
+<tr>
+<td><code>ESC # 3</code></td>
+<td>DECDHL_Top</td>
+<td>Double-Height Line (Top Half)</td>
+</tr>
+<tr>
+<td><code>ESC # 4</code></td>
+<td>DECDHL_Bottom</td>
+<td>Double-Height Line (Bottom Half)</td>
+</tr>
+<tr>
+<td><code>ESC ( 4</code></td>
+<td>SCS_G0_DUTCH</td>
+<td>Set G0 to Dutch</td>
+</tr>
+<tr>
+<td><code>ESC ) 4</code></td>
+<td>SCS_G1_DUTCH</td>
+<td>Set G1 to Dutch</td>
+</tr>
+<tr>
+<td><code>ESC # 5</code></td>
+<td>DECSWL</td>
+<td>Single-Width Line</td>
+</tr>
+<tr>
+<td><code>ESC   6</code></td>
+<td>DECBI</td>
+<td>Back Index</td>
+</tr>
+<tr>
+<td><code>ESC # 6</code></td>
+<td>DECDWL</td>
+<td>Double-Width Line</td>
+</tr>
+<tr>
+<td><code>ESC   7</code></td>
+<td>DECSC</td>
+<td>Save Cursor</td>
+</tr>
+<tr>
+<td><code>ESC   8</code></td>
+<td>DECRS</td>
+<td>Restore Cursor</td>
+</tr>
+<tr>
+<td><code>ESC # 8</code></td>
+<td>DECALN</td>
+<td>Screen Alignment Pattern</td>
+</tr>
+<tr>
+<td><code>ESC   9</code></td>
+<td>DECFI</td>
+<td>Forward Index</td>
+</tr>
+<tr>
+<td><code>ESC   =</code></td>
+<td>DECKPAM</td>
+<td>Keypad Application Mode</td>
+</tr>
+<tr>
+<td><code>ESC ( =</code></td>
+<td>SCS_G0_SWISS</td>
+<td>Set G0 to Swiss</td>
+</tr>
+<tr>
+<td><code>ESC ) =</code></td>
+<td>SCS_G1_SWISS</td>
+<td>Set G1 to Swiss</td>
+</tr>
+<tr>
+<td><code>ESC   &gt;</code></td>
+<td>DECKPNM</td>
+<td>Keypad Numeric Mode</td>
+</tr>
+<tr>
+<td><code>ESC ( &gt;</code></td>
+<td>SCS_G0_TECHNICAL</td>
+<td>Set G0 to DEC Technical</td>
+</tr>
+<tr>
+<td><code>ESC ) &gt;</code></td>
+<td>SCS_G1_TECHNICAL</td>
+<td>Set G1 to DEC Technical</td>
+</tr>
+<tr>
+<td><code>ESC % @</code></td>
+<td>DOCS_DEFAULT</td>
+<td>Select default (ISO 8859-1) character set</td>
+</tr>
+<tr>
+<td><code>ESC ( A</code></td>
+<td>SCS_G0_BRITISH</td>
+<td>Set G0 to British</td>
+</tr>
+<tr>
+<td><code>ESC ) A</code></td>
+<td>SCS_G1_BRITISH</td>
+<td>Set G1 to British</td>
+</tr>
+<tr>
+<td><code>ESC * A</code></td>
+<td>SCS_G2_BRITISH</td>
+<td>Set G2 to British</td>
+</tr>
+<tr>
+<td><code>ESC + A</code></td>
+<td>SCS_G3_BRITISH</td>
+<td>Set G3 to British</td>
+</tr>
+<tr>
+<td><code>ESC ( B</code></td>
+<td>SCS_G0_USASCII</td>
+<td>Set G0 to USASCII</td>
+</tr>
+<tr>
+<td><code>ESC ) B</code></td>
+<td>SCS_G1_USASCII</td>
+<td>Set G1 to USASCII</td>
+</tr>
+<tr>
+<td><code>ESC * B</code></td>
+<td>SCS_G2_USASCII</td>
+<td>Set G2 to USASCII</td>
+</tr>
+<tr>
+<td><code>ESC + B</code></td>
+<td>SCS_G3_USASCII</td>
+<td>Set G3 to USASCII</td>
+</tr>
+<tr>
+<td><code>ESC ( C</code></td>
+<td>SCS_G0_FINNISH</td>
+<td>Set G0 to Finnish</td>
+</tr>
+<tr>
+<td><code>ESC ) C</code></td>
+<td>SCS_G1_FINNISH</td>
+<td>Set G1 to Finnish</td>
+</tr>
+<tr>
+<td><code>ESC   D</code></td>
+<td>IND</td>
+<td>Index</td>
+</tr>
+<tr>
+<td><code>ESC   E</code></td>
+<td>NEL</td>
+<td>Next Line</td>
+</tr>
+<tr>
+<td><code>ESC ( E</code></td>
+<td>SCS_G0_NORWEGIAN</td>
+<td>Set G0 to Norwegian/Danish</td>
+</tr>
+<tr>
+<td><code>ESC ) E</code></td>
+<td>SCS_G1_NORWEGIAN</td>
+<td>Set G1 to Norwegian/Danish</td>
+</tr>
+<tr>
+<td><code>ESC   F</code></td>
+<td>S7C1T</td>
+<td>Select 7-bit C1 Control Transmission</td>
+</tr>
+<tr>
+<td><code>ESC   G</code></td>
+<td>S8C1T</td>
+<td>Select 8-bit C1 Control Transmission</td>
+</tr>
+<tr>
+<td><code>ESC % G</code></td>
+<td>DOCS_UTF8</td>
+<td>Select UTF-8 character set</td>
+</tr>
+<tr>
+<td><code>ESC   H</code></td>
+<td>HTS</td>
+<td>Horizontal Tab Set</td>
+</tr>
+<tr>
+<td><code>ESC ( H</code></td>
+<td>SCS_G0_SWEDISH</td>
+<td>Set G0 to Swedish</td>
+</tr>
+<tr>
+<td><code>ESC ) H</code></td>
+<td>SCS_G1_SWEDISH</td>
+<td>Set G1 to Swedish</td>
+</tr>
+<tr>
+<td><code>ESC ( K</code></td>
+<td>SCS_G0_GERMAN</td>
+<td>Set G0 to German</td>
+</tr>
+<tr>
+<td><code>ESC ) K</code></td>
+<td>SCS_G1_GERMAN</td>
+<td>Set G1 to German</td>
+</tr>
+<tr>
+<td><code>ESC   M</code></td>
+<td>RI</td>
+<td>Reverse Index</td>
+</tr>
+<tr>
+<td><code>ESC   N</code></td>
+<td>SS2</td>
+<td>Single Shift Select (G2 Character Set)</td>
+</tr>
+<tr>
+<td><code>ESC   O</code></td>
+<td>SS3</td>
+<td>Single Shift Select (G3 Character Set)</td>
+</tr>
+<tr>
+<td><code>ESC ( Q</code></td>
+<td>SCS_G0_FRENCHCANADIAN</td>
+<td>Set G0 to French Canadian</td>
+</tr>
+<tr>
+<td><code>ESC ) Q</code></td>
+<td>SCS_G1_FRENCHCANADIAN</td>
+<td>Set G1 to French Canadian</td>
+</tr>
+<tr>
+<td><code>ESC ( R</code></td>
+<td>SCS_G0_FRENCH</td>
+<td>Set G0 to French</td>
+</tr>
+<tr>
+<td><code>ESC ) R</code></td>
+<td>SCS_G1_FRENCH</td>
+<td>Set G1 to French</td>
+</tr>
+<tr>
+<td><code>ESC   V</code></td>
+<td>SPA</td>
+<td>Start of Protected Area; protects written cells against erases.</td>
+</tr>
+<tr>
+<td><code>ESC   W</code></td>
+<td>EPA</td>
+<td>End of Protected Area; stops protecting newly written cells.</td>
+</tr>
+<tr>
+<td><code>ESC   Z</code></td>
+<td>DECID</td>
+<td>Identify Terminal</td>
+</tr>
+<tr>
+<td><code>ESC ( Z</code></td>
+<td>SCS_G0_SPANISH</td>
+<td>Set G0 to Spanish</td>
+</tr>
+<tr>
+<td><code>ESC ) Z</code></td>
+<td>SCS_G1_SPANISH</td>
+<td>Set G1 to Spanish</td>
+</tr>
+<tr>
+<td><code>ESC   c</code></td>
+<td>RIS</td>
+<td>Reset to Initial State (Hard Reset)</td>
+</tr>
+<tr>
+<td><code>ESC   n</code></td>
+<td>LS2</td>
+<td>Locking Shift 2; Maps G2 into GL.</td>
+</tr>
+<tr>
+<td><code>ESC   o</code></td>
+<td>LS3</td>
+<td>Locking Shift 3; Maps G3 into GL.</td>
+</tr>
+<tr>
+<td><code>ESC   |</code></td>
+<td>LS3R</td>
+<td>Locking Shift 3 Right; Maps G3 into GR.</td>
+</tr>
+<tr>
+<td><code>ESC   }</code></td>
+<td>LS2R</td>
+<td>Locking Shift 2 Right; Maps G2 into GR.</td>
+</tr>
+<tr>
+<td><code>ESC   ~</code></td>
+<td>LS1R</td>
+<td>Locking Shift 1 Right; Maps G1 into GR.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="control-sequences">Control Sequences<a class="headerlink" href="#control-sequences" title="Permanent link">#</a></h2>
+<table>
+<thead>
+<tr>
+<th>Sequence</th>
+<th>Code</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CSI   0..1   @</code></td>
+<td>ICH</td>
+<td>Insert characters</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   @</code></td>
+<td>SL</td>
+<td>Scroll Left</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   A</code></td>
+<td>CUU</td>
+<td>Move cursor up</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   A</code></td>
+<td>SR</td>
+<td>Scroll Right</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   B</code></td>
+<td>CUD</td>
+<td>Move cursor down</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   C</code></td>
+<td>CUF</td>
+<td>Move cursor forward</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   D</code></td>
+<td>CUB</td>
+<td>Move cursor backward</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   E</code></td>
+<td>CNL</td>
+<td>Move cursor to next line</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   F</code></td>
+<td>CPL</td>
+<td>Move cursor to previous line</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   G</code></td>
+<td>CHA</td>
+<td>Move cursor to column</td>
+</tr>
+<tr>
+<td><code>CSI   0..2   H</code></td>
+<td>CUP</td>
+<td>Move cursor to position</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   I</code></td>
+<td>CHT</td>
+<td>Cursor Horizontal Forward Tabulation</td>
+</tr>
+<tr>
+<td><code>CSI   0..    J</code></td>
+<td>ED</td>
+<td>Erase in Display</td>
+</tr>
+<tr>
+<td><code>CSI ? 0..1   J</code></td>
+<td>DECSED</td>
+<td>Selective Erase in Display</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   K</code></td>
+<td>EL</td>
+<td>Erase in Line</td>
+</tr>
+<tr>
+<td><code>CSI ? 0..1   K</code></td>
+<td>DECSEL</td>
+<td>Selective Erase in Line</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   L</code></td>
+<td>IL</td>
+<td>Insert lines</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   M</code></td>
+<td>DL</td>
+<td>Delete lines</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   P</code></td>
+<td>DCH</td>
+<td>Delete characters</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   P</code></td>
+<td>PPA</td>
+<td>Page Position Absolute</td>
+</tr>
+<tr>
+<td><code>CSI   0..  # P</code></td>
+<td>XTPUSHCOLORS</td>
+<td>Pushes the color palette onto the palette's saved-stack.</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   Q</code></td>
+<td>PPR</td>
+<td>Page Position Relative</td>
+</tr>
+<tr>
+<td><code>CSI   0..  # Q</code></td>
+<td>XTPOPCOLORS</td>
+<td>Pops the color palette from the palette's saved-stack.</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   R</code></td>
+<td>PPB</td>
+<td>Page Position Backward</td>
+</tr>
+<tr>
+<td><code>CSI   0    # R</code></td>
+<td>XTREPORTCOLORS</td>
+<td>Reports number of color palettes on the stack.</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   S</code></td>
+<td>SU</td>
+<td>Scroll Up</td>
+</tr>
+<tr>
+<td><code>CSI ? 2..4   S</code></td>
+<td>XTSMGRAPHICS</td>
+<td>Set/request graphics attribute</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   T</code></td>
+<td>SD</td>
+<td>Scroll Down</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 + T</code></td>
+<td>UNSCROLL</td>
+<td>Scroll Down with Scrollback Fill (kitty unscroll)</td>
+</tr>
+<tr>
+<td><code>CSI &gt; 0..    T</code></td>
+<td>XTRMTITLE</td>
+<td>Reset title mode features (hex/UTF-8 title encoding).</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   U</code></td>
+<td>NP</td>
+<td>Next Page</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   V</code></td>
+<td>PP</td>
+<td>Previous Page</td>
+</tr>
+<tr>
+<td><code>CSI   0..    W</code></td>
+<td>CTC</td>
+<td>Cursor Tabulation Control</td>
+</tr>
+<tr>
+<td><code>CSI ? 0..1   W</code></td>
+<td>DECST8C</td>
+<td>Set Tab at Every 8 Columns</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   X</code></td>
+<td>ECH</td>
+<td>Erase characters</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   Z</code></td>
+<td>CBT</td>
+<td>Cursor Backward Tabulation</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   ```</code></td>
+<td>HPA</td>
+<td>Horizontal Position Absolute</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   a</code></td>
+<td>HPR</td>
+<td>Horizontal Position Relative</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   b</code></td>
+<td>REP</td>
+<td>Repeat last character</td>
+</tr>
+<tr>
+<td><code>CSI &gt; 0..7   b</code></td>
+<td>SBQUERY</td>
+<td>Query semantic command blocks: the last, the last N, the one in progress, or one by id.</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   c</code></td>
+<td>DA1</td>
+<td>Primary Device Attributes</td>
+</tr>
+<tr>
+<td><code>CSI = 0..1   c</code></td>
+<td>DA3</td>
+<td>Tertiary Device Attributes</td>
+</tr>
+<tr>
+<td><code>CSI &gt; 0..1   c</code></td>
+<td>DA2</td>
+<td>Secondary Device Attributes</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   d</code></td>
+<td>VPA</td>
+<td>Vertical Position Absolute</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   e</code></td>
+<td>VPR</td>
+<td>Vertical Position Relative</td>
+</tr>
+<tr>
+<td><code>CSI   0..2   f</code></td>
+<td>HVP</td>
+<td>Horizontal and Vertical Position</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   g</code></td>
+<td>TBC</td>
+<td>Horizontal Tab Clear</td>
+</tr>
+<tr>
+<td><code>CSI   1..    h</code></td>
+<td>SM</td>
+<td>Set Mode</td>
+</tr>
+<tr>
+<td><code>CSI ? 1..    h</code></td>
+<td>DECSM</td>
+<td>Set DEC-mode</td>
+</tr>
+<tr>
+<td><code>CSI   1..    l</code></td>
+<td>RM</td>
+<td>Reset Mode</td>
+</tr>
+<tr>
+<td><code>CSI ? 1..    l</code></td>
+<td>DECRM</td>
+<td>Reset DEC-mode</td>
+</tr>
+<tr>
+<td><code>CSI   0..    m</code></td>
+<td>SGR</td>
+<td>Select Graphic Rendition</td>
+</tr>
+<tr>
+<td><code>CSI &gt; 0..2   m</code></td>
+<td>XTMODKEYS</td>
+<td>Set/reset key modifier options</td>
+</tr>
+<tr>
+<td><code>CSI   1      n</code></td>
+<td>DSR</td>
+<td>Device Status Report (ANSI)</td>
+</tr>
+<tr>
+<td><code>CSI &gt; 0..1   n</code></td>
+<td>XTRMMODKEYS</td>
+<td>Disable key modifier options</td>
+</tr>
+<tr>
+<td><code>CSI ? 1..2   n</code></td>
+<td>DSR</td>
+<td>Device Status Report (DEC)</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   p</code></td>
+<td>DECSSCLS</td>
+<td>Set Scroll Speed.</td>
+</tr>
+<tr>
+<td><code>CSI   0    ! p</code></td>
+<td>DECSTR</td>
+<td>Soft terminal reset</td>
+</tr>
+<tr>
+<td><code>CSI   1..2 " p</code></td>
+<td>DECSCL</td>
+<td>Set conformance level (DECSCL), VT220 and up.</td>
+</tr>
+<tr>
+<td><code>CSI   1    $ p</code></td>
+<td>DECRQM_ANSI</td>
+<td>Request ANSI-mode</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 + p</code></td>
+<td>DECSR</td>
+<td>Secure Reset</td>
+</tr>
+<tr>
+<td><code>CSI ? 1    $ p</code></td>
+<td>DECRQM</td>
+<td>Request DEC-mode</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   q</code></td>
+<td>DECSCUSR</td>
+<td>Set Cursor Style</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 " q</code></td>
+<td>DECSCA</td>
+<td>Select Character Protection Attribute</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 + q</code></td>
+<td>DECELF</td>
+<td>Enable Local Functions</td>
+</tr>
+<tr>
+<td><code>CSI &gt; 0..1   q</code></td>
+<td>XTVERSION</td>
+<td>Report xterm version</td>
+</tr>
+<tr>
+<td><code>CSI   0..2   r</code></td>
+<td>DECSTBM</td>
+<td>Set top/bottom margin</td>
+</tr>
+<tr>
+<td><code>CSI   5..  $ r</code></td>
+<td>DECCARA</td>
+<td>Change Attributes in Rectangular Area</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 + r</code></td>
+<td>DECSMKR</td>
+<td>Select Modifier Key Reporting</td>
+</tr>
+<tr>
+<td><code>CSI ? 0..    r</code></td>
+<td>XTRESTORE</td>
+<td>Restore DEC private modes.</td>
+</tr>
+<tr>
+<td><code>CSI   0      s</code></td>
+<td>SCOSC</td>
+<td>Save Cursor (available only when DECLRMM is disabled)</td>
+</tr>
+<tr>
+<td><code>CSI   0..2   s</code></td>
+<td>DECSLRM</td>
+<td>Set left/right margin</td>
+</tr>
+<tr>
+<td><code>CSI &gt; 0..1   s</code></td>
+<td>XTSHIFTESCAPE</td>
+<td>Set/reset shift-escape options</td>
+</tr>
+<tr>
+<td><code>CSI ? 0..    s</code></td>
+<td>XTSAVE</td>
+<td>Save DEC private modes.</td>
+</tr>
+<tr>
+<td><code>CSI   1..3   t</code></td>
+<td>WINMANIP</td>
+<td>Window Manipulation</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   t</code></td>
+<td>DECSWBV</td>
+<td>Set Warning Bell Volume</td>
+</tr>
+<tr>
+<td><code>CSI   5..  $ t</code></td>
+<td>DECRARA</td>
+<td>Reverse Attributes in Rectangular Area</td>
+</tr>
+<tr>
+<td><code>CSI &gt; 0..    t</code></td>
+<td>XTSMTITLE</td>
+<td>Set title mode features (hex/UTF-8 title encoding).</td>
+</tr>
+<tr>
+<td><code>CSI &gt; 0..2 , t</code></td>
+<td>XTCAPTURE</td>
+<td>Report screen buffer capture.</td>
+</tr>
+<tr>
+<td><code>CSI   0      u</code></td>
+<td>ANSISYSSC</td>
+<td>Save Cursor (ANSI.SYS)</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   u</code></td>
+<td>DECSMBV</td>
+<td>Set Margin Bell Volume</td>
+</tr>
+<tr>
+<td><code>CSI   0    &amp; u</code></td>
+<td>DECRQUPSS</td>
+<td>Request User-Preferred Supplemental Set</td>
+</tr>
+<tr>
+<td><code>CSI &lt; 0..1   u</code></td>
+<td>CSIULEAVE</td>
+<td>Leave Extended keyboard mode</td>
+</tr>
+<tr>
+<td><code>CSI = 0..2   u</code></td>
+<td>CSIUENHCE</td>
+<td>Request enhancement to extended keyboard mode</td>
+</tr>
+<tr>
+<td><code>CSI &gt; 0..1   u</code></td>
+<td>CSIUENTER</td>
+<td>Enter Extended keyboard mode</td>
+</tr>
+<tr>
+<td><code>CSI ? 0      u</code></td>
+<td>CSIUQUERY</td>
+<td>Query Extended keyboard mode</td>
+</tr>
+<tr>
+<td><code>CSI   0    " v</code></td>
+<td>DECRQDE</td>
+<td>Request Displayed Extent</td>
+</tr>
+<tr>
+<td><code>CSI   0..9 $ v</code></td>
+<td>DECCRA</td>
+<td>Copy rectangular area</td>
+</tr>
+<tr>
+<td><code>CSI   1    $ w</code></td>
+<td>DECRQPSR</td>
+<td>Request presentation state report</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   x</code></td>
+<td>DECREQTPARM</td>
+<td>Request Terminal Parameters</td>
+</tr>
+<tr>
+<td><code>CSI   0..5 $ x</code></td>
+<td>DECFRA</td>
+<td>Fill rectangular area</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 * x</code></td>
+<td>DECSACE</td>
+<td>Select Attribute Change Extent</td>
+</tr>
+<tr>
+<td><code>CSI   1..    y</code></td>
+<td>DECTST</td>
+<td>Invoke Confidence Test</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 # y</code></td>
+<td>XTCHECKSUM</td>
+<td>Select checksum extension</td>
+</tr>
+<tr>
+<td><code>CSI   0..6 * y</code></td>
+<td>DECRQCRA</td>
+<td>Request Checksum of Rectangular Area</td>
+</tr>
+<tr>
+<td><code>CSI   0..4 $ z</code></td>
+<td>DECERA</td>
+<td>Erase rectangular area</td>
+</tr>
+<tr>
+<td><code>CSI   0..2 ' z</code></td>
+<td>DECELR</td>
+<td>Enable Locator Reporting</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 * z</code></td>
+<td>DECINVM</td>
+<td>Invoke Macro</td>
+</tr>
+<tr>
+<td><code>CSI   0    # {</code></td>
+<td>SGRSAVE</td>
+<td>Saves video attributes onto stack.</td>
+</tr>
+<tr>
+<td><code>CSI   0..4 $ {</code></td>
+<td>DECSERA</td>
+<td>Selective Erase in Rectangular Area</td>
+</tr>
+<tr>
+<td><code>CSI   0..  ' {</code></td>
+<td>DECSLE</td>
+<td>Select Locator Events</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 ) {</code></td>
+<td>DECSTGLT</td>
+<td>Select Color Look-Up Table</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 $ |</code></td>
+<td>DECSCPP</td>
+<td>Select 80 or 132 Columns per Page</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 ' |</code></td>
+<td>DECRQLP</td>
+<td>Request Locator Position</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 * |</code></td>
+<td>DECSNLS</td>
+<td>Select number of lines per screen.</td>
+</tr>
+<tr>
+<td><code>CSI   1..3 , |</code></td>
+<td>DECAC</td>
+<td>Assign Color</td>
+</tr>
+<tr>
+<td><code>CSI   0    # }</code></td>
+<td>SGRRESTORE</td>
+<td>Restores video attributes.</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 $ }</code></td>
+<td>DECSASD</td>
+<td>Select Active Status Display</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 ' }</code></td>
+<td>DECIC</td>
+<td>Insert column</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 * }</code></td>
+<td>DECLFKC</td>
+<td>Local Function Key Control</td>
+</tr>
+<tr>
+<td><code>CSI   0..3 , }</code></td>
+<td>DECATC</td>
+<td>Alternate Text Color</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 $ ~</code></td>
+<td>DECSSDT</td>
+<td>Select Status Display (Line) Type</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 ' ~</code></td>
+<td>DECDC</td>
+<td>Delete column</td>
+</tr>
+<tr>
+<td><code>CSI   3..18 , ~</code></td>
+<td>DECPS</td>
+<td>Controls the sound frequency or notes</td>
+</tr>
+</tbody>
+</table>
+<h2 id="operating-system-commands">Operating System Commands<a class="headerlink" href="#operating-system-commands" title="Permanent link">#</a></h2>
+<table>
+<thead>
+<tr>
+<th>Sequence</th>
+<th>Code</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>OSC 0</code></td>
+<td>SETTITLE</td>
+<td>Change Window &amp; Icon Title</td>
+</tr>
+<tr>
+<td><code>OSC 1</code></td>
+<td>SETICON</td>
+<td>Change Icon Title</td>
+</tr>
+<tr>
+<td><code>OSC 2</code></td>
+<td>SETWINTITLE</td>
+<td>Change Window Title</td>
+</tr>
+<tr>
+<td><code>OSC 3</code></td>
+<td>SETXPROP</td>
+<td>Set X11 property</td>
+</tr>
+<tr>
+<td><code>OSC 4</code></td>
+<td>SETCOLPAL</td>
+<td>Set/Query color palette</td>
+</tr>
+<tr>
+<td><code>OSC 5</code></td>
+<td>SETSPECIALCOLPAL</td>
+<td>Set/Query special color palette</td>
+</tr>
+<tr>
+<td><code>OSC 7</code></td>
+<td>SETCWD</td>
+<td>Set current working directory</td>
+</tr>
+<tr>
+<td><code>OSC 8</code></td>
+<td>HYPERLINK</td>
+<td>Hyperlinked Text</td>
+</tr>
+<tr>
+<td><code>OSC 9</code></td>
+<td>CONEMU</td>
+<td>ConEmu-style notification or progress indicator</td>
+</tr>
+<tr>
+<td><code>OSC 10</code></td>
+<td>COLORFG</td>
+<td>Change or request text foreground color.</td>
+</tr>
+<tr>
+<td><code>OSC 11</code></td>
+<td>COLORBG</td>
+<td>Change or request text background color.</td>
+</tr>
+<tr>
+<td><code>OSC 12</code></td>
+<td>COLORCURSOR</td>
+<td>Change text cursor color to Pt.</td>
+</tr>
+<tr>
+<td><code>OSC 13</code></td>
+<td>COLORMOUSEFG</td>
+<td>Change mouse foreground color.</td>
+</tr>
+<tr>
+<td><code>OSC 14</code></td>
+<td>COLORMOUSEBG</td>
+<td>Change mouse background color.</td>
+</tr>
+<tr>
+<td><code>OSC 17</code></td>
+<td>COLORHIGHLIGHTBG</td>
+<td>Change or request highlight background color.</td>
+</tr>
+<tr>
+<td><code>OSC 19</code></td>
+<td>COLORHIGHLIGHTFG</td>
+<td>Change or request highlight foreground color.</td>
+</tr>
+<tr>
+<td><code>OSC 22</code></td>
+<td>POINTERSHAPE</td>
+<td>Kitty pointer shape protocol: set, push, pop or query the mouse pointer shape.</td>
+</tr>
+<tr>
+<td><code>OSC 30</code></td>
+<td>SETTABNAME</td>
+<td>Set Session/Tab Name</td>
+</tr>
+<tr>
+<td><code>OSC 50</code></td>
+<td>SETFONT</td>
+<td>Get or set font.</td>
+</tr>
+<tr>
+<td><code>OSC 52</code></td>
+<td>CLIPBOARD</td>
+<td>Clipboard management.</td>
+</tr>
+<tr>
+<td><code>OSC 60</code></td>
+<td>SETFONTALL</td>
+<td>Get or set all font faces, styles, size.</td>
+</tr>
+<tr>
+<td><code>OSC 66</code></td>
+<td>TEXTSIZING</td>
+<td>Kitty text sizing protocol: sized/scaled text.</td>
+</tr>
+<tr>
+<td><code>OSC 99</code></td>
+<td>DESKTOPNOTIFY</td>
+<td>Kitty Desktop Notification.</td>
+</tr>
+<tr>
+<td><code>OSC 104</code></td>
+<td>RCOLPAL</td>
+<td>Reset color full palette or entry</td>
+</tr>
+<tr>
+<td><code>OSC 105</code></td>
+<td>RCOLSPECIALPAL</td>
+<td>Reset special color palette or entry</td>
+</tr>
+<tr>
+<td><code>OSC 106</code></td>
+<td>COLORSPECIAL</td>
+<td>Enable/disable Special Color Number c.</td>
+</tr>
+<tr>
+<td><code>OSC 110</code></td>
+<td>RCOLORFG</td>
+<td>Reset VT100 text foreground color.</td>
+</tr>
+<tr>
+<td><code>OSC 111</code></td>
+<td>RCOLORBG</td>
+<td>Reset VT100 text background color.</td>
+</tr>
+<tr>
+<td><code>OSC 112</code></td>
+<td>RCOLORCURSOR</td>
+<td>Reset text cursor color.</td>
+</tr>
+<tr>
+<td><code>OSC 113</code></td>
+<td>RCOLORMOUSEFG</td>
+<td>Reset mouse foreground color.</td>
+</tr>
+<tr>
+<td><code>OSC 114</code></td>
+<td>RCOLORMOUSEBG</td>
+<td>Reset mouse background color.</td>
+</tr>
+<tr>
+<td><code>OSC 117</code></td>
+<td>RCOLORHIGHLIGHTBG</td>
+<td>Reset highlight background color.</td>
+</tr>
+<tr>
+<td><code>OSC 119</code></td>
+<td>RCOLORHIGHLIGHTFG</td>
+<td>Reset highlight foreground color.</td>
+</tr>
+<tr>
+<td><code>OSC 133</code></td>
+<td>SEMA</td>
+<td>Semantic block / shell integration</td>
+</tr>
+<tr>
+<td><code>OSC 777</code></td>
+<td>NOTIFY</td>
+<td>Send Notification.</td>
+</tr>
+<tr>
+<td><code>OSC 888</code></td>
+<td>DUMPSTATE</td>
+<td>Dumps internal state to debug stream.</td>
+</tr>
+<tr>
+<td><code>OSC 1337</code></td>
+<td>ITERM2</td>
+<td>iTerm2 proprietary extensions: inline images (File=) and capability reporting (Capabilities).</td>
+</tr>
+<tr>
+<td><code>OSC 3008</code></td>
+<td>HIERCONTEXT</td>
+<td>Hierarchical context signalling (UAPI.15): the nesting a shell, run0, ssh or a container runtime opens around what runs inside it.</td>
+</tr>
+<tr>
+<td><code>OSC 5522</code></td>
+<td>KITTYCLIPBOARD</td>
+<td>Kitty clipboard protocol: chunked, MIME-typed clipboard read/write.</td>
+</tr>
+<tr>
+<td><code>OSC 7501</code></td>
+<td>PROGRAMSTATUS</td>
+<td>Program status (program-status rev 0.4): a program reports whether it is idle, working, done, blocked on the user, or failed.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="device-control-sequences">Device Control Sequences<a class="headerlink" href="#device-control-sequences" title="Permanent link">#</a></h2>
+<table>
+<thead>
+<tr>
+<th>Sequence</th>
+<th>Code</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DCS   0    ! g</code></td>
+<td>GIP</td>
+<td>Good Image Protocol (upload, render, release, oneshot, query).</td>
+</tr>
+<tr>
+<td><code>DCS   0..1   p</code></td>
+<td>REGIS</td>
+<td>ReGIS Vector Graphics</td>
+</tr>
+<tr>
+<td><code>DCS   0    $ p</code></td>
+<td>STP</td>
+<td>Set Terminal Profile</td>
+</tr>
+<tr>
+<td><code>DCS   0..3   q</code></td>
+<td>DECSIXEL</td>
+<td>Sixel Graphics Image</td>
+</tr>
+<tr>
+<td><code>DCS   0    $ q</code></td>
+<td>DECRQSS</td>
+<td>Request Status String</td>
+</tr>
+<tr>
+<td><code>DCS   0    + q</code></td>
+<td>XTGETTCAP</td>
+<td>Request Termcap/Terminfo String</td>
+</tr>
+<tr>
+<td><code>DCS   1    $ t</code></td>
+<td>DECRSPS</td>
+<td>Restore Presentation State</td>
+</tr>
+<tr>
+<td><code>DCS   0..1 ! u</code></td>
+<td>DECAUPSS</td>
+<td>Assign User-Preferred Supplemental Set</td>
+</tr>
+<tr>
+<td><code>DCS   0..3 ! z</code></td>
+<td>DECDMAC</td>
+<td>Define Macro</td>
+</tr>
+<tr>
+<td><code>DCS   0..16   {</code></td>
+<td>DECDLD</td>
+<td>Down-Line-Load Character Set (DRCS)</td>
+</tr>
+<tr>
+<td><code>DCS   0..2   |</code></td>
+<td>DECUDK</td>
+<td>User-Defined Keys</td>
+</tr>
+</tbody>
+</table></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="control-codes" href="#control-codes">Control Codes</a><a data-head="escape-sequences" href="#escape-sequences">Escape Sequences</a><a data-head="control-sequences" href="#control-sequences">Control Sequences</a><a data-head="operating-system-commands" href="#operating-system-commands">Operating System Commands</a><a data-head="device-control-sequences" href="#device-control-sequences">Device Control Sequences</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><span class="none">generated from contour</span>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">reference › <b>vt sequences</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

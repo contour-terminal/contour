@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>line reflow mode - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="../..">
+<link rel="icon" href="../../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../../assets/theme/site.css">
+<script type="module" src="../../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../../assets/contour-logo.png" alt=""><span id="cw-title">line reflow mode</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href="../.."><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../../configuration/"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../../vt-sequence/" aria-current="true"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour" hidden>
+<a class="tab" data-group="" href="../..">home</a>
+<a class="tab" data-group="" href="../../install/">install</a>
+<a class="tab" data-group="" href="../../features/">features</a>
+<a class="tab" data-group="" href="../../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure" hidden>
+<a class="tab" data-group="" href="../../configuration/">config file</a>
+<a class="tab" data-group="" href="../../configuration/profiles/">profiles</a>
+<a class="tab" data-group="" href="../../configuration/settings/">settings window</a>
+<a class="tab" data-group="" href="../../configuration/colors/">colors</a>
+<a class="tab" data-group="" href="../../configuration/key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../../configuration/layouts/">layouts</a>
+<a class="tab" data-group="more" href="../../configuration/links/">links</a>
+<a class="tab" data-group="more" href="../../configuration/hosts/">hosts</a>
+<a class="tab" data-group="more" href="../../configuration/indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../../configuration/paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference">
+<a class="tab" data-group="" href="../../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="./" aria-current="page">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>line reflow mode</summary>
+  <div class="tabsel-list">
+<a href="../../vt-sequence/">vt sequences</a>
+<a href="../../demo/regis-graphics/">regis graphics</a>
+<a href="../synchronized-output/">synchronized output</a>
+<a href="../osc-133-shell-integration/">shell integration</a>
+<a href="../clickable-links/">clickable links</a>
+<a href="../buffer-capture/">buffer capture</a>
+<a href="../program-status/">program status</a>
+<a href="../semantic-block-query/">semantic block query</a>
+<a href="../osc-9-4-progress/">progress (osc 9;4)</a>
+<a href="../osc-3008-context/">context (osc 3008)</a>
+<a href="../vertical-line-marks/">vertical line marks</a>
+<a href="../color-palette-update-notifications/">palette notifications</a>
+<a href="../font-settings/">font settings</a>
+<a href="./" aria-current="page">line reflow mode</a>
+<a href="../private-use-glyphs/">private-use glyphs</a>
+<a href="../save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a href="../unicode-core/">unicode core</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="line-reflow-reconfiguration">Line Reflow Reconfiguration<a class="headerlink" href="#line-reflow-reconfiguration" title="Permanent link">#</a></h1>
+<p>On resize, overly long lines, that would otherwise be cut off, are usually reflowed to the next line on modern terminals.</p>
+<p>This extension allows toggling reflow for the current line and subsequent lines using a DEC mode (<code>2028</code>).</p>
+<h2 id="feature-detection">Feature detection<a class="headerlink" href="#feature-detection" title="Permanent link">#</a></h2>
+<p>Use <code>DECRQM</code> (<code>CSI ? 2028 $ p</code>) to detect support for line reflow reconfiguration.</p>
+<h2 id="using-the-feature">Using the feature<a class="headerlink" href="#using-the-feature" title="Permanent link">#</a></h2>
+<p>Use <code>CSI ? 2028 h</code> to enable text reflow on the current line and the following lines.</p>
+<p>Use <code>CSI ? 2028 l</code> to disable text reflow on the current line and the following lines.</p></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="feature-detection" href="#feature-detection">Feature detection</a><a data-head="using-the-feature" href="#using-the-feature">Using the feature</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/vt-extensions/line-reflow-mode.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">reference › <b>line reflow mode</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

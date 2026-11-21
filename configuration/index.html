@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>config file - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="..">
+<link rel="icon" href="../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../assets/theme/site.css">
+<script type="module" src="../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../assets/contour-logo.png" alt=""><span id="cw-title">config file</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href=".."><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="./" aria-current="true"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../vt-sequence/"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour" hidden>
+<a class="tab" data-group="" href="..">home</a>
+<a class="tab" data-group="" href="../install/">install</a>
+<a class="tab" data-group="" href="../features/">features</a>
+<a class="tab" data-group="" href="../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure">
+<a class="tab" data-group="" href="./" aria-current="page">config file</a>
+<a class="tab" data-group="" href="profiles/">profiles</a>
+<a class="tab" data-group="" href="settings/">settings window</a>
+<a class="tab" data-group="" href="colors/">colors</a>
+<a class="tab" data-group="" href="key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="layouts/">layouts</a>
+<a class="tab" data-group="more" href="links/">links</a>
+<a class="tab" data-group="more" href="hosts/">hosts</a>
+<a class="tab" data-group="more" href="indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference" hidden>
+<a class="tab" data-group="" href="../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../vt-extensions/synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>config file</summary>
+  <div class="tabsel-list">
+<a href="./" aria-current="page">config file</a>
+<a href="profiles/">profiles</a>
+<a href="settings/">settings window</a>
+<a href="colors/">colors</a>
+<a href="key-mapping/">key mapping</a>
+<a href="layouts/">layouts</a>
+<a href="links/">links</a>
+<a href="hosts/">hosts</a>
+<a href="indicator-statusline/">status line</a>
+<a href="paths/">paths</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="configuring-contour">Configuring Contour<a class="headerlink" href="#configuring-contour" title="Permanent link">#</a></h1>
+<p>Contour offers a wide range of configuration options that can be customized, including color scheme, shell, initial working directory, and more.
+The configuration options can be categorized into several groups:</p>
+<ul>
+<li>Global options: These settings determine the overall behavior of the terminal and apply to all profiles.</li>
+<li>Profiles: With profiles, you can configure the terminal more granularly and create multiple profiles that can be easily switched between.</li>
+<li>Color scheme: Contour allows you to define different color schemes for the terminal and choose which one to use for each of the profiles.</li>
+</ul>
+<p>On Unix systems, the main configuration file is located at  <code>~/.config/contour/contour.yml</code> and is both read from and auto-generated there. On Windows systems, the file is located at  <code>%LocalAppData%\contour\contour.yml</code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Please note that on Unix systems, the environment variable <code>XDG_CONFIG_HOME</code> (by default set to <code>~/.config</code>) is taken into account.</p>
+</div>
+<p>By default, on Unix systems, Contour is executed with the following arguments <code>contour config ~/.config/contour/contour.yml profile main</code>. If the configuration file includes a <code>default_profile</code> variable, it will be used as the default profile. Otherwise, the first profile listed in the file will be the default one.</p>
+<h2 id="how-to">How to<a class="headerlink" href="#how-to" title="Permanent link">#</a></h2>
+<h3 id="load-specific-configuration-file">Load specific configuration file<a class="headerlink" href="#load-specific-configuration-file" title="Permanent link">#</a></h3>
+<p><code>contour config /path/to/file/with/configuration.yml</code></p>
+<h3 id="set-profile-for-current-session">Set profile for current session<a class="headerlink" href="#set-profile-for-current-session" title="Permanent link">#</a></h3>
+<p>You can utilize the <code>profile</code> parameter with the <code>contour</code> command:</p>
+<p><code>contour profile one_of_profiles</code></p>
+<h2 id="global-options">Global options<a class="headerlink" href="#global-options" title="Permanent link">#</a></h2>
+<p>Let's go through the different sections of the global configurations in the file:</p>
+<h3 id="defaults_edition"><code>defaults_edition</code><a class="headerlink" href="#defaults_edition" title="Permanent link">#</a></h3>
+<p>option names the generation of built-in defaults the configuration file is written against, so a setting the file does not spell out keeps the value it had when the file was written. <code>classic</code> is the defaults of every release before the 2026 redesign, and is what a file without the key gets. <code>native2026</code> is the redesign's: JetBrains Mono (Cascadia Mono on Windows) at 13pt on macOS and 12pt elsewhere, a 100x30 page with 8x6 margins, the <code>contour-dark</code>/<code>contour-light</code> color schemes, the status line without hard-coded colors, a silent bell, 10000 lines of scrollback, a steady block cursor, links decorated while the follow modifier (Command on macOS) is held, unfocused panes dimmed, a tab bar shown only for two or more tabs, a scrollbar that follows the system's scroll bar setting (<code>scrollbar.mode: system</code>, where <code>classic</code> always shows it), a hovered link's target shown only while the follow modifier is held (<code>hyperlink_hover_tooltip: false</code>), and GUI chrome that follows the terminal background (<code>theme: terminal</code>, where <code>classic</code> follows the OS). Under <code>native2026</code> <code>colors: default</code>, the stock scheme left unmodified, also means the <code>contour-dark</code>/<code>contour-light</code> pair, so an existing configuration follows dark mode; naming any other scheme keeps it fixed. Under <code>native2026</code> the default profile's <code>contour-dark</code> and <code>contour-light</code> palettes come from the built-in schemes: a <code>color_schemes:</code> entry of either name takes effect only when a profile names it in <code>colors:</code>. A freshly generated configuration states <code>native2026</code>. A <code>settings.yml</code> beside the file may set the key too, and wins.</p>
+<h3 id="platform_plugin"><code>platform_plugin</code><a class="headerlink" href="#platform_plugin" title="Permanent link">#</a></h3>
+<p>option allows you to override the auto-detected platform plugin to be loaded. You can specify values like <code>auto</code>, <code>xcb</code>, <code>cocoa</code>, <code>direct2d</code>, or <code>winrt</code> to determine the platform plugin. The default value is <code>auto</code>.</p>
+<h3 id="renderer"><code>renderer</code><a class="headerlink" href="#renderer" title="Permanent link">#</a></h3>
+<p>section contains configuration options related to the VT Renderer, which is responsible for rendering the terminal onto the screen. It includes the <code>backend</code> option to specify the Qt RHI graphics API, with possible values of <code>auto</code> (the native backend per platform), <code>OpenGL</code>, <code>vulkan</code>, <code>direct3d11</code>, <code>direct3d12</code>, <code>metal</code>, or <code>software</code>. The other options in this section control the tile mapping and caching for performance optimization. </p>
+<h3 id="ssh_default_term"><code>ssh_default_term</code><a class="headerlink" href="#ssh_default_term" title="Permanent link">#</a></h3>
+<p>Default terminal type for built-in SSH profiles. A profile's TERM takes precedence.</p>
+<h3 id="word_delimiters"><code>word_delimiters</code><a class="headerlink" href="#word_delimiters" title="Permanent link">#</a></h3>
+<p>option defines the delimiters to be used when selecting words in the terminal. It is a string of characters that act as delimiters.</p>
+<h3 id="extended_word_delimiters"><code>extended_word_delimiters</code><a class="headerlink" href="#extended_word_delimiters" title="Permanent link">#</a></h3>
+<p>option defines the delimiters to be used when selecting words in the second time. It is a string of characters that act as delimiters. By default word delimiters are used.</p>
+<h3 id="command_palette_recent_count"><code>command_palette_recent_count</code><a class="headerlink" href="#command_palette_recent_count" title="Permanent link">#</a></h3>
+<p>option sets how many recently used commands the command palette pins above its alphabetical list. The palette is opened with the <code>OpenCommandPalette</code> action (bound to <code>Ctrl+Shift+P</code> by default), and the list of recent commands is remembered across restarts in the <code>command-history.yml</code> file beside your configuration file. Set it to <code>0</code> to turn the "recently used" section off entirely. The default value is <code>5</code>.</p>
+<h3 id="read_buffer_size"><code>read_buffer_size</code><a class="headerlink" href="#read_buffer_size" title="Permanent link">#</a></h3>
+<p>option sets the most bytes taken from the PTY in one read, and so the most parsed in one go. Larger batches parse output faster; smaller ones show a flood of it in smaller steps. It is an advanced option and should be used with caution. The default value is <code>65536</code>. A change applies to sessions opened afterwards.</p>
+<h3 id="pty_buffer_size"><code>pty_buffer_size</code><a class="headerlink" href="#pty_buffer_size" title="Permanent link">#</a></h3>
+<p>option sets the size in bytes per PTY Buffer Object. It is an advanced option for internal storage and should be changed carefully. The default value is <code>1048576</code>. A change applies to sessions opened afterwards.</p>
+<h3 id="default_profile"><code>default_profile</code><a class="headerlink" href="#default_profile" title="Permanent link">#</a></h3>
+<p>option determines the default profile to use in the terminal.</p>
+<h3 id="early_exit_threshold"><code>early_exit_threshold</code><a class="headerlink" href="#early_exit_threshold" title="Permanent link">#</a></h3>
+<p>option determines the early threshold time. If the shell ends earlier than the specified threshold without a successful exit status, its pane stays open with the shell's last output and a footer naming how it ended (its exit code or signal): Return restarts the shell in the same pane, and the <code>ClosePane</code> binding (Ctrl+Shift+W, or Command+W on macOS, by default) closes it. A shell that exits successfully -- <code>exit</code> or Ctrl+D -- closes the pane at once.</p>
+<h3 id="spawn_new_process"><code>spawn_new_process</code><a class="headerlink" href="#spawn_new_process" title="Permanent link">#</a></h3>
+<p>flag determines whether a new process should be spawned when creating a new terminal. The default value is <code>false</code>.</p>
+<h3 id="reflow_on_resize"><code>reflow_on_resize</code><a class="headerlink" href="#reflow_on_resize" title="Permanent link">#</a></h3>
+<p>option controls whether or not the lines in the terminal should be reflowed when a resize event occurs. The default value is <code>true</code>. A change applies to sessions opened afterwards.</p>
+<h3 id="snap_to_rows"><code>snap_to_rows</code><a class="headerlink" href="#snap_to_rows" title="Permanent link">#</a></h3>
+<p>option aligns startup and manually resized window heights to complete terminal rows. The default is <code>false</code>. Applies to a single visible pane, including a zoomed split pane. Font metrics, window chrome and configured margins are taken into account. Windows snaps during resizing; macOS snaps when manual resizing ends; X11 uses window-manager size hints. Wayland has no resize-increment hint, so only startup sizing is supported there. Maximized and fullscreen sizes are unrestricted. Fractional scaling can leave less than one logical pixel of rounding slack. A change applies at the next startup or manual resize.</p>
+<h3 id="connect_picker_on_start"><code>connect_picker_on_start</code><a class="headerlink" href="#connect_picker_on_start" title="Permanent link">#</a></h3>
+<p>option makes a plain launch, one with no command-line arguments such as a Dock, Spotlight or launcher start, show the Connect picker first: a small window asking whether the new window's sessions live in this computer's daemon, in this window only, or on a saved host. The default is <code>false</code>. <code>contour connect</code> shows the picker whatever this says, and a launch with arguments never does. Also the "Ask every time Contour starts" switch of the picker and of Settings.</p>
+<h3 id="remember_window_position"><code>remember_window_position</code><a class="headerlink" href="#remember_window_position" title="Permanent link">#</a></h3>
+<p>option remembers the last normal window position and monitor, without saving window size. The default is <code>true</code> on Windows and <code>false</code> on other platforms. Enable it to opt in on macOS and X11; Wayland leaves placement to the compositor. The first window restores its location at startup. The window-position.yml side file stores monitor-relative x/y coordinates and a zero-based monitor index. Disabling the option stops reading and writing position state.</p>
+<h3 id="tab_switch_on_horizontal_wheel"><code>tab_switch_on_horizontal_wheel</code><a class="headerlink" href="#tab_switch_on_horizontal_wheel" title="Permanent link">#</a></h3>
+<p>option controls whether a horizontal mouse wheel tilt (or a horizontal trackpad swipe) over the tab strip or the terminal switches to the previous/next tab. An application that has requested mouse reporting keeps receiving the horizontal wheel; holding the bypass modifier switches tabs anyway. An explicit <code>WheelLeft</code>/<code>WheelRight</code> entry in <code>input_mapping</code> takes precedence. The default value is <code>true</code>.</p>
+<h3 id="hyperlink_hover_tooltip"><code>hyperlink_hover_tooltip</code><a class="headerlink" href="#hyperlink_hover_tooltip" title="Permanent link">#</a></h3>
+<p>Whether hovering a link (<a href="../vt-extensions/clickable-links/">OSC 8</a> or detected) shows its target without holding the follow modifier. While the modifier is held the target always shows. A local <code>file://</code> target is shown as a plain path. Defaults to <code>false</code>; a configuration written before the 2026 defaults keeps <code>true</code>.</p>
+<h3 id="progress_show_delay"><code>progress_show_delay</code><a class="headerlink" href="#progress_show_delay" title="Permanent link">#</a></h3>
+<p>How long running or busy <a href="../vt-extensions/osc-9-4-progress/">OSC 9;4</a> progress waits before appearing on tabs and desktop indicators, in milliseconds. The default is <code>500</code>. Set it to <code>0</code> to show progress immediately. Paused and error states always appear immediately.</p>
+<h3 id="progress_timeout"><code>progress_timeout</code><a class="headerlink" href="#progress_timeout" title="Permanent link">#</a></h3>
+<p>How long an application's progress indicator (<a href="../vt-extensions/osc-9-4-progress/">OSC 9;4</a>) stays on screen without being updated, in milliseconds.</p>
+<p><code>0</code> (the default) disables expiry entirely: the indicator persists until the application clears it with state <code>0</code>, which is what the sequence specifies and what ConEmu and Windows Terminal do. The terminal cannot tell a long-running operation from an application that died holding one, so a non-zero value trades that fidelity for a guard against a bar left stranded on screen. Applications using the protocol are expected to refresh it about once a second, so a timeout well above that -- 15000 or so -- is the useful range.</p>
+<h3 id="notification_close_timeout"><code>notification_close_timeout</code><a class="headerlink" href="#notification_close_timeout" title="Permanent link">#</a></h3>
+<p>How long after showing a desktop notification that asked to hear of its close (<code>c=1</code>) the terminal waits before assuming the desktop closed it, in milliseconds.</p>
+<p>This only applies where a close cannot be observed. Contour normally learns that a notification was dismissed or expired from the desktop itself and reports it back to the application as the OSC 99 <code>p=close</code> event. Inside a Flatpak sandbox that is impossible: the only reachable service is the <code>org.freedesktop.portal.Notification</code> portal, which has no close signal of any kind, so an application that asked for close events (<code>c=1</code>) would otherwise wait forever.</p>
+<p>A notification that states its own lifetime through <code>w=</code> is answered after that instead -- the application already said what it wanted. Only <code>w=-1</code>, "whatever the desktop does", falls back to this value.</p>
+<p>Two cases are deliberately never answered, because there is no moment at which an answer would be true: <code>0</code> here, which disables the assumption outright, and <code>w=0</code> on the notification, which asks for a popup that never expires on its own. An application that requested close events in either case is not told.</p>
+<p>A notification that asked for no close event -- a command's finish notice among them -- is never assumed closed: assuming it would only make it impossible to withdraw, and its click, from the desktop's notification history, would go unanswered.</p>
+<p>Read once per terminal session, so a changed value reaches sessions opened after the reload.</p>
+<p>Because the report is a timer rather than an observation, it is marked <code>untracked</code> on the wire, so an application can tell the two apart.</p>
+<h3 id="accessibility_announcements"><code>accessibility_announcements</code><a class="headerlink" href="#accessibility_announcements" title="Permanent link">#</a></h3>
+<p>Whether events with no representation in the accessibility tree -- the bell, a desktop notification, a mode change -- are announced to assistive technology. Costs nothing while no assistive client is attached. See <a href="../accessibility/">Accessibility</a>.</p>
+<h3 id="accessibility_caret_reporting"><code>accessibility_caret_reporting</code><a class="headerlink" href="#accessibility_caret_reporting" title="Permanent link">#</a></h3>
+<p>Whether the terminal reports where the caret is to assistive technology, which is how a screen magnifier follows what you are typing. Costs nothing while no assistive client is attached. Turn it off to rule the caret reports out when diagnosing input latency. See <a href="../accessibility/">Accessibility</a>.</p>
+<h3 id="tab_bar_position"><code>tab_bar_position</code><a class="headerlink" href="#tab_bar_position" title="Permanent link">#</a></h3>
+<p>Selects where the GUI tab strip (tab bar) is placed within the window. Valid values (ignore-case):</p>
+<ul>
+<li><code>Top</code> — the tab strip is drawn above the terminal content. This is the default.</li>
+<li><code>Bottom</code> — the tab strip is drawn below the terminal content.</li>
+</ul>
+<h3 id="tab_bar_visibility"><code>tab_bar_visibility</code><a class="headerlink" href="#tab_bar_visibility" title="Permanent link">#</a></h3>
+<p>Selects when the GUI tab strip (tab bar) is shown. Valid values (ignore-case):</p>
+<ul>
+<li><code>Always</code> — the tab strip is always shown. This is the <code>classic</code> default.</li>
+<li><code>Never</code> — the tab strip is never shown.</li>
+<li><code>Multiple</code> — the tab strip is shown only when the window has more than one tab, and hidden while a single tab remains. This is the <code>native2026</code> default.</li>
+</ul>
+<h3 id="tab_placement"><code>tab_placement</code><a class="headerlink" href="#tab_placement" title="Permanent link">#</a></h3>
+<p>Selects where the window's tabs live. Valid values (ignore-case):</p>
+<ul>
+<li><code>Top</code> — the tabs are in the tab strip, at the edge <code>tab_bar_position</code> names. This is the <code>classic</code> default.</li>
+<li><code>Sidebar</code> — the tabs are rows of the workspace sidebar, under their workspace, and the tab strip gives way to a breadcrumb. This is the <code>native2026</code> default.</li>
+</ul>
+<h3 id="sidebar"><code>sidebar</code><a class="headerlink" href="#sidebar" title="Permanent link">#</a></h3>
+<p>configuration controls the workspace sidebar: the list of workspaces, and with <a href="#tab_placement"><code>tab_placement</code></a> <code>Sidebar</code> their tabs, at the window's left edge.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">sidebar</span><span class="p">:</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">visible</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">width</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">tab_color</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tint</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span><span class="nt">workspace_color</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tint</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span><span class="nt">row_spacing</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">comfortable</span>
+</span></code></pre></div>
+<ul>
+<li><code>visible</code>: Whether the sidebar starts shown. This is <code>false</code> for the <code>classic</code> defaults and <code>true</code> for the <code>native2026</code> ones. What you last chose in a window is remembered, and wins over this.</li>
+<li><code>width</code>: The sidebar's starting width in logical pixels, or in cells under <code>ui_style: terminal</code>, kept within the bounds of the chrome style; a width dragged in a window is remembered likewise. Omit it or use <code>null</code> for the style's own width.</li>
+<li><code>tab_color</code>: How a coloured tab shows its colour on its sidebar rows (ignore-case). An uncoloured tab looks the same in all three.<ul>
+<li><code>tint</code> (default): the row is filled with the colour, faded as the tab strip fades it.</li>
+<li><code>bar</code>: a narrow bar in the colour at the row's leading edge, the row's full height.</li>
+<li><code>name</code>: the tab's name is drawn in the colour.</li>
+</ul>
+</li>
+<li><code>workspace_color</code>: How a coloured workspace shows its colour in the sidebar (ignore-case). An uncoloured workspace looks the same in all three.<ul>
+<li><code>tint</code> (default): the workspace's row is filled with the colour, faded as the tab strip fades it.</li>
+<li><code>group</code>: a rail in the colour down the leading edge of the workspace's row and every row beneath it, over a faint wash.</li>
+<li><code>swatch</code>: a small square in the colour before the workspace's name.</li>
+</ul>
+</li>
+<li><code>row_spacing</code>: How much room a tab's or a pane's two-line row takes (ignore-case). A workspace's one-line row and the rows under <code>ui_style: terminal</code>, two cells tall, are the same in both.<ul>
+<li><code>comfortable</code> (default): taller rows, the extra room going between the rows, so each row's two lines read as one.</li>
+<li><code>compact</code>: tighter rows, so more of them fit.</li>
+</ul>
+</li>
+</ul>
+<p><code>tab_color</code>, <code>workspace_color</code> and <code>row_spacing</code> are read when a window opens: a window that is open when the configuration is reloaded keeps the styles it opened with, and a window opened after it uses the new ones.</p>
+<h3 id="tab_style"><code>tab_style</code><a class="headerlink" href="#tab_style" title="Permanent link">#</a></h3>
+<p>section changes how the tabs are drawn, on top of the chrome's own look. Every key defaults to the chrome's own, and a change is applied live.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">tab_style</span><span class="p">:</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">preset</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">none</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">shape</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">spacing</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">material</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">active_fill</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span><span class="nt">inactive_fill</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">  </span><span class="nt">bar_fill</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">  </span><span class="nt">active_indicator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">none</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">  </span><span class="nt">indicator_color</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">accent</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">  </span><span class="nt">tab_color_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fill</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">  </span><span class="nt">close_button</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">  </span><span class="nt">new_tab_button</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shown</span>
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">  </span><span class="nt">tab_width</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">  </span><span class="nt">min_tab_width</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="w">  </span><span class="nt">max_tab_width</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
+</span></code></pre></div>
+<ul>
+<li><code>preset</code>: A named look that sets several of the keys below at once: <code>none</code> (the default), <code>classic</code> (square tabs edge to edge on an opaque bar), <code>minimal</code> (no fills; the active tab is the one underlined), <code>rounded</code> (floating pills with a little room between them), <code>glass</code> (floating pills on a see-through bar, the active one a faint wash) or <code>outlined</code> (floating outlines, an accent line under the active one). A key set to anything but its default wins over the preset, so a preset is a starting point to adjust.</li>
+<li><code>shape</code>: How each tab is drawn: <code>auto</code> (the interface style's own tab), <code>pill</code> (a rounded tab that floats on the bar, the active one filled), <code>flat</code> (a square tab, the active one filled), <code>underline</code> (no fill; the active tab is the one with the line under it) or <code>outlined</code> (a rounded tab that floats on the bar, the active one outlined). The bar itself stays where the interface style puts it. Has no effect under <a href="#ui_style"><code>ui_style: terminal</code></a>, whose tabs are character cells.</li>
+<li><code>spacing</code>: The gap between two tabs, in pixels, from <code>0</code> (they touch) to <code>32</code>. With a gap, no line is drawn between tabs. The pills of macOS and Linux keep their own gap.</li>
+<li><code>material</code>: What the tab bar is made of: <code>auto</code> (the interface style's own), <code>solid</code> (opaque), <code>frosted</code> (mostly opaque, softly coloured by what is behind the window) or <code>glass</code> (clearly see-through: a blurred view of what is behind the window). The names are the same on every system, and each draws them with its own material: Windows draws <code>frosted</code> as Mica and <code>glass</code> as Acrylic. macOS draws <code>frosted</code> as its own title-bar material and <code>glass</code> as Liquid Glass on each tab, following Apple's guidance to keep glass on the controls rather than across the bar (macOS 26; earlier versions keep the solid bar). KDE Plasma draws both over KWin's blur, under a translucent tint. A desktop without such a blur (GNOME, any X11 window manager but KWin) keeps the bar as the interface style draws it, as does any system with transparency effects turned off. A translucent <code>active_fill</code> or <code>inactive_fill</code> lets the material show through the tabs.</li>
+<li><code>active_fill</code>: The active tab's fill: <code>auto</code>, <code>accent</code> (the accent colour), <code>subtle</code> (a faint wash that keeps the bar's tone) or a colour such as <code>'#3B82F6'</code>. A colour given to a tab itself wins over it.</li>
+<li><code>inactive_fill</code>: The fill of every other tab, spelled the same way.</li>
+<li><code>bar_fill</code>: The bar's own fill, spelled the same way. Over a <code>frosted</code> or <code>glass</code> material a colour is a tint the material shows through. The labels and buttons on the bar (tab titles, the new-tab button, the window buttons) are inked for the bar's colour, so a dark bar on a light theme stays readable.</li>
+<li><code>active_indicator</code>: A line on the active tab: <code>none</code>, <code>underline</code> (along its bottom edge) or <code>top-line</code> (along its top edge).</li>
+<li><code>indicator_color</code>: That line's colour: <code>accent</code> (the system accent colour) or a colour such as <code>'#3B82F6'</code>.</li>
+<li><code>tab_color_mode</code>: How a tab shows a colour of its own, whether from a profile's <a href="profiles/#tab_color"><code>tab_color</code></a> or picked for the tab: <code>fill</code> (the colour is the tab's fill, faded while the tab is inactive; this is the default and replaces <code>active_fill</code> and <code>inactive_fill</code> on that tab), <code>tint</code> (a wash of the colour over the tab as it is otherwise styled) or <code>indicator</code> (the tab keeps its styled fill and the colour is its indicator line, in place of <code>indicator_color</code>; such a tab shows the line whether or not it is active).</li>
+<li><code>close_button</code>: When a tab shows its close button: <code>auto</code> (the interface style's own: on every tab of a flat strip, on the active or hovered tab otherwise), <code>hover</code> (only on the tab under the pointer), <code>active</code> (on the active tab and under the pointer), <code>always</code> or <code>never</code> (a tab then closes with a middle click, its menu or the keyboard, and keeps no room for it).</li>
+<li><code>new_tab_button</code>: <code>shown</code> (where the interface style puts it: after the tabs on Windows, in the toolbar on macOS, in the header bar on Linux) or <code>hidden</code> (a tab then opens from the keyboard, the menus or the command palette).</li>
+<li><code>tab_width</code>: How wide the tabs are: <code>auto</code> (the interface style's own: equal pills on macOS and Linux, each tab as wide as its title on Windows), <code>equal</code> (every tab as wide as the others, sharing the bar and shrinking together as tabs are added, down to <code>min_tab_width</code>; past that the strip scrolls) or <code>fit</code> (each tab as wide as its title, within the two limits). The pills of macOS and Linux are always equal. Has no effect under <a href="#ui_style"><code>ui_style: terminal</code></a>.</li>
+<li><code>min_tab_width</code>: The narrowest a tab gets, in pixels, up to <code>1000</code>; <code>0</code> keeps the interface style's own.</li>
+<li><code>max_tab_width</code>: The widest a tab gets, in pixels, up to <code>1000</code>; <code>0</code> keeps the interface style's own. A maximum under the minimum is taken as the minimum.</li>
+</ul>
+<h3 id="gui_config_locked"><code>gui_config_locked</code><a class="headerlink" href="#gui_config_locked" title="Permanent link">#</a></h3>
+<p>flag, when <code>true</code>, opens the in-app settings page read-only and prevents the GUI from writing any of its side files (<code>profiles/</code>, <code>colorschemes/</code>, <code>settings.yml</code>), so this hand-maintained configuration file stays the single source of truth. The default value is <code>false</code>.</p>
+<h3 id="theme"><code>theme</code><a class="headerlink" href="#theme" title="Permanent link">#</a></h3>
+<p>option selects the light/dark appearance of the GUI chrome (title bar, tab strip, command palette, settings pages, dialogs) independently of the operating system. Possible values are <code>terminal</code> (follow the terminal's background), <code>system</code> (follow the OS color scheme), <code>dark</code>, and <code>light</code>. The terminal grid keeps following the OS light/dark preference through its own color scheme. The default value is <code>terminal</code> under <code>defaults_edition: native2026</code> and <code>system</code> under <code>classic</code>.</p>
+<h3 id="ui_style"><code>ui_style</code><a class="headerlink" href="#ui_style" title="Permanent link">#</a></h3>
+<p>Selects how the application's own chrome is painted: the tab strip and title bar, and the controls (buttons, fields, menu entries, combo boxes) inside menus, popups and the settings page. This selects a <em>shape</em>, not a color: both styles take their colors from the operating system palette and follow the <a href="#theme"><code>theme</code></a> setting. Valid values (ignore-case):</p>
+<ul>
+<li><code>native</code> — platform-native GUI chrome. This is the default.</li>
+<li><code>terminal</code> — the chrome is quantized to whole character cells of a monospace font and its corners are squared off, so the window reads as one continuous TUI rather than as a GUI wrapped around a terminal. Tabs keep every GUI affordance (drag to reorder, tear off, rename, close, context menu); only their appearance changes.</li>
+</ul>
+<p>This is the recommended way to get the terminal look now that a window can hold split panes: the indicator status line's <code>{Tabs}</code> item still works, but it is drawn per pane, so a split window would show one tab list per pane instead of one per window.</p>
+<p>The Qt Quick Controls half of the style is selected once, before the first control is created, so a change takes effect on the next start rather than live.</p>
+<h3 id="window_control_style"><code>window_control_style</code><a class="headerlink" href="#window_control_style" title="Permanent link">#</a></h3>
+<p>Selects how the window's own minimize/maximize/close controls are drawn, and which side of the tab bar they sit on. These are drawn only while the native title bar is hidden (<a href="profiles/#show_title_bar"><code>show_title_bar</code></a> is <code>false</code>, the default), which is when the tab bar doubles as the title bar; with the native frame shown, the operating system draws them itself. Valid values (ignore-case):</p>
+<ul>
+<li><code>auto</code> — match the host: macOS gets <code>macos</code>, Windows gets <code>windows</code>, and anything else (KDE Plasma included) gets <code>linux</code>. This is the default.</li>
+<li><code>windows</code> — trailing (right) edge, flush rectangular buttons in minimize/maximize/close order, with a red close hover.</li>
+<li><code>macos</code> — leading (left) edge, traffic lights in close/minimize/zoom order. The dots reveal their glyphs while the group is hovered and grey out while the window is inactive.</li>
+<li><code>plasma</code> — trailing (right) edge, like <code>windows</code> but with the circular hover fills of KDE Plasma's Breeze decoration.</li>
+<li><code>linux</code> — round buttons with the desktop's themed icons, in the order and on the side (or sides) the desktop's own button layout names: GNOME's <code>button-layout</code>, KWin's <code>ButtonsOnLeft</code> and <code>ButtonsOnRight</code>, or GTK's <code>gtk-decoration-layout</code>. Where none is set, minimize, maximize and close sit at the trailing (right) edge.</li>
+</ul>
+<p>Independent of <a href="#ui_style"><code>ui_style</code></a>: every value works in both the native and the terminal chrome, and takes its extents from whichever of those is active — so under <code>ui_style: terminal</code> the controls stay quantized to whole character cells, and the traffic lights are drawn as coloured cell-wide dots.</p>
+<p>Unlike <code>ui_style</code>, this applies immediately when changed from the settings page.</p>
+<h3 id="chrome_density"><code>chrome_density</code><a class="headerlink" href="#chrome_density" title="Permanent link">#</a></h3>
+<p>Selects how much room the window chrome takes. Valid values (ignore-case):</p>
+<ul>
+<li><code>comfortable</code> — once a tab is split, its panes are cards with a header each and a 6 pt gap between them. This is the default.</li>
+<li><code>minimal</code> — panes are separated by 1 pt lines and carry no header; hold Alt (Option on macOS) for half a second to show the headers. On macOS a tab that is not split gets a bare 28 pt band.</li>
+</ul>
+<p>A change is applied live.</p>
+<h3 id="secure_input"><code>secure_input</code><a class="headerlink" href="#secure_input" title="Permanent link">#</a></h3>
+<p>Shows a lock while the program in a pane hides what you type (a password prompt) and, on macOS, turns on Secure Keyboard Entry while that pane has focus. <code>auto</code> or <code>off</code>.</p>
+<h3 id="ui_font_family"><code>ui_font_family</code><a class="headerlink" href="#ui_font_family" title="Permanent link">#</a></h3>
+<p>Font family the terminal-style chrome is drawn with. When empty (the default) the chrome inherits the regular font family of the profile the window is running (<code>-p</code>/<code>--profile</code>, else <a href="#default_profile"><code>default_profile</code></a>), which is what makes it match the terminal grid below it. Ignored while <a href="#ui_style"><code>ui_style</code></a> is <code>native</code>, where the chrome uses the platform UI font. Takes effect on the next start.</p>
+<h3 id="ui_font_size"><code>ui_font_size</code><a class="headerlink" href="#ui_font_size" title="Permanent link">#</a></h3>
+<p>Font size, in points, the terminal-style chrome is drawn with. When 0 (the default) the chrome inherits the font size of the profile the window is running. Ignored while <a href="#ui_style"><code>ui_style</code></a> is <code>native</code>. Takes effect on the next start.</p>
+<h3 id="grapheme_clustering"><code>grapheme_clustering</code><a class="headerlink" href="#grapheme_clustering" title="Permanent link">#</a></h3>
+<p>Whether DEC mode 2027 starts out set. While set, a late codepoint may widen its grapheme cluster -- U+FE0F widens a cluster to two columns -- but a cluster never narrows again. While unset, a cell is measured by plain wcwidth() with no clustering. Applications may still toggle the mode at runtime. A change applies to sessions opened afterwards.</p>
+<h3 id="text_scaling_method"><code>text_scaling_method</code><a class="headerlink" href="#text_scaling_method" title="Permanent link">#</a></h3>
+<p>How a glyph is enlarged for scaled text (kitty text sizing protocol, OSC 66). <code>stretch</code> magnifies the ordinary-size glyph: free to rasterize, no extra atlas entries, but softer at large scales. <code>rerasterize</code> asks the font for the glyph at the larger size: crisp at any scale, at the cost of a rasterization and an atlas entry per glyph and scale.</p>
+<h3 id="bypass_mouse_protocol_modifier"><code>bypass_mouse_protocol_modifier</code><a class="headerlink" href="#bypass_mouse_protocol_modifier" title="Permanent link">#</a></h3>
+<p>option specifies the keyboard modifier (e.g., Shift) that can be used to bypass the terminal's mouse protocol and select screen content.</p>
+<h3 id="mouse_block_selection_modifier"><code>mouse_block_selection_modifier</code><a class="headerlink" href="#mouse_block_selection_modifier" title="Permanent link">#</a></h3>
+<p>option determines the modifier (e.g., Control) that needs to be pressed to initiate block selection using the left mouse button.</p>
+<h3 id="on_mouse_select"><code>on_mouse_select</code><a class="headerlink" href="#on_mouse_select" title="Permanent link">#</a></h3>
+<p>option selects the action to perform when a text selection has been made. Possible values include <code>None</code>, <code>CopyToClipboard</code>, and <code>CopyToSelectionClipboard</code>.</p>
+<h3 id="live_config"><code>live_config</code><a class="headerlink" href="#live_config" title="Permanent link">#</a></h3>
+<p>option determines whether the instance should reload the configuration files whenever they change. The default value is <code>false</code>.</p>
+<h3 id="experimental"><code>experimental</code><a class="headerlink" href="#experimental" title="Permanent link">#</a></h3>
+<h3 id="images"><code>images</code><a class="headerlink" href="#images" title="Permanent link">#</a></h3>
+<p>section contains configuration options related to inline images. It includes options like <code>sixel_scrolling</code>, <code>sixel_register_count</code>, and <code>good_image_protocol</code> to control various aspects of image rendering. The maximum image size is derived from the screen size; <code>max_width</code> and <code>max_height</code> are deprecated and ignored.</p>
+<h3 id="daemon"><code>daemon</code><a class="headerlink" href="#daemon" title="Permanent link">#</a></h3>
+<p>section decides whether sessions are hosted by a daemon process, so they outlive the window.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">daemon</span><span class="p">:</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">socket</span><span class="p">:</span><span class="w"> </span><span class="s">""</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">size_policy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">latest</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">default_cell_pixel_size</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> width</span><span class="p">:</span><span class="w"> </span><span class="nv">10</span><span class="p p-Indicator">,</span><span class="nt"> height</span><span class="p">:</span><span class="w"> </span><span class="nv">20</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="nt">history_limit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="nt">restore</span><span class="p">:</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="nt">scrollback</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="nt">scrollback_lines</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">    </span><span class="nt">rerun_programs</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">    </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">  </span><span class="nt">keeper</span><span class="p">:</span>
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">    </span><span class="nt">restart_hung</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">    </span><span class="nt">give_up_crashes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
+</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">    </span><span class="nt">give_up_window</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">300</span>
+</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">    </span><span class="nt">backoff_start</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">    </span><span class="nt">backoff_cap</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30</span>
+</span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="w">    </span><span class="nt">startup_timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30</span>
+</span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="w">    </span><span class="nt">stop_timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">60</span>
+</span></code></pre></div>
+<ul>
+<li><code>mode</code>: <code>in_process</code> keeps sessions in the GUI process, <code>auto</code> uses a daemon and falls back to in-process with a notice, <code>required</code> fails when no daemon can be reached.</li>
+<li><code>socket</code>: The daemon's socket path; empty selects the default.</li>
+<li><code>size_policy</code>: Which client's size wins when several are attached: <code>latest</code>, <code>smallest</code> or <code>largest</code>.</li>
+<li><code>default_cell_pixel_size</code>: The cell size in pixels images are laid out on before any client has reported one; 10×20 is the VT340's text cell.</li>
+<li><code>history_limit</code>: Scrollback lines per session, <code>-1</code> for unlimited; unset uses the hosting profile's <code>history.limit</code>.</li>
+<li><code>restore.scrollback</code>: Whether a restored pane gets its scrollback back; the snapshot file may hold secrets that were on screen, and is readable by your user only.</li>
+<li><code>restore.scrollback_lines</code>: The most scrollback lines kept per pane, from <code>0</code> to <code>100000</code>; the live scrollback stays <code>history_limit</code>.</li>
+<li><code>restore.rerun_programs</code>: Programs a restored pane runs again when it was running one of them, such as <code>[vim, htop]</code>; nothing is re-run unless listed.</li>
+<li><code>restore.interval</code>: How often, in seconds, a changed workspace is written; at least <code>5</code>.</li>
+<li><code>keeper.restart_hung</code>: Whether the PTY keeper, the process <code>contour daemon</code> runs the daemon behind, restarts a daemon that stops answering for 30 seconds.</li>
+<li><code>keeper.give_up_crashes</code> and <code>keeper.give_up_window</code>: A daemon that crashes this many times within this many seconds is not restarted at once again: the keeper waits two minutes, then tries once more, and ends with the shells if that one crashes too.</li>
+<li><code>keeper.backoff_start</code> and <code>keeper.backoff_cap</code>: How many seconds the restart after a crash soon after another waits, doubling from the first up to the second.</li>
+<li><code>keeper.startup_timeout</code>: How many seconds a starting daemon may be silent before it serves, or is killed as hung: until its first heartbeat, and between heartbeats after it.</li>
+<li><code>keeper.stop_timeout</code>: How many seconds a stopping daemon has to end before the keeper kills it; keep it below a service manager's own stop timeout (systemd: 90).</li>
+</ul>
+<h3 id="quick_terminal"><code>quick_terminal</code><a class="headerlink" href="#quick_terminal" title="Permanent link">#</a></h3>
+<p>section sets a global hotkey that slides a terminal down from the top of the screen under the pointer, full width and 40 % of its height, in Minimal density.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">quick_terminal</span><span class="p">:</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">hotkey</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> mods</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Control</span><span class="p p-Indicator">],</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="s">'`'</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="nt">hide_on_focus_loss</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span></code></pre></div>
+<ul>
+<li><code>hotkey</code>: The chord, spelled as an input mapping spells it; it needs at least one of <code>Control</code>, <code>Alt</code> and <code>Super</code>. Unbound (<code>~</code>) by default.</li>
+<li><code>hide_on_focus_loss</code>: Whether the quick terminal hides when it loses the focus.</li>
+</ul>
+<h3 id="folding"><code>folding</code><a class="headerlink" href="#folding" title="Permanent link">#</a></h3>
+<p>configuration controls output folding: collapsing a finished command's output down to the prompt line it was entered at, and expanding it again.</p>
+<p></p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">folding</span><span class="p">:</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nt">show_markers</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="nt">auto_collapse_on_new_command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="nt">on_jump_into_fold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">expand</span>
+</span></code></pre></div>
+Folding is driven entirely by the OSC 133 semantic marks a shell with shell integration emits, so no additional escape sequence is involved and any shell that already speaks OSC 133 works. Only FINISHED commands fold, which is why the prompt you are typing at never does.
+<ul>
+<li><code>enabled</code>: Whether folding is available at all. When false the actions below do nothing and no fold markers are drawn.</li>
+<li><code>show_markers</code>: Whether the gutter's block column, left of the grid, draws fold markers: a boxed minus on a foldable prompt line whose output is showing, a boxed plus once it is collapsed, and a bar down the side of the block joining the two. Clicking anywhere on that column toggles the fold. Note that the column costs one column of terminal width; it is reserved while this, <code>gutter.exit_status</code> or <code>gutter.user_marks</code> is on.</li>
+<li><code>auto_collapse_on_new_command</code>: Whether a command's output is collapsed automatically as soon as the next prompt appears, so that only the command you are running now is shown in full.</li>
+<li><code>on_jump_into_fold</code>: What a Vi-mode jump that targets a line inside a collapsed block does: <code>expand</code> opens the block so the cursor lands on what it was aiming at, <code>skip</code> leaves it collapsed and stops at its prompt line instead. Plain motions (<code>j</code>, <code>k</code>, <code>{</code>, <code>}</code>, ++ctrl+d++, ++ctrl+u++) always step over a collapsed block regardless of this setting.</li>
+</ul>
+<p>The actions <code>CollapseAllFolds</code>, <code>ExpandAllFolds</code>, <code>CollapseLastFold</code>, <code>ToggleLastFold</code> and <code>ToggleFold</code> can be bound to keys; <code>ScrollMarkUp</code> and <code>ScrollMarkDown</code> already move the viewport from one prompt to the next.</p>
+<h3 id="gutter"><code>gutter</code><a class="headerlink" href="#gutter" title="Permanent link">#</a></h3>
+<p>configuration controls the gutter: the strip left of the grid that carries per-line timestamps, line numbers and the block column.</p>
+<p></p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">gutter</span><span class="p">:</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">exit_status</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="nt">user_marks</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span><span class="nt">block_column_width</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span><span class="nt">rail_thickness</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">  </span><span class="nt">bold_on_hover</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">  </span><span class="nt">line_numbers</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">off</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">  </span><span class="nt">line_number_width</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">6</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">  </span><span class="nt">timestamps</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">  </span><span class="nt">timestamp_format</span><span class="p">:</span><span class="w"> </span><span class="s">'%H:%M:%S'</span>
+</span></code></pre></div>
+The gutter's width follows this configuration and never its content, so a growing line number cannot resize the page in the middle of a command's output. The block column is reserved while fold markers (<code>folding.show_markers</code>), exit status or user marks are on, <code>block_column_width</code> cells wide.
+<ul>
+<li><code>exit_status</code>: Colour each command's fold controls by how it ended -- the colour scheme's <code>block_status</code> colours -- draw a triangle beside a running command, and a dot beside a finished one that shows no fold control: one with nothing to fold, or any one while fold markers are off. Hovering the block column shows the exit code, duration, start time, working directory and command line.</li>
+<li><code>user_marks</code>: Draw a diamond beside every row marked with vi-mode <code>mm</code>.</li>
+<li><code>block_column_width</code>: The block column's width in cells, 1 or 2. At 2, the default, its fold controls and marks are drawn across both cells at twice the size, and a click anywhere in the column -- the blank strip left of it included -- lands on it.</li>
+<li><code>rail_thickness</code>: Native command-block rail thickness in UI points, 0 to hide the line or 1 to 8. Omit or use null for the style default. Takes effect for new sessions.</li>
+<li><code>bold_on_hover</code>: Draw the fold under the pointer -- its line, its box and its end -- one stroke heavier, as well as at full strength: a failed command's, already heavy, heavier still. Its colours are the color scheme's <code>fold_marker.hover</code> and <code>block_status_hover</code>.</li>
+<li><code>line_numbers</code>: <code>off</code>, <code>absolute</code> (every row's number, counted from the session's first row, so the numbers stay put while history scrolls away), <code>relative</code> (every row's distance from the cursor row, counting a collapsed block as one row -- exactly what <code>j</code> and <code>k</code> count) or <code>hybrid</code> (the cursor row's own number, every other row's distance), as vim's <code>nu</code> and <code>rnu</code>. In vi mode the distance counts from the vi cursor.</li>
+<li><code>line_number_width</code>: Columns the line numbers take, 3 to 10. A longer number shows its last digits after an ellipsis.</li>
+<li><code>timestamps</code>: Show the time each row was first reached. A row shows it only where it differs from the row above, so a long output does not repeat one second.</li>
+<li><code>timestamp_format</code>: A <code>std::format</code> chrono specification in local time, such as <code>%H:%M</code> or <code>%a %H:%M:%S</code>. It must begin with a <code>%</code> conversion, so a leading literal such as <code>[%H:%M]</code> is refused, and so is a leading width or alignment such as <code>8%H</code> or <code>&gt;%H</code>, which <code>std::format</code> would pad the timestamp with. Every character it spells must take exactly one column, so a double-width character (a CJK ideograph, say) or a combining mark is refused as well. A format that cannot be drawn is reported when the configuration loads, and the default is kept.</li>
+</ul>
+<p>In vi normal mode, <code>za</code>, <code>zo</code>, <code>zc</code>, <code>zM</code> and <code>zR</code> toggle, open and close the block under the cursor, and close or open all of them, as in vim.</p>
+<h3 id="osc_context"><code>osc_context</code><a class="headerlink" href="#osc_context" title="Permanent link">#</a></h3>
+<p>configuration controls whether Contour reads OSC 3008, systemd's hierarchical context signalling (UAPI.15): the nested stack of contexts a shell, <code>run0</code>, <code>ssh</code> or a container runtime opens around whatever runs inside it.</p>
+<p></p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">osc_context</span><span class="p">:</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="nt">max_depth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">16</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span><span class="nt">max_retained_contexts</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">256</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">  </span><span class="nt">derive_markers</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">when_alone</span>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">  </span><span class="nt">tinting</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">boundaries</span>
+</span></code></pre></div>
+systemd 258 and later ship a shell snippet that emits these sequences around every interactive command with no configuration at all, so on such a system Contour learns command boundaries, exit statuses (including whether a command crashed or was interrupted, which OSC 133 cannot express) and working directories without any shell integration being installed.
+<ul>
+<li><code>enabled</code>: Whether the sequences are read at all. When false nothing is tracked, nothing is derived and nothing is tinted.</li>
+<li><code>max_depth</code>: How deep the context stack may grow. Beyond it, further contexts are ignored -- the NEWER ones, so that a program cannot push the context established above it out of the stack.</li>
+<li><code>max_retained_contexts</code>: How many contexts are remembered for scrolled-back output that still refers to them. Older ones are forgotten, and output belonging to them simply stops being attributed.</li>
+<li><code>derive_markers</code>: Whether OSC 3008 may stand in for a shell integration that is not installed. <code>when_alone</code> derives prompt and command marks from it only while OSC 133 has said nothing; once a shell integration speaks, it owns the marks for the rest of the session. <code>never</code> leaves marks entirely to OSC 133.</li>
+<li><code>tinting</code>: Which contexts may tint the page background. The colours themselves come from the colour scheme's <code>tint:</code> map, which no shipped scheme sets, so nothing is tinted until you choose a colour there. Note that a context is something the session <strong>announced</strong>: anything that can write to your terminal can announce one, or fail to announce one, so the absence of a tint is not a statement that nothing is elevated.</li>
+</ul>
+<h3 id="command_blocks"><code>command_blocks</code><a class="headerlink" href="#command_blocks" title="Permanent link">#</a></h3>
+<p>configuration controls what the terminal remembers about each shell command it saw run.</p>
+<p></p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">command_blocks</span><span class="p">:</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">max_records</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nt">pager</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">less -R</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span><span class="nt">pager_format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sgr</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">  </span><span class="nt">show_in_context_menu</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">  </span><span class="nt">compact_context_menu</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span></code></pre></div>
+Set <code>show_in_context_menu</code> to false to omit the clicked command's details and actions from the pane's context menu. The rail's block menu is still available.
+Set <code>compact_context_menu</code> to true to group the command's details and actions under Command Block.
+A command block is one prompt and the output of the command run at it, delimited by the OSC 133 marks a shell with shell integration emits -- or, without one, by systemd's OSC 3008 contexts. For each block the terminal keeps its command line, exit status, duration, start time and working directory, even after the block's rows have left the scrollback.
+<ul>
+<li><code>max_records</code>: How many blocks one session remembers; the oldest are forgotten first. At least 1, at most 1000000. A change applies to sessions opened afterwards.</li>
+<li><code>pager</code>: The program the OpenCommandOutput action ("Open Output in Pager", Ctrl+Shift+G) opens a command's output with when its binding names none. It is read as a profile's <code>shell:</code> is: a string naming a program runs as it is; otherwise its first word is the program and the rest its arguments -- on Windows passed on as written, so <code>C:\Tools\less.exe -R</code> needs no quoting. A binding's own <code>program:</code> is read the same way. The output is written to a private file that is appended as the last argument and deleted when the pane closes. Defaults to <code>less -R</code> (<code>more</code> on Windows).</li>
+<li><code>pager_format</code>: Whether the pager renders colours: <code>sgr</code> writes the output with its SGR sequences, <code>plain</code> as text only. Defaults to <code>sgr</code>, which both <code>less -R</code> and Windows <code>more</code> (inside the terminal's pseudo console) render. A binding's own <code>format:</code> wins, and a binding that names its own <code>program:</code> gets <code>sgr</code>.</li>
+</ul>
+<h3 id="default_layout"><code>default_layout</code><a class="headerlink" href="#default_layout" title="Permanent link">#</a></h3>
+<p>Name of the layout to open at startup, instead of a single default tab.</p>
+<h3 id="hosts"><code>hosts</code><a class="headerlink" href="#hosts" title="Permanent link">#</a></h3>
+<p>Saved remote hosts that "Attach to Host" lists.</p>
+<h3 id="git_drawings"><code>git_drawings</code><a class="headerlink" href="#git_drawings" title="Permanent link">#</a></h3>
+<p>Contour implements rendering of git branch characters used by e.g. <a href="https://github.com/rbong/vim-flog">vim-flog</a> and <a href="https://github.com/isakbm/gitgraph.nvim">gitgraph.nvim</a>. Initially introduced to <a href="https://github.com/kovidgoyal/kitty/pull/7681">kitty</a>, the symbol set was later expanded to support more commit options.</p>
+<p>The symbols use codepoints U+F5D0 ... U+F60D.</p>
+<blockquote>
+<p><strong>Note:</strong> U+F5D2 ... U+F5D5 are supposed to be fading out symbols but currently are rendered as simple lines.</p>
+</blockquote>
+<p><img alt="f5d0-f5d9-git-branch-drawings" src="../screenshots/contour-gitbranch-f5d0-f5d9.png"></p>
+<p><img alt="f5da-f5ed-git-branch-drawings" src="../screenshots/contour-gitbranch-f5da-f5ed.png"></p>
+<p><img alt="f5ee-f60d-git-branch-drawings" src="../screenshots/contour-gitbranch-f5ee-f60d.png"></p>
+<p>The symbols may be customized via config options:</p>
+<ul>
+<li><code>branch_style</code> controls the style of connecting branches. May be one of <code>none</code>, <code>thin</code>, <code>thick</code>, <code>double</code>. The default value is <code>thin</code>.</li>
+<li><code>arc_style</code> controls the style of arcs. May be one of <code>round</code>, <code>ellips</code>. <code>arc_style</code> has effect only if <code>branch_style</code> is <code>thin</code>. The default value is <code>round</code>.</li>
+<li><code>merge_commit_style</code> controls the style of merge commits. May be one of <code>solid</code>, <code>bullet</code>. The default value is <code>bullet</code>.</li>
+</ul>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">git_drawings</span><span class="p">:</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">    </span><span class="nt">branch_style</span><span class="p">:</span><span class="w">       </span><span class="l l-Scalar l-Scalar-Plain">thin</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="nt">arc_style</span><span class="p">:</span><span class="w">          </span><span class="l l-Scalar l-Scalar-Plain">round</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span><span class="nt">merge_commit_style</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bullet</span>
+</span></code></pre></div>
+<h3 id="box_arc_style"><code>box_arc_style</code><a class="headerlink" href="#box_arc_style" title="Permanent link">#</a></h3>
+<p>Controls how arcs in box drawing characters are drawn. May be one of <code>round</code> or <code>ellips</code>. The default value is <code>round</code>.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">box_arc_style</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">round</span>
+</span></code></pre></div>
+<h3 id="braille_style"><code>braille_style</code><a class="headerlink" href="#braille_style" title="Permanent link">#</a></h3>
+<p>Controls how Unicode Braille characters are rendered. May be one of <code>font</code>, <code>solid</code>, <code>circle</code>, <code>circle_empty</code>, <code>square</code>, <code>square_empty</code>, <code>aa_square</code>, <code>aa_square_empty</code>. The default value is <code>circle</code>.</p>
+<ul>
+<li><code>font</code> disables special rendering and uses font characters.</li>
+<li><code>solid</code> splits the character box into 8 rectangles without space between them. No antialiasing is used, some font sizes may result in differently sized "dots".</li>
+<li><code>circle&lt;..&gt;</code> and <code>&lt;..&gt;square&lt;..&gt;</code> groups use circle and square "dots" respectively.</li>
+<li><code>&lt;..&gt;_empty</code> draws non-filled "dots".</li>
+<li><code>square&lt;..&gt;</code> does not use antialiasing, which may result in differently sized "dots". <code>aa_square&lt;..&gt;</code> uses antialiasing.</li>
+</ul>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">braille_style</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">circle</span>
+</span></code></pre></div>
+<h3 id="default-global-parameters">Default global parameters<a class="headerlink" href="#default-global-parameters" title="Permanent link">#</a></h3>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nt">platform_plugin</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="nt">renderer</span><span class="p">:</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">    </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">    </span><span class="nt">tile_hashtable_slots</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4096</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">    </span><span class="nt">tile_cache_count</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4000</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">    </span><span class="nt">tile_direct_mapping</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="nt">word_delimiters</span><span class="p">:</span><span class="w"> </span><span class="s">"</span><span class="nv"> </span><span class="s">/\\()\"'-.,:;&lt;&gt;~!@#$%^&amp;*+=[]{}~?|│"</span>
+</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="nt">read_buffer_size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">65536</span>
+</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="nt">pty_buffer_size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1048576</span>
+</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="nt">default_profile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">main</span>
+</span><span id="__span-11-11"><a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="nt">spawn_new_process</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span><span id="__span-11-12"><a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="nt">reflow_on_resize</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-11-13"><a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="nt">bypass_mouse_protocol_modifier</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Shift</span>
+</span><span id="__span-11-14"><a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a><span class="nt">mouse_block_selection_modifier</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Control</span>
+</span><span id="__span-11-15"><a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a><span class="nt">on_mouse_select</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CopyToSelectionClipboard</span>
+</span><span id="__span-11-16"><a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a><span class="nt">live_config</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span><span id="__span-11-17"><a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a><span class="nt">images</span><span class="p">:</span>
+</span><span id="__span-11-18"><a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a><span class="w">    </span><span class="nt">sixel_scrolling</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-11-19"><a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a><span class="w">    </span><span class="nt">sixel_register_count</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4096</span>
+</span></code></pre></div>
+<p>The default profile is automatically the top (first) defined profile in the configuration file, but can be explicitly set to an order-independent name using <code>default_profile</code> configuration key.</p>
+<h2 id="profiles">Profiles<a class="headerlink" href="#profiles" title="Permanent link">#</a></h2>
+<p>Profiles is the main part of user specific customizations, you can create more than one profile and chose which you want to use during startup or define in configuration file.</p>
+<p>By default each profile inherites values from <code>default_profile</code>. This means that you can specify only values that you want to change in respect to default profile, for example you can create new profile to use <code>bash</code> as a shell preserving other configuration from <code>main</code> profile</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>profiles:
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>    main:
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    # default profile here
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    bash:
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>        shell: "/usr/bin/bash"
+</span></code></pre></div>
+<p>For the full list of options see generated configuration file on your system or <a href="profiles/">Profiles</a> section of documentation.</p>
+<h2 id="color-schemes">Color Schemes<a class="headerlink" href="#color-schemes" title="Permanent link">#</a></h2>
+<p>In contour you can specify different colors inside terminal, for example text background and foreground, cursor properties, selection colors and plenty others.
+You can configure your color profiles, whereas a color can be expressed in standard web format, with a leading # followed by red/green/blue values, 7 characters in total. You may alternatively use 0x as prefix instead of #. For example 0x102030 is equal to '#102030'.</p>
+<p>Syntax for color schemes repeat the one of profiles. First color scheme inside configuration file must be named <code>default</code>, each other color schemes inherit values from <code>default</code> color scheme. Example of configuration for <code>color_schemes</code></p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>color_schemes:
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>    default:
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>    # values for default color scheme
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>    different_selection:
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>      selection:
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>        background: '#fff0f0'
+</span></code></pre></div>
+<p>For the full list of options see generated configuration file on your system or <a href="colors/">Colors</a> section of documentation.</p></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="how-to" href="#how-to">How to</a><a data-head="global-options" href="#global-options">Global options</a><a data-head="profiles" href="#profiles">Profiles</a><a data-head="color-schemes" href="#color-schemes">Color Schemes</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><span class="none">generated from contour</span>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">configure › <b>config file</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

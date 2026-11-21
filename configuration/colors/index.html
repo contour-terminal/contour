@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>colors - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="../..">
+<link rel="icon" href="../../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../../assets/theme/site.css">
+<script type="module" src="../../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../../assets/contour-logo.png" alt=""><span id="cw-title">colors</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href="../.."><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../" aria-current="true"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../../vt-sequence/"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour" hidden>
+<a class="tab" data-group="" href="../..">home</a>
+<a class="tab" data-group="" href="../../install/">install</a>
+<a class="tab" data-group="" href="../../features/">features</a>
+<a class="tab" data-group="" href="../../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure">
+<a class="tab" data-group="" href="../">config file</a>
+<a class="tab" data-group="" href="../profiles/">profiles</a>
+<a class="tab" data-group="" href="../settings/">settings window</a>
+<a class="tab" data-group="" href="./" aria-current="page">colors</a>
+<a class="tab" data-group="" href="../key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../layouts/">layouts</a>
+<a class="tab" data-group="more" href="../links/">links</a>
+<a class="tab" data-group="more" href="../hosts/">hosts</a>
+<a class="tab" data-group="more" href="../indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference" hidden>
+<a class="tab" data-group="" href="../../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../../vt-extensions/synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>colors</summary>
+  <div class="tabsel-list">
+<a href="../">config file</a>
+<a href="../profiles/">profiles</a>
+<a href="../settings/">settings window</a>
+<a href="./" aria-current="page">colors</a>
+<a href="../key-mapping/">key mapping</a>
+<a href="../layouts/">layouts</a>
+<a href="../links/">links</a>
+<a href="../hosts/">hosts</a>
+<a href="../indicator-statusline/">status line</a>
+<a href="../paths/">paths</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><p>Color scheme configure colors that are used inside terminal. To specify which color scheme you want to use you need to define the name of the scheme inside profile configuration or inline colors inside profile.</p>
+<h2 id="color-scheme-configuration">Color scheme configuration<a class="headerlink" href="#color-scheme-configuration" title="Permanent link">#</a></h2>
+<p>Color configuration is set under <code>profiles</code> with <code>colors</code>.
+Then the scheme is defined under <code>color_schemes</code>.</p>
+<h3 id="default"><code>default</code><a class="headerlink" href="#default" title="Permanent link">#</a></h3>
+<p>section defines the default colors used in the terminal.
+</p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">      </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#1a1716'</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">      </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#d0d0d0'</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">      </span><span class="nt">bright_foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#ffffff'</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">      </span><span class="nt">dimmed_foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#808080'</span>
+</span></code></pre></div>
+- <mark>background</mark>  determines the default background color of the terminal.
+- <mark>foreground</mark>  option sets the default foreground text color of the terminal.
+- <mark>bright_foreground</mark>  option sets the default foreground text color of the terminal when text text is instructed to be bold (/bright). This is only used if profile option <code>draw_bold_text_with_bright_colors</code> is set to <code>true</code>
+- <mark>dimmed_foreground</mark>  option sets the default foreground text color of the terminal when text text is instructed to be dimmed.
+<h3 id="background_image"><code>background_image</code><a class="headerlink" href="#background_image" title="Permanent link">#</a></h3>
+<p>section in the configuration file allows you to control various aspects of the background image feature.
+</p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">background_image</span><span class="p">:</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="s">'/path/to/image.png'</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">      </span><span class="nt">opacity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">      </span><span class="nt">blur</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span></code></pre></div>
+- <mark>path</mark> To specify the image file to use as the background, you need to provide the full path to the image. Both <code>~</code> (home directory) and <code>${VAR}</code> (environment variable) expansion are supported — see <a href="../paths/">Path Handling</a> for details. By default, the path option is set to an empty string, indicating that background image support is disabled.
+- <mark>opacity</mark> option controls the opacity of the background image. It determines how transparent or intense the image appears. The default value is 0.5, which provides a moderately transparent background. You can adjust this value to make the image more or less prominent, depending on your preferences.
+- <mark>blur</mark> option applies a blur effect to the background image. This can help reduce distractions and keep the focus on the terminal contents. By default, the blur option is set to false, indicating that background image blurring is disabled. If you want to enable it, set the value to true.
+<h3 id="cursor"><code>cursor</code><a class="headerlink" href="#cursor" title="Permanent link">#</a></h3>
+<p>section in the configuration file let you customize the color of the cursor and optionally override the text color.
+</p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">cursor</span><span class="p">:</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">      </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellForeground</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">      </span><span class="nt">text</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellBackground</span>
+</span></code></pre></div>
+- <mark>default</mark> option allows you to specify the color of the cursor shape. By default, the default value is set to CellForeground, which means the cursor color will be the same as the cell's foreground color. You can change this value to any valid RGB color or use the special options CellForeground or CellBackground.
+- <mark>text</mark> allows you to specify the color of the characters that would be covered by the cursor shape. This is useful for ensuring readability when the cursor overlaps with the text. By default, the text value is set to CellBackground, which means the overridden text color will be the same as the cell's background color. Similarly to the default option, you can specify any valid RGB color or use the CellForeground or CellBackground options.
+<h3 id="hyperlink_decoration"><code>hyperlink_decoration</code><a class="headerlink" href="#hyperlink_decoration" title="Permanent link">#</a></h3>
+<p>allows you to customize the colors used for hyperlink decoration when hovering over them.
+These colours apply to the links Contour <a href="../links/">detects in output</a> as well as to OSC 8 hyperlinks.
+</p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">hyperlink_decoration</span><span class="p">:</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">      </span><span class="nt">normal</span><span class="p">:</span><span class="w"> </span><span class="s">'#f0f000'</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">      </span><span class="nt">hover</span><span class="p">:</span><span class="w"> </span><span class="s">'#ff0000'</span>
+</span></code></pre></div>
+- <mark>normal</mark>  defines the color to be used for hyperlink decoration in its normal state (not being hovered).
+- <mark>hover</mark>  determines the color to be applied to hyperlink decoration when it is being hovered over.
+<h3 id="vi_mode_highlight"><code>vi_mode_highlight</code><a class="headerlink" href="#vi_mode_highlight" title="Permanent link">#</a></h3>
+<p>customize the colors used for highlighting in Vi mode.
+</p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="nt">vi_mode_highlight</span><span class="p">:</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">      </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellForeground</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">      </span><span class="nt">foreground_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">      </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#ffa500'</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">      </span><span class="nt">background_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+</span></code></pre></div>
+- <mark>foreground</mark>  section specifies the color to be used for the foreground of the highlighted text.
+- <mark>foreground_alpha</mark> option determines the transparency level of the foreground color. It accepts a value between 0.0 (fully transparent) and 1.0 (fully opaque). This option allows you to control the visibility of the highlighted text.
+- <mark>background</mark> option in the vi_mode_highlight section defines the color to be used for the background of the highlighted text.
+- <mark>background_alpha</mark> option controls the transparency level of the background color. It accepts a value between 0.0 (fully transparent) and 1.0 (fully opaque).
+<h3 id="vi_mode_cursorline"><code>vi_mode_cursorline</code><a class="headerlink" href="#vi_mode_cursorline" title="Permanent link">#</a></h3>
+<p>customize the colors used for the cursor line in Vi mode. Options similar to <code>vi_mode_highlight</code>.
+</p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">vi_mode_cursorline</span><span class="p">:</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">      </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellForeground</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">      </span><span class="nt">foreground_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">      </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#ffa500'</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">      </span><span class="nt">background_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+</span></code></pre></div>
+<h3 id="selection"><code>selection</code><a class="headerlink" href="#selection" title="Permanent link">#</a></h3>
+<p>section customize the colors used for text selection. Options similar to <code>vi_mode_highlight</code>.
+</p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="nt">selection</span><span class="p">:</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">      </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellForeground</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">      </span><span class="nt">foreground_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">      </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#4040f0'</span>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">      </span><span class="nt">background_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+</span></code></pre></div>
+<h3 id="search_highlight"><code>search_highlight</code><a class="headerlink" href="#search_highlight" title="Permanent link">#</a></h3>
+<p>section customize the colors used for search highlight. Options similar to <code>vi_mode_highlight</code>.
+</p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="nt">search_highlight</span><span class="p">:</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">      </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellForeground</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">      </span><span class="nt">foreground_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">      </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#4040f0'</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">      </span><span class="nt">background_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+</span></code></pre></div>
+<h3 id="search_highlight_focused"><code>search_highlight_focused</code><a class="headerlink" href="#search_highlight_focused" title="Permanent link">#</a></h3>
+<p>section customize the colors used for focused search highlight. Options similar to <code>vi_mode_highlight</code>.
+</p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="nt">search_highlight_focused</span><span class="p">:</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">      </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellForeground</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">      </span><span class="nt">foreground_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">      </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#4040f0'</span>
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">      </span><span class="nt">background_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+</span></code></pre></div>
+<h3 id="word_highlight_current"><code>word_highlight_current</code><a class="headerlink" href="#word_highlight_current" title="Permanent link">#</a></h3>
+<p>Coloring for the word that is highlighted due to double-clicking it. Options similar to <code>vi_mode_highlight</code>.
+</p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">word_highlight_current</span><span class="p">:</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">      </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellForeground</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">      </span><span class="nt">foreground_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">      </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#4040f0'</span>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="w">      </span><span class="nt">background_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+</span></code></pre></div>
+<h3 id="word_highlight_other"><code>word_highlight_other</code><a class="headerlink" href="#word_highlight_other" title="Permanent link">#</a></h3>
+<p>Coloring for the word that is highlighted due to double-clicking another word that matches this word. Options similar to <code>vi_mode_highlight</code>.
+</p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="nt">word_highlight_other</span><span class="p">:</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">      </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellForeground</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">      </span><span class="nt">foreground_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="w">      </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#4040f0'</span>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="w">      </span><span class="nt">background_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+</span></code></pre></div>
+<h3 id="indicator_statusline"><code>indicator_statusline</code><a class="headerlink" href="#indicator_statusline" title="Permanent link">#</a></h3>
+<p>Defines the colors to be used for the Indicator status line. Configuration entry consist of following sections, namely <code>default</code>, <code>inactive</code>, <code>insert_mode</code>, <code>normal_mode</code>, <code>visual_mode</code>. Each section have <code>foreground</code> and <code>background</code> options. You can specify only the sections you want to customize after configuring the <code>default</code> section.
+Minimal configuration looks like this:
+</p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">    </span><span class="nt">indicator_statusline</span><span class="p">:</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">        </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">          </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#808080'</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">          </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#000000'</span>
+</span></code></pre></div>
+<h3 id="fold_marker"><code>fold_marker</code><a class="headerlink" href="#fold_marker" title="Permanent link">#</a></h3>
+<p>Defines the colors of the fold markers drawn in the gutter's block column, left of the grid, when output
+folding is enabled (see <code>folding.show_markers</code>). Two independent sections, <code>default</code> and <code>hover</code>,
+each with <code>foreground</code> and <code>background</code>; <code>hover</code> applies to the whole run of the fold the pointer is
+currently over, not just the row under it.</p>
+<p>Both are <strong>optional</strong>, and left unset by default. When a section is missing, its colors are derived
+from this scheme's own <code>default</code> foreground and background: at rest the glyph is faded partway
+toward the background so it stays quieter than the text beside it, and on hover it comes up to the
+full foreground. Only the glyph changes — the background stays the page's own in both states, so the
+gutter never paints over a transparent window. That is what lets a scheme which has never heard of
+folding still draw a legible, obviously-clickable column, in light and dark themes alike — so only
+set these if you actively want something else.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">    </span><span class="nt">fold_marker</span><span class="p">:</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">        </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">          </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#7e7c7c'</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">          </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#1a1716'</span>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="w">        </span><span class="nt">hover</span><span class="p">:</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="w">          </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#d0d0d0'</span>
+</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="w">          </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#1a1716'</span>
+</span></code></pre></div>
+<ul>
+<li><mark>default</mark> Colors of the fold column at rest. Set the background to
+this scheme's own background to keep the gutter transparent along with the rest of the window.</li>
+<li><mark>hover</mark> Colors of the fold run under the pointer — the whole run of
+the hovered fold, not just the row beneath it.</li>
+</ul>
+<h3 id="block_status"><code>block_status</code><a class="headerlink" href="#block_status" title="Permanent link">#</a></h3>
+<p>Defines the colors of a command block's marks by how its command ended (see
+<a href="../../demo/command-blocks/">Command blocks</a>): what the gutter's block column draws beside it while
+<code>gutter.exit_status</code> is on (the default), and its tick on the scrollbar. Each is a single color, and all
+three are <strong>optional</strong>, left unset by default. A missing one is derived from this scheme, so a scheme that
+has never heard of them still shows them legibly:</p>
+<ul>
+<li><code>success</code> — a command that exited with 0, or whose exit status is unknown. Derived from the fold
+  marker's color, so a successful block looks exactly as the fold column always has.</li>
+<li><code>failure</code> — a command that exited non-zero, or was killed. Derived from this scheme's normal red
+  (normal color 1).</li>
+<li><code>running</code> — a command that has not finished yet. Derived from this scheme's normal yellow (normal
+  color 3).</li>
+</ul>
+<p>Under the pointer, <code>failure</code> and <code>running</code> — and a <code>success</code> set here — are lifted halfway toward the text
+color; an unset <code>success</code> comes up to full strength, as the fold column does.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">    </span><span class="nt">block_status</span><span class="p">:</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">        </span><span class="nt">success</span><span class="p">:</span><span class="w"> </span><span class="s">'#7E7C7C'</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">        </span><span class="nt">failure</span><span class="p">:</span><span class="w"> </span><span class="s">'#C63939'</span>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">        </span><span class="nt">running</span><span class="p">:</span><span class="w"> </span><span class="s">'#A0A000'</span>
+</span></code></pre></div>
+<p>The values shown are what the default scheme derives.</p>
+<h3 id="gutter_text"><code>gutter_text</code><a class="headerlink" href="#gutter_text" title="Permanent link">#</a></h3>
+<p>The color of the gutter's line numbers and timestamps, and of the chip a collapsed fold carries
+(<code>1,234 lines hidden ⌄</code>), lifted where it would not read on the chip's band. <strong>Optional</strong>, and unset by default: it is then this scheme's foreground faded toward its
+background, as the resting fold markers are, so the numbers stay quieter than the text beside them.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">    </span><span class="nt">gutter_text</span><span class="p">:</span><span class="w"> </span><span class="s">'#7E7C7C'</span>
+</span></code></pre></div>
+<h3 id="sticky_header"><code>sticky_header</code><a class="headerlink" href="#sticky_header" title="Permanent link">#</a></h3>
+<p>Defines the colors of the sticky command header (see the profile key <code>sticky_header</code>): the band pinned
+over the top row while you read a command's output with the command itself scrolled out of view, and
+the one-pixel line along its bottom edge.</p>
+<p>Both are <strong>optional</strong>, and unset by default. A missing one is derived from this scheme's own <code>default</code>
+colors: the band is the background lifted a tenth of the way toward the foreground, the line about a
+third of the way — quiet in every theme, yet distinct from the page.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">    </span><span class="nt">sticky_header</span><span class="p">:</span>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">        </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#2C2928'</span>
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">        </span><span class="nt">separator</span><span class="p">:</span><span class="w"> </span><span class="s">'#595757'</span>
+</span></code></pre></div>
+<ul>
+<li><mark>background</mark> The band's color. The command copied into it keeps its own
+colors; only the cells the shell left on the default background take this one.</li>
+<li><mark>separator</mark> The one-pixel line along the band's bottom edge.</li>
+</ul>
+<h3 id="palette-presets">Palette Presets<a class="headerlink" href="#palette-presets" title="Permanent link">#</a></h3>
+<p>When choosing a palette from a preset as the color scheme  (in <code>profiles</code>) it is possible to tweak any configuration:
+</p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span><span class="nt">one-light</span><span class="p">:</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">      </span><span class="nt">word_highlight_other</span><span class="p">:</span>
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">          </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellForeground</span>
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">          </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellBackground</span>
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">          </span><span class="nt">foreground_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-16-7"><a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="w">          </span><span class="nt">background_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span></code></pre></div>
+<p>Complete configuration looks like this:
+</p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">    </span><span class="nt">indicator_statusline</span><span class="p">:</span>
+</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="w">        </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-17-5"><a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="w">          </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#FFFFFF'</span>
+</span><span id="__span-17-6"><a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="w">          </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#0270C0'</span>
+</span><span id="__span-17-7"><a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="w">        </span><span class="nt">inactive</span><span class="p">:</span>
+</span><span id="__span-17-8"><a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="w">          </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#FFFFFF'</span>
+</span><span id="__span-17-9"><a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="w">          </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#0270C0'</span>
+</span><span id="__span-17-10"><a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="w">        </span><span class="nt">insert_mode</span><span class="p">:</span>
+</span><span id="__span-17-11"><a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a><span class="w">          </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#FFFFFF'</span>
+</span><span id="__span-17-12"><a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a><span class="w">          </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#0270C0'</span>
+</span><span id="__span-17-13"><a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a><span class="w">        </span><span class="nt">normal_mode</span><span class="p">:</span>
+</span><span id="__span-17-14"><a id="__codelineno-17-14" name="__codelineno-17-14" href="#__codelineno-17-14"></a><span class="w">          </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#0F0002'</span>
+</span><span id="__span-17-15"><a id="__codelineno-17-15" name="__codelineno-17-15" href="#__codelineno-17-15"></a><span class="w">          </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#0270C0'</span>
+</span><span id="__span-17-16"><a id="__codelineno-17-16" name="__codelineno-17-16" href="#__codelineno-17-16"></a><span class="w">        </span><span class="nt">visual_mode</span><span class="p">:</span>
+</span><span id="__span-17-17"><a id="__codelineno-17-17" name="__codelineno-17-17" href="#__codelineno-17-17"></a><span class="w">          </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#FFFFFF'</span>
+</span><span id="__span-17-18"><a id="__codelineno-17-18" name="__codelineno-17-18" href="#__codelineno-17-18"></a><span class="w">          </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#0270C0'</span>
+</span></code></pre></div>
+<h3 id="normal"><code>normal</code><a class="headerlink" href="#normal" title="Permanent link">#</a></h3>
+<p>Normal colors
+</p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="w">    </span><span class="nt">normal</span><span class="p">:</span>
+</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="w">      </span><span class="nt">black</span><span class="p">:</span><span class="w">   </span><span class="s">'#000000'</span>
+</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="w">      </span><span class="nt">red</span><span class="p">:</span><span class="w">     </span><span class="s">'#c63939'</span>
+</span><span id="__span-18-6"><a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="w">      </span><span class="nt">green</span><span class="p">:</span><span class="w">   </span><span class="s">'#00a000'</span>
+</span><span id="__span-18-7"><a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="w">      </span><span class="nt">yellow</span><span class="p">:</span><span class="w">  </span><span class="s">'#a0a000'</span>
+</span><span id="__span-18-8"><a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="w">      </span><span class="nt">blue</span><span class="p">:</span><span class="w">    </span><span class="s">'#4d79ff'</span>
+</span><span id="__span-18-9"><a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a><span class="w">      </span><span class="nt">magenta</span><span class="p">:</span><span class="w"> </span><span class="s">'#ff66ff'</span>
+</span><span id="__span-18-10"><a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="w">      </span><span class="nt">cyan</span><span class="p">:</span><span class="w">    </span><span class="s">'#00a0a0'</span>
+</span><span id="__span-18-11"><a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a><span class="w">      </span><span class="nt">white</span><span class="p">:</span><span class="w">   </span><span class="s">'#c0c0c0'</span>
+</span></code></pre></div>
+<h3 id="bright"><code>bright</code><a class="headerlink" href="#bright" title="Permanent link">#</a></h3>
+<p>Bright colors
+</p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="w">    </span><span class="nt">bright</span><span class="p">:</span>
+</span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="w">      </span><span class="nt">black</span><span class="p">:</span><span class="w">   </span><span class="s">'#707070'</span>
+</span><span id="__span-19-5"><a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="w">      </span><span class="nt">red</span><span class="p">:</span><span class="w">     </span><span class="s">'#ff0000'</span>
+</span><span id="__span-19-6"><a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="w">      </span><span class="nt">green</span><span class="p">:</span><span class="w">   </span><span class="s">'#00ff00'</span>
+</span><span id="__span-19-7"><a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="w">      </span><span class="nt">yellow</span><span class="p">:</span><span class="w">  </span><span class="s">'#ffff00'</span>
+</span><span id="__span-19-8"><a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="w">      </span><span class="nt">blue</span><span class="p">:</span><span class="w">    </span><span class="s">'#0000ff'</span>
+</span><span id="__span-19-9"><a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a><span class="w">      </span><span class="nt">magenta</span><span class="p">:</span><span class="w"> </span><span class="s">'#ff00ff'</span>
+</span><span id="__span-19-10"><a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a><span class="w">      </span><span class="nt">cyan</span><span class="p">:</span><span class="w">    </span><span class="s">'#00ffff'</span>
+</span><span id="__span-19-11"><a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a><span class="w">      </span><span class="nt">white</span><span class="p">:</span><span class="w">   </span><span class="s">'#ffffff'</span>
+</span></code></pre></div>
+<h3 id="writing-a-palette">Writing a palette<a class="headerlink" href="#writing-a-palette" title="Permanent link">#</a></h3>
+<p><code>normal</code>, <code>bright</code> and <code>dim</code> each take their eight colors either by name, as above, or as a list in the
+order black, red, green, yellow, blue, magenta, cyan, white:
+</p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="w">    </span><span class="nt">bright</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">'#707070'</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">'#ff0000'</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">'#00ff00'</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">'#ffff00'</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">'#0000ff'</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">'#ff00ff'</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">'#00ffff'</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">'#ffffff'</span><span class="p p-Indicator">]</span>
+</span></code></pre></div>
+A list may stop short: the colors it leaves out keep their values. Either way, each color is written as
+<code>'#rrggbb'</code> (quoted, since <code>#</code> would otherwise start a YAML comment) or as <code>0xrrggbb</code>. A bare decimal number
+is not a color, and leaves its slot as it was.
+<h2 id="default-color-scheme">Default color scheme<a class="headerlink" href="#default-color-scheme" title="Permanent link">#</a></h2>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="w">    </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="w">        </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="w">            </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#1a1716'</span>
+</span><span id="__span-21-5"><a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="w">            </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#d0d0d0'</span>
+</span><span id="__span-21-6"><a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="w">        </span><span class="nt">background_image</span><span class="p">:</span>
+</span><span id="__span-21-7"><a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="w">            </span><span class="nt">opacity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+</span><span id="__span-21-8"><a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a><span class="w">            </span><span class="nt">blur</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span><span id="__span-21-9"><a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a><span class="w">        </span><span class="nt">cursor</span><span class="p">:</span>
+</span><span id="__span-21-10"><a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a><span class="w">            </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellForeground</span>
+</span><span id="__span-21-11"><a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a><span class="w">            </span><span class="nt">text</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellBackground</span>
+</span><span id="__span-21-12"><a id="__codelineno-21-12" name="__codelineno-21-12" href="#__codelineno-21-12"></a><span class="w">        </span><span class="nt">hyperlink_decoration</span><span class="p">:</span>
+</span><span id="__span-21-13"><a id="__codelineno-21-13" name="__codelineno-21-13" href="#__codelineno-21-13"></a><span class="w">            </span><span class="nt">normal</span><span class="p">:</span><span class="w"> </span><span class="s">'#f0f000'</span>
+</span><span id="__span-21-14"><a id="__codelineno-21-14" name="__codelineno-21-14" href="#__codelineno-21-14"></a><span class="w">            </span><span class="nt">hover</span><span class="p">:</span><span class="w"> </span><span class="s">'#ff0000'</span>
+</span><span id="__span-21-15"><a id="__codelineno-21-15" name="__codelineno-21-15" href="#__codelineno-21-15"></a><span class="w">        </span><span class="nt">vi_mode_highlight</span><span class="p">:</span>
+</span><span id="__span-21-16"><a id="__codelineno-21-16" name="__codelineno-21-16" href="#__codelineno-21-16"></a><span class="w">            </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellForeground</span>
+</span><span id="__span-21-17"><a id="__codelineno-21-17" name="__codelineno-21-17" href="#__codelineno-21-17"></a><span class="w">            </span><span class="nt">foreground_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-21-18"><a id="__codelineno-21-18" name="__codelineno-21-18" href="#__codelineno-21-18"></a><span class="w">            </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#ffa500'</span>
+</span><span id="__span-21-19"><a id="__codelineno-21-19" name="__codelineno-21-19" href="#__codelineno-21-19"></a><span class="w">            </span><span class="nt">background_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+</span><span id="__span-21-20"><a id="__codelineno-21-20" name="__codelineno-21-20" href="#__codelineno-21-20"></a><span class="w">        </span><span class="nt">vi_mode_cursorline</span><span class="p">:</span>
+</span><span id="__span-21-21"><a id="__codelineno-21-21" name="__codelineno-21-21" href="#__codelineno-21-21"></a><span class="w">            </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#ffffff'</span>
+</span><span id="__span-21-22"><a id="__codelineno-21-22" name="__codelineno-21-22" href="#__codelineno-21-22"></a><span class="w">            </span><span class="nt">foreground_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.2</span>
+</span><span id="__span-21-23"><a id="__codelineno-21-23" name="__codelineno-21-23" href="#__codelineno-21-23"></a><span class="w">            </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#808080'</span>
+</span><span id="__span-21-24"><a id="__codelineno-21-24" name="__codelineno-21-24" href="#__codelineno-21-24"></a><span class="w">            </span><span class="nt">background_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.4</span>
+</span><span id="__span-21-25"><a id="__codelineno-21-25" name="__codelineno-21-25" href="#__codelineno-21-25"></a><span class="w">        </span><span class="nt">selection</span><span class="p">:</span>
+</span><span id="__span-21-26"><a id="__codelineno-21-26" name="__codelineno-21-26" href="#__codelineno-21-26"></a><span class="w">            </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellForeground</span>
+</span><span id="__span-21-27"><a id="__codelineno-21-27" name="__codelineno-21-27" href="#__codelineno-21-27"></a><span class="w">            </span><span class="nt">foreground_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-21-28"><a id="__codelineno-21-28" name="__codelineno-21-28" href="#__codelineno-21-28"></a><span class="w">            </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#4040f0'</span>
+</span><span id="__span-21-29"><a id="__codelineno-21-29" name="__codelineno-21-29" href="#__codelineno-21-29"></a><span class="w">            </span><span class="nt">background_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+</span><span id="__span-21-30"><a id="__codelineno-21-30" name="__codelineno-21-30" href="#__codelineno-21-30"></a><span class="w">        </span><span class="nt">search_highlight</span><span class="p">:</span>
+</span><span id="__span-21-31"><a id="__codelineno-21-31" name="__codelineno-21-31" href="#__codelineno-21-31"></a><span class="w">            </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellBackground</span>
+</span><span id="__span-21-32"><a id="__codelineno-21-32" name="__codelineno-21-32" href="#__codelineno-21-32"></a><span class="w">            </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellForeground</span>
+</span><span id="__span-21-33"><a id="__codelineno-21-33" name="__codelineno-21-33" href="#__codelineno-21-33"></a><span class="w">            </span><span class="nt">foreground_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-21-34"><a id="__codelineno-21-34" name="__codelineno-21-34" href="#__codelineno-21-34"></a><span class="w">            </span><span class="nt">background_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-21-35"><a id="__codelineno-21-35" name="__codelineno-21-35" href="#__codelineno-21-35"></a><span class="w">        </span><span class="nt">search_highlight_focused</span><span class="p">:</span>
+</span><span id="__span-21-36"><a id="__codelineno-21-36" name="__codelineno-21-36" href="#__codelineno-21-36"></a><span class="w">            </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellBackground</span>
+</span><span id="__span-21-37"><a id="__codelineno-21-37" name="__codelineno-21-37" href="#__codelineno-21-37"></a><span class="w">            </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellForeground</span>
+</span><span id="__span-21-38"><a id="__codelineno-21-38" name="__codelineno-21-38" href="#__codelineno-21-38"></a><span class="w">            </span><span class="nt">foreground_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-21-39"><a id="__codelineno-21-39" name="__codelineno-21-39" href="#__codelineno-21-39"></a><span class="w">            </span><span class="nt">background_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-21-40"><a id="__codelineno-21-40" name="__codelineno-21-40" href="#__codelineno-21-40"></a><span class="w">        </span><span class="nt">word_highlight_current</span><span class="p">:</span>
+</span><span id="__span-21-41"><a id="__codelineno-21-41" name="__codelineno-21-41" href="#__codelineno-21-41"></a><span class="w">            </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellForeground</span>
+</span><span id="__span-21-42"><a id="__codelineno-21-42" name="__codelineno-21-42" href="#__codelineno-21-42"></a><span class="w">            </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#909090'</span>
+</span><span id="__span-21-43"><a id="__codelineno-21-43" name="__codelineno-21-43" href="#__codelineno-21-43"></a><span class="w">            </span><span class="nt">foreground_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-21-44"><a id="__codelineno-21-44" name="__codelineno-21-44" href="#__codelineno-21-44"></a><span class="w">            </span><span class="nt">background_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+</span><span id="__span-21-45"><a id="__codelineno-21-45" name="__codelineno-21-45" href="#__codelineno-21-45"></a><span class="w">        </span><span class="nt">word_highlight_other</span><span class="p">:</span>
+</span><span id="__span-21-46"><a id="__codelineno-21-46" name="__codelineno-21-46" href="#__codelineno-21-46"></a><span class="w">            </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellForeground</span>
+</span><span id="__span-21-47"><a id="__codelineno-21-47" name="__codelineno-21-47" href="#__codelineno-21-47"></a><span class="w">            </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#909090'</span>
+</span><span id="__span-21-48"><a id="__codelineno-21-48" name="__codelineno-21-48" href="#__codelineno-21-48"></a><span class="w">            </span><span class="nt">foreground_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-21-49"><a id="__codelineno-21-49" name="__codelineno-21-49" href="#__codelineno-21-49"></a><span class="w">            </span><span class="nt">background_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+</span><span id="__span-21-50"><a id="__codelineno-21-50" name="__codelineno-21-50" href="#__codelineno-21-50"></a><span class="w">        </span><span class="nt">indicator_statusline</span><span class="p">:</span>
+</span><span id="__span-21-51"><a id="__codelineno-21-51" name="__codelineno-21-51" href="#__codelineno-21-51"></a><span class="w">            </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-21-52"><a id="__codelineno-21-52" name="__codelineno-21-52" href="#__codelineno-21-52"></a><span class="w">              </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#FFFFFF'</span>
+</span><span id="__span-21-53"><a id="__codelineno-21-53" name="__codelineno-21-53" href="#__codelineno-21-53"></a><span class="w">              </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#0270C0'</span>
+</span><span id="__span-21-54"><a id="__codelineno-21-54" name="__codelineno-21-54" href="#__codelineno-21-54"></a><span class="w">            </span><span class="nt">inactive</span><span class="p">:</span>
+</span><span id="__span-21-55"><a id="__codelineno-21-55" name="__codelineno-21-55" href="#__codelineno-21-55"></a><span class="w">              </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#FFFFFF'</span>
+</span><span id="__span-21-56"><a id="__codelineno-21-56" name="__codelineno-21-56" href="#__codelineno-21-56"></a><span class="w">              </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#0270C0'</span>
+</span><span id="__span-21-57"><a id="__codelineno-21-57" name="__codelineno-21-57" href="#__codelineno-21-57"></a><span class="w">            </span><span class="nt">insert_mode</span><span class="p">:</span>
+</span><span id="__span-21-58"><a id="__codelineno-21-58" name="__codelineno-21-58" href="#__codelineno-21-58"></a><span class="w">              </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#FFFFFF'</span>
+</span><span id="__span-21-59"><a id="__codelineno-21-59" name="__codelineno-21-59" href="#__codelineno-21-59"></a><span class="w">              </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#0270C0'</span>
+</span><span id="__span-21-60"><a id="__codelineno-21-60" name="__codelineno-21-60" href="#__codelineno-21-60"></a><span class="w">            </span><span class="nt">normal_mode</span><span class="p">:</span>
+</span><span id="__span-21-61"><a id="__codelineno-21-61" name="__codelineno-21-61" href="#__codelineno-21-61"></a><span class="w">              </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#FFFFFF'</span>
+</span><span id="__span-21-62"><a id="__codelineno-21-62" name="__codelineno-21-62" href="#__codelineno-21-62"></a><span class="w">              </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#0270C0'</span>
+</span><span id="__span-21-63"><a id="__codelineno-21-63" name="__codelineno-21-63" href="#__codelineno-21-63"></a><span class="w">            </span><span class="nt">visual_mode</span><span class="p">:</span>
+</span><span id="__span-21-64"><a id="__codelineno-21-64" name="__codelineno-21-64" href="#__codelineno-21-64"></a><span class="w">              </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#FFFFFF'</span>
+</span><span id="__span-21-65"><a id="__codelineno-21-65" name="__codelineno-21-65" href="#__codelineno-21-65"></a><span class="w">              </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#0270C0'</span>
+</span><span id="__span-21-66"><a id="__codelineno-21-66" name="__codelineno-21-66" href="#__codelineno-21-66"></a><span class="w">        </span><span class="c1"># fold_marker:</span>
+</span><span id="__span-21-67"><a id="__codelineno-21-67" name="__codelineno-21-67" href="#__codelineno-21-67"></a><span class="w">        </span><span class="c1">#     default:</span>
+</span><span id="__span-21-68"><a id="__codelineno-21-68" name="__codelineno-21-68" href="#__codelineno-21-68"></a><span class="w">        </span><span class="c1">#         foreground: '#7e7c7c'</span>
+</span><span id="__span-21-69"><a id="__codelineno-21-69" name="__codelineno-21-69" href="#__codelineno-21-69"></a><span class="w">        </span><span class="c1">#         background: '#1a1716'</span>
+</span><span id="__span-21-70"><a id="__codelineno-21-70" name="__codelineno-21-70" href="#__codelineno-21-70"></a><span class="w">        </span><span class="c1">#     hover:</span>
+</span><span id="__span-21-71"><a id="__codelineno-21-71" name="__codelineno-21-71" href="#__codelineno-21-71"></a><span class="w">        </span><span class="c1">#         foreground: '#d0d0d0'</span>
+</span><span id="__span-21-72"><a id="__codelineno-21-72" name="__codelineno-21-72" href="#__codelineno-21-72"></a><span class="w">        </span><span class="c1">#         background: '#1a1716'</span>
+</span><span id="__span-21-73"><a id="__codelineno-21-73" name="__codelineno-21-73" href="#__codelineno-21-73"></a><span class="w">        </span><span class="c1"># block_status:</span>
+</span><span id="__span-21-74"><a id="__codelineno-21-74" name="__codelineno-21-74" href="#__codelineno-21-74"></a><span class="w">        </span><span class="c1">#     success: '#7E7C7C'</span>
+</span><span id="__span-21-75"><a id="__codelineno-21-75" name="__codelineno-21-75" href="#__codelineno-21-75"></a><span class="w">        </span><span class="c1">#     failure: '#C63939'</span>
+</span><span id="__span-21-76"><a id="__codelineno-21-76" name="__codelineno-21-76" href="#__codelineno-21-76"></a><span class="w">        </span><span class="c1">#     running: '#A0A000'</span>
+</span><span id="__span-21-77"><a id="__codelineno-21-77" name="__codelineno-21-77" href="#__codelineno-21-77"></a><span class="w">        </span><span class="c1"># gutter_text: '#7E7C7C'</span>
+</span><span id="__span-21-78"><a id="__codelineno-21-78" name="__codelineno-21-78" href="#__codelineno-21-78"></a><span class="w">        </span><span class="c1"># sticky_header:</span>
+</span><span id="__span-21-79"><a id="__codelineno-21-79" name="__codelineno-21-79" href="#__codelineno-21-79"></a><span class="w">        </span><span class="c1">#     background: '#2C2928'</span>
+</span><span id="__span-21-80"><a id="__codelineno-21-80" name="__codelineno-21-80" href="#__codelineno-21-80"></a><span class="w">        </span><span class="c1">#     separator: '#595757'</span>
+</span><span id="__span-21-81"><a id="__codelineno-21-81" name="__codelineno-21-81" href="#__codelineno-21-81"></a><span class="w">        </span><span class="nt">input_method_editor</span><span class="p">:</span>
+</span><span id="__span-21-82"><a id="__codelineno-21-82" name="__codelineno-21-82" href="#__codelineno-21-82"></a><span class="w">            </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#FFFFFF'</span>
+</span><span id="__span-21-83"><a id="__codelineno-21-83" name="__codelineno-21-83" href="#__codelineno-21-83"></a><span class="w">            </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#FF0000'</span>
+</span><span id="__span-21-84"><a id="__codelineno-21-84" name="__codelineno-21-84" href="#__codelineno-21-84"></a><span class="w">        </span><span class="nt">normal</span><span class="p">:</span>
+</span><span id="__span-21-85"><a id="__codelineno-21-85" name="__codelineno-21-85" href="#__codelineno-21-85"></a><span class="w">            </span><span class="nt">black</span><span class="p">:</span><span class="w">   </span><span class="s">'#000000'</span>
+</span><span id="__span-21-86"><a id="__codelineno-21-86" name="__codelineno-21-86" href="#__codelineno-21-86"></a><span class="w">            </span><span class="nt">red</span><span class="p">:</span><span class="w">     </span><span class="s">'#c63939'</span>
+</span><span id="__span-21-87"><a id="__codelineno-21-87" name="__codelineno-21-87" href="#__codelineno-21-87"></a><span class="w">            </span><span class="nt">green</span><span class="p">:</span><span class="w">   </span><span class="s">'#00a000'</span>
+</span><span id="__span-21-88"><a id="__codelineno-21-88" name="__codelineno-21-88" href="#__codelineno-21-88"></a><span class="w">            </span><span class="nt">yellow</span><span class="p">:</span><span class="w">  </span><span class="s">'#a0a000'</span>
+</span><span id="__span-21-89"><a id="__codelineno-21-89" name="__codelineno-21-89" href="#__codelineno-21-89"></a><span class="w">            </span><span class="nt">blue</span><span class="p">:</span><span class="w">    </span><span class="s">'#4d79ff'</span>
+</span><span id="__span-21-90"><a id="__codelineno-21-90" name="__codelineno-21-90" href="#__codelineno-21-90"></a><span class="w">            </span><span class="nt">magenta</span><span class="p">:</span><span class="w"> </span><span class="s">'#ff66ff'</span>
+</span><span id="__span-21-91"><a id="__codelineno-21-91" name="__codelineno-21-91" href="#__codelineno-21-91"></a><span class="w">            </span><span class="nt">cyan</span><span class="p">:</span><span class="w">    </span><span class="s">'#00a0a0'</span>
+</span><span id="__span-21-92"><a id="__codelineno-21-92" name="__codelineno-21-92" href="#__codelineno-21-92"></a><span class="w">            </span><span class="nt">white</span><span class="p">:</span><span class="w">   </span><span class="s">'#c0c0c0'</span>
+</span><span id="__span-21-93"><a id="__codelineno-21-93" name="__codelineno-21-93" href="#__codelineno-21-93"></a><span class="w">        </span><span class="nt">bright</span><span class="p">:</span>
+</span><span id="__span-21-94"><a id="__codelineno-21-94" name="__codelineno-21-94" href="#__codelineno-21-94"></a><span class="w">            </span><span class="nt">black</span><span class="p">:</span><span class="w">   </span><span class="s">'#707070'</span>
+</span><span id="__span-21-95"><a id="__codelineno-21-95" name="__codelineno-21-95" href="#__codelineno-21-95"></a><span class="w">            </span><span class="nt">red</span><span class="p">:</span><span class="w">     </span><span class="s">'#ff0000'</span>
+</span><span id="__span-21-96"><a id="__codelineno-21-96" name="__codelineno-21-96" href="#__codelineno-21-96"></a><span class="w">            </span><span class="nt">green</span><span class="p">:</span><span class="w">   </span><span class="s">'#00ff00'</span>
+</span><span id="__span-21-97"><a id="__codelineno-21-97" name="__codelineno-21-97" href="#__codelineno-21-97"></a><span class="w">            </span><span class="nt">yellow</span><span class="p">:</span><span class="w">  </span><span class="s">'#ffff00'</span>
+</span><span id="__span-21-98"><a id="__codelineno-21-98" name="__codelineno-21-98" href="#__codelineno-21-98"></a><span class="w">            </span><span class="nt">blue</span><span class="p">:</span><span class="w">    </span><span class="s">'#0000ff'</span>
+</span><span id="__span-21-99"><a id="__codelineno-21-99" name="__codelineno-21-99" href="#__codelineno-21-99"></a><span class="w">            </span><span class="nt">magenta</span><span class="p">:</span><span class="w"> </span><span class="s">'#ff00ff'</span>
+</span><span id="__span-21-100"><a id="__codelineno-21-100" name="__codelineno-21-100" href="#__codelineno-21-100"></a><span class="w">            </span><span class="nt">cyan</span><span class="p">:</span><span class="w">    </span><span class="s">'#00ffff'</span>
+</span><span id="__span-21-101"><a id="__codelineno-21-101" name="__codelineno-21-101" href="#__codelineno-21-101"></a><span class="w">            </span><span class="nt">white</span><span class="p">:</span><span class="w">   </span><span class="s">'#ffffff'</span>
+</span></code></pre></div></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="color-scheme-configuration" href="#color-scheme-configuration">Color scheme configuration</a><a data-head="default-color-scheme" href="#default-color-scheme">Default color scheme</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/configuration/colors.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">configure › <b>colors</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

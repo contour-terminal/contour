@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>private-use glyphs - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="../..">
+<link rel="icon" href="../../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../../assets/theme/site.css">
+<script type="module" src="../../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../../assets/contour-logo.png" alt=""><span id="cw-title">private-use glyphs</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href="../.."><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../../configuration/"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../../vt-sequence/" aria-current="true"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour" hidden>
+<a class="tab" data-group="" href="../..">home</a>
+<a class="tab" data-group="" href="../../install/">install</a>
+<a class="tab" data-group="" href="../../features/">features</a>
+<a class="tab" data-group="" href="../../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure" hidden>
+<a class="tab" data-group="" href="../../configuration/">config file</a>
+<a class="tab" data-group="" href="../../configuration/profiles/">profiles</a>
+<a class="tab" data-group="" href="../../configuration/settings/">settings window</a>
+<a class="tab" data-group="" href="../../configuration/colors/">colors</a>
+<a class="tab" data-group="" href="../../configuration/key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../../configuration/layouts/">layouts</a>
+<a class="tab" data-group="more" href="../../configuration/links/">links</a>
+<a class="tab" data-group="more" href="../../configuration/hosts/">hosts</a>
+<a class="tab" data-group="more" href="../../configuration/indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../../configuration/paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference">
+<a class="tab" data-group="" href="../../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="./" aria-current="page">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>private-use glyphs</summary>
+  <div class="tabsel-list">
+<a href="../../vt-sequence/">vt sequences</a>
+<a href="../../demo/regis-graphics/">regis graphics</a>
+<a href="../synchronized-output/">synchronized output</a>
+<a href="../osc-133-shell-integration/">shell integration</a>
+<a href="../clickable-links/">clickable links</a>
+<a href="../buffer-capture/">buffer capture</a>
+<a href="../program-status/">program status</a>
+<a href="../semantic-block-query/">semantic block query</a>
+<a href="../osc-9-4-progress/">progress (osc 9;4)</a>
+<a href="../osc-3008-context/">context (osc 3008)</a>
+<a href="../vertical-line-marks/">vertical line marks</a>
+<a href="../color-palette-update-notifications/">palette notifications</a>
+<a href="../font-settings/">font settings</a>
+<a href="../line-reflow-mode/">line reflow mode</a>
+<a href="./" aria-current="page">private-use glyphs</a>
+<a href="../save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a href="../unicode-core/">unicode core</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="private-use-glyphs">Private Use Glyphs<a class="headerlink" href="#private-use-glyphs" title="Permanent link">#</a></h1>
+<p>Contour draws a few glyphs that Unicode has no character for. Rather than inventing a second
+drawing channel for them, they are given codepoints in a Private Use Area and rendered by the same
+built-in box-drawing renderer that draws <code>U+2500</code>–<code>U+257F</code>, the block elements and the legacy
+computing symbols.</p>
+<p>This page documents those codepoints so that other terminals, fonts and tools can render the same
+glyphs if they want to. Nothing here is a protocol: no escape sequence introduces these characters,
+and Contour never requires an application to emit one.</p>
+<h2 id="the-reserved-block">The reserved block<a class="headerlink" href="#the-reserved-block" title="Permanent link">#</a></h2>
+<p><strong><code>U+10F000</code>–<code>U+10F0FF</code></strong> — Contour Terminal private glyphs.</p>
+<p>The block sits in <strong>Supplementary Private Use Area-B</strong> (plane 16) rather than in the BMP's
+<code>U+E000</code>–<code>U+F8FF</code>. That lower range is comprehensively claimed by Nerd Fonts — Powerline, Font
+Awesome, Devicons, Octicons, Seti, Material and others — and Contour already renders several of
+those assignments itself (<code>U+E0B0</code>–<code>U+E0BE</code>, <code>U+EE00</code>–<code>U+EE05</code>, <code>U+F5D0</code>–<code>U+F60D</code>).</p>
+<p>It also sits away from the <em>start</em> of a plane. An allocation that outgrows the BMP tends to land at
+the beginning of the next area it is offered, which makes <code>U+F0000</code> — the first codepoint of plane
+15 — one of the more contended places to put a block, not one of the safer ones. <code>U+10F000</code> is near
+the far end of plane 16 instead, where no widely-deployed assignment reaches.</p>
+<p>Only the codepoints listed below are actually claimed by the renderer. The rest of the block is
+reserved for future use and deliberately falls through to the font, so that reserving a range costs
+nothing to anyone who is already using it.</p>
+<h2 id="assigned-codepoints">Assigned codepoints<a class="headerlink" href="#assigned-codepoints" title="Permanent link">#</a></h2>
+<table>
+<thead>
+<tr>
+<th>Codepoint</th>
+<th>Name</th>
+<th>Glyph</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>U+10F000</code></td>
+<td>FOLD HEAD OPEN</td>
+<td>A square box containing a minus, with a stem descending from its bottom edge to the bottom of the cell.</td>
+</tr>
+<tr>
+<td><code>U+10F001</code></td>
+<td>FOLD HEAD CLOSED</td>
+<td>A square box containing a plus. No stem.</td>
+</tr>
+<tr>
+<td><code>U+10F002</code></td>
+<td>BLOCK RUNNING</td>
+<td>A small filled triangle pointing right, as <code>U+25B8</code> ▸.</td>
+</tr>
+<tr>
+<td><code>U+10F003</code></td>
+<td>USER MARK</td>
+<td>A filled diamond, as <code>U+25C6</code> ◆.</td>
+</tr>
+<tr>
+<td><code>U+10F004</code></td>
+<td>BLOCK FINISHED</td>
+<td>A filled disc, as <code>U+25CF</code> ●.</td>
+</tr>
+<tr>
+<td><code>U+10F005</code></td>
+<td>BLOCK FAILED</td>
+<td>A diagonal cross, as <code>U+2717</code> ✗.</td>
+</tr>
+<tr>
+<td><code>U+10F006</code></td>
+<td>FOLD BODY</td>
+<td>A vertical line through the cell, in the stem's column, as <code>U+2502</code> │.</td>
+</tr>
+<tr>
+<td><code>U+10F007</code></td>
+<td>FOLD BODY END</td>
+<td>A vertical line from the cell's top to its middle, turning right to the cell's edge, as <code>U+2514</code> └.</td>
+</tr>
+<tr>
+<td><code>U+10F008</code></td>
+<td>FOLD HEAD OPEN HEAVY</td>
+<td><code>U+10F000</code> drawn at twice the stroke.</td>
+</tr>
+<tr>
+<td><code>U+10F009</code></td>
+<td>FOLD HEAD CLOSED HEAVY</td>
+<td><code>U+10F001</code> drawn at twice the stroke.</td>
+</tr>
+<tr>
+<td><code>U+10F00A</code></td>
+<td>FOLD BODY HEAVY</td>
+<td><code>U+10F006</code> drawn at twice the stroke.</td>
+</tr>
+<tr>
+<td><code>U+10F00B</code></td>
+<td>FOLD BODY END HEAVY</td>
+<td><code>U+10F007</code> drawn at twice the stroke.</td>
+</tr>
+<tr>
+<td><code>U+10F00C</code></td>
+<td>FOLD HEAD OPEN HEAVIER</td>
+<td><code>U+10F000</code> drawn at three times the stroke.</td>
+</tr>
+<tr>
+<td><code>U+10F00D</code></td>
+<td>FOLD HEAD CLOSED HEAVIER</td>
+<td><code>U+10F001</code> drawn at three times the stroke.</td>
+</tr>
+<tr>
+<td><code>U+10F00E</code></td>
+<td>FOLD BODY HEAVIER</td>
+<td><code>U+10F006</code> drawn at three times the stroke.</td>
+</tr>
+<tr>
+<td><code>U+10F00F</code></td>
+<td>FOLD BODY END HEAVIER</td>
+<td><code>U+10F007</code> drawn at three times the stroke.</td>
+</tr>
+<tr>
+<td><code>U+10F010</code></td>
+<td>BLOCK SUCCEEDED</td>
+<td>A light check mark, as <code>U+2713</code> ✓.</td>
+</tr>
+<tr>
+<td><code>U+10F011</code></td>
+<td>BLOCK FAILED DISC</td>
+<td>A filled disc with a diagonal cross knocked out of it: ✗ on ●.</td>
+</tr>
+</tbody>
+</table>
+<p>The fold column is drawn as line art at the current foreground colour, scaled to the cell: the box is
+square whatever the cell's aspect ratio, and every glyph of the column shares one stroke and one column,
+so that the head's stem, the body and its end meet exactly. The stroke is the cell's own line weight --
+twice it for the heavy four, three times for the heavier four -- even where the gutter draws its glyphs
+two cells wide.</p>
+<p>The marks are filled shapes at the current foreground colour, anti-aliased, centred in the cell
+and spanning 60% of its shorter side, so they sit on the same line as the fold column's stem.</p>
+<h3 id="what-they-are-for">What they are for<a class="headerlink" href="#what-they-are-for" title="Permanent link">#</a></h3>
+<p>They form the head of Contour's <strong>fold column</strong> — the gutter drawn to the left of the grid, which
+marks each foldable <a href="../osc-133-shell-integration/">OSC 133</a> command block:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>⊟─ $ make -j8          &lt;- U+10F000, the block is open
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>│    [  1/120] cc a.c  &lt;- U+10F006
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│    [  2/120] cc b.c
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>└    ... done          &lt;- U+10F007, the block's last row
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>⊞  $ make -j8          &lt;- U+10F001, the block is collapsed
+</span></code></pre></div>
+<p>The body and its end look like <code>U+2502</code> (BOX DRAWINGS LIGHT VERTICAL) and <code>U+2514</code> (BOX DRAWINGS LIGHT
+UP AND RIGHT), and once were. They are Contour's own because of the two-cell gutter: a box-drawing
+character drawn two cells wide takes the doubled stroke of a DECDWL row, whose text is stretched to twice
+its width, while the head beside it does not -- so the body stepped out of the stem's weight at every head.
+Drawn here, the column has one stroke in either width.</p>
+<p>The head needs a codepoint of its own in any case. <code>U+229F</code> SQUARED MINUS and <code>U+229E</code> SQUARED PLUS are the box and its sign, but
+neither carries the stem that joins an open head to the body beneath it, and a head that did not
+connect would read as two unrelated marks rather than as one bracket down the side of a block.</p>
+<p>A box carrying a plus or a minus, rather than a triangle, because that is the fold control a reader
+has already met in editors, tree views and file managers.</p>
+<p>The marks share that column. A command that is still running heads its block with <code>U+10F002</code>, a
+finished one with no fold control beside it with <code>U+10F004</code> -- or <code>U+10F005</code> when it failed -- and a row
+the user marked (vi <code>mm</code>) carries <code>U+10F003</code>. A failed command whose output folds draws its whole fold
+heavy, head and body, with <code>U+10F008</code> to <code>U+10F00B</code>, so failure reads by shape as well as by colour --
+collapsed too, where only the head is drawn. The fold under the pointer is drawn one step heavier again
+(<code>gutter.bold_on_hover</code>): heavy for a light fold, <code>U+10F00C</code> to <code>U+10F00F</code> for a failed one.</p>
+<p>The gutter's block column may be two cells wide (<code>gutter.block_column_width</code>); its glyphs are then drawn
+across both cells, each twice the size.</p>
+<p>The native chromes draw the block column as a <strong>rail</strong> instead: a bar in a strip of pixels between the
+gutter's cells and the grid, which marks a block's head with <code>U+10F002</code> while it runs, with <code>U+10F011</code>
+when it failed -- one glyph, so the cross is the page showing through the disc -- and with <code>U+10F010</code>,
+only while the block is hovered or focused, when it succeeded. A row the user marked carries
+<code>U+10F003</code> there too. The rail's marks are drawn two cells wide, sized to the row; the Terminal chrome
+keeps the glyph column above.</p>
+<p>Unicode has these four shapes at <code>U+25B8</code>, <code>U+25C6</code>, <code>U+25CF</code> and <code>U+2717</code> (and the check at <code>U+2713</code>), but the gutter does not use them:
+the renderer's claim on a codepoint is global, so claiming those would draw every one a program
+writes -- the ● of <code>systemctl status</code>, a prompt theme's ▸ or ◆, DEC Special Graphics' <code>`</code> -- as a
+gutter mark instead of in its font's own size and weight.</p>
+<h2 id="notes-for-implementers">Notes for implementers<a class="headerlink" href="#notes-for-implementers" title="Permanent link">#</a></h2>
+<ul>
+<li>These characters are <strong>produced by the terminal, for its own gutter</strong>. They are not part of any
+  escape sequence, and an application has no reason to write one.</li>
+<li>A Private Use Area assignment is by definition not exclusive. Planes 15 and 16 are also used by
+  some East Asian fonts for user-defined characters (GB 18030 and Big5 user-defined areas), so a
+  document that already uses <code>U+10F000</code> for something else will render as a fold head in Contour.
+  Turning the gutter off (<code>folding.show_markers: false</code>) does not change that, because the glyphs
+  are claimed by the renderer rather than by the fold feature — if this ever proves to matter in
+  practice, the claim is one entry in <code>BoxDrawingRenderer::renderable()</code>.</li>
+<li>If you implement these in a font, note that Contour will still prefer its own rendition: the
+  box-drawing renderer is consulted before font shaping, and <code>font.builtin_box_drawing: false</code>
+  turns that off for all built-in glyphs, not just these.</li>
+</ul></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="the-reserved-block" href="#the-reserved-block">The reserved block</a><a data-head="assigned-codepoints" href="#assigned-codepoints">Assigned codepoints</a><a data-head="notes-for-implementers" href="#notes-for-implementers">Notes for implementers</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/vt-extensions/private-use-glyphs.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">reference › <b>private-use glyphs</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>hint mode - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="../..">
+<link rel="icon" href="../../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../../assets/theme/site.css">
+<script type="module" src="../../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../../assets/contour-logo.png" alt=""><span id="cw-title">hint mode</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href="../.." aria-current="true"><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../../configuration/"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../../vt-sequence/"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour">
+<a class="tab" data-group="" href="../..">home</a>
+<a class="tab" data-group="" href="../../install/">install</a>
+<a class="tab" data-group="" href="../../features/">features</a>
+<a class="tab" data-group="" href="../../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="./" aria-current="page">hint mode</a>
+<a class="tab" data-group="guides" href="../../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure" hidden>
+<a class="tab" data-group="" href="../../configuration/">config file</a>
+<a class="tab" data-group="" href="../../configuration/profiles/">profiles</a>
+<a class="tab" data-group="" href="../../configuration/settings/">settings window</a>
+<a class="tab" data-group="" href="../../configuration/colors/">colors</a>
+<a class="tab" data-group="" href="../../configuration/key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../../configuration/layouts/">layouts</a>
+<a class="tab" data-group="more" href="../../configuration/links/">links</a>
+<a class="tab" data-group="more" href="../../configuration/hosts/">hosts</a>
+<a class="tab" data-group="more" href="../../configuration/indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../../configuration/paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference" hidden>
+<a class="tab" data-group="" href="../../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../../vt-extensions/synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>hint mode</summary>
+  <div class="tabsel-list">
+<a href="../..">home</a>
+<a href="../../install/">install</a>
+<a href="../../features/">features</a>
+<a href="../../release-notes/">release notes</a>
+<a href="../../persistent-sessions/">persistent sessions</a>
+<a href="../../sidebar/">workspace sidebar</a>
+<a href="../../remote-hosts/">remote hosts</a>
+<a href="../../control-api/">control api</a>
+<a href="../command-blocks/">command blocks</a>
+<a href="./" aria-current="page">hint mode</a>
+<a href="../../input-modes/">input modes</a>
+<a href="../drag-and-drop/">drag and drop</a>
+<a href="../../extensions/">status-line extensions</a>
+<a href="../../quick-terminal/">quick terminal</a>
+<a href="../../accessibility/">accessibility</a>
+<a href="../../secure-input/">secure input</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="hint-mode">Hint Mode<a class="headerlink" href="#hint-mode" title="Permanent link">#</a></h1>
+<p>Hint mode lets you quickly act on clickable elements visible in the terminal —
+URLs, file paths, git commit hashes, IP addresses — using only the keyboard.
+When activated, Contour scans the visible screen for recognized patterns,
+overlays a short alphabetic label on each match, and waits for you to type a
+label to perform an action on that match.</p>
+<p>Think of it like <a href="https://vimium.github.io/">Vimium</a> for your terminal.</p>
+<p><img alt="hint-mode-overview" src="../../screenshots/hint-mode-overview.png" title="Hint mode with labels overlaid on detected patterns"></p>
+<h2 id="activating-hint-mode">Activating Hint Mode<a class="headerlink" href="#activating-hint-mode" title="Permanent link">#</a></h2>
+<p>There are two ways to enter hint mode:</p>
+<h3 id="via-key-binding-from-any-mode">Via Key Binding (from any mode)<a class="headerlink" href="#via-key-binding-from-any-mode" title="Permanent link">#</a></h3>
+<p>The default key binding activates hint mode for URLs:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">input_mapping</span><span class="p">:</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> mods</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Control</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Shift</span><span class="p p-Indicator">],</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">U</span><span class="p p-Indicator">,</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">HintMode</span><span class="p p-Indicator">,</span><span class="nt"> patterns</span><span class="p">:</span><span class="w"> </span><span class="nv">url</span><span class="p p-Indicator">,</span><span class="nt"> hint_action</span><span class="p">:</span><span class="w"> </span><span class="nv">Open</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span></code></pre></div>
+<p>Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>U</kbd> to scan for URLs
+and open the selected one in your browser.</p>
+<h3 id="via-vi-normal-mode">Via Vi Normal Mode<a class="headerlink" href="#via-vi-normal-mode" title="Permanent link">#</a></h3>
+<p>When in <a href="../../input-modes/">normal mode</a>, you can use:</p>
+<ul>
+<li><code>gh</code> — activate hint mode with <strong>Copy</strong> action (yank the match to clipboard)</li>
+<li><code>gH</code> — activate hint mode with <strong>Open</strong> action (open the match, e.g. URL in browser)</li>
+</ul>
+<p>These commands scan with the profile's patterns: the builtins (URLs, file paths,
+git hashes, IPs) and your own <code>hint_patterns</code>.</p>
+<h2 id="using-hint-mode">Using Hint Mode<a class="headerlink" href="#using-hint-mode" title="Permanent link">#</a></h2>
+<p>Once hint mode is active:</p>
+<ol>
+<li><strong>Labels appear</strong> — Each detected match gets a short label (<code>a</code>, <code>b</code>, ..., <code>z</code>; or two-character labels <code>aa</code>, <code>ab</code>, ... for more than 26 matches).</li>
+<li><strong>Type the label</strong> — Type the label characters to select a match. Labels are case-insensitive.</li>
+<li><strong>Auto-select</strong> — As soon as your typed characters uniquely identify a match, the action is performed automatically.</li>
+<li><strong>Cancel</strong> — Press <kbd>Escape</kbd> to exit hint mode without selecting anything.</li>
+<li><strong>Backspace</strong> — Press <kbd>Backspace</kbd> to undo the last typed label character.</li>
+</ol>
+<h2 id="recognized-patterns">Recognized Patterns<a class="headerlink" href="#recognized-patterns" title="Permanent link">#</a></h2>
+<p>Contour ships with the following builtin pattern detectors:</p>
+<table>
+<thead>
+<tr>
+<th>Pattern</th>
+<th>Examples</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>url</code></td>
+<td><code>https://example.com</code>, <code>http://localhost:8080</code></td>
+<td><code>http</code>, <code>https</code>, <code>ftp</code>, <code>file</code> and <code>mailto</code> URLs</td>
+</tr>
+<tr>
+<td><code>filepath</code></td>
+<td><code>/home/user/file.txt</code>, <code>./src/main.cpp</code>, <code>src/main.cpp:12:5</code>, <code>C:\Users\me\notes.txt</code>, <code>Makefile</code></td>
+<td>Absolute, relative, home-relative (<code>~/...</code>) and Windows paths, and bare file names; a <code>:line[:column]</code> or <code>(line[,column])</code> after one is kept as its location</td>
+</tr>
+<tr>
+<td><code>githash</code></td>
+<td><code>a1b2c3d</code>, <code>abc1234567890def1234567890abcdef12345678</code></td>
+<td>7–40 character hex strings (git commit SHAs)</td>
+</tr>
+<tr>
+<td><code>ipv4</code></td>
+<td><code>192.168.1.1</code>, <code>10.0.0.1:8080</code></td>
+<td>IPv4 addresses, optionally with port</td>
+</tr>
+<tr>
+<td><code>ipv6</code></td>
+<td><code>::1</code>, <code>fe80::1</code>, <code>2001:0db8:85a3:0000:0000:8a2e:0370:7334</code></td>
+<td>IPv6 addresses</td>
+</tr>
+</tbody>
+</table>
+<h3 id="smart-file-path-detection">Smart File Path Detection<a class="headerlink" href="#smart-file-path-detection" title="Permanent link">#</a></h3>
+<p>Hint mode and the links Contour underlines in output share one path grammar,
+which takes bare names and a location printed after a path (<code>main.cpp:42:10</code>).
+When the terminal knows the current working directory, or the directory a command
+ran in (via <a href="../../vt-extensions/osc-133-shell-integration/">shell integration</a>),
+file path detection also matches:</p>
+<ul>
+<li><strong>Bare filenames with extensions</strong> — <code>main.cpp</code>, <code>README.md</code></li>
+<li><strong>Extensionless files</strong> — <code>Makefile</code>, <code>LICENSE</code>, <code>Dockerfile</code>, <code>CHANGELOG</code></li>
+<li><strong>Directory names</strong> — <code>src</code>, <code>build</code>, <code>docs</code></li>
+</ul>
+<p>These bare names are validated against the filesystem: only entries that actually
+exist in that directory are shown as hints. This means you can
+look at <code>ls</code> output, compiler errors, or <code>git status</code> and jump directly to the
+referenced files.</p>
+<p><img alt="hint-mode-bare-filenames" src="../../screenshots/hint-mode-bare-filenames.png" title="Bare filenames and directories detected in compiler output"></p>
+<h2 id="actions">Actions<a class="headerlink" href="#actions" title="Permanent link">#</a></h2>
+<p>The <code>hint_action</code> parameter controls what happens when you select a match:</p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Copy</code></td>
+<td>Copy the matched text to the system clipboard (default); a path, resolved to its absolute form</td>
+</tr>
+<tr>
+<td><code>Open</code></td>
+<td>Open the match as Ctrl+click opens it — web URLs in the browser, directories in the file manager, and files (a <code>file://</code> URL among them) with <a href="../../configuration/links/#file_opener"><code>file_opener</code></a> at the line they were printed with</td>
+</tr>
+<tr>
+<td><code>Paste</code></td>
+<td>Paste the matched text into the terminal input</td>
+</tr>
+<tr>
+<td><code>CopyAndPaste</code></td>
+<td>Copy to clipboard <strong>and</strong> paste into the terminal</td>
+</tr>
+<tr>
+<td><code>Select</code></td>
+<td>Enter vi visual mode with the match range pre-selected for manual adjustment</td>
+</tr>
+</tbody>
+</table>
+<h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">#</a></h2>
+<h3 id="key-bindings">Key Bindings<a class="headerlink" href="#key-bindings" title="Permanent link">#</a></h3>
+<p>You can create multiple hint mode bindings for different pattern sets and actions:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">input_mapping</span><span class="p">:</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">    </span><span class="c1"># Open URLs in browser</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> mods</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Control</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Shift</span><span class="p p-Indicator">],</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">U</span><span class="p p-Indicator">,</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">HintMode</span><span class="p p-Indicator">,</span><span class="nt"> patterns</span><span class="p">:</span><span class="w"> </span><span class="nv">url</span><span class="p p-Indicator">,</span><span class="nt"> hint_action</span><span class="p">:</span><span class="w"> </span><span class="nv">Open</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="c1"># Copy file paths to clipboard</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> mods</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Control</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Shift</span><span class="p p-Indicator">],</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">F</span><span class="p p-Indicator">,</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">HintMode</span><span class="p p-Indicator">,</span><span class="nt"> patterns</span><span class="p">:</span><span class="w"> </span><span class="nv">filepath</span><span class="p p-Indicator">,</span><span class="nt"> hint_action</span><span class="p">:</span><span class="w"> </span><span class="nv">Copy</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="c1"># Copy git hashes to clipboard</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> mods</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Control</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Shift</span><span class="p p-Indicator">],</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">G</span><span class="p p-Indicator">,</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">HintMode</span><span class="p p-Indicator">,</span><span class="nt"> patterns</span><span class="p">:</span><span class="w"> </span><span class="nv">githash</span><span class="p p-Indicator">,</span><span class="nt"> hint_action</span><span class="p">:</span><span class="w"> </span><span class="nv">Copy</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">    </span><span class="c1"># Scan for all patterns and copy</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> mods</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Control</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Shift</span><span class="p p-Indicator">],</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">H</span><span class="p p-Indicator">,</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">HintMode</span><span class="p p-Indicator">,</span><span class="nt"> patterns</span><span class="p">:</span><span class="w"> </span><span class="nv">all</span><span class="p p-Indicator">,</span><span class="nt"> hint_action</span><span class="p">:</span><span class="w"> </span><span class="nv">Copy</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span></code></pre></div>
+<p>The <code>patterns</code> parameter accepts:</p>
+<ul>
+<li>A single pattern name: <code>url</code>, <code>filepath</code>, <code>githash</code>, <code>ipv4</code>, <code>ipv6</code></li>
+<li>Multiple pattern names separated by <code>|</code>: <code>filepath|githash</code></li>
+<li><code>all</code> or empty: scan for all builtin patterns at once</li>
+</ul>
+<h3 id="scope-reaching-into-scrollback">Scope: Reaching Into Scrollback<a class="headerlink" href="#scope-reaching-into-scrollback" title="Permanent link">#</a></h3>
+<p>By default hint mode scans only what is on screen. The <code>scope</code> parameter widens
+that to the scrollback history:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">input_mapping</span><span class="p">:</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">    </span><span class="c1"># Scan the visible page (the default — may be omitted)</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> mods</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Control</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Shift</span><span class="p p-Indicator">],</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">U</span><span class="p p-Indicator">,</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">HintMode</span><span class="p p-Indicator">,</span><span class="nt"> patterns</span><span class="p">:</span><span class="w"> </span><span class="nv">url</span><span class="p p-Indicator">,</span><span class="nt"> hint_action</span><span class="p">:</span><span class="w"> </span><span class="nv">Open</span><span class="p p-Indicator">,</span><span class="nt"> scope</span><span class="p">:</span><span class="w"> </span><span class="nv">Visible</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="c1"># Scan the visible page *and* scrollback history</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> mods</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Control</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Shift</span><span class="p p-Indicator">],</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">Y</span><span class="p p-Indicator">,</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">HintMode</span><span class="p p-Indicator">,</span><span class="nt"> patterns</span><span class="p">:</span><span class="w"> </span><span class="nv">url</span><span class="p p-Indicator">,</span><span class="nt"> hint_action</span><span class="p">:</span><span class="w"> </span><span class="nv">Open</span><span class="p p-Indicator">,</span><span class="nt"> scope</span><span class="p">:</span><span class="w"> </span><span class="nv">Scrollback</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span></code></pre></div>
+<p>Under <code>scope: Scrollback</code>, labels are assigned once when hint mode is activated and
+then <strong>stay put</strong>: scrolling reveals the labels on other rows rather than renaming
+the ones you have already read. So the workflow is: activate, scroll to the output
+you want, then type its label. A label acts on its match even while it is off screen.</p>
+<p><code>scope: Visible</code> behaves the other way round, because its scan region <em>is</em> the
+viewport: scrolling re-scans and re-labels.</p>
+<p>How much history a <code>Scrollback</code> activation reads is capped per profile, so a very
+large scrollback does not turn one keystroke into a long scan:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">main</span><span class="p">:</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="c1"># Maximum scrollback rows a `scope: Scrollback` activation scans (default: 1000).</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="nt">hint_scrollback_lines</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000</span>
+</span></code></pre></div>
+<h3 id="wrapped-lines">Wrapped Lines<a class="headerlink" href="#wrapped-lines" title="Permanent link">#</a></h3>
+<p>A pattern is matched against the <em>logical</em> line, so a URL that the terminal broke
+across two or more rows because the window was too narrow is still found as a
+single hint, and selecting it yields the whole URL rather than the fragment on one
+row. The label sits at the start of the match, and the highlight follows the match
+across the line break.</p>
+<p>A hint is only offered where its label can be drawn. A match that begins above the
+scanned region — so that its label would be invisible — is not offered, since a
+label you cannot see is a label you cannot type. A match that begins inside the
+region and runs past its end <em>is</em> offered, and still yields its complete text.</p>
+<h3 id="colors">Colors<a class="headerlink" href="#colors" title="Permanent link">#</a></h3>
+<p>Hint mode label and match colors are configured in the color scheme section of
+your configuration:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">color_schemes</span><span class="p">:</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">    </span><span class="nt">default</span><span class="p">:</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">        </span><span class="c1"># Colors for the short alphabetic labels overlaid on matches.</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">        </span><span class="nt">hint_label</span><span class="p">:</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">            </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#000000'</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">            </span><span class="nt">foreground_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">            </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#E5C07B'</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">            </span><span class="nt">background_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">        </span><span class="c1"># Colors for the matched text behind the labels.</span>
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">        </span><span class="nt">hint_match</span><span class="p">:</span>
+</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="w">            </span><span class="nt">foreground</span><span class="p">:</span><span class="w"> </span><span class="s">'#ABB2BF'</span>
+</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="w">            </span><span class="nt">foreground_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-4-14"><a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="w">            </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="s">'#3E4452'</span>
+</span><span id="__span-4-15"><a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="w">            </span><span class="nt">background_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.8</span>
+</span></code></pre></div>
+<h3 id="custom-patterns">Custom Patterns<a class="headerlink" href="#custom-patterns" title="Permanent link">#</a></h3>
+<p>You can define your own hint patterns in the profile configuration. Each pattern
+needs a <code>name</code> (used to reference it in key bindings) and a <code>regex</code>
+(<a href="https://en.cppreference.com/w/cpp/regex/ecmascript">ECMAScript syntax</a>):</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">main</span><span class="p">:</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">hint_patterns</span><span class="p">:</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">uuid</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">        </span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="s">'\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b'</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker_id</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">        </span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="s">'\b[0-9a-f]{12,64}\b'</span>
+</span></code></pre></div>
+<p>Custom patterns with the same name as a builtin override the builtin definition.
+You can then reference custom patterns in key bindings just like builtins:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">input_mapping</span><span class="p">:</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> mods</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Control</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Shift</span><span class="p p-Indicator">],</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">I</span><span class="p p-Indicator">,</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">HintMode</span><span class="p p-Indicator">,</span><span class="nt"> patterns</span><span class="p">:</span><span class="w"> </span><span class="nv">uuid</span><span class="p p-Indicator">,</span><span class="nt"> hint_action</span><span class="p">:</span><span class="w"> </span><span class="nv">Copy</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span></code></pre></div>
+<p>Back-references (<code>\1</code> to <code>\9</code>) are not supported; a pattern using one is reported
+when the configuration is loaded and disabled.</p>
+<h3 id="clickable-patterns">Clickable Patterns<a class="headerlink" href="#clickable-patterns" title="Permanent link">#</a></h3>
+<p><a href="../../configuration/links/">Links in Terminal Output</a> describes the links Contour
+finds in output, and how they open, in full.</p>
+<p>A pattern can also be found in the terminal's output without entering hint mode:
+with <code>clickable: true</code> its matches are decorated as links are (see
+<code>hyperlink_decoration</code>) and opened with Ctrl+click. <code>url</code> says what is opened,
+with <code>{0}</code> standing for the whole match and <code>{1}</code> to <code>{9}</code> for its capture
+groups. Without <code>url</code>, the match is opened as printed.</p>
+<p>Where the printed text chooses the scheme (no <code>url</code>, or a <code>url</code> that does not
+start with a scheme of its own, such as <code>{0}</code>), a match opens only with a scheme
+Contour opens in URLs it finds itself: <code>http</code>, <code>https</code>, <code>ftp</code>, <code>mailto</code> or
+<code>file</code>. Any other is no link: it is not underlined, and hint mode offers it to
+copy and opens nothing. A <code>url</code> that writes its scheme itself may open any.</p>
+<p>Only what a URL cannot hold is percent-encoded as a group is put in: spaces,
+control characters and <code>"#&lt;&gt;[\]^`{|}</code>. Characters such as <code>/ ? &amp; = + @ : %</code>
+pass through, so a group placed in a query can add parameters, and one placed
+before the host can change it. Write the scheme and the host in the template
+itself, as the examples below do, and put groups after them.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">main</span><span class="p">:</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="nt">hint_patterns</span><span class="p">:</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">jira</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">        </span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="s">'\b[A-Z][A-Z0-9]+-\d+\b'</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">        </span><span class="nt">clickable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">        </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="s">'https://jira.example.com/browse/{0}'</span>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">github_issue</span>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="w">        </span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="s">'\b([\w.-]+)/([\w.-]+)#(\d+)\b'</span>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="w">        </span><span class="nt">clickable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="w">        </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="s">'https://github.com/{1}/{2}/issues/{3}'</span>
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">commit</span>
+</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="w">        </span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="s">'\b[0-9a-f]{7,40}\b'</span>
+</span><span id="__span-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="w">        </span><span class="nt">clickable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="w">        </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="s">'https://github.com/contour-terminal/contour/commit/{0}'</span>
+</span></code></pre></div>
+<p>The builtins <code>url</code> and <code>filepath</code> are clickable, and <code>githash</code>, <code>ipv4</code> and <code>ipv6</code>
+are offered in hint mode only. An entry named like a builtin changes only the keys
+it gives, so it may leave out its <code>regex</code>:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="w">    </span><span class="nt">hint_patterns</span><span class="p">:</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">filepath</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">        </span><span class="nt">clickable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">   </span><span class="c1"># stop underlining paths; hint mode still offers them</span>
+</span></code></pre></div>
+<p>A <code>url</code> template applies to your own patterns only: a builtin opens what it finds,
+and a <code>url</code> given to one is reported and ignored. So <code>clickable: true</code> on
+<code>githash</code>, <code>ipv4</code> or <code>ipv6</code> alone makes no link, as a bare hash or address names
+no scheme; to link commits to their page, write a pattern of your own with a
+<code>url</code>, as <code>commit</code> above does.</p>
+<p>A <code>url</code> that names a capture group the regex does not have, such as <code>{2}</code> for a
+regex with one group, is reported when the configuration is loaded and disables
+the pattern.</p>
+<p>A regex that overrides <code>filepath</code> must say which part of its match is the path:
+capture group 1 is the path, groups 2 and 3 a <code>:line[:column]</code> printed after it,
+and groups 4 and 5 a <code>(line[,column])</code>. An override of <code>filepath</code> without a
+capture group is reported and disabled. Every other pattern's link is its whole
+match, <code>{0}</code>.</p>
+<h3 id="path-resolution">Path Resolution<a class="headerlink" href="#path-resolution" title="Permanent link">#</a></h3>
+<p>When copying or opening file paths, Contour resolves relative paths to absolute
+using the directory the command that printed them ran in, as shell integration
+recorded it, so a <code>cd</code> since then does not change what an earlier command's output
+names. Outside any command's output, the terminal's current working directory is
+used. For example, copying a hint for <code>src/main.cpp</code> gives you
+<code>/home/user/project/src/main.cpp</code> in the clipboard, and opening it passes the full
+path to your editor or file manager. Ctrl+clicking a path resolves it the same way.</p>
+<p>A command that changes directory itself, such as <code>cd build &amp;&amp; make</code>, prints paths
+relative to where it went. The shell reports that directory only at the next
+prompt, so a path not found where the command started is looked up there too.</p>
+<p>Paths printed by a command that ran on another machine (over ssh, in a container)
+name files there, so they are neither offered as hints nor opened here. That
+includes the output of an <code>ssh</code> session whose remote shell reports its directory
+but marks no commands of its own: everything it printed belongs to the local <code>ssh</code>
+command, and stays refused after you return to the local prompt.</p>
+<p>Home-relative paths (<code>~/...</code>) are expanded using the <code>HOME</code> environment variable.</p>
+<h2 id="tips-and-tricks">Tips and Tricks<a class="headerlink" href="#tips-and-tricks" title="Permanent link">#</a></h2>
+<ul>
+<li>
+<p><strong>Shell integration matters</strong> — Ensure your shell reports the current working
+  directory via <a href="../../vt-extensions/osc-133-shell-integration/">OSC 133</a> for the
+  best file path detection. Without it, only paths containing a <code>/</code> separator are
+  matched.</p>
+</li>
+<li>
+<p><strong>Combine with Vi mode</strong> — In normal mode, <code>gh</code> (copy) and <code>gH</code> (open) are
+  quick ways to enter hint mode without reaching for modifier keys.</p>
+</li>
+<li>
+<p><strong>Works with scrollback</strong> — Hint mode scans the currently visible viewport.
+  Scroll to the area of interest first, then activate hint mode.</p>
+</li>
+<li>
+<p><strong>Compiler errors</strong> — When viewing build output with file paths like
+  <code>src/main.cpp:42:10: error: ...</code>, hint mode detects the file path portion,
+  making it easy to copy or open the referenced file.</p>
+</li>
+</ul>
+<h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">#</a></h2>
+<ul>
+<li><a href="../../input-modes/">Input Modes</a> — Vi-like input modes including normal mode, where <code>gh</code>/<code>gH</code> trigger hint mode</li>
+<li><a href="../../configuration/key-mapping/">Key Mapping</a> — How to customize key bindings</li>
+<li><a href="../../vt-extensions/osc-133-shell-integration/">Shell Integration</a> — Enables smart bare filename detection</li>
+</ul></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="activating-hint-mode" href="#activating-hint-mode">Activating Hint Mode</a><a data-head="using-hint-mode" href="#using-hint-mode">Using Hint Mode</a><a data-head="recognized-patterns" href="#recognized-patterns">Recognized Patterns</a><a data-head="actions" href="#actions">Actions</a><a data-head="configuration" href="#configuration">Configuration</a><a data-head="tips-and-tricks" href="#tips-and-tricks">Tips and Tricks</a><a data-head="related" href="#related">Related</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/demo/hint-mode.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">contour › <b>hint mode</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>semantic block query - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="../..">
+<link rel="icon" href="../../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../../assets/theme/site.css">
+<script type="module" src="../../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../../assets/contour-logo.png" alt=""><span id="cw-title">semantic block query</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href="../.."><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../../configuration/"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../../vt-sequence/" aria-current="true"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour" hidden>
+<a class="tab" data-group="" href="../..">home</a>
+<a class="tab" data-group="" href="../../install/">install</a>
+<a class="tab" data-group="" href="../../features/">features</a>
+<a class="tab" data-group="" href="../../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure" hidden>
+<a class="tab" data-group="" href="../../configuration/">config file</a>
+<a class="tab" data-group="" href="../../configuration/profiles/">profiles</a>
+<a class="tab" data-group="" href="../../configuration/settings/">settings window</a>
+<a class="tab" data-group="" href="../../configuration/colors/">colors</a>
+<a class="tab" data-group="" href="../../configuration/key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../../configuration/layouts/">layouts</a>
+<a class="tab" data-group="more" href="../../configuration/links/">links</a>
+<a class="tab" data-group="more" href="../../configuration/hosts/">hosts</a>
+<a class="tab" data-group="more" href="../../configuration/indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../../configuration/paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference">
+<a class="tab" data-group="" href="../../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../program-status/">program status</a>
+<a class="tab" data-group="extensions" href="./" aria-current="page">semantic block query</a>
+<a class="tab" data-group="extensions" href="../osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>semantic block query</summary>
+  <div class="tabsel-list">
+<a href="../../vt-sequence/">vt sequences</a>
+<a href="../../demo/regis-graphics/">regis graphics</a>
+<a href="../synchronized-output/">synchronized output</a>
+<a href="../osc-133-shell-integration/">shell integration</a>
+<a href="../clickable-links/">clickable links</a>
+<a href="../buffer-capture/">buffer capture</a>
+<a href="../program-status/">program status</a>
+<a href="./" aria-current="page">semantic block query</a>
+<a href="../osc-9-4-progress/">progress (osc 9;4)</a>
+<a href="../osc-3008-context/">context (osc 3008)</a>
+<a href="../vertical-line-marks/">vertical line marks</a>
+<a href="../color-palette-update-notifications/">palette notifications</a>
+<a href="../font-settings/">font settings</a>
+<a href="../line-reflow-mode/">line reflow mode</a>
+<a href="../private-use-glyphs/">private-use glyphs</a>
+<a href="../save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a href="../unicode-core/">unicode core</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="semantic-block-query-dec-mode-2034">Semantic Block Query (DEC Mode 2034)<a class="headerlink" href="#semantic-block-query-dec-mode-2034" title="Permanent link">#</a></h1>
+<p>This extension provides a discoverable, machine-readable query mechanism that returns structured
+JSON blocks of semantic command data from the terminal. It is designed for programmatic consumers
+such as AI agents, accessibility tools, and automation scripts.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Contour's own <a href="../../accessibility/">accessibility support</a> — reporting the caret and the live prompt
+region to the operating system — does <strong>not</strong> go through this protocol and does not require mode 2034.
+It reads the <a href="../osc-133-shell-integration/">OSC 133</a> line marks directly, because those are terminal
+memory and are recorded for every shell that emits them. This extension is for <em>external</em> consumers
+that want the command history as structured data.</p>
+</div>
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">#</a></h2>
+<p>This feature requires <a href="../osc-133-shell-integration/">OSC 133 shell integration</a> to be active
+in the running shell. The shell must emit OSC 133 sequences (A, B, C, D) to mark prompt boundaries,
+command output regions, and command completion.</p>
+<h2 id="feature-discovery">Feature Discovery<a class="headerlink" href="#feature-discovery" title="Permanent link">#</a></h2>
+<h3 id="dec-private-mode-2034">DEC Private Mode 2034<a class="headerlink" href="#dec-private-mode-2034" title="Permanent link">#</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Enable:  CSI ? 2034 h       (DECSM)
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>Disable: CSI ? 2034 l       (DECRM)
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>Query:   CSI ? 2034 $ p     (DECRQM)  -&gt;  CSI ? 2034 ; Ps $ y
+</span></code></pre></div>
+<p>Where <code>Ps</code> in the DECRQM response is:
+- <code>0</code> = not recognized (terminal does not support this mode)
+- <code>1</code> = set (enabled)
+- <code>2</code> = reset (disabled)</p>
+<p>When enabled:
+- The terminal reports the command blocks whose command has not started yet: the prompt on screen at this
+  point (a shell may enable the mode from its prompt hook), and every block after it. Contour records every
+  shell's command blocks whether or not this mode is on (its gutter, sticky header and notifications read
+  them), but a reader never sees a command that started before it enabled the mode, so enabling it is never a
+  way to read back commands that ran earlier.
+- The terminal generates a session token and replies with a DCS containing the token (see Authentication below).
+- The query sequence <code>CSI &gt; Ps ; Pn ; T1 ; T2 ; T3 ; T4 [; Ph] b</code> becomes available.</p>
+<p>When disabled:
+- Nothing is reported any more; commands started so far stay hidden even if the mode is enabled again.
+- The session token is invalidated.
+- The query sequence returns an error response.</p>
+<h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">#</a></h2>
+<p>When mode 2034 is enabled via DECSM, the terminal generates a 64-bit session token and replies with:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>DCS &gt; 2034 ; 1 b T1 ; T2 ; T3 ; T4 ST
+</span></code></pre></div>
+<p>That is: <code>ESC P &gt; 2034 ; 1 b T1 ; T2 ; T3 ; T4 ESC \</code></p>
+<p><code>T1</code>..<code>T4</code> are the session token: four decimal integers from 0 to 65534, its four 16-bit parts. Every
+SBQUERY carries them back as its last four parameters, exactly as received (see Query Syntax below).
+There is nothing to convert.</p>
+<p>A part is never 65535: a terminal reads every larger number in a CSI parameter as 65535, so that value
+stands for all of them. An SBQUERY whose token carries a part of 65535 or more, or leaves a part out, fails
+authentication (status 3).</p>
+<h3 id="token-lifecycle">Token Lifecycle<a class="headerlink" href="#token-lifecycle" title="Permanent link">#</a></h3>
+<ol>
+<li><strong>On DECSET 2034</strong>: Terminal generates a fresh token and replies with the DCS token response.</li>
+<li><strong>On SBQUERY</strong>: The token must be included as parameters T1..T4. Missing or invalid tokens produce error responses.</li>
+<li><strong>On DECRST 2034</strong>: The token is invalidated, and the commands started so far are hidden from every later session.</li>
+<li><strong>On RIS</strong>: As on DECRST 2034. A hard reset returns every mode to its power-up state, this one included.</li>
+<li><strong>On re-enable</strong>: A new token is generated; previous tokens are no longer valid.</li>
+</ol>
+<h3 id="security-note">Security Note<a class="headerlink" href="#security-note" title="Permanent link">#</a></h3>
+<p>DECSET normally does not produce a reply. Some terminal multiplexers (e.g. tmux, screen)
+may not forward the DCS token response to the application. In such environments, token-based
+authentication may not be usable. This is a known limitation.</p>
+<h2 id="query-syntax-sbquery">Query Syntax — SBQUERY<a class="headerlink" href="#query-syntax-sbquery" title="Permanent link">#</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>CSI &gt; Ps ; Pn ; T1 ; T2 ; T3 ; T4 [; Ph] b
+</span></code></pre></div>
+<p><strong>Mnemonic:</strong> SBQUERY — <strong>S</strong>emantic <strong>B</strong>lock <strong>QUERY</strong></p>
+<p>CSI with <code>&gt;</code> leader, final character <code>b</code> (for "blocks").</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Ps</td>
+<td>Query type (see table below)</td>
+</tr>
+<tr>
+<td>Pn</td>
+<td>Count parameter (default 1); for <code>Ps</code> 4, the id's low 16 bits</td>
+</tr>
+<tr>
+<td>T1..T4</td>
+<td>The session token, as the DECSET reply carried it</td>
+</tr>
+<tr>
+<td>Ph</td>
+<td>For <code>Ps</code> 4, the id's high 16 bits (default 0)</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Ps</th>
+<th>Meaning</th>
+<th>Pn</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Last completed command block</td>
+<td>ignored</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Last N completed command blocks</td>
+<td>count (default 1)</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Current in-progress command</td>
+<td>ignored</td>
+</tr>
+<tr>
+<td>4</td>
+<td>The block with id <code>Ph × 65536 + Pn</code>, in any state</td>
+<td>the id's low 16 bits</td>
+</tr>
+</tbody>
+</table>
+<p>A <code>Ps</code> of 0, like an omitted one, means 1. Any other <code>Ps</code> is answered <code>DCS &gt; 0 b ST</code>, as a query with no
+data: a reader asking a question the terminal does not know never receives the answer to another.</p>
+<p><code>Ps</code> 4 answers an older block a reader learned the <code>id</code> of from an earlier reply: finished, superseded,
+running or still at its prompt. A CSI parameter cannot exceed 65535, so the id travels in two halves,
+<code>Pn = id &amp; 0xFFFF</code> and <code>Ph = id &gt;&gt; 16</code>; <code>Ph</code> comes after the token, which so stays at parameters 2..5. A
+block the reader may not see (its command started before the mode was enabled), or one the terminal no
+longer keeps, is answered <code>DCS &gt; 0 b ST</code>, as is an id of 0, which no block has.</p>
+<p>A <em>completed</em> block is one the shell finished with OSC 133;D (or OSC 3008 <code>end=</code>). A block that a newer
+prompt superseded without one -- the prompt of a nested shell, such as inside <code>ssh</code> -- is not reported.</p>
+<h2 id="response-syntax">Response Syntax<a class="headerlink" href="#response-syntax" title="Permanent link">#</a></h2>
+<p>The response is a DCS (Device Control String) with <code>&gt;</code> leader and final character <code>b</code>.</p>
+<p><strong>Success:</strong></p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>DCS &gt; 1 b {JSON} ST
+</span></code></pre></div>
+<p>That is: <code>ESC P &gt; 1 b {JSON} ESC \</code></p>
+<p><strong>Error — no data or mode disabled:</strong></p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>DCS &gt; 0 b ST
+</span></code></pre></div>
+<p><strong>Error — authentication required (missing token):</strong></p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>DCS &gt; 2 b ST
+</span></code></pre></div>
+<p><strong>Error — authentication failed (wrong token):</strong></p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>DCS &gt; 3 b ST
+</span></code></pre></div>
+<h3 id="status-codes">Status Codes<a class="headerlink" href="#status-codes" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>Mode disabled, no data, or an unknown query type</td>
+</tr>
+<tr>
+<td>1</td>
+<td>Success with JSON payload</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Authentication required (no token provided)</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Authentication failed (invalid token)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="json-response-schema">JSON Response Schema<a class="headerlink" href="#json-response-schema" title="Permanent link">#</a></h2>
+<p>The JSON of step 4 of the <a href="#example-session">example session</a> below, laid out with whitespace the terminal
+does not send; the values of the keys version 2 adds are an example of their own:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="p">{</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nt">"blocks"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="p">{</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">      </span><span class="nt">"command"</span><span class="p">:</span><span class="w"> </span><span class="s2">"echo hello"</span><span class="p">,</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">      </span><span class="nt">"prompt"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user@host:~$ echo hello"</span><span class="p">,</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">      </span><span class="nt">"output"</span><span class="p">:</span><span class="w"> </span><span class="s2">"hello"</span><span class="p">,</span>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">      </span><span class="nt">"exitCode"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="w">      </span><span class="nt">"finished"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="w">      </span><span class="nt">"outputLineCount"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="w">      </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span>
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="w">      </span><span class="nt">"cwd"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/home/user"</span><span class="p">,</span>
+</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="w">      </span><span class="nt">"startedAt"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-24T09:41:07.312Z"</span><span class="p">,</span>
+</span><span id="__span-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="w">      </span><span class="nt">"durationMs"</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span>
+</span><span id="__span-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="w">    </span><span class="p">}</span>
+</span><span id="__span-7-16"><a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="w">  </span><span class="p">]</span>
+</span><span id="__span-7-17"><a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="p">}</span>
+</span></code></pre></div>
+<h3 id="fields">Fields<a class="headerlink" href="#fields" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>version</code></td>
+<td>integer</td>
+<td>Schema version, currently <code>2</code>.</td>
+</tr>
+<tr>
+<td><code>blocks</code></td>
+<td>array</td>
+<td>Array of command block objects, ordered chronologically.</td>
+</tr>
+<tr>
+<td><code>command</code></td>
+<td>string or null</td>
+<td>The command line from OSC 133;C <code>cmdline_url</code> or <code>cmdline</code>, or -- when the shell sent none but marked its prompt end with OSC 133;B -- the text typed after the prompt. <code>null</code> when neither is known. Longer than 4096 bytes it is cut at a character boundary and ends in <code>…</code>.</td>
+</tr>
+<tr>
+<td><code>prompt</code></td>
+<td>string</td>
+<td>The prompt the command was typed at, the typed command included: the block's lines from the one OSC 133;A marked down to the one its output starts on.</td>
+</tr>
+<tr>
+<td><code>output</code></td>
+<td>string</td>
+<td>What the command printed: the block's lines from the one OSC 133;C marked to where OSC 133;D ended it. For a command still running, what it printed so far, down to the line the cursor is on.</td>
+</tr>
+<tr>
+<td><code>exitCode</code></td>
+<td>integer</td>
+<td>From OSC 133;D (or OSC 3008 <code>end=</code>). <code>-1</code> if unknown.</td>
+</tr>
+<tr>
+<td><code>finished</code></td>
+<td>boolean</td>
+<td><code>false</code> for in-progress commands (Ps=3 query), <code>true</code> otherwise.</td>
+</tr>
+<tr>
+<td><code>outputLineCount</code></td>
+<td>integer</td>
+<td>Number of lines in <code>output</code>.</td>
+</tr>
+<tr>
+<td><code>id</code></td>
+<td>integer</td>
+<td>The block's id (version 2): what <code>Ps</code> 4 asks for. Valid within the current id epoch only -- the ids start over when they would overflow -- and not the <code>block:&lt;pane&gt;/&lt;serial&gt;</code> id of the <a href="../../control-api/">control API</a>.</td>
+</tr>
+<tr>
+<td><code>cwd</code></td>
+<td>string or null</td>
+<td>The working directory (OSC 7) the command started in (version 2). <code>null</code> before it started, or when none was reported.</td>
+</tr>
+<tr>
+<td><code>startedAt</code></td>
+<td>string or null</td>
+<td>When the command started (OSC 133;C), as RFC 3339 in UTC with milliseconds (version 2). <code>null</code> before it started.</td>
+</tr>
+<tr>
+<td><code>durationMs</code></td>
+<td>integer or null</td>
+<td>How long it ran, from OSC 133;C to its reported end, in milliseconds (version 2). <code>null</code> until it ended.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Versions.</strong> Version 2 only adds keys, after every key of version 1, which keeps its spelling, place and
+meaning: a reader of version 1 reads a version-2 reply unchanged. A reader that needs <code>id</code>, <code>cwd</code>,
+<code>startedAt</code> or <code>durationMs</code> checks <code>version &gt;= 2</code>.</p>
+<p><code>prompt</code> and <code>output</code> are read from the block's own lines, wherever they are in the scrollback, so
+neither ever carries another command's text. Lines that have scrolled out of the history are missing
+from them; once all of a block's lines have, both are empty.</p>
+<p>Text fields use JSON's native encoding for control characters (e.g. <code>\u001b</code> for ESC),
+which ensures the payload never contains a raw ST (ESC ) sequence.</p>
+<h2 id="example-session">Example Session<a class="headerlink" href="#example-session" title="Permanent link">#</a></h2>
+<p>At a <code>user@host:~$</code> prompt, in a shell whose OSC 133 integration reports each command line
+(<code>cmdline_url</code>). Every <code>printf</code> is a command of its own, and so a command block of its own.</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># 1. Enable the semantic block protocol and capture the token</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033[?2034h'</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="c1"># Response: DCS &gt; 2034 ; 1 b 41394 ; 50132 ; 58870 ; 1816 ST</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># Token values: T1=41394 T2=50132 T3=58870 T4=1816</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="c1"># 2. Verify it's enabled via DECRQM</span>
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033[?2034$p'</span>
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="c1"># Response: CSI ? 2034 ; 1 $ y</span>
+</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>
+</span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="c1"># 3. Run some commands</span>
+</span><span id="__span-8-11"><a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>ls
+</span><span id="__span-8-12"><a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="nb">echo</span><span class="w"> </span>hello
+</span><span id="__span-8-13"><a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>
+</span><span id="__span-8-14"><a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="c1"># 4. Query the last completed command (with token)</span>
+</span><span id="__span-8-15"><a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033[&gt;1;1;41394;50132;58870;1816b'</span>
+</span><span id="__span-8-16"><a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="c1"># Response: DCS &gt; 1 b {"version":2,"blocks":[{"command":"echo hello","prompt":"user@host:~$ echo hello","output":"hello","exitCode":0,"finished":true,"outputLineCount":1,"id":4,...}]} ST</span>
+</span><span id="__span-8-17"><a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>
+</span><span id="__span-8-18"><a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="c1"># 5. Query the last 3 completed commands (with token)</span>
+</span><span id="__span-8-19"><a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033[&gt;2;3;41394;50132;58870;1816b'</span>
+</span><span id="__span-8-20"><a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a><span class="c1"># Response: DCS &gt; 1 b {JSON} ST, listing `ls`, `echo hello` and the printf of step 4, oldest first</span>
+</span><span id="__span-8-21"><a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a>
+</span><span id="__span-8-22"><a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a><span class="c1"># 6. Query any in-progress command (with token)</span>
+</span><span id="__span-8-23"><a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033[&gt;3;1;41394;50132;58870;1816b'</span>
+</span><span id="__span-8-24"><a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a><span class="c1"># Response: DCS &gt; 1 b {JSON} ST, listing this printf itself, with "finished":false and "exitCode":-1</span>
+</span><span id="__span-8-25"><a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a>
+</span><span id="__span-8-26"><a id="__codelineno-8-26" name="__codelineno-8-26" href="#__codelineno-8-26"></a><span class="c1"># 7. Query block 4, the `echo hello` of step 3, by the id step 4 reported (Pn = 4, Ph = 0)</span>
+</span><span id="__span-8-27"><a id="__codelineno-8-27" name="__codelineno-8-27" href="#__codelineno-8-27"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033[&gt;4;4;41394;50132;58870;1816;0b'</span>
+</span><span id="__span-8-28"><a id="__codelineno-8-28" name="__codelineno-8-28" href="#__codelineno-8-28"></a><span class="c1"># Response: DCS &gt; 1 b {JSON} ST, listing that block alone</span>
+</span><span id="__span-8-29"><a id="__codelineno-8-29" name="__codelineno-8-29" href="#__codelineno-8-29"></a>
+</span><span id="__span-8-30"><a id="__codelineno-8-30" name="__codelineno-8-30" href="#__codelineno-8-30"></a><span class="c1"># 8. Disable when done (invalidates the token)</span>
+</span><span id="__span-8-31"><a id="__codelineno-8-31" name="__codelineno-8-31" href="#__codelineno-8-31"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033[?2034l'</span>
+</span></code></pre></div>
+<h2 id="implementation-notes">Implementation Notes<a class="headerlink" href="#implementation-notes" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>Token storage</strong>: Terminals implementing this specification should generate the session token
+  using a cryptographically secure random number generator and store it for the duration of the
+  mode being enabled. The token must be regenerated on each enable. Contour draws it from the
+  platform's random device.</li>
+<li><strong>Terminal multiplexers</strong>: DECSET does not normally produce a reply. Multiplexers and terminal
+  proxies that intercept DEC mode sequences should be aware that mode 2034 produces a DCS reply
+  and must forward it to the requesting application.</li>
+<li><strong>CLI/tool integration</strong>: Tools should capture the DCS token reply immediately after sending
+  DECSET 2034, and read <code>T1</code>..<code>T4</code> from it (see <a href="#authentication">Authentication</a>) before issuing
+  any SBQUERY.</li>
+<li><strong>Error handling</strong>: Consumers should check the status byte in every DCS response and handle
+  status 2 (missing token) and 3 (invalid token) gracefully, e.g. by re-enabling the mode to
+  obtain a fresh token.</li>
+<li><strong>Capacity limits</strong>: The number of retained completed command blocks is implementation-defined.
+  Consumers should not assume an unbounded history.</li>
+<li><strong>Output encoding</strong>: JSON text fields use standard JSON escaping for control characters
+  (e.g. <code>\u001b</code> for ESC), ensuring the DCS payload never contains a raw ST sequence.</li>
+</ul>
+<h2 id="see-also">See Also<a class="headerlink" href="#see-also" title="Permanent link">#</a></h2>
+<ul>
+<li><a href="../osc-133-shell-integration/">OSC 133 - Shell Integration</a></li>
+</ul></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="prerequisites" href="#prerequisites">Prerequisites</a><a data-head="feature-discovery" href="#feature-discovery">Feature Discovery</a><a data-head="authentication" href="#authentication">Authentication</a><a data-head="query-syntax-sbquery" href="#query-syntax-sbquery">Query Syntax — SBQUERY</a><a data-head="response-syntax" href="#response-syntax">Response Syntax</a><a data-head="json-response-schema" href="#json-response-schema">JSON Response Schema</a><a data-head="example-session" href="#example-session">Example Session</a><a data-head="implementation-notes" href="#implementation-notes">Implementation Notes</a><a data-head="see-also" href="#see-also">See Also</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/vt-extensions/semantic-block-query.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">reference › <b>semantic block query</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

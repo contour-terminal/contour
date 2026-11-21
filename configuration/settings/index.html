@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>settings window - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="../..">
+<link rel="icon" href="../../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../../assets/theme/site.css">
+<script type="module" src="../../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../../assets/contour-logo.png" alt=""><span id="cw-title">settings window</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href="../.."><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../" aria-current="true"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../../vt-sequence/"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour" hidden>
+<a class="tab" data-group="" href="../..">home</a>
+<a class="tab" data-group="" href="../../install/">install</a>
+<a class="tab" data-group="" href="../../features/">features</a>
+<a class="tab" data-group="" href="../../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure">
+<a class="tab" data-group="" href="../">config file</a>
+<a class="tab" data-group="" href="../profiles/">profiles</a>
+<a class="tab" data-group="" href="./" aria-current="page">settings window</a>
+<a class="tab" data-group="" href="../colors/">colors</a>
+<a class="tab" data-group="" href="../key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../layouts/">layouts</a>
+<a class="tab" data-group="more" href="../links/">links</a>
+<a class="tab" data-group="more" href="../hosts/">hosts</a>
+<a class="tab" data-group="more" href="../indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference" hidden>
+<a class="tab" data-group="" href="../../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../../vt-extensions/synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>settings window</summary>
+  <div class="tabsel-list">
+<a href="../">config file</a>
+<a href="../profiles/">profiles</a>
+<a href="./" aria-current="page">settings window</a>
+<a href="../colors/">colors</a>
+<a href="../key-mapping/">key mapping</a>
+<a href="../layouts/">layouts</a>
+<a href="../links/">links</a>
+<a href="../hosts/">hosts</a>
+<a href="../indicator-statusline/">status line</a>
+<a href="../paths/">paths</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="the-settings-window">The Settings Window<a class="headerlink" href="#the-settings-window" title="Permanent link">#</a></h1>
+<p>Settings opens in a window of its own, one per application, from <strong>Settings…</strong> in the Contour menu
+(<kbd>⌘</kbd>+<kbd>,</kbd> on macOS, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>,</kbd> elsewhere), from the command
+palette, or with the <code>OpenConfiguration</code> binding. Asking for it again brings the open window forward, and it
+reopens on the page it was left on.</p>
+<p>The sidebar lists five sections, then your profiles, then <strong>Edit contour.yml…</strong>, which opens the file in your
+editor. A search field above them finds a row by its label, then its help text, then its key, in any case.</p>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>What it holds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>General</td>
+<td>Windows, the command palette, and the advanced global options such as the rendering GPU.</td>
+</tr>
+<tr>
+<td>Appearance</td>
+<td>Window chrome, the tab bar, and whether tabs sit in it or in the workspace sidebar.</td>
+</tr>
+<tr>
+<td>Keyboard</td>
+<td>Key bindings, as a list.</td>
+</tr>
+<tr>
+<td>Shell Integration</td>
+<td>What shell integration draws: the gutter, command blocks and folding.</td>
+</tr>
+<tr>
+<td>Profiles</td>
+<td>One page per profile: colors, window, text, scrolling, behaviour, cursor, bell, background, links, status line and more.</td>
+</tr>
+</tbody>
+</table>
+<p>A profile's page has a <strong>live preview</strong> at its top: a small terminal that shows the profile's font, size and
+colors, and follows every change before it is written. <strong>Colors</strong>, <strong>Links</strong> and <strong>Status Line</strong> open as pages
+of their own from the profile, and the Status Line fields are on both the profile's page and the Status Line page.</p>
+<h2 id="every-change-applies-at-once">Every change applies at once<a class="headerlink" href="#every-change-applies-at-once" title="Permanent link">#</a></h2>
+<p>There is no Apply or Save button. A change takes effect in every terminal that uses the profile, in every window,
+and is written to disk within about 300 ms of the last edit. <strong>Revert Changes</strong>, at the top right, undoes
+everything changed since the window opened, and is disabled until something has.</p>
+<p>Settings writes only the files it owns: <code>settings.yml</code> for the global options, <code>profiles/&lt;name&gt;.yml</code> for each
+profile it edits, and <code>colorschemes/&lt;name&gt;.yml</code> for each color scheme. It never writes <code>contour.yml</code>. Each write
+replaces the whole file at once, so a crash never leaves half of one.</p>
+<ul>
+<li><strong>A file you edited meanwhile is never overwritten.</strong> If an editor saves a profile while Settings has it
+  open, Settings writes nothing, shows the version on disk, and says which file changed. That includes a file
+  saved in a state that does not parse: it stays as you left it until you fix it.</li>
+<li><strong>Profiles and color schemes defined in <code>contour.yml</code> are read-only.</strong> The page says "Defined in contour.yml"
+  and offers <strong>Duplicate to Edit</strong>, which makes a copy Settings can change.</li>
+<li><strong>With <code>gui_config_locked: true</code></strong> every control is disabled and nothing is written; a banner says why.</li>
+<li><strong>A change that cannot be applied</strong> (a value the loader would reject, or a folder you cannot write to) is refused
+  with the reason, and the control goes on showing the value in effect.</li>
+</ul>
+<p>Names for new profiles and color schemes follow the rules of every system the configuration may travel to, so
+they cannot contain path separators or <code>..</code> and, because a configuration directory may be copied to Windows, may
+not be one of its reserved device names such as <code>con</code>, <code>aux</code> or <code>nul</code>. A <code>profiles/aux.yml</code> or <code>nul.yml</code> you
+already have on Linux still loads, can be edited and deleted.</p>
+<h2 id="colors">Colors<a class="headerlink" href="#colors" title="Permanent link">#</a></h2>
+<p>The Colors page picks the color scheme (one for both appearances, or one for light and one for dark) from a
+gallery of every scheme with its eight ANSI colors. <strong>New scheme</strong> and <strong>Duplicate to Edit</strong> create a scheme;
+a scheme made in Settings can be renamed and deleted. Renaming moves every profile that draws with it. A scheme
+a profile defined in <code>contour.yml</code> draws with cannot be renamed or deleted here, and neither can one that is
+still in use.</p>
+<p>Every color well shows its contrast against the background and says whether it passes, so a scheme whose ink
+does not read is found while you make it. A scheme file that does not parse is never renamed over: open it and
+fix it first.</p>
+<h2 id="links-and-status-line">Links and Status Line<a class="headerlink" href="#links-and-status-line" title="Permanent link">#</a></h2>
+<p>The Links page edits <code>hint_patterns</code> with a preview line that shows what each pattern underlines, as
+described in <a href="../links/">Links</a>. The Status Line page edits the indicator status line's segments with a preview
+of the bar, as described in <a href="../indicator-statusline/">the indicator status line</a>.</p>
+<h2 id="option-as-alt-on-macos">Option as Alt on macOS<a class="headerlink" href="#option-as-alt-on-macos" title="Permanent link">#</a></h2>
+<p><code>option_as_alt</code> takes <code>off</code>, <code>left</code>, <code>right</code> or <code>both</code>, so that one Option key can type accents (é, ü) while the
+other acts as Alt. In Settings it is the <strong>Use Option as Meta</strong> row on the Keyboard group of a profile. <code>true</code>
+and <code>false</code> in an existing file are still read, as <code>both</code> and <code>off</code>.</p></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="every-change-applies-at-once" href="#every-change-applies-at-once">Every change applies at once</a><a data-head="colors" href="#colors">Colors</a><a data-head="links-and-status-line" href="#links-and-status-line">Links and Status Line</a><a data-head="option-as-alt-on-macos" href="#option-as-alt-on-macos">Option as Alt on macOS</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/configuration/settings.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">configure › <b>settings window</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

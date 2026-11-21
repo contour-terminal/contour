@@ -1,0 +1,803 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>profiles - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="../..">
+<link rel="icon" href="../../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../../assets/theme/site.css">
+<script type="module" src="../../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../../assets/contour-logo.png" alt=""><span id="cw-title">profiles</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href="../.."><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../" aria-current="true"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../../vt-sequence/"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour" hidden>
+<a class="tab" data-group="" href="../..">home</a>
+<a class="tab" data-group="" href="../../install/">install</a>
+<a class="tab" data-group="" href="../../features/">features</a>
+<a class="tab" data-group="" href="../../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure">
+<a class="tab" data-group="" href="../">config file</a>
+<a class="tab" data-group="" href="./" aria-current="page">profiles</a>
+<a class="tab" data-group="" href="../settings/">settings window</a>
+<a class="tab" data-group="" href="../colors/">colors</a>
+<a class="tab" data-group="" href="../key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../layouts/">layouts</a>
+<a class="tab" data-group="more" href="../links/">links</a>
+<a class="tab" data-group="more" href="../hosts/">hosts</a>
+<a class="tab" data-group="more" href="../indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference" hidden>
+<a class="tab" data-group="" href="../../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../../vt-extensions/synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>profiles</summary>
+  <div class="tabsel-list">
+<a href="../">config file</a>
+<a href="./" aria-current="page">profiles</a>
+<a href="../settings/">settings window</a>
+<a href="../colors/">colors</a>
+<a href="../key-mapping/">key mapping</a>
+<a href="../layouts/">layouts</a>
+<a href="../links/">links</a>
+<a href="../hosts/">hosts</a>
+<a href="../indicator-statusline/">status line</a>
+<a href="../paths/">paths</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><p>All profiles inside configuration files share parent node <code>profiles</code>. To create profile you need to specify child node</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">    </span><span class="nt">main</span><span class="p">:</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="c1">#default configuration</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="nt">profile_for_windows</span><span class="p">:</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="c1"># windows specific entries</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="nt">profile_for_macos</span><span class="p">:</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="c1"># macos specific entries</span>
+</span></code></pre></div>
+<h2 id="profile-configuration">Profile configuration<a class="headerlink" href="#profile-configuration" title="Permanent link">#</a></h2>
+<h3 id="shell"><code>shell</code><a class="headerlink" href="#shell" title="Permanent link">#</a></h3>
+<p>configuration section allows you to specify the process to be started inside the terminal. It provides flexibility to override the default login shell and supports logging in to a remote host.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">shell</span><span class="p">:</span><span class="w"> </span><span class="s">"/bin/bash"</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="nt">arguments</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"some"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"optional"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"arguments"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"for"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"the"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"shell"</span><span class="p p-Indicator">]</span>
+</span></code></pre></div>
+<ul>
+<li>
+<p><code>arguments</code>: (optional) Allows you to provide additional command-line arguments to the shell executable. These arguments will be passed to the shell when it is started inside the terminal.</p>
+</li>
+<li>
+<p><code>environment</code>: Variables for the shell the profile opens. A local profile passes them to its child process. A built-in SSH profile sends them to its remote host.</p>
+</li>
+</ul>
+<h3 id="ssh"><code>ssh</code><a class="headerlink" href="#ssh" title="Permanent link">#</a></h3>
+<p>With this key, you can bypass local PTY and process execution and directly connect via TCP/IP to a remote SSH server.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">ssh</span><span class="p">:</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">      </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">remote-server.example.com</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">      </span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">22</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">      </span><span class="nt">user</span><span class="p">:</span><span class="w"> </span><span class="s">"CustomUserName"</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">      </span><span class="nt">private_key</span><span class="p">:</span><span class="w"> </span><span class="s">"path/to/key"</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">      </span><span class="nt">public_key</span><span class="p">:</span><span class="w"> </span><span class="s">"path/to/key.pub"</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">      </span><span class="nt">known_hosts</span><span class="p">:</span><span class="w"> </span><span class="s">"~/.ssh/known_hosts"</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">      </span><span class="nt">forward_agent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">      </span><span class="nt">install_terminfo</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">      </span><span class="nt">connect_timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30</span>
+</span></code></pre></div>
+<p>Note, only <code>host</code> option is required. Everything else is defaulted.
+Keep in mind, that the user's <code>~/.ssh/config</code> will be parsed with respect to the supported options above.
+These values can be overridden in the local Contour configuration as follows:</p>
+<ul>
+<li><code>ssh.host</code>: SSH server to establish the connection to.</li>
+<li><code>ssh.port</code>: SSH port (defaults to <code>22</code>). Only specify this value if it is deviating from the default value <code>22</code>.</li>
+<li><code>ssh.private_key</code>: Path to private key to use for key based authentication.</li>
+<li><code>ssh.public_key</code>: Path to public key that belongs to the private key. When using key based authentication, it depends on the underlying backend, if the public key is also required. OpenSSL for example does not require it.</li>
+<li><code>ssh.known_hosts</code>: Path to <code>known_hosts</code> file. This defaults to and usually is located in <code>~/.ssh/known_hosts</code>.</li>
+<li><code>ssh.forward_agent</code>: Boolean, indicating whether or not the local SSH auth agent should be requested to be forwarded. Note: this is currently not working due to an issue related to the underlying library being used, but is hopefully resolved soon.</li>
+<li><code>ssh.install_terminfo</code>: Boolean (defaults to <code>true</code>), indicating whether Contour's terminfo should be installed on the remote host when connecting. It is skipped if the profile's <code>TERM</code> is set to anything other than <code>contour</code>.</li>
+<li><code>ssh.connect_timeout</code>: Seconds (defaults to <code>30</code>) the connection may take to come up, from the TCP connect to the started shell. Time spent waiting for the user (host key confirmation, passphrase, password) does not count, nor does SSH agent authentication, which has its own allowance of 2 minutes (or this value, if longer). <code>0</code> means no limit; values above <code>86400</code> (24 hours) are taken as <code>86400</code>.</li>
+</ul>
+<p>For SSH profiles, TERM from the profile's <code>environment</code> is sent with the PTY request. If blank or omitted, it uses the top-level <code>ssh_default_term</code>, then the client environment. If both are empty, Windows uses <code>xterm-256color</code> and other platforms send an empty terminal type. Choose a TERM value whose terminfo entry is installed on the server. Other variables are sent as SSH environment requests and may be rejected by the server.</p>
+<p>If an OpenSSH server is used, have a look at the <code>AcceptEnv</code> configuration setting in the <code>sshd_config</code>
+configuration file on the remote SSH server, to configure what environment variables are permitted to be sent.</p>
+<h3 id="escape_sandbox"><code>escape_sandbox</code><a class="headerlink" href="#escape_sandbox" title="Permanent link">#</a></h3>
+<p>option in the configuration file allows you to control the sandboxing behavior when the terminal is executed from within Flatpak. This configuration is relevant only if the terminal is running in a Flatpak environment.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">escape_sandbox</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span></code></pre></div>
+<h3 id="copy_last_mark_range_offset"><code>copy_last_mark_range_offset</code><a class="headerlink" href="#copy_last_mark_range_offset" title="Permanent link">#</a></h3>
+<p>configuration option is an advanced setting that is useful when using the CopyPreviousMarkRange feature with multiline prompts. It allows you to specify an offset value that is added to the current cursor's line number minus 1 (i.e., the line above the current cursor).</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="nt">copy_last_mark_range_offset</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
+</span></code></pre></div>
+<h3 id="copy_command_preserve_multiline"><code>copy_command_preserve_multiline</code><a class="headerlink" href="#copy_command_preserve_multiline" title="Permanent link">#</a></h3>
+<p>Set <code>copy_command_preserve_multiline: true</code> to preserve internal line breaks and tabs when using Copy Command. The default is <code>false</code>, which keeps single-line copying. CR/CRLF are normalized to LF; trailing whitespace is removed. Unsafe controls are filtered in both modes. Pasting multiline text into a destination without bracketed paste may execute commands immediately.</p>
+<h3 id="show_title_bar"><code>show_title_bar</code><a class="headerlink" href="#show_title_bar" title="Permanent link">#</a></h3>
+<p>configuration option determines whether or not the title bar will be shown when the terminal profile is activated.
+On Linux, <code>false</code> (the default) is Contour's own header bar with the desktop's window buttons; with <code>true</code> the window manager draws the frame (KWin, Mutter, or a tiling WM's border or none), and the header bar keeps the tabs, new tab, search and menu: only the window buttons move out of it.</p>
+<p></p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">show_title_bar</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span></code></pre></div>
+With <code>false</code>, the header bar rounds the window's top corners while it is neither maximised nor full screen. Outside the corners the window is transparent, which takes a compositor: on X11 without one, the corners show black. Run a compositor there, or set <code>show_title_bar: true</code>.
+<h3 id="window_shadow"><code>window_shadow</code><a class="headerlink" href="#window_shadow" title="Permanent link">#</a></h3>
+<p>configuration option sets how far the drop shadow around a frameless window reaches.
+One of <code>None</code>, <code>Small</code>, <code>Medium</code>, <code>Large</code> or <code>VeryLarge</code> — the same names and sizes Breeze offers, so a Contour window matches the rest of a Plasma desktop.</p>
+<p></p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="nt">window_shadow</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Large</span>
+</span></code></pre></div>
+Only KWin can act on this. With <a href="./#show_title_bar"><code>show_title_bar</code></a> set to <code>true</code> the window manager draws its own shadow along with its decoration, and no other Wayland compositor or X11 window manager offers a way for an undecorated window to publish one — so everywhere else, every value behaves as <code>None</code>. Windows and macOS draw a system shadow of their own instead.
+<h3 id="dim_unfocused"><code>dim_unfocused</code><a class="headerlink" href="#dim_unfocused" title="Permanent link">#</a></h3>
+<p>configuration option dims a pane while it is not the focused one (an inactive pane of a split, or any pane of an unfocused window) by blending it toward its own background color. The value is the blend amount between 0.0 (dimming disabled; the <code>classic</code> default) and 1.0 (fully blended to the background). The <code>native2026</code> default is 0.15.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="nt">dim_unfocused</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.3</span>
+</span></code></pre></div>
+<h3 id="size_indicator_on_resize"><code>size_indicator_on_resize</code><a class="headerlink" href="#size_indicator_on_resize" title="Permanent link">#</a></h3>
+<p>configuration option determines whether or not the size indicator will be shown when terminal will resized.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="nt">size_indicator_on_resize</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span></code></pre></div>
+<h3 id="fullscreen"><code>fullscreen</code><a class="headerlink" href="#fullscreen" title="Permanent link">#</a></h3>
+<p>configuration option determines whether the terminal's screen should be put into fullscreen mode when the terminal profile is activated. Fullscreen mode expands the terminal window to occupy the entire screen, providing a distraction-free environment for your terminal sessions.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">fullscreen</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span></code></pre></div>
+<h3 id="maximized"><code>maximized</code><a class="headerlink" href="#maximized" title="Permanent link">#</a></h3>
+<p>configuration option determines whether the terminal window should be maximized when the specified profile is activated. Maximizing a window expands it to fill the entire available space on the screen, excluding the taskbar or other system elements.</p>
+<h3 id="insert_after_yank"><code>insert_after_yank</code><a class="headerlink" href="#insert_after_yank" title="Permanent link">#</a></h3>
+<p>This configuration option determines whether the terminal should automatically switch from normal mode to insert mode after executing a yank command. When enabled, the terminal will enter insert mode, allowing for immediate text input. If disabled, the terminal will remain in normal mode, maintaining command functionality.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="nt">insert_after_yank</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span></code></pre></div>
+<h3 id="bell"><code>bell</code><a class="headerlink" href="#bell" title="Permanent link">#</a></h3>
+<p>Configuration section permits tuning the behavior of the terminal bell.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">    </span><span class="nt">bell</span><span class="p">:</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">      </span><span class="nt">sound</span><span class="p">:</span><span class="w"> </span><span class="s">"default"</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">      </span><span class="nt">alert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span></code></pre></div>
+<ul>
+<li><code>sound</code>: This option determines the sound of <code>BEL</code> (also <code></code> or <code>0x07</code>) to <code>off</code> or <code>default</code> or sound generated by a file located at <code>path</code>.</li>
+<li><code>alert</code>: This option determines whether or not a window alert will be raised each time a bell is ringed. Useful for tiling window managers like i3 or sway.</li>
+</ul>
+<h3 id="notify_on_command_finish"><code>notify_on_command_finish</code><a class="headerlink" href="#notify_on_command_finish" title="Permanent link">#</a></h3>
+<p>configuration tells you when a command you are not watching finishes: a desktop notification, the bell, or both.</p>
+<p></p><div class="language-yaml highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">    </span><span class="nt">notify_on_command_finish</span><span class="p">:</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">      </span><span class="nt">when</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unfocused</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">      </span><span class="nt">min_duration</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">      </span><span class="nt">outcome</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">any</span>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="w">      </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">notify</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="w">      </span><span class="nt">clear_on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">focus</span>
+</span></code></pre></div>
+Commands are known from the OSC 133 marks shell integration emits; a shell without it reports none, so nothing is notified. A notification reads <code>✓ make finished</code>, <code>✗ make failed (exit 2)</code> or <code>✗ make killed (SIGSEGV)</code>, with how long it took, where it ran and the tab's name below. A newer finish in the same pane replaces the older notification, and clicking it brings the pane forward where the desktop reports clicks.
+<ul>
+<li><code>when</code>: <code>never</code>, <code>unfocused</code> (unless it is the focused pane of the active window), <code>hidden</code> (only while the pane is off screen: another tab is active, a sibling pane is zoomed, or the window is minimised) or <code>always</code>.</li>
+<li><code>min_duration</code>: Commands that ran for fewer seconds than this never notify.</li>
+<li><code>outcome</code>: <code>any</code>, or <code>failure</code> for commands that exited non-zero or died of a signal.</li>
+<li><code>action</code>: <code>notify</code> (a desktop notification), <code>bell</code> (the profile's bell sound and window alert) or <code>notify_bell</code> (both).</li>
+<li><code>clear_on</code>: When a notification still on screen is withdrawn: <code>focus</code> (the pane is focused), <code>next</code> (the pane's next command starts) or <code>never</code>. Only a desktop notification can be withdrawn, which is what Linux shows; on Windows and macOS the notice is a tray message, which stays until it times out whatever <code>clear_on</code> says.</li>
+</ul>
+<h3 id="terminal_id"><code>terminal_id</code><a class="headerlink" href="#terminal_id" title="Permanent link">#</a></h3>
+<p>configuration option allows you to specify the terminal type that will be advertised by the terminal emulator. The terminal type indicates the set of capabilities and features that the terminal supports, enabling compatibility with different applications and systems.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">    </span><span class="nt">terminal_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">VT525</span>
+</span></code></pre></div>
+<h3 id="answerback"><code>answerback</code><a class="headerlink" href="#answerback" title="Permanent link">#</a></h3>
+<p>configuration option sets the answerback message: the text the terminal sends to the application when it receives ENQ (Ctrl+E). It is empty by default, so nothing is sent, as in xterm and Windows Terminal. Anything put here is told to every program that asks, so it should not hold anything secret.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">    </span><span class="nt">answerback</span><span class="p">:</span><span class="w"> </span><span class="s">"contour"</span>
+</span></code></pre></div>
+<h3 id="pixel_reporting"><code>pixel_reporting</code><a class="headerlink" href="#pixel_reporting" title="Permanent link">#</a></h3>
+<p>Selects the unit Contour reports pixel sizes to applications in, via <code>TIOCGWINSZ</code>
+(<code>ws_xpixel</code>/<code>ws_ypixel</code>), <code>CSI 14 t</code>, <code>CSI 16 t</code> and <code>XTSMGRAPHICS</code>.</p>
+<p>Applications derive the cell size by dividing a reported extent by the grid and size image
+canvases from it, so on a scaled display this decides how large an image an application draws
+into a given area.</p>
+<p>A report is only usable if that division is exact, and Contour's cell is the font's advance in
+<strong>device</strong> pixels — at a fractional scale it has no exact logical counterpart (17 / 1.75 =
+9.714). Valid values (ignore-case):</p>
+<ul>
+<li><code>Device</code> — report device pixels. The division is exact, so an image lands 1:1 on the display's
+  own pixels and is never resampled — gapless and sharp. The cost is that the application draws
+  as many times more pixels per axis as the display is scaled by. This is the default.</li>
+<li><code>Logical</code> — report logical pixels, matching the canvas size a terminal whose cell is integral
+  in logical pixels (Konsole, for one) would report, which is useful when comparing the two on
+  equal terms. Exact only where the scale divides both cell axes evenly (an unscaled display,
+  or a 20x40 cell at scale 2). Otherwise each axis is floored on its own, which changes the
+  cell's aspect ratio, and a full-page image is letterboxed by the difference — a few percent
+  of unpainted space down one side.</li>
+</ul>
+<p>On an unscaled display the two are identical.</p>
+<h3 id="frozen_dec_modes"><code>frozen_dec_modes</code><a class="headerlink" href="#frozen_dec_modes" title="Permanent link">#</a></h3>
+<p>Defines a list of DEC modes to explicitly and permanently disable or enable support for.</p>
+<p>This is a developer-users-only option that may possibly help investigating problems. It may also be used by regular users if they are asked to, in order to disable a broken functionality. This is something we hardly try to avoid, of course.</p>
+<p>It is an object with each key being the DEC mode number and its value a boolean, indicating whether this DEC mode is permanently set (enabled) or unset (disabled). A change applies to sessions opened afterwards. It is a profile option.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">    </span><span class="nt">frozen_dec_modes</span><span class="p">:</span>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">      </span><span class="nt">2026</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">      </span><span class="nt">2027</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span></code></pre></div>
+<h3 id="slow_scrolling_time"><code>slow_scrolling_time</code><a class="headerlink" href="#slow_scrolling_time" title="Permanent link">#</a></h3>
+<p>Defines the number of milliseconds to wait before actually executing the LF (linefeed) control code
+in case DEC mode <code>DECSCLM</code> is enabled.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">    </span><span class="nt">slow_scrolling_time</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
+</span></code></pre></div>
+<h3 id="smooth_scrolling"><code>smooth_scrolling</code><a class="headerlink" href="#smooth_scrolling" title="Permanent link">#</a></h3>
+<p>Enables pixel-based smooth scrolling.
+When enabled, scrolling will be performed in pixel increments rather than jumping by full lines,
+providing a smoother visual experience similar to GNOME Terminal/VTE.
+This applies to mouse wheel and trackpad scrolling on the primary screen.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">    </span><span class="nt">smooth_scrolling</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span></code></pre></div>
+<h3 id="momentum_scrolling"><code>momentum_scrolling</code><a class="headerlink" href="#momentum_scrolling" title="Permanent link">#</a></h3>
+<p>Enables momentum (inertia) scrolling for touchpad gestures.
+When enabled, lifting your finger from the touchpad after a swipe will cause
+the terminal to continue scrolling with decelerating velocity, mimicking
+the natural scrolling behaviour of macOS and iOS.
+This governs touchpad finger-lift inertia only. Mouse-wheel smoothness is controlled by
+<code>smooth_scrolling</code>, which glides discrete wheel notches with the same physics.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="w">    </span><span class="nt">momentum_scrolling</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span></code></pre></div>
+<h3 id="terminal_size"><code>terminal_size</code><a class="headerlink" href="#terminal_size" title="Permanent link">#</a></h3>
+<p>configuration option allows you to specify the initial size of the terminal window in terms of the number of columns and lines.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="w">    </span><span class="nt">terminal_size</span><span class="p">:</span>
+</span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="w">      </span><span class="nt">columns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">80</span>
+</span><span id="__span-19-5"><a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="w">      </span><span class="nt">lines</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">25</span>
+</span></code></pre></div>
+<ul>
+<li><code>columns</code>: This option specifies the number of columns (characters) to be displayed in the terminal window. In the provided example, the value is set to 80.</li>
+<li><code>lines</code>: This option specifies the number of lines to be displayed in the terminal window. In the provided example, the value is set to 25.</li>
+</ul>
+<h3 id="margins"><code>margins</code><a class="headerlink" href="#margins" title="Permanent link">#</a></h3>
+<p>Enforces a horizontal and vertical margin to respect on both sides of the terminal.
+This is particularly useful on operating systems (like MacOS) that draw the border frame into the main widgets space,
+or simply to create some artificial space to improve the user's focus.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="w">    </span><span class="nt">margins</span><span class="p">:</span>
+</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="w">      </span><span class="nt">horizontal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
+</span><span id="__span-20-5"><a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="w">      </span><span class="nt">vertical</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
+</span></code></pre></div>
+<h3 id="history"><code>history</code><a class="headerlink" href="#history" title="Permanent link">#</a></h3>
+<p>configuration allows you to customize the behavior and settings related to the terminal's history, including the number of preserved lines, auto-scrolling, and scroll events.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="w">    </span><span class="nt">history</span><span class="p">:</span>
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="w">      </span><span class="nt">limit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000</span>
+</span><span id="__span-21-5"><a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="w">      </span><span class="nt">hard_limit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2000</span>
+</span><span id="__span-21-6"><a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="w">      </span><span class="nt">auto_scroll_on_update</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span><span id="__span-21-7"><a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="w">      </span><span class="nt">scroll_multiplier</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
+</span></code></pre></div>
+<ul>
+<li><code>limit</code>: This option specifies the number of lines to preserve in the terminal's history. A value of -1 indicates unlimited history, meaning that all lines are preserved. In the provided example, the limit is set to 1000.</li>
+<li><code>hard_limit</code>: The upper bound on the scrollback, and what makes eviction command-aware. Anything above <code>limit</code> is headroom: the buffer is allowed to grow into it, and when it fills, whole (prompt, output) blocks are dropped from the top rather than a slice taken wherever <code>limit</code> fell. The oldest line kept is then a prompt with its command's output intact, instead of an orphaned tail. Block boundaries come from the <a href="../../vt-extensions/osc-133-shell-integration/">OSC 133</a> marks a shell with shell integration emits, so with no such shell -- or for a single command whose output is larger than the whole headroom -- there is no boundary to honour and the buffer simply bounds at this value, evicting line by line as before. Values below <code>limit</code> are raised to it, which disables the feature; -1 means infinite, and an infinite <code>limit</code> makes this infinite too since nothing is ever evicted. Defaults to <code>limit</code>.</li>
+<li><code>auto_scroll_on_update</code>: This boolean option determines whether new output brings a view scrolled back into the history down to the bottom. Only output that adds lines counts: a prompt, a progress bar or a clock repainted in place does not, so a shell that redraws its prompt on a timer leaves the view where you put it. If set to false, the terminal maintains the current scroll position until you type, which always brings the view down. Defaults to false.</li>
+<li><code>scroll_multiplier</code>: This option defines the number of lines to scroll when the ScrollUp or ScrollDown events occur. By default, scrolling up or down moves three lines at a time. You can adjust this value as needed. In the provided example, scroll_multiplier is set to 3.</li>
+</ul>
+<h3 id="scrollbar"><code>scrollbar</code><a class="headerlink" href="#scrollbar" title="Permanent link">#</a></h3>
+<p>configuration allows you to customize the appearance and behavior of the visual scrollbar in the terminal.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="w">    </span><span class="nt">scrollbar</span><span class="p">:</span>
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="w">      </span><span class="nt">position</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Right</span>
+</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="w">      </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">system</span>
+</span><span id="__span-22-6"><a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="w">      </span><span class="nt">hide_in_alt_screen</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-22-7"><a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="w">      </span><span class="nt">marks</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">failures</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">commands</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">running</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">user_marks</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">search_matches</span><span class="p p-Indicator">]</span>
+</span></code></pre></div>
+<ul>
+<li><code>position</code>:  This option specifies the position of the scrollbar in the terminal window. It can be set to one of the following values: Left, Right, Hidden. The default is Right for new configurations; a <code>contour.yml</code> written by an earlier version keeps <code>Hidden</code>, so set <code>position: Right</code> there to see the marks. Hidden turns the scrollbar, and with it the command marks, off. The scrollbar floats over the edge of the terminal, takes no column from it, and is shown only while there is history to scroll through.</li>
+<li><code>mode</code>: <code>system</code> follows the operating system's scroll bar setting; <code>overlay</code> hides the bar at the bottom of the scrollback, unless a failed or running command or a user mark is above the view; <code>always</code> shows it while there is scrollback. Defaults to <code>system</code>; a configuration written before the 2026 defaults keeps <code>always</code>. Where the system publishes no setting, <code>system</code> means <code>overlay</code>.</li>
+<li><code>hide_in_alt_screen</code>: This boolean option determines whether the scrollbar should be hidden when the terminal is in the alternate screen mode. If set to true, the scrollbar will be hidden when the terminal switches to the alternate screen. If set to false, the scrollbar will remain visible even in the alternate screen mode.</li>
+<li><code>marks</code>: Which marks the scrollbar shows as thin ticks; clicking a tick scrolls its line to the top of the view, opening it if it is folded. A list of <code>failures</code> (commands that exited with an error), <code>commands</code> (every command that did not fail; <code>running</code> is listed on its own), <code>running</code> (commands still running, drawn as hollow ticks), <code>user_marks</code> (lines marked with <code>mm</code> in vi normal mode) and <code>search_matches</code> (the rows the active search matches, in yellow); <code>[]</code> shows none. The default is <code>[failures, running, search_matches]</code>, or, in a configuration written before the 2026 defaults, <code>[failures, commands, running, user_marks]</code>. Command ticks need the OSC 133 marks a shell with shell integration emits -- or, without one, systemd's OSC 3008 contexts. Ticks are hidden whenever the scrollbar is.</li>
+</ul>
+<h3 id="sticky_header"><code>sticky_header</code><a class="headerlink" href="#sticky_header" title="Permanent link">#</a></h3>
+<p>configuration pins the command line of the block you are reading over the top row of the terminal, once that command has scrolled out of view above its own output.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="w">    </span><span class="nt">sticky_header</span><span class="p">:</span>
+</span><span id="__span-23-4"><a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="w">      </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">scrolled</span>
+</span><span id="__span-23-5"><a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="w">      </span><span class="nt">show_evicted</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span></code></pre></div>
+<ul>
+<li><code>mode</code>: When the header appears: <code>never</code>, <code>scrolled</code> (only while the viewport is scrolled back into history; the default) or <code>always</code> (also while following live output, so a long build keeps its command in view). It needs prompt marks (OSC 133;A), never appears on the alternate screen, shows the command's exit status and duration on its right, and a click on it scrolls to the command. A shell that marks only where its commands run (<code>;C</code>, <code>;D</code>) gets no header.</li>
+<li><code>show_evicted</code>: Whether the header still names a command whose own line has already been dropped from the scrollback, as <code>⋯ &lt;command&gt; — earlier output evicted</code>, so a long output does not lose its header when its prompt is evicted. At the very top of the scrollback it shows whatever <code>mode</code> says (even <code>never</code>); anywhere else it shows wherever <code>mode</code> would show a header.</li>
+</ul>
+<h3 id="mouse"><code>mouse</code><a class="headerlink" href="#mouse" title="Permanent link">#</a></h3>
+<p>configuration allows you to control the behavior of the mouse in the terminal.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="w">    </span><span class="nt">mouse</span><span class="p">:</span>
+</span><span id="__span-24-4"><a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="w">      </span><span class="nt">hide_while_typing</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span></code></pre></div>
+<ul>
+<li><code>hide_while_typing</code>: This boolean option determines whether the mouse cursor should be hidden while typing in the terminal. When set to true, the mouse cursor will be hidden when you start typing. When set to false, the mouse cursor will remain visible while typing.</li>
+</ul>
+<h3 id="permissions"><code>permissions</code><a class="headerlink" href="#permissions" title="Permanent link">#</a></h3>
+<p>configuration allows you to control the access permissions for specific VT sequences in the terminal.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-25-3"><a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="w">    </span><span class="nt">permissions</span><span class="p">:</span>
+</span><span id="__span-25-4"><a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="w">      </span><span class="nt">change_font</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ask</span>
+</span><span id="__span-25-5"><a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a><span class="w">      </span><span class="nt">capture_buffer</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ask</span>
+</span><span id="__span-25-6"><a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a><span class="w">      </span><span class="nt">display_host_writable_statusline</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ask</span>
+</span></code></pre></div>
+<ul>
+<li><code>change_font</code>: This option determines the access permission for changing the font using the VT sequence <code>OSC 50 ; Pt ST</code>. The possible values are: allow, deny, ask.</li>
+<li><code>capture_buffer</code>: This option determines the access permission for capturing the screen buffer using the VT sequence <code>CSI &gt; Pm ; Ps ; Pc ST</code>. The response can be read from stdin as the sequence <code>OSC 314 ; &lt;screen capture&gt; ST</code>. The possible values are: allow, deny, ask.</li>
+<li><code>display_host_writable_statusline</code>: This option determines the access permission for displaying the "Host Writable Statusline" programmatically using the VT sequence <code>DECSSDT 2</code>. The possible values are: allow, deny, ask.</li>
+</ul>
+<h3 id="input_method_editor"><code>input_method_editor</code><a class="headerlink" href="#input_method_editor" title="Permanent link">#</a></h3>
+<p>Enables Input Method Editor (IME) support. This is enabled by default.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-26-2"><a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-26-3"><a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="w">    </span><span class="nt">input_method_editor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span></code></pre></div>
+<h3 id="input_method_editor_style"><code>input_method_editor_style</code><a class="headerlink" href="#input_method_editor_style" title="Permanent link">#</a></h3>
+<p>How text an input method is composing is drawn, at the cursor, or to its left when it would not fit.</p>
+<p>Valid values are:</p>
+<ul>
+<li><code>inline</code> - in the terminal's default colours with a thin underline, as it will read once committed</li>
+<li><code>highlighted</code> - in the colour scheme's <code>input_method_editor</code> colours, bold and underlined</li>
+</ul>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-27-2"><a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-27-3"><a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="w">    </span><span class="nt">input_method_editor_style</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">inline</span>
+</span></code></pre></div>
+<h3 id="highlight_word_and_matches_on_double_click"><code>highlight_word_and_matches_on_double_click</code><a class="headerlink" href="#highlight_word_and_matches_on_double_click" title="Permanent link">#</a></h3>
+<p>configuration option enables the highlighting of a word and its matches when double-clicked on the primary screen in the terminal.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-28-1"><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-28-2"><a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-28-3"><a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="w">    </span><span class="nt">highlight_word_and_matches_on_double_click</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span></code></pre></div>
+<ul>
+<li>
+<p><code>highlight_word_and_matches_on_double_click</code>: When this option is enabled (true), the following behavior occurs:</p>
+<ul>
+<li>Double-clicking on a word in the primary screen will select and highlight the double-clicked word.</li>
+<li>Additionally, all other occurrences of the same word will also be highlighted without being selected.</li>
+<li>This feature is implemented by initiating a search for the double-clicked word.</li>
+<li>You can use the FocusNextSearchMatch and FocusPreviousSearchMatch actions to navigate to the next or previous occurrence of the same word, even if it is outside the current viewport.</li>
+</ul>
+</li>
+</ul>
+<h3 id="font"><code>font</code><a class="headerlink" href="#font" title="Permanent link">#</a></h3>
+<p>section of the configuration allows you to customize the font settings for the terminal.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-29-1"><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-29-2"><a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-29-3"><a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="w">    </span><span class="nt">font</span><span class="p">:</span>
+</span><span id="__span-29-4"><a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">12</span>
+</span><span id="__span-29-5"><a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a><span class="w">      </span><span class="nt">locator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">native</span>
+</span><span id="__span-29-6"><a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a><span class="w">      </span><span class="nt">text_shaping</span><span class="p">:</span>
+</span><span id="__span-29-7"><a id="__codelineno-29-7" name="__codelineno-29-7" href="#__codelineno-29-7"></a><span class="w">        </span><span class="nt">engine</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">native</span>
+</span><span id="__span-29-8"><a id="__codelineno-29-8" name="__codelineno-29-8" href="#__codelineno-29-8"></a><span class="w">      </span><span class="nt">builtin_box_drawing</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-29-9"><a id="__codelineno-29-9" name="__codelineno-29-9" href="#__codelineno-29-9"></a><span class="w">      </span><span class="nt">max_fallback_count</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">16</span>
+</span><span id="__span-29-10"><a id="__codelineno-29-10" name="__codelineno-29-10" href="#__codelineno-29-10"></a><span class="w">      </span><span class="nt">render_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gray</span>
+</span><span id="__span-29-11"><a id="__codelineno-29-11" name="__codelineno-29-11" href="#__codelineno-29-11"></a><span class="w">      </span><span class="nt">strict_spacing</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span><span id="__span-29-12"><a id="__codelineno-29-12" name="__codelineno-29-12" href="#__codelineno-29-12"></a><span class="w">      </span><span class="nt">regular</span><span class="p">:</span>
+</span><span id="__span-29-13"><a id="__codelineno-29-13" name="__codelineno-29-13" href="#__codelineno-29-13"></a><span class="w">        </span><span class="nt">family</span><span class="p">:</span><span class="w"> </span><span class="s">"monospace"</span>
+</span><span id="__span-29-14"><a id="__codelineno-29-14" name="__codelineno-29-14" href="#__codelineno-29-14"></a><span class="w">        </span><span class="nt">weight</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">regular</span>
+</span><span id="__span-29-15"><a id="__codelineno-29-15" name="__codelineno-29-15" href="#__codelineno-29-15"></a><span class="w">        </span><span class="nt">slant</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">normal</span>
+</span><span id="__span-29-16"><a id="__codelineno-29-16" name="__codelineno-29-16" href="#__codelineno-29-16"></a><span class="w">        </span><span class="nt">features</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span>
+</span><span id="__span-29-17"><a id="__codelineno-29-17" name="__codelineno-29-17" href="#__codelineno-29-17"></a><span class="w">      </span><span class="nt">emoji</span><span class="p">:</span><span class="w"> </span><span class="s">"emoji"</span>
+</span></code></pre></div>
+<ul>
+<li><code>size</code>: Specifies the initial font size in pixels. The default value is 12, and 13 on macOS under the <code>native2026</code> defaults.</li>
+<li><code>locator</code>:  Determines the font locator engine to use for locating font files and font fallback. Possible values are <code>native</code> and <code>mock</code>. <code>native</code> will use the operating-system native font location service (e.g. CoreText on macOS and DirectWrite on Windows), whereas <code>mock</code> is solely used for testing the software (not recommended by end-users)</li>
+<li><code>text_shaping.engine</code>: Selects the text shaping and font rendering engine. Supported values are native, DirectWrite, CoreText, and OpenShaper. </li>
+<li><code>builtin_box_drawing</code>: Specifies whether to use built-in textures for pixel-perfect box drawing. If disabled, the font's provided box drawing characters will be used. The default value is true.</li>
+<li><code>max_fallback_count</code>: Maximum number of fallback fonts per font style. Set to -1 for unlimited, 0 to disable fallbacks entirely. The default value is 16.</li>
+<li><code>render_mode</code>: Specifies the font render mode, which tells the font rasterizer engine what rendering technique to use. Available modes are lcd, light, gray, color and monochrome. </li>
+<li><code>strict_spacing</code>: Indicates whether only monospace fonts should be included in the font and font fallback list. The default value is false. A character none of those fonts has is still drawn with whatever font the system names for it, on Windows and macOS.</li>
+<li><code>regular</code>: Defines the regular font style with the following parameters: </li>
+<li><code>regular.family</code>: Specifies the font family name, such as "monospace", "Courier New", or "Fira Code".</li>
+<li><code>regular.weight</code>: Specifies the font weight, such as thin, extra_light, light, demilight, book, normal, medium, demibold, bold, extra_bold, black, or extra_black.</li>
+<li><code>regular.slant</code>: Specifies the font slant, which can be normal, italic, or oblique.</li>
+<li><code>regular.features</code>: Sets optional font features to be enabled. This is usually a 4-letter code, such as ss01 or ss02. Refer to your font's documentation for supported features. By default, no features are enabled.</li>
+<li><code>emoji</code>: Specifies the font to be used for displaying Unicode symbols with emoji presentation. The default value is "emoji".</li>
+</ul>
+<h3 id="draw_bold_text_with_bright_colors"><code>draw_bold_text_with_bright_colors</code><a class="headerlink" href="#draw_bold_text_with_bright_colors" title="Permanent link">#</a></h3>
+<p>Specifies whether bold text should be rendered in bright colors for indexed colors. If disabled, normal colors will be used for bold text. The default value is false.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-30-1"><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-30-2"><a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-30-3"><a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="w">   </span><span class="nt">draw_bold_text_with_bright_colors</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span></code></pre></div>
+<h3 id="search_case_sensitivity"><code>search_case_sensitivity</code><a class="headerlink" href="#search_case_sensitivity" title="Permanent link">#</a></h3>
+<p>Which case policy the find bar opens with.</p>
+<ul>
+<li><code>smart</code> (default): the search is case-insensitive until the term contains an uppercase letter, at which point it becomes exact. So <code>error</code> also finds <code>Error</code>, while <code>Error</code> finds only itself. The test is Unicode-aware, so it works for non-Latin scripts too.</li>
+<li><code>insensitive</code>: never case-sensitive.</li>
+<li><code>sensitive</code>: always case-sensitive.</li>
+</ul>
+<p>The find bar's <code>Aa</code> button cycles the same three at any time; this only selects the one it starts from.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-31-1"><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-31-2"><a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-31-3"><a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="w">    </span><span class="nt">search_case_sensitivity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">smart</span>
+</span></code></pre></div>
+<h3 id="mouse_forwarding"><code>mouse_forwarding</code><a class="headerlink" href="#mouse_forwarding" title="Permanent link">#</a></h3>
+<p>Mouse Forwarding: whether mouse events reach an application that asks for them.</p>
+<ul>
+<li><code>forwarded</code> (default): an application that turns mouse tracking on (<code>vim</code>, <code>tmux</code>, <code>htop</code>, many TUIs) is told about clicks, motion and the wheel.</li>
+<li><code>blocked</code>: no mouse report and no DEC locator event reaches the application, and a locator position request is answered as from an unavailable locator. Selecting, scrolling and following links work as if no application had asked, and on the alternate screen the wheel still becomes cursor keys (alternate scroll). The application's request is still recorded, so forwarding again resumes the protocol it asked for.</li>
+</ul>
+<p>The <code>ToggleMouseForwarding</code> action flips this at runtime. A profile switch or a configuration reload re-imposes the profile's value.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-32-1"><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-32-2"><a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-32-3"><a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="w">    </span><span class="nt">mouse_forwarding</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">forwarded</span>
+</span></code></pre></div>
+<h3 id="blink_style"><code>blink_style</code><a class="headerlink" href="#blink_style" title="Permanent link">#</a></h3>
+<p>Determines the visual style of cell blink animation (SGR attributes 5 and 6).</p>
+<p>Valid values are:</p>
+<ul>
+<li><code>classic</code> - abrupt on/off toggle</li>
+<li><code>smooth</code> - continuous cosine-based pulse</li>
+<li><code>linger</code> - like smooth but stays visible longer</li>
+</ul>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-33-1"><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-33-2"><a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-33-3"><a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="w">    </span><span class="nt">blink_style</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">smooth</span>
+</span></code></pre></div>
+<h3 id="screen_transition"><code>screen_transition</code><a class="headerlink" href="#screen_transition" title="Permanent link">#</a></h3>
+<p>Determines the visual style of screen transitions between primary and alternate screens.</p>
+<p>When switching between primary and alternate screen buffers (e.g. entering/leaving vim, htop),
+this setting controls whether the transition is instant or animated.</p>
+<p>Valid values are:</p>
+<ul>
+<li><code>classic</code> - instant switch (no animation)</li>
+<li><code>fade</code> - smooth fade-out/fade-in (250ms by default; 150ms under the <code>native2026</code> defaults)</li>
+</ul>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-34-1"><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-34-2"><a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-34-3"><a id="__codelineno-34-3" name="__codelineno-34-3" href="#__codelineno-34-3"></a><span class="w">    </span><span class="nt">screen_transition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fade</span>
+</span></code></pre></div>
+<h3 id="screen_transition_duration"><code>screen_transition_duration</code><a class="headerlink" href="#screen_transition_duration" title="Permanent link">#</a></h3>
+<p>Duration in milliseconds for the screen transition animation.</p>
+<p>Only applies when <code>screen_transition</code> is set to <code>fade</code>.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-35-1"><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-35-2"><a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-35-3"><a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a><span class="w">    </span><span class="nt">screen_transition_duration</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">250</span>
+</span></code></pre></div>
+<h3 id="cursor_motion_animation_duration"><code>cursor_motion_animation_duration</code><a class="headerlink" href="#cursor_motion_animation_duration" title="Permanent link">#</a></h3>
+<p>Duration in milliseconds for the cursor motion animation when the cursor moves between cells.</p>
+<p>Set to <code>0</code> to disable cursor motion animation (instant jumps).</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-36-1"><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-36-2"><a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-36-3"><a id="__codelineno-36-3" name="__codelineno-36-3" href="#__codelineno-36-3"></a><span class="w">    </span><span class="nt">cursor_motion_animation_duration</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100</span>
+</span></code></pre></div>
+<h3 id="cursor"><code>cursor</code><a class="headerlink" href="#cursor" title="Permanent link">#</a></h3>
+<p>section of the configuration allows you to customize the appearance and behavior of the terminal cursor.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-37-1"><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-37-2"><a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-37-3"><a id="__codelineno-37-3" name="__codelineno-37-3" href="#__codelineno-37-3"></a><span class="w">   </span><span class="nt">cursor</span><span class="p">:</span>
+</span><span id="__span-37-4"><a id="__codelineno-37-4" name="__codelineno-37-4" href="#__codelineno-37-4"></a><span class="w">    </span><span class="nt">shape</span><span class="p">:</span><span class="w"> </span><span class="s">"bar"</span>
+</span><span id="__span-37-5"><a id="__codelineno-37-5" name="__codelineno-37-5" href="#__codelineno-37-5"></a><span class="w">    </span><span class="nt">blinking</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span><span id="__span-37-6"><a id="__codelineno-37-6" name="__codelineno-37-6" href="#__codelineno-37-6"></a><span class="w">    </span><span class="nt">blinking_interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">500</span>
+</span></code></pre></div>
+<ul>
+<li>
+<p><code>shape</code>: Specifies the shape of the cursor. You can choose from the following options:</p>
+<ul>
+<li><code>block</code>: A filled rectangle.</li>
+<li><code>rectangle</code>: Just the outline of a block.</li>
+<li><code>underscore</code>: A line under the text.</li>
+<li><code>bar</code>: The well-known i-Beam cursor.</li>
+</ul>
+</li>
+<li>
+<p><code>blinking</code>: Determines whether the cursor should blink over time. If set to true, the cursor will blink; if set to false, the cursor will remain static.</p>
+</li>
+<li><code>blinking_interval</code>: Specifies the blinking interval in milliseconds. This value defines how quickly the cursor alternates between being visible and invisible when blinking is enabled.</li>
+</ul>
+<h3 id="normal_mode"><code>normal_mode</code><a class="headerlink" href="#normal_mode" title="Permanent link">#</a></h3>
+<p>section in the configuration allows you to customize the appearance and behavior of the cursor specifically in vi-like normal mode.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-38-1"><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-38-2"><a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-38-3"><a id="__codelineno-38-3" name="__codelineno-38-3" href="#__codelineno-38-3"></a><span class="w">    </span><span class="nt">normal_mode</span><span class="p">:</span>
+</span><span id="__span-38-4"><a id="__codelineno-38-4" name="__codelineno-38-4" href="#__codelineno-38-4"></a><span class="w">      </span><span class="nt">cursor</span><span class="p">:</span>
+</span><span id="__span-38-5"><a id="__codelineno-38-5" name="__codelineno-38-5" href="#__codelineno-38-5"></a><span class="w">        </span><span class="nt">shape</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">block</span>
+</span><span id="__span-38-6"><a id="__codelineno-38-6" name="__codelineno-38-6" href="#__codelineno-38-6"></a><span class="w">        </span><span class="nt">blinking</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span><span id="__span-38-7"><a id="__codelineno-38-7" name="__codelineno-38-7" href="#__codelineno-38-7"></a><span class="w">        </span><span class="nt">blinking_interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">500</span>
+</span></code></pre></div>
+<h3 id="visual_mode"><code>visual_mode</code><a class="headerlink" href="#visual_mode" title="Permanent link">#</a></h3>
+<p>section in the configuration allows you to customize the appearance and behavior of the cursor specifically in vi-like normal mode.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-39-1"><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-39-2"><a id="__codelineno-39-2" name="__codelineno-39-2" href="#__codelineno-39-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-39-3"><a id="__codelineno-39-3" name="__codelineno-39-3" href="#__codelineno-39-3"></a><span class="w">    </span><span class="nt">visual_mode</span><span class="p">:</span>
+</span><span id="__span-39-4"><a id="__codelineno-39-4" name="__codelineno-39-4" href="#__codelineno-39-4"></a><span class="w">      </span><span class="nt">cursor</span><span class="p">:</span>
+</span><span id="__span-39-5"><a id="__codelineno-39-5" name="__codelineno-39-5" href="#__codelineno-39-5"></a><span class="w">        </span><span class="nt">shape</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">block</span>
+</span><span id="__span-39-6"><a id="__codelineno-39-6" name="__codelineno-39-6" href="#__codelineno-39-6"></a><span class="w">        </span><span class="nt">blinking</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span><span id="__span-39-7"><a id="__codelineno-39-7" name="__codelineno-39-7" href="#__codelineno-39-7"></a><span class="w">        </span><span class="nt">blinking_interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">500</span>
+</span></code></pre></div>
+<h3 id="vi_mode_highlight_timeout"><code>vi_mode_highlight_timeout</code><a class="headerlink" href="#vi_mode_highlight_timeout" title="Permanent link">#</a></h3>
+<p>option in the configuration determines the duration in milliseconds for which the yank highlight is shown in vi mode. After yanking (copying) text in vi mode, the yanked text is typically highlighted momentarily to provide visual feedback. This configuration option allows you to specify the duration of this highlight.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-40-1"><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-40-2"><a id="__codelineno-40-2" name="__codelineno-40-2" href="#__codelineno-40-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-40-3"><a id="__codelineno-40-3" name="__codelineno-40-3" href="#__codelineno-40-3"></a><span class="w">    </span><span class="nt">vi_mode_highlight_timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">300</span>
+</span></code></pre></div>
+<h3 id="vi_mode_scrolloff"><code>vi_mode_scrolloff</code><a class="headerlink" href="#vi_mode_scrolloff" title="Permanent link">#</a></h3>
+<p>option in the configuration sets the scrolloff value for cursor movements in normal and visual (block) modes. The scrolloff value determines the minimum number of lines to keep visible above and below the cursor when scrolling. In other words, it controls the amount of margin or padding around the cursor during scrolling operations.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-41-1"><a id="__codelineno-41-1" name="__codelineno-41-1" href="#__codelineno-41-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-41-2"><a id="__codelineno-41-2" name="__codelineno-41-2" href="#__codelineno-41-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-41-3"><a id="__codelineno-41-3" name="__codelineno-41-3" href="#__codelineno-41-3"></a><span class="w">    </span><span class="nt">vi_mode_scrolloff</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8</span>
+</span></code></pre></div>
+<h3 id="status_line"><code>status_line</code><a class="headerlink" href="#status_line" title="Permanent link">#</a></h3>
+<p>section in the configuration file allows you to customize the behavior and appearance of the status line in the terminal.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-42-1"><a id="__codelineno-42-1" name="__codelineno-42-1" href="#__codelineno-42-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-42-2"><a id="__codelineno-42-2" name="__codelineno-42-2" href="#__codelineno-42-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-42-3"><a id="__codelineno-42-3" name="__codelineno-42-3" href="#__codelineno-42-3"></a><span class="w">    </span><span class="nt">status_line</span><span class="p">:</span>
+</span><span id="__span-42-4"><a id="__codelineno-42-4" name="__codelineno-42-4" href="#__codelineno-42-4"></a><span class="w">      </span><span class="nt">display</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">none</span>
+</span><span id="__span-42-5"><a id="__codelineno-42-5" name="__codelineno-42-5" href="#__codelineno-42-5"></a><span class="w">      </span><span class="nt">position</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bottom</span>
+</span><span id="__span-42-6"><a id="__codelineno-42-6" name="__codelineno-42-6" href="#__codelineno-42-6"></a><span class="w">      </span><span class="nt">sync_to_window_title</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span></code></pre></div>
+<ul>
+<li>
+<p><code>display</code>: specifies whether the status line should be shown or not. The possible values are none (status line is not shown) and indicator (status line is shown). In the example, the status line is set to none, meaning it will not be displayed initially.</p>
+</li>
+<li>
+<p><code>position</code>: determines the placement of the status line. It can be set to top or bottom. In the example, the status line is set to bottom, indicating that it will appear at the bottom of the terminal window if enabled.</p>
+</li>
+<li><code>sync_to_window_title</code>: controls whether the window title should be synchronized with the Host Writable status line. If the Host Writable status line is denied, enabling this option will update the window title accordingly. By default, this option is set to false.</li>
+<li><code>extension</code>: names an entry of the profile's <code>extensions</code> section that takes the whole status line over. By default it is null, which keeps the template-driven status line.</li>
+</ul>
+<h3 id="extensions"><code>extensions</code><a class="headerlink" href="#extensions" title="Permanent link">#</a></h3>
+<p>section in the configuration file declares the WebAssembly extensions that may draw into the status line of a profile. None is configured by default.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-43-1"><a id="__codelineno-43-1" name="__codelineno-43-1" href="#__codelineno-43-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-43-2"><a id="__codelineno-43-2" name="__codelineno-43-2" href="#__codelineno-43-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-43-3"><a id="__codelineno-43-3" name="__codelineno-43-3" href="#__codelineno-43-3"></a><span class="w">    </span><span class="nt">extensions</span><span class="p">:</span>
+</span><span id="__span-43-4"><a id="__codelineno-43-4" name="__codelineno-43-4" href="#__codelineno-43-4"></a><span class="w">      </span><span class="nt">git</span><span class="p">:</span><span class="w">    </span><span class="p p-Indicator">{</span><span class="nt"> run_command</span><span class="p">:</span><span class="w"> </span><span class="nv">ask</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-43-5"><a id="__codelineno-43-5" name="__codelineno-43-5" href="#__codelineno-43-5"></a><span class="w">      </span><span class="nt">plasma</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> config</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> speed</span><span class="p">:</span><span class="w"> </span><span class="s">"2"</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-43-6"><a id="__codelineno-43-6" name="__codelineno-43-6" href="#__codelineno-43-6"></a><span class="w">      </span><span class="nt">mine</span><span class="p">:</span><span class="w">   </span><span class="p p-Indicator">{</span><span class="nt"> path</span><span class="p">:</span><span class="w"> </span><span class="nv">~/wasm/mine.wasm</span><span class="p p-Indicator">,</span><span class="nt"> run_command</span><span class="p">:</span><span class="w"> </span><span class="nv">deny</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-43-7"><a id="__codelineno-43-7" name="__codelineno-43-7" href="#__codelineno-43-7"></a><span class="w">    </span><span class="nt">status_line</span><span class="p">:</span>
+</span><span id="__span-43-8"><a id="__codelineno-43-8" name="__codelineno-43-8" href="#__codelineno-43-8"></a><span class="w">      </span><span class="nt">extension</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">plasma</span>
+</span><span id="__span-43-9"><a id="__codelineno-43-9" name="__codelineno-43-9" href="#__codelineno-43-9"></a><span class="w">      </span><span class="nt">indicator</span><span class="p">:</span>
+</span><span id="__span-43-10"><a id="__codelineno-43-10" name="__codelineno-43-10" href="#__codelineno-43-10"></a><span class="w">        </span><span class="nt">right</span><span class="p">:</span><span class="w"> </span><span class="s">"{Extension:git}</span><span class="nv"> </span><span class="s">|</span><span class="nv"> </span><span class="s">{Clock:Bold}"</span>
+</span></code></pre></div>
+<ul>
+<li><code>path</code>: is the module to load; a leading <code>~</code> is the home directory. Without it, the entry's name selects an extension bundled with Contour.</li>
+<li><code>config</code>: holds text values the extension reads by key.</li>
+<li><code>run_command</code>: decides whether the extension may run the commands its manifest declares: <code>allow</code>, <code>deny</code> or <code>ask</code>. The default is <code>ask</code>.</li>
+</ul>
+<p>An extension is used by naming it in a status line template as <code>{Extension:name}</code>, or, with <code>status_line.extension</code>, by letting it take the whole line over.</p>
+<h3 id="background"><code>background</code><a class="headerlink" href="#background" title="Permanent link">#</a></h3>
+<p>section in the configuration file allows you to customize the background settings for the terminal.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-44-1"><a id="__codelineno-44-1" name="__codelineno-44-1" href="#__codelineno-44-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-44-2"><a id="__codelineno-44-2" name="__codelineno-44-2" href="#__codelineno-44-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-44-3"><a id="__codelineno-44-3" name="__codelineno-44-3" href="#__codelineno-44-3"></a><span class="w">    </span><span class="nt">background</span><span class="p">:</span>
+</span><span id="__span-44-4"><a id="__codelineno-44-4" name="__codelineno-44-4" href="#__codelineno-44-4"></a><span class="w">      </span><span class="nt">opacity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-44-5"><a id="__codelineno-44-5" name="__codelineno-44-5" href="#__codelineno-44-5"></a><span class="w">      </span><span class="nt">blur</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span></code></pre></div>
+<ul>
+<li><code>opacity</code>: specifies the background opacity to use. The value ranges from 0.0 to 1.0, where 0.0 represents fully transparent and 1.0 represents fully opaque. You can adjust this value to control the transparency level of the terminal's background.</li>
+<li><code>blur</code>: determines whether the transparent background should be blurred on platforms that support it. Currently, only Windows 10 is supported for background blurring. By default, this option is set to false, meaning no background blurring will be applied.</li>
+</ul>
+<h3 id="colors"><code>colors</code><a class="headerlink" href="#colors" title="Permanent link">#</a></h3>
+<p>section in the configuration file allows you to specify the colorscheme to use for the terminal. You can use one of the predefined color palettes as a setting for colors entry.
+List of predefined colorschemes: <code>contour</code>(default colors), <code>monokai</code>, <code>one-light</code>, <code>one-dark</code>, <code>gruvbox-light</code>, <code>gruvbox-dark</code>, <code>solarized-light</code>, <code>solarized-dark</code>, <code>papercolor-light</code>, <code>papercolor-dark</code>.</p>
+<p>Under <code>defaults_edition: native2026</code>, <code>colors: default</code> (the stock scheme, unmodified) means the pair <code>contour-dark</code>/<code>contour-light</code>, so the terminal follows the system's dark mode; naming another scheme keeps it fixed, and <code>classic</code> keeps <code>default</code> as one fixed scheme.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-45-1"><a id="__codelineno-45-1" name="__codelineno-45-1" href="#__codelineno-45-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-45-2"><a id="__codelineno-45-2" name="__codelineno-45-2" href="#__codelineno-45-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-45-3"><a id="__codelineno-45-3" name="__codelineno-45-3" href="#__codelineno-45-3"></a><span class="w">    </span><span class="nt">colors</span><span class="p">:</span><span class="w"> </span><span class="s">"</span><span class="nv"> </span><span class="s">default</span><span class="nv"> </span><span class="s">"</span>
+</span></code></pre></div>
+<p>To make the terminal's color scheme dependant on OS appearance (dark and light mode) settings,
+you need to specify two color schemes:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-46-1"><a id="__codelineno-46-1" name="__codelineno-46-1" href="#__codelineno-46-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-46-2"><a id="__codelineno-46-2" name="__codelineno-46-2" href="#__codelineno-46-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-46-3"><a id="__codelineno-46-3" name="__codelineno-46-3" href="#__codelineno-46-3"></a><span class="w">    </span><span class="nt">colors</span><span class="p">:</span>
+</span><span id="__span-46-4"><a id="__codelineno-46-4" name="__codelineno-46-4" href="#__codelineno-46-4"></a><span class="w">      </span><span class="nt">dark</span><span class="p">:</span><span class="w"> </span><span class="s">"some_dark_scheme_name"</span>
+</span><span id="__span-46-5"><a id="__codelineno-46-5" name="__codelineno-46-5" href="#__codelineno-46-5"></a><span class="w">      </span><span class="nt">light</span><span class="p">:</span><span class="w"> </span><span class="s">"some_light_scheme_name"</span>
+</span></code></pre></div>
+<p>With this, the terminal will use the color scheme as specified in <code>dark</code> when OS dark mode is on,
+and <code>light</code>'s color scheme otherwise.</p>
+<p>A configuration reload applies the colors to running sessions too, replacing any a program set there (OSC 4, 10, 11 and friends), just as switching to another profile does.</p>
+<h3 id="hyperlink_decoration"><code>hyperlink_decoration</code><a class="headerlink" href="#hyperlink_decoration" title="Permanent link">#</a></h3>
+<p>section in the configuration file allows you to configure the styling and colorization of hyperlinks when they are displayed in the terminal and when they are hovered over by the cursor.</p>
+<p>Possible values: underline, dotted-underline, double-underline, curly-underline, dashed-underline, overline, crossed-out, framed, encircle (if implemented)</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-47-1"><a id="__codelineno-47-1" name="__codelineno-47-1" href="#__codelineno-47-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-47-2"><a id="__codelineno-47-2" name="__codelineno-47-2" href="#__codelineno-47-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-47-3"><a id="__codelineno-47-3" name="__codelineno-47-3" href="#__codelineno-47-3"></a><span class="w">    </span><span class="nt">hyperlink_decoration</span><span class="p">:</span>
+</span><span id="__span-47-4"><a id="__codelineno-47-4" name="__codelineno-47-4" href="#__codelineno-47-4"></a><span class="w">      </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">always</span>
+</span><span id="__span-47-5"><a id="__codelineno-47-5" name="__codelineno-47-5" href="#__codelineno-47-5"></a><span class="w">      </span><span class="nt">normal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dotted-underline</span>
+</span><span id="__span-47-6"><a id="__codelineno-47-6" name="__codelineno-47-6" href="#__codelineno-47-6"></a><span class="w">      </span><span class="nt">hover</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">underline</span>
+</span></code></pre></div>
+<ul>
+<li><code>mode</code>: when links are decorated: <code>always</code>, <code>hover</code> (only the one under the pointer), <code>modifier</code> (all of them while the follow modifier is held), <code>never</code>.</li>
+</ul>
+<h3 id="link_detection"><code>link_detection</code><a class="headerlink" href="#link_detection" title="Permanent link">#</a></h3>
+<p>section decides which links are found automatically in printed text, per screen. OSC 8 hyperlinks are always links, and hint mode always offers everything.
+<code>primary_screen</code> is the normal shell screen; <code>other_screens</code> is the alternate screen (vim, less, htop, ...) and every further page.
+<code>urls</code> also covers your own patterns, unless they open a <code>file:</code> URL, which follows <code>file_paths</code>.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-48-1"><a id="__codelineno-48-1" name="__codelineno-48-1" href="#__codelineno-48-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-48-2"><a id="__codelineno-48-2" name="__codelineno-48-2" href="#__codelineno-48-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-48-3"><a id="__codelineno-48-3" name="__codelineno-48-3" href="#__codelineno-48-3"></a><span class="w">    </span><span class="nt">link_detection</span><span class="p">:</span>
+</span><span id="__span-48-4"><a id="__codelineno-48-4" name="__codelineno-48-4" href="#__codelineno-48-4"></a><span class="w">      </span><span class="nt">primary_screen</span><span class="p">:</span>
+</span><span id="__span-48-5"><a id="__codelineno-48-5" name="__codelineno-48-5" href="#__codelineno-48-5"></a><span class="w">        </span><span class="nt">urls</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-48-6"><a id="__codelineno-48-6" name="__codelineno-48-6" href="#__codelineno-48-6"></a><span class="w">        </span><span class="nt">file_paths</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-48-7"><a id="__codelineno-48-7" name="__codelineno-48-7" href="#__codelineno-48-7"></a><span class="w">      </span><span class="nt">other_screens</span><span class="p">:</span>
+</span><span id="__span-48-8"><a id="__codelineno-48-8" name="__codelineno-48-8" href="#__codelineno-48-8"></a><span class="w">        </span><span class="nt">urls</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-48-9"><a id="__codelineno-48-9" name="__codelineno-48-9" href="#__codelineno-48-9"></a><span class="w">        </span><span class="nt">file_paths</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span></code></pre></div>
+<h3 id="file_opener"><code>file_opener</code><a class="headerlink" href="#file_opener" title="Permanent link">#</a></h3>
+<p>opens detected file paths on Ctrl+click and with hint mode's Open.
+<code>command</code> is a command line with <code>{path}</code>, <code>{line}</code> and <code>{column}</code>, split into arguments
+once, with no shell involved; its program is written out, without a placeholder.
+<code>placement</code> is <code>detached</code> (default), <code>split</code> or <code>tab</code>.
+Without a command, a file opens with the system's default application; a directory always opens in the
+file manager.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-49-1"><a id="__codelineno-49-1" name="__codelineno-49-1" href="#__codelineno-49-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-49-2"><a id="__codelineno-49-2" name="__codelineno-49-2" href="#__codelineno-49-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-49-3"><a id="__codelineno-49-3" name="__codelineno-49-3" href="#__codelineno-49-3"></a><span class="w">    </span><span class="nt">file_opener</span><span class="p">:</span>
+</span><span id="__span-49-4"><a id="__codelineno-49-4" name="__codelineno-49-4" href="#__codelineno-49-4"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="s">'code</span><span class="nv"> </span><span class="s">--goto</span><span class="nv"> </span><span class="s">{path}:{line}:{column}'</span>
+</span><span id="__span-49-5"><a id="__codelineno-49-5" name="__codelineno-49-5" href="#__codelineno-49-5"></a><span class="w">      </span><span class="nt">placement</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">detached</span>
+</span></code></pre></div>
+<h3 id="hint_patterns"><code>hint_patterns</code><a class="headerlink" href="#hint_patterns" title="Permanent link">#</a></h3>
+<p>Patterns for hint mode and for the links detected in output.</p>
+<p>The built-in patterns are <code>url</code> and <code>filepath</code> (clickable), <code>githash</code>, <code>ipv4</code> and <code>ipv6</code> (hint mode only). An entry named like a built-in overrides only the keys it gives, and may leave out its regex: <code>- { name: filepath, clickable: false }</code> stops underlining paths.</p>
+<ul>
+<li><code>regex</code>: ECMAScript regular expression; back-references (<code>\1</code> to <code>\9</code>) are not supported.</li>
+<li><code>clickable</code>: <code>true</code> to detect it in output, decorate it and open it with Ctrl+click (default: <code>false</code>; the built-ins keep their own).</li>
+<li><code>url</code>: for your own patterns, what Ctrl+click opens: <code>{0}</code> is the match, <code>{1}</code> to <code>{9}</code> its capture groups (default: the match as printed). A group is percent-encoded only where a URL cannot hold a character (<code>/?&amp;=+@:%</code> pass through): write the scheme and host out, groups after.</li>
+</ul>
+<p>A regex overriding <code>filepath</code> names the path with capture group 1, and its location with groups 2 and 3 (<code>:line[:column]</code>) and 4 and 5 (<code>(line[,column])</code>); any other pattern's link is its whole match.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-50-1"><a id="__codelineno-50-1" name="__codelineno-50-1" href="#__codelineno-50-1"></a><span class="nt">hint_patterns</span><span class="p">:</span>
+</span><span id="__span-50-2"><a id="__codelineno-50-2" name="__codelineno-50-2" href="#__codelineno-50-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">uuid</span>
+</span><span id="__span-50-3"><a id="__codelineno-50-3" name="__codelineno-50-3" href="#__codelineno-50-3"></a><span class="w">    </span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="s">'\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b'</span>
+</span><span id="__span-50-4"><a id="__codelineno-50-4" name="__codelineno-50-4" href="#__codelineno-50-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">jira</span>
+</span><span id="__span-50-5"><a id="__codelineno-50-5" name="__codelineno-50-5" href="#__codelineno-50-5"></a><span class="w">    </span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="s">'\b[A-Z][A-Z0-9]+-\d+\b'</span>
+</span><span id="__span-50-6"><a id="__codelineno-50-6" name="__codelineno-50-6" href="#__codelineno-50-6"></a><span class="w">    </span><span class="nt">clickable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-50-7"><a id="__codelineno-50-7" name="__codelineno-50-7" href="#__codelineno-50-7"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="s">'https://jira.example.com/browse/{0}'</span>
+</span></code></pre></div>
+<h3 id="hint_scrollback_lines"><code>hint_scrollback_lines</code><a class="headerlink" href="#hint_scrollback_lines" title="Permanent link">#</a></h3>
+<p>How many scrollback rows a <code>HintMode</code> action with <code>scope: Scrollback</code> scans at most. Only that scope reads this; <code>scope: Visible</code> (the default) never leaves the viewport.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-51-1"><a id="__codelineno-51-1" name="__codelineno-51-1" href="#__codelineno-51-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-51-2"><a id="__codelineno-51-2" name="__codelineno-51-2" href="#__codelineno-51-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-51-3"><a id="__codelineno-51-3" name="__codelineno-51-3" href="#__codelineno-51-3"></a><span class="w">    </span><span class="nt">hint_scrollback_lines</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000</span>
+</span></code></pre></div>
+<h3 id="wm_class"><code>wm_class</code><a class="headerlink" href="#wm_class" title="Permanent link">#</a></h3>
+<p>Configuration option defines the class part of the <code>WM_CLASS</code> property of the terminal window. The <code>WM_CLASS</code> property is a standard X11 property used to identify and classify windows by their class and instance.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-52-1"><a id="__codelineno-52-1" name="__codelineno-52-1" href="#__codelineno-52-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-52-2"><a id="__codelineno-52-2" name="__codelineno-52-2" href="#__codelineno-52-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-52-3"><a id="__codelineno-52-3" name="__codelineno-52-3" href="#__codelineno-52-3"></a><span class="w">    </span><span class="nt">wm_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">contour</span>
+</span></code></pre></div>
+<h3 id="tab_label"><code>tab_label</code><a class="headerlink" href="#tab_label" title="Permanent link">#</a></h3>
+<p>Default template for the text shown on each GUI tab. The value is a string with optional <code>{Name}</code> placeholders that are substituted per tab:</p>
+<ul>
+<li><code>{TabName}</code> — the tab title the application set with OSC 30, as the indicator status line shows it, or the window title when the application set none (or cleared it). This is the default.</li>
+<li><code>{WindowTitle}</code> — the active pane's window title (OSC 0/2), ignoring any tab title.</li>
+<li><code>{TabPosition}</code> — the tab's 1-based position in the window.</li>
+</ul>
+<p>Literal text outside placeholders is kept verbatim, and an unknown placeholder is echoed verbatim (you see exactly the <code>{Name}</code> you typed). Renaming a tab overrides this default for that tab with its name, which is literal text: placeholders in a name are not expanded. A tab holding a split is shown as <code>Multiple panes</code>.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-53-1"><a id="__codelineno-53-1" name="__codelineno-53-1" href="#__codelineno-53-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-53-2"><a id="__codelineno-53-2" name="__codelineno-53-2" href="#__codelineno-53-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-53-3"><a id="__codelineno-53-3" name="__codelineno-53-3" href="#__codelineno-53-3"></a><span class="w">    </span><span class="nt">tab_label</span><span class="p">:</span><span class="w"> </span><span class="s">"{TabName}"</span>
+</span></code></pre></div>
+<h3 id="tab_color"><code>tab_color</code><a class="headerlink" href="#tab_color" title="Permanent link">#</a></h3>
+<p>Default tab color as <code>'#RRGGBB'</code>, or <code>null</code> for no profile color. Layout, user and application colors override it. Split tabs keep the color of the profile that created the tab.</p>
+<h3 id="tab_icon"><code>tab_icon</code><a class="headerlink" href="#tab_icon" title="Permanent link">#</a></h3>
+<p>The icon on tabs opened with this profile: <code>auto</code> (the default) shows the running program's initial while a program other than the shell runs, else the interface style's own icon; <code>none</code> shows no icon; anything else is the path to an image (PNG, SVG and the other formats Qt reads), shown on every tab shape, <code>~</code> meaning the home directory. Unlike the other profile keys it is not inherited from the default profile: a profile that sets none uses <code>auto</code>.</p>
+<h3 id="option_as_alt"><code>option_as_alt</code><a class="headerlink" href="#option_as_alt" title="Permanent link">#</a></h3>
+<p>section tells Contour which Option keys act as Alt (Meta) on macOS: <code>off</code>, <code>left</code>, <code>right</code> or <code>both</code>.
+The other Option key keeps typing accents like é and ü. <code>true</code> and <code>false</code> are still read, as <code>both</code> and <code>off</code>.
+This value is ignored on other platforms.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-54-1"><a id="__codelineno-54-1" name="__codelineno-54-1" href="#__codelineno-54-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-54-2"><a id="__codelineno-54-2" name="__codelineno-54-2" href="#__codelineno-54-2"></a><span class="w">  </span><span class="nt">profile_name</span><span class="p">:</span>
+</span><span id="__span-54-3"><a id="__codelineno-54-3" name="__codelineno-54-3" href="#__codelineno-54-3"></a><span class="w">    </span><span class="nt">option_as_alt</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">left</span>
+</span></code></pre></div></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="shell" href="#shell">shell</a><a data-head="ssh" href="#ssh">ssh</a><a data-head="escape_sandbox" href="#escape_sandbox">escape_sandbox</a><a data-head="copy_last_mark_range_offset" href="#copy_last_mark_range_offset">copy_last_mark_range_offset</a><a data-head="copy_command_preserve_multiline" href="#copy_command_preserve_multiline">copy_command_preserve_multiline</a><a data-head="show_title_bar" href="#show_title_bar">show_title_bar</a><a data-head="window_shadow" href="#window_shadow">window_shadow</a><a data-head="dim_unfocused" href="#dim_unfocused">dim_unfocused</a><a data-head="size_indicator_on_resize" href="#size_indicator_on_resize">size_indicator_on_resize</a><a data-head="fullscreen" href="#fullscreen">fullscreen</a><a data-head="maximized" href="#maximized">maximized</a><a data-head="insert_after_yank" href="#insert_after_yank">insert_after_yank</a><a data-head="bell" href="#bell">bell</a><a data-head="notify_on_command_finish" href="#notify_on_command_finish">notify_on_command_finish</a><a data-head="terminal_id" href="#terminal_id">terminal_id</a><a data-head="answerback" href="#answerback">answerback</a><a data-head="pixel_reporting" href="#pixel_reporting">pixel_reporting</a><a data-head="frozen_dec_modes" href="#frozen_dec_modes">frozen_dec_modes</a><a data-head="slow_scrolling_time" href="#slow_scrolling_time">slow_scrolling_time</a><a data-head="smooth_scrolling" href="#smooth_scrolling">smooth_scrolling</a><a data-head="momentum_scrolling" href="#momentum_scrolling">momentum_scrolling</a><a data-head="terminal_size" href="#terminal_size">terminal_size</a><a data-head="margins" href="#margins">margins</a><a data-head="history" href="#history">history</a><a data-head="scrollbar" href="#scrollbar">scrollbar</a><a data-head="sticky_header" href="#sticky_header">sticky_header</a><a data-head="mouse" href="#mouse">mouse</a><a data-head="permissions" href="#permissions">permissions</a><a data-head="input_method_editor" href="#input_method_editor">input_method_editor</a><a data-head="input_method_editor_style" href="#input_method_editor_style">input_method_editor_style</a><a data-head="highlight_word_and_matches_on_double_click" href="#highlight_word_and_matches_on_double_click">highlight_word_and_matches_on_double_click</a><a data-head="font" href="#font">font</a><a data-head="draw_bold_text_with_bright_colors" href="#draw_bold_text_with_bright_colors">draw_bold_text_with_bright_colors</a><a data-head="search_case_sensitivity" href="#search_case_sensitivity">search_case_sensitivity</a><a data-head="mouse_forwarding" href="#mouse_forwarding">mouse_forwarding</a><a data-head="blink_style" href="#blink_style">blink_style</a><a data-head="screen_transition" href="#screen_transition">screen_transition</a><a data-head="screen_transition_duration" href="#screen_transition_duration">screen_transition_duration</a><a data-head="cursor_motion_animation_duration" href="#cursor_motion_animation_duration">cursor_motion_animation_duration</a><a data-head="cursor" href="#cursor">cursor</a><a data-head="normal_mode" href="#normal_mode">normal_mode</a><a data-head="visual_mode" href="#visual_mode">visual_mode</a><a data-head="vi_mode_highlight_timeout" href="#vi_mode_highlight_timeout">vi_mode_highlight_timeout</a><a data-head="vi_mode_scrolloff" href="#vi_mode_scrolloff">vi_mode_scrolloff</a><a data-head="status_line" href="#status_line">status_line</a><a data-head="extensions" href="#extensions">extensions</a><a data-head="background" href="#background">background</a><a data-head="colors" href="#colors">colors</a><a data-head="hyperlink_decoration" href="#hyperlink_decoration">hyperlink_decoration</a><a data-head="link_detection" href="#link_detection">link_detection</a><a data-head="file_opener" href="#file_opener">file_opener</a><a data-head="hint_patterns" href="#hint_patterns">hint_patterns</a><a data-head="hint_scrollback_lines" href="#hint_scrollback_lines">hint_scrollback_lines</a><a data-head="wm_class" href="#wm_class">wm_class</a><a data-head="tab_label" href="#tab_label">tab_label</a><a data-head="tab_color" href="#tab_color">tab_color</a><a data-head="tab_icon" href="#tab_icon">tab_icon</a><a data-head="option_as_alt" href="#option_as_alt">option_as_alt</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><span class="none">generated from contour</span>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">configure › <b>profiles</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

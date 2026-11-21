@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>context (osc 3008) - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="../..">
+<link rel="icon" href="../../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../../assets/theme/site.css">
+<script type="module" src="../../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../../assets/contour-logo.png" alt=""><span id="cw-title">context (osc 3008)</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href="../.."><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../../configuration/"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../../vt-sequence/" aria-current="true"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour" hidden>
+<a class="tab" data-group="" href="../..">home</a>
+<a class="tab" data-group="" href="../../install/">install</a>
+<a class="tab" data-group="" href="../../features/">features</a>
+<a class="tab" data-group="" href="../../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure" hidden>
+<a class="tab" data-group="" href="../../configuration/">config file</a>
+<a class="tab" data-group="" href="../../configuration/profiles/">profiles</a>
+<a class="tab" data-group="" href="../../configuration/settings/">settings window</a>
+<a class="tab" data-group="" href="../../configuration/colors/">colors</a>
+<a class="tab" data-group="" href="../../configuration/key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../../configuration/layouts/">layouts</a>
+<a class="tab" data-group="more" href="../../configuration/links/">links</a>
+<a class="tab" data-group="more" href="../../configuration/hosts/">hosts</a>
+<a class="tab" data-group="more" href="../../configuration/indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../../configuration/paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference">
+<a class="tab" data-group="" href="../../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="./" aria-current="page">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>context (osc 3008)</summary>
+  <div class="tabsel-list">
+<a href="../../vt-sequence/">vt sequences</a>
+<a href="../../demo/regis-graphics/">regis graphics</a>
+<a href="../synchronized-output/">synchronized output</a>
+<a href="../osc-133-shell-integration/">shell integration</a>
+<a href="../clickable-links/">clickable links</a>
+<a href="../buffer-capture/">buffer capture</a>
+<a href="../program-status/">program status</a>
+<a href="../semantic-block-query/">semantic block query</a>
+<a href="../osc-9-4-progress/">progress (osc 9;4)</a>
+<a href="./" aria-current="page">context (osc 3008)</a>
+<a href="../vertical-line-marks/">vertical line marks</a>
+<a href="../color-palette-update-notifications/">palette notifications</a>
+<a href="../font-settings/">font settings</a>
+<a href="../line-reflow-mode/">line reflow mode</a>
+<a href="../private-use-glyphs/">private-use glyphs</a>
+<a href="../save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a href="../unicode-core/">unicode core</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="osc-3008-hierarchical-context-signalling">OSC 3008 — Hierarchical Context Signalling<a class="headerlink" href="#osc-3008-hierarchical-context-signalling" title="Permanent link">#</a></h1>
+<p>Contour consumes <strong>OSC 3008</strong>, the <a href="https://uapi-group.org/specifications/specs/osc_context/">UAPI.15 hierarchical context signalling
+specification</a>.</p>
+<p>A terminal connects a user with programs, and control of the program side is passed around while the
+user works: a shell invokes a command, <code>run0</code> acquires privileges, <code>systemd-nspawn</code> enters a
+container, <code>ssh</code> connects to another machine. OSC 3008 lets each of those components tell the
+terminal that a new <strong>context</strong> begins, and carry metadata describing it.</p>
+<p>The value is not that this is more metadata. It is that it arrives <strong>without any configuration</strong>:
+systemd 258 and later ship a shell snippet that emits these sequences around every interactive
+command, so on such a system Contour learns command boundaries, exit statuses and working
+directories with no shell integration installed at all.</p>
+<h2 id="sequences">Sequences<a class="headerlink" href="#sequences" title="Permanent link">#</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>OSC 3008 ; start= CTXID [ ; field=value ]... ST
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>OSC 3008 ; end=   CTXID [ ; field=value ]... ST
+</span></code></pre></div>
+<p><code>start=</code> initiates a context, <strong>updates</strong> one that already exists, or <strong>returns to</strong> one further up.
+<code>end=</code> terminates one. Contexts nest: the newest is active, and everything written while it is
+active belongs to it.</p>
+<p>Because <code>;</code> separates fields, a literal semicolon in a value is written as the four characters
+<code>\x3b</code>, and a literal backslash as <code>\x5c</code>. Values are UTF-8 and are stored as sent.</p>
+<h3 id="fields-on-start">Fields on <code>start=</code><a class="headerlink" href="#fields-on-start" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>type=</code></td>
+<td><code>service</code>, <code>session</code>, <code>shell</code>, <code>command</code>, <code>vm</code>, <code>container</code>, <code>elevate</code>, <code>chpriv</code>, <code>subcontext</code>, <code>remote</code>, <code>boot</code>, <code>app</code></td>
+</tr>
+<tr>
+<td><code>user=</code>, <code>hostname=</code>, <code>machineid=</code>, <code>bootid=</code>, <code>pid=</code>, <code>pidfdid=</code>, <code>comm=</code></td>
+<td>who and where the announcing process is</td>
+</tr>
+<tr>
+<td><code>cwd=</code></td>
+<td>the working directory (<code>shell</code>, <code>command</code>)</td>
+</tr>
+<tr>
+<td><code>cmdline=</code></td>
+<td>the command line (<code>command</code>)</td>
+</tr>
+<tr>
+<td><code>vm=</code>, <code>container=</code></td>
+<td>the VM or container being entered</td>
+</tr>
+<tr>
+<td><code>targetuser=</code>, <code>targethost=</code>, <code>sessionid=</code></td>
+<td>what is being connected or elevated to</td>
+</tr>
+</tbody>
+</table>
+<h3 id="fields-on-end">Fields on <code>end=</code><a class="headerlink" href="#fields-on-end" title="Permanent link">#</a></h3>
+<p><code>exit=</code> (<code>success</code>, <code>failure</code>, <code>crash</code>, <code>interrupt</code>), <code>status=</code> (numeric), and <code>signal=</code> (symbolic,
+e.g. <code>SIGSEGV</code>). Note that <code>crash</code>, <code>interrupt</code> and <code>signal=</code> express things
+<a href="../osc-133-shell-integration/">OSC 133</a>'s numeric exit code structurally cannot.</p>
+<h2 id="what-contour-does-with-it">What Contour does with it<a class="headerlink" href="#what-contour-does-with-it" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>Tracks the ancestry</strong>, so every line of output is associated with the context that produced it.
+  The association survives reflow and scrolling into history.</li>
+<li><strong>Derives semantic marks</strong> when no shell integration is present, so prompt navigation, output
+  folding and "copy last command output" work with no setup. See <em>Interaction with OSC 133</em> below.</li>
+<li><strong>Tints the page background</strong> under a boundary context, if the colour scheme opts in.</li>
+<li><strong>Shows a breadcrumb</strong> in the indicator status line via the <code>{Context}</code> placeholder.</li>
+<li><strong>Resolves the working directory</strong> for the tab tooltip and "Open Current Folder".</li>
+<li><strong>Replicates all of it to daemon clients</strong>, so a <code>contour attach</code> pane behaves like a local one.</li>
+</ul>
+<h2 id="interaction-with-osc-133">Interaction with OSC 133<a class="headerlink" href="#interaction-with-osc-133" title="Permanent link">#</a></h2>
+<p>Both protocols describe the same prompt cycle, so exactly one of them owns a session's semantic
+marks, and the rule is one-way:</p>
+<ul>
+<li>If <strong>OSC 133 speaks at any point</strong>, it owns the marks for the rest of the session. OSC 3008 then
+  contributes metadata only — working directories, identity, and the richer exit information — and
+  never a mark.</li>
+<li>If OSC 133 has said nothing, OSC 3008 stands in for it: a <code>type=shell</code> update marks the prompt, a
+  <code>type=command</code> start marks where output begins, and its <code>end=</code> marks where output stopped.</li>
+</ul>
+<p>OSC 3008 can never take the marks back, which is what stops a session flapping between sources.
+There is one thing it cannot supply: OSC 133's <code>;B</code>, the border between the prompt and what the user
+types. OSC 3008 has no event there, so a session driven by it alone reports the prompt's line span
+but not the column input begins at.</p>
+<h2 id="reset-behaviour">Reset behaviour<a class="headerlink" href="#reset-behaviour" title="Permanent link">#</a></h2>
+<p><strong>RIS and DECSTR deliberately do not clear the context stack.</strong> The specification makes this a
+safety property: a program running down the ancestry must not be able to erase context a program
+above it established, and RIS is something any program can send. A shell that announced "you are
+inside container X" must still be able to say so after a program inside that container resets the
+terminal. The stack is destroyed when the session is.</p>
+<h2 id="limits">Limits<a class="headerlink" href="#limits" title="Permanent link">#</a></h2>
+<p>Configurable through the <a href="../../configuration/#osc_context"><code>osc_context</code></a> section: <code>max_depth</code> (default
+16) bounds the ancestry, and <code>max_retained_contexts</code> (default 256) bounds how much history is kept
+for scrolled-back output. Per the specification, hitting the depth limit drops the <strong>newer</strong>
+contexts, so a program deep in the ancestry cannot push out the one above it. Field lengths are
+protocol constants and are not configurable.</p>
+<h2 id="security">Security<a class="headerlink" href="#security" title="Permanent link">#</a></h2>
+<p><strong>Every field is a display hint. Nothing gates behaviour on one.</strong></p>
+<p>Any program that can write to the terminal can emit <code>type=elevate</code> or <code>user=root</code>, so nothing
+Contour draws from these sequences is an assurance. Two consequences worth stating outright:</p>
+<ul>
+<li><strong>The absence of an elevate context is not a statement that nothing is running as root.</strong> A
+  program in a genuinely elevated shell can simply <code>end=</code> the context, and no terminal can detect
+  that. This is why Contour ships no default tint and never decorates a context with a lock, a
+  shield or a warning colour: doing so would teach users to read a spoofable signal as authority.</li>
+<li><strong>A <code>cwd=</code> is not trusted for opening or spawning unless it is provably this machine's.</strong> A
+  context carries no host authority, so a container's <code>/app</code> would otherwise pass every locality
+  test and open the host's directory of the same name. Contour requires a matching <code>machineid=</code> (or
+  failing that a matching <code>hostname=</code>) and refuses when a container, VM or remote boundary is in
+  force. A context that claims nothing at all is treated as unknown, not local — which matters
+  because nothing emits a <code>remote</code> context for <code>ssh</code> today, so a remote host's own sequences look
+  entirely local.</li>
+</ul>
+<p>A <code>machineid=</code> counts only as the 32 hexadecimal digits of machine-id(5); anything else, systemd's
+  <code>uninitialized</code> placeholder included, is as if it were left out, and the <code>hostname=</code> decides. Host
+  names are compared whole, ignoring case, and <code>localhost</code> proves nothing. On a machine that has no
+  machine id of its own — Windows, a system without systemd — a context naming one is foreign: it
+  comes from another installation, such as a shell in a WSL distribution beside a Windows terminal
+  that shares its host name.</p>
+<p>To opt out of all of it: <code>osc_context: { enabled: false }</code>.</p>
+<h2 id="not-implemented">Not implemented<a class="headerlink" href="#not-implemented" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>Killing a context tree via <code>pidfdid=</code>.</strong> That field is a pidfd <em>inode</em>, not a handle, so it can
+  only <em>verify</em> a <code>pidfd_open(pid)</code> — and the protocol carries no process-group id and no cgroup
+  path, so "kill this context and its children" is not implementable from the fields that exist.
+  Inside a container <code>pid=</code> names another PID namespace, so opening it locally names an unrelated
+  process, and a <code>run0</code> context's pid is root-owned, so the case a user most wants would fail with
+  <code>EPERM</code>.</li>
+<li><strong>Re-entering a container or remote host to open its working directory.</strong> Executing <code>nsenter</code> or
+  <code>ssh</code> on the basis of a spoofable field is exactly the rule above being broken.</li>
+</ul></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="sequences" href="#sequences">Sequences</a><a data-head="what-contour-does-with-it" href="#what-contour-does-with-it">What Contour does with it</a><a data-head="interaction-with-osc-133" href="#interaction-with-osc-133">Interaction with OSC 133</a><a data-head="reset-behaviour" href="#reset-behaviour">Reset behaviour</a><a data-head="limits" href="#limits">Limits</a><a data-head="security" href="#security">Security</a><a data-head="not-implemented" href="#not-implemented">Not implemented</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/vt-extensions/osc-3008-context.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">reference › <b>context (osc 3008)</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>
