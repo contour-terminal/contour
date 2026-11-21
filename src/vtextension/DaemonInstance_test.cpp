@@ -3,7 +3,6 @@
 // The daemon world's instance, driven step by step through the fake backend: what `load` hands the guest,
 // the imports this host does not serve yet, the call deadline, and the deadline's pause across durable
 // host calls.
-#include <core/platform/Clock.hpp>
 
 #include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -80,7 +79,7 @@ struct FakeDaemonGuest
         engine = *created;
         auto compiled = CompiledExtension::load(*engine, vtextension::testing::daemonProbe());
         REQUIRE(compiled.has_value());
-        return DaemonInstance::create(*compiled, services, clock, watchdog ? *watchdog : *engine, limits);
+        return DaemonInstance::create(*compiled, services, watchdog ? *watchdog : *engine, limits);
     }
 
     /// @return The instance the backend created last.
@@ -107,7 +106,6 @@ struct FakeDaemonGuest
     FakeWasmBackend backend;
     ExtensionLimits limits;
     FakeDaemonHostServices services;
-    core::platform::ManualClock clock;
     std::shared_ptr<Engine> engine;
     std::function<std::expected<void, wasm::CallFailure>(std::span<uint32_t>)> onUpdate;
     uint32_t next = 1024; ///< The bump allocator's next address.
@@ -140,7 +138,8 @@ constexpr auto TabAndActionImports = std::array {
     DaemonImport::TabRead, DaemonImport::TabWrite, DaemonImport::ActionsTake,
 };
 
-/// Records what is armed and disarmed, in one log with the service calls the test adds to it.
+/// Records what is armed and disarmed, in one log with the service calls the test adds to it. Nothing is
+/// spent while armed: what is left of a deadline is all of it.
 class RecordingWatchdog final: public IDeadlineWatchdog
 {
   public:
@@ -149,12 +148,20 @@ class RecordingWatchdog final: public IDeadlineWatchdog
     void armDeadline(WatchToken /*token*/, std::chrono::milliseconds timeout) override
     {
         _events.push_back(std::format("arm {}", timeout.count()));
+        _armed = timeout;
     }
 
-    void disarm(WatchToken /*token*/) override { _events.emplace_back("disarm"); }
+    void disarm(WatchToken /*token*/) override
+    {
+        _events.emplace_back("disarm");
+        _armed = std::chrono::nanoseconds::zero();
+    }
+
+    [[nodiscard]] std::chrono::nanoseconds unspent(WatchToken /*token*/) override { return _armed; }
 
   private:
     std::vector<std::string>& _events;
+    std::chrono::nanoseconds _armed {};
 };
 
 } // namespace

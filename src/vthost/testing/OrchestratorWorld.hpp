@@ -34,11 +34,13 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
 
 #include <vtextension/DaemonExtensionRuntime.hpp>
+#include <vtextension/ThreadCpuClock.hpp>
 #include <vtextension/testing/FakeFileLocker.hpp>
 #include <vtextension/testing/FixtureProcessRunner.hpp>
 #include <vtextension/testing/GuestSlowdown.hpp>
@@ -217,12 +219,15 @@ struct Connection
 };
 
 /// The host's owned panes as a daemon world reaches them, with a stall a test can put after one pane-open:
-/// the host has opened the pane, but the guest hears of it only once its call deadline is spent.
+/// the host has opened the pane, but the guest hears of it only once its call deadline is spent. A deadline
+/// is spent in the CPU time of the guest's thread, which the stall runs on, so the stall keeps that thread
+/// busy: a host that merely took long to answer would cost the guest nothing short of the real-time bound.
 class StallingPanes final: public IOwnedPanes
 {
   public:
     /// @param host The host's owned panes.
-    /// @param stall How long the next open() waits after the host answered it, once; read on the lane.
+    /// @param stall How much CPU time the next open() spends after the host answered it, once; read on the
+    ///        lane.
     StallingPanes(IOwnedPanes& host, std::atomic<std::chrono::milliseconds::rep>& stall):
         _host { host }, _stall { stall }
     {
@@ -232,7 +237,7 @@ class StallingPanes final: public IOwnedPanes
     {
         auto opened = _host.open(std::move(spawn));
         if (auto const stall = _stall.exchange(0); stall != 0)
-            std::this_thread::sleep_for(std::chrono::milliseconds { stall });
+            spend(std::chrono::milliseconds { stall });
         return opened;
     }
 
@@ -256,6 +261,24 @@ class StallingPanes final: public IOwnedPanes
     }
 
   private:
+    /// Keeps the calling thread busy until it has spent @p cpu of CPU time; where its clock cannot be read,
+    /// sleeps that long in real time.
+    static void spend(std::chrono::milliseconds cpu)
+    {
+        auto const& clock = vtextension::nativeThreadCpuClock();
+        auto const thread = clock.currentThread();
+        auto const start = thread ? clock.consumed(*thread) : std::nullopt;
+        if (!start)
+        {
+            std::this_thread::sleep_for(cpu);
+            return;
+        }
+        auto spins = std::uint64_t { 0 };
+        while (clock.consumed(*thread).value_or(*start + cpu) - *start < cpu)
+            ++spins;
+        std::ignore = spins;
+    }
+
     IOwnedPanes& _host;
     std::atomic<std::chrono::milliseconds::rep>& _stall;
 };
@@ -457,8 +480,8 @@ struct OrchestratorWorld
         return runs;
     }
 
-    /// Has the host's next pane-open answer the guest only after twice its call deadline: the pane is
-    /// opened, and the guest faults before it can store that it was.
+    /// Has the host's next pane-open answer the guest only after spending twice its call deadline of the
+    /// guest thread's CPU time: the pane is opened, and the guest faults before it can store that it was.
     void stallNextPaneOpen() { stall = (2 * vtextension::testing::guestTestLimits().callDeadline).count(); }
 
     /// @return The daemon world of the latest host made with factory(); null once that host is gone.

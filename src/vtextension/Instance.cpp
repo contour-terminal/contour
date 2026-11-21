@@ -2,7 +2,6 @@
 #include <vtextension/Instance.hpp>
 
 #include <core/Assert.hpp>
-#include <core/platform/Clock.hpp>
 
 #include <algorithm>
 #include <array>
@@ -181,14 +180,13 @@ struct Instance::HostCalls
 Instance::Instance(PrivateTag /*unused*/,
                    std::shared_ptr<CompiledExtension const> compiled,
                    IHostServices& services,
-                   core::platform::IClock& clock,
                    ExtensionLimits limits):
     _compiled { std::move(compiled) },
     _engine { _compiled->engine().shared_from_this() },
     _services { services },
     _limits { limits },
     _declaredControl { declaredControlOf(*_compiled) },
-    _guest { _engine->backend(), clock, *_engine, _limits }
+    _guest { _engine->backend(), *_engine, _limits }
 {
 }
 
@@ -197,15 +195,13 @@ Instance::~Instance() = default;
 std::expected<std::unique_ptr<Instance>, ExtensionError> Instance::create(Engine& engine,
                                                                           CompiledExtension const& compiled,
                                                                           IHostServices& services,
-                                                                          core::platform::IClock& clock,
                                                                           ExtensionLimits limits)
 {
     Require(&engine == &compiled.engine() && engine.world() == World::StatusLine);
     // The memory and stack caps are the engine's runtime's: an instance cannot be held to others.
     Require(limits.memoryBytes == engine.limits().memoryBytes
             && limits.stackBytes == engine.limits().stackBytes);
-    auto instance =
-        std::make_unique<Instance>(PrivateTag {}, compiled.shared_from_this(), services, clock, limits);
+    auto instance = std::make_unique<Instance>(PrivateTag {}, compiled.shared_from_this(), services, limits);
     return instance->instantiate().transform([&] { return std::move(instance); });
 }
 

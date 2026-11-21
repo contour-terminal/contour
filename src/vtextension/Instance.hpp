@@ -3,8 +3,6 @@
 
 #include <vtpty/PageSize.hpp>
 
-#include <core/platform/Clock.hpp>
-
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -72,25 +70,18 @@ class Instance final: private wasm::IHostContext
     /// @param engine The engine; it must be the one @p compiled was loaded on.
     /// @param compiled The module; the instance keeps it alive.
     /// @param services What the guest's imports call; it must outlive the instance.
-    /// @param clock What measures how much of a call's deadline is spent; it must outlive the
-    ///        instance. The watchdog itself enforces deadlines in real time.
     /// @param limits The limits this instance is held to. Its `memoryBytes` and `stackBytes` must be the
     ///        engine's (@p engine's limits()), whose runtime enforces them; the rest are the instance's.
     /// @return The instance; `OutOfMemory` if the module needs more memory than @p limits allow,
     ///         `InvalidComponent` if the runtime cannot instantiate it, or the error a WASI reactor's
     ///         `_initialize` failed with.
     [[nodiscard]] static std::expected<std::unique_ptr<Instance>, ExtensionError> create(
-        Engine& engine,
-        CompiledExtension const& compiled,
-        IHostServices& services,
-        core::platform::IClock& clock,
-        ExtensionLimits limits);
+        Engine& engine, CompiledExtension const& compiled, IHostServices& services, ExtensionLimits limits);
 
     /// Use create(); public only so that std::make_unique can reach it.
     Instance(PrivateTag,
              std::shared_ptr<CompiledExtension const> compiled,
              IHostServices& services,
-             core::platform::IClock& clock,
              ExtensionLimits limits);
 
     ~Instance() override;

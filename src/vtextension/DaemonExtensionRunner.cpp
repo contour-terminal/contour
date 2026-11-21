@@ -245,7 +245,7 @@ class DaemonExtensionRunner::Core final: public IDaemonHostServices, public std:
         }
         // Instantiating runs a reactor's _initialize, a callback of its own.
         beginCallback();
-        auto instance = DaemonInstance::create(_compiled, *this, clock(), *_engine, _config.limits);
+        auto instance = DaemonInstance::create(_compiled, *this, *_engine, _config.limits);
         if (!instance)
         {
             fault(instance.error());

@@ -42,6 +42,7 @@ set(vtextension_SOURCES
     SettableEnvironment.cpp
     StatusLineAdapter.cpp
     Surface.cpp
+    ThreadCpuClock.cpp
 )
 
 set(vtextension_HEADERS
@@ -103,6 +104,7 @@ set(vtextension_HEADERS
     StatusLineAdapter.hpp
     StatuslineWorld.hpp
     Surface.hpp
+    ThreadCpuClock.hpp
     Utf8.hpp
     World.hpp
     wasm/DefaultBackend.hpp

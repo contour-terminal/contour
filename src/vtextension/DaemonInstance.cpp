@@ -2,7 +2,6 @@
 #include <vtextension/DaemonInstance.hpp>
 
 #include <core/Assert.hpp>
-#include <core/platform/Clock.hpp>
 
 #include <algorithm>
 #include <array>
@@ -375,13 +374,12 @@ struct DaemonInstance::HostCalls
 DaemonInstance::DaemonInstance(PrivateTag /*unused*/,
                                std::shared_ptr<CompiledExtension const> compiled,
                                IDaemonHostServices& services,
-                               core::platform::IClock& clock,
                                IDeadlineWatchdog& watchdog,
                                ExtensionLimits limits):
     _compiled { std::move(compiled) },
     _services { services },
     _limits { limits },
-    _guest { _compiled->engine().backend(), clock, watchdog, _limits }
+    _guest { _compiled->engine().backend(), watchdog, _limits }
 {
 }
 
@@ -390,7 +388,6 @@ DaemonInstance::~DaemonInstance() = default;
 std::expected<std::unique_ptr<DaemonInstance>, ExtensionError> DaemonInstance::create(
     std::shared_ptr<CompiledExtension const> compiled,
     IDaemonHostServices& services,
-    core::platform::IClock& clock,
     IDeadlineWatchdog& watchdog,
     ExtensionLimits limits)
 {
@@ -398,8 +395,8 @@ std::expected<std::unique_ptr<DaemonInstance>, ExtensionError> DaemonInstance::c
     // The memory and stack caps are the engine's runtime's: an instance cannot be held to others.
     auto const& engineLimits = compiled->engine().limits();
     Require(limits.memoryBytes == engineLimits.memoryBytes && limits.stackBytes == engineLimits.stackBytes);
-    auto instance = std::make_unique<DaemonInstance>(
-        PrivateTag {}, std::move(compiled), services, clock, watchdog, limits);
+    auto instance =
+        std::make_unique<DaemonInstance>(PrivateTag {}, std::move(compiled), services, watchdog, limits);
     return instance->instantiate().transform([&] { return std::move(instance); });
 }
 

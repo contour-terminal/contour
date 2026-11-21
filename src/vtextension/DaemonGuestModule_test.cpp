@@ -3,7 +3,6 @@
 // A daemon-world guest as a toolchain builds it: the module check over hand-assembled modules, and, when the
 // WASI C++ toolchain built it (CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST), the C++ probe checked and run on the
 // daemon engine of this build's runtime.
-#include <core/platform/Clock.hpp>
 
 #include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -186,7 +185,6 @@ TEST_CASE("DaemonGuestModule: the C++ probe is a well-formed daemon module", "[d
     CHECK(daemonGuestModuleProblems(module).empty());
 
     auto const backend = wasm::makeDefaultBackend();
-    auto clock = core::platform::ManualClock {};
     auto const limits = ExtensionLimits {};
     auto const engine = Engine::create(*backend, World::Daemon, limits);
     REQUIRE(engine.has_value());
@@ -197,7 +195,7 @@ TEST_CASE("DaemonGuestModule: the C++ probe is a well-formed daemon module", "[d
 
     auto services = vtextension::testing::FakeDaemonHostServices {};
     services.clock = ClockReading { .monotonicMs = 1'234'567'890'123, .wallMs = 1 };
-    auto const instance = DaemonInstance::create(*compiled, services, clock, **engine, limits);
+    auto const instance = DaemonInstance::create(*compiled, services, **engine, limits);
     REQUIRE(instance.has_value());
 
     REQUIRE((*instance)->load("{}", DaemonHostInfo {}).has_value());

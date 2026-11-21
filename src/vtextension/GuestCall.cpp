@@ -61,12 +61,8 @@ class GuestCall::GuestMemory final: public abi::IGuestMemory
     uint64_t _liftBudget = 0; ///< What lifting may still spend in the current host call.
 };
 
-GuestCall::GuestCall(wasm::IWasmBackend& backend,
-                     core::platform::IClock& clock,
-                     IDeadlineWatchdog& watchdog,
-                     ExtensionLimits const& limits):
+GuestCall::GuestCall(wasm::IWasmBackend& backend, IDeadlineWatchdog& watchdog, ExtensionLimits const& limits):
     _backend { backend },
-    _clock { clock },
     _watchdog { watchdog },
     _limits { limits },
     _memory { std::make_unique<GuestMemory>(*this) }
@@ -113,14 +109,13 @@ std::expected<void, ExtensionError> GuestCall::initialize()
     return guarded(_limits.loadDeadline, [&] { return callExport(*initialize, {}); });
 }
 
-std::expected<void, ExtensionError> GuestCall::beginCall(std::chrono::milliseconds timeout)
+std::expected<void, ExtensionError> GuestCall::beginCall()
 {
     Require(_backend.isCurrentThreadPrepared());
     if (_fault)
         return std::unexpected(*_fault);
     _hostCallError.reset();
     resetLiftBudget();
-    _deadline = _clock.now() + timeout;
     return {};
 }
 
@@ -147,7 +142,6 @@ abi::IGuestMemory& GuestCall::memory() noexcept
 
 GuestCall::ResumeDeadlineOnExit::~ResumeDeadlineOnExit()
 {
-    _call._deadline = _call._clock.now() + _remaining;
     _call._watchdog.armDeadline(_call.watchToken(), std::chrono::ceil<std::chrono::milliseconds>(_remaining));
 }
 

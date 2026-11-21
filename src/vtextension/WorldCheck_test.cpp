@@ -3,7 +3,6 @@
 // One engine per extension world: a module loads only on the engine of the world it was built for, checked
 // against that world's exact imports, exports and placement; and two engines alive at once each reach
 // their own handlers.
-#include <core/platform/Clock.hpp>
 
 #include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -228,7 +227,6 @@ TEST_CASE("WorldCheck: with both engines alive each world's call reaches its own
     // module's `log` must reach the daemon's handler, and the status line's the status line's, with both
     // engines alive -- and a status-line engine going away must not take the daemon's registrations along.
     auto const backend = wasm::makeDefaultBackend();
-    auto clock = core::platform::ManualClock {};
     auto const limits = ExtensionLimits {};
 
     auto daemonEngine = Engine::create(*backend, World::Daemon, limits);
@@ -243,11 +241,10 @@ TEST_CASE("WorldCheck: with both engines alive each world's call reaches its own
     REQUIRE(statusCompiled.has_value());
 
     auto daemonServices = vtextension::testing::FakeDaemonHostServices {};
-    auto daemonInstance =
-        DaemonInstance::create(*daemonCompiled, daemonServices, clock, **daemonEngine, limits);
+    auto daemonInstance = DaemonInstance::create(*daemonCompiled, daemonServices, **daemonEngine, limits);
     REQUIRE(daemonInstance.has_value());
     auto statusServices = vtextension::testing::FakeHostServices {};
-    auto statusInstance = Instance::create(**statusEngine, **statusCompiled, statusServices, clock, limits);
+    auto statusInstance = Instance::create(**statusEngine, **statusCompiled, statusServices, limits);
     REQUIRE(statusInstance.has_value());
 
     REQUIRE((*daemonInstance)->load("{}", DaemonHostInfo {}).has_value());

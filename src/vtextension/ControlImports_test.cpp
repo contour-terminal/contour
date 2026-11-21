@@ -3,7 +3,6 @@
 // The control interface's imports: their table, what one does with a guest's request -- lift, check, call,
 // store -- and what it refuses to do, against a fake linear memory; then the same through an Instance, on the
 // fake backend (to drive the deadline) and on the real one (to link and call an import).
-#include <core/platform/Clock.hpp>
 
 #include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -421,8 +420,7 @@ TEST_CASE("a module importing the control interface instantiates", "[vtextension
         CompiledExtension::load(**engine, toModule(vtextension::testing::ControlImportingModule));
     REQUIRE(compiled.has_value());
     auto services = FakeHostServices {};
-    auto clock = core::platform::ManualClock {};
-    auto const instance = Instance::create(**engine, **compiled, services, clock, ExtensionLimits {});
+    auto const instance = Instance::create(**engine, **compiled, services, ExtensionLimits {});
     REQUIRE(instance.has_value());
     CHECK((*instance)->render(surface(80, 1)).has_value());
     CHECK(services.controlCalls.empty());
@@ -495,8 +493,7 @@ TEST_CASE("an instance's deadline expiring during a control call faults it, writ
         while (backend.lastInstance->interrupts.load() == 0 && std::chrono::steady_clock::now() < giveUp)
             std::this_thread::sleep_for(1ms);
     };
-    auto clock = core::platform::ManualClock {};
-    auto const instance = Instance::create(**engine, **compiled, services, clock, limits);
+    auto const instance = Instance::create(**engine, **compiled, services, limits);
     REQUIRE(instance.has_value());
 
     CHECK(errorOf((*instance)->render(surface(80, 1))) == ExtensionError::DeadlineExceeded);

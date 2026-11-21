@@ -5,7 +5,6 @@
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/Primitives.hpp>
 
-#include <core/platform/Clock.hpp>
 #include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <catch2/catch_message.hpp>
@@ -840,7 +839,6 @@ TEST_CASE("Bundled: the orchestrator loads with the linked runtime", "[vtextensi
     CHECK((*compiled)->manifest()->placement == ManifestPlacement::Daemon);
 
     auto services = vtextension::testing::FakeDaemonHostServices {};
-    auto clock = core::platform::ManualClock {};
-    CHECK(DaemonInstance::create(*compiled, services, clock, **engine, limits).has_value());
+    CHECK(DaemonInstance::create(*compiled, services, **engine, limits).has_value());
 }
 #endif

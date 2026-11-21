@@ -4,8 +4,6 @@
 // sets, and a guest running on it.
 #pragma once
 
-#include <core/platform/Clock.hpp>
-
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
@@ -156,7 +154,7 @@ class RunningGuest
     void restart()
     {
         _instance.reset();
-        auto instance = Instance::create(*_engine, *_compiled, services, clock, _limits);
+        auto instance = Instance::create(*_engine, *_compiled, services, _limits);
         REQUIRE(instance.has_value());
         _instance = std::move(*instance);
     }
@@ -182,8 +180,7 @@ class RunningGuest
         return std::move(*rendered);
     }
 
-    FakeHostServices services;         ///< Declared first: outlives the instance that calls it.
-    core::platform::ManualClock clock; ///< What the instance measures its deadlines' use by.
+    FakeHostServices services; ///< Declared first: outlives the instance that calls it.
 
   private:
     std::unique_ptr<wasm::IWasmBackend> _backend; ///< Outlives the engine created from it.

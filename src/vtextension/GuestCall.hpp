@@ -4,7 +4,6 @@
 #pragma once
 
 #include <core/Assert.hpp>
-#include <core/platform/Clock.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -39,13 +38,9 @@ class GuestCall
   public:
     /// @param backend The backend the instance's runtime came from; calls must be made on a thread it
     ///        prepared.
-    /// @param clock What measures how much of a call's deadline is spent.
-    /// @param watchdog What enforces the deadlines.
+    /// @param watchdog What enforces the deadlines, and measures how much of one is spent.
     /// @param limits The instance's limits. Every reference must outlive the GuestCall.
-    GuestCall(wasm::IWasmBackend& backend,
-              core::platform::IClock& clock,
-              IDeadlineWatchdog& watchdog,
-              ExtensionLimits const& limits);
+    GuestCall(wasm::IWasmBackend& backend, IDeadlineWatchdog& watchdog, ExtensionLimits const& limits);
     ~GuestCall();
 
     GuestCall(GuestCall const&) = delete;
@@ -73,7 +68,7 @@ class GuestCall
     template <typename Body>
     [[nodiscard]] auto guarded(std::chrono::milliseconds timeout, Body const& body) -> decltype(body())
     {
-        if (auto const ready = beginCall(timeout); !ready)
+        if (auto const ready = beginCall(); !ready)
             return std::unexpected(ready.error());
         auto result = runGuarded(_watchdog, watchToken(), timeout, body);
         if (auto const failed = endCall(result ? std::nullopt : std::optional { result.error() }))
@@ -125,11 +120,11 @@ class GuestCall
     [[nodiscard]] abi::Result<std::invoke_result_t<Call const&>> pauseDeadline(Call const& call)
     {
         auto const token = watchToken();
-        auto const remaining = _deadline - _clock.now();
+        auto const remaining = _watchdog.unspent(token);
         _watchdog.disarm(token);
         // Once disarmed, the watchdog cannot fire any more; it may have already, or the deadline may be
         // spent all the same.
-        if (isDeadlineExpired() || remaining <= core::platform::SteadyDuration::zero())
+        if (isDeadlineExpired() || remaining <= std::chrono::nanoseconds::zero())
             return std::unexpected(ExtensionError::DeadlineExceeded);
 
         auto const resume = ResumeDeadlineOnExit { *this, remaining };
@@ -139,11 +134,8 @@ class GuestCall
     /// @return The guest's memory, as the codec reaches it.
     [[nodiscard]] abi::IGuestMemory& memory() noexcept;
 
-    /// @return How much of the current call's deadline is left, by the clock.
-    [[nodiscard]] core::platform::SteadyDuration remaining() const noexcept
-    {
-        return _deadline - _clock.now();
-    }
+    /// @return How much of the current call's deadline is left, as the watchdog measures it.
+    [[nodiscard]] std::chrono::nanoseconds remaining() { return _watchdog.unspent(watchToken()); }
 
     /// @return The deadline's state, which the watchdog sets from its own thread.
     [[nodiscard]] std::atomic<DeadlineState> const& deadlineState() const noexcept { return _deadlineState; }
@@ -166,7 +158,7 @@ class GuestCall
     class ResumeDeadlineOnExit
     {
       public:
-        ResumeDeadlineOnExit(GuestCall& call, core::platform::SteadyDuration remaining) noexcept:
+        ResumeDeadlineOnExit(GuestCall& call, std::chrono::nanoseconds remaining) noexcept:
             _call { call }, _remaining { remaining }
         {
         }
@@ -181,11 +173,11 @@ class GuestCall
 
       private:
         GuestCall& _call;
-        core::platform::SteadyDuration _remaining;
+        std::chrono::nanoseconds _remaining;
     };
 
     /// Prepares a guarded call: the instance must be usable and the thread prepared.
-    [[nodiscard]] std::expected<void, ExtensionError> beginCall(std::chrono::milliseconds timeout);
+    [[nodiscard]] std::expected<void, ExtensionError> beginCall();
 
     /// Records how a guarded call ended.
     /// @param error Why it failed; `std::nullopt` if it returned.
@@ -209,7 +201,6 @@ class GuestCall
     [[nodiscard]] std::unexpected<ExtensionError> failHostCall(ExtensionError error) noexcept;
 
     wasm::IWasmBackend& _backend;
-    core::platform::IClock& _clock;
     IDeadlineWatchdog& _watchdog;
     ExtensionLimits const& _limits;
     /// Written by the watchdog, from its own thread, before it interrupts the instance. Once Expired it
@@ -221,7 +212,6 @@ class GuestCall
     std::optional<ExtensionError> _fault;
     std::optional<ExtensionError> _hostCallError; ///< What a host function failed with, this call.
     HostCallState _hostCall = HostCallState::Idle;
-    core::platform::SteadyTimePoint _deadline; ///< When the current call's deadline expires, by _clock.
 };
 
 } // namespace vtextension::detail

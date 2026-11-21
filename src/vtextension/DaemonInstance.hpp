@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <core/platform/Clock.hpp>
-
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -52,7 +50,6 @@ class DaemonInstance final: private wasm::IHostContext
     /// Instantiates a compiled daemon-world extension, and runs a WASI reactor's `_initialize`.
     /// @param compiled The module, loaded on a World::Daemon engine; the instance keeps it alive.
     /// @param services What the guest's served imports call; it must outlive the instance.
-    /// @param clock What measures how much of a call's deadline is spent; it must outlive the instance.
     /// @param watchdog What enforces the deadlines: the module's engine in production. It must outlive
     ///        the instance.
     /// @param limits The limits this instance is held to. Its `memoryBytes` and `stackBytes` must be the
@@ -63,7 +60,6 @@ class DaemonInstance final: private wasm::IHostContext
     [[nodiscard]] static std::expected<std::unique_ptr<DaemonInstance>, ExtensionError> create(
         std::shared_ptr<CompiledExtension const> compiled,
         IDaemonHostServices& services,
-        core::platform::IClock& clock,
         IDeadlineWatchdog& watchdog,
         ExtensionLimits limits);
 
@@ -71,7 +67,6 @@ class DaemonInstance final: private wasm::IHostContext
     DaemonInstance(PrivateTag,
                    std::shared_ptr<CompiledExtension const> compiled,
                    IDaemonHostServices& services,
-                   core::platform::IClock& clock,
                    IDeadlineWatchdog& watchdog,
                    ExtensionLimits limits);
 

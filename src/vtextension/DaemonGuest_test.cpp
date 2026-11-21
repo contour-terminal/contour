@@ -723,7 +723,6 @@ constexpr auto MeasuredRounds = 20;
     auto const compiled = CompiledExtension::load(**engine, orchestratorModule());
     REQUIRE(compiled.has_value());
     auto const pullRequests = readTestdata("github/prs-100.json");
-    auto clock = core::platform::SteadyClock {};
     auto const info =
         DaemonHostInfo { .roots = orchestratorRoots(), .home = "/home/u", .utcOffsetMinutes = 0 };
 
@@ -739,7 +738,7 @@ constexpr auto MeasuredRounds = 20;
             REQUIRE(store.set(run.key, run.value).has_value());
 
         auto services = MeasuredServices { pullRequests, seed.runs, store, tabs };
-        auto instance = DaemonInstance::create(*compiled, services, clock, **engine, limits);
+        auto instance = DaemonInstance::create(*compiled, services, **engine, limits);
         REQUIRE(instance.has_value());
         REQUIRE((*instance)->load(seed.configJson, info).has_value());
         services.finish();
@@ -786,7 +785,7 @@ class RepaintRig
         _engine { required(Engine::create(*_backend, World::Daemon, _limits)) },
         _compiled { required(CompiledExtension::load(*_engine, orchestratorModule())) },
         _services { readTestdata(pullRequestsFixture), seed.runs, _store, tab, std::move(reads) },
-        _instance { required(DaemonInstance::create(_compiled, _services, _clock, *_engine, _limits)) }
+        _instance { required(DaemonInstance::create(_compiled, _services, *_engine, _limits)) }
     {
         for (auto const& run: seed.runs)
             REQUIRE(_store.set(run.key, run.value).has_value());
@@ -824,7 +823,6 @@ class RepaintRig
   private:
     ExtensionLimits _limits;
     MemoryStore _store;
-    core::platform::SteadyClock _clock;
     std::unique_ptr<wasm::IWasmBackend> _backend;
     std::shared_ptr<Engine> _engine;
     std::shared_ptr<CompiledExtension> _compiled;
@@ -868,8 +866,7 @@ TEST_CASE("DaemonGuest: the orchestrator is a well-formed daemon module", "[daem
 
     auto services = vtextension::testing::FakeDaemonHostServices {};
     services.clock = ClockReading { .monotonicMs = 1'000, .wallMs = 1'794'582'527'000 };
-    auto clock = core::platform::ManualClock {};
-    auto const instance = DaemonInstance::create(*compiled, services, clock, **engine, limits);
+    auto const instance = DaemonInstance::create(*compiled, services, **engine, limits);
     REQUIRE(instance.has_value());
     REQUIRE((*instance)
                 ->load(OrchestratorConfig, DaemonHostInfo { .roots = orchestratorRoots(), .home = "/home/u" })
