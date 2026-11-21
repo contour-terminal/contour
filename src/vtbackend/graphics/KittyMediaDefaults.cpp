@@ -75,6 +75,8 @@ std::vector<std::filesystem::path> platformTemporaryRoots([[maybe_unused]] core:
     if (auto const tmpdir = env.get("TMPDIR"))
         addRoot(roots, *tmpdir);
     #ifdef __APPLE__
+    // `/tmp` as spelled, and what it links to: a requested path is judged before anything resolves it.
+    addRoot(roots, "/tmp");
     addRoot(roots, "/private/tmp");
     auto userTemp = std::array<char, PATH_MAX> {};
     if (auto const length = ::confstr(_CS_DARWIN_USER_TEMP_DIR, userTemp.data(), userTemp.size());

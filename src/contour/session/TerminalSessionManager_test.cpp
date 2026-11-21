@@ -7742,6 +7742,8 @@ TEST_CASE("TerminalSessionManager: kitty file media are read for a local process
     auto* const session = sessionAtRow(manager, *window, 0);
     REQUIRE(session != nullptr);
 
+    // A local shell in the foreground: a PTY that cannot name its foreground process reads nothing.
+    mockPtyOf(*session).setForegroundProcessName("bash");
     mockPtyOf(*session).appendStdOutBuffer(probe);
     REQUIRE(session->terminal().processInputOnce());
     CHECK(session->terminal().peekInput() == row.reply);

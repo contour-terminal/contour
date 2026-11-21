@@ -31,6 +31,8 @@ TEST_CASE("KittyMediaDefaults.platformTemporaryRoots", "[kitty][media]")
     CHECK(holds(roots, "/x"));
     #ifdef __APPLE__
     CHECK(holds(roots, "/private/tmp"));
+    // As spelled too: the requested path is judged before anything resolves it.
+    CHECK(holds(roots, "/tmp"));
     #else
     CHECK(holds(roots, "/tmp"));
     CHECK_FALSE(holds(roots, "/dev/shm"));
@@ -73,7 +75,11 @@ TEST_CASE("KittyMediaDefaults.platformTemporaryRoots_keeps_the_spelling_and_drop
 {
     auto const env = core::testing::FakeEnvironment { { { "TMPDIR", "/x/y/" } } };
     auto const roots = platformTemporaryRoots(env);
+#ifdef _WIN32
+    CHECK(roots.empty());
+#else
     CHECK(holds(roots, "/x/y"));
+#endif
 }
 
 #ifndef _WIN32

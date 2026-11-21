@@ -2003,8 +2003,8 @@ class Terminal: public IStatusLinePublishTarget
     /// construction, but only while the batch came from the PTY (ByteOrigin::Pty), on a terminal that is no
     /// replica (ReplicaRole::None), and while the active context is not ContextLocality::Foreign (`ssh`
     /// typed into a local pane: the path names a file over there), nor while the PTY's foreground process is
-    /// a remote-shell client (kitty_graphics::isRemoteShellClient(), the same without shell integration).
-    /// Requires _stateMutex to be held.
+    /// a remote-shell client (kitty_graphics::isRemoteShellClient(), the same without shell integration) or
+    /// cannot be named at all. Requires _stateMutex to be held.
     /// @return The services, or nullptr when every file medium is refused.
     [[nodiscard]] kitty_graphics::KittyMediumServices const* kittyMediaForCurrentBatch() const;
 

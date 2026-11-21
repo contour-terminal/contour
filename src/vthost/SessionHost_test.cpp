@@ -6047,11 +6047,12 @@ TEST_CASE("a hosted session reads kitty file media with the host's own services"
     struct Row
     {
         bool granted;
-        std::string_view foreground;
+        std::optional<std::string_view> foreground;
         bool read;
     };
     auto const row = GENERATE(Row { .granted = true, .foreground = "bash", .read = true },
                               Row { .granted = true, .foreground = "ssh", .read = false },
+                              Row { .granted = true, .foreground = std::nullopt, .read = false },
                               Row { .granted = false, .foreground = "bash", .read = false });
     auto const granted = row.granted;
     auto const services = vtbackend::kitty_graphics::KittyMediumServices {
@@ -6083,7 +6084,8 @@ TEST_CASE("a hosted session reads kitty file media with the host's own services"
     auto& mock = dynamic_cast<vtpty::MockPty&>(dynamic_cast<vthost::TappingPty&>(terminal->device()).inner());
 
     // The foreground process reaches the terminal through the host's byte tap.
-    mock.setForegroundProcessName(std::string { row.foreground });
+    mock.setForegroundProcessName(
+        row.foreground.transform([](std::string_view name) { return std::string { name }; }));
     mock.appendStdOutBuffer(std::format("\033_Ga=q,i=31,s=1,v=1,t=f,f=32;{}\033\\",
                                         core::base64::encode("/tmp/tty-graphics-protocol-probe.rgba")));
     REQUIRE(terminal->processInputOnce());

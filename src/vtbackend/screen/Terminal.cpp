@@ -2955,9 +2955,10 @@ kitty_graphics::KittyMediumServices const* Terminal::kittyMediaForCurrentBatch()
     if (_contexts.localityOf(_contexts.activeId(), localIdentity()) == ContextLocality::Foreign)
         return nullptr;
     // The same without shell integration: a remote-shell client in the PTY's foreground relays another host.
+    // A PTY that cannot name its foreground process cannot rule one out, so it reads nothing (fail closed).
     // Asked of the PTY only for a file medium, never per byte.
     if (auto const foreground = _pty->foregroundProcessName();
-        foreground && kitty_graphics::isRemoteShellClient(*foreground))
+        !foreground || kitty_graphics::isRemoteShellClient(*foreground))
         return nullptr;
     return &*_kittyMedia;
 }

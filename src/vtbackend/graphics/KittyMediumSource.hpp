@@ -47,18 +47,22 @@ class RefusingMediumSource final: public KittyMediumSource
 /// there is refused or left alone rather than read or deleted. Production passes none.
 struct MediumReadInterleavings
 {
-    /// Called with the canonical path once checkPath() accepted it, just before it is opened.
+    /// Called with the requested path once checkPath() accepted it, just before it is walked and opened.
     std::function<void(std::filesystem::path const&)> pathAccepted {};
     /// Called with the canonical path after the read, just before a `t=t` file is unlinked.
     std::function<void(std::filesystem::path const&)> beforeUnlink {};
 };
 
-/// The POSIX (Linux, macOS) source. In this order, refusing at the first step that fails: canonicalize the
-/// path (`realpath`) -> checkPath() on the canonical path -> `open(O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC)`
-/// -> the opened descriptor's own path must be the canonical one (a swap between the check and the open is
-/// refused) -> `fstat` -> checkOpenedFile() -> a read bounded by the size limit -> deletionAfterRead() ->
-/// `unlink`, only if the path still names the file that was read. Nothing is opened before the path policy
-/// accepted it: opening a device node has side effects. A FIFO is opened without blocking and refused.
+/// The POSIX (Linux, macOS) source. In this order, refusing at the first step that fails: checkPath() on the
+/// requested path, lexically normal, before anything is looked up -> walk down from its enclosingRoot() one
+/// component at a time with `openat(O_NOFOLLOW)`, refusing any link below the root without looking its target
+/// up (the file itself opened `O_RDONLY|O_NONBLOCK`) -> checkPath() on the real path walked -> the opened
+/// descriptor's own path must be that path -> `fstat` -> checkOpenedFile() -> a read bounded by the size
+/// limit
+/// -> deletionAfterRead() -> `unlinkat` in the walked directory, only if it is still where it was and the
+/// name still names the file read. Nothing outside the roots is resolved, and nothing is opened before the
+/// path policy accepted it: opening a device node has side effects. A FIFO is opened without blocking and
+/// refused.
 class PosixMediumSource final: public KittyMediumSource
 {
   public:

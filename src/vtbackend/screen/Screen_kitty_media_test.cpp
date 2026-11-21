@@ -65,6 +65,13 @@ class FakeMediumSource final: public KittyMediumSource
         "\033_Ga={},i=31,s=1,v=1,t={},f=32;{}\033\\", action, medium, core::base64::encode(ProbePath));
 }
 
+/// Puts a local shell in the foreground of @p mock's PTY: a terminal that cannot tell what is in the
+/// foreground reads no file.
+void runsLocalShell(MockTerm<vtpty::MockPty>& mock)
+{
+    mock.mockPty().setForegroundProcessName("bash");
+}
+
 constexpr auto Ok = "\033_Gi=31;OK\033\\"sv;
 constexpr auto Refused = "\033_Gi=31;EBADF:file not readable\033\\"sv;
 } // namespace
@@ -73,6 +80,7 @@ TEST_CASE("KittyMedia.probe_from_the_pty_is_read", "[kitty][media]")
 {
     auto const source = FakeMediumSource {};
     auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+    runsLocalShell(mock);
 
     mock.writeToScreen(probe());
 
@@ -88,6 +96,7 @@ TEST_CASE("KittyMedia.temporary_file_reaches_the_source_as_such", "[kitty][media
 {
     auto const source = FakeMediumSource {};
     auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+    runsLocalShell(mock);
 
     mock.writeToScreen(probe('t'));
 
@@ -100,6 +109,7 @@ TEST_CASE("KittyMedia.transmission_stores_the_file", "[kitty][media]")
 {
     auto const source = FakeMediumSource {};
     auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+    runsLocalShell(mock);
 
     mock.writeToScreen(probe('f', "t"));
 
@@ -113,6 +123,7 @@ TEST_CASE("KittyMedia.a_frame_reads_the_file", "[kitty][media]")
 {
     auto const source = FakeMediumSource {};
     auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+    runsLocalShell(mock);
     mock.writeToScreen("\033_Ga=t,i=31,s=1,v=1,f=32;AAAA/w==\033\\"sv);
     mock.discardPendingReplies();
 
@@ -131,6 +142,7 @@ TEST_CASE("KittyMedia.every_failure_gets_one_refusal", "[kitty][media]")
     {
         source.result = std::unexpected(MediaRefusal::OutsideRoots);
         auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+        runsLocalShell(mock);
         mock.writeToScreen(probe());
         CHECK(mock.terminal.peekInput() == Refused);
     }
@@ -139,6 +151,7 @@ TEST_CASE("KittyMedia.every_failure_gets_one_refusal", "[kitty][media]")
     {
         source.result = std::vector<uint8_t> { 1, 2, 3 };
         auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+        runsLocalShell(mock);
         mock.writeToScreen(probe('f', "t"));
         CHECK(mock.terminal.peekInput() == Refused);
         CHECK(mock.terminal.primaryScreen().kittyImage(31) == nullptr);
@@ -147,6 +160,7 @@ TEST_CASE("KittyMedia.every_failure_gets_one_refusal", "[kitty][media]")
     SECTION("t=s is never read")
     {
         auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+        runsLocalShell(mock);
         mock.writeToScreen(probe('s'));
         CHECK(mock.terminal.peekInput() == Refused);
         CHECK(source.requests.empty());
@@ -164,6 +178,7 @@ TEST_CASE("KittyMedia.every_failure_gets_one_refusal", "[kitty][media]")
         auto services = servicesOf(source);
         services.policy.transmission = FileTransmission::Disabled;
         auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, services };
+        runsLocalShell(mock);
         mock.writeToScreen(probe());
         CHECK(mock.terminal.peekInput() == Refused);
         CHECK(source.requests.empty());
@@ -174,6 +189,7 @@ TEST_CASE("KittyMedia.only_bytes_from_a_local_pty_are_read", "[kitty][media]")
 {
     auto const source = FakeMediumSource {};
     auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+    runsLocalShell(mock);
 
     SECTION("written by the host, not the PTY")
     {
@@ -210,6 +226,7 @@ TEST_CASE("KittyMedia.not_while_a_remote_shell_client_is_in_the_foreground", "[k
     // tells that the bytes come from over there.
     auto const source = FakeMediumSource {};
     auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+    runsLocalShell(mock);
 
     SECTION("ssh")
     {
@@ -225,6 +242,14 @@ TEST_CASE("KittyMedia.not_while_a_remote_shell_client_is_in_the_foreground", "[k
         mock.writeToScreen(probe());
         CHECK(mock.terminal.peekInput() == Ok);
     }
+
+    SECTION("none the PTY can name")
+    {
+        mock.mockPty().setForegroundProcessName(std::nullopt);
+        mock.writeToScreen(probe());
+        CHECK(mock.terminal.peekInput() == Refused);
+        CHECK(source.requests.empty());
+    }
 }
 
 TEST_CASE("KittyMedia.a_quota_refusal_after_a_read_is_the_one_refusal", "[kitty][media]")
@@ -232,6 +257,7 @@ TEST_CASE("KittyMedia.a_quota_refusal_after_a_read_is_the_one_refusal", "[kitty]
     // Inside the roots, ENOSPC would tell the application more about a file than the uniform refusal does.
     auto const source = FakeMediumSource {};
     auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+    runsLocalShell(mock);
     mock.terminal.settings().kittyImageStorageQuota = 6;
     mock.writeToScreen("\033_Ga=t,i=1,s=1,v=1,f=32,q=2;AAAA/w==\033\\"sv);
 
@@ -270,6 +296,7 @@ TEST_CASE("KittyMedia.what_the_host_writes_mid_batch_is_not_the_ptys", "[kitty][
 {
     auto const source = FakeMediumSource {};
     auto mock = EventProbeTerm { PageSize { LineCount(4), ColumnCount(8) }, servicesOf(source) };
+    runsLocalShell(mock);
 
     SECTION("a status line written while the batch is parsed")
     {

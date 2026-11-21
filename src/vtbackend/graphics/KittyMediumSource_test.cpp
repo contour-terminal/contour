@@ -107,13 +107,13 @@ TEST_CASE("KittyMediumSource.posix.reads_a_regular_file", "[kitty][media]")
         CHECK_FALSE(std::filesystem::exists(file));
     }
 
-    SECTION("a path through a link inside the root reads the canonical file")
+    SECTION("a path through a link inside the root is refused, even back into the root")
     {
         std::filesystem::create_directory_symlink(root.path(), root.path() / "alias");
-        auto const bytes = source.read(
-            (root.path() / "alias" / "tty-graphics-protocol-a.rgba").native(), Medium::File, policyFor(root));
-        REQUIRE(bytes.has_value());
-        CHECK(*bytes == bytesOf("RGBA"));
+        checkRefused(source.read((root.path() / "alias" / "tty-graphics-protocol-a.rgba").native(),
+                                 Medium::File,
+                                 policyFor(root)),
+                     MediaRefusal::SymbolicLink);
     }
 }
 
@@ -144,7 +144,7 @@ TEST_CASE("KittyMediumSource.posix.refusals", "[kitty][media]")
         auto const target = outside.write("secret", "KEY");
         std::filesystem::create_symlink(target, root.path() / "tty-graphics-protocol-link");
         checkRefused(source.read((root.path() / "tty-graphics-protocol-link").native(), Medium::File, policy),
-                     MediaRefusal::OutsideRoots);
+                     MediaRefusal::SymbolicLink);
         CHECK(std::filesystem::exists(target));
     }
 
@@ -205,19 +205,47 @@ TEST_CASE("KittyMediumSource.posix.swaps_after_the_path_check", "[kitty][media]"
                 std::filesystem::remove(canonical);
                 std::filesystem::create_symlink(secret, canonical);
             } } };
-        checkRefused(source.read(file.native(), Medium::TemporaryFile, policy), MediaRefusal::Unreadable);
+        checkRefused(source.read(file.native(), Medium::TemporaryFile, policy), MediaRefusal::SymbolicLink);
         CHECK(std::filesystem::exists(secret));
     }
 
-    SECTION("a directory above it swapped for a symbolic link (the descriptor's path differs)")
+    SECTION("a directory above it swapped for a symbolic link")
     {
         auto const file = root.write("dir/tty-graphics-protocol-a", "RGBA");
         auto const source = PosixMediumSource { { .pathAccepted = [&](std::filesystem::path const&) {
             std::filesystem::rename(root.path() / "dir", root.path() / "moved");
             std::filesystem::create_directory_symlink(secret.parent_path(), root.path() / "dir");
         } } };
-        checkRefused(source.read(file.native(), Medium::TemporaryFile, policy), MediaRefusal::Unreadable);
+        checkRefused(source.read(file.native(), Medium::TemporaryFile, policy), MediaRefusal::SymbolicLink);
         CHECK(std::filesystem::exists(secret));
+    }
+}
+
+TEST_CASE("KittyMediumSource.posix.a_link_below_the_root_is_never_followed", "[kitty][media]")
+{
+    // Following it would look its target up -- an automount, a network filesystem -- under the terminal lock.
+    // Refused as a link, whatever it points at, existing or not: its target is never resolved.
+    auto const root = TestDirectory {};
+    auto const source = PosixMediumSource {};
+    auto const target = GENERATE(std::filesystem::path { "/net/example.invalid/tty-graphics-protocol-a" },
+                                 std::filesystem::path { "/nonexistent-contour-media-test/dir" });
+    INFO(target);
+
+    SECTION("as the file")
+    {
+        std::filesystem::create_symlink(target, root.path() / "tty-graphics-protocol-n");
+        checkRefused(
+            source.read((root.path() / "tty-graphics-protocol-n").native(), Medium::File, policyFor(root)),
+            MediaRefusal::SymbolicLink);
+    }
+
+    SECTION("as a directory on the way")
+    {
+        std::filesystem::create_directory_symlink(target, root.path() / "n");
+        checkRefused(source.read((root.path() / "n" / "tty-graphics-protocol-a").native(),
+                                 Medium::File,
+                                 policyFor(root)),
+                     MediaRefusal::SymbolicLink);
     }
 }
 

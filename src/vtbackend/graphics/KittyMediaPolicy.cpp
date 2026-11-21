@@ -162,6 +162,30 @@ std::expected<void, MediaRefusal> checkOpenedFile(MediaPolicy const& policy, Ope
     return {};
 }
 
+std::optional<std::filesystem::path> enclosingRoot(MediaPolicy const& policy,
+                                                   std::filesystem::path const& path,
+                                                   Medium medium)
+{
+    auto const& furtherRoots = medium == Medium::File ? policy.allowedRoots : policy.temporaryFileOnlyRoots;
+    auto best = std::optional<std::filesystem::path> {};
+    auto bestDepth = size_t { 0 };
+    for (auto const& roots: { std::span { policy.temporaryRoots }, std::span { furtherRoots } })
+        for (auto const& root: roots)
+        {
+            auto const below = componentsBelow(root, path);
+            if (!below || std::ranges::any_of(*below, [](std::filesystem::path const& component) {
+                    return component.native().starts_with('.');
+                }))
+                continue;
+            if (auto const depth = componentsOf(root).size(); !best || depth > bestDepth)
+            {
+                best = root;
+                bestDepth = depth;
+            }
+        }
+    return best;
+}
+
 bool isRemoteShellClient(std::string_view processName) noexcept
 {
     auto const separator = processName.rfind('/');

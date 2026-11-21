@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -59,6 +60,8 @@ enum class MediaRefusal : uint8_t
     MultipleLinks,     ///< The opened file has more than one hard link.
     TooLarge,          ///< The opened file exceeds the size limit.
     Unreadable,        ///< It does not exist, vanished, was swapped, or reading it failed.
+    SymbolicLink, ///< A component below the root is a symbolic link: never followed, nor its target looked
+                  ///< up.
 };
 
 /// The one reply every refused file medium gets, whatever the reason: inside the allowed roots it still
@@ -105,6 +108,16 @@ enum class DeletionAfterRead : uint8_t
 [[nodiscard]] std::expected<void, MediaRefusal> checkPath(MediaPolicy const& policy,
                                                           std::filesystem::path const& realPath,
                                                           Medium medium);
+
+/// The root a reader walks down from to reach @p path: the deepest root eligible for @p medium that @p path
+/// lies below with no hidden component in between.
+/// @param policy The terminal's media policy.
+/// @param path A lexically normal, absolute path checkPath() accepted.
+/// @param medium The command's `t=`.
+/// @return The root, or nullopt when there is none.
+[[nodiscard]] std::optional<std::filesystem::path> enclosingRoot(MediaPolicy const& policy,
+                                                                 std::filesystem::path const& path,
+                                                                 Medium medium);
 
 /// Judges an opened file's attributes against the policy.
 /// @param policy The terminal's media policy.
