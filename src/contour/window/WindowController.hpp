@@ -605,7 +605,9 @@ class WindowController:
     Q_INVOKABLE void beginActiveTabTitleEdit();
     /// Asks the active tab's QML delegate to open its color picker (the keyboard entry point for the
     /// SetTabColor action when it names no color). No-op when this window has no active tab. Emits
-    /// tabColorPickRequested() with the active tab's row so exactly that TabItem opens its flyout.
+    /// tabColorPickRequested() with the active tab's row so exactly that TabItem opens its flyout; where no
+    /// tab strip is drawn (tabs in the sidebar, or the strip hidden), sidebarTabColorPickRequested() for the
+    /// active tab's row instead.
     Q_INVOKABLE void beginActiveTabColorPick();
 
     // {{{ Keyboard focus in the chrome
@@ -2147,10 +2149,8 @@ class WindowController:
     /// the row is shown.
     void runSidebarAction(SidebarRowKey const& row, actions::Action const& action);
     /// Runs @p action on what the window shows, once @p row is shown (the tail of runSidebarAction()).
-    void runSidebarActionShown(
-        SidebarRowKey const& row,
-        actions::Action const& action); /// Asks, through sidebarCloseConfirmationRequested(), whether to
-                                        /// close the node @p key stands for.
+    void runSidebarActionShown(SidebarRowKey const& row, actions::Action const& action);
+    /// Asks, through sidebarCloseConfirmationRequested(), whether to close the node @p key stands for.
     void askToClose(CloseKind kind, SidebarRowKey const& key);
     /// Builds and presents the menu of sidebar row @p row.
     void openSidebarContextMenu(SidebarRow const& row, QPointF windowPosition);

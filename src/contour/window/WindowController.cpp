@@ -432,8 +432,9 @@ namespace
     }
 
     /// @param color The colour a daemon's directory lists for a tab.
-    /// @return It as the tab's menu sees it: the wire carries one colour only, so a listed one reads as the
-    ///         user's, whose reset the daemon makes (and leaves an application's alone).
+    /// @return It as the tab's menu sees it: the user's. A daemon colours a tab only as a user asked
+    ///         (TabColorSource::User, vthost's TabEdits); its sessions' DECAC requests take the Null events'
+    ///         default and colour nothing, so every colour it lists is one "Reset" drops.
     [[nodiscard]] TabColoring coloringListed(std::optional<vtbackend::RGBColor> color)
     {
         return TabColoring { .color = color,
@@ -1744,7 +1745,26 @@ void WindowController::beginActiveTabColorPick()
     auto const index = activeTabIndex();
     if (index < 0)
         return;
-    emit tabColorPickRequested(index);
+    if (_tabPlacement == config::TabPlacement::Top && tabBarShouldShow())
+    {
+        emit tabColorPickRequested(index);
+        return;
+    }
+    // No tab strip is drawn to hang the tab's own picker from: the sidebar's, over the active tab's row, in a
+    // sidebar shown for it (as beginCurrentWorkspaceColorPick() hangs the workspace's).
+    if (_directorySource == nullptr)
+        return;
+    auto const displayed = _sidebarHost->displayedTab(_directorySource->directory());
+    if (!displayed)
+        return;
+    focusSidebar();
+    // The rows may not have caught up yet with a tab that has just opened or been switched to.
+    _sidebar->refreshNow();
+    emit sidebarTabColorPickRequested(_sidebar->rowIndexOf(SidebarRowKey { .kind = SidebarRowKind::Tab,
+                                                                           .workspace = displayed->workspace,
+                                                                           .tab = displayed->tab,
+                                                                           .pane = PaneKey {} }),
+                                      displayed->tab);
 }
 
 void WindowController::beginSaveLayoutPrompt()

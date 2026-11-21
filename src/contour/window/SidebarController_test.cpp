@@ -11,6 +11,7 @@
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/test/AppFixture.hpp>
+#include <contour/test/ContextMenuRows.hpp>
 #include <contour/test/CoreFixtures.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/window/SwitcherController.hpp>
@@ -651,19 +652,7 @@ namespace
     return static_cast<int>(std::distance(rows.begin(), at));
 }
 
-/// @return The row titled @p title in @p rows, searching submenus too; an empty map for none.
-[[nodiscard]] QVariantMap menuRowOf(QVariantList const& rows, QString const& title)
-{
-    for (auto const& value: rows)
-    {
-        auto row = value.toMap();
-        if (row["title"].toString() == title)
-            return row;
-        if (auto nested = menuRowOf(row["children"].toList(), title); !nested.isEmpty())
-            return nested;
-    }
-    return {};
-}
+using contour::test::menuRowOf;
 
 /// @return The action ids of the command rows of submenu @p title, in order.
 [[nodiscard]] std::vector<int> submenuActionsOf(QVariantList const& rows, QString const& title)
@@ -1094,6 +1083,59 @@ TEST_CASE("a sidebar tab menu's Tab Color colours its own tab, not the focused o
         window->resetTabColorOf(right.value);
         CHECK_FALSE(userColorOf(right).has_value());
         CHECK(activeTab() == focused);
+    }
+    SECTION("the picker colours none of another window's tabs")
+    {
+        auto const other =
+            contour::test::ScopedController { manager, contour::config::MenuPresentation::InScene };
+        auto const theirs = contour::test::createSessionTabs(manager, *other, 1).tabs.at(0);
+        manager.model().setTabColor(
+            theirs, vtworkspace::TabColorSource::User, vtbackend::RGBColor { 4, 5, 6 });
+        window->setTabColorOf(theirs.value, QColor { 0x12, 0x34, 0x56 });
+        CHECK(userColorOf(theirs) == vtbackend::RGBColor { 4, 5, 6 });
+        window->resetTabColorOf(theirs.value);
+        CHECK(userColorOf(theirs) == vtbackend::RGBColor { 4, 5, 6 });
+    }
+}
+
+TEST_CASE("SetTabColor without a colour opens the sidebar's picker where no tab strip is drawn",
+          "[contour][sidebar][controller][tabcolor]")
+{
+    using contour::config::TabBarVisibility;
+    // Where the tabs live, and whether the strip would be drawn at the top.
+    auto const [placement, visibility] =
+        GENERATE(std::pair { TabPlacement::Top, TabBarVisibility::Always },
+                 std::pair { TabPlacement::Top, TabBarVisibility::Never },
+                 std::pair { TabPlacement::Sidebar, TabBarVisibility::Always });
+    INFO("tab placement " << static_cast<int>(placement) << ", tab bar " << static_cast<int>(visibility));
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    app.app().config().tabPlacement = placement;
+    auto& manager = app.manager();
+    auto const window =
+        contour::test::ScopedController { manager, contour::config::MenuPresentation::InScene };
+    window->setTabBarVisibility(visibility);
+    auto const made = contour::test::createSessionTabs(manager, *window, 2);
+    auto const focused = made.tabs.at(1);
+    auto picks = QSignalSpy { &*window, &contour::window::WindowController::sidebarTabColorPickRequested };
+    auto stripPicks = QSignalSpy { &*window, &contour::window::WindowController::tabColorPickRequested };
+
+    // What the SetTabColor action naming no colour does, from a key binding, the palette or the menu bar.
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+    CHECK((*session)(contour::actions::SetTabColor {}));
+
+    if (placement == TabPlacement::Top && visibility == TabBarVisibility::Always)
+    {
+        // The strip's own picker, over the active tab.
+        CHECK(stripPicks.count() == 1);
+        CHECK(picks.count() == 0);
+    }
+    else
+    {
+        CHECK(stripPicks.count() == 0);
+        REQUIRE(picks.count() == 1);
+        CHECK(picks.at(0).at(0).toInt() == tabRowOf(*window, focused.value));
+        CHECK(picks.at(0).at(1).value<quint64>() == focused.value);
     }
 }
 
