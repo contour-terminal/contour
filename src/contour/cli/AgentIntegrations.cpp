@@ -5,7 +5,8 @@
 //   Codex CLI:   https://learn.chatgpt.com/docs/hooks
 // Both run a command hook with one JSON document on stdin carrying `hook_event_name`, and per event:
 //   PreToolUse/PermissionRequest/PostToolUse: `tool_name`, `tool_input` (`file_path`, `command`, ...);
-//   Notification (Claude): `message` and `notification_type`; Stop: `last_assistant_message`.
+//   Notification (Claude): `message` and `notification_type`; Stop: `last_assistant_message`, and (Claude)
+//   `background_tasks` and `session_crons`, the work in flight and the wake-ups that will start another turn.
 // Codex has Interrupt and no Notification. Codex runs only hooks the user has reviewed and trusted, so the
 // user must trust the hooks `contour agent setup` installs once, inside Codex.
 #include <contour/cli/AgentIntegrations.hpp>
@@ -14,6 +15,7 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <ranges>
 #include <string>
 
@@ -162,8 +164,48 @@ namespace
         return StatusReport { .state = "idle", .kind = {}, .message = {} };
     }
 
+    /// @param payload A hook payload.
+    /// @param key A member name.
+    /// @return The member when it is an array; else null.
+    [[nodiscard]] glz::generic::array_t const* arrayOf(glz::generic const& payload,
+                                                       std::string_view key) noexcept
+    {
+        auto const* member = memberOf(payload, key);
+        return member != nullptr ? member->get_if<glz::generic::array_t>() : nullptr;
+    }
+
+    /// The members that name a background task, most telling first.
+    inline constexpr auto BackgroundTaskNameKeys = std::array { "description"sv, "command"sv, "type"sv };
+
+    /// @param tasks A Stop's `background_tasks`, not empty.
+    /// @return "Waiting for <what the first task is>", with a count of the others.
+    [[nodiscard]] std::string waitingFor(glz::generic::array_t const& tasks)
+    {
+        auto message = std::string { "Waiting for" };
+        auto const keys = BackgroundTaskNameKeys | std::views::transform([&](auto key) {
+                              return firstLine(textOf(tasks.front(), key));
+                          });
+        if (auto const name = std::ranges::find_if(keys, [](auto const& text) { return !text.empty(); });
+            name != keys.end())
+            message += " " + *name;
+        if (tasks.size() > 1)
+            message += std::format(" (+{} more)", tasks.size() - 1);
+        return message;
+    }
+
+    /// Claude Code ends a turn, and fires Stop, also to wait for its background work (a shell, a subagent, a
+    /// monitor) or for a scheduled wake-up (ScheduleWakeup, CronCreate, /loop), which then starts the next
+    /// turn. Such a wait is idle, not done: the agent waits for something other than the user, and the reason
+    /// line says what. Only a Stop with neither in flight is done; Codex's Stop carries neither list.
     HookOutcome onStop(glz::generic const& payload)
     {
+        if (auto const* tasks = arrayOf(payload, "background_tasks"); tasks != nullptr && !tasks->empty())
+            return StatusReport { .state = "idle", .kind = {}, .message = waitingFor(*tasks) };
+        if (auto const* crons = arrayOf(payload, "session_crons"); crons != nullptr && !crons->empty())
+            return StatusReport { .state = "idle",
+                                  .kind = {},
+                                  .message = "Waiting for a wake-up: "
+                                             + firstLine(textOf(crons->front(), "prompt")) };
         return StatusReport { .state = "done",
                               .kind = {},
                               .message = firstLine(textOf(payload, "last_assistant_message")) };

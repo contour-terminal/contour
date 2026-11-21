@@ -399,6 +399,10 @@ Limits:
 - Both agents show working (prompt, tool use), needs-you (a permission request; for Claude also a question)
   and done. Claude also shows an error (`StopFailure`); Codex shows idle after an interrupt. Claude's
   "idle, waiting for your input" notification is ignored.
+- Claude ends its turn, and fires `Stop`, also to wait for its own background work (a shell, a subagent, a
+  monitor) or for a scheduled wake-up. Such a `Stop` shows idle with what it waits for (`Waiting for <task>`),
+  not done: only a turn that ends with nothing in flight is done. Done means the turn ended, not that the task
+  did: a question Claude asks in plain text, without its question tool, ends the turn too, and shows as done.
 - The event names and payload fields were checked against the agents' hook documentation on 2026-11-11; a
   renamed event shows up as a pane that never changes status.
 - The hooks need the daemon. In in-process mode there is no control socket, and the hooks do nothing.
