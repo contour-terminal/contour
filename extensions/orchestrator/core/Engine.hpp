@@ -164,8 +164,9 @@ struct PaneOpenFailedFor
 struct Dispatch
 {
     std::string repo;                   ///< The repository's configured name.
-    ItemRef item;                       ///< The item to work on.
-    std::string url;                    ///< The item's web page.
+    ItemRef item;                       ///< The item to work on; a TopicRef's slug is made from @ref topic.
+    std::string url;                    ///< The item's web page; empty for a topic.
+    std::string topic = {};             ///< A topic's text, as the user typed it; empty for any other item.
     std::string task;                   ///< The task's id.
     std::string model;                  ///< The model; empty: the task's.
     std::optional<std::string> note;    ///< The user's note, if any.

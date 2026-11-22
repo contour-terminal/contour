@@ -9,6 +9,7 @@
 #include <chrono>
 #include <deque>
 #include <format>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -211,10 +212,16 @@ Run storedRun(RunState state, std::string_view id, ItemRef item, std::string_vie
                 return std::format("https://github.com/contour-terminal/contour/pull/{}", ref.number);
             else if constexpr (std::is_same_v<std::decay_t<decltype(ref)>, IssueRef>)
                 return std::format("https://github.com/contour-terminal/contour/issues/{}", ref.number);
-            else
+            else if constexpr (std::is_same_v<std::decay_t<decltype(ref)>, JiraRef>)
                 return std::format("https://jira.example.com/browse/{}", ref.key);
+            else
+                return std::string {}; // A topic has no web page.
         },
         item);
+    // A topic's text, as its slug spells it with spaces.
+    auto topic = std::string {};
+    if (auto const* const ref = std::get_if<TopicRef>(&item))
+        std::ranges::replace_copy(ref->slug, std::back_inserter(topic), '-', ' ');
     auto const isActive = std::holds_alternative<Running>(state) || std::holds_alternative<Blocked>(state)
                           || std::holds_alternative<Done>(state);
     return Run { .id = std::string { id },
@@ -225,6 +232,7 @@ Run storedRun(RunState state, std::string_view id, ItemRef item, std::string_vie
                  .base = "master",
                  .item = std::move(item),
                  .url = url,
+                 .topic = std::move(topic),
                  .task = std::string { task },
                  .model = "sonnet",
                  .prompt = std::format("/contour-workflows:fix-ci {}", url),

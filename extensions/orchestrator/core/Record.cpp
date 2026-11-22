@@ -52,6 +52,7 @@ namespace
                               [](ChangeRequestRef const& ref) { return std::format("pr#{}", ref.number); },
                               [](IssueRef const& ref) { return std::format("issue#{}", ref.number); },
                               [](JiraRef const& ref) { return std::format("jira:{}", ref.key); },
+                              [](TopicRef const& ref) { return std::format("topic:{}", ref.slug); },
                           },
                           item);
     }

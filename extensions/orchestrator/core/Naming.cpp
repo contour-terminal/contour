@@ -30,6 +30,13 @@ namespace
         return std::format("issue-{}", ref.number);
     }
 
+    [[nodiscard]] std::expected<std::string, NamingError> slugOf(TopicRef const& ref)
+    {
+        if (ref.slug.empty() || topicSlug(ref.slug) != ref.slug)
+            return std::unexpected { NamingError::NotSlug };
+        return std::format("topic-{}", ref.slug);
+    }
+
     [[nodiscard]] std::expected<std::string, NamingError> slugOf(JiraRef const& ref)
     {
         if (!isJiraKey(ref.key))
@@ -39,6 +46,30 @@ namespace
         return slug;
     }
 } // namespace
+
+std::string topicSlug(std::string_view text)
+{
+    auto const isKept = [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+    };
+    auto slug = std::string {};
+    auto pendingDash = false;
+    for (auto const c: text)
+    {
+        if (!isKept(c))
+        {
+            pendingDash = !slug.empty();
+            continue;
+        }
+        if (slug.size() + (pendingDash ? 2 : 1) > MaxTopicSlugChars)
+            break;
+        if (pendingDash)
+            slug += '-';
+        pendingDash = false;
+        slug += toLower(c);
+    }
+    return slug.empty() ? std::string { "topic" } : slug;
+}
 
 std::expected<std::string, NamingError> itemSlug(ItemRef const& item)
 {

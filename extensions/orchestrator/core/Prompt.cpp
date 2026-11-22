@@ -42,17 +42,28 @@ namespace
         return PromptError::NoteTooLong;
     }
 
-    /// @p promptTemplate with every `{url}` replaced by @p url; a `{url}` inside @p url stays as it is.
-    [[nodiscard]] std::string substituted(std::string_view promptTemplate, std::string_view url)
+    /// @p promptTemplate with every @p placeholder replaced by @p value; one inside @p value stays as it is.
+    [[nodiscard]] std::string substituted(std::string_view promptTemplate,
+                                          std::string_view placeholder,
+                                          std::string_view value)
     {
         auto prompt = std::string {};
         auto separator = std::string_view {};
-        for (auto const part: std::views::split(promptTemplate, UrlPlaceholder))
+        for (auto const part: std::views::split(promptTemplate, placeholder))
         {
             prompt += separator;
             prompt += std::string_view { part.begin(), part.end() };
-            separator = url;
+            separator = value;
         }
+        return prompt;
+    }
+
+    /// @return @p prompt if it is Text; otherwise why not, a NUL having been refused before.
+    [[nodiscard]] std::expected<std::string, PromptError> asText(std::string prompt)
+    {
+        if (!argumentAccepts(ArgumentKind::Text, prompt))
+            return std::unexpected { prompt.starts_with('-') ? PromptError::StartsWithDash
+                                                             : PromptError::TooLong };
         return prompt;
     }
 } // namespace
@@ -66,7 +77,7 @@ std::expected<std::string, PromptError> buildPrompt(std::string_view promptTempl
     if (!isHttpsUrl(url))
         return std::unexpected { PromptError::UrlNotHttps };
 
-    auto prompt = substituted(promptTemplate, url);
+    auto prompt = substituted(promptTemplate, UrlPlaceholder, url);
     if (note)
     {
         auto const line = singleLineNote(*note);
@@ -77,10 +88,23 @@ std::expected<std::string, PromptError> buildPrompt(std::string_view promptTempl
     }
 
     // The guarantee: an accepted prompt is Text. A NUL was refused above, so a dash or the length remains.
-    if (!argumentAccepts(ArgumentKind::Text, prompt))
-        return std::unexpected { prompt.starts_with('-') ? PromptError::StartsWithDash
-                                                         : PromptError::TooLong };
-    return prompt;
+    return asText(std::move(prompt));
+}
+
+std::expected<std::string, PromptError> buildTopicPrompt(std::string_view promptTemplate,
+                                                         std::string_view topic)
+{
+    if (promptTemplate.contains('\0'))
+        return std::unexpected { PromptError::TemplateNotText };
+    auto const line = singleLineNote(topic);
+    if (!line)
+        return std::unexpected { promptErrorOf(line.error()) };
+    if (line->empty())
+        return std::unexpected { PromptError::TopicEmpty };
+    auto prompt = promptTemplate.contains(TopicPlaceholder)
+                      ? substituted(promptTemplate, TopicPlaceholder, *line)
+                      : std::format("{}\n{}", promptTemplate, *line);
+    return asText(std::move(prompt));
 }
 
 } // namespace orchestrator

@@ -84,13 +84,25 @@ inline constexpr std::size_t MaxJiraKeyBytes = 32;
            && !number.empty() && std::ranges::all_of(number, isDigit);
 }
 
+/// The most characters of a topic's slug.
+inline constexpr std::size_t MaxTopicSlugChars = 40;
+
+/// The slug a topic's text makes, the only part of it that reaches a run's names: ASCII letters lower-cased
+/// and digits kept, every run of anything else folded to one `-`, none leading or trailing, cut at
+/// MaxTopicSlugChars; `topic` when nothing is left.
+/// @param text The topic as the user typed it.
+/// @return The slug, such as "fix-the-ci-flake".
+[[nodiscard]] std::string topicSlug(std::string_view text);
+
 /// Why a run's names could not be made.
 enum class NamingError : uint8_t
 {
     NotJiraKey, ///< The item is a JiraRef whose key fails isJiraKey.
+    NotSlug,    ///< The item is a TopicRef whose slug topicSlug() would not have made.
 };
 
-/// The item's part of a run's names: `pr-<number>`, `issue-<number>`, or the Jira key in lower case.
+/// The item's part of a run's names: `pr-<number>`, `issue-<number>`, the Jira key in lower case, or
+/// `topic-<slug>`.
 /// @param item The item.
 /// @return The slug, such as "pr-2334", "issue-2301" or "ct-418", or NamingError::NotJiraKey.
 [[nodiscard]] std::expected<std::string, NamingError> itemSlug(ItemRef const& item);

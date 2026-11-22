@@ -113,6 +113,7 @@ namespace
     constexpr auto AppliesToSpellings = std::array {
         Spelling { .text = "pr"sv, .meaning = AppliesTo::PullRequest },
         Spelling { .text = "issue"sv, .meaning = AppliesTo::Issue },
+        Spelling { .text = "topic"sv, .meaning = AppliesTo::Topic },
     };
 
     /// @return The meaning of @p text in @p table, or nothing if no row spells it.
@@ -783,9 +784,10 @@ namespace
         if (!std::ranges::contains(models, *model))
             return fail(key("model"), ConfigProblem::UnlistedModel);
 
-        auto const prompt = checked(json.prompt, key("prompt"), [](std::string_view value) {
+        auto const prompt = checked(json.prompt, key("prompt"), [&](std::string_view value) {
             auto const problem = textProblem(value);
-            if (!problem && !value.contains(UrlPlaceholder))
+            // A topic has no URL: its text goes where `{topic}` is, or after the prompt.
+            if (!problem && *appliesTo != AppliesTo::Topic && !value.contains(UrlPlaceholder))
                 return std::optional { ConfigProblem::MissingUrl };
             return problem;
         });
@@ -960,6 +962,22 @@ Config::Config(Values values) noexcept:
     _tasks { std::move(values.tasks) },
     _sources { values.sources }
 {
+    // Every configuration can start an agent on a topic: without a task of its own, the topic's text is the
+    // prompt.
+    if (std::ranges::contains(_tasks, AppliesTo::Topic, &TaskDef::appliesTo) || _models.empty())
+        return;
+    auto const id = std::ranges::find_if(BuiltinTopicTaskIds, [&](std::string_view candidate) {
+        return !std::ranges::contains(_tasks, candidate, &TaskDef::id);
+    });
+    if (id == BuiltinTopicTaskIds.end())
+        return;
+    _tasks.push_back(TaskDef { .id = std::string { *id },
+                               .key = '\0',
+                               .label = "topic",
+                               .appliesTo = AppliesTo::Topic,
+                               .model = _models.front(),
+                               .prompt = std::string { TopicPlaceholder },
+                               .endDoneAfter = std::nullopt });
 }
 
 Repo const* Config::findRepo(std::string_view name) const noexcept

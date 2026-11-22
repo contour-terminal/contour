@@ -150,9 +150,11 @@ namespace
 
     /// @return Such as `#2334`, or a Jira key.
 
-    /// @return Such as `pr-2334`; the run's id when the item has no slug.
+    /// @return Such as `pr-2334`, or a topic's text; the run's id when the item has no slug.
     [[nodiscard]] std::string itemName(Run const& run)
     {
+        if (std::holds_alternative<TopicRef>(run.item))
+            return run.topic;
         auto const slug = itemSlug(run.item);
         return slug ? *slug : run.id;
     }
@@ -647,7 +649,11 @@ namespace
         std::ranges::move(statsDetails(run), std::back_inserter(details));
         details.push_back(DetailLine { .label = "branch", .value = clean(run.branch) });
         details.push_back(DetailLine { .label = "worktree", .value = clean(run.worktree) });
-        details.push_back(DetailLine { .label = "url", .value = clean(run.url), .role = Role::Dim });
+        // A topic has no web page: its text is what it is about.
+        if (std::holds_alternative<TopicRef>(run.item))
+            details.push_back(DetailLine { .label = "topic", .value = clean(run.topic) });
+        else
+            details.push_back(DetailLine { .label = "url", .value = clean(run.url), .role = Role::Dim });
         return details;
     }
 
@@ -1175,6 +1181,7 @@ std::string itemLabel(ItemRef const& item)
                           [](ChangeRequestRef const& ref) { return std::format("#{}", ref.number); },
                           [](IssueRef const& ref) { return std::format("#{}", ref.number); },
                           [](JiraRef const& ref) { return ref.key; },
+                          [](TopicRef const&) { return std::string { "topic" }; },
                       },
                       item);
 }

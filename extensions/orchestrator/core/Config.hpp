@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -23,24 +24,33 @@ enum class AppliesTo : uint8_t
 {
     PullRequest, ///< A change request; spelled `pr`.
     Issue,       ///< An issue; spelled `issue`.
+    Topic,       ///< A topic the user typed; spelled `topic`.
 };
 
 /// @param item An item.
-/// @return The kind of task it takes: a change request's, or an issue's (forge or Jira).
+/// @return The kind of task it takes: a change request's, an issue's (forge or Jira), or a topic's.
 [[nodiscard]] constexpr AppliesTo appliesToOf(ItemRef const& item) noexcept
 {
-    return std::holds_alternative<ChangeRequestRef>(item) ? AppliesTo::PullRequest : AppliesTo::Issue;
+    if (std::holds_alternative<ChangeRequestRef>(item))
+        return AppliesTo::PullRequest;
+    return std::holds_alternative<TopicRef>(item) ? AppliesTo::Topic : AppliesTo::Issue;
 }
+
+/// The id of the task that stands in for topics when no configured task applies to them, and the one it
+/// takes instead when a configured task already has that id.
+inline constexpr auto BuiltinTopicTaskIds =
+    std::array { std::string_view { "topic" }, std::string_view { "builtin_topic" } };
 
 /// One row of the `tasks` table: what the dashboard offers to start on an item. A new task is a new row.
 struct TaskDef
 {
     std::string id;    ///< Unique among the tasks; an ArgumentKind::Name.
-    char key = '\0';   ///< The dashboard key that starts it; unique, and none of the dashboard's own.
+    char key = '\0';   ///< The dashboard key that starts it; unique, and none of the dashboard's own; `\0`:
+                       ///< none (the built-in topic task).
     std::string label; ///< What the dashboard calls it.
     AppliesTo appliesTo = AppliesTo::PullRequest; ///< The kind of item it works on.
     std::string model;  ///< The model it runs with by default; one of Config::models().
-    std::string prompt; ///< The prompt, with `{url}` standing for the item's URL.
+    std::string prompt; ///< The prompt, with `{url}` standing for the item's URL, or `{topic}` for a topic.
     /// How long its runs' agents stay done before their run ends (`end_done_after`); nullopt: the global one.
     std::optional<std::chrono::milliseconds> endDoneAfter = std::nullopt;
 };

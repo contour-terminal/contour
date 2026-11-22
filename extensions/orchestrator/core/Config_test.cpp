@@ -148,7 +148,14 @@ TEST_CASE("Config.example", "[config]")
     CHECK(config->findRepo("contour") == &repo);
     CHECK(config->findRepo("other") == nullptr);
 
-    REQUIRE(config->tasks().size() == 3);
+    // The three configured tasks, then the built-in one that stands in for topics.
+    REQUIRE(config->tasks().size() == 4);
+    auto const& topic = config->tasks()[3];
+    CHECK(topic.id == "topic");
+    CHECK(topic.key == '\0');
+    CHECK(topic.appliesTo == AppliesTo::Topic);
+    CHECK(topic.model == "opus");
+    CHECK(topic.prompt == "{topic}");
     auto const& fixCi = config->tasks()[0];
     CHECK(fixCi.id == "fix_ci");
     CHECK(fixCi.key == 'f');
@@ -583,4 +590,28 @@ TEST_CASE("forge queries still load", "[config]")
     REQUIRE_FALSE(withSite);
     CHECK(withSite.error().key == "repos[0].issues[0].site");
     CHECK(withSite.error().problem == ConfigProblem::UnknownKey);
+}
+
+TEST_CASE("a topic task needs no {url}, and replaces the built-in one", "[config]")
+{
+    auto const config = parse(Input { .json = Minimal,
+                                      .find = R"("applies_to": "issue", "model": "opus",
+               "prompt": "/contour-workflows:work-issue {url}")",
+                                      .replace = R"("applies_to": "topic", "model": "opus",
+               "prompt": "/contour-workflows:writing-plans {topic}")" });
+    REQUIRE(config.has_value());
+    REQUIRE(config->tasks().size() == 1);
+    CHECK(config->tasks()[0].appliesTo == AppliesTo::Topic);
+    REQUIRE(config->firstTaskFor(AppliesTo::Topic) != nullptr);
+    CHECK(config->firstTaskFor(AppliesTo::Topic)->id == "issue");
+}
+
+TEST_CASE("the built-in topic task takes another id when topic is taken", "[config]")
+{
+    auto const config =
+        parse(Input { .json = Minimal, .find = R"("id": "issue")", .replace = R"("id": "topic")" });
+    REQUIRE(config.has_value());
+    REQUIRE(config->tasks().size() == 2);
+    CHECK(config->tasks()[1].id == "builtin_topic");
+    CHECK(config->tasks()[1].appliesTo == AppliesTo::Topic);
 }

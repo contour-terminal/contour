@@ -178,6 +178,11 @@ TEST_CASE("Naming", "[orchestrator][naming]")
                       .runId = "issue-2301-20261113-150847",
                       .branch = "agent/issue-2301-20261113-150847",
                       .worktree = "/home/u/wt/contour/issue-2301-20261113-150847" },
+            NameRow { .item = orchestrator::TopicRef { .slug = "fix-the-ci-flake" },
+                      .slug = "topic-fix-the-ci-flake",
+                      .runId = "topic-fix-the-ci-flake-20261113-150847",
+                      .branch = "agent/topic-fix-the-ci-flake-20261113-150847",
+                      .worktree = "/home/u/wt/contour/topic-fix-the-ci-flake-20261113-150847" },
             NameRow { .item = orchestrator::JiraRef { .key = "CT-418" },
                       .slug = "ct-418",
                       .runId = "ct-418-20261113-150847",
@@ -265,4 +270,31 @@ TEST_CASE("Naming", "[orchestrator][naming]")
                                                 orchestrator::worktreePath("/w", "r", *runId)));
         }
     }
+}
+
+TEST_CASE("Naming.topicSlug", "[orchestrator][naming]")
+{
+    struct Row
+    {
+        std::string_view text;
+        std::string_view slug;
+    };
+    auto const longest = std::string(orchestrator::MaxTopicSlugChars, 'a');
+    for (auto const& row: std::array {
+             Row { .text = "Fix the CI flake!", .slug = "fix-the-ci-flake" },
+             // Anything but ASCII letters and digits folds into one dash; none leads or trails.
+             Row { .text = "  \xc3\x9c"
+                           "BER  dash--es ",
+                   .slug = "ber-dash-es" },
+             Row { .text = "v2.1 release", .slug = "v2-1-release" },
+             Row { .text = "!!!", .slug = "topic" },
+             Row { .text = "", .slug = "topic" },
+         })
+    {
+        CAPTURE(row.text);
+        CHECK(orchestrator::topicSlug(row.text) == row.slug);
+    }
+    // Cut at MaxTopicSlugChars, and a dash the cut leaves last goes too.
+    CHECK(orchestrator::topicSlug(std::string(60, 'a')) == longest);
+    CHECK(orchestrator::topicSlug(std::string(39, 'a') + " b") == std::string(39, 'a'));
 }

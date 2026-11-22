@@ -2385,3 +2385,43 @@ TEST_CASE("a run's times are read from its history", "[orchestrator][run]")
     history.push_back(StateChange { .wallMs = 13'000, .state = "finished" });
     CHECK(timesOf(history) == RunTimes { .wallMs = 12'000, .waitingMs = 6'000 });
 }
+
+TEST_CASE("a topic run round-trips its slug and its text, and nothing else has a topic",
+          "[orchestrator][run]")
+{
+    auto run = makeRun(Item::Issue, Running {});
+    run.item = orchestrator::TopicRef { .slug = "fix-the-ci-flake" };
+    run.url.clear();
+    run.topic = "Fix the CI flake";
+    REQUIRE(orchestrator::isStorable(run));
+    auto const json = orchestrator::toJson(run);
+    CHECK(json.contains(R"("itemKind":"topic")"));
+    CHECK(json.contains(R"("itemKey":"fix-the-ci-flake")"));
+    auto const read = orchestrator::runFromJson(json);
+    REQUIRE(read.has_value());
+    CHECK(read->item == run.item);
+    CHECK(read->topic == "Fix the CI flake");
+    CHECK(read->url.empty());
+
+    SECTION("a slug its text would not make is refused")
+    {
+        run.item = orchestrator::TopicRef { .slug = "Not A Slug" };
+        CHECK_FALSE(orchestrator::isStorable(run));
+    }
+    SECTION("a topic with a web page is refused")
+    {
+        run.url = "https://example.com";
+        CHECK_FALSE(orchestrator::isStorable(run));
+    }
+    SECTION("a topic without its text is refused")
+    {
+        run.topic.clear();
+        CHECK_FALSE(orchestrator::isStorable(run));
+    }
+    SECTION("an issue with a topic is refused")
+    {
+        auto issue = makeRun(Item::Issue, Running {});
+        issue.topic = "stray";
+        CHECK_FALSE(orchestrator::isStorable(issue));
+    }
+}

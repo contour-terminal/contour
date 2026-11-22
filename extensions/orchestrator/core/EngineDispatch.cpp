@@ -16,6 +16,7 @@
 #include <orchestrator/core/Naming.hpp>
 #include <orchestrator/core/Prompt.hpp>
 #include <orchestrator/core/Reconcile.hpp>
+#include <orchestrator/core/Sanitize.hpp>
 
 namespace orchestrator
 {
@@ -89,8 +90,11 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
     auto const* const repo = _config->findRepo(request.repo);
     if (repo == nullptr)
         return std::unexpected { DispatchRefusal::UnknownRepo };
+    // A topic's slug is the engine's to make, from the text: the only part of it in the run's names.
+    auto const isTopic = std::holds_alternative<TopicRef>(request.item);
+    auto const item = isTopic ? ItemRef { TopicRef { .slug = topicSlug(request.topic) } } : request.item;
     auto const* const task = _config->findTask(request.task);
-    if (task == nullptr || task->appliesTo != appliesToOf(request.item))
+    if (task == nullptr || task->appliesTo != appliesToOf(item))
         return std::unexpected { DispatchRefusal::UnknownTask };
     auto const& model = request.model.empty() ? task->model : request.model;
     if (!std::ranges::contains(_config->models(), model))
@@ -98,7 +102,7 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
 
     // Only active runs count: a Finished entry is history, and Done is active until the user ends it.
     auto active = _runs | std::views::filter(countsAsActive);
-    if (activeRunOn(repo->name, request.item) != nullptr)
+    if (activeRunOn(repo->name, item) != nullptr)
         return std::unexpected { DispatchRefusal::AlreadyRunning };
     if (std::cmp_greater_equal(std::ranges::distance(active), _config->maxAgents()))
         return std::unexpected { DispatchRefusal::AgentLimit };
@@ -110,7 +114,7 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
     if (state == nullptr)
         return std::unexpected { DispatchRefusal::NotConfigured };
     auto base = std::optional<std::string> {};
-    if (auto const* const changeRequest = std::get_if<ChangeRequestRef>(&request.item))
+    if (auto const* const changeRequest = std::get_if<ChangeRequestRef>(&item))
     {
         // A change request's base is its own, as last listed.
         auto const listed =
@@ -123,7 +127,8 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
     if (!base)
         return std::unexpected { DispatchRefusal::BaseUnknown };
 
-    auto prompt = buildPrompt(task->prompt, request.url, request.note);
+    auto prompt = isTopic ? buildTopicPrompt(task->prompt, request.topic)
+                          : buildPrompt(task->prompt, request.url, request.note);
     // A run of the item dispatched in the same second, since finished, still holds the plain id, and so may a
     // worktree no run accounts for, or its branch, which `git worktree add -b` would refuse: the new run
     // takes the next ordinal (no active run of the item exists here; that was refused above).
@@ -136,12 +141,12 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
                   });
     };
     auto const stamp = stampFromUnixMs(request.wallMs, _host.utcOffsetMinutes);
-    auto id = runId(request.item, stamp);
+    auto id = runId(item, stamp);
     for (auto const ordinal: std::views::iota(uint32_t { 2 }, MaxRunsPerSecond + 1))
     {
         if (!id || !isTaken(*id))
             break;
-        id = runId(request.item, stamp, ordinal);
+        id = runId(item, stamp, ordinal);
     }
     if (!prompt || !id)
         return std::unexpected { DispatchRefusal::BadPrompt };
@@ -154,8 +159,10 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
                      .forge = repo->forge,
                      .remote = repo->remote,
                      .base = std::move(*base),
-                     .item = request.item,
-                     .url = request.url,
+                     .item = item,
+                     .url = isTopic ? std::string {} : request.url,
+                     // Shown where an item shows its title: one line, cut like an entry.
+                     .topic = isTopic ? displayText(request.topic, MaxEntryChars) : std::string {},
                      .task = task->id,
                      .model = model,
                      .prompt = std::move(*prompt),

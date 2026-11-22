@@ -16,8 +16,8 @@ One JSON object per line, its keys in this order:
 | `format`        | `1`.                                                                                     |
 | `run`           | The run's id, such as `pr-2379-20261113-150912`.                                         |
 | `repo`          | The repository's configured name.                                                        |
-| `item`          | `pr#<n>`, `issue#<n>` or `jira:<key>`.                                                   |
-| `url`           | The item's web page.                                                                     |
+| `item`          | `pr#<n>`, `issue#<n>`, `jira:<key>`, or `topic:<slug>` for a topic the user typed.        |
+| `url`           | The item's web page; empty for a topic.                                                  |
 | `task`, `model` | The task's id and the model the agent ran.                                               |
 | `session`       | The agent's Claude Code session id.                                                      |
 | `dispatchedMs`, `endedMs` | When it was dispatched and ended, in milliseconds since the Unix epoch.        |

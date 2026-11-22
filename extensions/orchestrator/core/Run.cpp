@@ -994,6 +994,15 @@ bool isStorable(Run const& run) noexcept
         return false;
     if (auto const* const jira = std::get_if<JiraRef>(&run.item); jira != nullptr && !isJiraKey(jira->key))
         return false;
+    // A topic's slug is what its text makes, the only part of it in the run's names; its text is one line,
+    // and only a topic has one.
+    if (std::holds_alternative<TopicRef>(run.item))
+    {
+        if (!itemSlug(run.item) || run.topic.empty() || !run.url.empty() || !fits(Shape::Entry, run.topic))
+            return false;
+    }
+    else if (!run.topic.empty())
+        return false;
     if (auto const* const finished = std::get_if<Finished>(&run.state))
         return entriesFit(*finished);
     if (auto const* const ending = std::get_if<Ending>(&run.state); ending != nullptr && ending->resumedFrom)
@@ -1017,6 +1026,7 @@ namespace
     constexpr auto ChangeRequestKind = "pr"sv;
     constexpr auto IssueKind = "issue"sv;
     constexpr auto JiraKind = "jira"sv;
+    constexpr auto TopicKind = "topic"sv;
     /// How the store says a run was appended to the file of finished runs.
     constexpr auto LedgerWritten = "written"sv;
 
@@ -1045,6 +1055,15 @@ namespace
 
     [[nodiscard]] std::optional<ItemRef> itemOf(JsonRun const& json)
     {
+        if (json.itemKind == TopicKind)
+        {
+            // Its slug is the key, and its text the topic; a topic has no web page.
+            if (json.itemNumber || !json.itemKey || !json.topic || !json.url.empty())
+                return std::nullopt;
+            return TopicRef { .slug = *json.itemKey };
+        }
+        if (json.topic)
+            return std::nullopt;
         if (json.itemKind == JiraKind)
         {
             if (json.itemNumber || !json.itemKey || !isJiraKey(*json.itemKey))
@@ -1140,6 +1159,11 @@ std::string toJson(Run const& run)
                        json.itemKind = JiraKind;
                        json.itemKey = ref.key;
                    },
+                   [&](TopicRef const& ref) {
+                       json.itemKind = TopicKind;
+                       json.itemKey = ref.slug;
+                       json.topic = run.topic;
+                   },
                },
                run.item);
     json.url = run.url;
@@ -1215,6 +1239,7 @@ std::optional<Run> runFromJson(std::string_view text)
         .base = std::move(json.base),
         .item = std::move(*item),
         .url = std::move(json.url),
+        .topic = std::move(json.topic).value_or(std::string {}),
         .task = std::move(json.task),
         .model = std::move(json.model),
         .prompt = std::move(json.prompt),

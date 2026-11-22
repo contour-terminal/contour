@@ -200,7 +200,8 @@ struct Run
     std::string remote;              ///< The remote to fetch from: a Name.
     std::string base;                ///< The base branch; the worktree starts at `<remote>/<base>`.
     ItemRef item;                    ///< What the run works on.
-    std::string url;                 ///< The item's web page.
+    std::string url;                 ///< The item's web page; empty for a topic.
+    std::string topic {};            ///< A TopicRef's text, sanitised to one line; empty for any other item.
     std::string task;                ///< The task's id.
     std::string model;               ///< The model the agent runs: a Name.
     std::string prompt;              ///< The agent's first prompt: a Text.

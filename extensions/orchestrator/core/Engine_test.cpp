@@ -3931,6 +3931,51 @@ TEST_CASE("an unmeasured issue source's login check never runs", "[orchestrator]
     CHECK(harness.commandsIssued("acli-issues") == 0);
 }
 
+TEST_CASE("a topic dispatches on a new branch named from its text, with the text as its prompt",
+          "[orchestrator][engine][topic]")
+{
+    auto harness = Harness { contextFor({ .repos = R"([ { "name": "contour", "path": "~/projects/contour",
+                                                         "forge": "github", "base": "main" } ])" }) };
+    constexpr auto Id = "topic-investigate-the-flaky-test-20261113-150847"sv;
+    auto request = issueDispatch();
+    request.item = TopicRef {};
+    request.url.clear();
+    request.topic = "Investigate the flaky test";
+    request.task = "topic";
+    CHECK(countOf<DispatchRefused>(harness.feed(request)) == 0);
+    auto const runs = harness.engine().runs();
+    auto const found = std::ranges::find(runs, Id, &Run::id);
+    REQUIRE(found != runs.end());
+    auto const* const run = &*found;
+    CHECK(run->item == ItemRef { TopicRef { .slug = "investigate-the-flaky-test" } });
+    CHECK(run->topic == "Investigate the flaky test");
+    CHECK(run->url.empty());
+    CHECK(run->prompt == "Investigate the flaky test");
+    CHECK(run->branch == std::format("agent/{}", Id));
+
+    auto const added = all<RunCommand>(harness.finish("git-fetch", ok()));
+    REQUIRE(added.size() == 1);
+    CHECK(added.front().command == "git-worktree-add-branch");
+    CHECK(std::ranges::contains(added.front().arguments, "origin/main"s, &Argument::value));
+
+    SECTION("the same topic again, while the first runs, is refused")
+    {
+        auto again = request;
+        again.session = "11111111-2222-4333-8444-555555555555";
+        auto const refused = all<DispatchRefused>(harness.feed(again));
+        REQUIRE(refused.size() == 1);
+        CHECK(refused.front().reason == DispatchRefusal::AlreadyRunning);
+    }
+    SECTION("an empty topic is refused")
+    {
+        auto empty = request;
+        empty.topic = "  ";
+        auto const refused = all<DispatchRefused>(harness.feed(empty));
+        REQUIRE(refused.size() == 1);
+        CHECK(refused.front().reason == DispatchRefusal::BadPrompt);
+    }
+}
+
 TEST_CASE("a jira item dispatches on a new branch named from its key", "[orchestrator][engine][jira]")
 {
     auto harness = Harness { jiraContext() };

@@ -54,6 +54,7 @@ struct JsonRun
     std::optional<uint64_t> itemNumber;
     std::optional<std::string> itemKey;
     std::string url;
+    std::optional<std::string> topic; ///< A topic run's text; absent for any other item.
     std::string task;
     std::string model;
     std::string prompt;

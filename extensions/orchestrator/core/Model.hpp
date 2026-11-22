@@ -102,8 +102,15 @@ struct JiraRef
     [[nodiscard]] bool operator==(JiraRef const&) const = default;
 };
 
+/// A topic the user typed, by the slug its text makes (topicSlug()); the text itself is Run::topic.
+struct TopicRef
+{
+    std::string slug; ///< `[a-z0-9-]`, at most MaxTopicSlugChars, neither leading nor trailing `-`.
+    [[nodiscard]] bool operator==(TopicRef const&) const = default;
+};
+
 /// The thing an agent run works on.
-using ItemRef = std::variant<ChangeRequestRef, IssueRef, JiraRef>;
+using ItemRef = std::variant<ChangeRequestRef, IssueRef, JiraRef, TopicRef>;
 
 /// The most characters a title, or a check's name, keeps once sanitised (see displayText()).
 inline constexpr std::size_t MaxTitleChars = 200;

@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -208,5 +209,37 @@ TEST_CASE("Prompt", "[orchestrator][prompt]")
         auto const prompt = orchestrator::buildPrompt(viewOf(Template), Pull, std::nullopt);
         REQUIRE_FALSE(prompt.has_value());
         CHECK(prompt.error() == PromptError::TemplateNotText);
+    }
+}
+
+TEST_CASE("Prompt.topic", "[orchestrator][prompt]")
+{
+    struct Row
+    {
+        std::string_view promptTemplate;
+        std::string_view topic;
+        std::expected<std::string, PromptError> expected;
+    };
+    for (auto const& row: std::array {
+             Row { .promptTemplate = "{topic}", .topic = "do X", .expected = "do X" },
+             Row { .promptTemplate = "/w {topic} now, {topic}", .topic = "a", .expected = "/w a now, a" },
+             // A template without the placeholder gets the topic on a line of its own.
+             Row { .promptTemplate = "/plan", .topic = "a", .expected = "/plan\na" },
+             // The topic is sanitised to one line.
+             Row { .promptTemplate = "{topic}", .topic = "  two\r\nlines ", .expected = "two lines" },
+             Row { .promptTemplate = "{topic}",
+                   .topic = "-x",
+                   .expected = std::unexpected { PromptError::NoteStartsWithDash } },
+             Row { .promptTemplate = "{topic}",
+                   .topic = " \n ",
+                   .expected = std::unexpected { PromptError::TopicEmpty } },
+             Row { .promptTemplate = "{topic}", .topic = std::string_view { "a\0b", 3 }, .expected = "ab" },
+         })
+    {
+        CAPTURE(row.promptTemplate, row.topic);
+        auto const prompt = orchestrator::buildTopicPrompt(row.promptTemplate, row.topic);
+        CHECK(prompt == row.expected);
+        if (prompt)
+            CHECK(orchestrator::argumentAccepts(orchestrator::ArgumentKind::Text, *prompt));
     }
 }
