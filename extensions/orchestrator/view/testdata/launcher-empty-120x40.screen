@@ -16,14 +16,14 @@
 │   #2162 OSC 9;9 (C│  #2369 examples: add donut-animation, a full-screen animation done … ✓       │                   │
 │                   │  #2346 contour: tab_style — shapes, fills, materials and widths for… ✓       │                   │
 │ AGENTS · 0 OF 4 RU│ ISSUES WITHOUT A PR                                                          │                   │
-│ no agents         │  #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key presse…         │                   │
-│                   │  #2338 Flaky on Windows: SessionHost.extension.controlVerb requires…         │                   │
+│ no agents         │  #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key presses, t…     │                   │
+│                   │  #2338 Flaky on Windows: SessionHost.extension.controlVerb requires the…     │                   │
 │ FINISHED · 0 NEW  │  #2253 Switch `daemon` Same `client`                                         │                   │
-│ nothing finished  │  #2163 OSC 133: optional nonce to reject forged command lines and m…         │                   │
-│                   │  #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead of…         │                   │
+│ nothing finished  │  #2163 OSC 133: optional nonce to reject forged command lines and marks      │                   │
+│                   │  #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead of set…     │                   │
 │                   │ ──────────────────────────────────────────────────────────────────────────── │                   │
 │                   │ task ‹ fix CI ›   model ‹ sonnet ›   perms ‹ standard ›   note none          │                   │
-│                   │ #2114 · contour · checks fail: Check clang-tidy and 9 more                   │                   │
+│                   │ #2114 · contour · checks failing: Check clang-tidy and 9 more                │                   │
 │                   │ checkout  gh pr checkout 2114 --branch agent/pr-2114-…                       │                   │
 │                   │ worktree  /home/u/worktrees/contour/pr-2114-…                                │                   │
 │                   │ perms     standard · 19 allowed · 4 denied · edits need no approval          │                   │

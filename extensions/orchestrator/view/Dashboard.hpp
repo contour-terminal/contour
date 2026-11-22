@@ -87,7 +87,7 @@ class Dashboard
     [[nodiscard]] std::vector<UiAction> select(std::string_view run);
 
     /// Opens the launcher on an item the engine lists, its session id taken from the dashboard's source: what
-    /// `d` does on a finished run, a board or a transcript, through the same openFormFor(). The launcher
+    /// `d` does on a finished run, a board or a transcript, through the same openLauncherFor(). The launcher
     /// previews and refuses as every dispatch does; nothing starts before it is confirmed. When the engine
     /// does not list the item, no launcher opens and the summary line says why.
     /// @param repo The repository's configured name.

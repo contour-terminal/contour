@@ -9,13 +9,13 @@
 │   │  #2369 examples: add donut-animation, a full-screen animati… ✓       │   │
 │ IS│  #2346 contour: tab_style — shapes, fills, materials and wi… ✓       │   │
 │ ▾ │ ISSUES WITHOUT A PR                                                  │   │
-│   │  #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow ke…         │n… │
-│   │  #2338 Flaky on Windows: SessionHost.extension.controlVerb …         │e… │
+│   │  #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key pr…     │n… │
+│   │  #2338 Flaky on Windows: SessionHost.extension.controlVerb requ…     │e… │
 ╰───│  #2253 Switch `daemon` Same `client`                                 │───╯
 ╭─ D│   ↓ 2 more                                                           │───╮
 │ Sa│ ──────────────────────────────────────────────────────────────────── │e… │
 │   │ task ‹ fix CI ›   model ‹ sonnet ›   perms ‹ standard ›   note none  │   │
-│ br│ #2114 · contour · checks fail: Check clang-tidy and 9 more           │   │
+│ br│ #2114 · contour · checks failing: Check clang-tidy and 9 more        │   │
 │ ch│ checkout  gh pr checkout 2114 --branch agent/pr-2114-…               │   │
 │ ur│ worktree  /home/u/worktrees/contour/pr-2114-…                        │   │
 │   │ perms     standard · 19 allowed · 4 denied · edits need no approval  │   │

@@ -308,23 +308,28 @@ struct KeyContext
 /// @param interaction Where the user is.
 void leaveSubject(Interaction& interaction) noexcept;
 
-/// Opens the dispatch form on an item, as `d` does on a finished run, a board or a transcript: on @p task
-/// while it still applies to the item, else on the first task that does. The form previews and refuses as
-/// every dispatch does (an item with an active run shows the refusal); nothing starts before it is
-/// confirmed. When no form opens, the summary line says why.
-/// @param interaction Where the user is: its form opened, or its notice set. Its session id is left empty
+/// Opens the launcher on an item, as `d` does on a finished run, a board or a transcript: on @p task while it
+/// still applies to the item, else on the first task that does. The launcher previews and refuses as every
+/// dispatch does (an item with an active run shows the refusal); nothing starts before it is confirmed. When
+/// it does not open, the summary line says why.
+/// @param interaction Where the user is: its launcher opened, or its notice set. Its session id is left empty
 ///        for the caller, which holds the source of them, to mint.
 /// @param engine The engine: its configuration and its lists.
 /// @param repo The repository's configured name.
-/// @param item The item; a TopicRef opens the topic form on @p topic.
-/// @param task The id of the task the form starts on, such as the run's.
+/// @param item The item; a TopicRef opens the launcher on @p topic, its topic row highlighted.
+/// @param task The id of the task it starts on, such as the run's.
 /// @param topic A topic's text, such as the run's; empty for any other item.
-void openFormFor(Interaction& interaction,
-                 Engine const& engine,
-                 std::string_view repo,
-                 ItemRef const& item,
-                 std::string_view task,
-                 std::string_view topic);
+void openLauncherFor(Interaction& interaction,
+                     Engine const& engine,
+                     std::string_view repo,
+                     ItemRef const& item,
+                     std::string_view task,
+                     std::string_view topic);
+
+/// @param key A key the terminal sent.
+/// @param letter A lower-case letter.
+/// @return Whether @p key is Ctrl and @p letter, in either case: such as Ctrl+P.
+[[nodiscard]] bool isCtrl(core::tui::KeyEvent const& key, char32_t letter) noexcept;
 
 /// @param engine The engine; nullptr: none.
 /// @param run A run's id.

@@ -14,7 +14,7 @@
 │   #2253 Switch `da╭─ ✦ New agent ────────────────────────────────────────────────────────────────╮                   │
 │   #2163 OSC 133: o│ › Investigate why the shell integration test hangs on CI▏                    │                   │
 │   #2162 OSC 9;9 (C│                                                                              │                   │
-│                   │ ▍✎ topic “Investigate why the shell integration test hangs o…     new branch │                   │
+│                   │ ▍✎ topic “Investigate why the shell integration test hangs on CI” new branch │                   │
 │ AGENTS · 0 OF 4 RU│ ──────────────────────────────────────────────────────────────────────────── │                   │
 │ no agents         │ repo ‹ contour ›   task ‹ topic ›   model ‹ opus ›   perms ‹ standard ›      │                   │
 │                   │ an agent on what you typed, on a new branch                                  │                   │

@@ -1,15 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <orchestrator/view/Launcher.hpp>
 
+#include <core/Utils.hpp>
 #include <core/tui/KeyCode.hpp>
 #include <core/tui/Modifier.hpp>
 
 #include <algorithm>
-#include <cctype>
+#include <array>
+#include <expected>
 #include <format>
+#include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include <orchestrator/core/Commands.hpp>
@@ -24,27 +30,10 @@ namespace orchestrator::view
 
 namespace
 {
-    /// @return @p text with ASCII letters lower-cased: titles are matched as typed, whatever their case.
-    [[nodiscard]] std::string folded(std::string_view text)
-    {
-        return text | std::views::transform([](char c) {
-                   return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
-               })
-               | std::ranges::to<std::string>();
-    }
+    using namespace std::string_literals;
+    using namespace std::string_view_literals;
 
-    /// @return @p text without the blanks around it.
-    [[nodiscard]] std::string_view trimmed(std::string_view text) noexcept
-    {
-        auto const isBlank = [](char c) {
-            return c == ' ' || c == '\t';
-        };
-        while (!text.empty() && isBlank(text.front()))
-            text.remove_prefix(1);
-        while (!text.empty() && isBlank(text.back()))
-            text.remove_suffix(1);
-        return text;
-    }
+    // {{{ the candidates
 
     [[nodiscard]] bool needsAttention(ChangeRequest const& request) noexcept
     {
@@ -91,9 +80,12 @@ namespace
     [[nodiscard]] bool namesExactly(Candidate const& candidate, std::string_view query)
     {
         auto const label = itemLabel(candidate.item);
-        return query == candidate.url || folded(query) == folded(label)
+        return query == candidate.url || equalsIgnoringCase(query, label)
                || (label.starts_with('#') && query == std::string_view { label }.substr(1));
     }
+
+    // }}}
+    // {{{ the state
 
     /// The settings Tab moves through: an item's, and a topic's, which also chooses its repository.
     constexpr auto ItemSettings =
@@ -108,11 +100,14 @@ namespace
         return ItemSettings;
     }
 
-    /// Builds the form for the highlighted candidate afresh: the settings follow the row, and only how far
-    /// the user got past the setup warning, and a topic's repository, carry over.
-    void reform(LauncherState& state, Engine const& engine)
+    /// Builds the choices for the highlighted one of @p candidates afresh: they follow the row, and only a
+    /// topic's repository carries over from the row before.
+    /// @param task The task to start an item on while it applies to it; else the item's first.
+    void reform(LauncherState& state,
+                Engine const& engine,
+                std::span<Candidate const> candidates,
+                std::string_view task = {})
     {
-        auto const candidates = candidatesOf(engine, state.query);
         if (candidates.empty())
         {
             state.form.reset();
@@ -121,7 +116,6 @@ namespace
         state.highlighted = std::min(state.highlighted, candidates.size() - 1);
         auto const& candidate = candidates[state.highlighted];
         auto const previous = std::move(state.form);
-        auto const* const config = engine.config();
         if (std::holds_alternative<TopicRef>(candidate.item))
         {
             auto const repo = previous && std::holds_alternative<TopicRef>(previous->item) ? previous->repo
@@ -130,51 +124,75 @@ namespace
         }
         else
         {
-            auto const* const task =
-                config != nullptr ? config->firstTaskFor(appliesToOf(candidate.item)) : nullptr;
+            auto const* const config = engine.config();
+            auto const* chosen = config != nullptr ? config->findTask(task) : nullptr;
+            if (chosen == nullptr || chosen->appliesTo != appliesToOf(candidate.item))
+                chosen = config != nullptr ? config->firstTaskFor(appliesToOf(candidate.item)) : nullptr;
             state.form =
-                task != nullptr
-                    ? openDispatchForm(engine, candidate.repo, candidate.item, task->id, state.session)
+                chosen != nullptr
+                    ? openDispatchForm(engine, candidate.repo, candidate.item, chosen->id, state.session)
                     : std::nullopt;
         }
-        if (state.form && previous)
-            state.form->hooks = previous->hooks;
         if (state.form)
-            state.form->focus = settingsOf(*state.form).front();
+            state.setting = settingsOf(*state.form).front();
+    }
+
+    /// Re-lists for the query, highlights its first row and builds its choices, the keys back on the list.
+    void requery(LauncherState& state, Engine const& engine)
+    {
+        state.focus = LauncherFocus::List;
+        state.highlighted = 0;
+        reform(state, engine, candidatesOf(engine, state.query));
     }
 
     /// @return Whether the keys go to an item's note: the one text field among the settings.
     [[nodiscard]] bool isOnNote(LauncherState const& state) noexcept
     {
-        return state.focus == LauncherFocus::Settings && state.form && state.form->focus == FormField::Note;
+        return state.focus == LauncherFocus::Settings && state.form && state.setting == FormField::Note;
     }
 
-    /// Feeds @p code to the highlighted candidate's form, as the dispatch form's own keys.
-    [[nodiscard]] std::optional<DispatchAction> toForm(core::tui::KeyCode code,
-                                                       LauncherState& state,
-                                                       Engine const& engine,
-                                                       HooksWarning hooksAtInput,
-                                                       std::string_view nearTab)
+    /// Confirms the launcher: the dispatch of its choices, unless they cannot be confirmed, or the setup is
+    /// incomplete and its warning was not confirmed by an earlier input.
+    [[nodiscard]] std::optional<DispatchAction> confirm(LauncherState& state,
+                                                        Engine const& engine,
+                                                        HooksWarning hooksAtInput,
+                                                        std::string_view nearTab)
     {
-        return applyFormKey(core::tui::KeyEvent { .key = code }, state.form, engine, hooksAtInput, nearTab);
+        if (!state.form || !canConfirm(*state.form, engine))
+            return std::nullopt;
+        if (isSetupIncomplete(engine))
+        {
+            // The first Enter confirms the warning; only an Enter of a later input dispatches, so a paste or
+            // a held key cannot click through it.
+            if (state.hooks != HooksWarning::Confirmed)
+            {
+                state.hooks = HooksWarning::Confirmed;
+                return std::nullopt;
+            }
+            if (hooksAtInput != HooksWarning::Confirmed)
+                return std::nullopt;
+        }
+        return actionOf(*state.form, engine, nearTab);
     }
+
+    // }}}
 } // namespace
 
 std::vector<Candidate> candidatesOf(Engine const& engine, std::string_view query)
 {
     auto items = itemsOf(engine);
-    auto const typed = trimmed(query);
+    auto const typed = core::trim(query);
     if (typed.empty())
         return items;
 
-    auto const needle = folded(typed);
     auto exact = std::vector<Candidate> {};
     auto matching = std::vector<Candidate> {};
     for (auto& candidate: items)
     {
         if (namesExactly(candidate, typed))
             exact.push_back(std::move(candidate));
-        else if (folded(std::format("{} {}", itemLabel(candidate.item), candidate.title)).contains(needle))
+        else if (containsIgnoringCase(itemLabel(candidate.item), typed)
+                 || containsIgnoringCase(candidate.title, typed))
             matching.push_back(std::move(candidate));
     }
     auto candidates = std::move(exact);
@@ -188,48 +206,39 @@ std::optional<LauncherState> openLauncher(Engine const& engine, std::string quer
 {
     if (engine.config() == nullptr)
         return std::nullopt;
-    auto state = LauncherState { .query = std::move(query), .session = std::move(session) };
-    reform(state, engine);
+    auto state =
+        LauncherState { .query = std::move(query),
+                        .session = std::move(session),
+                        .hooks = isSetupIncomplete(engine) ? HooksWarning::Shown : HooksWarning::None };
+    requery(state, engine);
     return state;
 }
 
-std::optional<LauncherState> openLauncherOn(Engine const& engine,
-                                            std::string_view repo,
-                                            ItemRef const& item,
-                                            std::optional<std::string_view> task,
-                                            std::optional<std::string_view> model,
-                                            std::string session)
+std::expected<LauncherState, LauncherRefusal> openLauncherOn(Engine const& engine,
+                                                             std::string_view repo,
+                                                             ItemRef const& item,
+                                                             std::string_view task,
+                                                             std::string session)
 {
-    auto state = openLauncher(engine, itemLabel(item), std::move(session));
-    if (!state)
-        return std::nullopt;
+    auto const* const config = engine.config();
+    if (config == nullptr)
+        return std::unexpected(LauncherRefusal::NotConfigured);
+    if (config->firstTaskFor(appliesToOf(item)) == nullptr)
+        return std::unexpected(LauncherRefusal::NoTask);
+    auto state =
+        LauncherState { .query = itemLabel(item),
+                        .session = std::move(session),
+                        .hooks = isSetupIncomplete(engine) ? HooksWarning::Shown : HooksWarning::None };
     // The label names the item exactly, so it stands first; another repository's item of the same number
     // stands beside it.
-    auto const candidates = candidatesOf(engine, state->query);
+    auto const candidates = candidatesOf(engine, state.query);
     auto const at = std::ranges::find_if(candidates, [&](Candidate const& candidate) {
         return candidate.repo == repo && candidate.item == item;
     });
     if (at == candidates.end())
-        return std::nullopt;
-    state->highlighted = static_cast<std::size_t>(std::ranges::distance(candidates.begin(), at));
-    reform(*state, engine);
-    if (!state->form)
-        return state;
-    auto const* const config = engine.config();
-    if (task)
-    {
-        auto opened = openDispatchForm(engine, repo, item, *task, state->session);
-        if (opened)
-        {
-            opened->hooks = state->form->hooks;
-            opened->focus = state->form->focus;
-            state->form = std::move(opened);
-        }
-    }
-    if (model)
-        if (auto const found = std::ranges::find(config->models(), *model); found != config->models().end())
-            state->form->model =
-                static_cast<std::size_t>(std::ranges::distance(config->models().begin(), found));
+        return std::unexpected(LauncherRefusal::NotListed);
+    state.highlighted = static_cast<std::size_t>(std::ranges::distance(candidates.begin(), at));
+    reform(state, engine, candidates, task);
     return state;
 }
 
@@ -242,10 +251,8 @@ void pasteIntoLauncher(std::optional<LauncherState>& launcher, Engine const& eng
         launcher->form->note += text;
         return;
     }
-    launcher->focus = LauncherFocus::List;
     launcher->query += text;
-    launcher->highlighted = 0;
-    reform(*launcher, engine);
+    requery(*launcher, engine);
 }
 
 std::optional<DispatchAction> applyLauncherKey(core::tui::KeyEvent const& key,
@@ -266,46 +273,39 @@ std::optional<DispatchAction> applyLauncherKey(core::tui::KeyEvent const& key,
         launcher.reset();
         return std::nullopt;
     }
-    if (core::tui::hasModifier(key.modifiers, Modifier::Ctrl))
+    if (isCtrl(key, U'p'))
     {
-        // Ctrl+P arrives as `p` (or Ctrl+Shift+P as `P`) with the Ctrl modifier.
-        if (key.codepoint == U'p' || key.codepoint == U'P' || key.key == static_cast<KeyCode>(U'p'))
-            state.preview =
-                state.preview == LauncherPreview::Short ? LauncherPreview::Full : LauncherPreview::Short;
+        state.preview =
+            state.preview == LauncherPreview::Short ? LauncherPreview::Full : LauncherPreview::Short;
         return std::nullopt;
     }
-
-    auto const settingStep = [&](int step) {
-        if (!state.form)
-            return;
-        auto const order = settingsOf(*state.form);
-        auto const at = std::ranges::find(order, state.form->focus);
-        auto const index = static_cast<std::ptrdiff_t>(std::ranges::distance(order.begin(), at)) + step;
-        if (index < 0 || index >= static_cast<std::ptrdiff_t>(order.size()))
-        {
-            state.focus = LauncherFocus::List;
-            state.form->focus = order.front();
-            return;
-        }
-        state.form->focus = order[static_cast<std::size_t>(index)];
-    };
+    if (core::tui::hasModifier(key.modifiers, Modifier::Ctrl))
+        return std::nullopt;
 
     switch (key.key)
     {
         case KeyCode::Escape: launcher.reset(); return std::nullopt;
         case KeyCode::Tab: {
+            if (!state.form)
+                return std::nullopt;
+            auto const order = settingsOf(*state.form);
             auto const back = core::tui::hasModifier(key.modifiers, Modifier::Shift);
             if (state.focus == LauncherFocus::List)
             {
-                if (state.form)
-                {
-                    state.focus = LauncherFocus::Settings;
-                    auto const order = settingsOf(*state.form);
-                    state.form->focus = back ? order.back() : order.front();
-                }
+                state.focus = LauncherFocus::Settings;
+                state.setting = back ? order.back() : order.front();
+                return std::nullopt;
+            }
+            auto const at = static_cast<std::ptrdiff_t>(
+                std::ranges::distance(order.begin(), std::ranges::find(order, state.setting)));
+            auto const next = at + (back ? -1 : 1);
+            if (next < 0 || next >= std::ssize(order))
+            {
+                state.focus = LauncherFocus::List;
+                state.setting = order.front();
             }
             else
-                settingStep(back ? -1 : 1);
+                state.setting = order[static_cast<std::size_t>(next)];
             return std::nullopt;
         }
         case KeyCode::Up:
@@ -315,65 +315,53 @@ std::optional<DispatchAction> applyLauncherKey(core::tui::KeyEvent const& key,
                 state.focus = LauncherFocus::List;
                 return std::nullopt;
             }
-            auto const count = candidatesOf(engine, state.query).size();
-            if (count == 0)
+            auto const candidates = candidatesOf(engine, state.query);
+            if (candidates.empty())
                 return std::nullopt;
+            auto const count = candidates.size();
             state.highlighted = key.key == KeyCode::Up ? (state.highlighted + count - 1) % count
                                                        : (state.highlighted + 1) % count;
-            reform(state, engine);
+            reform(state, engine, candidates);
             return std::nullopt;
         }
         case KeyCode::Left:
         case KeyCode::Right:
             if (state.focus == LauncherFocus::Settings && state.form)
-            {
-                static_cast<void>(toForm(key.key, state, engine, hooksAtInput, nearTab));
-            }
+                changeSetting(*state.form, state.setting, key.key == KeyCode::Right ? 1 : -1, engine);
             return std::nullopt;
         case KeyCode::Backspace:
             if (isOnNote(state))
+                dropLastCodepoint(state.form->note);
+            else
             {
-                static_cast<void>(toForm(key.key, state, engine, hooksAtInput, nearTab));
-                return std::nullopt;
+                dropLastCodepoint(state.query);
+                requery(state, engine);
             }
-            state.focus = LauncherFocus::List;
-            dropLastCodepoint(state.query);
-            state.highlighted = 0;
-            reform(state, engine);
             return std::nullopt;
         case KeyCode::Enter: {
-            if (!state.form)
-                return std::nullopt;
-            auto action = toForm(KeyCode::Enter, state, engine, hooksAtInput, nearTab);
+            auto action = confirm(state, engine, hooksAtInput, nearTab);
             if (action)
                 launcher.reset();
-            else if (!state.form)
-                // The form closes only as it dispatches; it stays open for the launcher otherwise.
-                reform(state, engine);
             return action;
         }
         default: break;
     }
-    if (isOnNote(state))
-    {
-        // The note is a text field: what is typed goes into it.
-        static_cast<void>(applyFormKey(key, state.form, engine, hooksAtInput, nearTab));
-        return std::nullopt;
-    }
     if (auto const printable = printableOf(key))
     {
-        state.focus = LauncherFocus::List;
-        appendUtf8(state.query, *printable);
-        state.highlighted = 0;
-        reform(state, engine);
+        if (isOnNote(state))
+            appendUtf8(state.form->note, *printable);
+        else
+        {
+            appendUtf8(state.query, *printable);
+            requery(state, engine);
+        }
     }
     return std::nullopt;
 }
 
 namespace
 {
-    using namespace std::string_literals;
-    using namespace std::string_view_literals;
+    // {{{ drawing
 
     /// One run of text drawn in one role.
     struct Segment
@@ -389,43 +377,46 @@ namespace
         std::vector<Segment> right = {};
     };
 
-    /// What each group is headed by; the topic row has no heading.
-    constexpr auto GroupHeadings = std::array {
-        ""sv,
-        "NEEDS ATTENTION"sv,
-        "MY PULL REQUESTS"sv,
-        "ISSUES WITHOUT A PR"sv,
+    /// How a group is headed; an empty heading heads nothing.
+    struct GroupRow
+    {
+        CandidateGroup group;
+        std::string_view heading;
     };
+
+    /// Every group, in CandidateGroup's order.
+    constexpr auto GroupRows = std::array {
+        GroupRow { .group = CandidateGroup::Topic, .heading = ""sv },
+        GroupRow { .group = CandidateGroup::NeedsAttention, .heading = "NEEDS ATTENTION"sv },
+        GroupRow { .group = CandidateGroup::MyPullRequests, .heading = "MY PULL REQUESTS"sv },
+        GroupRow { .group = CandidateGroup::Issues, .heading = "ISSUES WITHOUT A PR"sv },
+    };
+    static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, GroupRows.size()),
+                                      [](std::size_t i) {
+                                          return std::to_underlying(GroupRows[i].group) == i;
+                                      }),
+                  "GroupRows has one row per CandidateGroup, in its order");
 
     /// The cells a value's label takes on a line of its own.
     constexpr auto LabelColumns = 10;
+    /// How far a value's continuation lines are indented past its first.
+    constexpr auto ContinuationIndent = 2;
     /// The cells the box and its padding take on either side.
     constexpr auto SideColumns = 2;
 
-    /// A pull request's checks as one glyph.
-    [[nodiscard]] Segment ciGlyph(CiState ci)
+    /// @return One glyph of a table of looks, a blank where it has none.
+    [[nodiscard]] Segment glyphOf(Look const& look)
     {
-        switch (ci)
-        {
-            case CiState::Failing: return { .text = "✗", .role = Role::Failing };
-            case CiState::Passing: return { .text = "✓", .role = Role::Passing };
-            case CiState::Pending: return { .text = "●", .role = Role::Warning };
-            case CiState::None: break;
-        }
-        return { .text = " " };
+        return look.mark.empty() ? Segment { .text = " " }
+                                 : Segment { .text = std::string { look.mark }, .role = look.role };
     }
 
-    /// A pull request's review as one glyph.
-    [[nodiscard]] Segment reviewGlyph(ReviewState review)
+    [[nodiscard]] int columnsOf(std::span<Segment const> segments)
     {
-        switch (review)
-        {
-            case ReviewState::ChangesRequested: return { .text = "△", .role = Role::Warning };
-            case ReviewState::Approved: return { .text = "✓", .role = Role::Passing };
-            case ReviewState::Required: return { .text = "?", .role = Role::Dim };
-            case ReviewState::None: break;
-        }
-        return { .text = " " };
+        auto columns = 0;
+        for (auto const& segment: segments)
+            columns += view::columnsOf(segment.text);
+        return columns;
     }
 
     /// @return The line one candidate is listed on.
@@ -434,24 +425,29 @@ namespace
         auto const marker = Segment { .text = selected ? "▍"s : " "s, .role = Role::Accent };
         auto const textRole = selected ? Role::Selection : Role::Text;
         if (std::holds_alternative<TopicRef>(candidate.item))
+        {
+            auto right = std::vector<Segment> { { .text = "new branch", .role = Role::Dim } };
+            auto const lead = Segment { .text = "✎ topic ", .role = Role::Accent };
+            auto const room = width - 1 - view::columnsOf(lead.text) - columnsOf(right) - 1;
             return Line { .left = { marker,
-                                    { .text = "✎ topic ", .role = Role::Accent },
-                                    { .text = cut(std::format("“{}”", candidate.title), width - 24),
+                                    lead,
+                                    { .text = cut(std::format("“{}”", candidate.title), room),
                                       .role = textRole } },
-                          .right = { { .text = "new branch", .role = Role::Dim } } };
-        auto const label = itemLabel(candidate.item);
+                          .right = std::move(right) };
+        }
         auto right = std::vector<Segment> {};
         if (std::holds_alternative<ChangeRequestRef>(candidate.item))
         {
-            right.push_back(ciGlyph(candidate.ci));
+            right.push_back(glyphOf(entryOf(CiLooks, candidate.ci)));
             right.push_back({ .text = "  " });
-            right.push_back(reviewGlyph(candidate.review));
+            right.push_back(glyphOf(entryOf(ReviewLooks, candidate.review)));
         }
         right.push_back({ .text = "  " });
         right.push_back(candidate.activeRun.empty() ? Segment { .text = " " }
                                                     : Segment { .text = "⬢", .role = Role::Accent });
-        // Label, a blank, the title; the columns take 7 cells and the marker 1.
-        auto const room = width - 1 - columnsOf(label) - 1 - 8;
+        auto const label = itemLabel(candidate.item);
+        // The marker, the label and a blank, the title, a blank before the columns.
+        auto const room = width - 1 - view::columnsOf(label) - 1 - columnsOf(right) - 1;
         return Line { .left = { marker,
                                 { .text = label, .role = Role::Dim },
                                 { .text = " " },
@@ -459,9 +455,29 @@ namespace
                       .right = std::move(right) };
     }
 
+    /// @return What follows `checks failing`: the first failing check, and how many more fail.
+    [[nodiscard]] std::string failingText(std::span<std::string const> checks)
+    {
+        if (checks.empty())
+            return {};
+        if (checks.size() == 1)
+            return std::format(": {}", checks.front());
+        return std::format(": {} and {} more", checks.front(), checks.size() - 1);
+    }
+
+    /// @return How the settings line shows an item's note: with a cursor while it is typed into.
+    [[nodiscard]] std::string noteText(std::string_view note, bool focused)
+    {
+        if (focused)
+            return std::format("{}▏", note);
+        if (note.empty())
+            return "none";
+        return std::string { note };
+    }
+
     /// @return What the launcher says about the highlighted item beyond its row: its checks, its review and
     ///         the agent on it.
-    [[nodiscard]] std::string detailOf(Candidate const& candidate)
+    [[nodiscard]] std::string detailOf(Candidate const& candidate, int width)
     {
         if (std::holds_alternative<TopicRef>(candidate.item))
             return "an agent on what you typed, on a new branch";
@@ -469,44 +485,30 @@ namespace
             std::vector<std::string> { std::format("{} · {}", itemLabel(candidate.item), candidate.repo) };
         if (std::holds_alternative<ChangeRequestRef>(candidate.item))
         {
-            switch (candidate.ci)
-            {
-                case CiState::Failing:
-                    parts.push_back(candidate.failingChecks.empty()
-                                        ? "checks fail"s
-                                        : std::format("checks fail: {}{}",
-                                                      candidate.failingChecks.front(),
-                                                      candidate.failingChecks.size() > 1
-                                                          ? std::format(" and {} more",
-                                                                        candidate.failingChecks.size() - 1)
-                                                          : std::string {}));
-                    break;
-                case CiState::Passing: parts.emplace_back("checks pass"); break;
-                case CiState::Pending: parts.emplace_back("checks running"); break;
-                case CiState::None: break;
-            }
-            if (candidate.review == ReviewState::ChangesRequested)
-                parts.emplace_back("changes requested");
-            else if (candidate.review == ReviewState::Approved)
-                parts.emplace_back("approved");
+            if (candidate.ci != CiState::None)
+                parts.push_back(std::format("checks {}{}",
+                                            entryOf(CiLooks, candidate.ci).word,
+                                            failingText(candidate.failingChecks)));
+            if (auto const review = entryOf(ReviewLooks, candidate.review).word; !review.empty())
+                parts.emplace_back(review);
         }
         if (!candidate.activeRun.empty())
             parts.push_back(std::format("{} works on it", candidate.activeRun));
-        auto text = std::string {};
-        for (auto const& part: parts)
-            text += text.empty() ? part : std::format(" · {}", part);
-        return text;
+        auto const views =
+            parts | std::views::transform([](std::string const& part) { return std::string_view { part }; })
+            | std::ranges::to<std::vector>();
+        return joinHints(views, width);
     }
 
     /// Appends a labelled value, wrapped, continuation lines indented under it.
     void appendValue(
         std::vector<Line>& lines, std::string_view label, std::string_view value, Role role, int width)
     {
-        auto const wrapped = wrap(value, width - LabelColumns, width - LabelColumns - 2);
+        auto const wrapped = wrap(value, width - LabelColumns, width - LabelColumns - ContinuationIndent);
         for (auto const index: std::views::iota(std::size_t { 0 }, wrapped.size()))
         {
-            auto const lead =
-                index == 0 ? std::format("{:<{}}", label, LabelColumns) : std::string(LabelColumns + 2, ' ');
+            auto const lead = index == 0 ? std::format("{:<{}}", label, LabelColumns)
+                                         : std::string(LabelColumns + ContinuationIndent, ' ');
             lines.push_back(Line {
                 .left = { { .text = lead, .role = Role::Dim }, { .text = wrapped[index], .role = role } } });
         }
@@ -523,54 +525,65 @@ namespace
         auto const tasks = config != nullptr ? config->tasks() : std::span<TaskDef const> {};
         auto const models = config != nullptr ? config->models() : std::span<std::string const> {};
         auto const profiles = config != nullptr ? config->profiles() : std::span<PermissionProfile const> {};
-        auto const add = [&](std::string_view label, FormField field, std::string_view value) {
-            auto const focused = state.focus == LauncherFocus::Settings && form.focus == field;
+        auto const isFocused = [&](FormField field) {
+            return state.focus == LauncherFocus::Settings && state.setting == field;
+        };
+        auto const add = [&](std::string_view label, FormField field, std::string value) {
             if (!line.left.empty())
                 line.left.push_back({ .text = "   " });
             line.left.push_back({ .text = std::format("{} ", label), .role = Role::Dim });
             line.left.push_back(
-                { .text = std::format("‹ {} ›", value), .role = focused ? Role::Selection : Role::Text });
+                { .text = std::move(value), .role = isFocused(field) ? Role::Selection : Role::Text });
         };
-        if (std::holds_alternative<TopicRef>(form.item))
-            add("repo", FormField::Repo, form.repo);
-        add("task",
-            FormField::Task,
-            form.task < tasks.size() ? std::string_view { tasks[form.task].label } : "?"sv);
-        add("model",
-            FormField::Model,
-            form.model < models.size() ? std::string_view { models[form.model] } : "?"sv);
-        add("perms",
-            FormField::Permissions,
-            form.permissions < profiles.size() ? std::string_view { profiles[form.permissions].name }
-                                               : "?"sv);
-        if (!std::holds_alternative<TopicRef>(form.item))
-        {
-            auto const focused = state.focus == LauncherFocus::Settings && form.focus == FormField::Note;
-            line.left.push_back({ .text = "   note ", .role = Role::Dim });
-            line.left.push_back({ .text = focused             ? std::format("{}▏", form.note)
-                                          : form.note.empty() ? "none"s
-                                                              : form.note,
-                                  .role = focused                      ? Role::Selection
-                                          : form.note.starts_with('-') ? Role::Failing
-                                                                       : Role::Text });
-        }
+        auto const between = [](std::string_view value) {
+            return std::format("‹ {} ›", value);
+        };
+        for (auto const field: settingsOf(form))
+            switch (field)
+            {
+                case FormField::Repo: add("repo", field, between(form.repo)); break;
+                case FormField::Task:
+                    add("task",
+                        field,
+                        between(form.task < tasks.size() ? std::string_view { tasks[form.task].label }
+                                                         : "?"sv));
+                    break;
+                case FormField::Model:
+                    add("model",
+                        field,
+                        between(form.model < models.size() ? std::string_view { models[form.model] }
+                                                           : "?"sv));
+                    break;
+                case FormField::Permissions:
+                    add("perms",
+                        field,
+                        between(form.permissions < profiles.size()
+                                    ? std::string_view { profiles[form.permissions].name }
+                                    : "?"sv));
+                    break;
+                case FormField::Note:
+                    add("note", field, noteText(form.note, isFocused(field)));
+                    if (form.note.starts_with('-'))
+                        line.left.back().role = Role::Failing;
+                    break;
+            }
         return line;
     }
 
-    /// @return The hint line: what Enter does now, then the other keys.
-    [[nodiscard]] Line hintLine(LauncherState const& state, Engine const& engine)
+    /// @return The hint line: what Enter does now, then the other keys, cut between hints.
+    [[nodiscard]] Line hintLine(LauncherState const& state, bool confirmable, bool incomplete, int width)
     {
-        auto enter = "enter start"sv;
-        if (!state.form || !previewOf(*state.form, engine))
-            enter = ""sv;
-        else if (isSetupIncomplete(engine) && state.form->hooks != HooksWarning::Confirmed)
-            enter = "enter confirms the warning"sv;
-        else if (isSetupIncomplete(engine))
-            enter = "enter starts it anyway"sv;
-        auto text = std::string { enter };
-        for (auto const hint: { "↑↓ choose"sv, "tab settings"sv, "ctrl+p more"sv, "esc close"sv })
-            text += text.empty() ? std::string { hint } : std::format(" · {}", hint);
-        return Line { .left = { { .text = text, .role = Role::Dim } } };
+        auto hints = std::vector<std::string_view> {};
+        // What Enter does while the setup is incomplete, indexed by HooksWarning.
+        constexpr auto IncompleteEnterHints = std::array { "enter confirms the warning"sv,
+                                                           "enter confirms the warning"sv,
+                                                           "enter starts it anyway"sv };
+        static_assert(IncompleteEnterHints.size() == std::to_underlying(HooksWarning::Confirmed) + 1U);
+        if (confirmable)
+            hints.push_back(incomplete ? IncompleteEnterHints[std::to_underlying(state.hooks)]
+                                       : "enter start"sv);
+        hints.insert(hints.end(), { "↑↓ choose"sv, "tab settings"sv, "ctrl+p more"sv, "esc close"sv });
+        return Line { .left = { { .text = joinHints(hints, width), .role = Role::Dim } } };
     }
 
     /// The launcher's lines in three parts: the query above the list, every row of the list, and what follows
@@ -594,7 +607,7 @@ namespace
             auto const first =
                 list.size() <= rows
                     ? std::size_t { 0 }
-                    : std::min(highlightedAt > rows / 2 ? highlightedAt - rows / 2 : 0, list.size() - rows);
+                    : std::min(highlightedAt > rows / 2 ? highlightedAt - (rows / 2) : 0, list.size() - rows);
             for (auto const& line: list | std::views::drop(first) | std::views::take(rows))
                 all.push_back(line);
             if (list.size() > first + rows)
@@ -624,11 +637,10 @@ namespace
         for (auto const index: std::views::iota(std::size_t { 0 }, candidates.size()))
         {
             auto const& candidate = candidates[index];
-            if (candidate.group != CandidateGroup::Topic
-                && (index == 0 || candidates[index - 1].group != candidate.group))
-                layout.list.push_back(Line {
-                    .left = { { .text = std::string { GroupHeadings[std::to_underlying(candidate.group)] },
-                                .role = Role::Dim } } });
+            auto const heading = GroupRows[std::to_underlying(candidate.group)].heading;
+            if (!heading.empty() && (index == 0 || candidates[index - 1].group != candidate.group))
+                layout.list.push_back(
+                    Line { .left = { { .text = std::string { heading }, .role = Role::Dim } } });
             if (index == state.highlighted)
                 layout.highlightedAt = layout.list.size();
             layout.list.push_back(candidateLine(candidate, index == state.highlighted, width));
@@ -641,11 +653,15 @@ namespace
         tail.push_back(Line { .left = { { .text = std::move(rule), .role = Role::Border } } });
         tail.push_back(settingsLine(state, engine));
         if (state.highlighted < candidates.size())
-            tail.push_back(Line { .left = { { .text = cut(detailOf(candidates[state.highlighted]), width),
-                                              .role = Role::Dim } } });
+            tail.push_back(Line {
+                .left = { { .text = detailOf(candidates[state.highlighted], width), .role = Role::Dim } } });
+        auto confirmable = false;
         if (state.form)
         {
-            if (auto const preview = previewOf(*state.form, engine))
+            auto const preview = previewOf(*state.form, engine);
+            confirmable =
+                preview && !state.form->note.starts_with('-') && !state.form->topic.starts_with('-');
+            if (preview)
             {
                 appendValue(tail, "checkout", checkoutText(preview->run), Role::Text, width);
                 appendValue(
@@ -664,21 +680,24 @@ namespace
             }
             else
                 appendValue(tail, "refused", refusalText(preview.error()), Role::Failing, width);
+            if (state.form->note.starts_with('-') || state.form->topic.starts_with('-'))
+                tail.push_back(Line { .left = { { .text = std::holds_alternative<TopicRef>(state.form->item)
+                                                              ? "a topic may not start with -"
+                                                              : "a note may not start with -",
+                                                  .role = Role::Failing } } });
         }
         else if (!candidates.empty())
             appendValue(tail, "refused", "no task applies to it", Role::Failing, width);
-        if (state.form && state.form->note.starts_with('-'))
-            tail.push_back(Line { .left = { { .text = std::holds_alternative<TopicRef>(state.form->item)
-                                                          ? "a topic may not start with -"
-                                                          : "a note may not start with -",
-                                              .role = Role::Failing } } });
-        for (auto const& warning: setupWarnings(engine))
+        auto const warnings = setupWarnings(engine);
+        for (auto const& warning: warnings)
             for (auto const& part: wrap(warning, width, width))
                 tail.push_back(Line { .left = { { .text = part, .role = Role::Warning } } });
         tail.emplace_back();
-        tail.push_back(hintLine(state, engine));
+        tail.push_back(hintLine(state, confirmable, !warnings.empty(), width));
         return layout;
     }
+
+    // }}}
 } // namespace
 
 void LauncherView::render(core::tui::Canvas& canvas)
@@ -695,9 +714,8 @@ void LauncherView::render(core::tui::Canvas& canvas)
     auto const others = static_cast<int>(layout.head.size() + layout.tail.size());
     auto const listRows = std::clamp(inside.height() - others, 1, MaxLauncherListRows);
     auto const lines = layout.lines(static_cast<std::size_t>(listRows));
-    for (auto const index:
-         std::views::iota(std::size_t { 0 },
-                          std::min(lines.size(), static_cast<std::size_t>(std::max(inside.height(), 0)))))
+    auto const shown = std::min(lines.size(), static_cast<std::size_t>(std::max(inside.height(), 0)));
+    for (auto const index: std::views::iota(std::size_t { 0 }, shown))
     {
         auto const y = static_cast<int>(index);
         auto x = 1;
@@ -706,18 +724,16 @@ void LauncherView::render(core::tui::Canvas& canvas)
             // Segments are sanitised already, and their blanks separate them: cutSanitised() keeps them.
             auto const text = cutSanitised(segment.text, width + 1 - x);
             inside.putString(y, x, text, styleOf(theme, segment.role));
-            x += columnsOf(text);
+            x += view::columnsOf(text);
         }
-        auto rightWidth = 0;
-        for (auto const& segment: lines[index].right)
-            rightWidth += columnsOf(segment.text);
+        auto const rightWidth = columnsOf(lines[index].right);
         if (lines[index].right.empty() || x + 1 + rightWidth > width + 1)
             continue;
         auto rx = width + 1 - rightWidth;
         for (auto const& segment: lines[index].right)
         {
             inside.putString(y, rx, segment.text, styleOf(theme, segment.role));
-            rx += columnsOf(segment.text);
+            rx += view::columnsOf(segment.text);
         }
     }
 }

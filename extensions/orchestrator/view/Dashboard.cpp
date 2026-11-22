@@ -56,19 +56,20 @@ namespace
     constexpr auto AgeTickMs = uint64_t { 1000 };
 
     /// The widest the launcher is in the Wide band.
-    constexpr auto FormMaxColumns = 80;
+    constexpr auto LauncherMaxColumns = 80;
     /// How much of the tab's width the launcher takes in the Medium band, in percent.
-    constexpr auto FormMediumPercent = 90;
+    constexpr auto LauncherMediumPercent = 90;
 
     /// @return The cells the launcher is wide in @p band, in a tab @p columns wide: in the Wide band a
     /// popup
-    ///         of at most FormMaxColumns, in the Medium band most of the tab, in the Narrow band all of it.
-    [[nodiscard]] int formWidthIn(Band band, int columns) noexcept
+    ///         of at most LauncherMaxColumns, in the Medium band most of the tab, in the Narrow band all of
+    ///         it.
+    [[nodiscard]] int launcherWidthIn(Band band, int columns) noexcept
     {
         switch (band)
         {
-            case Band::Wide: return std::min(FormMaxColumns, columns);
-            case Band::Medium: return columns * FormMediumPercent / 100;
+            case Band::Wide: return std::min(LauncherMaxColumns, columns);
+            case Band::Medium: return columns * LauncherMediumPercent / 100;
             case Band::Narrow: break;
         }
         return columns;
@@ -162,7 +163,7 @@ struct Dashboard::State
     [[nodiscard]] std::vector<UiAction> applyKeys(std::vector<core::tui::InputEvent> const& events,
                                                   HooksWarning hooksAtInput);
     /// @return The form's HooksWarning now: what the next input begins with.
-    [[nodiscard]] HooksWarning formHooks() const noexcept;
+    [[nodiscard]] HooksWarning launcherHooks() const noexcept;
     /// Resolves a held ESC that waited past EscapeTimeout into the Escape key.
     /// @return What the engine is asked, in order.
     [[nodiscard]] std::vector<UiAction> resolveOverdueEscape();
@@ -171,7 +172,7 @@ struct Dashboard::State
     /// Gives a launcher just opened its agent's session id, from the dashboard's source.
     void mintSession();
     /// Shows the launcher where the band puts it, or hides it.
-    void syncForm();
+    void syncLauncher();
     /// Keeps a board's or a transcript's scroll within what it holds, once the last draw knows its end: the
     /// keys scroll past an end not yet wrapped, and a draw shows such a scroll from the end.
     void clampScroll() noexcept;
@@ -844,13 +845,12 @@ std::vector<UiAction> Dashboard::State::resolveOverdueEscape()
         return {};
     escapeHeldSince.reset();
     ensureRows();
-    return applyKeys(parser.timeout(), formHooks());
+    return applyKeys(parser.timeout(), launcherHooks());
 }
 
-HooksWarning Dashboard::State::formHooks() const noexcept
+HooksWarning Dashboard::State::launcherHooks() const noexcept
 {
-    return interaction.launcher && interaction.launcher->form ? interaction.launcher->form->hooks
-                                                              : HooksWarning::None;
+    return interaction.launcher ? interaction.launcher->hooks : HooksWarning::None;
 }
 
 void Dashboard::State::syncLayout()
@@ -867,7 +867,7 @@ void Dashboard::State::syncLayout()
             panel->setVisible(shown);
     if (problems != nullptr)
         problems->refresh();
-    syncForm();
+    syncLauncher();
     if (interaction.overlay == Overlay::Help && !interaction.launcher)
     {
         auto const wanted = help->preferredSize();
@@ -897,7 +897,7 @@ void Dashboard::State::mintSession()
         interaction.launcher->form->session = interaction.launcher->session;
 }
 
-void Dashboard::State::syncForm()
+void Dashboard::State::syncLauncher()
 {
     if (!interaction.launcher)
     {
@@ -907,7 +907,7 @@ void Dashboard::State::syncForm()
     }
     // Centred; the Narrow band gives it the whole tab.
     auto const band = BandBreakpoints[breakpointFor(size)].band;
-    auto const width = formWidthIn(band, size.width);
+    auto const width = launcherWidthIn(band, size.width);
     auto const height =
         band == Band::Narrow ? size.height : std::min(launcherView->heightAt(width), size.height);
     launcherView->place(Size { .width = width, .height = height });
@@ -942,7 +942,7 @@ std::vector<UiAction> Dashboard::input(std::string_view bytes)
     state.escapeHeldSince.reset();
     state.ensureRows();
     // A form's warning confirmed by a key of this input is not confirmed for the rest of it.
-    std::ranges::move(state.applyKeys(state.parser.feed(bytes), state.formHooks()),
+    std::ranges::move(state.applyKeys(state.parser.feed(bytes), state.launcherHooks()),
                       std::back_inserter(actions));
     if (bytes.ends_with('\x1b'))
         state.escapeHeldSince = state.clock.now();
@@ -1033,7 +1033,7 @@ std::vector<UiAction> Dashboard::select(std::string_view run)
 void Dashboard::openLauncherOn(std::string_view repo, ItemRef const& item, std::string_view task)
 {
     auto& state = *_state;
-    openFormFor(state.interaction, state.engine, repo, item, task, {});
+    openLauncherFor(state.interaction, state.engine, repo, item, task, {});
     state.mintSession();
     state.repaint = State::Repaint::Needed;
 }

@@ -118,7 +118,7 @@ TEST_CASE("a note starting with - is refused in the form", "[orchestrator][view]
     auto fixture = DashboardFixture { World {} };
     fixture.dashboard.openLauncherOn("contour", ChangeRequestRef { 2375 }, "fix_ci");
     CHECK(fixture.dashboard.input("\t\t\t\t-rf").empty());
-    REQUIRE(fixture.dashboard.launcher()->form->focus == FormField::Note);
+    REQUIRE(fixture.dashboard.launcher()->setting == FormField::Note);
     CHECK(fixture.dashboard.launcher()->form->note == "-rf");
     CHECK(fixture.screen().contains("a note may not start with -"));
 
@@ -167,12 +167,12 @@ TEST_CASE("hooks missing needs a second Enter", "[orchestrator][view][form]")
 {
     auto fixture = DashboardFixture { hooksMissing() };
     fixture.dashboard.openLauncherOn("contour", ChangeRequestRef { 2375 }, "fix_ci");
-    REQUIRE(fixture.dashboard.launcher()->form->hooks == HooksWarning::Shown);
+    REQUIRE(fixture.dashboard.launcher()->hooks == HooksWarning::Shown);
     CHECK(fixture.screen().contains("status hooks are not installed"));
 
     CHECK(fixture.dashboard.input("\r").empty());
     REQUIRE(fixture.dashboard.launcher().has_value());
-    CHECK(fixture.dashboard.launcher()->form->hooks == HooksWarning::Confirmed);
+    CHECK(fixture.dashboard.launcher()->hooks == HooksWarning::Confirmed);
     CHECK(fixture.screen().contains("enter starts it anyway"));
 
     auto const dispatched = dispatchesIn(fixture.dashboard.input("\r"));
@@ -237,13 +237,13 @@ TEST_CASE("a confirmation never reaches a form reopened in the same read", "[orc
         auto fixture = DashboardFixture { hooksMissing() };
         fixture.dashboard.openLauncherOn("contour", ChangeRequestRef { 2375 }, "fix_ci");
         CHECK(fixture.dashboard.input("\r").empty());
-        REQUIRE(fixture.dashboard.launcher()->form->hooks == HooksWarning::Confirmed);
+        REQUIRE(fixture.dashboard.launcher()->hooks == HooksWarning::Confirmed);
 
         CHECK(dispatchesIn(fixture.dashboard.input(read)).empty());
         REQUIRE(fixture.dashboard.launcher().has_value());
         CHECK(fixture.dashboard.launcher()->form->session
               != "00000001-0000-4000-8000-000000000000"); // the second form
-        CHECK(fixture.dashboard.launcher()->form->hooks == HooksWarning::Confirmed);
+        CHECK(fixture.dashboard.launcher()->hooks == HooksWarning::Confirmed);
     }
 }
 
@@ -339,11 +339,11 @@ TEST_CASE("a finished topic run's form opens on its text", "[orchestrator][view]
 {
     auto fixture = DashboardFixture { World {} };
     auto interaction = Interaction {};
-    openFormFor(interaction, fixture.engine, "contour", TopicRef { .slug = "fix-it" }, "topic", "Fix it");
+    openLauncherFor(interaction, fixture.engine, "contour", TopicRef { .slug = "fix-it" }, "topic", "Fix it");
     REQUIRE(interaction.launcher.has_value());
     REQUIRE(interaction.launcher->form.has_value());
     CHECK(interaction.launcher->query == "Fix it");
-    CHECK(interaction.launcher->form->note == "Fix it");
+    CHECK(interaction.launcher->form->topic == "Fix it");
     CHECK(interaction.launcher->form->repo == "contour");
     CHECK(std::holds_alternative<TopicRef>(interaction.launcher->form->item));
 }
@@ -385,7 +385,7 @@ TEST_CASE("a missing plugin is warned of and needs a second Enter", "[orchestrat
 {
     auto fixture = DashboardFixture { World { .plugins = "claude/plugin-list-without.json" } };
     fixture.dashboard.openLauncherOn("contour", ChangeRequestRef { 2375 }, "fix_ci");
-    REQUIRE(fixture.dashboard.launcher()->form->hooks == HooksWarning::Shown);
+    REQUIRE(fixture.dashboard.launcher()->hooks == HooksWarning::Shown);
     CHECK(fixture.screen().contains("lacks the plugin contour-workflows@contour-terminal"));
 
     CHECK(fixture.dashboard.input("\r").empty());

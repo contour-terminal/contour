@@ -24,7 +24,7 @@ Claude Code's status hooks are missing: blocked and permission states may not sh
 │                   │ Claude Code's status hooks are not installed: agents may not show as blocked │                   │
 │                   │ or waiting for permission (contour agent setup)                              │                   │
 │                   │                                                                              │                   │
-│                   │ enter confirms the warning · ↑↓ choose · tab settings · ctrl+p more · esc c… │                   │
+│                   │ enter confirms the warning · ↑↓ choose · tab settings · ctrl+p more          │                   │
 │                   ╰──────────────────────────────────────────────────────────────────────────────╯                   │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │

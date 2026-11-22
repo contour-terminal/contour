@@ -178,8 +178,9 @@ namespace
         return UiAction { Action { .run = context.selected->run } };
     }
 
-    /// Opens the launcher on the selected item, on @p task; or says why it cannot.
-    void openFormOn(Interaction& interaction, KeyContext const& context, TaskDef const* task)
+    /// Opens the launcher on the selected item, on @p task: a task's key, Enter and `d`; or says why it
+    /// cannot.
+    void openLauncherOnSelected(Interaction& interaction, KeyContext const& context, TaskDef const* task)
     {
         auto const* const row = context.selected;
         if (row == nullptr || !row->item || context.engine == nullptr)
@@ -189,16 +190,13 @@ namespace
             interaction.notice = "no task applies to this item";
             return;
         }
+        // A task's key names its task: one that does not apply is said, not swapped for another.
         if (task->appliesTo != appliesToOf(*row->item))
         {
             interaction.notice = std::format("{} does not apply to this item", task->label);
             return;
         }
-        // Its session id is minted by the dashboard, which holds the source of them.
-        interaction.launcher =
-            openLauncherOn(*context.engine, row->repo, *row->item, task->id, std::nullopt, {});
-        if (!interaction.launcher)
-            interaction.notice = std::format("{} is not listed any more", itemLabel(*row->item));
+        openLauncherFor(interaction, *context.engine, row->repo, *row->item, task->id, {});
     }
 
     /// @return The first task that applies to the selected item, as Enter and `d` offer it; nullptr when
@@ -229,16 +227,16 @@ namespace
         return context.rows > 1 ? context.rows - 1 : 1;
     }
 
-    /// Opens the launcher on a run's item and task (openFormFor()); does nothing for a run the engine
+    /// Opens the launcher on a run's item and task (openLauncherFor()); does nothing for a run the engine
     /// no longer knows.
-    void openFormOnRun(Interaction& interaction, KeyContext const& context, std::string_view runId)
+    void openLauncherOnRun(Interaction& interaction, KeyContext const& context, std::string_view runId)
     {
         if (context.engine == nullptr)
             return;
         auto const runs = context.engine->runs();
         auto const run = std::ranges::find(runs, runId, &Run::id);
         if (run != runs.end())
-            openFormFor(interaction, *context.engine, run->repo, run->item, run->task, run->topic);
+            openLauncherFor(interaction, *context.engine, run->repo, run->item, run->task, run->topic);
     }
 
     /// @return How many pages the shown transcript has, as its last page read says; 0 while none was read.
@@ -446,7 +444,7 @@ namespace
                                                         ? context.engine->activeRunOn(row->repo, *row->item)
                                                         : nullptr)
                             return UiAction { RevealAgentAction { .run = run->id } };
-                        openFormOn(interaction, context, firstTaskOf(context));
+                        openLauncherOnSelected(interaction, context, firstTaskOf(context));
                         return std::nullopt;
                     default: break;
                 }
@@ -464,11 +462,11 @@ namespace
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
                 auto const* const row = context.selected;
                 if (interaction.screen != Screen::Dashboard)
-                    openFormOnRun(interaction, context, interaction.subject);
+                    openLauncherOnRun(interaction, context, interaction.subject);
                 else if (row != nullptr && std::ranges::contains(row->offers, KeyCommand::Dispatch))
-                    openFormOnRun(interaction, context, row->run);
+                    openLauncherOnRun(interaction, context, row->run);
                 else
-                    openFormOn(interaction, context, firstTaskOf(context));
+                    openLauncherOnSelected(interaction, context, firstTaskOf(context));
                 return std::nullopt;
             } },
         CommandRow {
@@ -477,7 +475,7 @@ namespace
                 auto const* const config = context.engine != nullptr ? context.engine->config() : nullptr;
                 if (config == nullptr || !context.task || *context.task >= config->tasks().size())
                     return std::nullopt;
-                openFormOn(interaction, context, &config->tasks()[*context.task]);
+                openLauncherOnSelected(interaction, context, &config->tasks()[*context.task]);
                 return std::nullopt;
             } },
         CommandRow {
@@ -720,43 +718,53 @@ void leaveSubject(Interaction& interaction) noexcept
     interaction.scroll = 0;
 }
 
-void openFormFor(Interaction& interaction,
-                 Engine const& engine,
-                 std::string_view repo,
-                 ItemRef const& item,
-                 std::string_view task,
-                 std::string_view topic)
+void openLauncherFor(Interaction& interaction,
+                     Engine const& engine,
+                     std::string_view repo,
+                     ItemRef const& item,
+                     std::string_view task,
+                     std::string_view topic)
 {
-    auto const* const config = engine.config();
-    if (config == nullptr)
-        return;
+    // What each refusal leaves on the summary line, indexed by LauncherRefusal; `{}` is the item's label.
+    constexpr auto RefusalNotices = std::array {
+        "the orchestrator is not configured"sv, // NotConfigured
+        "{} is not listed any more"sv,          // NotListed
+        "no task applies to this item"sv,       // NoTask
+    };
+    static_assert(RefusalNotices.size() == std::to_underlying(LauncherRefusal::NoTask) + 1U);
+
     if (std::holds_alternative<TopicRef>(item))
     {
         // A topic is listed nowhere: the launcher opens on its text, which its topic row then holds.
-        interaction.launcher = openLauncher(engine, std::string { topic }, {});
-        if (interaction.launcher)
-            interaction.overlay = Overlay::None;
-        else
-            interaction.notice = "no repository is configured";
-        return;
-    }
-    auto const tasks = config->tasks();
-    auto const kind = appliesToOf(item);
-    auto const* chosen = config->firstTaskFor(kind);
-    // The run's own task while the configuration still has it for such items; else the item's first.
-    if (auto const named = std::ranges::find(tasks, task, &TaskDef::id);
-        named != tasks.end() && named->appliesTo == kind)
-        chosen = &*named;
-    if (chosen == nullptr)
-    {
-        interaction.notice = "no task applies to this item";
-        return;
-    }
-    interaction.launcher = openLauncherOn(engine, repo, item, chosen->id, std::nullopt, {});
-    if (interaction.launcher)
+        auto launcher = openLauncher(engine, std::string { topic }, {});
+        if (!launcher)
+        {
+            interaction.notice = RefusalNotices[std::to_underlying(LauncherRefusal::NotConfigured)];
+            return;
+        }
+        interaction.launcher = std::move(launcher);
         interaction.overlay = Overlay::None;
-    else
-        interaction.notice = std::format("{} is not listed any more", itemLabel(item));
+        return;
+    }
+    auto launcher = openLauncherOn(engine, repo, item, task, {});
+    if (!launcher)
+    {
+        auto const label = itemLabel(item);
+        interaction.notice =
+            std::vformat(RefusalNotices[std::to_underlying(launcher.error())], std::make_format_args(label));
+        return;
+    }
+    interaction.launcher = std::move(*launcher);
+    interaction.overlay = Overlay::None;
+}
+
+bool isCtrl(core::tui::KeyEvent const& key, char32_t letter) noexcept
+{
+    if (!core::tui::hasModifier(key.modifiers, core::tui::Modifier::Ctrl))
+        return false;
+    auto const upper = letter >= U'a' && letter <= U'z' ? letter - U'a' + U'A' : letter;
+    return key.codepoint == letter || key.codepoint == upper
+           || key.key == static_cast<core::tui::KeyCode>(letter);
 }
 
 bool hasAgentTab(Engine const* engine, std::string_view run) noexcept

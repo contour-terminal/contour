@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <orchestrator/view/DispatchForm.hpp>
 
-#include <core/tui/Canvas.hpp>
-#include <core/tui/KeyCode.hpp>
-#include <core/tui/Modifier.hpp>
-
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -21,12 +17,8 @@
 
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Naming.hpp>
-#include <orchestrator/core/Overloaded.hpp>
 #include <orchestrator/core/Permissions.hpp>
-#include <orchestrator/core/Utf8.hpp>
-#include <orchestrator/view/Keys.hpp>
 #include <orchestrator/view/Sections.hpp>
-#include <orchestrator/view/Theme.hpp>
 
 using namespace std::string_view_literals;
 
@@ -63,25 +55,6 @@ namespace
         auto const profiles = config.profiles();
         auto const& profile = config.profileFor(taskId);
         return static_cast<std::size_t>(&profile - profiles.data());
-    }
-
-    /// The form's fields in the order Tab moves through them: an item's, and a topic's.
-    constexpr auto FieldOrder = std::array { FormField::Task, FormField::Model, FormField::Note };
-    constexpr auto TopicFieldOrder =
-        std::array { FormField::Repo, FormField::Note, FormField::Task, FormField::Model };
-
-    /// @return Whether @p form is a topic's.
-    [[nodiscard]] bool isTopicForm(DispatchFormState const& form) noexcept
-    {
-        return std::holds_alternative<TopicRef>(form.item);
-    }
-
-    /// @return The order Tab moves through @p form's fields.
-    [[nodiscard]] std::span<FormField const> fieldOrderOf(DispatchFormState const& form) noexcept
-    {
-        if (isTopicForm(form))
-            return TopicFieldOrder;
-        return FieldOrder;
     }
 
     // }}}
@@ -131,19 +104,6 @@ namespace
         return from;
     }
 
-    /// @return Whether the note would be read as an option.
-    [[nodiscard]] bool startsWithDash(DispatchFormState const& form) noexcept
-    {
-        return form.note.starts_with('-');
-    }
-
-    /// @return Whether Enter does something now: not while the note starts with `-` or the engine would
-    /// refuse.
-    [[nodiscard]] bool enterActs(DispatchFormState const& form, Engine const& engine)
-    {
-        return !startsWithDash(form) && previewOf(form, engine).has_value();
-    }
-
     // }}}
 } // namespace
 
@@ -181,9 +141,8 @@ std::optional<DispatchFormState> openDispatchForm(Engine const& engine,
                      : 0,
         .permissions = profileIndexFor(*config, found->id),
         .note = {},
+        .topic = {},
         .session = std::move(session),
-        .focus = FormField::Task,
-        .hooks = isSetupIncomplete(engine) ? HooksWarning::Shown : HooksWarning::None,
     };
 }
 
@@ -210,10 +169,9 @@ std::optional<DispatchFormState> openTopicForm(Engine const& engine,
                      ? static_cast<std::size_t>(std::ranges::distance(models.begin(), model))
                      : 0,
         .permissions = task != nullptr ? profileIndexFor(*config, task->id) : 0,
-        .note = std::move(topic),
+        .note = {},
+        .topic = std::move(topic),
         .session = std::move(session),
-        .focus = FormField::Note,
-        .hooks = isSetupIncomplete(engine) ? HooksWarning::Shown : HooksWarning::None,
     };
 }
 
@@ -226,14 +184,13 @@ DispatchAction actionOf(DispatchFormState const& form, Engine const& engine, std
         .repo = form.repo,
         .item = form.item,
         .url = form.url,
-        .topic = isTopicForm(form) ? form.note : std::string {},
+        .topic = form.topic,
         .task = form.task < tasks.size() ? tasks[form.task].id : std::string {},
         .model = form.model < models.size() ? models[form.model] : std::string {},
         .permissions = config != nullptr && form.permissions < config->profiles().size()
                            ? config->profiles()[form.permissions].name
                            : std::string {},
-        // A topic form's text is its topic, not a note.
-        .note = form.note.empty() || isTopicForm(form) ? std::nullopt : std::optional { form.note },
+        .note = form.note.empty() ? std::nullopt : std::optional { form.note },
         .session = form.session,
         .nearTab = std::string { nearTab },
     };
@@ -257,102 +214,48 @@ std::expected<DispatchPreview, DispatchRefusal> previewOf(DispatchFormState cons
                                      .monoMs = 0 });
 }
 
-std::optional<DispatchAction> applyFormKey(core::tui::KeyEvent const& key,
-                                           std::optional<DispatchFormState>& form,
-                                           Engine const& engine,
-                                           HooksWarning hooksAtInput,
-                                           std::string_view nearTab)
+bool canConfirm(DispatchFormState const& form, Engine const& engine)
 {
-    if (!form)
-        return std::nullopt;
+    // A note or a topic starting with `-` would be read as an option.
+    return !form.note.starts_with('-') && !form.topic.starts_with('-') && previewOf(form, engine).has_value();
+}
+
+void changeSetting(DispatchFormState& form, FormField field, int step, Engine const& engine)
+{
     auto const* const config = engine.config();
-    auto& state = *form;
-    auto const move = [&](int step) {
-        auto const order = fieldOrderOf(state);
-        auto const at = std::ranges::find(order, state.focus);
-        auto const index = static_cast<std::size_t>(std::ranges::distance(order.begin(), at));
-        state.focus = order[cycled(index, order.size(), step, [](std::size_t) { return true; })];
+    if (config == nullptr)
+        return;
+    auto const any = [](std::size_t) {
+        return true;
     };
-    auto const change = [&](int step) {
-        if (config == nullptr)
-            return;
-        if (state.focus == FormField::Task)
-        {
+    switch (field)
+    {
+        case FormField::Task: {
             auto const tasks = config->tasks();
-            state.task = cycled(state.task, tasks.size(), step, [&](std::size_t index) {
-                return tasks[index].appliesTo == appliesToOf(state.item);
+            form.task = cycled(form.task, tasks.size(), step, [&](std::size_t index) {
+                return tasks[index].appliesTo == appliesToOf(form.item);
             });
             // A task comes with its own model and permission profile.
             auto const models = config->models();
-            if (auto const model = std::ranges::find(models, tasks[state.task].model); model != models.end())
-                state.model = static_cast<std::size_t>(std::ranges::distance(models.begin(), model));
-            state.permissions = profileIndexFor(*config, tasks[state.task].id);
+            if (auto const model = std::ranges::find(models, tasks[form.task].model); model != models.end())
+                form.model = static_cast<std::size_t>(std::ranges::distance(models.begin(), model));
+            form.permissions = profileIndexFor(*config, tasks[form.task].id);
+            break;
         }
-        else if (state.focus == FormField::Permissions)
-            state.permissions =
-                cycled(state.permissions, config->profiles().size(), step, [](std::size_t) { return true; });
-        else if (state.focus == FormField::Model)
-            state.model =
-                cycled(state.model, config->models().size(), step, [](std::size_t) { return true; });
-        else if (state.focus == FormField::Repo)
-        {
+        case FormField::Model: form.model = cycled(form.model, config->models().size(), step, any); break;
+        case FormField::Permissions:
+            form.permissions = cycled(form.permissions, config->profiles().size(), step, any);
+            break;
+        case FormField::Repo: {
             auto const repos = config->repos();
-            auto const at = std::ranges::find(repos, state.repo, &Repo::name);
+            auto const at = std::ranges::find(repos, form.repo, &Repo::name);
             auto const index = static_cast<std::size_t>(std::ranges::distance(repos.begin(), at));
             if (index < repos.size())
-                state.repo = repos[cycled(index, repos.size(), step, [](std::size_t) { return true; })].name;
+                form.repo = repos[cycled(index, repos.size(), step, any)].name;
+            break;
         }
-    };
-
-    // A key with Alt is how an Esc reads when the next key follows it in the same read: the user pressed Esc,
-    // and the form is cancelled, not acted on (Alt+Enter never dispatches). A Ctrl chord does nothing here.
-    if (core::tui::hasModifier(key.modifiers, core::tui::Modifier::Alt))
-    {
-        form.reset();
-        return std::nullopt;
+        case FormField::Note: break;
     }
-    if (core::tui::hasModifier(key.modifiers, core::tui::Modifier::Ctrl))
-        return std::nullopt;
-    switch (key.key)
-    {
-        case core::tui::KeyCode::Escape: form.reset(); return std::nullopt;
-        case core::tui::KeyCode::Tab:
-            move(core::tui::hasModifier(key.modifiers, core::tui::Modifier::Shift) ? -1 : 1);
-            return std::nullopt;
-        case core::tui::KeyCode::Up: move(-1); return std::nullopt;
-        case core::tui::KeyCode::Down: move(1); return std::nullopt;
-        case core::tui::KeyCode::Left: change(-1); return std::nullopt;
-        case core::tui::KeyCode::Right: change(1); return std::nullopt;
-        case core::tui::KeyCode::Backspace:
-            if (state.focus == FormField::Note)
-                dropLastCodepoint(state.note);
-            return std::nullopt;
-        case core::tui::KeyCode::Enter: {
-            if (!enterActs(state, engine))
-                return std::nullopt;
-            if (isSetupIncomplete(engine))
-            {
-                // The first Enter confirms the warning; only an Enter of a later input dispatches, so a paste
-                // or a held key cannot click through it.
-                if (state.hooks != HooksWarning::Confirmed)
-                {
-                    state.hooks = HooksWarning::Confirmed;
-                    return std::nullopt;
-                }
-                if (hooksAtInput != HooksWarning::Confirmed)
-                    return std::nullopt;
-            }
-            auto action = actionOf(state, engine, nearTab);
-            form.reset();
-            return action;
-        }
-        default: break;
-    }
-    if (state.focus != FormField::Note)
-        return std::nullopt;
-    if (auto const printable = printableOf(key))
-        appendUtf8(state.note, *printable);
-    return std::nullopt;
 }
 
 std::optional<std::vector<std::string>> commandShown(Run const& run)

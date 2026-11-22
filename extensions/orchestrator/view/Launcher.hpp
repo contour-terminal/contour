@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -75,10 +76,13 @@ struct LauncherState
     std::string query = {};                    ///< What was typed.
     std::size_t highlighted = 0;               ///< Into candidatesOf(engine, query).
     LauncherFocus focus = LauncherFocus::List; ///< Where the keys go.
+    FormField setting = FormField::Task;       ///< The setting ←/→ change while the focus is on the settings.
     /// What Enter would dispatch: the highlighted candidate with its settings; none when nothing is listed or
     /// no task applies to it.
     std::optional<DispatchFormState> form = {};
     std::string session = {};                         ///< The agent's session UUID, minted as it opened.
+    HooksWarning hooks =
+        HooksWarning::None; ///< How far the user got past the warning of an incomplete setup.
     LauncherPreview preview = LauncherPreview::Short; ///< How much it shows.
     [[nodiscard]] bool operator==(LauncherState const&) const = default;
 };
@@ -92,21 +96,27 @@ struct LauncherState
                                                         std::string query,
                                                         std::string session);
 
+/// Why the launcher did not open on an item.
+enum class LauncherRefusal : uint8_t
+{
+    NotConfigured, ///< The orchestrator is not configured.
+    NotListed,     ///< The engine does not list the item (any more).
+    NoTask,        ///< No task applies to the item.
+};
+
 /// Opens the launcher on an item, as Enter or `d` on its row, or a task's key, ask.
 /// @param engine Its lists and configuration.
 /// @param repo The item's repository.
 /// @param item The item.
-/// @param task The task to start on; none: the first that applies to the item.
-/// @param model The model to start with; none: the task's.
+/// @param task The task to start on while it applies to the item, such as a finished run's; else the first
+///        task that does.
 /// @param session The agent's session UUID.
-/// @return The launcher with the item's label typed, so it is highlighted first; std::nullopt when the engine
-///         is not configured or does not list the item.
-[[nodiscard]] std::optional<LauncherState> openLauncherOn(Engine const& engine,
-                                                          std::string_view repo,
-                                                          ItemRef const& item,
-                                                          std::optional<std::string_view> task,
-                                                          std::optional<std::string_view> model,
-                                                          std::string session);
+/// @return The launcher with the item's label typed and the item highlighted, or why it cannot open.
+[[nodiscard]] std::expected<LauncherState, LauncherRefusal> openLauncherOn(Engine const& engine,
+                                                                           std::string_view repo,
+                                                                           ItemRef const& item,
+                                                                           std::string_view task,
+                                                                           std::string session);
 
 /// Types a paste into the launcher's query, as one line: a paste is text, never keys.
 /// @param launcher The open launcher; nothing happens when none is.

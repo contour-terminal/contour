@@ -106,6 +106,15 @@ namespace
 {
 constexpr auto SessionOne = "00000001-0000-4000-8000-000000000000"sv;
 
+/// @return The launcher opened on @p item, as an optional the keys take.
+[[nodiscard]] std::optional<LauncherState> openedOn(Engine const& engine,
+                                                    ItemRef const& item,
+                                                    std::string_view task = {})
+{
+    auto opened = openLauncherOn(engine, "contour", item, task, std::string { SessionOne });
+    return opened ? std::optional { std::move(*opened) } : std::nullopt;
+}
+
 [[nodiscard]] core::tui::KeyEvent typed(char32_t c)
 {
     return core::tui::KeyEvent { .key = static_cast<core::tui::KeyCode>(c), .codepoint = c };
@@ -150,7 +159,7 @@ TEST_CASE("the launcher's query is typed, and Enter on the topic row starts a to
     CHECK(launcher->highlighted == 0);
     REQUIRE(launcher->form.has_value());
     CHECK(std::holds_alternative<TopicRef>(launcher->form->item));
-    CHECK(launcher->form->note == "flaky");
+    CHECK(launcher->form->topic == "flaky");
 
     auto const action = press(launcher, engine, KeyCode::Enter);
     REQUIRE(action.has_value());
@@ -191,8 +200,7 @@ TEST_CASE("the launcher opens on an item, and its settings change with Tab and t
 {
     using core::tui::KeyCode;
     auto const engine = bootEngine(World {});
-    auto launcher = openLauncherOn(
-        engine, "contour", ChangeRequestRef { 2375 }, std::nullopt, std::nullopt, std::string { SessionOne });
+    auto launcher = openedOn(engine, ChangeRequestRef { 2375 });
     REQUIRE(launcher.has_value());
     CHECK(launcher->query == "#2375");
     CHECK(launcher->highlighted == 0);
@@ -201,16 +209,16 @@ TEST_CASE("the launcher opens on an item, and its settings change with Tab and t
 
     CHECK_FALSE(press(launcher, engine, KeyCode::Tab));
     CHECK(launcher->focus == LauncherFocus::Settings);
-    CHECK(launcher->form->focus == FormField::Task);
+    CHECK(launcher->setting == FormField::Task);
     CHECK_FALSE(press(launcher, engine, KeyCode::Right)); // the only pull-request task: still fix CI
     CHECK_FALSE(press(launcher, engine, KeyCode::Tab));
-    CHECK(launcher->form->focus == FormField::Model);
+    CHECK(launcher->setting == FormField::Model);
     CHECK_FALSE(press(launcher, engine, KeyCode::Right)); // sonnet → opus
     CHECK_FALSE(press(launcher, engine, KeyCode::Tab));
-    CHECK(launcher->form->focus == FormField::Permissions);
+    CHECK(launcher->setting == FormField::Permissions);
     CHECK_FALSE(press(launcher, engine, KeyCode::Right)); // trusted
     CHECK_FALSE(press(launcher, engine, KeyCode::Tab));
-    CHECK(launcher->form->focus == FormField::Note);
+    CHECK(launcher->setting == FormField::Note);
     type(launcher, engine, "small");
     CHECK(launcher->form->note == "small");
     CHECK(launcher->query == "#2375");
@@ -224,19 +232,16 @@ TEST_CASE("the launcher opens on an item, and its settings change with Tab and t
     CHECK(action->permissions == "trusted");
     CHECK(action->note == std::optional<std::string> { "small" });
 
-    // A task and a model to start with, as a task's key and a finished run's `d` ask.
-    auto const chosen = openLauncherOn(
-        engine, "contour", ChangeRequestRef { 2375 }, "fix_ci", "opus", std::string { SessionOne });
+    // A task to start with, as a task's key and a finished run's `d` ask.
+    auto const chosen = openedOn(engine, ChangeRequestRef { 2375 }, "fix_ci");
     REQUIRE(chosen.has_value());
     REQUIRE(chosen->form.has_value());
     auto const chosenAction = actionOf(*chosen->form, engine, "t1");
     CHECK(chosenAction.task == "fix_ci");
-    CHECK(chosenAction.model == "opus");
+    CHECK(chosenAction.model == "sonnet");
 
-    CHECK_FALSE(
-        openLauncherOn(
-            engine, "contour", ChangeRequestRef { 1 }, std::nullopt, std::nullopt, std::string { SessionOne })
-            .has_value());
+    CHECK(openLauncherOn(engine, "contour", ChangeRequestRef { 1 }, "", std::string { SessionOne }).error()
+          == LauncherRefusal::NotListed);
 }
 
 TEST_CASE("the launcher closes on Esc, and Ctrl+P shows more", "[orchestrator][view][launcher]")
@@ -270,8 +275,7 @@ TEST_CASE("the launcher refuses an item an agent works on, and asks twice while 
     using core::tui::KeyCode;
     auto const busy = bootEngine(
         World { .stored = { storedRun(Running {}, "pr-2375-20261113-150847", ChangeRequestRef { 2375 }) } });
-    auto launcher = openLauncherOn(
-        busy, "contour", ChangeRequestRef { 2375 }, std::nullopt, std::nullopt, std::string { SessionOne });
+    auto launcher = openedOn(busy, ChangeRequestRef { 2375 });
     REQUIRE(launcher.has_value());
     CHECK_FALSE(press(launcher, busy, KeyCode::Enter));
     CHECK(launcher.has_value());
@@ -284,10 +288,10 @@ TEST_CASE("the launcher refuses an item an agent works on, and asks twice while 
     CHECK_FALSE(press(launcher, incomplete, KeyCode::Enter, HooksWarning::Shown));
     REQUIRE(launcher.has_value());
     REQUIRE(launcher->form.has_value());
-    CHECK(launcher->form->hooks == HooksWarning::Confirmed);
+    CHECK(launcher->hooks == HooksWarning::Confirmed);
     // The warning survives a move of the highlight.
     CHECK_FALSE(press(launcher, incomplete, KeyCode::Down));
     CHECK_FALSE(press(launcher, incomplete, KeyCode::Up));
-    CHECK(launcher->form->hooks == HooksWarning::Confirmed);
+    CHECK(launcher->hooks == HooksWarning::Confirmed);
     CHECK(press(launcher, incomplete, KeyCode::Enter, HooksWarning::Confirmed).has_value());
 }

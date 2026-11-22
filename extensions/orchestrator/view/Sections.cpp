@@ -113,41 +113,6 @@ namespace
 
     // {{{ what each state looks like
 
-    /// How a value is shown: a mark, its role, and a word.
-    struct Look
-    {
-        std::string_view mark = {}; ///< One cell, or empty.
-        Role role = Role::Text;     ///< How the mark and the word are drawn.
-        std::string_view word = {}; ///< What the row's status or a detail says.
-    };
-
-    /// A change request's checks, indexed by CiState.
-    constexpr auto CiLooks = std::array {
-        Look { .mark = ""sv, .role = Role::Dim, .word = "no checks"sv },
-        Look { .mark = "●"sv, .role = Role::Warning, .word = "running"sv },
-        Look { .mark = "✓"sv, .role = Role::Passing, .word = "passing"sv },
-        Look { .mark = "✗"sv, .role = Role::Failing, .word = "failing"sv },
-    };
-
-    /// A change request's review, indexed by ReviewState.
-    constexpr auto ReviewLooks = std::array {
-        Look { .mark = ""sv, .role = Role::Dim, .word = ""sv },
-        Look { .mark = ""sv, .role = Role::Dim, .word = "review required"sv },
-        Look { .mark = ""sv, .role = Role::Passing, .word = "approved"sv },
-        Look { .mark = ""sv, .role = Role::Warning, .word = "changes requested"sv },
-    };
-
-    static_assert(CiLooks.size() == std::to_underlying(CiState::Failing) + 1U);
-    static_assert(ReviewLooks.size() == std::to_underlying(ReviewState::ChangesRequested) + 1U);
-
-    /// The entry of @p table that @p value indexes.
-    template <typename Entry, std::size_t N, typename Enum>
-    [[nodiscard]] constexpr Entry const& entryOf(std::array<Entry, N> const& table, Enum value) noexcept
-    {
-        auto const index = static_cast<std::size_t>(std::to_underlying(value));
-        return table[index < N ? index : 0];
-    }
-
     // }}}
     // {{{ the words a row is made of
 
@@ -920,15 +885,6 @@ namespace
         std::ranges::move(items, std::back_inserter(rows));
     }
 
-    /// @return Whether @p haystack holds @p needle, ignoring ASCII case.
-    [[nodiscard]] bool containsIgnoringCase(std::string_view haystack, std::string_view needle) noexcept
-    {
-        auto const lower = [](char c) {
-            return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
-        };
-        return !std::ranges::search(haystack, needle, {}, lower, lower).empty();
-    }
-
     /// Appends the AGENTS and FINISHED sections: every stored run, in the engine's order.
     void appendRunSections(std::vector<Row>& rows, Engine const& engine, Lists const& lists)
     {
@@ -1277,6 +1233,16 @@ std::string cutSanitised(std::string_view sanitised, int columns)
     }
     result += Ellipsis;
     return result;
+}
+
+bool containsIgnoringCase(std::string_view haystack, std::string_view needle) noexcept
+{
+    return !std::ranges::search(haystack, needle, {}, asciiLower, asciiLower).empty();
+}
+
+bool equalsIgnoringCase(std::string_view a, std::string_view b) noexcept
+{
+    return std::ranges::equal(a, b, {}, asciiLower, asciiLower);
 }
 
 } // namespace orchestrator::view

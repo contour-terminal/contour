@@ -5,7 +5,7 @@
 │ ✓ ╭─ ✦ New agent ────────────────────────────────────────────────────────╮   │
 │ ✓ │ › Investigate why the shell integration test hangs on CI▏            │a… │
 │ ✗ │                                                                      │d… │
-│ ✗ │ ▍✎ topic “Investigate why the shell integration test…     new branch │a… │
+│ ✗ │ ▍✎ topic “Investigate why the shell integration test han… new branch │a… │
 │   │ ──────────────────────────────────────────────────────────────────── │   │
 │ IS│ repo ‹ contour ›   task ‹ topic ›   model ‹ opus ›   perms ‹ standa… │   │
 │ ▾ │ an agent on what you typed, on a new branch                          │   │

@@ -3,6 +3,7 @@
 
 #include <core/tui/Canvas.hpp>
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -10,6 +11,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <orchestrator/core/Engine.hpp>
@@ -166,6 +168,54 @@ enum class ChartRows : uint8_t
 [[nodiscard]] std::size_t positionOfSelectable(std::span<Row const> rows,
                                                std::span<std::size_t const> shown,
                                                std::size_t index) noexcept;
+
+/// How a value is shown: a mark, its role, and a word.
+struct Look
+{
+    std::string_view mark = {}; ///< One cell, or empty.
+    Role role = Role::Text;     ///< How the mark and the word are drawn.
+    std::string_view word = {}; ///< What the row's status or a detail says.
+};
+
+/// A change request's checks, indexed by CiState.
+inline constexpr auto CiLooks = std::array {
+    Look { .mark = std::string_view {}, .role = Role::Dim, .word = "no checks" },
+    Look { .mark = "●", .role = Role::Warning, .word = "running" },
+    Look { .mark = "✓", .role = Role::Passing, .word = "passing" },
+    Look { .mark = "✗", .role = Role::Failing, .word = "failing" },
+};
+
+/// A change request's review, indexed by ReviewState.
+inline constexpr auto ReviewLooks = std::array {
+    Look { .mark = std::string_view {}, .role = Role::Dim, .word = std::string_view {} },
+    Look { .mark = "?", .role = Role::Dim, .word = "review required" },
+    Look { .mark = "✓", .role = Role::Passing, .word = "approved" },
+    Look { .mark = "△", .role = Role::Warning, .word = "changes requested" },
+};
+
+static_assert(CiLooks.size() == std::to_underlying(CiState::Failing) + 1U);
+static_assert(ReviewLooks.size() == std::to_underlying(ReviewState::ChangesRequested) + 1U);
+
+/// The entry of @p table that @p value indexes.
+template <typename Entry, std::size_t N, typename Enum>
+[[nodiscard]] constexpr Entry const& entryOf(std::array<Entry, N> const& table, Enum value) noexcept
+{
+    auto const index = static_cast<std::size_t>(std::to_underlying(value));
+    return table[index < N ? index : 0];
+}
+
+/// @param c A character.
+/// @return @p c with an ASCII capital lower-cased.
+[[nodiscard]] constexpr char asciiLower(char c) noexcept
+{
+    return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+}
+
+/// @return Whether @p haystack holds @p needle, ignoring ASCII case.
+[[nodiscard]] bool containsIgnoringCase(std::string_view haystack, std::string_view needle) noexcept;
+
+/// @return Whether @p a and @p b are equal, ignoring ASCII case.
+[[nodiscard]] bool equalsIgnoringCase(std::string_view a, std::string_view b) noexcept;
 
 /// @param item An item.
 /// @return How the dashboard names it: `#2331`, or a Jira key.

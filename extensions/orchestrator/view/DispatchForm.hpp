@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <core/tui/Component.hpp>
-#include <core/tui/InputEvent.hpp>
-
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -40,12 +37,12 @@ enum class FormField : uint8_t
 {
     Task = 0, ///< ←/→ cycle the tasks that apply to the item.
     Model,    ///< ←/→ cycle the configured models.
-    Note,     ///< Typed text extends the note, or a topic form's topic; Backspace shortens it.
+    Note,     ///< An item's note: a text field.
     Repo,     ///< A topic form's: ←/→ cycle the configured repositories.
     Permissions, ///< ←/→ cycle the permission profiles.
 };
 
-/// How far the user got past the warning that Claude Code's status hooks are missing.
+/// How far the user got past the warning that the agents' setup is incomplete (status hooks or a plugin).
 enum class HooksWarning : uint8_t
 {
     None = 0,  ///< No warning was shown: the hooks were installed as the form opened.
@@ -63,10 +60,9 @@ struct DispatchFormState
     std::size_t task = 0;     ///< The task: an index into Config::tasks(), one that applies to the item.
     std::size_t model = 0;    ///< The model: an index into Config::models().
     std::size_t permissions = 0; ///< The permission profile: an index into Config::profiles().
-    std::string note = {};    ///< What the user typed: the note, or a topic form's topic; empty: none.
-    std::string session = {}; ///< The agent's session UUID, minted as the form opens.
-    FormField focus = FormField::Task;       ///< Where ←/→ and typed text go.
-    HooksWarning hooks = HooksWarning::None; ///< How far the user got past the missing-hooks warning.
+    std::string note = {};       ///< An item's note, added to its prompt; empty: none.
+    std::string topic = {};      ///< A topic's text; empty for an item.
+    std::string session = {};    ///< The agent's session UUID, minted as the form opens.
     [[nodiscard]] bool operator==(DispatchFormState const&) const = default;
 };
 
@@ -117,7 +113,7 @@ inline constexpr std::string_view HooksMissingWarning =
                                                                 std::string_view task,
                                                                 std::string session);
 
-/// Opens a form on a topic, focused on its text: the dashboard's `n`, and `d` on a finished topic run.
+/// The choices for a topic: the launcher's topic row.
 /// @param engine The engine: its configuration and whether the hooks are installed.
 /// @param repo The repository's configured name; one the configuration lacks starts on its first.
 /// @param topic The topic's text to start with; empty for a new one.
@@ -143,22 +139,19 @@ inline constexpr std::string_view HooksMissingWarning =
 [[nodiscard]] std::expected<DispatchPreview, DispatchRefusal> previewOf(DispatchFormState const& form,
                                                                         Engine const& engine);
 
-/// Applies one key to an open form. Esc closes it, and so does a key with Alt (an Esc and the key after it,
-/// read together); a Ctrl chord does nothing; Tab and ↑/↓ move between the fields; ←/→ change the task or the
-/// model; text and Backspace edit the note; Enter confirms. Enter does nothing while the note starts with `-`
-/// or the engine would refuse the dispatch; while the hooks are missing, the first Enter only confirms the
-/// warning, and an Enter dispatches only when the confirmation came in an earlier input.
-/// @param key A key the terminal sent.
-/// @param form The open form; closed (reset) when the key cancels or confirms it.
-/// @param engine The engine it was opened with.
-/// @param hooksAtInput The form's HooksWarning as the input that holds @p key began: two Enters in one read,
-///        such as a paste, confirm the warning and nothing more.
-/// @param nearTab The dashboard tab it is shown in.
-/// @return The dispatch, when the key confirmed the form.
-[[nodiscard]] std::optional<DispatchAction> applyFormKey(core::tui::KeyEvent const& key,
-                                                         std::optional<DispatchFormState>& form,
-                                                         Engine const& engine,
-                                                         HooksWarning hooksAtInput,
-                                                         std::string_view nearTab);
+/// @param form A dispatch's choices.
+/// @param engine The engine they would dispatch through.
+/// @return Whether confirming them now dispatches: not while a note or a topic starts with `-`, nor while the
+///         engine would refuse.
+[[nodiscard]] bool canConfirm(DispatchFormState const& form, Engine const& engine);
+
+/// Changes one of a dispatch's settings by a step, wrapping around: the task (among those that apply to the
+/// item, bringing its own model and profile), the model, a topic's repository, or the profile. The note is
+/// text, and is not stepped.
+/// @param form The choices.
+/// @param field Which setting.
+/// @param step 1 for the next value, -1 for the one before.
+/// @param engine The engine whose configuration lists the values.
+void changeSetting(DispatchFormState& form, FormField field, int step, Engine const& engine);
 
 } // namespace orchestrator::view
