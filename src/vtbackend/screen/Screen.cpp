@@ -5986,12 +5986,25 @@ void Screen::updateKittyFragments(std::predicate<ImageFragment const&> auto cons
     }
 }
 
-void Screen::removeAllKittyPlacements()
+std::unordered_set<uint32_t> Screen::removeAllKittyPlacements()
 {
+    // Which kitty image each fragment shows, whichever of its frames the cells hold.
+    auto owners = KittyFrameSwaps {};
+    for (auto const imageId: _kittyImages | std::views::keys)
+        addKittyFrameSwaps(owners, imageId, nullptr);
+
     // Only the fragments: the text sharing the cells is not the placement's to erase.
+    auto unplaced = std::unordered_set<uint32_t> {};
     updateKittyFragments([](ImageFragment const&) { return true; },
-                         [](CellProxy& cell, ImageFragment const&) { cell.clearImageFragment(); },
+                         [&](CellProxy& cell, ImageFragment const& fragment) {
+                             if (auto const owner =
+                                     owners.find(fragment.rasterizedImage().imagePointer().get());
+                                 owner != owners.end())
+                                 unplaced.insert(owner->second.imageId);
+                             cell.clearImageFragment();
+                         },
                          KittyScan::PageOnly);
+    return unplaced;
 }
 
 std::expected<void, std::string_view> Screen::deleteKittyGraphics(kitty_graphics::Command const& command)
@@ -6005,17 +6018,24 @@ std::expected<void, std::string_view> Screen::deleteKittyGraphics(kitty_graphics
 
     switch (target)
     {
-        case 'a':
-            removeAllKittyPlacements();
-            if (freesData)
+        case 'a': {
+            auto const unplaced = removeAllKittyPlacements();
+            if (!freesData)
+                return {};
+            // Only the images whose placements went, and only once none is left in the scrollback, as
+            // kitty's free_only_matched has it: an image merely transmitted for a later `a=p` survives.
+            // The frames go with the image they were composited from: they are full copies of it, and
+            // far larger than the map holding them, so freeing the image without them reclaims almost
+            // nothing.
+            for (auto const imageId: unplaced)
             {
-                // The frames go with the image they were composited from: they are full copies of
-                // it, and far larger than the map holding them, so freeing the image without them
-                // reclaims almost nothing.
-                _kittyImages.clear();
-                _kittyAnimations.clear();
+                if (hasKittyPlacementOf(imageId))
+                    continue;
+                _kittyImages.erase(imageId);
+                _kittyAnimations.erase(imageId);
             }
             return {};
+        }
 
         case 'i':
             // Nothing transmitted under that id, nothing placed from it either. This includes `d=i`

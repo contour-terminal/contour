@@ -237,6 +237,24 @@ TEST_CASE("KittyGraphics.upper_case_delete_frees_the_image_data", "[kitty]")
     CHECK(mock.terminal.peekInput().contains("ENOENT"));
 }
 
+TEST_CASE("KittyGraphics.upper_case_delete_all_frees_only_the_images_it_unplaced", "[kitty]")
+{
+    // `d=A` frees the images whose placements it removed, as kitty's free_only_matched does -- not every
+    // image stored. One merely transmitted (`a=t`) for a later `a=p` had no placement to remove.
+    auto mock = KittyTerm { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=1,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.writeToScreen("\033_Ga=t,f=24,i=2,s=2,v=1;/wAAAP8A\033\\"sv);
+
+    mock.writeToScreen("\033_Ga=d,d=A\033\\"sv);
+    mock.terminal.flushInput();
+    mock.writeToScreen("\033[H\033_Ga=p,i=1\033\\"sv);
+    CHECK(mock.terminal.peekInput().contains("ENOENT"));
+
+    mock.terminal.flushInput();
+    mock.writeToScreen("\033[H\033_Ga=p,i=2\033\\"sv);
+    CHECK(mock.terminal.peekInput() == "\033_Gi=2;OK\033\\");
+}
+
 TEST_CASE("KittyGraphics.a_delete_aborts_a_chunked_transmission", "[kitty]")
 {
     // A delete arriving while a chunked transmission is in progress is no continuation chunk: kitty aborts

@@ -123,6 +123,7 @@
           <li>Fixes the sidebar's tab rows of a window without a daemon showing "Terminal" instead of the title the shell set, until something else changed</li>
           <li>Fixes Contour on Windows ending when a terminal is resized just as its program exits</li>
           <li>Fixes a kitty graphics delete (<code>a=d</code>) arriving during a chunked image transmission being taken for the transmission's last chunk: as in kitty, the transmission is now aborted and the delete carried out</li>
+          <li>Fixes the kitty graphics delete <code>a=d,d=A</code> freeing every stored image, even one never placed: as in kitty, it now frees only the images whose placements it removed, so an image transmitted for a later <code>a=p</code> survives it</li>
           <li>Fixes symbols such as <code>U+23BF</code> and <code>U+23F5</code>, which Claude Code draws its interface with, being drawn as the replacement character on Windows with <code>strict_spacing: true</code>: a character no configured font has is now drawn with the font Windows names for it, even a proportional one</li>
           <li>Fixes data races when a pane of a daemon session is attached: the connection's thread read which display showed the pane, and which pane the session was, while the window changed them</li>
           <li>Fixes Contour on Windows failing to save settings, load its configuration or write files with a few tabs open: each tab's fonts held files open until the process reached the C runtime's default limit of 512, which Contour now raises to 8192 (#2405)</li>

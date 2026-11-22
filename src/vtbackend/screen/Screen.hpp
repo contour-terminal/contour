@@ -464,7 +464,8 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     ///
     /// Fragments do not record which protocol placed them, so this clears Sixel images too, as it
     /// always has.
-    void removeAllKittyPlacements();
+    /// @return the kitty images at least one of the removed fragments showed.
+    std::unordered_set<uint32_t> removeAllKittyPlacements();
 
     /// How much of the grid a walk for image fragments covers.
     enum class KittyScan : uint8_t
