@@ -31,7 +31,7 @@ nothing to memorise beyond `↑↓ ⏎ esc tab ^K n`. What the screen offers ada
 ## Layout
 
 ```
-╭─ Fleet ─── Work ───────────────────╮ ╭─ pr-2375 · fix CI · sonnet ──────────── ● asking 2m ──╮
+╭─ Agents 7 ─────────────────────────╮ ╭─ pr-2375 · fix CI · sonnet ──────────── ● asking 2m ──╮
 │ NEEDS YOU · 2                      │ │  Board   Transcript   Details                          │
 │ ▶ pr-2375  fix CI          asking 2m│ │ ━━━━━━                                                 │
 │   topic    flaky reflow   error    │ │ ## Fixing CI                                           │
@@ -48,9 +48,9 @@ nothing to memorise beyond `↑↓ ⏎ esc tab ^K n`. What the screen offers ada
  ⏎ reply · 1 2 3 answer · t transcript · e end · ^k all actions               ⬢ 3/4 · 2 need you
 ```
 
-### Left pane: two tabs, Fleet and Work
+### Left pane: the Fleet, agents only
 
-- **Fleet** (the default) lists runs only, grouped by **what they need from you**, in this order:
+- The Fleet lists runs only, grouped by **what they need from you**, in this order:
   - **Needs you:** asking (a permission prompt), waiting for input, or stopped by an error;
   - **Working;**
   - **Done · to review:** the agent reported done, and the run is still open;
@@ -58,9 +58,8 @@ nothing to memorise beyond `↑↓ ⏎ esc tab ^K n`. What the screen offers ada
 
   Within a group the longest-waiting run comes first. A run moves between groups as its state changes, and the
   selection stays on the run, not on the position.
-- **Work** holds today's item lists: MY PULL REQUESTS, ISSUES WITHOUT A PR and Jira, with their folds and the
-  timeline. It is for browsing CI and review state. `⏎` on an item opens the launcher on it.
-- `w` switches between the tabs; the tab strip shows each tab's count.
+- Pull requests, issues and Jira issues are no longer listed on the dashboard. You browse and start them from the
+  launcher (`n`), which opens on the items that need attention.
 - `+ new agent` is the last Fleet row; `⏎` on it opens the launcher.
 
 ### Right pane: Focus, the selected run
@@ -84,9 +83,6 @@ Under the tab, **latest** shows the last three transcript entries, unless the Tr
 The **message box** is always present for a run whose pane is open. For a finished run it is replaced by that run's
 actions (run again, dismiss).
 
-When an item is selected on the Work tab, the Focus shows the item: its title, CI, review, URL, the runs it had,
-and `⏎ start an agent`.
-
 ### Bands
 
 - **Wide (≥ 100 columns):** both panes side by side.
@@ -106,7 +102,6 @@ The user is in one of two places, shown by the highlighted border.
 | `tab` `→` | into the message box (Wide, Medium) or into the Focus (Narrow) |
 | `[` `]` | switch the Focus tab without leaving the Fleet |
 | `pgup` `pgdn` | scroll the Focus tab |
-| `w` | Fleet ⇄ Work |
 | `n` | the launcher |
 | `/` | filter the rows |
 | `^K`, `?` | the command palette |
@@ -153,7 +148,6 @@ struct ActionRow {
 | `Done` | `⏎ open PR` (or `transcript` without a PR) · `m follow up` · `e end` |
 | `Finished` | `⏎ run again` · `del dismiss` · `t transcript` |
 | `Kept` | `⏎ details` · `x retry removal` · `del dismiss` |
-| `PullRequest`, `Issue`, `JiraIssue` | `⏎ start an agent` · `o open in browser` |
 | `NewAgent` | `⏎ new agent` |
 | `GroupHeader` | `⏎ fold` |
 
@@ -167,14 +161,14 @@ struct ActionRow {
 
 core-cpp's `CommandPalettePopup` lists every command:
 - the selected row's actions first, from the table above;
-- then the global ones: new agent, filter, refresh, install plugins, Fleet/Work, fold all;
+- then the global ones: new agent, filter, refresh, install plugins, fold all, show the last 24 hours (the timeline, as a popup);
 - each with its key.
 
 Typing filters it fuzzily, and `⏎` runs the chosen command. It replaces the help overlay: `?` opens it too.
 Commands that do not apply to the selection are listed dimmed, with the reason (for example, "e end · no run
 selected").
 
-## The launcher (`n`, `⏎` on an item or `+ new agent`)
+## The launcher (`n` or `+ new agent`): browse and start
 
 ```
 ╭─ New agent ────────────────────────────────────────────╮
@@ -188,8 +182,17 @@ selected").
 ╰─────────────────────────────────────────────────────────╯
 ```
 
-It is one popup, built on `FuzzyPickerPopup` for the list, and it replaces `DispatchForm`, `d`, the task letter
-keys and `n`.
+It is one popup, built on `FuzzyPickerPopup` for the list. It replaces the item lists on today's dashboard,
+`DispatchForm`, `d`, the task letter keys and `n`.
+
+- **Empty query: browse.** The items are listed in three groups:
+  - **Needs attention:** your PRs with failing CI or requested changes;
+  - **My pull requests;**
+  - **Issues without a PR** and Jira.
+
+  Each group is ordered as today's lists are. CI, review and "an agent is on it" (`⬢`) are aligned glyph columns.
+  One detail line describes the highlighted item: the failing job, the checks count, and the live agent's state.
+  `o` opens it in the browser.
 
 - **The query** filters the PRs, issues and Jira issues of every configured repository, matching their number and
   title. While the query is not empty, the first row is always **topic "<query>"**.
@@ -355,7 +358,7 @@ in the manifest, so the consent dialog shows it as it shows `board`.
 
 | Unit | What it does |
 | --- | --- |
-| `view/Fleet.{hpp,cpp}` | groups and orders run rows by attention; the Work tab reuses today's item sections |
+| `view/Fleet.{hpp,cpp}` | groups and orders run rows by attention |
 | `view/Focus.{hpp,cpp}` | the header, the three tabs, latest, the chips and the message box; draws with `BoardMarkdown`, `Transcript` and the detail lines from `Sections` |
 | `view/Actions.{hpp,cpp}` | `RowState`, `rowStateOf(Row, Engine)`, the `ActionRow` table, `actionsFor()`, `primaryAction()` |
 | `view/ActionBar.{hpp,cpp}` | draws the ranked actions that fit |
@@ -373,7 +376,6 @@ in the manifest, so the consent dialog shows it as it shows `board`.
 
 **`Interaction`** loses `screen`, `back`, `subject`, `form`, `message` and `overlay`. It gains:
 - `Place {Fleet, Composer}`;
-- `LeftTab {Fleet, Work}`;
 - `FocusTab {Board, Transcript, Details}`;
 - per-tab scroll and follow;
 - `std::optional<LauncherState>` and `std::optional<PaletteState>`.
@@ -449,10 +451,10 @@ box would be.
 - its rules grouped, with what the profile adds over its parent marked;
 - how many times the run still asked.
 
-**Work tab.**
-- Aligned CI and review glyph columns, and `⬢` on an item with a live agent.
-- The 24-hour timeline moves here from the dashboard.
-- An item's Focus shows checks, review and the agents that ran on it, with a `⏎ start an agent` box.
+**Launcher, empty query.**
+- Aligned CI, review and agent (`⬢`) glyph columns.
+- A detail line for the highlighted item.
+- The 24-hour timeline leaves the dashboard; the palette's "show the last 24 hours" opens it as a popup.
 
 **Popups (launcher, palette).**
 - An accent border on a dimmed dashboard.
