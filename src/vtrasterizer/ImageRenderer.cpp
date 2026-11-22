@@ -98,8 +98,8 @@ std::optional<atlas::ImageTextureId> ImageRenderer::textureFor(
     }
 
     auto const id = atlas::ImageTextureId { _nextImageTextureId++ };
-    // Whatever the protocol sent, the texture is RGBA8 -- widenToRgba() below makes sure of it.
-    auto const bytes = static_cast<size_t>(image.size().area()) * 4;
+    // RGBA8 whatever the protocol sent (widenToRgba() below makes sure of it), with its mip chain.
+    auto const bytes = imageTextureBytes(image.size());
     _imageTextures.emplace(imageId,
                            ImageTextureEntry { .id = id, .bytes = bytes, .lastUsedFrame = _frameCounter });
     _residentBytes += bytes;

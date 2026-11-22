@@ -59,6 +59,7 @@ countr_zero = "countr_zero"       # std::countr_zero, C++20 <bit>.
 tio = "tio"                       # The POSIX idiom for a local `struct termios`.
 iy = "iy"                         # Item-space y coordinate, paired with `ix`.
 msg_controllen = "msg_controllen" # The control-buffer length field of POSIX `struct msghdr`.
+textureLod = "textureLod"         # GLSL built-in: sample a texture at an explicit mip level (level of detail).
 
 [default.extend-words]
 # Domain vocabulary that is genuinely tree-wide in a terminal emulator.

@@ -37,6 +37,7 @@
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/graphics/KittyPlaceholders.hpp>
 #include <vtbackend/screen/GutterSettings.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
 
@@ -44,6 +45,8 @@
 
 #include <core/Base64.hpp>
 #include <core/Environment.hpp>
+
+#include <libunicode/convert.h>
 
 #include <QtCore/QBuffer>
 #include <QtCore/QCoreApplication>
@@ -68,6 +71,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -292,6 +296,73 @@ namespace
     return { QPoint(0, 0), QPoint(frame.width() - 1, pageHeight - 1) };
 }
 
+/// The output that shows an RGB picture through kitty Unicode placeholders at the top-left of the page.
+///
+/// Transmits the picture as image 42 in chunks, places it virtually over @p columns by @p rows cells, and
+/// prints that many placeholder cells (U+10EEEE, a row diacritic, a column diacritic) in the foreground
+/// colour that names image 42.
+/// @param width   The picture's width in pixels.
+/// @param height  The picture's height in pixels.
+/// @param pixelAt The colour of the pixel at a given x and y.
+/// @param columns The span's width in cells.
+/// @param rows    The span's height in cells.
+/// @return The bytes to feed the terminal.
+[[nodiscard]] std::string kittyPlaceholderPicture(
+    int width,
+    int height,
+    std::function<std::array<uint8_t, 3>(int, int)> const& pixelAt,
+    int columns,
+    int rows)
+{
+    auto pixels = std::string {};
+    for (auto const y: std::views::iota(0, height))
+        for (auto const x: std::views::iota(0, width))
+            for (auto const channel: pixelAt(x, y))
+                pixels += static_cast<char>(channel);
+
+    // A transmission's payload arrives in chunks of at most 4096 base64 bytes, the last one with m=0.
+    constexpr auto ChunkSize = size_t { 4096 };
+    auto const encoded = core::base64::encode(pixels);
+    auto output = std::string {};
+    for (auto const offset: std::views::iota(size_t { 0 }, (encoded.size() + ChunkSize - 1) / ChunkSize)
+                                | std::views::transform([&](size_t i) { return i * ChunkSize; }))
+    {
+        auto const isLast = offset + ChunkSize >= encoded.size();
+        auto const header =
+            offset == 0
+                ? std::format("a=T,U=1,i=42,c={},r={},f=24,s={},v={},q=2,", columns, rows, width, height)
+                : std::string {};
+        output += std::format("\033_G{}m={};{}\033\\",
+                              header,
+                              isLast ? 0 : 1,
+                              std::string_view { encoded }.substr(offset, ChunkSize));
+    }
+
+    output += "\033[H\033[38;5;42m";
+    for (auto const row: std::views::iota(0, rows))
+    {
+        auto line = std::u32string {};
+        for (auto const column: std::views::iota(0, columns))
+        {
+            line += vtbackend::kitty_graphics::PlaceholderCodepoint;
+            line += vtbackend::kitty_graphics::diacriticOf(static_cast<uint32_t>(row) + 1);
+            line += vtbackend::kitty_graphics::diacriticOf(static_cast<uint32_t>(column) + 1);
+        }
+        output += unicode::convert_to<char>(std::u32string_view { line });
+        output += "\r\n";
+    }
+    output += "\033[m";
+    return output;
+}
+
+/// A one-pixel red and blue checkerboard: the pattern whose every resampling mistake shows.
+[[nodiscard]] std::array<uint8_t, 3> redBlueChecker(int x, int y)
+{
+    if ((x + y) % 2 == 0)
+        return { 0xFF, 0x00, 0x00 };
+    return { 0x00, 0x00, 0xFF };
+}
+
 /// Puts the X11 primary selection back as it found it.
 ///
 /// Completing a selection copies its text to the selection clipboard, which belongs to the display
@@ -416,28 +487,13 @@ TEST_CASE("display: a kitty placeholder picture shows the fitted image with the 
     REQUIRE_DISPLAY_OR_SKIP();
     DisplayHarness h;
 
-    // An 8x4 solid red RGB image, placed virtually over 4 columns and 2 rows, then drawn as two rows of
-    // placeholder cells (U+10EEEE, a row diacritic, a column diacritic) in the foreground colour that names
-    // image 42. The span is taller than the 2:1 image fitted into it, so the picture is centred with a gap
-    // above and below it, where the cell background shows.
-    auto pixels = std::string {};
-    for ([[maybe_unused]] auto const _: std::views::iota(0, 8 * 4))
-        pixels += "\xFF\x00\x00"sv;
-    constexpr auto Placeholder = "\xF4\x8E\xBB\xAE"sv; // U+10EEEE
-    constexpr auto Diacritics = std::array { "\xCC\x85"sv, "\xCC\x8D"sv, "\xCC\x8E"sv, "\xCC\x90"sv }; // 0..3
-    auto cells = std::string { "\033[38;5;42m" };
-    for (auto const row: std::views::iota(0, 2))
-    {
-        for (auto const column: std::views::iota(0, 4))
-            cells += std::format("{}{}{}", Placeholder, Diacritics.at(row), Diacritics.at(column));
-        cells += "\r\n";
-    }
-    cells += "\033[m";
-
+    // An 8x4 solid red RGB image, placed virtually over 4 columns and 2 rows. The span is taller than the
+    // 2:1 image fitted into it, so the picture is centred with a gap above and below it, where the cell
+    // background shows.
     h.feedAndSettle("\033[?25l\033[2J\033[H"sv);
     auto const blank = h.pump();
-    h.feedAndSettle(std::format(
-        "\033_Ga=T,U=1,i=42,c=4,r=2,f=24,s=8,v=4,q=2;{}\033\\\033[H{}", core::base64::encode(pixels), cells));
+    h.feedAndSettle(kittyPlaceholderPicture(
+        8, 4, [](int, int) { return std::array<uint8_t, 3> { 0xFF, 0x00, 0x00 }; }, 4, 2));
     auto const frame = h.pump();
     REQUIRE(frame.size() == blank.size());
 
@@ -490,6 +546,81 @@ TEST_CASE("display: a kitty placeholder picture shows the fitted image with the 
         }
     CHECK(changedOutside == 0);
     CHECK(inkInside == 0);
+}
+
+namespace
+{
+
+/// How many pixels of a red and blue checkerboard, drawn into a 2x2-cell span, fail a check.
+///
+/// The checkerboard is @p numerator / @p denominator times the span's size, exactly, so it is fitted
+/// into the span at that ratio with no gap.
+/// @param numerator   The ratio's numerator.
+/// @param denominator The ratio's denominator; the span's width and height in pixels must be divisible by
+///                    it, which a 2x2-cell span is for 1 and 2.
+/// @param passes      Whether the pixel at a span-local x and y passes.
+/// @return The number of pixels that do not.
+[[nodiscard]] int checkerPixelsFailing(int numerator,
+                                       int denominator,
+                                       std::function<bool(int, int, QRgb)> const& passes)
+{
+    DisplayHarness h;
+    auto const metrics = h.display->gridMetrics();
+    auto const span = QRect { metrics.pageMargin.left,
+                              metrics.pageMargin.top,
+                              2 * metrics.cellSize.width.as<int>(),
+                              2 * metrics.cellSize.height.as<int>() };
+    h.feedAndSettle("\033[?25l\033[2J\033[H"sv);
+    h.feedAndSettle(kittyPlaceholderPicture(span.width() * numerator / denominator,
+                                            span.height() * numerator / denominator,
+                                            redBlueChecker,
+                                            2,
+                                            2));
+    auto const frame = h.pump();
+
+    auto failing = 0;
+    for (auto const y: std::views::iota(0, span.height()))
+        for (auto const x: std::views::iota(0, span.width()))
+            failing += passes(x, y, frame.pixel(span.left() + x, span.top() + y)) ? 0 : 1;
+    return failing;
+}
+
+} // namespace
+
+TEST_CASE("display: a picture shown at its own size is drawn texel for texel", "[display][render][image]")
+{
+    REQUIRE_DISPLAY_OR_SKIP();
+
+    // Fitted at a scale of one, filtering must leave every texel as it was: the one tap lands on a texel
+    // centre. Drawing at the wrong size or offset would mix neighbours into purple.
+    auto const exact = [](int x, int y, QRgb pixel) {
+        auto const [r, g, b] = redBlueChecker(x, y);
+        return std::abs(qRed(pixel) - r) <= 2 && qGreen(pixel) <= 2 && std::abs(qBlue(pixel) - b) <= 2;
+    };
+    CHECK(checkerPixelsFailing(1, 1, exact) == 0);
+}
+
+TEST_CASE("display: a shrunk picture averages its texels instead of skipping them",
+          "[display][render][image]")
+{
+    REQUIRE_DISPLAY_OR_SKIP();
+
+    // Every row: the ratio, then the band red and blue must each fall in for a pixel to count as a mix.
+    //  - 3:2, the ratio a 2x-rendered picture (a diagram, a screenshot) usually lands at. Each pixel covers
+    //    one and a half texels, so a box filter mixes red and blue in each, while nearest sampling keeps
+    //    a pure texel per pixel: the doubled and dropped lines that made downscaled text look jagged.
+    //  - 3:1, where every pixel centre lands on a texel centre, so a single bilinear tap keeps one texel
+    //    in nine just as nearest does; only a filter over the whole footprint comes out an even purple.
+    auto const [numerator, denominator, low, high] =
+        GENERATE(table<int, int, int, int>({ { 3, 2, 40, 215 }, { 3, 1, 90, 165 } }));
+    INFO("shrunk " << numerator << ":" << denominator);
+    auto const mixed = [&](int, int, QRgb pixel) {
+        auto const share = [&](int value) {
+            return value >= low && value <= high;
+        };
+        return share(qRed(pixel)) && qGreen(pixel) <= 16 && share(qBlue(pixel));
+    };
+    CHECK(checkerPixelsFailing(numerator, denominator, mixed) == 0);
 }
 
 TEST_CASE("display: a scaled block is selected over its whole height", "[display][render][textsizing]")

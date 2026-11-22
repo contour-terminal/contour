@@ -54,6 +54,12 @@ TEST_CASE("rhilayout: text-glyph vertex layout matches the shader contract", "[r
 // }}}
 
 // {{{ std140 uniform-block layout — must match the `layout(std140, binding=0) uniform Buf {...}` in shaders.
+TEST_CASE("rhilayout: image-pass std140 uniform block { vec4 u_imageSize; }", "[rhi][layout]")
+{
+    CHECK(rhilayout::ImageUniformSizeOffset == 0);
+    CHECK(rhilayout::ImageUniformBlockSize == rhilayout::Vec4Size);
+}
+
 TEST_CASE("rhilayout: background std140 uniform block { mat4 u_transform; float u_time; }", "[rhi][layout]")
 {
     CHECK(rhilayout::Mat4Size == 64);

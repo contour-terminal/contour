@@ -124,6 +124,7 @@
           <li>Fixes the status line at the top (<code>status_line.position: top</code>) having the page's first row drawn over it, and a row moving a row down while it was selected</li>
           <li>Fixes the sidebar's tab rows of a window without a daemon showing "Terminal" instead of the title the shell set, until something else changed</li>
           <li>Fixes Contour on Windows ending when a terminal is resized just as its program exits</li>
+          <li>Fixes inline images drawn smaller than they were sent, such as the Mermaid diagrams Claude Code renders at twice their size, looking jagged: each pixel now averages the image pixels it covers instead of picking one of them, so text and thin lines in a picture stay smooth, and transparent edges keep their colour</li>
           <li>Fixes a kitty graphics delete (<code>a=d</code>) arriving during a chunked image transmission being taken for the transmission's last chunk: as in kitty, the transmission is now aborted and the delete carried out</li>
           <li>Fixes the kitty graphics delete <code>a=d,d=A</code> freeing every stored image, even one never placed: as in kitty, it now frees only the images whose placements it removed, so an image transmitted for a later <code>a=p</code> survives it</li>
           <li>Fixes kitty graphics commands that name no image (neither <code>i=</code> nor <code>I=</code>) being answered when they fail, which the application, expecting no reply, read as typed input: as in kitty, such a command is never answered</li>

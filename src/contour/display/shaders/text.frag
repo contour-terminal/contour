@@ -22,7 +22,7 @@ layout(std140, binding = 0) uniform Buf
 }
 ubuf;
 
-// RGBA glyph/image atlas texture.
+// RGBA glyph atlas texture.
 layout(binding = 1) uniform sampler2D fs_textureAtlas;
 
 layout(location = 0) in vec4 fs_TexCoord;
@@ -32,7 +32,7 @@ layout(location = 0) out vec4 fragColor;
 
 // Fragment render-mode selectors (inlined from vtrasterizer/shared_defines.h).
 const int FRAGMENT_SELECTOR_GLYPH_ALPHA = 0;      // alpha-antialiased glyph (red channel)
-const int FRAGMENT_SELECTOR_IMAGE_BGRA = 1;       // raw BGRA image (emoji / image data)
+const int FRAGMENT_SELECTOR_IMAGE_BGRA = 1;       // pre-coloured RGBA tile (colour glyphs, e.g. emoji)
 const int FRAGMENT_SELECTOR_GLYPH_LCD_SIMPLE = 2; // LCD-subpixel glyph (simple algorithm)
 const int FRAGMENT_SELECTOR_GLYPH_LCD = 3;        // LCD-subpixel glyph (advanced algorithm)
 const int FRAGMENT_SELECTOR_GLYPH_OUTLINED = 4;   // pre-rasterized outline (R=fill, G=outline, A=max)
@@ -47,10 +47,11 @@ void renderGrayscaleGlyph()
     fragColor = sampled * fs_textColor;
 }
 
-// Renders an RGBA texture. This is used to render images (such as Sixel graphics or Emoji).
+// Renders a pre-coloured RGBA atlas tile as it is, such as a colour glyph (emoji). Images placed in the
+// grid (sixel, kitty, ...) have a pass of their own, image.frag.
 void renderColoredRGBA()
 {
-    // colored image (RGBA)
+    // pre-coloured tile (RGBA)
     vec4 v = texture(fs_textureAtlas, fs_TexCoord.xy);
     fragColor = v;
 }

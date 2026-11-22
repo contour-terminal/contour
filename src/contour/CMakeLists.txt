@@ -1049,6 +1049,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/SpeechSynthesizer_test.cpp
             display/ContentScale_test.cpp
             display/ImageDecoding_test.cpp
+            display/ImagePremultiply_test.cpp
             display/InGridVisualsRendering_test.cpp
             session/ExitCode_test.cpp
             session/MediaAccess_test.cpp
