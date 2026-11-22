@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/graphics/KittyMediaDefaults.hpp>
 
+#include <core/Utf8Path.hpp>
+
 #include <algorithm>
+#include <optional>
 #include <ranges>
 #include <system_error>
 
@@ -67,7 +70,24 @@ namespace
 std::vector<std::filesystem::path> platformTemporaryRoots([[maybe_unused]] core::Environment const& env)
 {
     auto roots = std::vector<std::filesystem::path> {};
-#ifndef _WIN32
+#ifdef _WIN32
+    // As a Windows program finds its temp directory (GetTempPathW): `%TMP%`, `%TEMP%`, and the per-user
+    // default beneath `%LOCALAPPDATA%`. Each is often spelled in 8.3 short names (`C:\Users\JOHNDO~1\...`)
+    // that a program names its files by: kept as spelled, and canonical -- long names, from the final path
+    // of the directory -- for the real path the reader judges.
+    auto const rootIn = [&](char const* name) -> std::optional<std::filesystem::path> {
+        auto const value = env.get(name);
+        if (!value || value->empty())
+            return std::nullopt;
+        auto path = core::pathFromUtf8(*value);
+        return path ? std::optional { std::move(*path) } : std::nullopt;
+    };
+    for (auto const* name: { "TMP", "TEMP" })
+        if (auto const root = rootIn(name))
+            addRoot(roots, *root);
+    if (auto const localAppData = rootIn("LOCALAPPDATA"))
+        addRoot(roots, *localAppData / "Temp");
+#else
     if (auto const tmpdir = env.get("TMPDIR"))
         addRoot(roots, *tmpdir);
     addRoot(roots, "/tmp");
@@ -129,7 +149,13 @@ PathCase platformPathCase() noexcept
 
 std::unique_ptr<KittyMediumSource const> makePlatformMediumSource()
 {
-#ifdef VTBACKEND_KITTY_FILE_MEDIA
+#if defined(VTBACKEND_KITTY_FILE_MEDIA) && defined(_WIN32)
+    // A token that cannot be read names no owner to match: nothing is read.
+    auto readers = currentReaderSids();
+    if (!readers)
+        return std::make_unique<RefusingMediumSource>();
+    return std::make_unique<Win32MediumSource>(std::move(*readers));
+#elifdef VTBACKEND_KITTY_FILE_MEDIA
     return std::make_unique<PosixMediumSource>(static_cast<uint32_t>(::getuid()));
 #else
     return std::make_unique<RefusingMediumSource>();

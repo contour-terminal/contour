@@ -1813,7 +1813,7 @@ constexpr StringLiteral ImagesConfig {
     "\n"
     "    {comment} Whether kitty graphics may read image files a local program names (t=f, t=t), as Claude\n"
     "    {comment} Code's pictures do. Only for sessions whose output comes from this machine; never over\n"
-    "    {comment} SSH, in tmux panes, or for a daemon's remote clients. Off on Windows and BSD.\n"
+    "    {comment} SSH, in tmux panes, or for a daemon's remote clients. Off on the BSDs.\n"
     "    kitty_file_transmission: {}\n"
     "\n"
     "    {comment} Directories, besides the temp directories, that t=f may read files below. A leading ~/\n"

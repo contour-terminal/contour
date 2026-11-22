@@ -1,7 +1,8 @@
 name: "Windows tests"
 description: >-
   The test suite of a Windows build tree, and the checks that the cases a Catch2 SKIP would hide did run:
-  the AF_UNIX transport, the PowerShell integration, the Win32 chrome and the Restart Manager. Both
+  the AF_UNIX transport, the PowerShell integration, kitty file media, the Win32 chrome and the Restart
+  Manager. Both
   Windows jobs of build.yml run it, the plain one on what a pull request builds and the production one on
   what ships. The per-step time limits of a workflow do not exist inside a composite action; the job
   bounds this step as a whole.
@@ -96,6 +97,41 @@ runs:
           exit 1
         }
         if ($status -ne 0) { exit 1 }
+    - name: "verify the kitty file-media tests actually ran"
+      # @see "verify the PowerShell integration tests actually ran": the Windows reader of kitty file media
+      # (t=f, t=t) is proved only against a real NTFS here -- junctions, hard links, attributes, share modes
+      # -- and its cases SKIP where they cannot set their file up. The [win32] ones need no privilege, so a
+      # skip of one is a regression. The [win32-privileged] ones make symbolic links, which take
+      # SeCreateSymbolicLinkPrivilege: asserted only where this runner is elevated, as windows-latest's
+      # administrator account is. The [win32-shortnames] ones are left out: whether a volume makes 8.3
+      # names is the image's choice, no regression.
+      shell: pwsh
+      env:
+        CMAKE_PRESET: ${{ inputs.preset }}
+      run: |
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $elevated = ([Security.Principal.WindowsPrincipal]$identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        $rows = @(
+          @{ Filter = '[kitty][media][win32]'; Required = $true; What = 'the Windows reader of kitty file media' }
+          @{ Filter = '[kitty][media][win32-privileged]'; Required = $elevated; What = 'its symbolic-link refusals' }
+        )
+        $binary = "out/build/$env:CMAKE_PRESET/bin/vtbackend_test.exe"
+        # A missing binary must not read as "nothing skipped".
+        if (-not (Test-Path $binary)) {
+          Write-Output "::error::$binary not found; the assertion below would pass vacuously"
+          exit 1
+        }
+        foreach ($row in $rows) {
+          Write-Output "--- $binary $($row.Filter) (asserted: $($row.Required))"
+          $output = & $binary $row.Filter 2>&1 | Out-String
+          $status = $LASTEXITCODE
+          Write-Output $output
+          if ($row.Required -and $output -match 'skipped') {
+            Write-Output "::error::$binary $($row.Filter) reported SKIPPED; $($row.What) is not being exercised on Windows"
+            exit 1
+          }
+          if ($status -ne 0 -and -not ($output -match 'skipped')) { exit 1 }
+        }
     - name: "verify the Win32 chrome and Restart Manager tests actually ran"
       # @see "verify the PowerShell integration tests actually ran": the [win32] cases SKIP off the native
       # Windows platform, and a SKIP exits 0, so a run that never reached the native plugin would read as a

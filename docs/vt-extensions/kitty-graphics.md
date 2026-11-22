@@ -104,16 +104,37 @@ for the terminal to read:
 A file is read, and a `t=t` file deleted, only when every one of these holds:
 
 - it lies below one of the **roots**: the temp directories (`$TMPDIR` and `/tmp` on Linux; `$TMPDIR`,
-  `/private/tmp` and the per-user temp directory on macOS; `/dev/shm` too, for `t=t` only, on Linux),
-  or a directory of `images.kitty_file_allow_list`. Only temporary files are deleted, only below a
-  temp directory, and only when their path carries the `tty-graphics-protocol` marker; one without it
-  is read and kept;
+  `/private/tmp` and the per-user temp directory on macOS; `/dev/shm` too, for `t=t` only, on Linux;
+  `%TMP%`, `%TEMP%` and `%LOCALAPPDATA%\Temp` on Windows, each as spelled -- often in short 8.3 names --
+  and in long names), or a directory of `images.kitty_file_allow_list`. Only temporary files are
+  deleted, only below a temp directory, and only when their path carries the `tty-graphics-protocol`
+  marker; one without it is read and kept;
 - no component of the path below that root is hidden (starts with `.`), and no symbolic link below
   the root is followed;
 - it is a regular file, owned by the user Contour runs as, with a single link (so that a hard link
   cannot reach a file elsewhere), and no larger than one direct transmission may be;
 - it is not below `/proc`, `/sys` or `/dev` (except `/dev/shm` as above);
 - its path is at most 4095 bytes long.
+
+On Windows, besides:
+
+- the path is drive-absolute (`C:\...` or `C:/...`), on a fixed or RAM disk. A share (`\\server\...`),
+  the device and NT namespaces (`\\?\`, `\\.\`, `\??\`), a network, removable or optical drive are
+  refused, and so is a POSIX path a WSL or MSYS program names (`/tmp/...`, `/mnt/c/...`): it is not
+  mapped to a Windows one;
+- no component is one Windows reads as something else: an alternate data stream (`a.png:x`), a device
+  name (`CON`, `NUL`, `COM1`, ... with any extension), `.` or `..`, a wildcard, or a trailing dot or
+  space;
+- no reparse point below the root is followed -- a junction no more than a symbolic link -- and no
+  entry below the root is hidden or system by its attributes, nor offline or fetched on access (a
+  cloud placeholder);
+- the file is opened shared for reading only, so nobody writes, renames or deletes it while it is read,
+  and the path Windows reports for it must be the one walked: a short 8.3 alias of a long name is
+  refused;
+- its owner is the user Contour runs as or, for an elevated Contour, the Administrators group that owns
+  what it creates; who else may write it (its ACL) is not judged, as POSIX judges no mode bits;
+- a `t=t` file is deleted through the handle it was read with; one whose directory forbids deleting is
+  read and kept. Root and path are compared ignoring the case of ASCII letters.
 
 Every refusal, whatever its reason — missing, outside the roots, the wrong kind of file, too large,
 undecodable, or a medium not supported — is the same reply, so that a program learns nothing about a
@@ -133,9 +154,11 @@ comes from a local program. They are refused:
 - in a daemon's replica of a session, and for bytes a client injects into a session;
 - while the terminal's context (OSC 3008) says the output comes from another host;
 - while the foreground process relays output from elsewhere: a remote shell client (`ssh`, `mosh`,
-  `et`, `telnet` and the like), a terminal multiplexer's client (`tmux`, `screen`, `zellij`), or a
-  container's or a VM's front end (`docker`, `podman`, `kubectl`, `incus`, `lxc`, `distrobox-enter`,
-  `toolbox`, `vagrant`, `multipass`); or while the terminal cannot tell which process that is.
+  `et`, `telnet`, PuTTY's `plink` and the like), a terminal multiplexer's client (`tmux`, `screen`,
+  `zellij`), or a container's or a VM's front end (`docker`, `podman`, `kubectl`, `incus`, `lxc`,
+  `distrobox-enter`, `toolbox`, `vagrant`, `multipass`, `wsl`, `wslhost`, Hyper-V's `hvc`); or while
+  the terminal cannot tell which process that is. On Windows `ssh.exe`, `SSH.EXE` and `ssh` are all
+  `ssh`.
 
 This last rule is a list of known programs, so a relay it does not name passes as local. What such a
 program could then learn is limited to whether a decodable image exists at a path it names inside the
@@ -144,14 +167,18 @@ roots, and a `t=t` name it gives could delete one of the user's own temporary fi
 
 The foreground process is looked at when the command is parsed, so a relay that exits right after
 sending one can race the check; and only the process-group leader is named, so `sudo ssh …` passes as
-local.
+local. A Windows console has no process group: the command the shell runs stands in for its leader --
+below the session's shell, and any shell it starts in turn, the newest child that is not itself a
+shell -- so an `ssh` running a `ProxyCommand` is still `ssh`. A relay that is not a process of the
+session at all -- PowerShell remoting (`Enter-PSSession`), which runs in the shell's own process -- is
+not seen: its output passes as local.
 
 With `contour daemon`, the daemon reads the files: its own configuration decides, and a client can
 neither widen nor narrow what a daemon reads. A daemon on another machine reads that machine's files,
 which is where a program running there wrote them.
 
-On Windows and the BSDs, file media are refused for now: a file is judged by the path its open
-descriptor names, which only Linux and macOS report.
+On the BSDs, file media are refused for now: a file is judged by the path its open descriptor names,
+which only Linux, macOS and Windows report (issue #2423).
 
 ## Configuration
 
@@ -165,7 +192,8 @@ images:
     kitty_file_allow_list: ['~/.claude/plugins/data']
 ```
 
-The default allow-list is where Claude Code's plugins keep what they render. The window reads its
+The default allow-list is where Claude Code's plugins keep what they render (`%USERPROFILE%\.claude\plugins\data`
+on Windows). The window reads its
 configuration as each session starts, so an edit reaches the sessions opened after it; a daemon reads
 its configuration once, when it starts.
 
@@ -180,8 +208,6 @@ list, set `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` in the environment of the sessio
 - **tmux control mode.** Placeholders reach a tmux pane through tmux's passthrough, and a file named
   there would be read on the machine running Contour while the tmux server may be elsewhere; such panes
   refuse file media until this is designed.
-- **Windows file media.** The rules for file owners, hidden files and reparse points are not defined
-  there yet.
 - **`S=` and `O=` for file media.** A file is always read whole; a raw image at an offset inside a
   larger file is refused.
 - **Reading off the parser thread.** A file is read while the terminal holds its state lock, so a file

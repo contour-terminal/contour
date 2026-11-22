@@ -85,6 +85,7 @@ set(vtbackend_HEADERS
     graphics/KittyMediaPolicy.hpp
     graphics/KittyMediumSource.hpp
     graphics/KittyPlaceholders.hpp
+    graphics/KittyWin32Paths.hpp
     grid/Line.hpp
     core/LineFlags.hpp
     grid/LineSoA.hpp
@@ -252,6 +253,7 @@ set(vtbackend_SOURCES
     graphics/KittyMediaDefaults.cpp
     graphics/KittyMediaPolicy.cpp
     graphics/KittyPlaceholders.cpp
+    graphics/KittyWin32Paths.cpp
     vt/TextSizing.cpp
     screen/LinkDetector.cpp
     links/LinkIndex.cpp
@@ -301,8 +303,11 @@ set(vtbackend_SOURCES
     core/Search.cpp
 )
 
-# Kitty file media (`t=f`, `t=t`) are read on POSIX only; Windows builds just the refusing source.
-if(NOT WIN32)
+# Kitty file media (`t=f`, `t=t`): each platform's reader. The Windows one asks a file's owner through
+# GetSecurityInfo and the reader's identity through its token, both advapi32's (linked below).
+if(WIN32)
+    list(APPEND vtbackend_SOURCES graphics/KittyMediumSource_win32.cpp)
+else()
     list(APPEND vtbackend_SOURCES graphics/KittyMediumSource_posix.cpp)
 endif()
 
@@ -344,6 +349,9 @@ target_link_libraries(vtbackend PUBLIC
 # PRIVATE: only the inflater (graphics/KittyInflate.cpp) includes zlib.h, and only the PNG decoder
 # (graphics/PngDecoding.cpp) png.h; no header of ours exposes either.
 target_link_libraries(vtbackend PRIVATE PNG::PNG ZLIB::ZLIB)
+if(WIN32)
+    target_link_libraries(vtbackend PRIVATE advapi32)
+endif()
 
 if(LIBTERMINAL_LOG_TRACE)
     target_compile_definitions(vtbackend PUBLIC LIBTERMINAL_LOG_TRACE=1)
@@ -457,7 +465,9 @@ if(LIBTERMINAL_TESTING)
         graphics/KittyMediaDefaults_test.cpp
         graphics/KittyMediaPolicy_test.cpp
         graphics/KittyMediumSource_posix_test.cpp
+        graphics/KittyMediumSource_win32_test.cpp
         graphics/KittyPlaceholders_test.cpp
+        graphics/KittyWin32Paths_test.cpp
         vt/TextSizing_test.cpp
         screen/ScreenTestFixtures.cpp
         screen/TerminalTestFixtures.cpp

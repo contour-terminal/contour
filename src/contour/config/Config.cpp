@@ -894,12 +894,18 @@ vtbackend::kitty_graphics::MediaSettings kittyMediaSettings(ImagesConfig const& 
             directory.size() > 1 && directory.front() == '~' && directory[1] != '/' && directory[1] != '\\';
         auto path =
             namesOtherHome ? fs::path {} : homeResolvedPath(directory, homeDirectory).value_or(fs::path {});
-        // Rooted rather than absolute, which on Windows would also demand a drive the POSIX spellings lack.
+        // Rooted rather than absolute, which on Windows would also demand a drive the POSIX spellings lack:
+        // there the media policy drops a root without one, as it reads drive-absolute paths only.
         if (!path.has_root_directory())
         {
-            errorLog()(
-                "images.kitty_file_allow_list: '{}' is not an absolute directory or `~/…`; ignoring it.",
-                directory);
+#ifdef _WIN32
+            constexpr auto Absolute = std::string_view { "absolute directory (`C:\\…`)" };
+#else
+            constexpr auto Absolute = std::string_view { "absolute directory" };
+#endif
+            errorLog()("images.kitty_file_allow_list: '{}' is not an {} or `~/…`; ignoring it.",
+                       directory,
+                       Absolute);
             continue;
         }
         settings.allowList.push_back(std::move(path));

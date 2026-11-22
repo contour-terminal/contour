@@ -69,6 +69,9 @@ enum class MediaRefusal : uint8_t
     Unreadable,        ///< It does not exist, vanished, was swapped, or reading it failed.
     SymbolicLink,      ///< A component below the root is a symbolic link, never followed.
     PathTooLong,       ///< The path is longer than MaxFilePathLength.
+    ReservedName,     ///< Windows: a component it reads as other than a name (a stream, a device, `..`, ...).
+    UnsupportedDrive, ///< Windows: not on a fixed or RAM disk (a share, removable or optical drive, a
+                      ///< device).
 };
 
 /// The longest path, in bytes, a file medium may name: Linux's PATH_MAX less its terminating NUL. A longer

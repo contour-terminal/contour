@@ -4,17 +4,19 @@
 #include <vtbackend/graphics/KittyGraphics.hpp>
 #include <vtbackend/graphics/KittyMediaPolicy.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <functional>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
-// Defined where PosixMediumSource can read: it judges a file by the path its open descriptor names, which
-// Linux (/proc/self/fd) and macOS (F_GETPATH) report and the BSDs do not. Elsewhere every file medium is
-// refused, as on Windows, whose owner, hidden-file and reparse-point rules are not defined yet.
-#if defined(__linux__) || defined(__APPLE__)
+// Defined where a platform source can read: PosixMediumSource judges a file by the path its open descriptor
+// names, which Linux (/proc/self/fd) and macOS (F_GETPATH) report and the BSDs do not; Win32MediumSource by
+// the final path of its handle. Elsewhere -- the BSDs -- every file medium is refused.
+#if defined(__linux__) || defined(__APPLE__) || defined(_WIN32)
     #define VTBACKEND_KITTY_FILE_MEDIA 1
 #endif
 
@@ -38,7 +40,7 @@ class KittyMediumSource
 };
 
 /// The source of a host that reads no files: every file medium is refused. The only one where
-/// VTBACKEND_KITTY_FILE_MEDIA is not defined: on Windows, and the BSDs.
+/// VTBACKEND_KITTY_FILE_MEDIA is not defined.
 class RefusingMediumSource final: public KittyMediumSource
 {
   public:
@@ -93,6 +95,45 @@ class PosixMediumSource final: public KittyMediumSource
     uint32_t _readerId;
     MediumReadInterleavings _interleavings;
 };
+#else
+/// The Windows source. In this order, refusing at the first step that fails:
+/// - requestedPath(), then the spelling as Windows reads it (win32::checkPathSpelling()): drive-absolute,
+///   no UNC or device namespace, no stream, device name, wildcard or trailing dot; then the drive's type
+///   (fixed or RAM disk only);
+/// - open its enclosingRoot() (`\\?\`, its own links followed), and checkPath() on the real path that the
+///   root's final path and the requested components make, before anything below the root is opened;
+/// - walk down one component at a time with NtCreateFile relative to the directory above
+///   (FILE_OPEN_REPARSE_POINT), refusing any reparse point -- junction or link -- and any hidden or system
+///   entry below the root, holding every directory so none is moved meanwhile;
+/// - open the file shared for reading only (nobody writes, renames or deletes it meanwhile), with DELETE
+///   when deletionAfterRead() says so;
+/// - its final path must be the path walked (ignoring case), which also refuses a short (8.3) alias;
+/// - its attributes (win32::checkAttributes()), its owner compared with the reader's SIDs,
+///   checkOpenedFile(), a read bounded by the size limit;
+/// - a `t=t` file is deleted through the very handle read.
+class Win32MediumSource final: public KittyMediumSource
+{
+  public:
+    /// A security identifier, as its bytes.
+    using Sid = std::vector<std::byte>;
+
+    /// @param readers The SIDs a file's owner must be one of: the reading token's user, and the owner it
+    ///                gives what it creates (currentReaderSids()).
+    /// @param interleavings What runs between the steps; none in production.
+    explicit Win32MediumSource(std::vector<Sid> readers, MediumReadInterleavings interleavings = {});
+
+    [[nodiscard]] std::expected<std::vector<uint8_t>, MediaRefusal> read(
+        std::string_view path, Medium medium, MediaPolicy const& policy) const override;
+
+  private:
+    std::vector<Sid> _readers;
+    MediumReadInterleavings _interleavings;
+};
+
+/// @return The SIDs this process reads as: its token's user and, where it differs (an elevated
+///         administrator's `BUILTIN\Administrators`), the token's default owner; why not, where the token
+///         cannot be read.
+[[nodiscard]] std::expected<std::vector<Win32MediumSource::Sid>, std::error_code> currentReaderSids();
 #endif
 
 /// What a terminal reads kitty file media with, and under which policy. Given to a Terminal only by a
