@@ -298,7 +298,9 @@ struct KeyContext
 /// @return Whether the row's run has a message box: it is active and its agent has a tab to type into.
 [[nodiscard]] bool hasMessageBox(Engine const* engine, Row const* row) noexcept;
 
-/// Applies one key's command.
+/// Applies one key's command: Enter as the selected row's primary action; a command that does not apply to
+/// the selected row, or that the engine does not allow now, only says why on the action bar
+/// (refusalNotice()).
 /// @param command What the key does.
 /// @param interaction Where the user is; changed by the command.
 /// @param context The selected row, the engine and the Focus tab as last drawn.
@@ -355,9 +357,9 @@ void dropLastCodepoint(std::string& text) noexcept;
 /// @return It as one line: line ends and tabs folded to a space each, every other control character dropped.
 [[nodiscard]] std::string pastedText(std::string_view text);
 
-/// Applies a paste: into the launcher's query while it is open, into the message box while it has the keys
-/// (its line feeds kept), into the filter while it is typed; dropped anywhere else. A paste is text, never
-/// keys: nothing in it confirms, moves or acts.
+/// Applies a paste: into the palette's or the launcher's query while one is open, into the message box while
+/// it has the keys (its line feeds kept), into the filter while it is typed; dropped anywhere else. A paste
+/// is text, never keys: nothing in it confirms, moves or acts.
 /// @param interaction Where the user is; its query, draft or filter extended.
 /// @param context The engine the launcher lists from, and the selected row.
 /// @param text What was pasted.
@@ -376,9 +378,10 @@ enum class FilterInput : uint8_t
 /// @return Whether the key was taken.
 [[nodiscard]] FilterInput typeIntoFilter(core::tui::KeyEvent const& key, Interaction& interaction);
 
-/// Applies one key: to the message box while it has the keys, to the filter while it is typed, to a pending
-/// end's confirmation, else by the key table. While an end waits for its confirmation, any key but `e` on the
-/// same run keeps the run and does nothing else.
+/// Applies one key: to the palette while it is open (applyPaletteKey()), to the timeline while it is shown
+/// (esc and ⏎ close it, `^K` opens the palette), to the message box while it has the keys, to the filter
+/// while it is typed, to a pending end's confirmation, else by the key table. While an end waits for its
+/// confirmation, any key but `e` on the same run keeps the run and does nothing else.
 /// @param key A key the terminal sent.
 /// @param interaction Where the user is; changed by the key.
 /// @param context The selected row, the engine and the Focus tab as last drawn.

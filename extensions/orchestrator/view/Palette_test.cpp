@@ -191,6 +191,16 @@ TEST_CASE("the palette's keys: type, move, run; esc closes it and keeps the quer
     CHECK(interaction.pendingEnd == RunId);
 }
 
+TEST_CASE("a paste into the palette is text: it runs nothing", "[orchestrator][view][palette]")
+{
+    auto const live = LiveRun {};
+    auto interaction = Interaction { .palette = PaletteState { .highlighted = 2 } };
+    pasteInto(interaction, live.context(), "end\r\n");
+    REQUIRE(interaction.palette.has_value());
+    CHECK(interaction.palette == PaletteState { .query = "end " });
+    CHECK(interaction.pendingEnd.empty());
+}
+
 TEST_CASE("a dimmed command run from the palette says why on the bar", "[orchestrator][view][palette]")
 {
     auto const live = LiveRun {};

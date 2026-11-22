@@ -140,12 +140,6 @@ namespace
     // }}}
     // {{{ the commands
 
-    /// @return Whether the selected row offers @p command.
-    [[nodiscard]] bool offers(KeyContext const& context, KeyCommand command) noexcept
-    {
-        return context.selected != nullptr && std::ranges::contains(context.selected->offers, command);
-    }
-
     /// Starts the Focus over for a row selected anew: its top, its transcript live on its last page.
     void restartFocus(Interaction& interaction) noexcept
     {
@@ -163,12 +157,10 @@ namespace
         interaction.selected = chosen;
     }
 
-    /// @return The run command @p command on the selected row, when the row accepts it.
+    /// @return A run command on the selected row: dispatch() runs a handler only where its action applies.
     template <typename Action>
-    [[nodiscard]] std::optional<UiAction> runAction(KeyCommand command, KeyContext const& context)
+    [[nodiscard]] std::optional<UiAction> runAction(Interaction& /*interaction*/, KeyContext const& context)
     {
-        if (!offers(context, command))
-            return std::nullopt;
         return UiAction { Action { .run = context.selected->run } };
     }
 
@@ -283,7 +275,7 @@ namespace
                                                     KeyCommand command)
     {
         auto const tab = std::ranges::find(TabCommands, command, &TabCommand::command);
-        if (tab == TabCommands.end() || !offers(context, command))
+        if (tab == TabCommands.end())
             return std::nullopt;
         if (activeTabOf(interaction, context.selected) != tab->tab)
             restartFocus(interaction);
@@ -465,38 +457,22 @@ namespace
         HandlerRow {
             .command = KeyCommand::EndRun,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                auto action = runAction<EndRunAction>(KeyCommand::EndRun, context);
-                if (!action)
-                    return std::nullopt;
                 if (interaction.pendingEnd != context.selected->run)
                 {
                     interaction.pendingEnd = context.selected->run;
                     return std::nullopt;
                 }
                 interaction.pendingEnd.clear();
-                return action;
+                return runAction<EndRunAction>(interaction, context);
             } },
-        HandlerRow { .command = KeyCommand::RetryRemoval,
-                     .handler =
-                         [](Interaction&, KeyContext const& context) {
-                             return runAction<RetryRemovalAction>(KeyCommand::RetryRemoval, context);
-                         } },
-        HandlerRow { .command = KeyCommand::Dismiss,
-                     .handler =
-                         [](Interaction&, KeyContext const& context) {
-                             return runAction<DismissAction>(KeyCommand::Dismiss, context);
-                         } },
-        HandlerRow { .command = KeyCommand::Reveal,
-                     .handler =
-                         [](Interaction&, KeyContext const& context) {
-                             return runAction<RevealAgentAction>(KeyCommand::Reveal, context);
-                         } },
+        HandlerRow { .command = KeyCommand::RetryRemoval, .handler = runAction<RetryRemovalAction> },
+        HandlerRow { .command = KeyCommand::Dismiss, .handler = runAction<DismissAction> },
+        HandlerRow { .command = KeyCommand::Reveal, .handler = runAction<RevealAgentAction> },
         // `o` copies the run's link with OSC 52 until the frontend can open it (phase 6), and says so.
         HandlerRow {
             .command = KeyCommand::OpenLink,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                auto const* const run =
-                    offers(context, KeyCommand::OpenLink) ? selectedRun(context) : nullptr;
+                auto const* const run = selectedRun(context);
                 if (run == nullptr)
                     return std::nullopt;
                 interaction.clipboard = run->url;
@@ -546,6 +522,12 @@ std::string pastedText(std::string_view text)
 
 void pasteInto(Interaction& interaction, KeyContext const& context, std::string_view text)
 {
+    if (interaction.palette)
+    {
+        interaction.palette->query += pastedText(text);
+        interaction.palette->highlighted = 0;
+        return;
+    }
     if (interaction.place == Place::Focus && hasMessageBox(context.engine, context.selected))
     {
         // A message keeps its line feeds: the agent receives it as one paste. A CR LF is one line end, and

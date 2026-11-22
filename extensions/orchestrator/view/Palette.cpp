@@ -41,13 +41,6 @@ namespace
     constexpr auto PaletteFurnitureRows = 4;
     /// The cells the box and its padding take on either side.
     constexpr auto SideColumns = 2;
-
-    /// @return The matches of the open palette.
-    [[nodiscard]] std::vector<PaletteMatch> matchesOf(PaletteState const& palette,
-                                                      std::span<PaletteEntry const> entries)
-    {
-        return paletteMatches(entries, palette.query);
-    }
 } // namespace
 
 std::vector<PaletteEntry> paletteEntries(Row const* row, Engine const* engine)
@@ -130,7 +123,8 @@ std::optional<UiAction> applyPaletteKey(core::tui::KeyEvent const& key,
     {
         case KeyCode::Up:
         case KeyCode::Down: {
-            auto const count = matchesOf(palette, paletteEntries(context.selected, context.engine)).size();
+            auto const count =
+                paletteMatches(paletteEntries(context.selected, context.engine), palette.query).size();
             if (count != 0)
                 palette.highlighted = key.key == KeyCode::Up ? (palette.highlighted + count - 1) % count
                                                              : (palette.highlighted + 1) % count;
@@ -142,7 +136,7 @@ std::optional<UiAction> applyPaletteKey(core::tui::KeyEvent const& key,
             return std::nullopt;
         case KeyCode::Enter: {
             auto const entries = paletteEntries(context.selected, context.engine);
-            auto const matches = matchesOf(palette, entries);
+            auto const matches = paletteMatches(entries, palette.query);
             if (palette.highlighted >= matches.size())
                 return std::nullopt;
             auto const command = entries[matches[palette.highlighted].entry].command;
