@@ -393,21 +393,25 @@ TEST_CASE("a missing plugin is warned of and needs a second Enter", "[orchestrat
     CHECK(dispatchesIn(fixture.dashboard.input("\r")).size() == 1);
 }
 
-TEST_CASE("I asks once, then installs the missing plugins", "[orchestrator][view][plugins]")
+TEST_CASE("the palette installs the missing plugins it names", "[orchestrator][view][plugins]")
 {
     auto fixture = DashboardFixture { World { .plugins = "claude/plugin-list-without.json" } };
-    CHECK(fixture.screen().contains("lacks the plugin contour-workflows@contour-terminal · I installs it"));
+    CHECK(fixture.screen().contains("lacks the plugin contour-workflows@contour-terminal · ^K installs it"));
+    CHECK(fixture.screen().contains("plugins missing · ^K install"));
+    // `I` is no key any more: it does nothing.
     CHECK(fixture.dashboard.input("I").empty());
-    CHECK(fixture.screen().contains("I again installs contour-workflows@contour-terminal"));
-    // Another key forgets the question.
-    CHECK(fixture.dashboard.input("j").empty());
-    CHECK(fixture.dashboard.input("I").empty());
-    CHECK(fixture.dashboard.input("I") == std::vector<UiAction> { InstallPluginsAction {} });
+    CHECK(fixture.dashboard.input("\x0binstall").empty());
+    CHECK(fixture.screen().contains("install the missing plugins"));
+    CHECK(fixture.dashboard.input("\r") == std::vector<UiAction> { InstallPluginsAction {} });
+    CHECK_FALSE(fixture.dashboard.interaction().palette.has_value());
 
-    SECTION("with nothing missing, I says so")
+    SECTION("with nothing missing, the palette says so and installs nothing")
     {
         auto installed = DashboardFixture { World {} };
-        CHECK(installed.dashboard.input("I").empty());
-        CHECK(installed.screen().contains("every plugin the tasks need is installed"));
+        CHECK(installed.dashboard.input("\x0binstall").empty());
+        CHECK(installed.screen().contains("install the missing plugins · every plugin"));
+        CHECK(installed.dashboard.input("\r").empty());
+        CHECK(installed.screen().contains(
+            "install the missing plugins · every plugin the tasks need is installed"));
     }
 }

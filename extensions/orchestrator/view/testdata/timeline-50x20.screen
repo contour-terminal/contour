@@ -1,0 +1,20 @@
+ ✦ Agents                ⬢ 4/4 ▰▰▰▰  ● 2 need you 
+╭─ Agents 7 ─────────────────────────────────────╮
+│ NEEDS YOU 2                                    │
+│▍? pr-2346 · fix CI                   asking 6m │
+│▍  asks in its tab · r shows it          ▰▰▰▱▱▱ │
+│ … issue-2253 · work on issue        waiting 6m │
+╭─ Last 24 hours · an hour a bar ────────────────╮
+│ agents active  ·······················█  peak… │
+│ tokens out     ························  0 in… │
+│ runs started   ·······················█  7 st… │
+│                                                │
+│ esc close                                      │
+╰────────────────────────────────────────────────╯
+│ ⚑ issue-2356 · work on issue · ended by … kept │
+│ ✗ pr-2114 · fix CI · preparation faile… failed │
+│                                                │
+│ + new agent                                    │
+│                                                │
+╰────────────────────────────────────────────────╯
+ ⏎ see request · r agent tab · ^k all actions     

@@ -1656,7 +1656,8 @@ TEST_CASE("input reaches the engine", "[guest]")
     served.invoke("open");
     REQUIRE(served.host.startsOf("gh-prs") == 1);
 
-    served.type("R");
+    // Refresh is the palette's: ^K, its name, Enter.
+    served.type("\x0brefresh\r");
     while (served.host.completeRunning() > 0)
         served.driver->update(Hint::Procs);
 

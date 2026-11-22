@@ -34,7 +34,7 @@
 │                                              │ │ 18:36 result .                                                      │
 │                                              │ │ 18:37 claude done.                                                  │
 │                                              │ │ ╭─────────────────────────────────────────────────────────────────╮ │
-│                                              │ │ │ ✗ failed · preparation failed · agents can't start here yet · … │ │
+│                                              │ │ │ ✗ failed · preparation failed · agents can't sta… · ⏎ run again │ │
 │                                              │ │ ╰─────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
- ↑↓ move · ⏎ open · tab focus · t transcript · d details · n new agent · / filter · o copy link · del dismiss · z fold  
+ ⏎ run again · t transcript · del dismiss · n new agent · ^k all actions                                                

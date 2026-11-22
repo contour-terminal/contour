@@ -49,7 +49,8 @@ struct LiveRun
                     .name = "pr-1",
                     .offers = { KeyCommand::BoardTab, KeyCommand::TranscriptTab, KeyCommand::DetailsTab },
                     .attention = FleetGroup::Working,
-                    .state = "working" };
+                    .state = "working",
+                    .rowState = RowState::Working };
 
     [[nodiscard]] KeyContext context(FocusTab tab = FocusTab::Board) const
     {
@@ -94,8 +95,12 @@ TEST_CASE("commandFor names keys by the table", "[orchestrator][view][keys]")
         Case { .key = character(U'o'), .expected = KeyCommand::OpenLink },
         Case { .key = character(U'r'), .expected = KeyCommand::Reveal },
         Case { .key = character(U'n'), .expected = KeyCommand::NewAgent },
-        Case { .key = character(U'R', Modifier::Shift), .expected = KeyCommand::Refresh },
+        Case { .key = character(U'?'), .expected = KeyCommand::Palette },
+        Case { .key = character(U'k', Modifier::Ctrl), .expected = KeyCommand::Palette },
+        Case { .key = character(U'R', Modifier::Shift), .expected = std::nullopt },
+        Case { .key = character(U'I', Modifier::Shift), .expected = std::nullopt },
         Case { .key = character(U'j', Modifier::Ctrl), .expected = std::nullopt },
+        Case { .key = character(U'k', Modifier::Alt), .expected = std::nullopt },
         Case { .key = character(U'q'), .expected = std::nullopt },
     };
     for (auto const& [key, expected]: cases)
@@ -107,17 +112,25 @@ TEST_CASE("commandFor names keys by the table", "[orchestrator][view][keys]")
 
 TEST_CASE("a run command acts only on a row that offers it", "[orchestrator][view][keys]")
 {
-    auto const agent =
-        Row { .kind = RowKind::Agent, .run = std::string { RunId }, .offers = { KeyCommand::EndRun } };
+    auto const agent = Row { .kind = RowKind::Agent,
+                             .run = std::string { RunId },
+                             .offers = { KeyCommand::EndRun },
+                             .state = "working",
+                             .rowState = RowState::Working };
     auto interaction = Interaction {};
     auto const context = KeyContext { .selectable = 1, .selected = &agent };
     CHECK(dispatch(KeyCommand::EndRun, interaction, context) == std::nullopt); // asks first
     CHECK(dispatch(KeyCommand::EndRun, interaction, context)
           == std::optional<UiAction> { EndRunAction { .run = std::string { RunId } } });
+    // Every refusal says why on the bar.
     CHECK(dispatch(KeyCommand::RetryRemoval, interaction, context) == std::nullopt);
+    CHECK(interaction.notice == "x retry removal · not while it is working");
     CHECK(dispatch(KeyCommand::Dismiss, interaction, context) == std::nullopt);
+    CHECK(interaction.notice == "del dismiss · not while it is working");
     CHECK(dispatch(KeyCommand::Reveal, interaction, context) == std::nullopt);
+    CHECK(interaction.notice == "r agent tab · its agent has no tab open");
     CHECK(dispatch(KeyCommand::EndRun, interaction, KeyContext {}) == std::nullopt);
+    CHECK(interaction.notice == "e end · no run selected");
 }
 
 TEST_CASE("typing a filter", "[orchestrator][view][keys]")
@@ -136,8 +149,10 @@ TEST_CASE("typing a filter", "[orchestrator][view][keys]")
 
 TEST_CASE("Del while typing a filter edits nothing and dismisses nothing", "[orchestrator][view][keys]")
 {
-    auto const finished =
-        Row { .kind = RowKind::Finished, .run = std::string { RunId }, .offers = { KeyCommand::Dismiss } };
+    auto const finished = Row { .kind = RowKind::Finished,
+                                .run = std::string { RunId },
+                                .offers = { KeyCommand::Dismiss },
+                                .rowState = RowState::Finished };
     auto interaction = Interaction { .filtering = Filtering::Typing, .filter = "pr" };
     auto const context = KeyContext { .selectable = 1, .selected = &finished };
     CHECK(applyKey(special(KeyCode::Delete), interaction, context) == std::nullopt);
@@ -149,8 +164,10 @@ TEST_CASE("Del while typing a filter edits nothing and dismisses nothing", "[orc
 
 TEST_CASE("ending a run asks once", "[orchestrator][view][keys]")
 {
-    auto const agent =
-        Row { .kind = RowKind::Agent, .run = std::string { RunId }, .offers = { KeyCommand::EndRun } };
+    auto const agent = Row { .kind = RowKind::Agent,
+                             .run = std::string { RunId },
+                             .offers = { KeyCommand::EndRun },
+                             .rowState = RowState::Working };
     auto const context = KeyContext { .selectable = 2, .selected = &agent };
 
     auto interaction = Interaction {};
@@ -256,7 +273,8 @@ TEST_CASE("a run opens on its group's tab, and a chosen tab sticks until its sta
                      .run = std::string { RunId },
                      .offers = { KeyCommand::BoardTab, KeyCommand::TranscriptTab, KeyCommand::DetailsTab },
                      .attention = FleetGroup::Working,
-                     .state = "working" };
+                     .state = "working",
+                     .rowState = RowState::Working };
     auto interaction = Interaction {};
     CHECK(activeTabOf(interaction, &row) == FocusTab::Board);
     row.attention = FleetGroup::NeedsYou;

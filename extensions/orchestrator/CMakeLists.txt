@@ -120,6 +120,8 @@ target_include_directories(orchestrator_core PUBLIC
 # The dashboard: the engine's lists drawn with core-cpp's headless terminal UI, laid out by breakpoint. Guest code
 # like the core: the guest serves it in its tab, and the native build tests it against golden screens.
 add_library(orchestrator_view STATIC
+    view/Actions.cpp
+    view/Actions.hpp
     view/Band.hpp
     view/Dashboard.cpp
     view/Dashboard.hpp
@@ -134,6 +136,8 @@ add_library(orchestrator_view STATIC
     view/Keys.cpp
     view/Keys.hpp
     view/LazyLines.hpp
+    view/Palette.cpp
+    view/Palette.hpp
     view/Sections.cpp
     view/Sections.hpp
     view/BoardMarkdown.cpp
@@ -194,10 +198,12 @@ if(ORCHESTRATOR_TESTING)
         core/Utf8_test.cpp
         core/Uuid_test.cpp
         guest/Driver_test.cpp
+        view/Actions_test.cpp
         view/Dashboard_test.cpp
         view/DispatchForm_test.cpp
         view/Launcher_test.cpp
         view/Keys_test.cpp
+        view/Palette_test.cpp
         view/Sections_test.cpp
         view/BoardMarkdown_test.cpp
         view/StatusBoard_test.cpp

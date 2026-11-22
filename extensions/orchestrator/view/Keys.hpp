@@ -123,20 +123,19 @@ using UiAction = std::variant<RefreshNowAction,
 // }}}
 // {{{ the key table
 
-/// What a key does on the dashboard.
+/// What a key, the palette or `⏎` does on the dashboard.
 enum class KeyCommand : uint8_t
 {
     Up,      ///< In the Fleet, select the row above; in the Focus, scroll its tab up a line.
     Down,    ///< In the Fleet, select the row below; in the Focus, scroll its tab down a line.
     Home,    ///< In the Fleet, select the first row, the run that waited longest; in the Focus, the top.
     End,     ///< In the Fleet, select the last row; in the Focus, the end of the tab, the transcript live.
-    Enter,   ///< The selected row's primary action: to the Focus of a live run, run a finished one again,
-             ///< retry a kept one's removal, unfold a group, open the launcher.
-    Back,    ///< Back to the Fleet; in it, close the help or clear the filter.
+    Enter,   ///< The selected row's primary action (primaryAction()).
+    Back,    ///< Back to the Fleet; in it, clear the filter.
     Tab,     ///< To the Focus, and back.
     Filter,  ///< Type a filter for the rows.
-    Help,    ///< Show or hide the keys.
-    Refresh, ///< Read the lists again now (the palette's, from phase 3).
+    Palette, ///< Open the command palette: every action, those that do not apply dimmed with the reason.
+    Refresh, ///< Read the lists again now; the palette's.
     EndRun,  ///< End the selected run; asks once.
     RetryRemoval,   ///< Check the selected kept worktree again.
     Dismiss,        ///< Drop the selected finished run.
@@ -149,16 +148,12 @@ enum class KeyCommand : uint8_t
     NextPage,       ///< Show the transcript's next page; its last follows the agent again.
     Fold,           ///< Fold or unfold the group of the selected row, and select its heading.
     NewAgent,       ///< Open the launcher, empty: to browse the items, or to type a topic.
-    InstallPlugins, ///< Install the Claude Code plugins the agents need and lack; asks once first.
+    InstallPlugins, ///< Install the Claude Code plugins the agents need and lack; the palette's.
     Reveal,         ///< Bring the selected run's agent tab in front.
     OpenLink,       ///< Copy the selected run's link with OSC 52, until the frontend can open it (phase 6).
-};
-
-/// How far the user got installing the missing plugins (`I`): it asks once, as ending a run does.
-enum class InstallConfirm : uint8_t
-{
-    None = 0, ///< Not asked.
-    Asked,    ///< The action bar asked; the next `I` installs, any other key forgets it.
+    Open,           ///< To the Focus of the selected row: to write to its agent, or to read it.
+    RunAgain,       ///< Open the launcher on the selected finished run's item, task and model.
+    Timeline,       ///< Show the last 24 hours, an hour a bar; the palette's.
 };
 
 /// Where the user is: which pane has the keys.
@@ -169,52 +164,47 @@ enum class Place : uint8_t
                ///< act and ↑↓ scroll.
 };
 
-/// The places a key row is hinted in: a bit per Place.
-enum class PlaceSet : uint8_t
-{
-    Fleet = 0b01, ///< The Fleet only.
-    Focus = 0b10, ///< The Focus only.
-    Both = 0b11,  ///< Either.
-};
-
-/// @param set Some places.
-/// @param place A place.
-/// @return Whether @p set holds @p place.
-[[nodiscard]] constexpr bool holds(PlaceSet set, Place place) noexcept
-{
-    return ((static_cast<unsigned>(std::to_underlying(set)) >> std::to_underlying(place)) & 1U) != 0;
-}
-
-/// One key: what it is called, what it does, and what the action bar calls it.
+/// One key and what it does: the only place a key is bound to a command.
 struct KeyRow
 {
-    std::string_view
-        key = {}; ///< Its name: a printable character, or `up`, `down`, `enter`, `esc` and the like.
+    std::string_view key = {}; ///< Its name: a printable character, `^k` for Ctrl+K, or `up`, `enter`, `esc`
+                               ///< and the like.
     KeyCommand command = KeyCommand::Up; ///< What it does.
-    std::string_view hint = {};   ///< How the action bar and the help name it; empty: neither shows the row.
-    PlaceSet on = PlaceSet::Both; ///< Where its hint is shown; every row acts in both places.
 };
 
-/// @return Every key the dashboard acts on, in the order the action bar and the help show them.
+/// @return Every key the dashboard acts on; the first row of a command names its key (keyNameOf()).
 [[nodiscard]] std::span<KeyRow const> keyRows() noexcept;
 
 /// @param key A key the terminal sent.
-/// @return What it does; std::nullopt for a key no row names, or one with Ctrl or Alt.
+/// @return What it does; std::nullopt for a key no row names, or one with Alt.
 [[nodiscard]] std::optional<KeyCommand> commandFor(core::tui::KeyEvent const& key) noexcept;
 
 /// @param command A command.
+/// @return How the bar and the palette name its key, such as `⏎`, `e`, `del` or `^k`; empty for a command no
+///         key is bound to.
+[[nodiscard]] std::string_view keyNameOf(KeyCommand command) noexcept;
+
+/// @param command A command.
 /// @return Whether it acts on the selected row only where the row offers it (Row::offers): the Focus tabs and
-///         the run commands. The action bar hints such a key only where it applies.
+///         the run commands.
 [[nodiscard]] bool isRowCommand(KeyCommand command) noexcept;
 
 // }}}
 // {{{ the interaction
 
-/// Whether the help is shown over the dashboard.
+/// What is shown over the dashboard, besides the launcher and the palette.
 enum class Overlay : uint8_t
 {
-    None, ///< Nothing over the dashboard.
-    Help, ///< The keys.
+    None = 0, ///< Nothing.
+    Timeline, ///< The last 24 hours, an hour a bar: esc or ⏎ closes it.
+};
+
+/// An open command palette.
+struct PaletteState
+{
+    std::string query = {};      ///< What was typed.
+    std::size_t highlighted = 0; ///< Into the entries the query matches (paletteMatches()).
+    [[nodiscard]] bool operator==(PaletteState const&) const = default;
 };
 
 /// Whether typed text goes to the filter.
@@ -254,13 +244,13 @@ struct Interaction
 {
     std::size_t selected = 0;             ///< The selected row, counted among the rows that can be selected.
     Place place = Place::Fleet;           ///< Which pane has the keys.
-    Overlay overlay = Overlay::None;      ///< Whether the help is shown.
+    Overlay overlay = Overlay::None;      ///< What is shown over the dashboard.
     Filtering filtering = Filtering::Off; ///< Whether typed text goes to the filter.
     std::string filter = {};              ///< Rows whose text does not hold it are left out; empty: none is.
     std::string pendingEnd = {}; ///< The run whose end waits for a second `e` (D14: asks once); empty: none.
-    InstallConfirm pendingInstall =
-        InstallConfirm::None;                   ///< Whether a second `I` installs the missing plugins.
     std::optional<LauncherState> launcher = {}; ///< The launcher, while it is open: it takes every key.
+    std::optional<PaletteState> palette = {};   ///< The palette, while it is open: it takes every key.
+    std::string paletteQuery = {}; ///< The query the palette had when esc closed it: it opens with it again.
     std::string notice = {}; ///< A one-line notice on the action bar, until the next key; empty: none.
     std::optional<TabChoice>
         chosenTab = {};           ///< The tab the user chose for a run; none: each opens on its own.

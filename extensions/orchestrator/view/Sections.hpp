@@ -95,6 +95,7 @@ struct Row
     std::optional<FleetGroup> attention = {}; ///< The group a run is listed in; none for any other row.
     std::string state = {}; ///< The word of its run's look (runLookOf()): a tab the user chose
                             ///< sticks until it changes.
+    RowState rowState = RowState::None; ///< What it is, as far as the actions it offers go (actionsFor()).
     std::string title = {}; ///< The Focus header's second line begins with it: the item's title.
     std::vector<DetailLine> details = {}; ///< The Details tab's lines.
 
@@ -113,6 +114,10 @@ struct Row
 ///        measured against.
 /// @return The rows; the configuration's absence is a notice row that says what to configure.
 [[nodiscard]] std::vector<Row> buildRows(Engine const& engine, uint64_t nowMonoMs);
+
+/// @param count A count, such as of tokens.
+/// @return It shortened: such as `152`, `42.3k` or `12.9M`.
+[[nodiscard]] std::string countText(uint64_t count);
 
 /// @param engine The engine.
 /// @param nowMonoMs Now, as buildRows() takes it.

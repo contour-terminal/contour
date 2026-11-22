@@ -81,6 +81,28 @@ struct RunLook
 /// @return How it looks.
 [[nodiscard]] RunLook runLookOf(Run const& run) noexcept;
 
+/// What a row of the Fleet is, as far as the actions it offers go (actionsFor()).
+enum class RowState : uint8_t
+{
+    None = 0,    ///< Nothing to act on: a notice, or no row.
+    Asking,      ///< Its agent asks for a permission.
+    Waiting,     ///< Its agent waits for input: its turn ended without reporting done.
+    Errored,     ///< Its agent stopped by an error.
+    Starting,    ///< Being prepared, or its agent has not reported yet.
+    Working,     ///< Its agent works.
+    Done,        ///< Its agent reported done, and the run is still open.
+    Ending,      ///< Being ended: its worktree is checked and removed.
+    Finished,    ///< Over, its worktree removed or gone.
+    Kept,        ///< Over, its worktree kept: what kept it is listed.
+    NewAgent,    ///< `+ new agent`.
+    GroupHeader, ///< A group's heading.
+    Leftover,    ///< A worktree no run accounts for.
+};
+
+/// @param run A run.
+/// @return Its state: from what it is, and what its agent last reported.
+[[nodiscard]] RowState rowStateOf(Run const& run) noexcept;
+
 /// @param run A run.
 /// @return Since when it waited in its group, in wall-clock milliseconds: when it entered its state, as its
 ///         history says, else when it was dispatched. The Fleet lists the longest waiting first.

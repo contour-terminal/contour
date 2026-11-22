@@ -18,7 +18,7 @@
 │ 18:36 result .                                                               │
 │ 18:37 claude done.                                                           │
 │ ╭──────────────────────────────────────────────────────────────────────────╮ │
-│ │ · removed · completed · ⏎ runs it again · del dismiss                    │ │
+│ │ · removed · completed · ⏎ run again · t transcript · del dismiss         │ │
 │ ╰──────────────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- ↑↓ move · ⏎ open · tab focus · t transcript           ⬢ 4/4 ▰▰▰▰  ● 2 need you 
+ ⏎ run again · t transcript · ^k all actions           ⬢ 4/4 ▰▰▰▰  ● 2 need you 

@@ -261,16 +261,6 @@ namespace
     /// The most tools a run's details name.
     constexpr auto MaxShownTools = std::size_t { 5 };
 
-    /// @return Such as `152`, `42.3k` or `12.9M`.
-    [[nodiscard]] std::string countText(uint64_t count)
-    {
-        if (count < 1'000)
-            return std::format("{}", count);
-        if (count < 1'000'000)
-            return std::format("{:.1f}k", static_cast<double>(count) / 1'000);
-        return std::format("{:.1f}M", static_cast<double>(count) / 1'000'000);
-    }
-
     /// @return Such as `45s`, `14m 47s` or `2h 3m`.
     [[nodiscard]] std::string spanText(uint64_t ms)
     {
@@ -519,6 +509,7 @@ namespace
                      .offers = std::move(offers),
                      .attention = fleetGroupOf(run),
                      .state = std::string { look.word },
+                     .rowState = rowStateOf(run),
                      .title = itemTitleOf(*lists.engine, run),
                      .details = std::move(details) };
     }
@@ -590,6 +581,7 @@ namespace
                      .offers = std::move(offers),
                      .attention = FleetGroup::Finished,
                      .state = std::string { look.word },
+                     .rowState = rowStateOf(run),
                      .title = itemTitleOf(*lists.engine, run),
                      .details = std::move(details) };
     }
@@ -655,6 +647,7 @@ namespace
                      .context = "no run uses this worktree",
                      .repo = std::string { repo },
                      .offers = { KeyCommand::DetailsTab },
+                     .rowState = RowState::Leftover,
                      .title = clean(orphan.path),
                      .details = std::move(details) };
     }
@@ -704,8 +697,10 @@ namespace
                                  .text = std::string { group.name },
                                  .status = std::move(count),
                                  .statusRole = Role::Dim,
+                                 .offers = { KeyCommand::Fold },
                                  .group = std::string { group.key },
-                                 .fold = hides ? Fold::Folded : Fold::Open });
+                                 .fold = hides ? Fold::Folded : Fold::Open,
+                                 .rowState = RowState::GroupHeader });
             for (auto const index: std::views::iota(std::size_t { 0 }, runs.size()))
             {
                 auto const& run = *runs[index];
@@ -737,6 +732,15 @@ namespace
         return rows;
     }
 } // namespace
+
+std::string countText(uint64_t count)
+{
+    if (count < 1'000)
+        return std::format("{}", count);
+    if (count < 1'000'000)
+        return std::format("{:.1f}k", static_cast<double>(count) / 1'000);
+    return std::format("{:.1f}M", static_cast<double>(count) / 1'000'000);
+}
 
 std::optional<uint64_t> nextRowChange(Engine const& engine, uint64_t nowMonoMs)
 {
@@ -786,8 +790,11 @@ std::vector<Row> buildRows(Engine const& engine, uint64_t nowMonoMs)
                              .status = std::format("{}", orphans.size()) });
         std::ranges::move(orphans, std::back_inserter(rows));
     }
-    rows.push_back(
-        Row { .kind = RowKind::NewAgent, .mark = "+", .markRole = Role::Accent, .text = "new agent" });
+    rows.push_back(Row { .kind = RowKind::NewAgent,
+                         .mark = "+",
+                         .markRole = Role::Accent,
+                         .text = "new agent",
+                         .rowState = RowState::NewAgent });
     return rows;
 }
 

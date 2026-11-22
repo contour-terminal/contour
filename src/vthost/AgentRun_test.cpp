@@ -735,8 +735,8 @@ TEST_CASE("a kept worktree is checked again on the next poll", "[daemon][e2e][ag
     CHECK(kept->finished->entries == std::vector<std::string> { "M a.txt" });
     CHECK(d.world.hasWorktree(dispatched.run.worktree));
 
-    // The next poll checks it again; committed and pushed meanwhile, it is removed.
-    desk.type("R");
+    // The next poll checks it again; committed and pushed meanwhile, it is removed. Refresh is the palette's.
+    desk.type("\x0brefresh\r");
     REQUIRE(desk.until([&] { return finishedAs(d.world, "pr-2375-", "completed", "removed"); }));
     CHECK_FALSE(d.world.hasWorktree(dispatched.run.worktree));
 }
@@ -960,11 +960,10 @@ TEST_CASE("b shows the board an agent wrote, with its age, in the Focus", "[daem
     });
     INFO("dashboard: " << page);
     REQUIRE(shown);
-    // The Focus names the run, and the board's age; the keys to its other tabs are offered.
+    // The Focus names the run, and the board's age; the bar says what ⏎ does.
     CHECK(page.contains("pr-2375 · fix CI · sonnet"));
     CHECK(page.contains("updated 3 min ago"));
-    CHECK(page.contains("t transcript"));
-    CHECK(page.contains("d details"));
+    CHECK(page.contains("⏎ message"));
 }
 
 TEST_CASE("a board that appears later is picked up while shown", "[daemon][e2e][agents]")

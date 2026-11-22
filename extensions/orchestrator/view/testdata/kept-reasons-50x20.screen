@@ -14,7 +14,7 @@
 │ 18:36 result .                                 │
 │ 18:37 claude done.                             │
 │ ╭────────────────────────────────────────────╮ │
-│ │ ⚑ kept · ended by you · 1 entry kept · ⏎ … │ │
+│ │ ⚑ kept · ended by you ·… · ⏎ retry removal │ │
 │ ╰────────────────────────────────────────────╯ │
 ╰────────────────────────────────────────────────╯
- ↑↓ scroll · esc back · b board · t transcript    
+ ⏎ retry removal · d details · ^k all actions     

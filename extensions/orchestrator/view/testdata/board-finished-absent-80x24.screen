@@ -18,7 +18,7 @@
 │                                                                              │
 │                                                                              │
 │ ╭──────────────────────────────────────────────────────────────────────────╮ │
-│ │ ⚑ kept · completed · 1 entry kept · ⏎ retries the removal · del dismiss  │ │
+│ │ ⚑ kept · completed · 1 entry kept · ⏎ retry removal · d details          │ │
 │ ╰──────────────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- ↑↓ scroll · esc back · b board · t transcript · d details · n new agent        
+ ⏎ retry removal · d details · del dismiss · esc back · ^k all actions          

@@ -3,7 +3,7 @@
 │▍+ new agent                                  │ │ No agents yet. ⏎ or n starts one on a pull request, an issue, or    │
 │                                              │ │ anything you type.                                                  │
 │                                              │ │ Once agents run: ⏎ talks to the selected one, esc steps back.       │
-│                                              │ │ Everything else is in ? (the keys).                                 │
+│                                              │ │ Everything else is in ^K.                                           │
 │                                              │ │                                                                     │
 │                   ╭─ ✦ New agent ────────────────────────────────────────────────────────────────╮                   │
 │                   │ › ▏type to filter, or describe a topic      pull requests · issues · a topic │                   │
@@ -37,4 +37,4 @@
 │                                              │ │                                                                     │
 │                                              │ │                                                                     │
 ╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
- ↑↓ move · ⏎ open · tab focus · n new agent · / filter · ? help · R refresh · I install plugins                         
+ ⏎ new agent · ^k all actions                                                                                           

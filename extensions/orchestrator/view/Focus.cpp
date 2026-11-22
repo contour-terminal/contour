@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <orchestrator/core/Transcript.hpp>
+#include <orchestrator/view/Actions.hpp>
 
 using namespace std::string_view_literals;
 
@@ -77,7 +78,7 @@ namespace
     constexpr auto Primer = std::array {
         "No agents yet. ⏎ or n starts one on a pull request, an issue, or anything you type."sv,
         "Once agents run: ⏎ talks to the selected one, esc steps back."sv,
-        "Everything else is in ? (the keys)."sv,
+        "Everything else is in ^K."sv,
     };
 
     /// One drawn line of the details: a detail's first line with its label, or one of its continuations.
@@ -107,6 +108,26 @@ namespace
                                              .link = detail.link });
         }
         return lines;
+    }
+
+    /// @return A state box's line: @p lead, @p context cut so that what ⏎ does still shows after it, then the
+    ///         row's other actions (actionHints()), as many whole ones as fit.
+    [[nodiscard]] std::string boxLine(std::string lead, std::string_view context, Row const& row, int columns)
+    {
+        auto parts = std::vector<std::string> { std::move(lead) };
+        auto hints = actionHints(&row);
+        if (!context.empty())
+        {
+            auto const separators = 2 * columnsOf(HintSeparator);
+            auto const primary = hints.empty() ? 0 : columnsOf(hints.front());
+            parts.push_back(
+                cut(context, std::max(1, columns - columnsOf(parts.front()) - primary - separators)));
+        }
+        std::ranges::move(hints, std::back_inserter(parts));
+        auto const views =
+            parts | std::views::transform([](std::string const& part) { return std::string_view { part }; })
+            | std::ranges::to<std::vector>();
+        return joinHints(views, columns);
     }
 
     /// @return The draft as the message box draws it: its lines, each wrapped to @p columns.
@@ -345,7 +366,7 @@ void Focus::renderRun(Canvas& canvas, Run const* run)
                                            .y = inside.height() - bottomRows,
                                            .width = std::max(0, inside.width() - 2),
                                            .height = bottomRows });
-        renderBottom(box, run);
+        renderBottom(box);
     }
 }
 
@@ -422,7 +443,7 @@ void Focus::renderLatest(Canvas& canvas, Run const& run)
             putLinked(canvas, y++, 1, line.text, styleOf(theme, line.role));
 }
 
-void Focus::renderBottom(Canvas& canvas, Run const* run)
+void Focus::renderBottom(Canvas& canvas)
 {
     auto const& theme = canvas.theme();
     auto const& row = *_frame.row;
@@ -455,24 +476,16 @@ void Focus::renderBottom(Canvas& canvas, Run const* run)
         }
         case BottomBox::Done: {
             drawFrame(canvas, {}, Role::Passing);
-            auto const actions = run != nullptr && !run->url.empty()
-                                     ? "✓ reported done · ⏎ follow up · o copy link · e end"sv
-                                     : "✓ reported done · ⏎ follow up · e end"sv;
-            insideFrame(canvas).putString(0, 1, cut(actions, width), styleOf(theme, Role::Passing));
+            insideFrame(canvas).putString(
+                0, 1, boxLine("✓ reported done", {}, row, width), styleOf(theme, Role::Passing));
             return;
         }
         case BottomBox::Ended: {
             drawFrame(canvas, {}, Role::Border);
-            auto const action = std::ranges::contains(row.offers, KeyCommand::RetryRemoval)
-                                    ? "⏎ retries the removal"sv
-                                    : "⏎ runs it again"sv;
-            auto const dismiss =
-                std::ranges::contains(row.offers, KeyCommand::Dismiss) ? " · del dismiss"sv : ""sv;
             insideFrame(canvas).putString(
                 0,
                 1,
-                cut(std::format("{} {} · {} · {}{}", row.mark, row.status, row.context, action, dismiss),
-                    width),
+                boxLine(std::format("{} {}", row.mark, row.status), row.context, row, width),
                 styleOf(theme, row.statusRole));
             return;
         }

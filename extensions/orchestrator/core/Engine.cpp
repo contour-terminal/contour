@@ -856,7 +856,7 @@ void Engine::rebuildProblems()
         problems.emplace_back(HooksMissingProblem);
     for (auto const& plugin: _missingPlugins)
         problems.push_back(displayText(
-            std::format("Claude Code lacks the plugin {} · I installs it", plugin.id), MaxSummaryLineChars));
+            std::format("Claude Code lacks the plugin {} · ^K installs it", plugin.id), MaxSummaryLineChars));
     // Orphans are not problems: the dashboard lists them in a section of their own.
     if (problems != _problems)
     {

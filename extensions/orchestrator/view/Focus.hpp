@@ -161,7 +161,7 @@ class Focus final: public core::tui::Component
     void renderRun(core::tui::Canvas& canvas, Run const* run);
     void renderDetails(core::tui::Canvas& canvas);
     void renderLatest(core::tui::Canvas& canvas, Run const& run);
-    void renderBottom(core::tui::Canvas& canvas, Run const* run);
+    void renderBottom(core::tui::Canvas& canvas);
     /// @return The selected run's draft; empty: none.
     [[nodiscard]] std::string_view draftOf() const noexcept;
 

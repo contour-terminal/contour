@@ -27,9 +27,11 @@
 #include <variant>
 #include <vector>
 
+#include <orchestrator/view/Actions.hpp>
 #include <orchestrator/view/Band.hpp>
 #include <orchestrator/view/Fleet.hpp>
 #include <orchestrator/view/Focus.hpp>
+#include <orchestrator/view/Palette.hpp>
 #include <orchestrator/view/Sections.hpp>
 #include <orchestrator/view/StatusBoard.hpp>
 #include <orchestrator/view/Theme.hpp>
@@ -58,8 +60,10 @@ namespace
 
     /// The widest the launcher is in the Wide band.
     constexpr auto LauncherMaxColumns = 80;
-    /// How much of the tab's width the launcher takes in the Medium band, in percent.
-    constexpr auto LauncherMediumPercent = 90;
+    /// The widest the palette is in the Wide band.
+    constexpr auto PaletteMaxColumns = 64;
+    /// How much of the tab's width a popup takes in the Medium band, in percent.
+    constexpr auto PopupMediumPercent = 90;
 
     /// The shares of the body the Fleet and the Focus take, side by side (Wide) or one above the other
     /// (Medium, where the Focus takes 60 % of the height).
@@ -69,15 +73,14 @@ namespace
     /// The cells the `▰▱` meters take.
     constexpr auto MeterCells = 6;
 
-    /// @return The cells the launcher is wide in @p band, in a tab @p columns wide: in the Wide band a popup
-    ///         of at most LauncherMaxColumns, in the Medium band most of the tab, in the Narrow band all of
-    ///         it.
-    [[nodiscard]] int launcherWidthIn(Band band, int columns) noexcept
+    /// @return The cells a popup is wide in @p band, in a tab @p columns wide: in the Wide band at most
+    ///         @p maxColumns, in the Medium band most of the tab, in the Narrow band all of it.
+    [[nodiscard]] int popupWidthIn(Band band, int columns, int maxColumns) noexcept
     {
         switch (band)
         {
-            case Band::Wide: return std::min(LauncherMaxColumns, columns);
-            case Band::Medium: return columns * LauncherMediumPercent / 100;
+            case Band::Wide: return std::min(maxColumns, columns);
+            case Band::Medium: return columns * PopupMediumPercent / 100;
             case Band::Narrow: break;
         }
         return columns;
@@ -154,7 +157,6 @@ namespace
 namespace
 {
     class ProblemLines;
-    class HelpOverlay;
 } // namespace
 
 /// Everything the dashboard is: the screen it draws on, where the user is, and the rows it draws.
@@ -198,12 +200,16 @@ struct Dashboard::State
     /// @return What the engine is asked, in order.
     [[nodiscard]] std::vector<UiAction> resolveOverdueEscape();
     /// Shows the panes of the current place and band and hides the others; sets what the Focus draws; places
-    /// the help and the launcher.
+    /// the launcher, the palette and the timeline.
     void syncLayout();
     /// Gives a launcher just opened its agent's session id, from the dashboard's source.
     void mintSession();
     /// Shows the launcher where the band puts it, or hides it.
     void syncLauncher();
+    /// Shows the palette where the band puts it, listing what applies to the selected row; or hides it.
+    void syncPalette();
+    /// Shows @p overlay centred in the tab at @p wanted, or moves it there.
+    void showCentred(Component& overlay, Size wanted);
     /// Keeps the Focus's scroll within what its tab holds, once the last draw knows its end.
     void clampScroll() noexcept;
     /// @return What a key is applied to.
@@ -275,8 +281,9 @@ struct Dashboard::State
     std::vector<std::pair<PanelRole, Component*>> toggled; ///< Its panels shown by place.
     ProblemLines* problems = nullptr;                      ///< The current layout's problem lines.
     Repaint repaint = Repaint::Needed;
-    std::unique_ptr<HelpOverlay> help;
     std::unique_ptr<LauncherView> launcherView; ///< Draws interaction.launcher.
+    std::unique_ptr<PaletteView> paletteView;   ///< Draws interaction.palette.
+    std::unique_ptr<TimelineView> timelineView; ///< Draws the last 24 hours while Overlay::Timeline.
     FocusFrame focus;                           ///< What the Focus draws this frame.
     FocusPanels focusPanels;                    ///< What the Focus's tabs learnt drawing themselves.
     std::unique_ptr<core::tui::Responsive> root;
@@ -378,7 +385,7 @@ namespace
             if (!_state.engine.missingPlugins().empty())
                 canvas.putString(0,
                                  x + 2,
-                                 cut("plugins missing · I installs", (canvas.width() / 2) - x),
+                                 cut("plugins missing · ^K install", (canvas.width() / 2) - x),
                                  styleOf(theme, Role::Warning));
             drawGauge(canvas, gaugeOf(_state), 0, canvas.width() - 1);
         }
@@ -540,8 +547,8 @@ namespace
         Band _band;
     };
 
-    /// The action bar: a notice until the next key, the question an `e` asks, or the keys that act now; and
-    /// the gauge on its right while the top bar gave way.
+    /// The action bar: a notice until the next key, the question an `e` asks, or the actions that apply to
+    /// the selected row (barText()); and the gauge on its right while the top bar gave way.
     class ActionBar final: public Component
     {
       public:
@@ -573,7 +580,14 @@ namespace
                         columns),
                     styleOf(theme, Role::Warning));
             else
-                canvas.putString(0, 1, joinHints(hints(), columns), styleOf(theme, Role::Dim));
+            {
+                auto const* const row = _state.selectedRow();
+                auto const keys = interaction.place == Place::Focus && hasMessageBox(&_state.engine, row)
+                                      ? MessageKeys::InBox
+                                      : MessageKeys::Elsewhere;
+                canvas.putString(
+                    0, 1, barText(row, interaction.place, keys, columns), styleOf(theme, Role::Dim));
+            }
         }
 
       private:
@@ -584,67 +598,7 @@ namespace
             return row != _state.rows.end() ? std::string_view { row->name } : run;
         }
 
-        /// @return The hints of the keys that act now: the message box's while it has the keys; else those of
-        ///         the place, a row command's only where the selected row offers it.
-        [[nodiscard]] std::vector<std::string_view> hints() const
-        {
-            auto const* const row = _state.selectedRow();
-            auto const place = _state.interaction.place;
-            if (place == Place::Focus && hasMessageBox(&_state.engine, row))
-                return { "⏎ send"sv, "alt⏎ line"sv, "esc keep draft"sv, "pgup pgdn scroll"sv };
-            auto hinted = std::vector<std::string_view> {};
-            for (auto const& key: keyRows())
-            {
-                if (key.hint.empty() || !holds(key.on, place))
-                    continue;
-                if (isRowCommand(key.command)
-                    && (row == nullptr || !std::ranges::contains(row->offers, key.command)))
-                    continue;
-                hinted.push_back(key.hint);
-            }
-            return hinted;
-        }
-
         Dashboard::State const& _state;
-    };
-
-    /// The keys and what they do, over the dashboard: the table's hints.
-    class HelpOverlay final: public Component
-    {
-      public:
-        void render(Canvas& canvas) override
-        {
-            canvas.clear(styleOf(canvas.theme(), Role::Text));
-            drawFrame(canvas, "Keys");
-            auto inside = insideFrame(canvas);
-            auto line = 0;
-            for (auto const hint: hints() | std::views::take(std::max(0, inside.height())))
-                inside.putString(
-                    line++, 1, cut(hint, inside.width() - 2), styleOf(canvas.theme(), Role::Text));
-        }
-
-        [[nodiscard]] Size preferredSize() const override
-        {
-            auto widest = 0;
-            auto count = 0;
-            for (auto const hint: hints())
-            {
-                widest = std::max(widest, columnsOf(hint));
-                ++count;
-            }
-            return { .width = widest + 4, .height = count + 2 };
-        }
-
-      private:
-        /// @return The hints of the keys that have one, each once, in the table's order.
-        [[nodiscard]] static std::vector<std::string_view> hints()
-        {
-            auto all = std::vector<std::string_view> {};
-            for (auto const& row: keyRows())
-                if (!row.hint.empty() && !std::ranges::contains(all, row.hint))
-                    all.push_back(row.hint);
-            return all;
-        }
     };
 
 } // namespace
@@ -665,8 +619,9 @@ Dashboard::State::State(Engine const& engine,
     surface { size, [this](std::string_view bytes) { frameBytes.append(bytes); } },
     screen { surface, core::tui::ScreenConfig {}, clock },
     size { size },
-    help { std::make_unique<HelpOverlay>() },
     launcherView { std::make_unique<LauncherView>(engine, interaction.launcher) },
+    paletteView { std::make_unique<PaletteView>(interaction.palette) },
+    timelineView { std::make_unique<TimelineView>(engine) },
     root { std::make_unique<core::tui::Responsive>(std::ranges::to<std::vector<core::tui::Breakpoint>>(
         std::views::iota(std::size_t { 0 }, BandBreakpoints.size())
         | std::views::transform([this](std::size_t index) {
@@ -681,10 +636,10 @@ Dashboard::State::State(Engine const& engine,
 
 Dashboard::State::~State()
 {
-    if (screen.isOverlayVisible(*help))
-        screen.hideOverlay(*help);
-    if (screen.isOverlayVisible(*launcherView))
-        screen.hideOverlay(*launcherView);
+    for (Component* const overlay:
+         std::array<Component*, 3> { launcherView.get(), paletteView.get(), timelineView.get() })
+        if (screen.isOverlayVisible(*overlay))
+            screen.hideOverlay(*overlay);
     screen.root().removeChild(*root);
 }
 
@@ -999,15 +954,41 @@ void Dashboard::State::syncLayout()
     if (problems != nullptr)
         problems->refresh();
     syncLauncher();
-    if (interaction.overlay == Overlay::Help && !interaction.launcher)
+    syncPalette();
+    if (interaction.overlay == Overlay::Timeline)
     {
-        auto const wanted = help->preferredSize();
-        screen.showOverlay(*help,
-                           { .x = std::max(0, (size.width - wanted.width) / 2),
-                             .y = std::max(0, (size.height - wanted.height) / 2) });
+        auto const wanted = timelineView->preferredSize();
+        showCentred(*timelineView,
+                    Size { .width = std::min(wanted.width, size.width),
+                           .height = std::min(wanted.height, size.height) });
     }
-    else if (screen.isOverlayVisible(*help))
-        screen.hideOverlay(*help);
+    else if (screen.isOverlayVisible(*timelineView))
+        screen.hideOverlay(*timelineView);
+}
+
+void Dashboard::State::showCentred(Component& overlay, Size wanted)
+{
+    auto const at =
+        core::tui::Point { .x = (size.width - wanted.width) / 2, .y = (size.height - wanted.height) / 2 };
+    if (screen.isOverlayVisible(overlay))
+        screen.positionOverlay(overlay, at);
+    else
+        screen.showOverlay(overlay, at);
+}
+
+void Dashboard::State::syncPalette()
+{
+    if (!interaction.palette)
+    {
+        if (screen.isOverlayVisible(*paletteView))
+            screen.hideOverlay(*paletteView);
+        return;
+    }
+    auto entries = paletteEntries(selectedRow(), &engine);
+    auto const wanted = Size { .width = popupWidthIn(band(), size.width, PaletteMaxColumns),
+                               .height = std::min(paletteView->heightFor(entries), size.height) };
+    paletteView->place(wanted, std::move(entries));
+    showCentred(*paletteView, wanted);
 }
 
 void Dashboard::State::clampScroll() noexcept
@@ -1037,15 +1018,12 @@ void Dashboard::State::syncLauncher()
     }
     // Centred; the Narrow band gives it the whole tab.
     auto const band = this->band();
-    auto const width = launcherWidthIn(band, size.width);
+    auto const width = popupWidthIn(band, size.width, LauncherMaxColumns);
     auto const height =
         band == Band::Narrow ? size.height : std::min(launcherView->heightAt(width), size.height);
-    launcherView->place(Size { .width = width, .height = height });
-    auto const at = core::tui::Point { .x = (size.width - width) / 2, .y = (size.height - height) / 2 };
-    if (screen.isOverlayVisible(*launcherView))
-        screen.positionOverlay(*launcherView, at);
-    else
-        screen.showOverlay(*launcherView, at);
+    auto const wanted = Size { .width = width, .height = height };
+    launcherView->place(wanted);
+    showCentred(*launcherView, wanted);
 }
 
 // }}}

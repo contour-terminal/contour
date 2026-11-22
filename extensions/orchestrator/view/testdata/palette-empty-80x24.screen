@@ -1,0 +1,24 @@
+ ✦ Agents                                                            ⬢ 0/4 ▱▱▱▱ 
+╭─ Agents 0 ───────────────────────────────────────────────────────────────────╮
+│▍+ ╭─ ✦ All actions ──────────────────────────────────────────────────────╮   │
+│   │ › ▏type to filter the actions                                        │   │
+│   │                                                                      │   │
+│   │▍ new agent                                                         ⏎ │   │
+│   │  filter the agents                                                 / │   │
+│   │  refresh the lists                                      palette only │   │
+│   │  show the last 24 hours                                 palette only │   │
+╰───│  open · no run selected                                 palette only │───╯
+╭───│  run again · no run selected                            palette only │───╮
+│ No│  end · no run selected                                             e │   │
+│ yo│  agent tab · no run selected                                       r │   │
+│ On│  copy link · no run selected                                       o │   │
+│ Ev│  retry removal · no run selected                                   x │   │
+│   │  dismiss · no run selected                                       del │   │
+│   │  board · no run selected                                           b │   │
+│   │  ↓ 4 more                                                            │   │
+│   │                                                                      │   │
+│   │ ⏎ run · ↑↓ choose · esc close                                        │   │
+│   ╰──────────────────────────────────────────────────────────────────────╯   │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ ⏎ new agent · ^k all actions                                                   

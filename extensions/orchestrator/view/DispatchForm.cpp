@@ -303,9 +303,10 @@ std::vector<std::string> setupWarnings(Engine const& engine)
     if (engine.hooks() == HooksState::Missing)
         warnings.emplace_back(HooksMissingWarning);
     for (auto const& plugin: engine.missingPlugins())
-        warnings.push_back(std::format("Claude Code lacks the plugin {}: a prompt naming its skills fails (I "
-                                       "on the dashboard installs it)",
-                                       plugin.id));
+        warnings.push_back(
+            std::format("Claude Code lacks the plugin {}: a prompt naming its skills fails (^K "
+                        "on the dashboard installs it)",
+                        plugin.id));
     return warnings;
 }
 

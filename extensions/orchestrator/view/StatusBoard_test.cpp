@@ -381,11 +381,11 @@ TEST_CASE("b is offered on a finished run only while its worktree is there", "[o
     CHECK_FALSE(fixture.screen().contains("b board"));
     CHECK(fixture.dashboard.input("b").empty());
     CHECK_FALSE(fixture.dashboard.interaction().chosenTab.has_value());
+    CHECK(fixture.screen().contains("b board · its board went with its worktree"));
 
     auto kept = DashboardFixture { keptBoardWorld(), Medium };
     static_cast<void>(kept.dashboard.frame());
     CHECK(kept.dashboard.select(KeptId).empty());
-    CHECK(kept.screen().contains("b board"));
     CHECK(kept.dashboard.input("b").empty());
     REQUIRE(kept.dashboard.interaction().chosenTab.has_value());
     CHECK(kept.dashboard.interaction().chosenTab->tab == FocusTab::Board);

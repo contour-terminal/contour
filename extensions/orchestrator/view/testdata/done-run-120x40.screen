@@ -34,7 +34,7 @@
 │                                              │ │ 18:36 result .                                                      │
 │                                              │ │ 18:37 claude done.                                                  │
 │                                              │ │ ╭─────────────────────────────────────────────────────────────────╮ │
-│                                              │ │ │ ✓ reported done · ⏎ follow up · o copy link · e end             │ │
+│                                              │ │ │ ✓ reported done · ⏎ follow up · o copy link · t transcript      │ │
 │                                              │ │ ╰─────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
- ↑↓ move · ⏎ open · tab focus · b board · t transcript · d details · n new agent · / filter · e end · o copy link       
+ ⏎ follow up · o copy link · t transcript · e end · n new agent · ^k all actions                                        

@@ -221,6 +221,12 @@ struct Scene
         Scene { .name = "problem", .world = World { .prs = { "" } }, .sizes = { Wide } },
         // Every group; the working run selected, on its Board.
         Scene { .name = "fleet", .world = fleetWorld(), .select = RunningId },
+        // The palette: the working run's actions, the global commands, the rest dimmed with the reason.
+        Scene { .name = "palette", .world = fleetWorld(), .keys = "\x0b", .select = RunningId },
+        Scene { .name = "palette-query", .world = fleetWorld(), .keys = "\x0bre", .sizes = { Wide }, .select = KeptId },
+        Scene { .name = "palette-empty", .world = World {}, .keys = "?", .sizes = { Medium } },
+        // The last 24 hours, opened from the palette.
+        Scene { .name = "timeline", .world = fleetWorld(), .keys = "\x0blast 24\r", .sizes = { Wide, Narrow } },
         // Each tab of the Focus, chosen with its letter.
         Scene { .name = "focus-board", .world = fleetWorld(), .keys = "b", .sizes = { Wide }, .select = RunningId },
         Scene { .name = "focus-transcript",
@@ -718,16 +724,20 @@ TEST_CASE("key input", "[orchestrator][view]")
           .expected = { .place = Place::Focus } },
         { .name = "tab and back", .world = &fleet, .size = Narrow, .keys = "\t\t", .expected = {} },
         { .name = "tab, esc", .world = &fleet, .size = Narrow, .keys = "\t\x1b", .expected = {} },
-        { .name = "help",
+        { .name = "palette",
           .world = &fleet,
           .size = Wide,
           .keys = "?",
-          .expected = { .overlay = Overlay::Help } },
-        { .name = "help closed", .world = &fleet, .size = Wide, .keys = "?\x1b", .expected = {} },
-        { .name = "refresh",
+          .expected = { .palette = PaletteState {} } },
+        { .name = "palette closed, its query kept",
           .world = &fleet,
           .size = Wide,
-          .keys = "R",
+          .keys = "\x0bref\x1b",
+          .expected = { .paletteQuery = "ref" } },
+        { .name = "refresh, from the palette",
+          .world = &fleet,
+          .size = Wide,
+          .keys = "\x0brefresh\r",
           .expected = {},
           .actions = { RefreshNowAction {} } },
         { .name = "b chooses the Board",
@@ -787,7 +797,7 @@ TEST_CASE("key input", "[orchestrator][view]")
           .world = &outsideKept,
           .size = Wide,
           .keys = "x",
-          .expected = {} },
+          .expected = { .notice = "x retry removal · its removal cannot be tried again now" } },
         { .name = "e, e on an active run outside the configuration",
           .world = &outsideRun,
           .size = Wide,
@@ -867,7 +877,7 @@ TEST_CASE("an ESC that ends an input waits for the rest of its sequence", "[orch
         auto fixture = Fixture { fleetWorld() };
         CHECK(fixture.dashboard.input("?").empty());
         CHECK(fixture.dashboard.input("\x1b").empty());
-        CHECK(fixture.dashboard.interaction() == Interaction { .overlay = Overlay::Help });
+        CHECK(fixture.dashboard.interaction() == Interaction { .palette = PaletteState {} });
         auto const deadline = fixture.dashboard.pendingEscapeDeadline();
         REQUIRE(deadline.has_value());
         CHECK(*deadline == fixture.clock.now() + std::chrono::milliseconds { 50 });
@@ -879,11 +889,11 @@ TEST_CASE("an ESC that ends an input waits for the rest of its sequence", "[orch
     SECTION("ESC, then j: Alt+j, which does nothing")
     {
         auto fixture = Fixture { fleetWorld() };
-        CHECK(fixture.dashboard.input("?").empty());
+        CHECK(fixture.dashboard.input("j").empty());
         CHECK(fixture.dashboard.input("\x1b").empty());
         CHECK(fixture.dashboard.input("j").empty());
         fixture.escapeTimesOut();
-        CHECK(fixture.dashboard.interaction() == Interaction { .overlay = Overlay::Help });
+        CHECK(fixture.dashboard.interaction() == Interaction { .selected = 1 });
     }
     SECTION("ESC, then j after the deadline: Escape, then j")
     {
@@ -927,21 +937,6 @@ TEST_CASE("the action bar offers a run's keys only where they apply", "[orchestr
     auto const finished = fixture.screen();
     CHECK_FALSE(finished.contains("e end"));
     CHECK(finished.contains("del dismiss"));
-}
-
-TEST_CASE("the help lists the keys that have a hint", "[orchestrator][view]")
-{
-    auto fixture = Fixture { fleetWorld() };
-    CHECK(!fixture.screen().contains(" Keys "));
-    CHECK(fixture.dashboard.input("?").empty());
-    auto const help = fixture.screen();
-    CHECK(help.contains("╭─ Keys "));
-    for (auto const& row: keyRows())
-    {
-        CAPTURE(row.key);
-        if (!row.hint.empty())
-            CHECK(help.contains(std::format("│ {} ", row.hint)));
-    }
 }
 
 // }}}

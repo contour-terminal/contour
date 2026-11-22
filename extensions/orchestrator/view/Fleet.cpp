@@ -133,6 +133,35 @@ RunLook runLookOf(Run const& run) noexcept
                       run.state);
 }
 
+RowState rowStateOf(Run const& run) noexcept
+{
+    if (auto const* const finished = finishedEntryOf(run))
+        return finished->fate == Fate::Kept ? RowState::Kept : RowState::Finished;
+    return std::visit(Overloaded {
+                          [](Preparing const&) { return RowState::Starting; },
+                          [](Ending const&) { return RowState::Ending; },
+                          [](Done const&) { return RowState::Done; },
+                          [&](Blocked const&) {
+                              return run.lastStatus == AgentStatus::Error ? RowState::Errored
+                                                                          : RowState::Asking;
+                          },
+                          [&](auto const&) {
+                              if (!run.lastStatus)
+                                  return RowState::Starting;
+                              switch (*run.lastStatus)
+                              {
+                                  case AgentStatus::Idle: return RowState::Waiting;
+                                  case AgentStatus::Error: return RowState::Errored;
+                                  case AgentStatus::Blocked: return RowState::Asking;
+                                  case AgentStatus::Done: return RowState::Done;
+                                  case AgentStatus::Working: break;
+                              }
+                              return RowState::Working;
+                          },
+                      },
+                      run.state);
+}
+
 uint64_t waitingSinceOf(Run const& run) noexcept
 {
     if (auto const* const finished = std::get_if<Finished>(&run.state);

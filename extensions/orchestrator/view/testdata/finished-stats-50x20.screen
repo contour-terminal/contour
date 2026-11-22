@@ -14,7 +14,7 @@
 │ 18:36 result .                                 │
 │ 18:37 claude done.                             │
 │ ╭────────────────────────────────────────────╮ │
-│ │ · removed · completed · ⏎ runs it again ·… │ │
+│ │ · removed · completed · ⏎ run again        │ │
 │ ╰────────────────────────────────────────────╯ │
 ╰────────────────────────────────────────────────╯
- ↑↓ scroll · esc back · t transcript · d details  
+ ⏎ run again · t transcript · ^k all actions      

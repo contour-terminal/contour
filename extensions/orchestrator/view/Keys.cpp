@@ -17,6 +17,8 @@
 #include <variant>
 
 #include <orchestrator/core/Utf8.hpp>
+#include <orchestrator/view/Actions.hpp>
+#include <orchestrator/view/Palette.hpp>
 #include <orchestrator/view/Sections.hpp>
 
 using namespace std::string_view_literals;
@@ -28,38 +30,34 @@ namespace
 {
     // {{{ the keys
 
-    // In the order the action bar shows them: the line is cut at the tab's edge, so the keys that find
-    // everything else come first.
+    // The first row of a command names its key on the bar and in the palette (keyNameOf()).
     constexpr auto KeyTable = std::array {
-        KeyRow { .key = "up"sv, .command = KeyCommand::Up, .hint = "↑↓ move"sv, .on = PlaceSet::Fleet },
-        KeyRow { .key = "up"sv, .command = KeyCommand::Up, .hint = "↑↓ scroll"sv, .on = PlaceSet::Focus },
+        KeyRow { .key = "up"sv, .command = KeyCommand::Up },
         KeyRow { .key = "k"sv, .command = KeyCommand::Up },
         KeyRow { .key = "down"sv, .command = KeyCommand::Down },
         KeyRow { .key = "j"sv, .command = KeyCommand::Down },
         KeyRow { .key = "home"sv, .command = KeyCommand::Home },
         KeyRow { .key = "end"sv, .command = KeyCommand::End },
-        KeyRow { .key = "enter"sv, .command = KeyCommand::Enter, .hint = "⏎ open"sv, .on = PlaceSet::Fleet },
-        KeyRow { .key = "esc"sv, .command = KeyCommand::Back, .hint = "esc back"sv, .on = PlaceSet::Focus },
-        KeyRow { .key = "tab"sv, .command = KeyCommand::Tab, .hint = "tab focus"sv, .on = PlaceSet::Fleet },
-        KeyRow { .key = "b"sv, .command = KeyCommand::BoardTab, .hint = "b board"sv },
-        KeyRow { .key = "t"sv, .command = KeyCommand::TranscriptTab, .hint = "t transcript"sv },
-        KeyRow { .key = "d"sv, .command = KeyCommand::DetailsTab, .hint = "d details"sv },
-        KeyRow { .key = "n"sv, .command = KeyCommand::NewAgent, .hint = "n new agent"sv },
-        KeyRow { .key = "/"sv, .command = KeyCommand::Filter, .hint = "/ filter"sv, .on = PlaceSet::Fleet },
-        KeyRow { .key = "e"sv, .command = KeyCommand::EndRun, .hint = "e end"sv },
-        KeyRow { .key = "o"sv, .command = KeyCommand::OpenLink, .hint = "o copy link"sv },
-        KeyRow { .key = "r"sv, .command = KeyCommand::Reveal, .hint = "r agent tab"sv },
-        KeyRow { .key = "x"sv, .command = KeyCommand::RetryRemoval, .hint = "x retry removal"sv },
-        KeyRow { .key = "del"sv, .command = KeyCommand::Dismiss, .hint = "del dismiss"sv },
-        KeyRow { .key = "z"sv, .command = KeyCommand::Fold, .hint = "z fold"sv, .on = PlaceSet::Fleet },
+        KeyRow { .key = "enter"sv, .command = KeyCommand::Enter },
+        KeyRow { .key = "esc"sv, .command = KeyCommand::Back },
+        KeyRow { .key = "tab"sv, .command = KeyCommand::Tab },
+        KeyRow { .key = "b"sv, .command = KeyCommand::BoardTab },
+        KeyRow { .key = "t"sv, .command = KeyCommand::TranscriptTab },
+        KeyRow { .key = "d"sv, .command = KeyCommand::DetailsTab },
+        KeyRow { .key = "n"sv, .command = KeyCommand::NewAgent },
+        KeyRow { .key = "/"sv, .command = KeyCommand::Filter },
+        KeyRow { .key = "e"sv, .command = KeyCommand::EndRun },
+        KeyRow { .key = "o"sv, .command = KeyCommand::OpenLink },
+        KeyRow { .key = "r"sv, .command = KeyCommand::Reveal },
+        KeyRow { .key = "x"sv, .command = KeyCommand::RetryRemoval },
+        KeyRow { .key = "del"sv, .command = KeyCommand::Dismiss },
+        KeyRow { .key = "z"sv, .command = KeyCommand::Fold },
         KeyRow { .key = "pgup"sv, .command = KeyCommand::ScrollPageUp },
         KeyRow { .key = "pgdn"sv, .command = KeyCommand::ScrollPageDown },
         KeyRow { .key = "left"sv, .command = KeyCommand::PreviousPage },
         KeyRow { .key = "right"sv, .command = KeyCommand::NextPage },
-        KeyRow { .key = "?"sv, .command = KeyCommand::Help, .hint = "? help"sv },
-        // The palette's commands from phase 3; keys until then, so that they stay reachable.
-        KeyRow { .key = "R"sv, .command = KeyCommand::Refresh, .hint = "R refresh"sv },
-        KeyRow { .key = "I"sv, .command = KeyCommand::InstallPlugins, .hint = "I install plugins"sv },
+        KeyRow { .key = "^k"sv, .command = KeyCommand::Palette },
+        KeyRow { .key = "?"sv, .command = KeyCommand::Palette },
     };
 
     /// The commands that act on the selected row only where it offers them (Row::offers).
@@ -87,33 +85,49 @@ namespace
     {
         core::tui::KeyCode code = core::tui::KeyCode::None; ///< The key.
         std::string_view name = {};                         ///< What KeyRow::key calls it.
+        std::string_view shown = {};                        ///< How the bar and the palette name it.
     };
 
     constexpr auto SpecialKeys = std::array {
-        SpecialKey { .code = core::tui::KeyCode::Up, .name = "up"sv },
-        SpecialKey { .code = core::tui::KeyCode::Down, .name = "down"sv },
-        SpecialKey { .code = core::tui::KeyCode::Home, .name = "home"sv },
-        SpecialKey { .code = core::tui::KeyCode::End, .name = "end"sv },
-        SpecialKey { .code = core::tui::KeyCode::Enter, .name = "enter"sv },
-        SpecialKey { .code = core::tui::KeyCode::Escape, .name = "esc"sv },
-        SpecialKey { .code = core::tui::KeyCode::Tab, .name = "tab"sv },
-        SpecialKey { .code = core::tui::KeyCode::Delete, .name = "del"sv },
-        SpecialKey { .code = core::tui::KeyCode::PageUp, .name = "pgup"sv },
-        SpecialKey { .code = core::tui::KeyCode::PageDown, .name = "pgdn"sv },
-        SpecialKey { .code = core::tui::KeyCode::Left, .name = "left"sv },
-        SpecialKey { .code = core::tui::KeyCode::Right, .name = "right"sv },
+        SpecialKey { .code = core::tui::KeyCode::Up, .name = "up"sv, .shown = "↑"sv },
+        SpecialKey { .code = core::tui::KeyCode::Down, .name = "down"sv, .shown = "↓"sv },
+        SpecialKey { .code = core::tui::KeyCode::Home, .name = "home"sv, .shown = "home"sv },
+        SpecialKey { .code = core::tui::KeyCode::End, .name = "end"sv, .shown = "end"sv },
+        SpecialKey { .code = core::tui::KeyCode::Enter, .name = "enter"sv, .shown = "⏎"sv },
+        SpecialKey { .code = core::tui::KeyCode::Escape, .name = "esc"sv, .shown = "esc"sv },
+        SpecialKey { .code = core::tui::KeyCode::Tab, .name = "tab"sv, .shown = "tab"sv },
+        SpecialKey { .code = core::tui::KeyCode::Delete, .name = "del"sv, .shown = "del"sv },
+        SpecialKey { .code = core::tui::KeyCode::PageUp, .name = "pgup"sv, .shown = "pgup"sv },
+        SpecialKey { .code = core::tui::KeyCode::PageDown, .name = "pgdn"sv, .shown = "pgdn"sv },
+        SpecialKey { .code = core::tui::KeyCode::Left, .name = "left"sv, .shown = "←"sv },
+        SpecialKey { .code = core::tui::KeyCode::Right, .name = "right"sv, .shown = "→"sv },
     };
 
-    /// @return Whether @p key was pressed with Ctrl or Alt, which no row of the table names.
+    /// The Ctrl chords the table names, as `^` and the letter.
+    constexpr auto CtrlLetters = std::array { U'k' };
+
+    /// @return Whether @p key was pressed with Alt, which no row of the table names.
+    [[nodiscard]] bool hasAlt(core::tui::KeyEvent const& key) noexcept
+    {
+        return core::tui::hasModifier(key.modifiers, core::tui::Modifier::Alt);
+    }
+
+    /// @return Whether @p key was pressed with Ctrl or Alt: never text.
     [[nodiscard]] bool isChord(core::tui::KeyEvent const& key) noexcept
     {
-        return core::tui::hasModifier(key.modifiers, core::tui::Modifier::Ctrl)
-               || core::tui::hasModifier(key.modifiers, core::tui::Modifier::Alt);
+        return core::tui::hasModifier(key.modifiers, core::tui::Modifier::Ctrl) || hasAlt(key);
     }
 
     /// @return The name KeyRow::key gives @p key; empty for a key no name is given.
     [[nodiscard]] std::string nameOf(core::tui::KeyEvent const& key)
     {
+        if (core::tui::hasModifier(key.modifiers, core::tui::Modifier::Ctrl))
+        {
+            auto const letter =
+                std::ranges::find_if(CtrlLetters, [&](char32_t candidate) { return isCtrl(key, candidate); });
+            return letter != CtrlLetters.end() ? std::format("^{}", static_cast<char>(*letter))
+                                               : std::string {};
+        }
         if (auto const special = std::ranges::find(SpecialKeys, key.key, &SpecialKey::code);
             special != SpecialKeys.end())
             return std::string { special->name };
@@ -278,31 +292,26 @@ namespace
         return std::nullopt;
     }
 
-    /// Opens the launcher, empty; or says what is missing while the orchestrator is not configured.
+    /// Opens the launcher, empty: dispatch() said already when the orchestrator is not configured.
     [[nodiscard]] std::optional<UiAction> openNewAgent(Interaction& interaction, KeyContext const& context)
     {
-        if (context.engine == nullptr)
-            return std::nullopt;
-        interaction.launcher = openLauncher(*context.engine, {}, {});
-        if (!interaction.launcher)
-            interaction.notice = "the orchestrator is not configured: the line above says what is missing";
-        else
-            interaction.overlay = Overlay::None;
+        if (context.engine != nullptr)
+            interaction.launcher = openLauncher(*context.engine, {}, {});
         return std::nullopt;
     }
 
     using Handler = std::optional<UiAction> (*)(Interaction&, KeyContext const&);
 
     /// One command and what it does.
-    struct CommandRow
+    struct HandlerRow
     {
         KeyCommand command = KeyCommand::Up; ///< The command.
         Handler handler = nullptr;           ///< What it does.
     };
 
-    constexpr auto Commands = std::array {
+    constexpr auto Handlers = std::array {
         // In the Fleet the moves move the selection; in the Focus they scroll its tab.
-        CommandRow {
+        HandlerRow {
             .command = KeyCommand::Up,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
                 if (interaction.place == Place::Focus)
@@ -314,7 +323,7 @@ namespace
                     select(interaction, context, interaction.selected == 0 ? 0 : interaction.selected - 1);
                 return std::nullopt;
             } },
-        CommandRow {
+        HandlerRow {
             .command = KeyCommand::Down,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
                 if (interaction.place == Place::Focus)
@@ -323,7 +332,7 @@ namespace
                     select(interaction, context, interaction.selected + 1);
                 return std::nullopt;
             } },
-        CommandRow {
+        HandlerRow {
             .command = KeyCommand::Home,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
                 if (interaction.place == Place::Focus)
@@ -333,7 +342,7 @@ namespace
                 return std::nullopt;
             } },
         // `end` in the Focus returns the transcript to the agent's last words.
-        CommandRow {
+        HandlerRow {
             .command = KeyCommand::End,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
                 if (interaction.place == Place::Fleet)
@@ -349,7 +358,7 @@ namespace
                 scrollTo(interaction, context, lastScroll(context));
                 return std::nullopt;
             } },
-        CommandRow {
+        HandlerRow {
             .command = KeyCommand::ScrollPageUp,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
                 auto const from = scrollOf(interaction, context);
@@ -357,75 +366,62 @@ namespace
                 scrollTo(interaction, context, from > page ? from - page : 0);
                 return std::nullopt;
             } },
-        CommandRow {
+        HandlerRow {
             .command = KeyCommand::ScrollPageDown,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
                 scrollTo(interaction, context, scrollOf(interaction, context) + pageOf(context));
                 return std::nullopt;
             } },
-        CommandRow {
+        HandlerRow {
             .command = KeyCommand::PreviousPage,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
                 auto const page = shownPage(interaction, context);
                 turnTo(interaction, context, page > 1 ? page - 1 : 1);
                 return std::nullopt;
             } },
-        CommandRow {
+        HandlerRow {
             .command = KeyCommand::NextPage,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
                 turnTo(interaction, context, shownPage(interaction, context) + 1);
                 return std::nullopt;
             } },
         // `b`, `t` and `d` choose the Focus tab; the choice sticks for the run until its state changes.
-        CommandRow { .command = KeyCommand::BoardTab,
+        HandlerRow { .command = KeyCommand::BoardTab,
                      .handler =
                          [](Interaction& interaction, KeyContext const& context) {
                              return chooseTab(interaction, context, KeyCommand::BoardTab);
                          } },
-        CommandRow { .command = KeyCommand::TranscriptTab,
+        HandlerRow { .command = KeyCommand::TranscriptTab,
                      .handler =
                          [](Interaction& interaction, KeyContext const& context) {
                              return chooseTab(interaction, context, KeyCommand::TranscriptTab);
                          } },
-        CommandRow { .command = KeyCommand::DetailsTab,
+        HandlerRow { .command = KeyCommand::DetailsTab,
                      .handler =
                          [](Interaction& interaction, KeyContext const& context) {
                              return chooseTab(interaction, context, KeyCommand::DetailsTab);
                          } },
-        // Enter does the selected row's primary action: the table-driven version is phase 3's.
-        CommandRow {
-            .command = KeyCommand::Enter,
+        HandlerRow {
+            .command = KeyCommand::Open,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                auto const* const row = context.selected;
-                if (row == nullptr)
-                    return std::nullopt;
-                switch (row->kind)
-                {
-                    case RowKind::Heading: return toggleFold(interaction, context);
-                    case RowKind::NewAgent: return openNewAgent(interaction, context);
-                    case RowKind::Finished:
-                        // A kept worktree is checked again; any other finished run is run again.
-                        if (offers(context, KeyCommand::RetryRemoval))
-                            return runAction<RetryRemovalAction>(KeyCommand::RetryRemoval, context);
-                        openLauncherOnRun(interaction, context);
-                        return std::nullopt;
-                    case RowKind::Agent:
-                    case RowKind::Orphan: toFocus(interaction, context); return std::nullopt;
-                    case RowKind::Notice: break;
-                }
+                toFocus(interaction, context);
                 return std::nullopt;
             } },
-        CommandRow { .command = KeyCommand::Back,
+        HandlerRow {
+            .command = KeyCommand::RunAgain,
+            .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
+                openLauncherOnRun(interaction, context);
+                return std::nullopt;
+            } },
+        HandlerRow { .command = KeyCommand::Back,
                      .handler = [](Interaction& interaction, KeyContext const&) -> std::optional<UiAction> {
                          if (interaction.place == Place::Focus)
                              backToFleet(interaction);
-                         else if (interaction.overlay != Overlay::None)
-                             interaction.overlay = Overlay::None;
                          else
                              interaction.filter.clear();
                          return std::nullopt;
                      } },
-        CommandRow {
+        HandlerRow {
             .command = KeyCommand::Tab,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
                 if (interaction.place == Place::Focus)
@@ -434,56 +430,39 @@ namespace
                     toFocus(interaction, context);
                 return std::nullopt;
             } },
-        CommandRow { .command = KeyCommand::Filter,
+        HandlerRow { .command = KeyCommand::Filter,
                      .handler = [](Interaction& interaction, KeyContext const&) -> std::optional<UiAction> {
                          interaction.filtering = Filtering::Typing;
                          interaction.place = Place::Fleet;
                          return std::nullopt;
                      } },
-        CommandRow { .command = KeyCommand::Help,
+        // `^K` and `?` open the palette, with the query esc left in it.
+        HandlerRow { .command = KeyCommand::Palette,
                      .handler = [](Interaction& interaction, KeyContext const&) -> std::optional<UiAction> {
-                         interaction.overlay =
-                             interaction.overlay == Overlay::Help ? Overlay::None : Overlay::Help;
+                         interaction.palette =
+                             PaletteState { .query = std::exchange(interaction.paletteQuery, {}) };
+                         return std::nullopt;
+                     } },
+        HandlerRow { .command = KeyCommand::Timeline,
+                     .handler = [](Interaction& interaction, KeyContext const&) -> std::optional<UiAction> {
+                         interaction.overlay = Overlay::Timeline;
                          return std::nullopt;
                      } },
         // `z` folds the group of the selected row and selects its heading: the run it was on may be gone.
-        CommandRow { .command = KeyCommand::Fold, .handler = toggleFold },
-        CommandRow { .command = KeyCommand::NewAgent, .handler = openNewAgent },
-        CommandRow { .command = KeyCommand::Refresh,
+        HandlerRow { .command = KeyCommand::Fold, .handler = toggleFold },
+        HandlerRow { .command = KeyCommand::NewAgent, .handler = openNewAgent },
+        HandlerRow { .command = KeyCommand::Refresh,
                      .handler = [](Interaction&, KeyContext const&) -> std::optional<UiAction> {
                          return UiAction { RefreshNowAction {} };
                      } },
-        // `I` installs the plugins the agents lack into the user's own Claude Code; it asks once first.
-        CommandRow {
-            .command = KeyCommand::InstallPlugins,
-            .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                if (context.engine == nullptr)
-                    return std::nullopt;
-                auto const missing = context.engine->missingPlugins();
-                if (context.engine->installingPlugins())
-                {
-                    interaction.notice = "installing the plugins…";
-                    return std::nullopt;
-                }
-                if (missing.empty())
-                {
-                    interaction.notice = "every plugin the tasks need is installed";
-                    return std::nullopt;
-                }
-                if (interaction.pendingInstall != InstallConfirm::Asked)
-                {
-                    auto ids = std::string {};
-                    for (auto const& plugin: missing)
-                        ids += (ids.empty() ? "" : ", ") + plugin.id;
-                    interaction.pendingInstall = InstallConfirm::Asked;
-                    interaction.notice = std::format("I again installs {} with claude plugin install", ids);
-                    return std::nullopt;
-                }
-                interaction.pendingInstall = InstallConfirm::None;
-                return UiAction { InstallPluginsAction {} };
-            } },
+        // The palette installs the plugins the agents lack into the user's own Claude Code: its entry names
+        // them, and dispatch() refuses while none is missing or they are being installed.
+        HandlerRow { .command = KeyCommand::InstallPlugins,
+                     .handler = [](Interaction&, KeyContext const&) -> std::optional<UiAction> {
+                         return UiAction { InstallPluginsAction {} };
+                     } },
         // D14: ending a run asks once. The first `e` names the run on the action bar; a second on it ends it.
-        CommandRow {
+        HandlerRow {
             .command = KeyCommand::EndRun,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
                 auto action = runAction<EndRunAction>(KeyCommand::EndRun, context);
@@ -497,23 +476,23 @@ namespace
                 interaction.pendingEnd.clear();
                 return action;
             } },
-        CommandRow { .command = KeyCommand::RetryRemoval,
+        HandlerRow { .command = KeyCommand::RetryRemoval,
                      .handler =
                          [](Interaction&, KeyContext const& context) {
                              return runAction<RetryRemovalAction>(KeyCommand::RetryRemoval, context);
                          } },
-        CommandRow { .command = KeyCommand::Dismiss,
+        HandlerRow { .command = KeyCommand::Dismiss,
                      .handler =
                          [](Interaction&, KeyContext const& context) {
                              return runAction<DismissAction>(KeyCommand::Dismiss, context);
                          } },
-        CommandRow { .command = KeyCommand::Reveal,
+        HandlerRow { .command = KeyCommand::Reveal,
                      .handler =
                          [](Interaction&, KeyContext const& context) {
                              return runAction<RevealAgentAction>(KeyCommand::Reveal, context);
                          } },
         // `o` copies the run's link with OSC 52 until the frontend can open it (phase 6), and says so.
-        CommandRow {
+        HandlerRow {
             .command = KeyCommand::OpenLink,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
                 auto const* const run =
@@ -606,11 +585,20 @@ std::span<KeyRow const> keyRows() noexcept
 
 std::optional<KeyCommand> commandFor(core::tui::KeyEvent const& key) noexcept
 {
-    if (isChord(key))
+    if (hasAlt(key))
         return std::nullopt;
     auto const name = nameOf(key);
     auto const row = std::ranges::find(KeyTable, name, &KeyRow::key);
     return row != KeyTable.end() ? std::optional { row->command } : std::nullopt;
+}
+
+std::string_view keyNameOf(KeyCommand command) noexcept
+{
+    auto const row = std::ranges::find(KeyTable, command, &KeyRow::command);
+    if (row == KeyTable.end())
+        return {};
+    auto const special = std::ranges::find(SpecialKeys, row->key, &SpecialKey::name);
+    return special != SpecialKeys.end() ? special->shown : row->key;
 }
 
 bool isRowCommand(KeyCommand command) noexcept
@@ -700,13 +688,27 @@ bool hasAgentTab(Engine const* engine, std::string_view run) noexcept
 
 std::optional<UiAction> dispatch(KeyCommand command, Interaction& interaction, KeyContext const& context)
 {
-    auto const row = std::ranges::find(Commands, command, &CommandRow::command);
-    return row != Commands.end() ? row->handler(interaction, context) : std::nullopt;
+    // Enter does the selected row's primary action, which the bar lists first.
+    if (command == KeyCommand::Enter)
+    {
+        auto const primary = primaryAction(context.selected);
+        if (!primary)
+            return std::nullopt;
+        command = *primary;
+    }
+    // An action that does not apply to the selected row, or that the engine does not allow now, says why.
+    if (auto notice = refusalNotice(context.selected, command, context.engine); !notice.empty())
+    {
+        interaction.notice = std::move(notice);
+        return std::nullopt;
+    }
+    auto const row = std::ranges::find(Handlers, command, &HandlerRow::command);
+    return row != Handlers.end() ? row->handler(interaction, context) : std::nullopt;
 }
 
 bool isDispatched(KeyCommand command) noexcept
 {
-    return std::ranges::contains(Commands, command, &CommandRow::command);
+    return command == KeyCommand::Enter || std::ranges::contains(Handlers, command, &HandlerRow::command);
 }
 
 namespace
@@ -720,6 +722,9 @@ namespace
                                                                          KeyContext const& context)
     {
         if (interaction.place != Place::Focus || !hasMessageBox(context.engine, context.selected))
+            return std::nullopt;
+        // `^K` opens the palette from the box too: a chord is never text.
+        if (commandFor(key) == KeyCommand::Palette && isChord(key))
             return std::nullopt;
         switch (key.key)
         {
@@ -791,6 +796,17 @@ std::optional<UiAction> applyKey(core::tui::KeyEvent const& key,
                                  Interaction& interaction,
                                  KeyContext const& context)
 {
+    if (interaction.palette)
+        return applyPaletteKey(key, interaction, context);
+    if (interaction.overlay == Overlay::Timeline)
+    {
+        // The timeline takes no command but the palette's: esc and ⏎ close it, as anything leaving it does.
+        auto const command = commandFor(key);
+        if (command == KeyCommand::Palette || command == KeyCommand::Back || command == KeyCommand::Enter
+            || hasAlt(key))
+            interaction.overlay = Overlay::None;
+        return command == KeyCommand::Palette ? dispatch(*command, interaction, context) : std::nullopt;
+    }
     if (auto typed = typeIntoMessage(key, interaction, context))
         return std::move(*typed);
     if (typeIntoFilter(key, interaction) == FilterInput::Taken)
@@ -799,11 +815,6 @@ std::optional<UiAction> applyKey(core::tui::KeyEvent const& key,
     if (!interaction.pendingEnd.empty() && command != KeyCommand::EndRun)
     {
         interaction.pendingEnd.clear();
-        return std::nullopt;
-    }
-    if (interaction.pendingInstall == InstallConfirm::Asked && command != KeyCommand::InstallPlugins)
-    {
-        interaction.pendingInstall = InstallConfirm::None;
         return std::nullopt;
     }
     return command ? dispatch(*command, interaction, context) : std::nullopt;

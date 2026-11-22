@@ -21,4 +21,4 @@
 │ │ rebase on master first▏                                                  │ │
 │ ╰──────────────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- ⏎ send · alt⏎ line · esc keep draft · pgup pgdn scroll                         
+ ⏎ send · alt⏎ line · esc keep draft · ^k all actions · pgup pgdn scroll        

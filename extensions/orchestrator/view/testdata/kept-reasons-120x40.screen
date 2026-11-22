@@ -34,7 +34,7 @@
 │                                              │ │ 18:36 result .                                                      │
 │                                              │ │ 18:37 claude done.                                                  │
 │                                              │ │ ╭─────────────────────────────────────────────────────────────────╮ │
-│                                              │ │ │ ⚑ kept · ended by you · 1 entry kept · ⏎ retries the removal ·… │ │
+│                                              │ │ │ ⚑ kept · ended by you · 1 entry kept · ⏎ retry removal          │ │
 │                                              │ │ ╰─────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
- ↑↓ move · ⏎ open · tab focus · b board · t transcript · d details · n new agent · / filter · o copy link               
+ ⏎ retry removal · d details · del dismiss · n new agent · ^k all actions                                               

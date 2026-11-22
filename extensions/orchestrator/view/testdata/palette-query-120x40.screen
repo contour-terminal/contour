@@ -1,0 +1,40 @@
+ ✦ Agents                                                                                      ⬢ 4/4 ▰▰▰▰  ● 2 need you 
+╭─ Agents 7 ───────────────────────────────────╮ ╭─ issue-2356 · work on issue · sonnet ─────────────────────── ⚑ kept ╮
+│ NEEDS YOU 2                                  │ │ Report the Qt macOS bug that drops Ctrl+Cmd+arrow key presses, the… │
+│ ? pr-2346 · fix CI                 asking 6m │ │ Board  Transcript  Details                                          │
+│   asks in its tab · r shows it               │ │ task      work on issue                                             │
+│ … issue-2253 · work on issue      waiting 6m │ │ model     sonnet                                                    │
+│   Waiting for Build pace                     │ │ state     ended by you, worktree kept, seen: .git file was changed; │
+│ WORKING 1 of 4                               │ │             nothing was run there                                   │
+│ ⠿ pr-2375 · fix CI                working 6m │ │ branch    agent/issue-2356-20261113-151001                          │
+│ TO REVIEW 1                                  │ │ worktree  /home/u/worktrees/contour/issue-2356-20261113-151001      │
+│ ✓ pr-2379 · fix CI                      done │ │ url       https://github.com/contour-terminal/contour/issues/2356   │
+│   reported done                              │ │ kept      what kept its worktree:                                   │
+│ FINISHED 3                                   │ │           .git file was changed; nothing was run there              │
+│ · pr-2366 · fix CI                   removed │ │           x or enter tries the removal again                        │
+│   completed                                  │ │                                                                     │
+│▍⚑ issue-2356 · work on iss╭─ ✦ All actions ──────────────────────────────────────────────╮                           │
+│▍  ended by you · 1 entry k│ › re▏                                                        │                           │
+│ ✗ pr-2114 · fix CI        │                                                              │                           │
+│   preparation failed · age│▍ retry removal                                             ⏎ │                           │
+│                           │  refresh the lists                              palette only │                           │
+│ + new agent               │  filter the agents                                         / │                           │
+│                           │                                                              │                           │
+│                           │ ⏎ run · ↑↓ choose · esc close                                │                           │
+│                           ╰──────────────────────────────────────────────────────────────╯                           │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │ ── latest ───────────────────────────────────────────────────────── │
+│                                              │ │ 18:36 tool Bash {"command":"mkdir sub && cd sub && ls -a ..","desc… │
+│                                              │ │ 18:36 result .                                                      │
+│                                              │ │ 18:37 claude done.                                                  │
+│                                              │ │ ╭─────────────────────────────────────────────────────────────────╮ │
+│                                              │ │ │ ⚑ kept · ended by you · 1 entry kept · ⏎ retry removal          │ │
+│                                              │ │ ╰─────────────────────────────────────────────────────────────────╯ │
+╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
+ ⏎ retry removal · d details · del dismiss · n new agent · ^k all actions                                               
