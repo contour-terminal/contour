@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <expected>
 #include <format>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <ranges>
@@ -27,8 +28,10 @@
 #include <orchestrator/core/Jira.hpp>
 #include <orchestrator/core/Json.hpp>
 #include <orchestrator/core/Model.hpp>
+#include <orchestrator/core/Overloaded.hpp>
 #include <orchestrator/core/Prompt.hpp>
 #include <orchestrator/core/Provider.hpp>
+#include <orchestrator/core/QuickReplies.hpp>
 
 using namespace std::string_view_literals;
 
@@ -66,7 +69,9 @@ struct glz::meta<orchestrator::config::detail::JsonConfig>
                                               "permissions",
                                               &T::permissions,
                                               "permission_profiles",
-                                              &T::permissionProfiles);
+                                              &T::permissionProfiles,
+                                              "quick_replies",
+                                              &T::quickReplies);
 };
 
 /// A task's keys: `applies_to` is no member name.
@@ -102,8 +107,10 @@ namespace
     using config::detail::JsonConfig;
     using config::detail::JsonDuration;
     using config::detail::JsonIssueSource;
+    using config::detail::JsonKey;
     using config::detail::JsonPermissionProfile;
     using config::detail::JsonPluginRequirement;
+    using config::detail::JsonQuickReply;
     using config::detail::JsonRepo;
     using config::detail::JsonTask;
 
@@ -154,6 +161,8 @@ namespace
         ReservedKeys, ///< The dashboardKeys() that type a character.
         PermissionModes, ///< PermissionModeNames.
         BuiltinProfiles, ///< builtinProfiles().
+        PaneKeys,        ///< paneKeyNames().
+        AfterReplies,    ///< afterReplyNames().
     };
 
     /// What each problem means; one row per ConfigProblem, in its order.
@@ -243,6 +252,13 @@ namespace
                           "must be a tool, or a tool and its specifier, such as Read or Bash(git push:*)" },
         ProblemText { .problem = ConfigProblem::SettingsTooLarge,
                       .text = "holds more rules than one --settings argument can carry" },
+        ProblemText { .problem = ConfigProblem::NotAReplyKey, .text = "must be a digit from 1 to 9" },
+        ProblemText {
+            .problem = ConfigProblem::NotAPaneKey, .text = "must be one of", .listing = Listing::PaneKeys },
+        ProblemText { .problem = ConfigProblem::UnknownThen,
+                      .text = "must be one of",
+                      .listing = Listing::AfterReplies },
+        ProblemText { .problem = ConfigProblem::LabelTooLong, .text = "is longer than 40 bytes" },
     };
 
     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ProblemTexts.size()),
@@ -250,7 +266,7 @@ namespace
                                           return static_cast<std::size_t>(ProblemTexts[i].problem) == i;
                                       }),
                   "ProblemTexts has one row per ConfigProblem, in its order");
-    static_assert(ProblemTexts.size() == static_cast<std::size_t>(ConfigProblem::SettingsTooLarge) + 1,
+    static_assert(ProblemTexts.size() == static_cast<std::size_t>(ConfigProblem::LabelTooLong) + 1,
                   "ProblemTexts covers every ConfigProblem");
 
     /// @return The values @p listing names, as the user writes them, of the rows @p sources holds.
@@ -287,6 +303,10 @@ namespace
             case Listing::BuiltinProfiles:
                 for (auto const& row: builtinProfiles())
                     values.push_back(row.name);
+                break;
+            case Listing::PaneKeys: std::ranges::copy(paneKeyNames(), std::back_inserter(values)); break;
+            case Listing::AfterReplies:
+                std::ranges::copy(afterReplyNames(), std::back_inserter(values));
                 break;
         }
         return values;
@@ -331,6 +351,7 @@ namespace
         String,   ///< A string.
         Count,    ///< A non-negative integer that fits 32 bits.
         Duration, ///< A string, or a non-negative integer (only 0 is accepted later).
+        Key,      ///< A string, or a non-negative integer: a digit.
         Strings,  ///< An array of strings.
         Objects,  ///< An array of objects of Field::object's kind.
     };
@@ -344,6 +365,7 @@ namespace
         Task,
         Plugin,
         PermissionProfile,
+        QuickReply,
     };
 
     /// One key an object may have, and the type of its value.
@@ -371,6 +393,7 @@ namespace
         Field { .key = "permission_profiles",
                 .type = JsonType::Objects,
                 .object = ObjectKind::PermissionProfile },
+        Field { .key = "quick_replies", .type = JsonType::Objects, .object = ObjectKind::QuickReply },
     };
 
     constexpr auto RepoFields = std::array {
@@ -413,6 +436,13 @@ namespace
         Field { .key = "deny", .type = JsonType::Strings },
     };
 
+    constexpr auto QuickReplyFields = std::array {
+        Field { .key = "key", .type = JsonType::Key },
+        Field { .key = "label", .type = JsonType::String },
+        Field { .key = "press", .type = JsonType::Key },
+        Field { .key = "then", .type = JsonType::String },
+    };
+
     [[nodiscard]] constexpr std::span<Field const> fieldsOf(ObjectKind kind) noexcept
     {
         switch (kind)
@@ -423,6 +453,7 @@ namespace
             case ObjectKind::Task: return TaskFields;
             case ObjectKind::Plugin: return PluginFields;
             case ObjectKind::PermissionProfile: return PermissionProfileFields;
+            case ObjectKind::QuickReply: return QuickReplyFields;
         }
         return {};
     }
@@ -447,6 +478,8 @@ namespace
                   "PluginFields and JsonPluginRequirement name the same keys");
     static_assert(matchesMirror<JsonPermissionProfile>(PermissionProfileFields),
                   "PermissionProfileFields and JsonPermissionProfile name the same keys");
+    static_assert(matchesMirror<JsonQuickReply>(QuickReplyFields),
+                  "QuickReplyFields and JsonQuickReply name the same keys");
 
     /// Integers are read exactly, so that a count is never a rounded double.
     using Generic = glz::generic_u64;
@@ -477,7 +510,8 @@ namespace
             case JsonType::Count:
                 return number != nullptr && *number <= std::numeric_limits<uint32_t>::max() ? std::nullopt
                                                                                             : wrongType;
-            case JsonType::Duration: return value.is_string() || number != nullptr ? std::nullopt : wrongType;
+            case JsonType::Duration:
+            case JsonType::Key: return value.is_string() || number != nullptr ? std::nullopt : wrongType;
             case JsonType::Strings:
             case JsonType::Objects:
                 if (array == nullptr)
@@ -961,6 +995,54 @@ namespace
         return plugins;
     }
 
+    /// @return @p key as text: a bare number as its digits.
+    [[nodiscard]] std::string keyText(JsonKey const& key)
+    {
+        return std::visit(Overloaded {
+                              [](uint64_t number) { return std::to_string(number); },
+                              [](std::string const& text) { return text; },
+                          },
+                          key);
+    }
+
+    [[nodiscard]] Checked<std::vector<QuickReply>> quickRepliesOf(
+        std::optional<std::vector<JsonQuickReply>> const& value)
+    {
+        if (!value)
+            return defaultQuickReplies();
+        auto replies = std::vector<QuickReply> {};
+        for (auto const [index, json]: std::views::enumerate(*value))
+        {
+            auto const key = [&](std::string_view field) {
+                return std::format("quick_replies[{}].{}", index, field);
+            };
+            if (!json.key)
+                return fail(key("key"), ConfigProblem::Missing);
+            auto const digit = keyText(*json.key);
+            if (digit.size() != 1 || digit.front() < '1' || digit.front() > '9')
+                return fail(key("key"), ConfigProblem::NotAReplyKey);
+            if (findQuickReply(replies, digit.front()) != nullptr)
+                return fail(key("key"), ConfigProblem::Duplicate);
+            if (!json.label)
+                return fail(key("label"), ConfigProblem::Missing);
+            if (json.label->empty())
+                return fail(key("label"), ConfigProblem::Empty);
+            if (auto const problem = textProblem(*json.label))
+                return fail(key("label"), *problem);
+            if (json.label->size() > MaxQuickReplyLabelBytes)
+                return fail(key("label"), ConfigProblem::LabelTooLong);
+            auto const press = paneKeyNamed(json.press ? keyText(*json.press) : digit);
+            if (!press)
+                return fail(key("press"), ConfigProblem::NotAPaneKey);
+            auto const then = json.then ? afterReplyNamed(*json.then) : std::optional { AfterReply::Wait };
+            if (!then)
+                return fail(key("then"), ConfigProblem::UnknownThen);
+            replies.push_back(
+                QuickReply { .key = digit.front(), .label = *json.label, .press = *press, .then = *then });
+        }
+        return replies;
+    }
+
     /// @return The rules of a profile's @p list, each checked, reported at `<key>[i]`.
     [[nodiscard]] Checked<std::vector<std::string>> checkedRules(
         std::optional<std::vector<std::string>> const& list, std::string const& key)
@@ -1194,6 +1276,8 @@ std::expected<Config, ConfigError> Config::parse(std::string_view json,
             return e;
         if (auto e = assign(values.plugins, pluginsOf(document.plugins)))
             return e;
+        if (auto e = assign(values.quickReplies, quickRepliesOf(document.quickReplies)))
+            return e;
         auto permissions = permissionsOf(document.permissions, document.permissionProfiles, values.tasks);
         if (!permissions)
             return std::move(permissions.error());
@@ -1219,6 +1303,7 @@ Config::Config(Values values) noexcept:
     _repos { std::move(values.repos) },
     _tasks { std::move(values.tasks) },
     _plugins { std::move(values.plugins) },
+    _quickReplies { std::move(values.quickReplies) },
     _profiles { std::move(values.profiles) },
     _defaultProfile { std::move(values.defaultProfile) },
     _sources { values.sources }

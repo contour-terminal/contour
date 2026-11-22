@@ -388,6 +388,10 @@ constexpr auto RejectRows = std::array {
     RejectRow { "a task model not in models", { .find = R"("model": "sonnet")", .replace = R"("model": "claude-opus-5-5")" }, "tasks[0].model", ConfigProblem::UnlistedModel },
     RejectRow { "a prompt without {url}", { .find = R"("/contour-workflows:fix-ci {url}")", .replace = R"("/contour-workflows:fix-ci")" }, "tasks[0].prompt", ConfigProblem::MissingUrl },
     RejectRow { "a prompt starting with -", { .find = R"("/contour-workflows:fix-ci {url}")", .replace = R"("-p {url}")" }, "tasks[0].prompt", ConfigProblem::LeadingDash },
+    RejectRow { "a quick reply on 0", { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "quick_replies": [ { "key": 0, "label": "no" } ],)" }, "quick_replies[0].key", ConfigProblem::NotAReplyKey },
+    RejectRow { "a quick reply pressing Enter", { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "quick_replies": [ { "key": "1", "label": "yes", "press": "enter" } ],)" }, "quick_replies[0].press", ConfigProblem::NotAPaneKey },
+    RejectRow { "a quick reply then sending", { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "quick_replies": [ { "key": "1", "label": "yes", "then": "send" } ],)" }, "quick_replies[0].then", ConfigProblem::UnknownThen },
+    RejectRow { "a quick reply's long label", { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "quick_replies": [ { "key": "1", "label": "yes, and do not ask again for anything at all" } ],)" }, "quick_replies[0].label", ConfigProblem::LabelTooLong },
 };
 // clang-format on
 
@@ -399,6 +403,82 @@ TEST_CASE("Config.rejects", "[config]")
     {
         CAPTURE(row.label, row.key);
         auto const config = parse(row.input);
+        REQUIRE_FALSE(config.has_value());
+        CHECK(config.error().key == row.key);
+        CHECK(config.error().problem == row.problem);
+    }
+}
+
+TEST_CASE("quick_replies: the default, none, or a table of its own", "[config]")
+{
+    auto const defaulted = parse(Input {});
+    REQUIRE(defaulted.has_value());
+    CHECK(std::ranges::equal(defaulted->quickReplies(), defaultQuickReplies()));
+    // Claude Code's No moves between 2, 3 and 4 with the menu; Escape rejects whichever it is.
+    auto const* const no = findQuickReply(defaulted->quickReplies(), '3');
+    REQUIRE(no != nullptr);
+    CHECK(no->press == PaneKey::Escape);
+    CHECK(no->then == AfterReply::Message);
+
+    auto const none =
+        parse(Input { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "quick_replies": [],)" });
+    REQUIRE(none.has_value());
+    CHECK(none->quickReplies().empty());
+
+    // A bare digit, as YAML writes `key: 1`, is its digit; `press` defaults to it.
+    auto const own =
+        parse(Input { .find = R"("max_agents": 4,)",
+                      .replace = R"("max_agents": 4, "quick_replies": [ { "key": 1, "label": "go" },
+                     { "key": "4", "label": "stop", "press": "esc", "then": "message" },
+                     { "key": "5", "label": "the fifth", "press": 2, "then": "wait" } ],)" });
+    REQUIRE(own.has_value());
+    CHECK(std::ranges::equal(
+        own->quickReplies(),
+        std::array {
+            QuickReply { .key = '1', .label = "go", .press = PaneKey::Digit1, .then = AfterReply::Wait },
+            QuickReply { .key = '4', .label = "stop", .press = PaneKey::Escape, .then = AfterReply::Message },
+            QuickReply {
+                .key = '5', .label = "the fifth", .press = PaneKey::Digit2, .then = AfterReply::Wait } }));
+
+    struct Row
+    {
+        std::string_view replies;
+        std::string_view key;
+        ConfigProblem problem;
+    };
+    for (auto const& row: std::array {
+             Row { .replies = R"([ { "label": "yes" } ])",
+                   .key = "quick_replies[0].key",
+                   .problem = ConfigProblem::Missing },
+             Row { .replies = R"([ { "key": "a", "label": "yes" } ])",
+                   .key = "quick_replies[0].key",
+                   .problem = ConfigProblem::NotAReplyKey },
+             Row { .replies = R"([ { "key": 10, "label": "yes" } ])",
+                   .key = "quick_replies[0].key",
+                   .problem = ConfigProblem::NotAReplyKey },
+             Row { .replies = R"([ { "key": "1", "label": "yes" }, { "key": 1, "label": "no" } ])",
+                   .key = "quick_replies[1].key",
+                   .problem = ConfigProblem::Duplicate },
+             Row { .replies = R"([ { "key": "1" } ])",
+                   .key = "quick_replies[0].label",
+                   .problem = ConfigProblem::Missing },
+             Row { .replies = R"([ { "key": "1", "label": "" } ])",
+                   .key = "quick_replies[0].label",
+                   .problem = ConfigProblem::Empty },
+             Row { .replies = R"([ { "key": "1", "label": "yes", "press": "0" } ])",
+                   .key = "quick_replies[0].press",
+                   .problem = ConfigProblem::NotAPaneKey },
+             Row { .replies = R"([ { "key": "1", "label": "yes", "colour": "red" } ])",
+                   .key = "quick_replies[0].colour",
+                   .problem = ConfigProblem::UnknownKey },
+             Row { .replies = R"([ { "key": true, "label": "yes" } ])",
+                   .key = "quick_replies[0].key",
+                   .problem = ConfigProblem::WrongType },
+         })
+    {
+        CAPTURE(row.replies);
+        auto const replaced = std::format(R"("max_agents": 4, "quick_replies": {},)", row.replies);
+        auto const config = parse(Input { .find = R"("max_agents": 4,)", .replace = replaced });
         REQUIRE_FALSE(config.has_value());
         CHECK(config.error().key == row.key);
         CHECK(config.error().problem == row.problem);

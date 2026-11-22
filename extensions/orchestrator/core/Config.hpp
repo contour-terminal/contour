@@ -17,6 +17,7 @@
 #include <orchestrator/core/Permissions.hpp>
 #include <orchestrator/core/Plugins.hpp>
 #include <orchestrator/core/Provider.hpp>
+#include <orchestrator/core/QuickReplies.hpp>
 
 namespace orchestrator
 {
@@ -138,6 +139,10 @@ enum class ConfigProblem : uint8_t
     BypassRefused,          ///< The `bypassPermissions` mode, which no profile may name.
     NotPermissionRule,      ///< A permission rule that is not `Tool` or `Tool(specifier)`.
     SettingsTooLarge,       ///< A permission profile too large to pass to `--settings`.
+    NotAReplyKey,           ///< A quick reply's key that is not a digit from 1 to 9.
+    NotAPaneKey,            ///< A quick reply's `press` that is not a digit from 1 to 9 or `esc`.
+    UnknownThen,            ///< A quick reply's `then` other than `wait` or `message`.
+    LabelTooLong,           ///< A quick reply's label longer than MaxQuickReplyLabelBytes.
 };
 
 /// Why a configuration was refused.
@@ -231,6 +236,9 @@ class Config
     [[nodiscard]] std::string const& boardInstruction() const noexcept { return _boardInstruction; }
     /// @return The Claude Code plugins the agents need (`plugins`); empty: none is checked for.
     [[nodiscard]] std::span<PluginRequirement const> plugins() const noexcept { return _plugins; }
+    /// @return The quick replies an asking agent is answered with (`quick_replies`), in the configured
+    ///         order; empty: none, the agent is answered in its tab.
+    [[nodiscard]] std::span<QuickReply const> quickReplies() const noexcept { return _quickReplies; }
     /// @return Every permission profile, resolved: the built-in ones, as `permission_profiles` changed them,
     ///         then the configured ones.
     [[nodiscard]] std::span<PermissionProfile const> profiles() const noexcept { return _profiles; }
@@ -282,6 +290,7 @@ class Config
         std::chrono::milliseconds statusBoardAfter = DefaultStatusBoardAfter;
         std::string boardInstruction = std::string { DefaultBoardInstruction };
         std::vector<PluginRequirement> plugins = defaultPluginRequirements();
+        std::vector<QuickReply> quickReplies = defaultQuickReplies();
         std::vector<PermissionProfile> profiles = {};
         std::string defaultProfile = std::string { DefaultProfileName };
         std::chrono::milliseconds endDoneAfter = DefaultEndDoneAfter;
@@ -305,6 +314,7 @@ class Config
     std::vector<Repo> _repos;
     std::vector<TaskDef> _tasks;
     std::vector<PluginRequirement> _plugins;
+    std::vector<QuickReply> _quickReplies;
     std::vector<PermissionProfile> _profiles;
     std::string _defaultProfile;
     SourceTables _sources;

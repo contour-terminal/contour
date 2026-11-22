@@ -53,6 +53,18 @@ struct JsonPermissionProfile
     std::optional<std::vector<std::string>> deny;
 };
 
+/// A key: a string such as "1" or "esc", or a bare digit, which a YAML-to-JSON conversion writes as a number.
+using JsonKey = std::variant<uint64_t, std::string>;
+
+/// One `quick_replies` entry.
+struct JsonQuickReply
+{
+    std::optional<JsonKey> key;
+    std::optional<std::string> label;
+    std::optional<JsonKey> press;
+    std::optional<std::string> then;
+};
+
 /// One `tasks` entry; `applies_to` is no member name, Config.cpp maps the key.
 struct JsonTask
 {
@@ -83,6 +95,7 @@ struct JsonConfig
     std::optional<std::vector<JsonPluginRequirement>> plugins;
     std::optional<std::string> permissions;
     std::optional<std::vector<JsonPermissionProfile>> permissionProfiles;
+    std::optional<std::vector<JsonQuickReply>> quickReplies;
 };
 
 } // namespace orchestrator::config::detail

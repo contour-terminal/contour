@@ -84,6 +84,8 @@ add_library(orchestrator_core STATIC
     core/Plugins.hpp
     core/PluginsJson.hpp
     core/Prompt.cpp
+    core/QuickReplies.cpp
+    core/QuickReplies.hpp
     core/Prompt.hpp
     core/Provider.cpp
     core/Provider.hpp
@@ -187,6 +189,7 @@ if(ORCHESTRATOR_TESTING)
         core/Permissions_test.cpp
         core/Plugins_test.cpp
         core/Prompt_test.cpp
+        core/QuickReplies_test.cpp
         core/Provider_test.cpp
         core/Reconcile_test.cpp
         core/Record_test.cpp
