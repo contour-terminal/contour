@@ -48,7 +48,7 @@ result of the last action until the next key (see "Actions and the palette" belo
 | Group | Holds |
 | --- | --- |
 | NEEDS YOU | an agent that asks for a permission (`?`, at Claude Code's menu, which `1 2 3` answer), waits for you (`…`, its turn ended without done, or it asked a question), or stopped by an error (`✗`) |
-| WORKING | an agent at work, starting (`◌`, its tab open and no report yet), preparing or ending |
+| WORKING | an agent at work (a turning `⠋` spinner), starting (`◌`, its tab open and no report yet), preparing or ending |
 | TO REVIEW | an agent that reported done (`✓`), its run still open |
 | FINISHED | every run kept and not dismissed: removed (`·`), kept (`⚑`) or failed (`✗`), folded to the newest five |
 
@@ -215,6 +215,24 @@ plugins are installed and enabled. Each missing one is a problem line, and the l
 asks for a second `Enter`. The palette's "install the missing plugins" (`Ctrl+K`, then `install`) runs
 `claude plugin marketplace add` and `claude plugin install` into your own Claude Code and checks again. On a machine you reach only through `contour client`,
 this is how its agents get their skills. The orchestrator never edits Claude Code's settings files.
+
+## Attention
+
+The dashboard tells you where to look without being asked:
+
+- **A run that starts to need you** — it asks, waits for you, or stopped by an error — moves to Needs you
+  without taking the selection, and the pill counts it. The action bar's right end names it,
+  `pr-2375 needs you · home`, until you select it or it no longer needs you. A run that already waited when
+  the dashboard opened is not named; one that goes from asking to waiting (as `3` leaves it) is not named again.
+- **In another tab**, the orchestrator's status-line summary (`{DaemonExtension:orchestrator}`) counts the
+  same runs: `⬢ agents 3/4 · ●2 need you`. A served tab can set no title and raise no notification or bell
+  (the host drops those sequences), so the summary is the way the count reaches you elsewhere.
+- **Unseen news:** a run that changed since you last selected it — its state, or its transcript as its
+  statistics say — carries a `•` after its name, gone once you select it. In the Focus, the Board or the
+  Transcript tab carries a `•` when its board or its last page changed since that tab was last shown. What the
+  dashboard has seen is kept in memory: a dashboard that opens marks nothing.
+- **Spinners:** a working run's glyph turns (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`), a frame on each redraw the dashboard makes
+  anyway — an age moving on, a followed transcript, a key — so it never wakes the guest on its own.
 
 ## Permissions
 

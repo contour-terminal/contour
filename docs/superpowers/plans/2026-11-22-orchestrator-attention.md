@@ -5,21 +5,20 @@
 > tracking.
 
 **Goal:** The dashboard says where to look without being asked: a run that starts to need the user is
-named on the action bar and raises a desktop notification while the dashboard is not focused, the
-dashboard's tab title counts the runs that need the user, a run (and a Focus tab) with news since it was
-last looked at carries a `•`, and working rows turn a spinner.
+named on the action bar, the status-line summary counts the runs that need the user, a run (and a Focus tab)
+with news since it was last looked at carries a `•`, and working rows turn a spinner.
 
 **Architecture:**
-- **No host change.** Everything goes out in the frame the dashboard already writes through `tab-write`:
-  - the notification is an OSC 99 desktop notification with `o=unfocused`, which Contour raises only while
-    the dashboard's pane lacks focus (`isNoticeWanted`, the existing path every application notification
-    takes);
-  - the tab title is OSC 2, `Agents · 2!`, written whenever the count changes (and in the first frame).
+- **No host change.** The spec asks for a tab title written as OSC 2 and a notification through the existing
+  path "if the host offers one". It does not: a served tab executes only the sequences that draw
+  (`vtbackend/vt/ServedTabSequences.hpp`), so a title, a notification (OSC 99) and BEL written through
+  `tab-write` are dropped by design, and a served tab's preset name would win over a title anyway. The count
+  reaches another tab through the existing `summary-set` instead: its `●N blocked` term becomes `●N need
+  you`, counted by one `needsUser()` predicate the Fleet's grouping shares.
 - **Needs-you entries:** the dashboard keeps the runs that were in Needs you when it last built its rows.
-  The first build only primes the set: a run already waiting when the dashboard opens raises nothing. A run
-  that enters it afterwards (from any group; moving between Asking and Waiting is not an entry) raises one
-  notification and becomes the action bar's right-end notice, `pr-2375 needs you · home`, until it is
-  selected or leaves Needs you.
+  The first build only primes the set: a run already waiting when the dashboard opens is not named. A run
+  that enters it afterwards (from any group; moving between Asking and Waiting is not an entry) becomes the
+  action bar's right-end notice, `pr-2375 needs you · home`, until it is selected or leaves Needs you.
 - **Unseen markers (`view/Attention.{hpp,cpp}`):** a `SeenLedger` per dashboard, in memory.
   - A run's Fleet news compares its `RunMarks` (row state, the time of its last state change, its
     transcript's last timestamp from `agent-stats`) with the marks as last seen. A run first met is seen as
@@ -38,7 +37,6 @@ Spec: `docs/superpowers/specs/2026-11-22-orchestrator-fleet-focus-design.md`, "A
 ## Global constraints
 
 - No extra timer: `nextRepaintDue()` is unchanged by the spinner and the markers.
-- The notification and the title carry only sanitised text (`cut()`), never a control character.
 - `3`'s unpersisted hold keeps a run in Needs you (Asking → Waiting is no entry, so no second notice).
 - Zero warnings, clang-tidy clean, `-j4`. Goldens rewritten only deliberately.
 
@@ -46,13 +44,14 @@ Spec: `docs/superpowers/specs/2026-11-22-orchestrator-fleet-focus-design.md`, "A
 
 | File | Change |
 | --- | --- |
-| `view/Attention.{hpp,cpp}`, `view/Attention_test.cpp` | `RunMarks`, `News`, `SeenLedger`, `needsYouEntries()`, the OSC 99 / OSC 2 writers |
+| `view/Attention.{hpp,cpp}`, `view/Attention_test.cpp` | `RunMarks`, `SeenLedger`, `needingRuns()`, `needsYouEntries()` |
+| `core/Finished.{hpp,cpp}` | `needsUser()`; the summary's `●N need you` |
 | `view/Fleet.cpp` | the working mark is `⠋` |
 | `view/Sections.hpp` | `Row::news` |
 | `view/Focus.{hpp,cpp}` | `FocusFrame::tabNews`; `•` after a tab's label |
-| `view/Dashboard.cpp` | the spinner, the ledger, the needs-you set, the right-end notice, the frame's OSC 99 and OSC 2 |
+| `view/Dashboard.cpp` | the spinner, the ledger, the needs-you set, the right-end notice |
 | `view/Dashboard_test.cpp`, goldens | |
-| `src/vthost/AgentRun_test.cpp` | e2e: the dashboard's terminal is titled `Agents · 1!` once an agent asks |
+| `src/vthost/AgentRun_test.cpp` | e2e: an agent that asks while another row is selected is named |
 | `README.md`, `docs/extensions.md` | |
 
 ## Task 1: the spinner
@@ -63,8 +62,8 @@ Spec: `docs/superpowers/specs/2026-11-22-orchestrator-fleet-focus-design.md`, "A
 ## Task 2: needs-you notices
 
 - [ ] `needsYouEntries(before, now)`; the dashboard primes, then notices entries.
-- [ ] The right-end notice, cleared on selection or exit; OSC 99 per entry; OSC 2 on a changed count.
-- [ ] Tests: no notice on open; one per entry, none for Asking → Waiting; the title's count; the bar text.
+- [ ] The right-end notice, cleared on selection or exit; the summary's `●N need you`.
+- [ ] Tests: no notice on open; one per entry, none for Asking → Waiting; the summary's count; the bar text.
 
 ## Task 3: unseen markers
 
@@ -74,5 +73,5 @@ Spec: `docs/superpowers/specs/2026-11-22-orchestrator-fleet-focus-design.md`, "A
 
 ## Task 4: e2e, docs and simplify
 
-- [ ] vthost: the dashboard's window title after an agent asks.
-- [ ] README (Attention), docs/extensions.md (no new host call; OSC 99 and OSC 2 in the frame).
+- [ ] vthost: the notice through the real guest.
+- [ ] README (Attention).
