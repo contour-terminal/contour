@@ -358,6 +358,8 @@ constexpr auto LineKinds = std::array {
                .since = 2,
                .rootAt = 0 },
     LineKind {
+        .keyword = "url-open", .headWords = 1, .keyWords = 1, .valued = Valued::No, .since = 2, .rootAt = 0 },
+    LineKind {
         .keyword = "action", .headWords = 2, .keyWords = 2, .valued = Valued::Yes, .since = 2, .rootAt = 0 },
     LineKind {
         .keyword = "title", .headWords = 1, .keyWords = 1, .valued = Valued::Yes, .since = 2, .rootAt = 0 },
@@ -643,6 +645,7 @@ constexpr auto CorpusRows = std::array {
     CorpusRow { .file = "valid/orchestrator.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/pane-env.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/pane-input.manifest", .expected = Fault::None },
+    CorpusRow { .file = "valid/url-open.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/pane.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/placement.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/read.manifest", .expected = Fault::None },
@@ -682,6 +685,7 @@ constexpr auto CorpusRows = std::array {
     CorpusRow { .file = "invalid/title-control-character.manifest", .expected = Fault::ControlCharacter },
     CorpusRow { .file = "invalid/title-repeated.manifest", .expected = Fault::Duplicate },
     CorpusRow { .file = "invalid/pane-input-repeated.manifest", .expected = Fault::Duplicate },
+    CorpusRow { .file = "invalid/url-open-repeated.manifest", .expected = Fault::Duplicate },
     CorpusRow { .file = "invalid/title-bidi-override.manifest", .expected = Fault::BadTitle },
     CorpusRow { .file = "invalid/action-title-too-long.manifest", .expected = Fault::BadTitle },
 };

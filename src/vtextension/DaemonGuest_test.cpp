@@ -466,6 +466,11 @@ class MeasuredServices final: public IDaemonHostServices
         return _tabs.tabReveal(tab, origin);
     }
 
+    [[nodiscard]] std::expected<void, HostError> urlOpen(std::string_view url, Origin origin) override
+    {
+        return _tabs.urlOpen(url, origin);
+    }
+
     [[nodiscard]] std::expected<std::vector<TabInfo>, HostError> tabs() override { return _tabs.tabs(); }
 
     [[nodiscard]] std::expected<ByteList, HostError> tabRead(std::string_view tab) override
@@ -643,6 +648,11 @@ class MeasuredTab final: public IServedTabService
 
     [[nodiscard]] std::expected<void, HostError> tabReveal(std::string_view /*tab*/,
                                                            Origin /*origin*/) override
+    {
+        return {};
+    }
+
+    [[nodiscard]] std::expected<void, HostError> urlOpen(std::string_view /*url*/, Origin /*origin*/) override
     {
         return {};
     }

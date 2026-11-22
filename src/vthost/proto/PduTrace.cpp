@@ -664,6 +664,12 @@ namespace
                    +[](DecodedPdu const& pdu) {
                        return std::format("session={}", std::get<RevealPane>(pdu).session);
                    } },
+        // A link can carry a token in its query: the trace counts its bytes and never writes it.
+        TraceRow { PduType::OpenUrl,
+                   "OpenUrl",
+                   +[](DecodedPdu const& pdu) {
+                       return std::format("bytes={}", std::get<OpenUrl>(pdu).url.size());
+                   } },
         TraceRow { PduType::SoftFontState,
                    "SoftFontState",
                    +[](DecodedPdu const& pdu) {

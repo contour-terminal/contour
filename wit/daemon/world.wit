@@ -333,6 +333,15 @@ interface host {
     /// menu's choice, such as an agent's permission prompt, never text. It is written alone, with no bracketed
     /// paste and no Enter. Without `pane-input` it is `bad-argument`.
     pane-key: func(pane: string, key: pane-key-name) -> result<_, host-error>;
+    /// Asks the frontend the user is at to open a web link, as following a hyperlink there does: the URL opens
+    /// on the machine the user sits at, which is not the daemon's when they attach to a remote one. Only with
+    /// the manifest's `url-open` (`not-granted` otherwise), and only an `http://` or `https://` URL with a host,
+    /// at most 2 KiB, free of control characters and blanks (`bad-argument` otherwise). It goes to the window of
+    /// the origin's action, which counts once and only for 2 s, as for `tab-reveal`; else to the window a key
+    /// or a mouse button pressed into one of the extension's served tabs came from within the last 2 s; with
+    /// neither it is `gone`. A frontend that cannot open links answers `not-supported-yet`. The call returns
+    /// once the request is on its way: the frontend opens it with its own launcher.
+    url-open: func(url: string, origin: origin) -> result<_, host-error>;
 }
 
 /// An extension that runs in a terminal's daemon.

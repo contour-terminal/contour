@@ -111,13 +111,13 @@ TEST_CASE("DaemonWit: every import row is declared verbatim, and nothing else", 
         CHECK(row.witSignature.starts_with(std::string(row.name) + ": func("));
     }
     CHECK(occurrences(host, ": func(") == DaemonImportRows.size());
-    CHECK(DaemonImportRows.size() == 26);
+    CHECK(DaemonImportRows.size() == 27);
 }
 #endif
 
 TEST_CASE("DaemonImports: rows are indexed by their enumerator", "[daemon][wit]")
 {
-    STATIC_CHECK(DaemonImportRows.size() == std::to_underlying(DaemonImport::PaneKey) + 1U);
+    STATIC_CHECK(DaemonImportRows.size() == std::to_underlying(DaemonImport::UrlOpen) + 1U);
     STATIC_CHECK(std::ranges::all_of(
         std::views::iota(std::size_t { 0 }, DaemonImportRows.size()),
         [](std::size_t index) { return std::to_underlying(DaemonImportRows.at(index).import) == index; }));
@@ -159,7 +159,7 @@ TEST_CASE("DaemonImports: these imports are served and no others", "[daemon][wit
         DaemonImport::TabClose,    DaemonImport::TabReveal,  DaemonImport::Tabs,
         DaemonImport::TabRead,     DaemonImport::TabWrite,   DaemonImport::ActionsTake,
         DaemonImport::SummarySet,  DaemonImport::PaneReveal, DaemonImport::FileRead,
-        DaemonImport::PaneSend,    DaemonImport::PaneKey,
+        DaemonImport::PaneSend,    DaemonImport::PaneKey,    DaemonImport::UrlOpen,
     };
     for (auto const& row: DaemonImportRows)
     {

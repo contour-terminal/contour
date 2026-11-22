@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/Logging.hpp>
+#include <contour/platform/ExternalLauncher.hpp>
 #include <contour/platform/FinishNotification.hpp>
 #include <contour/platform/Notifier.hpp>
 #include <contour/remote/DaemonDriftFollower.hpp>
 #include <contour/remote/DaemonLink.hpp>
 #include <contour/remote/SwitchGrants.hpp>
 #include <contour/remote/SwitchGuard.hpp>
+#include <contour/remote/UrlOpens.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/NoticeQueue.hpp>
@@ -19,6 +21,7 @@
 #include <QtCore/QPointer>
 #include <QtCore/QThread>
 #include <QtCore/QTimer>
+#include <QtCore/QUrl>
 
 #include <algorithm>
 #include <chrono>
@@ -379,6 +382,15 @@ void DaemonLink::connectController()
         [this] {
             if (!isStopped())
                 followPaneReveals();
+        },
+        Qt::QueuedConnection);
+    QObject::connect(
+        _controller.get(),
+        &NativeController::urlOpenRequested,
+        &_receiver,
+        [this] {
+            if (!isStopped())
+                followUrlOpens();
         },
         Qt::QueuedConnection);
     // The daemon's restore is told once, ahead of the layout it restored: the manager holds it until a
@@ -1444,6 +1456,26 @@ void DaemonLink::followPaneReveals()
         _sessions.revealSession(*shown);
         return true;
     });
+}
+
+void DaemonLink::followUrlOpens()
+{
+    if (!isLive())
+        return;
+    // Opened as a hyperlink the user followed here is: on this machine, through the app's launcher.
+    auto const urls = _controller->takeUrlOpens();
+    remote::followUrlOpens(
+        urls,
+        [this](std::string_view url) {
+            if (auto const opened = _host.externalLauncher().openUrl(
+                    QUrl(QString::fromUtf8(url.data(), static_cast<qsizetype>(url.size()))));
+                !opened)
+                errorLog()("Could not open the link a daemon extension asked for: {}.",
+                           platform::describe(opened.error()));
+        },
+        [](std::string_view url, std::string_view why) {
+            errorLog()("Not opening the link a daemon extension asked for, \"{}\": {}.", url, why);
+        });
 }
 
 void DaemonLink::answerSwitchRequests()

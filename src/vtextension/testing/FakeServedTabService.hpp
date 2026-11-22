@@ -46,6 +46,12 @@ class FakeServedTabService final: public IServedTabService
         return owns(tab) ? std::expected<void, HostError> {} : std::unexpected(HostError::NotOwned);
     }
 
+    [[nodiscard]] std::expected<void, HostError> urlOpen(std::string_view url, Origin /*origin*/) override
+    {
+        opened.emplace_back(url);
+        return {};
+    }
+
     [[nodiscard]] std::expected<std::vector<TabInfo>, HostError> tabs() override { return openTabs; }
 
     [[nodiscard]] std::expected<ByteList, HostError> tabRead(std::string_view tab) override
@@ -72,6 +78,7 @@ class FakeServedTabService final: public IServedTabService
     std::vector<TabInfo> openTabs;    ///< The open tabs.
     std::vector<std::string> written; ///< Every tab-write's bytes, in order.
     std::vector<ActionInfo> actions;  ///< What the next actions-take answers.
+    std::vector<std::string> opened;  ///< Every url-open's link, in order.
     int opens = 0;                    ///< How many tab-opens came.
     int closes = 0;                   ///< How many tab-closes came.
 

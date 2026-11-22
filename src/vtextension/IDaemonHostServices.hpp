@@ -166,6 +166,12 @@ class IDaemonHostServices
     /// @return Nothing; or why it was not revealed.
     [[nodiscard]] virtual std::expected<void, HostError> tabReveal(std::string_view tab, Origin origin) = 0;
 
+    /// `url-open`: asks the frontend the user is at to open a web link (IServedTabService).
+    /// @param url The link.
+    /// @param origin The connection the invoked action came from; 0 for none.
+    /// @return Nothing; or why it was not sent.
+    [[nodiscard]] virtual std::expected<void, HostError> urlOpen(std::string_view url, Origin origin) = 0;
+
     /// `tabs`: the extension's served tabs.
     /// @return Each with its scheme and size; or why they cannot be listed.
     [[nodiscard]] virtual std::expected<std::vector<TabInfo>, HostError> tabs() = 0;

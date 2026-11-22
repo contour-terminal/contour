@@ -493,6 +493,11 @@ class DaemonExtensionRunner::Core final: public IDaemonHostServices, public std:
         return servedUnlessClosed([&] { return _services.tabs.tabReveal(tab, origin); });
     }
 
+    [[nodiscard]] std::expected<void, HostError> urlOpen(std::string_view url, Origin origin) override
+    {
+        return servedUnlessClosed([&] { return _services.tabs.urlOpen(url, origin); });
+    }
+
     [[nodiscard]] std::expected<std::vector<TabInfo>, HostError> tabs() override
     {
         return servedUnlessClosed([&] { return _services.tabs.tabs(); });

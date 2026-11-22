@@ -98,6 +98,8 @@ namespace
             vthost::proto::Capability::DaemonExtensionConsent,
             // A window's command palette shows the daemon extensions' rows, and invokes them.
             vthost::proto::Capability::ExtensionPresence,
+            // A window opens the links a daemon extension asks for, as a hyperlink's follow gesture does.
+            vthost::proto::Capability::UrlOpen,
         });
         if (switchRequests == NativeController::SwitchRequests::Answered)
             offered.idents.push_back(std::to_underlying(vthost::proto::Capability::WorkspaceSwitch));
@@ -1858,7 +1860,23 @@ void NativeController::onExtensionEvent(vthost::client::NativeClient::ExtensionE
             _paneReveals.push_back(PendingReveal { .session = reveal->session, .arrived = _clock.now() });
         }
         emit paneRevealRequested();
+        return;
     }
+    // A daemon extension asked this window to open a link, as the user typed or clicked into its tab here.
+    if (auto const* open = std::get_if<vthost::proto::OpenUrl>(&event))
+    {
+        {
+            auto const lock = std::lock_guard { _mutex };
+            _urlOpens.push_back(open->url);
+        }
+        emit urlOpenRequested();
+    }
+}
+
+std::vector<std::string> NativeController::takeUrlOpens()
+{
+    auto const lock = std::lock_guard { _mutex };
+    return std::exchange(_urlOpens, {});
 }
 
 std::vector<PendingReveal> NativeController::takePaneReveals()

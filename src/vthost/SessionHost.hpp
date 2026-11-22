@@ -413,6 +413,15 @@ class SessionStreamEvents
     /// A daemon-scoped extension revealed its served tab, which the daemon activated: the observer's window
     /// raises itself and focuses @p session's pane (sends RevealPane, to a client with a palette).
     virtual void revealPane(vtworkspace::SessionId /*session*/) {}
+
+    /// @return Whether the observer's client opens a web link on its own machine
+    /// (proto::Capability::UrlOpen):
+    ///         only then is it sent openUrl().
+    [[nodiscard]] virtual LinkOpening linkOpening() const noexcept { return LinkOpening::Unable; }
+
+    /// A daemon-scoped extension asked the observer's window to open @p url, just after its user typed or
+    /// clicked into the extension's tab there (sends OpenUrl, to a client that opens links).
+    virtual void openUrl(std::string_view /*url*/) {}
 };
 
 /// What a hosted session hands a desktop notification on as: its title, its body, and the occasion
@@ -2496,6 +2505,7 @@ class SessionHost final:
                      proto::SwitchTargetWire target,
                      SwitchCompletion done) override;
     void revealTo(ConnectionId const& connection, vtworkspace::SessionId session) override;
+    void openUrlIn(ConnectionId const& connection, std::string const& url) override;
     [[nodiscard]] std::vector<ConnectionId> showing(vtworkspace::WorkspaceId workspace) const override;
     [[nodiscard]] std::optional<vtworkspace::WorkspaceId> workspaceOf(
         vtworkspace::SessionId session) const override;

@@ -339,6 +339,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @return The daemon's session ids, as RevealPane named them, each stamped with when it arrived (now()).
     [[nodiscard]] std::vector<PendingReveal> takePaneReveals();
 
+    /// Takes the links urlOpenRequested() announced, oldest first: what a daemon extension asked this window
+    /// to open, just after its user typed or clicked into the extension's tab here. GUI thread.
+    /// @return The links, as OpenUrl named them; not checked yet (followUrlOpens()).
+    [[nodiscard]] std::vector<std::string> takeUrlOpens();
+
     /// @return The time on the controller's clock: what takePaneReveals() stamps its reveals with.
     [[nodiscard]] core::platform::SteadyTimePoint now() const { return _clock.now(); }
 
@@ -781,6 +786,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// with takePaneReveals().
     void paneRevealRequested();
 
+    /// The daemon asks this client to open a web link on this machine: a daemon extension's url-open (fires
+    /// on the reactor thread; connect queued). The GUI takes the links with takeUrlOpens().
+    void urlOpenRequested();
+
     /// The daemon asks this client to switch the window showing one of its workspaces (fires on the reactor
     /// thread; connect queued). The GUI takes the requests with takeSwitchRequests().
     void switchRequested();
@@ -1188,6 +1197,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
     vthost::proto::ExtensionPresence _extensionPresence;
     /// The panes RevealPane named that the GUI has not taken yet, oldest first. Under _mutex.
     std::vector<PendingReveal> _paneReveals;
+    /// The links OpenUrl named that the GUI has not taken yet, oldest first. Under _mutex.
+    std::vector<std::string> _urlOpens;
     /// Guards the geometry bookkeeping below, and ONLY that.
     ///
     /// A lock of its own because the resize sink is reached from inside a `_mutex`-holding frame:

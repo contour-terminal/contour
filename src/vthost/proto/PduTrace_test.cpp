@@ -485,4 +485,6 @@ TEST_CASE("the trace counts an extension's palette rows, never transcribes them"
     CHECK(summarize(DecodedPdu { InvokeExtensionAction { .extension = "orchestrator", .action = "open" } })
           == R"(extension="orchestrator" action="open")");
     CHECK(summarize(DecodedPdu { RevealPane { .session = 9 } }) == "session=9");
+    CHECK(toString(PduType::OpenUrl) == "OpenUrl");
+    CHECK(summarize(DecodedPdu { OpenUrl { .url = "https://a.b/?t=secret" } }) == "bytes=21");
 }

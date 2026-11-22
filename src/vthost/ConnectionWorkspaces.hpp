@@ -18,6 +18,13 @@
 namespace vthost
 {
 
+/// Whether a window's client can open a web link on its own machine (proto::Capability::UrlOpen).
+enum class LinkOpening : uint8_t
+{
+    Unable = 0, ///< It cannot: it did not offer the capability.
+    Able,       ///< It opens what OpenUrl names, with its own launcher.
+};
+
 /// Which workspace each attached window selects, read from any thread.
 class IConnectionWorkspaces
 {
@@ -37,6 +44,10 @@ class IConnectionWorkspaces
     /// @return The attached connection whose window was focused last, of those that select a workspace;
     ///         nullopt when none does.
     [[nodiscard]] virtual std::optional<ConnectionId> mostRecentlyFocused() const = 0;
+
+    /// @param connection An attached connection.
+    /// @return Whether its client can open a web link; Unable for a connection that selects no workspace.
+    [[nodiscard]] virtual LinkOpening linkOpeningOf(ConnectionId const& connection) const = 0;
 };
 
 /// The production IConnectionWorkspaces: a mutex-guarded mirror the loop publishes into.
@@ -46,7 +57,10 @@ class ConnectionWorkspaces final: public IConnectionWorkspaces
     /// Records which workspace @p connection's window selects. Loop thread.
     /// @param connection An attached connection.
     /// @param selected Its selection; nullopt once it selects none, or detached.
-    void publish(ConnectionId const& connection, std::optional<vtworkspace::WorkspaceId> selected);
+    /// @param links Whether its client can open a web link.
+    void publish(ConnectionId const& connection,
+                 std::optional<vtworkspace::WorkspaceId> selected,
+                 LinkOpening links);
 
     /// Records that @p connection's window was focused now. Loop thread.
     void noteFocused(ConnectionId const& connection);
@@ -54,6 +68,7 @@ class ConnectionWorkspaces final: public IConnectionWorkspaces
     [[nodiscard]] std::optional<vtworkspace::WorkspaceId> selectedBy(
         ConnectionId const& connection) const override;
     [[nodiscard]] std::optional<ConnectionId> mostRecentlyFocused() const override;
+    [[nodiscard]] LinkOpening linkOpeningOf(ConnectionId const& connection) const override;
 
   private:
     /// One attached connection that selects a workspace.
@@ -61,6 +76,7 @@ class ConnectionWorkspaces final: public IConnectionWorkspaces
     {
         ConnectionId connection;
         vtworkspace::WorkspaceId workspace;
+        LinkOpening links = LinkOpening::Unable;
     };
 
     mutable std::mutex _mutex; ///< Guards everything below.

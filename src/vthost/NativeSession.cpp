@@ -1065,6 +1065,19 @@ void NativeSession::revealPane(SessionId session)
         send(0, proto::DecodedPdu { proto::RevealPane { .session = session.value } });
 }
 
+LinkOpening NativeSession::linkOpening() const noexcept
+{
+    return _negotiated.has_value() && _negotiated->shared.contains(proto::Capability::UrlOpen)
+               ? LinkOpening::Able
+               : LinkOpening::Unable;
+}
+
+void NativeSession::openUrl(std::string_view url)
+{
+    if (linkOpening() == LinkOpening::Able && !_closed)
+        send(0, proto::DecodedPdu { proto::OpenUrl { .url = std::string(url) } });
+}
+
 void NativeSession::invokeExtensionAction(proto::InvokeExtensionAction const& invoke)
 {
     if (!showsExtensionPresence())
@@ -3385,6 +3398,9 @@ void NativeSession::attachClient(uint64_t serial,
     send(serial, proto::DecodedPdu { std::move(reply) });
     _negotiated = std::move(negotiated);
     _phase = ConnectionPhase::Viewing;
+    // Published again now that what the client can do is known (linkOpening()): the attach plan published
+    // the selection before the handshake's outcome was kept.
+    _host.noteSelected(*this);
     // The role is stated once, whatever it is, so a window never has to assume one; a change is sent as it
     // happens.
     if (summarizesPanes())

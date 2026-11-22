@@ -1080,6 +1080,12 @@ bool NativeClient::handleNotice(proto::DecodedFrame const& frame)
             _onExtensionEvent(ExtensionEvent { *reveal });
         return true;
     }
+    if (auto const* open = std::get_if<proto::OpenUrl>(&pdu))
+    {
+        if (_onExtensionEvent)
+            _onExtensionEvent(ExtensionEvent { *open });
+        return true;
+    }
     if (auto const* request = std::get_if<proto::PermissionRequest>(&pdu))
     {
         if (_onPermissionRequest)

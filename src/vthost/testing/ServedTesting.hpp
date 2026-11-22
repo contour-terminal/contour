@@ -64,8 +64,12 @@ class FakeWindow final: public SessionStreamEvents
     [[nodiscard]] bool canSwitch() const noexcept override { return true; }
     void requestSwitch(proto::SwitchRequest const& request) override { switches.push_back(request); }
     void revealPane(vtworkspace::SessionId session) override { reveals.push_back(session); }
+    [[nodiscard]] LinkOpening linkOpening() const noexcept override { return links; }
+    void openUrl(std::string_view url) override { opened.emplace_back(url); }
 
     uint64_t selected = 0;                       ///< What it selects.
+    LinkOpening links = LinkOpening::Able;       ///< Whether its client opens links.
+    std::vector<std::string> opened;             ///< Every link it was told to open.
     std::vector<proto::SwitchRequest> switches;  ///< Every switch it was asked for.
     std::vector<vtworkspace::SessionId> reveals; ///< Every pane it was told to reveal.
 

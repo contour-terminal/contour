@@ -114,6 +114,7 @@ enum class PduType : uint8_t
     ExtensionPresence = 67,
     InvokeExtensionAction = 68,
     RevealPane = 69,
+    OpenUrl = 70,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -1557,6 +1558,16 @@ struct RevealPane
     bool operator==(RevealPane const&) const = default;
 };
 
+/// Server→client (Capability::UrlOpen): open this web link on the client's machine, as following a hyperlink
+/// there does. A daemon extension asked for it (`url-open`) right after the user typed or clicked into its
+/// tab in this window. The daemon checked it already (vthost::checkUrlToOpen()); the client checks it again
+/// and opens nothing else.
+struct OpenUrl
+{
+    std::string url = {}; ///< An http or https URL.
+    bool operator==(OpenUrl const&) const = default;
+};
+
 /// Either direction, after the handshake: the frame with serial @ref refusedSerial carried a PDU tag this
 /// peer does not know, or knows but cannot serve (a Control connection's attach-only request, a daemon
 /// control request on an endpoint with no daemon behind it). Its receiver stops sending that tag for the rest
@@ -2193,7 +2204,8 @@ using DecodedPdu = std::variant<Invalid,
                                 ConsentProof,
                                 ExtensionPresence,
                                 InvokeExtensionAction,
-                                RevealPane>;
+                                RevealPane,
+                                OpenUrl>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

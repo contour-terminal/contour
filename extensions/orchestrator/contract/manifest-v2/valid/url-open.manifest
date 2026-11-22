@@ -1,0 +1,5 @@
+# Opening links: `url-open` may ask the frontend the user is at to open an http or https link.
+name = links
+version = 2
+placement daemon
+url-open

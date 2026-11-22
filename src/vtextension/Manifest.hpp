@@ -110,6 +110,13 @@ enum class PaneInput : uint8_t
     Typed,       ///< `pane-send` types text the user wrote into them, and `pane-key` presses a key.
 };
 
+/// Whether an extension may ask the frontend the user is at to open a web link (`url-open`).
+enum class UrlOpening : uint8_t
+{
+    Refused = 0, ///< It may not: the default.
+    Allowed,     ///< `url-open` asks the frontend to open an http or https link.
+};
+
 /// A palette row (`action <id> = title`).
 struct ActionDecl
 {
@@ -159,6 +166,9 @@ struct Manifest
     /// Whether `pane-send` may type text the user wrote into those tabs, and `pane-key` press a key
     /// (`pane-input`).
     PaneInput paneInput = PaneInput::Refused;
+
+    /// Whether `url-open` may ask the frontend the user is at to open a web link (`url-open`).
+    UrlOpening urlOpening = UrlOpening::Refused;
 
     /// The scheme of the tabs the extension serves (`serve <scheme>`), if any.
     std::optional<std::string> servedScheme {};

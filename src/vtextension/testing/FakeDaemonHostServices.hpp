@@ -204,6 +204,13 @@ class FakeDaemonHostServices final: public IDaemonHostServices
         return tabAnswer;
     }
 
+    [[nodiscard]] std::expected<void, HostError> urlOpen(std::string_view url, Origin origin) override
+    {
+        called(DaemonImport::UrlOpen);
+        urlOpens.emplace_back(std::string(url), origin);
+        return tabAnswer;
+    }
+
     [[nodiscard]] std::expected<std::vector<TabInfo>, HostError> tabs() override
     {
         called(DaemonImport::Tabs);
@@ -272,10 +279,11 @@ class FakeDaemonHostServices final: public IDaemonHostServices
     std::expected<std::string, HostError> tabId = std::string { "tab-1" }; ///< What tabOpen() answers.
     std::vector<std::string> tabCloses;                                    ///< Every tabClose().
     std::vector<std::pair<std::string, Origin>> tabReveals;                ///< Every tabReveal().
+    std::vector<std::pair<std::string, Origin>> urlOpens;                  ///< Every urlOpen().
     std::vector<TabInfo> servedTabs;                                       ///< What tabs() answers.
     ByteList tabInput;                                                     ///< What tabRead() answers.
     std::vector<std::pair<std::string, ByteList>> tabWrites;               ///< Every tabWrite().
-    std::expected<void, HostError> tabAnswer; ///< What tabClose(), tabReveal(), tabWrite() answer.
+    std::expected<void, HostError> tabAnswer; ///< What tabClose(), tabReveal(), tabWrite(), urlOpen() answer.
     std::vector<ActionInfo> actions;          ///< What the next actionsTake() answers.
     std::vector<std::pair<std::string, std::string>> fileReads; ///< Every fileRead(): root and path.
     std::expected<FileContent, FileError> fileContent;          ///< What fileRead() answers.

@@ -1,0 +1,6 @@
+# `url-open` is said once: a second one is a repeat, not a second permission.
+name = links
+version = 2
+placement daemon
+url-open
+url-open

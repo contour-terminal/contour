@@ -533,6 +533,15 @@ extern bool terminal_extensions_daemon_host_pane_send(daemon_string_t *pane, dae
 // menu's choice, such as an agent's permission prompt, never text. It is written alone, with no bracketed
 // paste and no Enter. Without `pane-input` it is `bad-argument`.
 extern bool terminal_extensions_daemon_host_pane_key(daemon_string_t *pane, terminal_extensions_daemon_host_pane_key_name_t key, terminal_extensions_daemon_host_host_error_t *err);
+// Asks the frontend the user is at to open a web link, as following a hyperlink there does: the URL opens
+// on the machine the user sits at, which is not the daemon's when they attach to a remote one. Only with
+// the manifest's `url-open` (`not-granted` otherwise), and only an `http://` or `https://` URL with a host,
+// at most 2 KiB, free of control characters and blanks (`bad-argument` otherwise). It goes to the window of
+// the origin's action, which counts once and only for 2 s, as for `tab-reveal`; else to the window a key
+// or a mouse button pressed into one of the extension's served tabs came from within the last 2 s; with
+// neither it is `gone`. A frontend that cannot open links answers `not-supported-yet`. The call returns
+// once the request is on its way: the frontend opens it with its own launcher.
+extern bool terminal_extensions_daemon_host_url_open(daemon_string_t *url, terminal_extensions_daemon_host_origin_t origin, terminal_extensions_daemon_host_host_error_t *err);
 
 // Exported Functions from `daemon`
 void exports_daemon_load(daemon_string_t *config_json, daemon_host_info_t *info);

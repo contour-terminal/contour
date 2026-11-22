@@ -18,6 +18,7 @@
 #include <vthost/RepeatedText.hpp>
 #include <vthost/RevealOnLoop.hpp>
 #include <vthost/SessionHost.hpp>
+#include <vthost/UrlToOpen.hpp>
 
 namespace vthost
 {
@@ -548,6 +549,24 @@ std::expected<void, ServedTabError> ServedSessions::reveal(std::string_view exte
         return session ? std::expected<void, ServedTabError> { std::unexpect, ServedTabError::Gone }
                        : std::expected<void, ServedTabError> {};
     showOnceCreated(std::string(tab), session, *connection, *workspace);
+    return {};
+}
+
+std::expected<void, ServedTabError> ServedSessions::openUrl(std::string_view extension,
+                                                            std::string_view url,
+                                                            Origin origin)
+{
+    if (!checkUrlToOpen(url))
+        return std::unexpected(ServedTabError::BadArgument);
+    // As a reveal: the origin's window, if the user invoked the action behind it just now; else that of the
+    // key or click into one of its tabs just now. With neither no user is behind it, and nothing opens.
+    auto const connection =
+        _origins.claimReveal(extension, origin).or_else([&] { return recentInputFrom(extension); });
+    if (!connection)
+        return std::unexpected(ServedTabError::Gone);
+    if (_workspaces.linkOpeningOf(*connection) != LinkOpening::Able)
+        return std::unexpected(ServedTabError::NotSupported);
+    _post([this, connection = *connection, url = std::string(url)] { _host.openUrlIn(connection, url); });
     return {};
 }
 

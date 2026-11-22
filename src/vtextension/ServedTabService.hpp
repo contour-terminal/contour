@@ -16,6 +16,7 @@
 
 #include <vtextension/DaemonWorld.hpp>
 #include <vtextension/IHostServices.hpp>
+#include <vtextension/Manifest.hpp>
 
 namespace vtextension
 {
@@ -27,6 +28,7 @@ struct ServedTabOwner
     std::string_view title;                 ///< Its manifest's `title`, else its name: its tabs' name.
     std::optional<std::string_view> scheme; ///< Its manifest's `serve` line; none when it serves no tab.
     std::string_view moduleDigest;          ///< The hex SHA-256 of its module, which the chrome names.
+    UrlOpening urlOpening = UrlOpening::Refused; ///< Its manifest's `url-open`: whether it may open links.
 };
 
 /// The served tabs and invoked actions of one extension.
@@ -57,6 +59,13 @@ class IServedTabService
     /// @param origin The connection the invoked action came from.
     /// @return Nothing; or why it was not revealed.
     [[nodiscard]] virtual std::expected<void, HostError> tabReveal(std::string_view tab, Origin origin) = 0;
+
+    /// `url-open`: asks the frontend the user is at to open a web link: the window of the origin's action, or
+    /// the one a key or click into one of the extension's tabs came from just now.
+    /// @param url The link.
+    /// @param origin The connection the invoked action came from; 0 for none.
+    /// @return Nothing; or why it was not sent.
+    [[nodiscard]] virtual std::expected<void, HostError> urlOpen(std::string_view url, Origin origin) = 0;
 
     /// `tabs`: the extension's tabs.
     /// @return Each with its scheme and size; or why they cannot be listed.
@@ -97,6 +106,11 @@ class UnservedTabs final: public IServedTabService
 
     [[nodiscard]] std::expected<void, HostError> tabReveal(std::string_view /*tab*/,
                                                            Origin /*origin*/) override
+    {
+        return std::unexpected(HostError::NotSupportedYet);
+    }
+
+    [[nodiscard]] std::expected<void, HostError> urlOpen(std::string_view /*url*/, Origin /*origin*/) override
     {
         return std::unexpected(HostError::NotSupportedYet);
     }

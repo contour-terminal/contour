@@ -212,6 +212,8 @@ ConsentQuestion daemonConsentQuestion(DaemonConsentRequest const& request)
     if (manifest.servedScheme)
         line(std::format("It shows its own tab: {}://", neutralizedForDisplay(*manifest.servedScheme)),
              ConsentWeight::Observes);
+    if (manifest.urlOpening == UrlOpening::Allowed)
+        line("It may ask your terminal to open web links you choose", ConsentWeight::Observes);
     return question;
 }
 

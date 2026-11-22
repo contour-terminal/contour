@@ -342,8 +342,9 @@ class NativeClient final
     /// Handler invoked for each DaemonConsentEvent; answered with answerDaemonExtension().
     using DaemonConsentHandler = std::function<void(DaemonConsentEvent const&)>;
     /// What the daemon tells a window with a palette about the daemon-scoped extensions (Capability::
-    /// ExtensionPresence): their rows, the whole set each time, or a pane to raise and focus.
-    using ExtensionEvent = std::variant<proto::ExtensionPresence, proto::RevealPane>;
+    /// ExtensionPresence): their rows, the whole set each time, or a pane to raise and focus; or a link to
+    /// open (Capability::UrlOpen).
+    using ExtensionEvent = std::variant<proto::ExtensionPresence, proto::RevealPane, proto::OpenUrl>;
     /// Handler invoked for each ExtensionEvent; a row is invoked with invokeExtensionAction().
     using ExtensionEventHandler = std::function<void(ExtensionEvent const&)>;
     /// Handler invoked once, when the daemon accepted the handshake (connected() turned true).

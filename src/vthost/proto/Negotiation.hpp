@@ -148,6 +148,10 @@ enum class Capability : uint8_t
     /// client without it is never sent the extensions' rows or which tabs they serve, and an invocation from
     /// it is dropped.
     ExtensionPresence = 35,
+    /// The peer reads OpenUrl: a client that can open a web link on its own machine, as following a hyperlink
+    /// there does, offers it. A daemon sends a daemon extension's url-open only to such a client, and the
+    /// extension is told `not-supported-yet` for any other.
+    UrlOpen = 36,
 };
 
 /// One row of the table naming a Capability.
@@ -192,6 +196,7 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::WorkspaceColor, .name = "workspace-color" },
     CapabilityRow { .capability = Capability::DaemonExtensionConsent, .name = "daemon-extension-consent" },
     CapabilityRow { .capability = Capability::ExtensionPresence, .name = "extension-presence" },
+    CapabilityRow { .capability = Capability::UrlOpen, .name = "url-open" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

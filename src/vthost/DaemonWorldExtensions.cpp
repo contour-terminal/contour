@@ -39,9 +39,11 @@ namespace
         ServedTabErrorRow { .error = ServedTabError::Limit, .hostError = vtextension::HostError::Limit },
         ServedTabErrorRow { .error = ServedTabError::BadArgument,
                             .hostError = vtextension::HostError::BadArgument },
+        ServedTabErrorRow { .error = ServedTabError::NotSupported,
+                            .hostError = vtextension::HostError::NotSupportedYet },
     };
 
-    static_assert(ServedTabErrorRows.size() == std::to_underlying(ServedTabError::BadArgument) + 1U,
+    static_assert(ServedTabErrorRows.size() == std::to_underlying(ServedTabError::NotSupported) + 1U,
                   "every ServedTabError has a row");
     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ServedTabErrorRows.size()),
                                       [](std::size_t index) {
@@ -65,6 +67,7 @@ namespace
             _title { owner.title },
             _scheme { owner.scheme.transform([](std::string_view scheme) { return std::string(scheme); }) },
             _moduleDigest { owner.moduleDigest },
+            _urlOpening { owner.urlOpening },
             _wiring { wiring }
         {
         }
@@ -88,6 +91,15 @@ namespace
             std::string_view tab, vtextension::Origin origin) override
         {
             return _wiring.tabs.reveal(_extension, tab, origin).transform_error(hostErrorOf);
+        }
+
+        [[nodiscard]] std::expected<void, vtextension::HostError> urlOpen(std::string_view url,
+                                                                          vtextension::Origin origin) override
+        {
+            // Only with the manifest's `url-open`, which the user granted.
+            if (_urlOpening != vtextension::UrlOpening::Allowed)
+                return std::unexpected(vtextension::HostError::NotGranted);
+            return _wiring.tabs.openUrl(_extension, url, origin).transform_error(hostErrorOf);
         }
 
         [[nodiscard]] std::expected<std::vector<vtextension::TabInfo>, vtextension::HostError> tabs() override
@@ -131,6 +143,7 @@ namespace
         std::string _title;
         std::optional<std::string> _scheme;
         std::string _moduleDigest;
+        vtextension::UrlOpening _urlOpening;
         DaemonWorldWiring _wiring;
     };
 

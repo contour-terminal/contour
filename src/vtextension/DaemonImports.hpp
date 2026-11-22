@@ -55,6 +55,7 @@ enum class DaemonImport : uint8_t
     FileRead,    ///< `file-read`
     PaneSend,    ///< `pane-send`
     PaneKey,     ///< `pane-key`
+    UrlOpen,     ///< `url-open`
 };
 
 /// Whether this host serves an import yet. Every import is declared and linkable from the first version
@@ -81,7 +82,7 @@ struct DaemonImportRow
 /// `parameterCount` counts the flat parameters: 2 for a string or a list, 1 for an enum or a 32-bit
 /// integer, 3 for an `option<string>`, plus 1 for the address of a result that flattens to more than one
 /// value. Every row's name and count is what `wit-bindgen c` generates for the WIT.
-inline constexpr auto DaemonImportRows = std::array<DaemonImportRow, 26> {
+inline constexpr auto DaemonImportRows = std::array<DaemonImportRow, 27> {
     // clang-format off
     DaemonImportRow { DaemonImport::Log, "log", 3,
         "log: func(level: log-level, message: string)", ImportAvailability::Served },
@@ -145,10 +146,13 @@ inline constexpr auto DaemonImportRows = std::array<DaemonImportRow, 26> {
     DaemonImportRow { DaemonImport::PaneKey, "pane-key", 4,
         "pane-key: func(pane: string, key: pane-key-name) -> result<_, host-error>",
         ImportAvailability::Served },
+    DaemonImportRow { DaemonImport::UrlOpen, "url-open", 4,
+        "url-open: func(url: string, origin: origin) -> result<_, host-error>",
+        ImportAvailability::Served },
     // clang-format on
 };
 
-static_assert(DaemonImportRows.size() == std::to_underlying(DaemonImport::PaneKey) + 1U,
+static_assert(DaemonImportRows.size() == std::to_underlying(DaemonImport::UrlOpen) + 1U,
               "every DaemonImport has a row");
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, DaemonImportRows.size()),
                                   [](std::size_t index) {

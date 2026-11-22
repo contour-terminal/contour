@@ -386,6 +386,10 @@ namespace
     {
         return std::to_underlying(PduType::RevealPane);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(OpenUrl const&) noexcept
+    {
+        return std::to_underlying(PduType::OpenUrl);
+    }
     [[nodiscard]] constexpr uint64_t tagOf(CloseWorkspace const&) noexcept
     {
         return std::to_underlying(PduType::CloseWorkspace);
@@ -1153,6 +1157,11 @@ namespace
     void encodeBody(Writer& out, RevealPane const& pdu)
     {
         out.varint(pdu.session);
+    }
+
+    void encodeBody(Writer& out, OpenUrl const& pdu)
+    {
+        out.string(pdu.url);
     }
 
     void encodeSoftGlyph(Writer& out, WireSoftGlyph const& glyph)
@@ -2620,6 +2629,15 @@ namespace
         return pdu;
     }
 
+    DecodeResult decodeOpenUrl(Reader& in)
+    {
+        auto pdu = OpenUrl {};
+        auto error = DecodeError {};
+        if (!assign(in.string(), pdu.url, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
     DecodeResult decodeSelectWorkspace(Reader& in)
     {
         auto pdu = SelectWorkspace {};
@@ -3155,6 +3173,7 @@ namespace
         DecodeRow { PduType::ExtensionPresence, decodeExtensionPresence },
         DecodeRow { PduType::InvokeExtensionAction, decodeInvokeExtensionAction },
         DecodeRow { PduType::RevealPane, decodeRevealPane },
+        DecodeRow { PduType::OpenUrl, decodeOpenUrl },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

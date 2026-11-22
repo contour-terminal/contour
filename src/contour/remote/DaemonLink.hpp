@@ -523,6 +523,10 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     /// Answers the switch requests the daemon sent: each behind the guard (runGuardedSwitch()), in the window
     /// showing its workspace, or Failed when no window of this link shows it.
     void answerSwitchRequests();
+    /// Opens the links a daemon extension asked this window to open (urlOpenRequested()) that the rule takes,
+    /// through the application's launcher.
+    void followUrlOpens();
+
     /// Raises and focuses the panes the daemon revealed (paneRevealRequested()), and those revealed before
     /// their pane was realized here, once the layouts that bring them have.
     void followPaneReveals();

@@ -172,6 +172,7 @@ A peer of any of them gets only the readable refusal; no old codec is kept for t
 | `WorkspaceColor` | 33 | `workspace-color` | `SetWorkspaceColor` (tag 62, client->server, body: the workspace id, a has-colour byte and a `u32` `0xRRGGBB`, 0 when cleared) sets or clears a workspace's colour in the daemon's model, and `WorkspaceMeta`'s colour field (the fourth presence bit, after `position`) states it: in full and as a delta on each change. Without it (an older daemon) a client sends nothing and keeps the workspace uncoloured; an older client is stated no colour, so its `WorkspaceMeta` bytes are what they were |
 | `DaemonExtensionConsent` | 34 | `daemon-extension-consent` | `ExtensionPermissionRequest` / `ExtensionPermissionReply` / `ExtensionPermissionSettled` / `ConsentProof` (tags 63-66): a daemon-scoped extension's grant is asked only of a window that proved the daemon's consent key |
 | `ExtensionPresence` | 35 | `extension-presence` | The daemon extensions' palette rows and what invoking one does (see [Extension presence](#extension-presence)): `ExtensionPresence` (tag 67, server->client), `InvokeExtensionAction` (tag 68, client->server), `RevealPane` (tag 69, server->client), and the served tabs trailing `LayoutState`. A client without it is never sent the rows or the served tabs, and an invocation from it is dropped |
+| `UrlOpen` | 36 | `url-open` | The client opens a web link on its own machine: `OpenUrl` (tag 70, server->client) carries a daemon extension's `url-open`. Sent only to a client that offered it; any other is reported to the extension as `not-supported-yet` |
 
 A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
 costs an older one nothing. A protocol version step is reserved for a change to an existing PDU's
@@ -973,6 +974,7 @@ A window's command palette shows the actions each daemon-scoped extension declar
 | `ExtensionPresence` | 67 | server->client | `varint count`, per extension `string extension, string title, u8 state, varint count`, per row `string id, string title` |
 | `InvokeExtensionAction` | 68 | client->server | `string extension, string action` |
 | `RevealPane` | 69 | server->client | `varint session` |
+| `OpenUrl` | 70 | server->client | `string url` |
 
 `ExtensionPresence` is the whole set each time: sent to every connection sharing the capability as it
 attaches, and again whenever an extension's state or rows change, coalesced to one per loop turn. The title
@@ -996,6 +998,13 @@ coalesces them), and so does every change that finds it running with actions sti
 before it took them is told again once it is back.
 
 `RevealPane` asks the window to raise itself and focus a pane whose tab the daemon has already made active.
+
+`OpenUrl` (capability 36, `url-open`) asks the window to open a web link on its client's machine, as following
+a hyperlink there does. The daemon sends it for a daemon extension's `url-open`, only to the window of the
+action or of the key or click into the extension's tab that stands behind it, and only after
+`vthost::checkUrlToOpen()` takes the link (http or https, a host, at most 2 KiB, no control character or
+blank); the client applies the same rule again before its launcher opens it. The trace prints its length,
+never the link.
 
 The same capability tells a window which of its tabs an extension draws. `LayoutState` gains, after
 `servedEdit`, a trailing list: `varint count`, per served tab `varint tabId, string extension, string title,

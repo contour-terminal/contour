@@ -3683,6 +3683,15 @@ TEST_CASE("the extension presence PDUs are tags 67 to 69 and round-trip", "[vtho
     CHECK_FALSE(decodePdu(frameOf(PduType::ExtensionPresence, cut.view())).has_value());
 }
 
+TEST_CASE("OpenUrl is tag 70 and round-trips", "[vthost][pdu][presence][proto]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::OpenUrl) == 70);
+    auto const open =
+        DecodedPdu { OpenUrl { .url = "https://github.com/contour-terminal/contour/pull/2369" } };
+    CHECK(roundTrip(open) == open);
+    CHECK_FALSE(decodePdu(frameOf(PduType::OpenUrl, {})).has_value());
+}
+
 namespace
 {
 /// What InvokeExtensionAction must stay: two names and nothing else.

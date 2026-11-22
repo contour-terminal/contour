@@ -8,7 +8,8 @@ namespace vthost
 {
 
 void ConnectionWorkspaces::publish(ConnectionId const& connection,
-                                   std::optional<vtworkspace::WorkspaceId> selected)
+                                   std::optional<vtworkspace::WorkspaceId> selected,
+                                   LinkOpening links)
 {
     auto const lock = std::lock_guard { _mutex };
     std::erase_if(_selections, [&](Selection const& entry) { return entry.connection == connection; });
@@ -17,7 +18,7 @@ void ConnectionWorkspaces::publish(ConnectionId const& connection,
         std::erase_if(_focus, [&](auto const& stamp) { return stamp.first == connection; });
         return;
     }
-    _selections.push_back(Selection { .connection = connection, .workspace = *selected });
+    _selections.push_back(Selection { .connection = connection, .workspace = *selected, .links = links });
 }
 
 void ConnectionWorkspaces::noteFocused(ConnectionId const& connection)
@@ -32,6 +33,13 @@ std::optional<vtworkspace::WorkspaceId> ConnectionWorkspaces::selectedBy(Connect
     auto const lock = std::lock_guard { _mutex };
     auto const found = std::ranges::find(_selections, connection, &Selection::connection);
     return found != _selections.end() ? std::optional { found->workspace } : std::nullopt;
+}
+
+LinkOpening ConnectionWorkspaces::linkOpeningOf(ConnectionId const& connection) const
+{
+    auto const lock = std::lock_guard { _mutex };
+    auto const found = std::ranges::find(_selections, connection, &Selection::connection);
+    return found != _selections.end() ? found->links : LinkOpening::Unable;
 }
 
 std::optional<ConnectionId> ConnectionWorkspaces::mostRecentlyFocused() const

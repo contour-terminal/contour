@@ -217,3 +217,11 @@ TEST_CASE("capability 35 is extension-presence", "[vthost][negotiation][presence
     for (auto const& row: CapabilityTable)
         CHECK(std::ranges::count(CapabilityTable, row.capability, &CapabilityRow::capability) == 1);
 }
+
+TEST_CASE("capability 36 is url-open", "[vthost][negotiation][presence]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::UrlOpen) == 36);
+    auto const row = std::ranges::find(CapabilityTable, Capability::UrlOpen, &CapabilityRow::capability);
+    REQUIRE(row != CapabilityTable.end());
+    CHECK(row->name == "url-open");
+}

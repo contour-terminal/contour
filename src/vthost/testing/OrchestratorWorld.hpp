@@ -161,8 +161,8 @@ struct AgentReport
 enum class ClientKind : uint8_t
 {
     Cli = 0, ///< Offers nothing to answer with: the CLI's native clients.
-    Window,  ///< Offers DaemonExtensionConsent, ExtensionPresence, AttachIntent and InputKinds; proves the
-             ///< daemon's key.
+    Window,  ///< Offers DaemonExtensionConsent, ExtensionPresence, UrlOpen, AttachIntent and InputKinds;
+             ///< proves the daemon's key.
 };
 
 /// What a test's client was told.
@@ -191,13 +191,14 @@ struct ClientLog
 }
 
 /// @param intent Which of the daemon's workspaces it asks to be shown.
-/// @return The handshake of a window: it offers DaemonExtensionConsent, ExtensionPresence, AttachIntent and
-///         InputKinds, and proves the daemon's key.
+/// @return The handshake of a window: it offers DaemonExtensionConsent, ExtensionPresence, UrlOpen,
+///         AttachIntent and InputKinds, and proves the daemon's key.
 [[nodiscard]] inline client::NativeClient::HandshakeOptions windowHandshake(proto::AttachIntent intent)
 {
     auto handshake = client::NativeClient::HandshakeOptions {};
     handshake.capabilities = proto::CapabilitySet::of({ proto::Capability::DaemonExtensionConsent,
                                                         proto::Capability::ExtensionPresence,
+                                                        proto::Capability::UrlOpen,
                                                         proto::Capability::AttachIntent,
                                                         proto::Capability::InputKinds });
     handshake.attachIntent = intent;

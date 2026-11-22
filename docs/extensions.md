@@ -368,6 +368,7 @@ command's environment is judged as the command gets it, `command-env-for` laid o
 | `pane-input` | `pane-input` | `pane-send` may type text the user wrote into the extension's panes, and `pane-key` press a digit or Escape in them. The consent dialog says so. |
 | `inbox <name> = text` | `inbox note = A reviewer left a comment.` | Reserved: refused until a version of the manifest supports it. |
 | `serve <scheme>` | `serve orchestrator` | The extension serves `<scheme>://` tabs. |
+| `url-open` | `url-open` | `url-open` may ask the frontend the user is at to open an http or https link. The consent dialog says so. |
 | `action <id> = title` | `action open = Open Agents` | A row in the command palette; its title follows the `title` line's rules. |
 
 A conformance corpus of valid and invalid version-2 manifests, which Contour's parser is tested
@@ -449,6 +450,14 @@ again in a later callback", which starts with a fresh budget, not "the store is 
   with no bracketed paste and no Enter (Claude Code's select menu ignores a pasted digit). Without
   `pane-input` it is `bad-argument`; a pane closed or not yet created is `gone`, and another's is
   `not-owned`. The orchestrator presses one only on its user's digit, while the agent asks.
+- `url-open`: asks the frontend the user is at to open a web link, its manifest declaring `url-open`
+  (`not-granted` otherwise). Only an `http://` or `https://` URL that names a host, at most 2 KiB, with no
+  control character or blank (`bad-argument` otherwise). It goes to the window of the origin's action (once,
+  within 2 s, as for `tab-reveal`), else to the window a key or click into one of the extension's served tabs
+  came from within 2 s; with neither it is `gone`. A window whose client cannot open links (it did not
+  offer the native protocol's `url-open` capability) is `not-supported-yet`. The daemon sends that window the
+  `OpenUrl` PDU; Contour checks the link again and opens it with its external launcher, as a followed
+  hyperlink. A served tab drops OSC 8 and OSC 52, so this is how an extension's links reach the user.
 - `panes` reports each pane's `agent-status`: `asking` is a permission prompt (OSC 7501 `blocked` with kind
   `permission`, which `contour agent setup`'s hook reports), a menu `pane-key` answers; `blocked` is any other
   wait for the user, such as a question.
@@ -751,7 +760,7 @@ Key                     | Does, in the Fleet
 `n`                     | open the launcher
 `e`                     | end the selected run; asks once
 `r`                     | show the selected agent's tab
-`o`                     | copy the run's link (OSC 52)
+`o`                     | open the run's link on your machine (`url-open`)
 `x`                     | check a kept worktree again
 `Del`                   | drop a finished run from the list
 `/`                     | filter the runs by text

@@ -1643,7 +1643,7 @@ void SessionHost::noteClientDetached(SessionStreamEvents const* client, DetachKi
         return;
     _focusSerials.erase(client);
     _selectionSeen.erase(client);
-    _connectionWorkspaces.publish(client->connectionId(), std::nullopt);
+    _connectionWorkspaces.publish(client->connectionId(), std::nullopt, LinkOpening::Unable);
     noteLeft(client->selectedWorkspace());
     // A window that said it closes leaves its workspace free at once, a hold from an earlier drop of the same
     // window included; a lost connection is a reconnect.
@@ -1691,7 +1691,8 @@ void SessionHost::publishSelection(SessionStreamEvents const& client)
 {
     auto const selected = client.selectedWorkspace();
     _connectionWorkspaces.publish(client.connectionId(),
-                                  selected != 0 ? std::optional { WorkspaceId { selected } } : std::nullopt);
+                                  selected != 0 ? std::optional { WorkspaceId { selected } } : std::nullopt,
+                                  client.linkOpening());
 }
 
 void SessionHost::noteLeft(uint64_t workspace)
@@ -3155,6 +3156,13 @@ void SessionHost::revealTo(ConnectionId const& connection, SessionId session)
     for (auto* client: _attachedClients)
         if (client->connectionId() == connection)
             client->revealPane(session);
+}
+
+void SessionHost::openUrlIn(ConnectionId const& connection, std::string const& url)
+{
+    for (auto* client: _attachedClients)
+        if (client->connectionId() == connection)
+            client->openUrl(url);
 }
 
 std::vector<ConnectionId> SessionHost::showing(WorkspaceId workspace) const

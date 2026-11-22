@@ -161,7 +161,8 @@ struct HandshakePolicy
                                                                    // legacy branches taken without it go.
                                                                    proto::Capability::Names,
                                                                    proto::Capability::DaemonExtensionConsent,
-                                                                   proto::Capability::ExtensionPresence });
+                                                                   proto::Capability::ExtensionPresence,
+                                                                   proto::Capability::UrlOpen });
 };
 
 /// When a connection sends a session's program-status set.
@@ -348,6 +349,10 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     void extensionPresenceChanged(proto::ExtensionPresence const& presence) override;
     /// Sends RevealPane, to a client that shows the extensions' palette rows.
     void revealPane(vtworkspace::SessionId session) override;
+    /// @return Able once both ends offered proto::Capability::UrlOpen.
+    [[nodiscard]] LinkOpening linkOpening() const noexcept override;
+    /// Sends OpenUrl, to a client that opens links.
+    void openUrl(std::string_view url) override;
 
     /// Adapts the host's model-change fan-out into a "layout changed" callback naming the workspace or the
     /// tab the change is in: every structural change re-pushes the whole LayoutState of a workspace. It is a

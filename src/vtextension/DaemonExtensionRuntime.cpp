@@ -273,7 +273,8 @@ std::expected<std::unique_ptr<DaemonExtensionRuntime::Extension>, DeclarationPro
     auto const owner = ServedTabOwner { .extension = extension->name,
                                         .title = displayTitleOf(declared),
                                         .scheme = declared.servedScheme,
-                                        .moduleDigest = declared.digest };
+                                        .moduleDigest = declared.digest,
+                                        .urlOpening = declared.urlOpening };
     extension->tabs = _services.tabsFor ? _services.tabsFor(owner) : nullptr;
     if (!extension->tabs)
         extension->tabs = std::make_unique<UnservedTabs>();

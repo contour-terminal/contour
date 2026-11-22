@@ -159,6 +159,14 @@ class RecordingTabs final: public vthost::IServedTabs
         return std::unexpected(vthost::ServedTabError::Gone);
     }
 
+    [[nodiscard]] std::expected<void, vthost::ServedTabError> openUrl(std::string_view extension,
+                                                                      std::string_view url,
+                                                                      vthost::Origin /*origin*/) override
+    {
+        calls.push_back(std::format("openUrl {} {}", extension, url));
+        return std::unexpected(vthost::ServedTabError::NotSupported);
+    }
+
     [[nodiscard]] std::vector<vthost::ServedTabInfo> list(std::string_view /*extension*/) const override
     {
         return {};
@@ -449,6 +457,20 @@ TEST_CASE("DaemonWorldExtensions: a served-tab call reaches the host in the mani
     auto const bytes = std::array<uint8_t, 2> { 'h', 'i' };
     CHECK(service->tabWrite("tab-1", bytes) == Unit { std::unexpect, vtextension::HostError::BadArgument });
     CHECK(service->tabs() == std::expected<std::vector<vtextension::TabInfo>, vtextension::HostError> {});
+
+    // A link opens only with the manifest's `url-open`; a window that cannot open it is not-supported-yet.
+    CHECK(service->urlOpen("https://a.org/", 1)
+          == Unit { std::unexpect, vtextension::HostError::NotGranted });
+    auto opener = vthost::servedTabServiceOf(
+        vtextension::ServedTabOwner { .extension = "orchestrator",
+                                      .title = "Agents",
+                                      .scheme = scheme,
+                                      .moduleDigest = "3f9a",
+                                      .urlOpening = vtextension::UrlOpening::Allowed },
+        vthost::DaemonWorldWiring { .tabs = tabs, .actions = actions, .panes = panes });
+    CHECK(opener->urlOpen("https://a.org/", 1)
+          == Unit { std::unexpect, vtextension::HostError::NotSupportedYet });
+    CHECK(tabs.calls.back() == "openUrl orchestrator https://a.org/");
 
     // Actions are this extension's only, with their origin.
     auto const origin =

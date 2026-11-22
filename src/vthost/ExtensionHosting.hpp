@@ -262,6 +262,7 @@ enum class ServedTabError : uint8_t
     Gone,        ///< The connection the call came from detached.
     Limit,       ///< A limit is reached: too much at once, or a live upgrade runs (retry later).
     BadArgument, ///< An argument is not what the manifest declares, or the call accepts.
+    NotSupported, ///< The window the call is for cannot do it: a client that cannot open links.
 };
 
 /// Where a served tab stands, as its extension lists it. A tab closed before it was created is never listed.
@@ -339,6 +340,19 @@ class IServedTabs
     [[nodiscard]] virtual std::expected<void, ServedTabError> reveal(std::string_view extension,
                                                                      std::string_view tab,
                                                                      Origin origin) = 0;
+
+    /// Asks a window to open a web link on its own machine (PDU OpenUrl): the origin's window, which counts
+    /// once and only for ServedInputGrace after the action the user invoked through it (as for reveal());
+    /// else the window whose user typed or clicked into one of the extension's served tabs at most
+    /// ServedInputGrace ago. Returns before the window opens it.
+    /// @param extension What the daemon's configuration calls it.
+    /// @param url The link; checkUrlToOpen() must take it.
+    /// @param origin The connection the action that asked for it came from; 0 for none.
+    /// @return Nothing; BadArgument for a link checkUrlToOpen() refuses; Gone with no such window;
+    ///         NotSupported for a window whose client cannot open links (Capability::UrlOpen).
+    [[nodiscard]] virtual std::expected<void, ServedTabError> openUrl(std::string_view extension,
+                                                                      std::string_view url,
+                                                                      Origin origin) = 0;
 
     /// @param extension What the daemon's configuration calls it.
     /// @return Its tabs, pending ones included, in the order they were opened.

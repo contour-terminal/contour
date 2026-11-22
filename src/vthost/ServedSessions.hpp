@@ -159,6 +159,10 @@ class ServedTabHost
     /// Tells the window on @p connection to raise itself and focus @p session's pane (sends RevealPane).
     virtual void revealTo(ConnectionId const& connection, vtworkspace::SessionId session) = 0;
 
+    /// Tells the window on @p connection to open @p url on its client's machine (sends OpenUrl); nothing for
+    /// a connection gone meanwhile.
+    virtual void openUrlIn(ConnectionId const& connection, std::string const& url) = 0;
+
     /// @return The connections whose windows show @p workspace, the one focused last first.
     [[nodiscard]] virtual std::vector<ConnectionId> showing(vtworkspace::WorkspaceId workspace) const = 0;
 
@@ -241,6 +245,9 @@ class ServedSessions final: public IServedTabs, public IServedTabLookup
     [[nodiscard]] std::expected<void, ServedTabError> reveal(std::string_view extension,
                                                              std::string_view tab,
                                                              Origin origin) override;
+    [[nodiscard]] std::expected<void, ServedTabError> openUrl(std::string_view extension,
+                                                              std::string_view url,
+                                                              Origin origin) override;
     [[nodiscard]] std::vector<ServedTabInfo> list(std::string_view extension) const override;
     [[nodiscard]] std::expected<std::string, ServedTabError> read(std::string_view extension,
                                                                   std::string_view tab) override;

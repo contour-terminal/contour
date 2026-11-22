@@ -302,6 +302,8 @@ namespace vthost::testing
           proto::DecodedPdu {
               proto::InvokeExtensionAction { .extension = "orchestrator", .action = "open" } } },
         { proto::PduType::RevealPane, proto::DecodedPdu { proto::RevealPane { .session = 4 } } },
+        { proto::PduType::OpenUrl,
+          proto::DecodedPdu { proto::OpenUrl { .url = "https://example.org/?token=secret-title" } } },
         { proto::PduType::SetWorkspaceName,
           proto::DecodedPdu { proto::SetWorkspaceName { .workspace = 3, .name = "secret-label" } } },
         { proto::PduType::SetWorkspaceColor,

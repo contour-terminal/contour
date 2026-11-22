@@ -532,6 +532,7 @@ constexpr auto InvalidRows = std::array {
     InvalidRow { .file = "title-control-character", .fault = ManifestFault::NotUtf8 },
     InvalidRow { .file = "title-repeated", .fault = ManifestFault::Repeated },
     InvalidRow { .file = "pane-input-repeated", .fault = ManifestFault::Repeated },
+    InvalidRow { .file = "url-open-repeated", .fault = ManifestFault::Repeated },
     InvalidRow { .file = "title-bidi-override", .fault = ManifestFault::BadTitle },
     InvalidRow { .file = "action-title-too-long", .fault = ManifestFault::BadTitle },
 };
@@ -876,6 +877,20 @@ TEST_CASE("Manifest: the digest covers the whole module, its code too", "[vtexte
     CHECK(one->name == two->name);
     CHECK(one->commands.size() == two->commands.size());
     CHECK(one->digest != two->digest);
+}
+
+TEST_CASE("Manifest v2: url-open lets url-open ask the frontend to open links", "[vtextension][manifest]")
+{
+    constexpr auto Head = "name = p\nversion = 2\nplacement daemon\n";
+    auto const without = parseManifestText(Head);
+    REQUIRE(without.has_value());
+    CHECK(without->urlOpening == vtextension::UrlOpening::Refused);
+    auto const with = parseManifestText(std::string { Head } + "url-open\n");
+    REQUIRE(with.has_value());
+    CHECK(with->urlOpening == vtextension::UrlOpening::Allowed);
+    CHECK(parseManifestText(std::string { Head } + "url-open\nurl-open\n").error()
+          == ManifestFault::Repeated);
+    CHECK(parseManifestText(std::string { Head } + "url-open https\n").error() == ManifestFault::UnknownLine);
 }
 
 TEST_CASE("Manifest v2: pane-input lets pane-send type into the panes", "[vtextension][manifest]")

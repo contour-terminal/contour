@@ -605,6 +605,17 @@ namespace
         return {};
     }
 
+    /// `url-open`: no words. It lets `url-open` ask the frontend the user is at to open a web link.
+    [[nodiscard]] LineResult allowUrlOpen(ParseState& state, Line const& line)
+    {
+        if (!line.head.empty())
+            return refuse(ManifestFault::UnknownLine);
+        if (state.manifest.urlOpening == UrlOpening::Allowed)
+            return refuse(ManifestFault::Repeated);
+        state.manifest.urlOpening = UrlOpening::Allowed;
+        return {};
+    }
+
     [[nodiscard]] LineResult setServedScheme(ParseState& state, Line const& line)
     {
         if (line.head.size() != 1)
@@ -681,6 +692,7 @@ namespace
         LineKind { .keyword = "serve", .since = 2, .value = LineValue::None, .handler = &setServedScheme },
         LineKind {
             .keyword = "pane-input", .since = 2, .value = LineValue::None, .handler = &allowPaneInput },
+        LineKind { .keyword = "url-open", .since = 2, .value = LineValue::None, .handler = &allowUrlOpen },
         LineKind { .keyword = "action", .since = 2, .value = LineValue::Text, .handler = &addAction },
         LineKind { .keyword = "title", .since = 2, .value = LineValue::Text, .handler = &setTitle },
     };

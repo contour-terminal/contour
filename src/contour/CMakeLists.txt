@@ -405,6 +405,7 @@ if(CONTOUR_FRONTEND_GUI)
         remote/DaemonLinkHost.hpp
         remote/NativeController.hpp
         remote/PaneReveals.hpp
+        remote/UrlOpens.hpp
         remote/RemoteController.hpp
         remote/ReactorThread.hpp
         remote/RemoteLayout.hpp
@@ -1023,6 +1024,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/PromptHost_test.cpp
             remote/StartupAttach_test.cpp
             remote/PaneReveals_test.cpp
+            remote/UrlOpens_test.cpp
             remote/SwitchTrust_test.cpp
             remote/WorkspaceLister_test.cpp
             remote/RemoteController_test.cpp

@@ -659,6 +659,39 @@ TEST_CASE("a tab-reveal without an origin goes to the window that just typed int
     CHECK(bench.activeIn(bench.first) == session);
 }
 
+TEST_CASE("url-open goes to the window that just typed into the tab, if it opens links",
+          "[daemon][served][url-open]")
+{
+    auto bench = ServedBench {};
+    auto typing = FakeWindow { 1 };
+    auto const origin = bench.attach(typing, bench.first);
+    auto const opened = bench.tabs->open(Orchestrator, "Agents", "", AgentsScheme, origin);
+    REQUIRE(opened.has_value());
+    auto const session = bench.sessionOf(*opened);
+    constexpr auto Link = std::string_view { "https://github.com/contour-terminal/contour/pull/2369" };
+
+    // Not a web link: refused whoever asks.
+    CHECK(
+        failedWith(bench.tabs->openUrl(Orchestrator, "file:///etc/passwd", 0), ServedTabError::BadArgument));
+    // Before any key: no user action stands behind origin 0.
+    CHECK(failedWith(bench.tabs->openUrl(Orchestrator, Link, 0), ServedTabError::Gone));
+
+    bench.live.host.writeInputFrom(session, "o", typing.connectionId(), proto::InputKind::Keyboard);
+    // Another extension's tab was not typed into.
+    CHECK(failedWith(bench.tabs->openUrl("other", Link, 0), ServedTabError::Gone));
+    REQUIRE(bench.tabs->openUrl(Orchestrator, Link, 0).has_value());
+    CHECK(bench.live.eventually([&] { return typing.opened == std::vector { std::string { Link } }; }));
+
+    // A window whose client opens no links is told so, and sent nothing.
+    auto plain = FakeWindow { 2 };
+    plain.links = LinkOpening::Unable;
+    std::ignore = bench.attach(plain, bench.first);
+    bench.live.host.writeInputFrom(session, "o", plain.connectionId(), proto::InputKind::Keyboard);
+    CHECK(failedWith(bench.tabs->openUrl(Orchestrator, Link, 0), ServedTabError::NotSupported));
+    bench.turn();
+    CHECK(plain.opened.empty());
+}
+
 TEST_CASE("tab-open returns at once and the tab follows on the loop", "[daemon][served]")
 {
     auto bench = ServedBench {};

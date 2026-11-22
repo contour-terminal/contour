@@ -135,7 +135,7 @@ constexpr auto UnservedRows = std::array<UnservedRow, 0> {};
 /// The imports this host serves for served tabs and invoked actions.
 constexpr auto TabAndActionImports = std::array {
     DaemonImport::TabOpen, DaemonImport::TabClose, DaemonImport::TabReveal,   DaemonImport::Tabs,
-    DaemonImport::TabRead, DaemonImport::TabWrite, DaemonImport::ActionsTake,
+    DaemonImport::TabRead, DaemonImport::TabWrite, DaemonImport::ActionsTake, DaemonImport::UrlOpen,
 };
 
 /// Records what is armed and disarmed, in one log with the service calls the test adds to it. Nothing is
@@ -378,6 +378,8 @@ TEST_CASE("DaemonInstance: the tab and action imports are served", "[daemon][ins
         REQUIRE(guest.call(DaemonImport::TabWrite, { TabAddress, 5, BytesAddress, 5, ResultAddress })
                     .has_value());
         REQUIRE(guest.call(DaemonImport::TabReveal, { TabAddress, 5, 7, ResultAddress }).has_value());
+        guest.put(BytesAddress, "https://example.org/");
+        REQUIRE(guest.call(DaemonImport::UrlOpen, { BytesAddress, 20, 7, ResultAddress }).has_value());
         REQUIRE(guest.call(DaemonImport::Tabs, { ResultAddress }).has_value());
         listed = *abi::Codec<std::expected<std::vector<TabInfo>, HostError>>::load(memory, ResultAddress);
         REQUIRE(guest.call(DaemonImport::TabRead, { TabAddress, 5, ResultAddress }).has_value());
@@ -393,6 +395,7 @@ TEST_CASE("DaemonInstance: the tab and action imports are served", "[daemon][ins
           == std::vector { DaemonImport::TabOpen,
                            DaemonImport::TabWrite,
                            DaemonImport::TabReveal,
+                           DaemonImport::UrlOpen,
                            DaemonImport::Tabs,
                            DaemonImport::TabRead,
                            DaemonImport::ActionsTake,
@@ -403,6 +406,8 @@ TEST_CASE("DaemonInstance: the tab and action imports are served", "[daemon][ins
     CHECK(guest.services.tabWrites.front().first == "tab-1");
     CHECK(guest.services.tabWrites.front().second == ByteList { 'd', 'r', 'a', 'w', 'n' });
     CHECK(guest.services.tabReveals == std::vector { std::pair { std::string { "tab-1" }, Origin { 7 } } });
+    CHECK(guest.services.urlOpens
+          == std::vector { std::pair { std::string { "https://example.org/" }, Origin { 7 } } });
     CHECK(listed == std::expected<std::vector<TabInfo>, HostError> { guest.services.servedTabs });
     CHECK(read == std::expected<ByteList, HostError> { ByteList { 'j', 'k' } });
     CHECK(taken

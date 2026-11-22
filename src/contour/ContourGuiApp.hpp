@@ -736,7 +736,10 @@ class ContourGuiApp:
     }
 
     /// The external-resource launcher (URL opening, child-process spawning) for this app's sessions.
-    [[nodiscard]] platform::ExternalLauncher& externalLauncher() noexcept { return *_externalLauncher; }
+    [[nodiscard]] platform::ExternalLauncher& externalLauncher() noexcept override
+    {
+        return *_externalLauncher;
+    }
 
     /// The voice this app's sessions read selections through.
     ///
