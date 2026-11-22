@@ -770,11 +770,12 @@ void NativeController::onUpdate(RemoteScreen const& screen, vthost::proto::Delta
 {
     auto lock = std::unique_lock { _mutex };
     captureHandshake();
-    // A mirrored pane says its title and directory in its own stream, not in summaries.
-    if (auto& status = _paneStatus[screen.session]; status.title != screen.title || status.cwd != screen.cwd)
+    // A mirrored pane says its title in its own stream, not in summaries. Not its directory: the stream
+    // carries the OSC 7 URL as reported, and every pane's directory as shown arrives in summaries
+    // (onPaneSummary()).
+    if (auto& status = _paneStatus[screen.session]; status.title != screen.title)
     {
         status.title = screen.title;
-        status.cwd = screen.cwd;
         scheduleStatusFlush();
     }
 

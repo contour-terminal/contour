@@ -184,9 +184,28 @@ struct TitleChangedSignal
     std::string title; ///< The new title, as the application wrote it.
 };
 
-/// The application reported a working directory different from the one before.
+/// The directory a pane is shown in moved (@see SessionHost::shownWorkingDirectoryOf). Raised by the terminal
+/// as the shell reports one (OSC 7) or enters a context (OSC 3008), and polled from the process where neither
+/// reports; the host tells its subscribers only when the directory shown differs from the one told before.
 struct WorkingDirectoryChangedSignal
 {
+};
+
+/// Where the directory a pane is shown in comes from.
+enum class ShownDirectorySource : uint8_t
+{
+    None = 0, ///< Unknown: nothing reported one, and the process said none.
+    Reported, ///< The shell reported it (OSC 3008 or OSC 7), on whichever host.
+    Process,  ///< The pane's process, asked: nothing reported one.
+};
+
+/// The directory a pane is shown in, and where it comes from.
+struct ShownDirectory
+{
+    std::string path;                                         ///< UTF-8; empty for none.
+    ShownDirectorySource source = ShownDirectorySource::None; ///< Where @ref path comes from.
+
+    bool operator==(ShownDirectory const&) const = default;
 };
 
 /// The session's program-status records (OSC 7501) changed; the records are read back under the lock.
@@ -600,6 +619,29 @@ class HostedSession
     /// the PTY, so it reads `/proc` (or its platform's equivalent): loop thread, at most once a second.
     void pollForegroundProcess();
 
+    /// @return The directory the pane's process is in, empty when unknown or without a process. Reads `/proc`
+    ///         (or its platform's equivalent): loop thread.
+    [[nodiscard]] std::string processDirectory();
+
+    /// @return The directory the pane is shown in, as its pane header names it: the one its shell reported by
+    ///         OSC 3008 / OSC 7 on whichever host (vtbackend::CwdPurpose::Display), else the process's. Takes
+    ///         the terminal lock, then may read `/proc`: loop thread.
+    [[nodiscard]] ShownDirectory shownDirectory();
+
+    /// Notes @p now as the directory the host last told its subscribers of. Loop thread.
+    /// @return The one noted before.
+    ShownDirectory exchangeToldDirectory(ShownDirectory now)
+    {
+        return std::exchange(_toldDirectory, std::move(now));
+    }
+
+    /// @return Whether the directory shown is the pane's process's to ask: it has a process, and its shell
+    ///         has not reported one. Loop thread.
+    [[nodiscard]] bool followsProcessDirectory() noexcept
+    {
+        return _toldDirectory.source != ShownDirectorySource::Reported && process() != nullptr;
+    }
+
   private:
     /// The Terminal::Events glue: forwards the terminal events the daemon
     /// mirrors — the per-batch screen update, the bell, desktop notifications
@@ -693,7 +735,7 @@ class HostedSession
             if (onCopyToClipboard)
                 onCopyToClipboard(std::string { data }, targets);
         }
-        // The five below run on the parser thread under the terminal lock: each copies what it was handed
+        // The six below run on the parser thread under the terminal lock: each copies what it was handed
         // into a signal and reads no terminal state.
         void commandBlockFinished(vtbackend::CommandBlockSummary const& summary) override
         {
@@ -708,6 +750,11 @@ class HostedSession
             raise(TitleChangedSignal { .title = std::string { title } });
         }
         void workingDirectoryChanged() override { raise(WorkingDirectoryChangedSignal {}); }
+        // Entering or leaving an OSC 3008 context may move the directory shown, which prefers the context's.
+        void contextChanged(vtbackend::ContextId /*activeContext*/) override
+        {
+            raise(WorkingDirectoryChangedSignal {});
+        }
         void programStatusChanged(vtbackend::ProgramStatusChange const& change) override
         {
             raise(ProgramStatusChangedSignal { .reason = change.reason });
@@ -815,6 +862,9 @@ class HostedSession
     /// The foreground program the extensions were last told of, so that each is told once; extensions that
     /// load or subscribe later hear it from the terminal, which remembers it. Loop thread only.
     std::string _foregroundProcessName;
+    /// The directory the host last told its subscribers the pane is shown in, so a move is told once and a
+    /// report that moved nothing not at all. Loop thread only.
+    ShownDirectory _toldDirectory;
     std::function<void()> _onClosed;
     /// Why the pump loop ends: the process exiting by itself, terminate(), or quiesce().
     enum class PumpEnd : uint8_t
@@ -1777,6 +1827,16 @@ class SessionHost final: public vtworkspace::ModelEvents
     [[nodiscard]] std::optional<std::filesystem::path> workingDirectoryOf(
         vtworkspace::SessionId session) const;
 
+    /// @param session A hosted session.
+    /// @return The directory the pane is shown in, as its pane header names it: the one its shell reported by
+    ///         OSC 3008 / OSC 7 on whichever host (vtbackend::CwdPurpose::Display), else the process's.
+    ///         UTF-8. Nullopt for an unknown session or an unknown directory.
+    [[nodiscard]] std::optional<std::string> shownWorkingDirectoryOf(vtworkspace::SessionId session) const;
+
+    /// Tells the subscribers that @p session's shown directory moved (WorkingDirectoryChangedSignal), and has
+    /// its workspace's git state looked up again, when it differs from the one told before. Loop thread.
+    void tellDirectoryIfMoved(vtworkspace::SessionId session);
+
     // vtworkspace::ModelEvents — every completed change fans out to subscribers.
     void tabAdded(vtworkspace::WorkspaceId workspace, vtworkspace::TabId tab, int index) override;
     void tabClosed(vtworkspace::WorkspaceId workspace, vtworkspace::TabId tab, int index) override;
@@ -2224,8 +2284,10 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param host The SessionHost.
     static void pollWorkspaceGit(void* host);
 
-    /// Arms the once-a-second poll of the hosted programs, unless it is armed or no session's extensions
-    /// follow the foreground process. Asked again whenever a session's extensions are replaced.
+    /// Arms the once-a-second poll of the hosted programs, unless it is armed or nothing follows them: no
+    /// session's extensions follow the foreground process, and every pane's directory is one its shell
+    /// reports. Asked again whenever a session's extensions are replaced, a session is installed, or a
+    /// directory told.
     void armForegroundPoll();
 
     /// Moves the open permission questions @p gone asked to another session whose extensions run, or closes
@@ -2237,8 +2299,12 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return Whether some session's extensions follow the foreground process.
     [[nodiscard]] bool followsForegroundProcess() const noexcept;
 
-    /// What the poll does: tells every session's extensions of its foreground program, and re-arms while
-    /// any session runs extensions. @param host The SessionHost.
+    /// @return Whether some pane's shown directory is not one its shell reports, so it is the process's to
+    /// ask.
+    [[nodiscard]] bool followsProcessDirectory() const noexcept;
+
+    /// What the poll does: tells every session's extensions of its foreground program, and its subscribers of
+    /// a process's directory that moved, and re-arms while either is followed. @param host The SessionHost.
     static void pollForegroundProcesses(void* host);
 
     /// Releases what the runners of a session just destroyed retire, a second from now: a runner retires

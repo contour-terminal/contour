@@ -5072,6 +5072,22 @@ TEST_CASE("select() moves the mirrored sessions", "[attach][controller][director
         return 0;
     });
     CHECK(waitUntil([&] { return paneOf(controller, second.id).title == "mirrored title"; }));
+
+    // Its directory arrives as the OSC 7 URL the shell wrote, but the directory holds the path it names, of
+    // whichever host: the sidebar shows a path, as the pane header does, not file://HOST/PATH.
+    daemon.onDaemon([&] {
+        daemon.host->terminal(second.session)
+            ->writeToScreen("\033]7;file://some.host/tmp/mirrored%20dir\033\\");
+        return 0;
+    });
+    CHECK(waitUntil([&] { return paneOf(controller, second.id).cwd == "/tmp/mirrored dir"; }));
+    // Its screen stream, which carries the URL, does not say it again.
+    daemon.onDaemon([&] {
+        daemon.host->terminal(second.session)->writeToScreen("more output\r\n");
+        return 0;
+    });
+    REQUIRE((paneA.shows("more output") || paneB.shows("more output")));
+    CHECK(paneOf(controller, second.id).cwd == "/tmp/mirrored dir");
     controller.stop();
     paneA.terminal.reset();
     paneB.terminal.reset();

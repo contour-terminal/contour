@@ -583,16 +583,22 @@ void NativeSession::sessionSignal(SessionId session, SessionSignal const& signal
         scheduleFlush(flushDeadline(_services.flush, FlushReason::Coalesce, now));
         return;
     }
-    // What a pane of another workspace did is summarized; a mirrored pane says it in its own stream.
-    if (!summarizesPanes() || mirrorsSession(session))
+    if (!summarizesPanes())
+        return;
+    // Every pane's directory is summarized, a mirrored one's too: the window shows it as the pane header
+    // names it, which a screen stream's OSC 7 URL alone cannot say.
+    if (std::holds_alternative<WorkingDirectoryChangedSignal>(signal))
+    {
+        queueSummary(session, [this, session](proto::PaneSummary& summary) {
+            summary.cwd = _host.shownWorkingDirectoryOf(session);
+        });
+        return;
+    }
+    // What else a pane of another workspace did is summarized; a mirrored pane says it in its own stream.
+    if (mirrorsSession(session))
         return;
     if (auto const* title = std::get_if<TitleChangedSignal>(&signal))
         queueSummary(session, [title](proto::PaneSummary& summary) { summary.title = title->title; });
-    else if (std::holds_alternative<WorkingDirectoryChangedSignal>(signal))
-        queueSummary(session, [this, session](proto::PaneSummary& summary) {
-            if (auto const directory = _host.workingDirectoryOf(session))
-                summary.cwd = directory->string();
-        });
     else if (auto const* finished = std::get_if<CommandBlockFinishedSignal>(&signal))
         queueSummary(session, [finished](proto::PaneSummary& summary) {
             auto const& block = finished->summary;
@@ -844,34 +850,35 @@ void NativeSession::flushSummaries()
             send(0, proto::DecodedPdu { std::move(summary) });
             continue;
         }
-        // Mirrored since: the pane's own stream says what it is now, but what it raised while it was not
-        // mirrored was told to this connection nowhere else.
+        // Mirrored since: the pane's own stream says what it is now, but not its directory as shown, and what
+        // it raised while it was not mirrored was told to this connection nowhere else.
         auto raised = proto::PaneSummary { .session = session,
+                                           .cwd = std::move(summary.cwd),
                                            .finished = std::move(summary.finished),
                                            .bell = summary.bell,
                                            .notifications = std::move(summary.notifications) };
-        if (proto::carriesRaise(raised))
+        if (raised.cwd || proto::carriesRaise(raised))
             send(0, proto::DecodedPdu { std::move(raised) });
     }
 }
 
-void NativeSession::announceUnmirroredPanes()
+void NativeSession::announcePanes()
 {
     if (_phase != ConnectionPhase::Viewing || _closed || !summarizesPanes())
         return;
     for (auto const session: _host.sessionIds())
     {
-        if (mirrorsSession(session))
-            continue;
         // Merge into a pending entry: it may already carry a finished command or an activity mark that
         // this announcement must not drop.
         auto& summary =
             _pendingSummaries.try_emplace(session.value, proto::PaneSummary { .session = session.value })
                 .first->second;
+        // Every pane's directory, as shown: a mirrored pane's stream does not say it.
+        summary.cwd = _host.shownWorkingDirectoryOf(session);
+        if (mirrorsSession(session))
+            continue;
         if (auto const* terminal = _host.terminal(session))
             summary.title = terminal->resolvedWindowTitle();
-        if (auto const directory = _host.workingDirectoryOf(session))
-            summary.cwd = directory->string();
         if (mirrorsProgramStatus() && holdsProgramStatus(session))
             _programStatusPending.insert(session.value);
     }
@@ -1162,7 +1169,7 @@ void NativeSession::refreshSelection()
         _selectedWorkspace = 0;
         _selectedTabs = SelectedTabs::NeverHeld;
         forgetUnmirroredSessions();
-        announceUnmirroredPanes();
+        announcePanes();
         return;
     }
     selectWorkspace(vtworkspace::WorkspaceId { *next });
@@ -1212,7 +1219,7 @@ void NativeSession::selectWorkspace(vtworkspace::WorkspaceId workspace)
     _host.noteSelected(*this);
     // What the old workspace's sessions were sent is not what the new selection continues from.
     forgetUnmirroredSessions();
-    announceUnmirroredPanes();
+    announcePanes();
     requestWorkspaceSnapshots(*found);
 }
 
@@ -3223,7 +3230,7 @@ void NativeSession::attachClient(uint64_t serial,
     // The workspace/tab/pane layout first, so the client builds its tabs and split
     // trees before the per-session content streams into them.
     pushLayout();
-    announceUnmirroredPanes();
+    announcePanes();
 
     // A live upgrade that could not bring a session's screen back says so to the first client that mirrors
     // the session: what it sees is a fresh screen, the program behind it untouched.

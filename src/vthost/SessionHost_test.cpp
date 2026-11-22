@@ -7,6 +7,7 @@
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
 
+#include <vtpty/ChildProcess.hpp>
 #include <vtpty/MockPty.hpp>
 #ifndef _WIN32
     #include <vtpty/Process.hpp>
@@ -4297,6 +4298,83 @@ TEST_CASE("hosted sessions fan out block, title and cwd signals", "[vthost][host
     terminal.writeToScreen("\033]7;file://h/tmp\033\\");
     drain();
     CHECK(recorder.all<vthost::WorkingDirectoryChangedSignal>().size() == 1);
+}
+
+namespace
+{
+/// A pane whose process says the directory a case sets: what the host asks where no shell reports one.
+class DirectoryPty final: public vtpty::MockPty, public vtpty::ChildProcess
+{
+  public:
+    DirectoryPty(vtbackend::PageSize size, std::shared_ptr<std::string> directory):
+        vtpty::MockPty { size }, _directory { std::move(directory) }
+    {
+    }
+
+    [[nodiscard]] vtpty::SpawnProgress spawnProgress() const override
+    {
+        return vtpty::SpawnProgress::Settled;
+    }
+    [[nodiscard]] std::optional<vtpty::ExitStatus> checkStatus() const override { return std::nullopt; }
+    [[nodiscard]] std::string workingDirectory() const override { return *_directory; }
+    [[nodiscard]] std::optional<std::string> foregroundProcessName() const override { return std::nullopt; }
+    void terminate(vtpty::TerminationHint /*hint*/) override {}
+    [[nodiscard]] vtpty::ChildCrossing crossing() const override { return {}; }
+
+  private:
+    std::shared_ptr<std::string> _directory;
+};
+} // namespace
+
+TEST_CASE("a pane whose shell reports no directory is shown in its process's, polled",
+          "[vthost][host][signals][cwd]")
+{
+    auto clock = core::platform::ManualClock {};
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source, clock };
+    auto const directory = std::make_shared<std::string>("/srv/one");
+    auto host =
+        SessionHost { loop,
+                      [directory](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                          return std::make_unique<DirectoryPty>(size, directory);
+                      },
+                      vtbackend::Settings {},
+                      core::defaultEnvironment(),
+                      vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
+    auto recorder = SignalRecorder {};
+    auto const subscription = vthost::makeScopedStreamSubscription(host, recorder);
+    auto const* const tab = host.createTab();
+    REQUIRE(tab != nullptr);
+    auto const session = tab->rootPane()->session();
+    auto const tick = [&] {
+        clock.advance(std::chrono::seconds { 1 });
+        for ([[maybe_unused]] auto const i: std::views::iota(0, 4))
+            std::ignore = loop.runOnce(std::chrono::milliseconds { 0 });
+    };
+    auto const told = [&] {
+        return recorder.all<vthost::WorkingDirectoryChangedSignal>().size();
+    };
+
+    CHECK(host.shownWorkingDirectoryOf(session) == std::optional<std::string> { "/srv/one" });
+    tick();
+    CHECK(told() == 1);
+
+    // A `cd` no shell reported is seen at the next poll, and told once.
+    *directory = "/srv/two";
+    tick();
+    CHECK(told() == 2);
+    tick();
+    CHECK(told() == 2);
+    CHECK(host.shownWorkingDirectoryOf(session) == std::optional<std::string> { "/srv/two" });
+
+    // Once the shell reports one, that is the directory shown, and the process is not asked any more.
+    host.terminal(session)->writeToScreen("\033]7;file:///srv/reported\033\\");
+    tick();
+    CHECK(told() == 3);
+    *directory = "/srv/three";
+    tick();
+    CHECK(told() == 3);
+    CHECK(host.shownWorkingDirectoryOf(session) == std::optional<std::string> { "/srv/reported" });
 }
 
 TEST_CASE("a whole tab moved to another workspace reaches the subscribers, before and after",

@@ -1074,9 +1074,10 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// Sends the pending summaries, and forgets them.
     void flushSummaries();
 
-    /// Queues each unmirrored pane's title and working directory now, and any program status it holds, for
-    /// the next flush: what a window starts a pane's row from, as it attaches or selects another workspace.
-    void announceUnmirroredPanes();
+    /// Queues every pane's working directory as shown, and each unmirrored pane's title and any program
+    /// status it holds, for the next flush: what a window starts a pane's row from, as it attaches or selects
+    /// another workspace.
+    void announcePanes();
 
     /// @return Whether @p session has program-status records to tell.
     [[nodiscard]] bool holdsProgramStatus(vtworkspace::SessionId session) const;
@@ -1399,7 +1400,8 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     std::unordered_set<uint64_t> _pendingSessions;
     /// Sessions whose program-status records changed since the last flush. @see sessionSignal
     std::unordered_set<uint64_t> _programStatusPending;
-    /// What changed in each unmirrored pane since the last flush, merged into one summary per pane.
+    /// What changed in each pane since the last flush, merged into one summary per pane: everything of an
+    /// unmirrored one, the directory alone of a mirrored one (@see flushSummaries).
     std::map<uint64_t, proto::PaneSummary> _pendingSummaries;
     /// What this connection knows of an unmirrored pane's output, to decide whether an update is news.
     struct ActivityMark

@@ -862,6 +862,14 @@ class UiStyleProvider: public QObject
     ///         the well scrolls (a QML-facing bool, the documented carve-out).
     [[nodiscard]] Q_INVOKABLE QVariantMap tabWellLayout(qreal available, int tabCount) const;
 
+    /// The width a Text item lays @p text out in: what the chrome budgets a label by, so a budget equals the
+    /// label drawn. Not FontMetrics.advanceWidth(), which Qt measures apart from the layout and which falls
+    /// short of it for some faces (a bold one at exactly weight 700, by a pixel).
+    /// @param font The label's font.
+    /// @param text The label, plain text on one line.
+    /// @return The natural width of the laid-out line, in logical pixels; 0 for empty text.
+    [[nodiscard]] Q_INVOKABLE qreal textWidth(QFont const& font, QString const& text) const;
+
     /// The least width the tab well can be given at all, which the window's minimum width keeps.
     /// @param tabCount How many tabs the well lists.
     /// @return The width of a well holding one icon-only pill (window::iconOnlyTabWellMinimum); 0 without

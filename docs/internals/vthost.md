@@ -441,7 +441,8 @@ publishes the control event `object.renamed`, for workspaces, tabs and panes ali
 the one daemon workspace the connection displays in full; `0` asks the daemon to create a workspace and select
 it. `ReportFocus` (client->server, same gate) states whether the window has the user's focus, and `NotifyRole`
 (server->client) tells it whether it is the raise holder (see above). `PaneSummary` (server->client) carries
-what changed about a pane of an unselected workspace, and what it raised there: a bell mark and each desktop
+what changed about a pane of an unselected workspace -- and, for every pane, its working directory as shown --
+and what it raised there: a bell mark and each desktop
 notification, which a connection that does not mirror the pane is sent in place of `SessionBell` and
 `SessionNotify`. The `LayoutBatchEnd` answering a `SelectWorkspace` names it as its `causeSerial`, so a client
 that asked for a workspace the daemon does not have learns so at once. `SwitchRequest` (tag 48, server->client, gated on
@@ -1218,7 +1219,8 @@ layout of every other workspace (so a workspace list can be drawn) and, for each
 workspace, a `PaneSummary` (title, working directory, an activity mark throttled to one per second per
 session, a finished command, a bell mark and the desktop notifications it raised) and its `ProgramStatus` --
 never its screen. A pane that has a mirror on the
-connection has no summary. Selecting another workspace (`SelectWorkspace`, gated on
+connection is summarized for its working directory alone, the one its pane header shows (the shell's report on
+whichever host, else the process's): its screen stream carries only the OSC 7 URL as reported. Selecting another workspace (`SelectWorkspace`, gated on
 `Capability::DaemonFollow`; `0` creates a workspace and selects it) moves the mirror: the old workspace's panes
 turn into summaries, the new one's are sent in full.
 

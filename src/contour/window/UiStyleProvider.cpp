@@ -44,6 +44,8 @@
 #include <QtGui/QFontMetricsF>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QPalette>
+#include <QtGui/QTextLayout>
+#include <QtGui/QTextOption>
 
 #include <algorithm>
 #include <array>
@@ -602,6 +604,25 @@ TabWellMetrics UiStyleProvider::tabWellMetrics() const
                             .iconOnlyTab = (2 * _space.s5()) + _size.tabIcon(),
                             .gap = wellGap(),
                             .padding = wellPadding() };
+}
+
+qreal UiStyleProvider::textWidth(QFont const& font, QString const& text) const
+{
+    if (text.isEmpty())
+        return 0;
+    // What QQuickText does: the text laid out on one line, unwrapped, at its natural width.
+    auto layout = QTextLayout { text, font };
+    auto option = QTextOption {};
+    option.setWrapMode(QTextOption::NoWrap);
+    // As QQuickText lays out any text it does not render natively: unhinted advances, which a hinting
+    // fontconfig would otherwise round apart from the label drawn.
+    option.setUseDesignMetrics(true);
+    layout.setTextOption(option);
+    layout.beginLayout();
+    auto line = layout.createLine();
+    line.setLineWidth(0);
+    layout.endLayout();
+    return line.naturalTextWidth();
 }
 
 qreal UiStyleProvider::tabWellMinimum(int tabCount) const

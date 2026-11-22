@@ -1746,7 +1746,8 @@ struct PaneNotification
 };
 
 /// Server→client (Capability::DaemonFollow): what changed about a pane of a workspace this connection does
-/// not select. Absent optionals mean "unchanged", so one PDU carries every field that changed.
+/// not select, and the working directory as shown of any pane, a mirrored one's included. Absent optionals
+/// mean "unchanged", so one PDU carries every field that changed.
 ///
 /// It also carries what the pane raised, which a connection that does not mirror the pane is not sent as a
 /// SessionBell or SessionNotify: the window that raises (RaiseRole::Raise) rings and notifies for it.
