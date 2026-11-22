@@ -4100,6 +4100,18 @@ TEST_CASE("every agent starts with its permission profile as --settings",
         CHECK(run.permissions == "trusted");
         CHECK(paneArgument(pane, "settings")->contains("Bash(git push:*)"));
     }
+    SECTION("the dispatch's own, over the task's, and an unknown one refused")
+    {
+        auto harness = Harness { contextFor({}) };
+        harness.boot();
+        auto dispatch = prDispatch();
+        dispatch.permissions = "ask";
+        auto const preview = harness.engine().preview(dispatch);
+        REQUIRE(preview.has_value());
+        CHECK(preview->run.permissions == "ask");
+        dispatch.permissions = "nope";
+        CHECK(harness.engine().preview(dispatch).error() == DispatchRefusal::UnknownProfile);
+    }
 }
 
 TEST_CASE("a topic dispatches on a new branch named from its text, with the text as its prompt",

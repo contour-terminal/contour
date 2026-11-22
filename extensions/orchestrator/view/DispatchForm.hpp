@@ -27,6 +27,7 @@ struct DispatchAction
     std::string topic = {};               ///< A topic's text; empty for any other item.
     std::string task = {};                ///< The task's id.
     std::string model = {};               ///< The model.
+    std::string permissions = {};         ///< The permission profile.
     std::optional<std::string> note = {}; ///< The user's note; absent when none was typed.
     std::string session = {};             ///< The agent's fresh session UUID.
     std::string nearTab = {};             ///< The dashboard tab the form was confirmed in.
@@ -40,6 +41,7 @@ enum class FormField : uint8_t
     Model,    ///< ←/→ cycle the configured models.
     Note,     ///< Typed text extends the note, or a topic form's topic; Backspace shortens it.
     Repo,     ///< A topic form's: ←/→ cycle the configured repositories.
+    Permissions, ///< ←/→ cycle the permission profiles.
 };
 
 /// How far the user got past the warning that Claude Code's status hooks are missing.
@@ -59,6 +61,7 @@ struct DispatchFormState
     std::string title = {};   ///< The item's title, as last listed, sanitised.
     std::size_t task = 0;     ///< The task: an index into Config::tasks(), one that applies to the item.
     std::size_t model = 0;    ///< The model: an index into Config::models().
+    std::size_t permissions = 0; ///< The permission profile: an index into Config::profiles().
     std::string note = {};    ///< What the user typed: the note, or a topic form's topic; empty: none.
     std::string session = {}; ///< The agent's session UUID, minted as the form opens.
     FormField focus = FormField::Task;       ///< Where ←/→ and typed text go.

@@ -48,8 +48,9 @@ namespace
         "an agent already works on this item"sv,                                    // AlreadyRunning
         "the base branch is not known yet: it is read with the next refresh (R)"sv, // BaseUnknown
         "the prompt or the note cannot be passed to the agent"sv,                   // BadPrompt
+        "the permission profile is no longer configured"sv,                         // UnknownProfile
     };
-    static_assert(RefusalTexts.size() == std::to_underlying(DispatchRefusal::BadPrompt) + 1U,
+    static_assert(RefusalTexts.size() == std::to_underlying(DispatchRefusal::UnknownProfile) + 1U,
                   "RefusalTexts has one row per DispatchRefusal");
 
     /// What Enter does, indexed by HooksWarning: once the warning is confirmed, it asks for a second Enter.
@@ -98,6 +99,14 @@ namespace
     [[nodiscard]] bool isSetupIncomplete(Engine const& engine) noexcept
     {
         return engine.hooks() == HooksState::Missing || !engine.missingPlugins().empty();
+    }
+
+    /// @return The index into Config::profiles() of the profile @p taskId's runs start with.
+    [[nodiscard]] std::size_t profileIndexFor(Config const& config, std::string_view taskId) noexcept
+    {
+        auto const profiles = config.profiles();
+        auto const& profile = config.profileFor(taskId);
+        return static_cast<std::size_t>(&profile - profiles.data());
     }
 
     /// The form's fields in the order Tab moves through them: an item's, and a topic's.
@@ -440,6 +449,7 @@ std::optional<DispatchFormState> openDispatchForm(Engine const& engine,
         .model = model != models.end()
                      ? static_cast<std::size_t>(std::ranges::distance(models.begin(), model))
                      : 0,
+        .permissions = profileIndexFor(*config, found->id),
         .note = {},
         .session = std::move(session),
         .focus = FormField::Task,
@@ -469,6 +479,7 @@ std::optional<DispatchFormState> openTopicForm(Engine const& engine,
         .model = model != models.end()
                      ? static_cast<std::size_t>(std::ranges::distance(models.begin(), model))
                      : 0,
+        .permissions = task != nullptr ? profileIndexFor(*config, task->id) : 0,
         .note = std::move(topic),
         .session = std::move(session),
         .focus = FormField::Note,
@@ -488,6 +499,9 @@ DispatchAction actionOf(DispatchFormState const& form, Engine const& engine, std
         .topic = isTopicForm(form) ? form.note : std::string {},
         .task = form.task < tasks.size() ? tasks[form.task].id : std::string {},
         .model = form.model < models.size() ? models[form.model] : std::string {},
+        .permissions = config != nullptr && form.permissions < config->profiles().size()
+                           ? config->profiles()[form.permissions].name
+                           : std::string {},
         // A topic form's text is its topic, not a note.
         .note = form.note.empty() || isTopicForm(form) ? std::nullopt : std::optional { form.note },
         .session = form.session,
@@ -505,6 +519,7 @@ std::expected<DispatchPreview, DispatchRefusal> previewOf(DispatchFormState cons
                                      .topic = std::move(action.topic),
                                      .task = std::move(action.task),
                                      .model = std::move(action.model),
+                                     .permissions = std::move(action.permissions),
                                      .note = std::move(action.note),
                                      .session = std::move(action.session),
                                      .nearTab = std::nullopt,
@@ -537,11 +552,15 @@ std::optional<DispatchAction> applyFormKey(core::tui::KeyEvent const& key,
             state.task = cycled(state.task, tasks.size(), step, [&](std::size_t index) {
                 return tasks[index].appliesTo == appliesToOf(state.item);
             });
-            // A task comes with its own model.
+            // A task comes with its own model and permission profile.
             auto const models = config->models();
             if (auto const model = std::ranges::find(models, tasks[state.task].model); model != models.end())
                 state.model = static_cast<std::size_t>(std::ranges::distance(models.begin(), model));
+            state.permissions = profileIndexFor(*config, tasks[state.task].id);
         }
+        else if (state.focus == FormField::Permissions)
+            state.permissions =
+                cycled(state.permissions, config->profiles().size(), step, [](std::size_t) { return true; });
         else if (state.focus == FormField::Model)
             state.model =
                 cycled(state.model, config->models().size(), step, [](std::size_t) { return true; });
