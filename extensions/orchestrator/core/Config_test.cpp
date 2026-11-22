@@ -694,3 +694,111 @@ TEST_CASE("plugins: the default, none, or a list of its own", "[config]")
         CHECK(config.error().problem == row.problem);
     }
 }
+
+TEST_CASE("permissions: the default profile, a task's own, and profiles of one's own", "[config]")
+{
+    auto const defaulted = parse(Input {});
+    REQUIRE(defaulted.has_value());
+    CHECK(defaulted->defaultProfile().name == DefaultProfileName);
+    CHECK(defaulted->profileFor("fix_ci").name == DefaultProfileName);
+    CHECK(defaulted->profileFor("no-such-task").name == DefaultProfileName);
+    CHECK(defaulted->profiles().size() == 3);
+
+    auto const ask = parse(
+        Input { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "permissions": "ask",)" });
+    REQUIRE(ask.has_value());
+    CHECK(ask->profileFor("fix_ci").name == "ask");
+
+    auto const trusted = parse(Input { .find = R"("prompt": "/contour-workflows:fix-ci {url}" })",
+                                       .replace = R"("prompt": "/contour-workflows:fix-ci {url}",
+                                                     "permissions": "trusted" })" });
+    REQUIRE(trusted.has_value());
+    CHECK(trusted->profileFor("fix_ci").name == "trusted");
+    CHECK(trusted->profileFor("issue").name == DefaultProfileName);
+
+    auto const own =
+        parse(Input { .find = R"("max_agents": 4,)",
+                      .replace = R"js("max_agents": 4, "permissions": "careful", "permission_profiles": [
+            { "name": "careful", "extends": "standard", "mode": "default", "deny": [ "Bash(git commit:*)" ] } ],)js" });
+    REQUIRE(own.has_value());
+    CHECK(own->defaultProfile().name == "careful");
+    CHECK(own->defaultProfile().mode == PermissionMode::Default);
+    CHECK(own->defaultProfile().deny.back() == "Bash(git commit:*)");
+    REQUIRE(own->findProfile("careful") != nullptr);
+    CHECK(own->findProfile("nope") == nullptr);
+}
+
+TEST_CASE("permissions: what is refused, and where", "[config]")
+{
+    struct Row
+    {
+        std::string_view replace;
+        std::string_view key;
+        ConfigProblem problem;
+    };
+    auto const manyRules = [] {
+        auto rules = std::string {};
+        for (auto const index: std::views::iota(0, 64))
+            rules += std::format(
+                R"js({}"Bash({}-{:03}:*)")js", index == 0 ? "" : ",", std::string(128, 'x'), index);
+        return std::format(R"("permission_profiles": [ {{ "name": "big", "allow": [ {} ] }} ],)", rules);
+    }();
+    auto const tooMany = [] {
+        auto rules = std::string {};
+        for (auto const index: std::views::iota(0, 65))
+            rules += std::format(R"({}"Read")", index == 0 ? "" : ",");
+        return std::format(R"("permission_profiles": [ {{ "name": "big", "allow": [ {} ] }} ],)", rules);
+    }();
+    for (auto const& row: std::array {
+             Row { .replace = R"("permissions": "nope",)",
+                   .key = "permissions",
+                   .problem = ConfigProblem::UnknownProfile },
+             Row { .replace = R"("permission_profiles": [ { "name": "x", "mode": "bypassPermissions" } ],)",
+                   .key = "permission_profiles[0].mode",
+                   .problem = ConfigProblem::BypassRefused },
+             Row { .replace = R"("permission_profiles": [ { "name": "x", "mode": "yolo" } ],)",
+                   .key = "permission_profiles[0].mode",
+                   .problem = ConfigProblem::NotPermissionMode },
+             Row { .replace = R"("permission_profiles": [ { "name": "x", "allow": [ "Bash(" ] } ],)",
+                   .key = "permission_profiles[0].allow[0]",
+                   .problem = ConfigProblem::NotPermissionRule },
+             Row { .replace = R"("permission_profiles": [ { "name": "x", "deny": [ "Read", "-x" ] } ],)",
+                   .key = "permission_profiles[0].deny[1]",
+                   .problem = ConfigProblem::LeadingDash },
+             Row { .replace = R"("permission_profiles": [ { "name": "x" }, { "name": "x" } ],)",
+                   .key = "permission_profiles[1].name",
+                   .problem = ConfigProblem::Duplicate },
+             Row { .replace = R"("permission_profiles": [ { "mode": "plan" } ],)",
+                   .key = "permission_profiles[0].name",
+                   .problem = ConfigProblem::Missing },
+             Row { .replace = R"("permission_profiles": [ { "name": "x", "extends": "nope" } ],)",
+                   .key = "permission_profiles[0].extends",
+                   .problem = ConfigProblem::UnknownProfile },
+             Row { .replace = R"("permission_profiles": [ { "name": "a", "extends": "b" },
+                                                          { "name": "b", "extends": "a" } ],)",
+                   .key = "permission_profiles[0].extends",
+                   .problem = ConfigProblem::ProfileCycle },
+             Row { .replace = manyRules,
+                   .key = "permission_profiles[0]",
+                   .problem = ConfigProblem::SettingsTooLarge },
+             Row { .replace = tooMany,
+                   .key = "permission_profiles[0].allow",
+                   .problem = ConfigProblem::SettingsTooLarge },
+         })
+    {
+        CAPTURE(row.replace);
+        auto const replaced = std::format(R"("max_agents": 4, {})", row.replace);
+        auto const config = parse(Input { .find = R"("max_agents": 4,)", .replace = replaced });
+        REQUIRE_FALSE(config.has_value());
+        CHECK(config.error().key == row.key);
+        CHECK(config.error().problem == row.problem);
+        CHECK_FALSE(message(config.error(), sourceTables()).empty());
+    }
+
+    auto const taskProfile = parse(Input { .find = R"("prompt": "/contour-workflows:fix-ci {url}" })",
+                                           .replace = R"("prompt": "/contour-workflows:fix-ci {url}",
+                                                         "permissions": "nope" })" });
+    REQUIRE_FALSE(taskProfile.has_value());
+    CHECK(taskProfile.error().key == "tasks[0].permissions");
+    CHECK(taskProfile.error().problem == ConfigProblem::UnknownProfile);
+}

@@ -43,6 +43,16 @@ struct JsonPluginRequirement
     std::optional<std::string> marketplace;
 };
 
+/// One `permission_profiles` entry.
+struct JsonPermissionProfile
+{
+    std::optional<std::string> name;
+    std::optional<std::string> extends;
+    std::optional<std::string> mode;
+    std::optional<std::vector<std::string>> allow;
+    std::optional<std::vector<std::string>> deny;
+};
+
 /// One `tasks` entry; `applies_to` is no member name, Config.cpp maps the key.
 struct JsonTask
 {
@@ -53,6 +63,7 @@ struct JsonTask
     std::optional<std::string> model;
     std::optional<std::string> prompt;
     std::optional<JsonDuration> endDoneAfter;
+    std::optional<std::string> permissions;
 };
 
 /// The `config` subtree; its snake_case keys are mapped in Config.cpp.
@@ -70,6 +81,8 @@ struct JsonConfig
     std::optional<std::vector<JsonRepo>> repos;
     std::optional<std::vector<JsonTask>> tasks;
     std::optional<std::vector<JsonPluginRequirement>> plugins;
+    std::optional<std::string> permissions;
+    std::optional<std::vector<JsonPermissionProfile>> permissionProfiles;
 };
 
 } // namespace orchestrator::config::detail

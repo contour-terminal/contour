@@ -14,6 +14,7 @@
 
 #include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Model.hpp>
+#include <orchestrator/core/Permissions.hpp>
 #include <orchestrator/core/Plugins.hpp>
 #include <orchestrator/core/Provider.hpp>
 
@@ -54,6 +55,8 @@ struct TaskDef
     std::string prompt; ///< The prompt, with `{url}` standing for the item's URL, or `{topic}` for a topic.
     /// How long its runs' agents stay done before their run ends (`end_done_after`); nullopt: the global one.
     std::optional<std::chrono::milliseconds> endDoneAfter = std::nullopt;
+    /// The permission profile its runs start with (`permissions`); empty: Config::defaultProfile().
+    std::string permissions = {};
 };
 
 /// A program a declared command names that the host runs as its own executable.
@@ -129,6 +132,12 @@ enum class ConfigProblem : uint8_t
     ReservedKey,            ///< A task key the dashboard uses itself.
     MissingUrl,             ///< A prompt without `{url}`.
     NotPluginId,            ///< A plugin that is not `<plugin>@<marketplace>`.
+    UnknownProfile,         ///< A permission profile no built-in or configured profile is called.
+    ProfileCycle,           ///< A permission profile that extends itself, through any number of others.
+    NotPermissionMode,      ///< A permission mode other than `default`, `acceptEdits` or `plan`.
+    BypassRefused,          ///< The `bypassPermissions` mode, which no profile may name.
+    NotPermissionRule,      ///< A permission rule that is not `Tool` or `Tool(specifier)`.
+    SettingsTooLarge,       ///< A permission profile too large to pass to `--settings`.
 };
 
 /// Why a configuration was refused.
@@ -222,6 +231,18 @@ class Config
     [[nodiscard]] std::string const& boardInstruction() const noexcept { return _boardInstruction; }
     /// @return The Claude Code plugins the agents need (`plugins`); empty: none is checked for.
     [[nodiscard]] std::span<PluginRequirement const> plugins() const noexcept { return _plugins; }
+    /// @return Every permission profile, resolved: the built-in ones, as `permission_profiles` changed them,
+    ///         then the configured ones.
+    [[nodiscard]] std::span<PermissionProfile const> profiles() const noexcept { return _profiles; }
+    /// @return The profile a task without its own runs with (`permissions`).
+    [[nodiscard]] PermissionProfile const& defaultProfile() const noexcept;
+    /// @param name A profile name.
+    /// @return The resolved profile of that name, or nullptr.
+    [[nodiscard]] PermissionProfile const* findProfile(std::string_view name) const noexcept;
+    /// @param taskId A task id.
+    /// @return The profile the task's runs start with: its own, else the default; the default for a task no
+    ///         longer configured.
+    [[nodiscard]] PermissionProfile const& profileFor(std::string_view taskId) const noexcept;
     /// @return How long an agent stays done before its run is ended; 0: never.
     [[nodiscard]] std::chrono::milliseconds endDoneAfter() const noexcept { return _endDoneAfter; }
 
@@ -261,6 +282,8 @@ class Config
         std::chrono::milliseconds statusBoardAfter = DefaultStatusBoardAfter;
         std::string boardInstruction = std::string { DefaultBoardInstruction };
         std::vector<PluginRequirement> plugins = defaultPluginRequirements();
+        std::vector<PermissionProfile> profiles = {};
+        std::string defaultProfile = std::string { DefaultProfileName };
         std::chrono::milliseconds endDoneAfter = DefaultEndDoneAfter;
         std::chrono::milliseconds finishedRetention = DefaultFinishedRetention;
         std::vector<Repo> repos = {};
@@ -282,6 +305,8 @@ class Config
     std::vector<Repo> _repos;
     std::vector<TaskDef> _tasks;
     std::vector<PluginRequirement> _plugins;
+    std::vector<PermissionProfile> _profiles;
+    std::string _defaultProfile;
     SourceTables _sources;
 };
 

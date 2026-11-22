@@ -62,7 +62,11 @@ struct glz::meta<orchestrator::config::detail::JsonConfig>
                                               "tasks",
                                               &T::tasks,
                                               "plugins",
-                                              &T::plugins);
+                                              &T::plugins,
+                                              "permissions",
+                                              &T::permissions,
+                                              "permission_profiles",
+                                              &T::permissionProfiles);
 };
 
 /// A task's keys: `applies_to` is no member name.
@@ -85,7 +89,9 @@ struct glz::meta<orchestrator::config::detail::JsonTask>
                                               "prompt",
                                               &T::prompt,
                                               "end_done_after",
-                                              &T::endDoneAfter);
+                                              &T::endDoneAfter,
+                                              "permissions",
+                                              &T::permissions);
 };
 
 namespace orchestrator
@@ -96,6 +102,7 @@ namespace
     using config::detail::JsonConfig;
     using config::detail::JsonDuration;
     using config::detail::JsonIssueSource;
+    using config::detail::JsonPermissionProfile;
     using config::detail::JsonPluginRequirement;
     using config::detail::JsonRepo;
     using config::detail::JsonTask;
@@ -219,6 +226,20 @@ namespace
         ProblemText { .problem = ConfigProblem::MissingUrl, .text = "must contain {url}" },
         ProblemText { .problem = ConfigProblem::NotPluginId,
                       .text = "must be <plugin>@<marketplace>, such as contour-workflows@contour-terminal" },
+        ProblemText { .problem = ConfigProblem::UnknownProfile,
+                      .text =
+                          "names no permission profile; the built-in ones are standard, trusted and ask" },
+        ProblemText { .problem = ConfigProblem::ProfileCycle,
+                      .text = "makes a permission profile extend itself" },
+        ProblemText { .problem = ConfigProblem::NotPermissionMode,
+                      .text = "must be one of: default, acceptEdits, plan" },
+        ProblemText { .problem = ConfigProblem::BypassRefused,
+                      .text = "is refused: bypassPermissions would let an agent do anything without asking" },
+        ProblemText { .problem = ConfigProblem::NotPermissionRule,
+                      .text =
+                          "must be a tool, or a tool and its specifier, such as Read or Bash(git push:*)" },
+        ProblemText { .problem = ConfigProblem::SettingsTooLarge,
+                      .text = "holds more rules than one --settings argument can carry" },
     };
 
     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ProblemTexts.size()),
@@ -226,7 +247,7 @@ namespace
                                           return static_cast<std::size_t>(ProblemTexts[i].problem) == i;
                                       }),
                   "ProblemTexts has one row per ConfigProblem, in its order");
-    static_assert(ProblemTexts.size() == static_cast<std::size_t>(ConfigProblem::NotPluginId) + 1,
+    static_assert(ProblemTexts.size() == static_cast<std::size_t>(ConfigProblem::SettingsTooLarge) + 1,
                   "ProblemTexts covers every ConfigProblem");
 
     /// @return The values @p listing names, as the user writes them, of the rows @p sources holds.
@@ -311,6 +332,7 @@ namespace
         IssueSource,
         Task,
         Plugin,
+        PermissionProfile,
     };
 
     /// One key an object may have, and the type of its value.
@@ -334,6 +356,10 @@ namespace
         Field { .key = "repos", .type = JsonType::Objects, .object = ObjectKind::Repo },
         Field { .key = "tasks", .type = JsonType::Objects, .object = ObjectKind::Task },
         Field { .key = "plugins", .type = JsonType::Objects, .object = ObjectKind::Plugin },
+        Field { .key = "permissions", .type = JsonType::String },
+        Field { .key = "permission_profiles",
+                .type = JsonType::Objects,
+                .object = ObjectKind::PermissionProfile },
     };
 
     constexpr auto RepoFields = std::array {
@@ -360,11 +386,20 @@ namespace
         Field { .key = "model", .type = JsonType::String },
         Field { .key = "prompt", .type = JsonType::String },
         Field { .key = "end_done_after", .type = JsonType::Duration },
+        Field { .key = "permissions", .type = JsonType::String },
     };
 
     constexpr auto PluginFields = std::array {
         Field { .key = "id", .type = JsonType::String },
         Field { .key = "marketplace", .type = JsonType::String },
+    };
+
+    constexpr auto PermissionProfileFields = std::array {
+        Field { .key = "name", .type = JsonType::String },
+        Field { .key = "extends", .type = JsonType::String },
+        Field { .key = "mode", .type = JsonType::String },
+        Field { .key = "allow", .type = JsonType::Strings },
+        Field { .key = "deny", .type = JsonType::Strings },
     };
 
     [[nodiscard]] constexpr std::span<Field const> fieldsOf(ObjectKind kind) noexcept
@@ -376,6 +411,7 @@ namespace
             case ObjectKind::IssueSource: return IssueSourceFields;
             case ObjectKind::Task: return TaskFields;
             case ObjectKind::Plugin: return PluginFields;
+            case ObjectKind::PermissionProfile: return PermissionProfileFields;
         }
         return {};
     }
@@ -398,6 +434,8 @@ namespace
     static_assert(matchesMirror<JsonTask>(TaskFields), "TaskFields and JsonTask name the same keys");
     static_assert(matchesMirror<JsonPluginRequirement>(PluginFields),
                   "PluginFields and JsonPluginRequirement name the same keys");
+    static_assert(matchesMirror<JsonPermissionProfile>(PermissionProfileFields),
+                  "PermissionProfileFields and JsonPermissionProfile name the same keys");
 
     /// Integers are read exactly, so that a count is never a rounded double.
     using Generic = glz::generic_u64;
@@ -838,13 +876,23 @@ namespace
             endDoneAfter = *duration;
         }
 
+        auto permissions = std::string {};
+        if (json.permissions)
+        {
+            auto const profile = checked(json.permissions, key("permissions"), nameProblem);
+            if (!profile)
+                return std::unexpected(profile.error());
+            permissions = *profile;
+        }
+
         return TaskDef { .id = *id,
                          .key = keyText->front(),
                          .label = *label,
                          .appliesTo = *appliesTo,
                          .model = *model,
                          .prompt = *prompt,
-                         .endDoneAfter = endDoneAfter };
+                         .endDoneAfter = endDoneAfter,
+                         .permissions = std::move(permissions) };
     }
 
     [[nodiscard]] Checked<std::vector<TaskDef>> tasksOf(std::optional<std::vector<JsonTask>> const& value,
@@ -900,6 +948,126 @@ namespace
             plugins.push_back(PluginRequirement { .id = *json.id, .marketplace = std::move(marketplace) });
         }
         return plugins;
+    }
+
+    /// @return The rules of a profile's @p list, each checked, at `<prefix>.<field>[i]`.
+    [[nodiscard]] Checked<std::vector<std::string>> rulesOf(
+        std::optional<std::vector<std::string>> const& list, std::string const& key)
+    {
+        if (!list)
+            return std::vector<std::string> {};
+        if (list->size() > MaxPermissionRules)
+            return fail(key, ConfigProblem::SettingsTooLarge);
+        for (auto const [index, rule]: std::views::enumerate(*list))
+        {
+            auto const at = std::format("{}[{}]", key, index);
+            if (auto const problem = textProblem(rule))
+                return fail(at, *problem);
+            if (!isPermissionRule(rule))
+                return fail(at, ConfigProblem::NotPermissionRule);
+        }
+        return *list;
+    }
+
+    /// Validates the profile at @p index against those before it.
+    [[nodiscard]] Checked<PermissionProfile> profileOf(JsonPermissionProfile const& json,
+                                                       std::size_t index,
+                                                       std::span<PermissionProfile const> earlier)
+    {
+        auto const key = [index](std::string_view field) {
+            return std::format("permission_profiles[{}].{}", index, field);
+        };
+        auto const name = checked(json.name, key("name"), nameProblem);
+        if (!name)
+            return std::unexpected(name.error());
+        if (std::ranges::contains(earlier, *name, &PermissionProfile::name))
+            return fail(key("name"), ConfigProblem::Duplicate);
+        auto profile = PermissionProfile { .name = *name };
+        if (json.extends)
+        {
+            auto const parent = checked(json.extends, key("extends"), nameProblem);
+            if (!parent)
+                return std::unexpected(parent.error());
+            profile.extends = *parent;
+        }
+        if (json.mode)
+        {
+            if (*json.mode == RefusedPermissionMode)
+                return fail(key("mode"), ConfigProblem::BypassRefused);
+            profile.mode = permissionModeOf(*json.mode);
+            if (!profile.mode)
+                return fail(key("mode"), ConfigProblem::NotPermissionMode);
+        }
+        auto allow = rulesOf(json.allow, key("allow"));
+        if (!allow)
+            return std::unexpected(allow.error());
+        auto deny = rulesOf(json.deny, key("deny"));
+        if (!deny)
+            return std::unexpected(deny.error());
+        profile.allow = std::move(*allow);
+        profile.deny = std::move(*deny);
+        return profile;
+    }
+
+    /// The permission profiles, resolved, and the default's name.
+    struct Permissions
+    {
+        std::vector<PermissionProfile> profiles;
+        std::string defaultProfile;
+    };
+
+    /// Reads `permission_profiles` and `permissions`, and checks the profile each of @p tasks names.
+    [[nodiscard]] Checked<Permissions> permissionsOf(
+        std::optional<std::string> const& defaultName,
+        std::optional<std::vector<JsonPermissionProfile>> const& configured,
+        std::span<TaskDef const> tasks)
+    {
+        auto profiles = std::vector<PermissionProfile> {};
+        for (auto const [index, json]: std::views::enumerate(
+                 configured ? std::span { *configured } : std::span<JsonPermissionProfile const> {}))
+        {
+            auto profile = profileOf(json, static_cast<std::size_t>(index), profiles);
+            if (!profile)
+                return std::unexpected(profile.error());
+            profiles.push_back(std::move(*profile));
+        }
+        // Where a problem lies: the configured profile's `extends`, or the list as a whole for a built-in
+        // one.
+        auto const keyOf = [&](std::string_view name, std::string_view field) {
+            auto const at = std::ranges::find(profiles, name, &PermissionProfile::name);
+            return at == profiles.end()
+                       ? std::string { "permission_profiles" }
+                       : std::format("permission_profiles[{}]{}", std::distance(profiles.begin(), at), field);
+        };
+        auto resolved = resolveProfiles(profiles);
+        if (!resolved)
+        {
+            auto const problem = resolved.error().error == ProfileError::UnknownProfile
+                                     ? ConfigProblem::UnknownProfile
+                                     : ConfigProblem::ProfileCycle;
+            return fail(keyOf(resolved.error().profile, ".extends"), problem);
+        }
+        for (auto const& profile: *resolved)
+            if (!argumentAccepts(ArgumentKind::Text, settingsJsonOf(profile)))
+                return fail(keyOf(profile.name, ""), ConfigProblem::SettingsTooLarge);
+
+        auto const exists = [&](std::string_view name) {
+            return std::ranges::contains(*resolved, name, &PermissionProfile::name);
+        };
+        auto defaultProfile = std::string { DefaultProfileName };
+        if (defaultName)
+        {
+            auto const name = checked(defaultName, "permissions", nameProblem);
+            if (!name)
+                return std::unexpected(name.error());
+            if (!exists(*name))
+                return fail("permissions", ConfigProblem::UnknownProfile);
+            defaultProfile = *name;
+        }
+        for (auto const [index, task]: std::views::enumerate(tasks))
+            if (!task.permissions.empty() && !exists(task.permissions))
+                return fail(std::format("tasks[{}].permissions", index), ConfigProblem::UnknownProfile);
+        return Permissions { .profiles = std::move(*resolved), .defaultProfile = std::move(defaultProfile) };
     }
 
 } // namespace
@@ -1015,7 +1183,14 @@ std::expected<Config, ConfigError> Config::parse(std::string_view json,
             return e;
         if (auto e = assign(values.tasks, tasksOf(document.tasks, values.models)))
             return e;
-        return assign(values.plugins, pluginsOf(document.plugins));
+        if (auto e = assign(values.plugins, pluginsOf(document.plugins)))
+            return e;
+        auto permissions = permissionsOf(document.permissions, document.permissionProfiles, values.tasks);
+        if (!permissions)
+            return std::move(permissions.error());
+        values.profiles = std::move(permissions->profiles);
+        values.defaultProfile = std::move(permissions->defaultProfile);
+        return std::nullopt;
     }();
     if (problem)
         return std::unexpected(*problem);
@@ -1035,6 +1210,8 @@ Config::Config(Values values) noexcept:
     _repos { std::move(values.repos) },
     _tasks { std::move(values.tasks) },
     _plugins { std::move(values.plugins) },
+    _profiles { std::move(values.profiles) },
+    _defaultProfile { std::move(values.defaultProfile) },
     _sources { values.sources }
 {
     // Every configuration can start an agent on a topic: without a task of its own, the topic's text is the
@@ -1053,6 +1230,27 @@ Config::Config(Values values) noexcept:
                                .model = _models.front(),
                                .prompt = std::string { TopicPlaceholder },
                                .endDoneAfter = std::nullopt });
+}
+
+PermissionProfile const* Config::findProfile(std::string_view name) const noexcept
+{
+    auto const profile = std::ranges::find(_profiles, name, &PermissionProfile::name);
+    return profile != _profiles.end() ? &*profile : nullptr;
+}
+
+PermissionProfile const& Config::defaultProfile() const noexcept
+{
+    // parse() resolved the profiles and checked the default names one of them.
+    return *findProfile(_defaultProfile);
+}
+
+PermissionProfile const& Config::profileFor(std::string_view taskId) const noexcept
+{
+    auto const* const task = findTask(taskId);
+    if (task == nullptr || task->permissions.empty())
+        return defaultProfile();
+    // parse() checked that every task's profile exists.
+    return *findProfile(task->permissions);
 }
 
 Repo const* Config::findRepo(std::string_view name) const noexcept
