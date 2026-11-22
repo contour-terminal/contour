@@ -157,11 +157,20 @@ Item {
     /// has not keeps its two-line height and centres its name in it, except on the Terminal row, whose name
     /// keeps the first of its two cell rows, as half a cell is no place on the grid.
     readonly property bool hasSecondLine: row.secondLine !== SidebarRows.SecondLine.None
-    readonly property real firstLineHeight: row.groupsLines ? Math.max(titleMetrics.height, chromeStyle.sidebar.glyph)
+    // Each line is as tall as a Text lays it out, which is a whole pixel count, never the face's fractional
+    // FontMetrics height: summed from the metrics, a pair of lines can overflow the row it was measured for.
+    readonly property real firstLineHeight: row.groupsLines ? Math.max(titleText.implicitHeight, chromeStyle.sidebar.glyph)
                                                             : chromeStyle.sidebar.rowHeight
     // Both second lines are set in the footnote face, so one measure centres the pair whichever it is.
+    readonly property real secondLineHeight: idleText.implicitHeight
     readonly property real linesHeight: row.firstLineHeight
-                                        + (row.hasSecondLine ? row.lineGap + secondLineMetrics.height : 0)
+                                        + (row.hasSecondLine ? row.lineGap + row.secondLineHeight : 0)
+    /// The least a grouped row may be: both its lines, and space.s1 between them and the next row's, which is
+    /// more than any row's lineGap, so the rows still stand further apart than the lines within one. More than
+    /// the spacing's height only where the face is too tall for it, as a Linux desktop's system face can be,
+    /// and the same whether or not the row shows its second line.
+    readonly property real fittedHeight: row.firstLineHeight + row.lineGap + row.secondLineHeight
+                                         + chromeStyle.space.s1
     readonly property real firstLineTop: row.groupsLines ? Math.max(0, (row.height - row.linesHeight) / 2) : 0
     // The row's edge padding: 0 on the Terminal row, whose small spacing steps are no cells at all.
     readonly property real padding: chromeStyle.space.s3
@@ -176,6 +185,7 @@ Item {
 
     width: ListView.view ? ListView.view.width : implicitWidth
     implicitHeight: row.isWorkspace ? chromeStyle.sidebar.rowHeight
+                  : row.groupsLines ? Math.max(chromeStyle.sidebar.twoLineRowHeight(row.rowSpacing), row.fittedHeight)
                                     : chromeStyle.sidebar.twoLineRowHeight(row.rowSpacing)
     height: implicitHeight
 
@@ -197,7 +207,6 @@ Item {
     }
 
     FontMetrics { id: titleMetrics; font: titleText.font }
-    FontMetrics { id: secondLineMetrics; font: chromeStyle.type.footnote }
 
     // A coloured workspace's wash (`sidebar.workspace_color: group`): faint, behind everything the row draws,
     // so a coloured tab's own tint, the selection and the hover draw over it in their inset shape. It is the
@@ -749,6 +758,7 @@ Item {
     // The second line of a row with nothing to say: where it is and what runs there (`~/src · zsh`), in the
     // row's muted ink. A row that knows neither has no second line, and centres its name (firstLineTop).
     Text {
+        id: idleText
         objectName: "sidebarRowIdle"
         visible: row.secondLine === SidebarRows.SecondLine.Idle
         x: titleText.x

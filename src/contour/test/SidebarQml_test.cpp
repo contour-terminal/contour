@@ -539,7 +539,8 @@ constexpr auto RowSpacings = std::array { contour::config::SidebarRowSpacing::Co
 }
 } // namespace
 
-TEST_CASE("a two-line row is as tall as sidebar.row_spacing says (offscreen)", "[contour][gui][qml][sidebar]")
+TEST_CASE("a two-line row is as tall as sidebar.row_spacing says, or as its lines need (offscreen)",
+          "[contour][gui][qml][sidebar]")
 {
     for (auto const row: drawnRows())
     {
@@ -550,26 +551,33 @@ TEST_CASE("a two-line row is as tall as sidebar.row_spacing says (offscreen)", "
             INFO("spacing " << contour::config::configEnumToken(spacing));
             auto scene = SidebarWindow { { .row = row, .rowSpacing = spacing } };
             auto const twoLines = scene.spacedToken("twoLineRowHeight");
+            auto height = qreal { 0 };
             for (auto const* title: { "claude", "build", "notes" })
             {
                 INFO(title);
                 auto* rowItem = scene.rowTitled(QString::fromUtf8(title));
                 REQUIRE(rowItem != nullptr);
-                CHECK(rowItem->height() == twoLines);
+                // The spacing's height, unless the face is too tall for it: then what its lines take.
+                auto const fitted = row == ChromeStyle::Terminal
+                                        ? twoLines
+                                        : std::max(twoLines, rowItem->property("fittedHeight").toReal());
+                CHECK(rowItem->height() == fitted);
+                height = rowItem->height();
             }
             // A workspace's row is one line at either spacing.
             auto* docs = scene.rowTitled(QStringLiteral("docs"));
             REQUIRE(docs != nullptr);
             CHECK(docs->height() == scene.token("rowHeight"));
             CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
-            heights.push_back(twoLines);
+            heights.push_back(height);
         }
-        // Comfortable only adds room; the Terminal look's rows are two cells under either.
+        // Comfortable only adds room, which a face too tall for compact may already take; the Terminal look's
+        // rows are two cells under either.
         REQUIRE(heights.size() == 2);
         if (row == ChromeStyle::Terminal)
             CHECK(heights.front() == heights.back());
         else
-            CHECK(heights.front() > heights.back());
+            CHECK(heights.front() >= heights.back());
     }
 }
 
@@ -722,10 +730,15 @@ TEST_CASE("a two-line row keeps its lines inside it, and centres a name with not
             },
             1000));
 
+        // The spacing's height, or more where the face is too tall for it (SidebarRow's fittedHeight): the
+        // same for every row, whatever its second line says.
+        if (cellTree)
+            CHECK(blank->height() == twoLines);
+        CHECK(blank->height() >= twoLines);
         for (auto* rowItem: { blank, asking, idle })
         {
             INFO("title " << rowItem->property("title").toString().toStdString());
-            CHECK(rowItem->height() == twoLines);
+            CHECK(rowItem->height() == blank->height());
             auto const title = boxOf(*rowItem, QStringLiteral("sidebarRowTitle"));
             CHECK(title.top() > -CentringRounding);
             CHECK(title.bottom() < rowItem->height() + CentringRounding);
