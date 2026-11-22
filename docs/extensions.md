@@ -365,7 +365,7 @@ command's environment is judged as the command gets it, `command-env-for` laid o
 | `command-env-for <command> <KEY> = value` | `command-env-for git-status LC_ALL = C` | Environment for one command, applied after `command-env`. |
 | `pane <name> @<root> = argv…` | `pane agent @worktrees = claude --model {model}` | A program the extension may open in a tab. |
 | `pane-env <pane> <KEY> = value` | `pane-env agent GIT_CONFIG_COUNT = 1` | Environment for one pane. |
-| `pane-input` | `pane-input` | `pane-send` may type text the user wrote into the extension's panes. The consent dialog says so. |
+| `pane-input` | `pane-input` | `pane-send` may type text the user wrote into the extension's panes, and `pane-key` press a digit or Escape in them. The consent dialog says so. |
 | `inbox <name> = text` | `inbox note = A reviewer left a comment.` | Reserved: refused until a version of the manifest supports it. |
 | `serve <scheme>` | `serve orchestrator` | The extension serves `<scheme>://` tabs. |
 | `action <id> = title` | `action open = Open Agents` | A row in the command palette; its title follows the `title` line's rules. |
@@ -444,6 +444,14 @@ again in a later callback", which starts with a fresh budget, not "the store is 
   put in. Anything else, or any text without `pane-input`, is `bad-argument`. A pane closed or not yet
   created is `gone`, and another's is `not-owned`. The extension is to send only what its user wrote and
   sent: the orchestrator's message box is the one caller.
+- `pane-key`: presses one key of a fixed set, `digit-1` to `digit-9` or `escape`, in one of its open panes,
+  its manifest declaring `pane-input`: a menu's choice, such as an agent's permission prompt, written alone
+  with no bracketed paste and no Enter (Claude Code's select menu ignores a pasted digit). Without
+  `pane-input` it is `bad-argument`; a pane closed or not yet created is `gone`, and another's is
+  `not-owned`. The orchestrator presses one only on its user's digit, while the agent asks.
+- `panes` reports each pane's `agent-status`: `asking` is a permission prompt (OSC 7501 `blocked` with kind
+  `permission`, which `contour agent setup`'s hook reports), a menu `pane-key` answers; `blocked` is any other
+  wait for the user, such as a question.
 
 A declared command runs only where its manifest binds it, and sees only what its manifest declares:
 
@@ -674,6 +682,7 @@ Key                   | Meaning
 `status_board`        | What every agent's system prompt asks of it about its board (Claude Code's `--append-system-prompt`). Default: keep `STATUS.md` at the worktree's root with the `contour-workflows:status-board` skill, current at every state change, never committed. Your own words replace that; `off` asks for nothing.
 `plugins`             | The Claude Code plugins the tasks' prompts need, each `{ id: <plugin>@<marketplace>, marketplace: <source> }`. Default: `contour-workflows@contour-terminal` from `contour-terminal/claude-marketplace`. The orchestrator asks `claude plugin list --json` whether each one is installed and enabled, and lists the missing ones as problems; the dashboard palette's "install the missing plugins" installs them. `[]` checks for none.
 `permissions`         | The permission profile an agent starts with when its task names none, passed to Claude Code as `--settings`. Default `standard`: edits inside the worktree, `cmake`, `ctest`, local `git` (status, diff, log, show, add, commit, switch, rebase, fetch), read-only `gh` and the `contour-workflows` skills need no approval; `sudo`, `rm -rf`, `git push --force` and `git reset --hard` are denied; anything else, pushing and opening a pull request included, still asks. `trusted` is `standard` plus `git push`, `gh pr create` and `gh pr edit`. `ask` leaves every decision to Claude Code's own prompts. Your Claude Code settings still apply beneath the profile.
+`quick_replies`       | What the digits answer an agent that asks for a permission with, each `{ key, label, press, then }`: `key` the dashboard's digit, `1` to `9`; `label` what its chip says, at most 40 bytes; `press` the key pressed in the agent's tab, a digit or `esc` (default: `key`); `then` `wait` (default) or `message`, which opens the message box for a reason. Default `1 yes`, `2 yes, don't ask again`, and `3 no, and say why`, which presses `esc` (Claude Code's No moves between 2, 3 and 4 with the menu, while Escape rejects on every one) and opens the message box. The labels are never read from the agent's tab. `[]` turns the chips off.
 `permission_profiles` | Profiles of your own, or replacements for the built-in ones, each `{ name, extends, mode, allow, deny }`. `extends` names the profile it builds on: it takes that profile's mode unless it sets its own, and that profile's rules followed by its own. `mode` is `default`, `acceptEdits` or `plan`; `bypassPermissions` is refused. A rule is a tool, or a tool and its specifier, as Claude Code writes them (`Read`, `Bash(git push:*)`). A profile that extends itself, or one too large for a `--settings` argument, is refused.
 `end_done_after`      | How long an agent stays done before the orchestrator ends its run, as `e` would: its tab closes and its worktree is removed unless it holds work. The run is listed as completed. An agent that goes back to work, because you answered it, waits the whole time again. Done is a turn that ended with nothing in flight, which the dashboard shows as *waiting for you*: it also covers an agent that asked you a question in plain text, which this ends unanswered. An agent waiting on its own background work or a scheduled wake-up is not done, and shows what it waits for. A task can set its own (below). Default `0`: a done run waits for you.
 `finished_retention`  | How long a finished run stays in the Finished list. Default `30d`. Every finished run is also appended, for good, to `agent-runs.jsonl` in the daemon's state directory, with what its agent spent and did.

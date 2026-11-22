@@ -47,7 +47,7 @@ result of the last action until the next key (see "Actions and the palette" belo
 
 | Group | Holds |
 | --- | --- |
-| NEEDS YOU | an agent that asks (`?`, blocked at a prompt), waits for your answer (`…`, its turn ended without done), or stopped by an error (`✗`) |
+| NEEDS YOU | an agent that asks for a permission (`?`, at Claude Code's menu, which `1 2 3` answer), waits for you (`…`, its turn ended without done, or it asked a question), or stopped by an error (`✗`) |
 | WORKING | an agent at work, starting (`◌`, its tab open and no report yet), preparing or ending |
 | TO REVIEW | an agent that reported done (`✓`), its run still open |
 | FINISHED | every run kept and not dismissed: removed (`·`), kept (`⚑`) or failed (`✗`), folded to the newest five |
@@ -76,7 +76,8 @@ A run opens on the tab its state names — one that needs you on its Transcript,
 Board, a finished one on its Details — and a tab you choose sticks for that run until its state changes, so a
 run that starts asking shows you its request. Under the tab, `latest` shows the last three transcript entries
 (and a message you sent, until the transcript does), except while the Transcript tab is open. At the bottom
-is the message box of a live run, a done run's `✓ reported done` box, or how a finished run ended.
+is the message box of a live run, the asking box of one that asks (below), a done run's `✓ reported done`
+box, or how a finished run ended.
 
 Every URL the dashboard draws — the run's pull request or issue in its Details, and those in its board and
 its transcript — is an OSC 8 hyperlink, which Contour (and any terminal with OSC 8) opens with Ctrl+click on
@@ -103,6 +104,7 @@ has the keys: every printable key types, digits too, so no letter is ever both a
 | `x` | check a kept worktree again |
 | `Del` | drop a finished run from the list |
 | `z` | fold the selected run's group, or unfold a folded one |
+| `1` `2` `3` | answer the selected agent that asks, with that quick reply (below) |
 | `Esc` | drop the filter |
 
 A run key acts only where it applies to the selected row; elsewhere the action bar says why (`del dismiss ·
@@ -126,7 +128,7 @@ actions in rank order; the first is what `Enter` does, and the action bar lists 
 
 | Selected | Action bar |
 | --- | --- |
-| a run that asks | `⏎ see request` · `r agent tab` · `e end` |
+| a run that asks | `1 2 3 answer` · `⏎ see request` · `r agent tab` · `e end` |
 | a run that waits, or stopped by an error | `⏎ reply` · `t transcript` · `b board` (or `d details`) · `e end` |
 | a run starting or at work | `⏎ message` · `t transcript` · `b board` · `e end` (starting: `r agent tab`) |
 | a run that reported done | `⏎ follow up` · `o copy link` · `t transcript` · `e end` |
@@ -143,7 +145,7 @@ send · alt⏎ line · esc keep draft`.
 `Ctrl+K` or `?` opens the command palette over the dashboard. It lists the selected row's actions first, then
 the commands for the whole dashboard — new agent, filter the agents, refresh the lists, install the missing
 plugins, show the last 24 hours — then every other action, dimmed, with the reason it does not apply now
-(`end · no run selected`). Each shows its key, or `palette only`. Typing filters it fuzzily (`l24` finds "show
+(`end · no run selected`); an asking run's quick replies are listed by their labels. Each shows its key, or `palette only`. Typing filters it fuzzily (`l24` finds "show
 the last 24 hours"), the matched letters underlined; `↑` `↓` choose; `Enter` runs the command exactly as its
 key would; `Esc` closes it and keeps what you typed for the next time. Refreshing the lists and installing the
 plugins have no key: they are the palette's. "Show the last 24 hours" opens a popup that charts, an hour a bar,
@@ -268,12 +270,38 @@ agent. `Enter` on a live run gives its message box the keys: every key you press
 sends, `Alt+Enter` adds a line, a paste keeps its line feeds, and `Esc` goes back to the Fleet keeping the
 draft. The text goes through the host's `pane-send` (the manifest declares `pane-input`, and the consent dialog
 asks for it): it is typed into the agent's tab as one bracketed paste followed by Enter, so Claude Code
-receives it as one message. If the agent is waiting at a permission prompt, the message is what that prompt
-receives. After a send the draft clears, `latest` shows it (`you · sent 14:31`) until the transcript does, the
-action bar says `sent to pr-2375`, and the keys return to the Fleet. The orchestrator types nothing else, ever,
-and reads no screen: the Transcript tab shows what the agent did. A message the host refuses, such as one
+receives it as one message. An agent at a permission prompt has no message box: its menu takes the quick
+replies (below). After a send the draft clears, `latest` shows it (`you · sent 14:31`) until the transcript does, the
+action bar says `sent to pr-2375`, and the keys return to the Fleet. The orchestrator types nothing else, ever
+— but the quick reply you press — and reads no screen: the Transcript tab shows what the agent did. A message the host refuses, such as one
 holding a control character, or one sent after the agent's tab closed, comes back to the box with the keys,
 and the action bar says why.
+
+## Quick replies
+
+While an agent asks for a permission, Claude Code shows a select menu, and the Focus shows the **asking box**
+in the message box's place: the request, as the status hook reported it (`Bash: ctest -R reflow`), and the
+reply chips, `1 yes   2 yes, don't ask again   3 no, and say why`. The action bar opens with `1 2 3 answer`.
+Pressing a digit in the Fleet or in the Focus answers the menu without opening the agent's tab: the host's
+`pane-key` presses that one key in it, with no paste and no Enter, as a menu needs (a pasted digit is
+ignored). The chip fills and the box dims (`answered yes`) until the agent stops asking; still asking 10 s
+later, the action bar says `pr-2375 still asks · r opens its tab` and the chips are live again.
+
+- **Only what you can see.** A digit answers only while the selected run asks, its request then on screen in
+  every band: the asking box, or in a narrow tab the row's second line. Otherwise the bar says `select the
+  request first`. An asking run has no message box, so a digit never has to choose between answering and
+  typing; in the message box of any other run it types.
+- **`3` waits for your reason.** It presses Escape, which rejects the request on every Claude Code menu
+  (No is option 2, 3 or 4 depending on the menu), turns the run waiting, and opens its message box: the next
+  keys say why.
+- **The labels are configuration**, never read from the tab: `quick_replies` (see `docs/extensions.md`)
+  names each digit's label, the key it presses and whether the message box follows. A changed Claude Code
+  menu is fixed there. The defaults follow the menu of a Bash or edit prompt; on a menu with two options,
+  `2` is No.
+- **A question is not a menu.** An agent that asks a question, or a wait the hook cannot name, is waiting, not
+  asking: it shows no chips, and you answer it with a message or in its tab (`r`).
+- A reply on a run that stopped asking meanwhile is not pressed (`pr-2375 is no longer asking`), since a digit
+  where no menu is up would be typed into the agent's prompt.
 
 ## Statistics
 
