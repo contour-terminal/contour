@@ -229,8 +229,13 @@ struct Dashboard::State
     void syncTranscript(std::vector<UiAction>& actions);
     /// @return The transcript page the Focus asks for: the one turned to, else the last one the engine knows.
     [[nodiscard]] uint32_t wantedPage() const noexcept;
+    /// @return When an agent answered with a quick reply is pointed at its tab if it still asks;
+    ///         std::nullopt: none was answered.
+    [[nodiscard]] std::optional<uint64_t> stillAsksDueMs() const noexcept;
     /// An agent still asking StillAsksAfterMs after its quick reply: the action bar says so.
     void remindStillAsking();
+    /// A quick reply was not pressed: its chip empties, a message box it opened closes, the bar says why.
+    void refuseReply(std::string notice);
     /// @return When the transcript the Focus follows is read again; std::nullopt: it is not.
     [[nodiscard]] std::optional<uint64_t> transcriptDueMs() const noexcept;
     /// @return The band the tab's size chooses.
@@ -704,13 +709,18 @@ void Dashboard::State::ensureRows()
         interaction.answered.reset();
 }
 
+std::optional<uint64_t> Dashboard::State::stillAsksDueMs() const noexcept
+{
+    return interaction.answered.transform(
+        [](AnsweredRequest const& answered) { return answered.atMs + StillAsksAfterMs; });
+}
+
 void Dashboard::State::remindStillAsking()
 {
-    auto const& answered = interaction.answered;
-    if (!answered || nowMonoMs() < answered->atMs + StillAsksAfterMs)
+    if (auto const due = stillAsksDueMs(); !due || nowMonoMs() < *due)
         return;
     // Its chips are live again: the reply may not have taken, and the user may try another.
-    auto const row = std::ranges::find(rows, answered->run, &Row::run);
+    auto const row = std::ranges::find(rows, interaction.answered->run, &Row::run);
     if (row != rows.end() && row->rowState == RowState::Asking)
         interaction.notice = std::format("{} still asks · r opens its tab", row->name);
     interaction.answered.reset();
@@ -1097,8 +1107,7 @@ std::optional<core::SteadyTimePoint> Dashboard::nextRepaintDue() const noexcept
     if (state.focus.tab == FocusTab::Board)
         consider(state.focusPanels.board.ageChangeMs);
     consider(state.transcriptDueMs());
-    if (auto const& answered = state.interaction.answered)
-        consider(answered->atMs + StillAsksAfterMs);
+    consider(state.stillAsksDueMs());
     return earliest ? std::optional { core::SteadyTimePoint { std::chrono::milliseconds { *earliest } } }
                     : std::nullopt;
 }
@@ -1193,22 +1202,26 @@ void Dashboard::messageRefused(std::string_view why)
     _state->repaint = State::Repaint::Needed;
 }
 
+void Dashboard::State::refuseReply(std::string notice)
+{
+    if (auto const answered = std::exchange(interaction.answered, std::nullopt);
+        answered && selectedKey == answered->run)
+        backToFleet(interaction);
+    interaction.notice = std::move(notice);
+    repaint = Repaint::Needed;
+}
+
 void Dashboard::replyRefused(std::string_view why)
 {
-    auto& interaction = _state->interaction;
-    auto const answered = std::exchange(interaction.answered, std::nullopt);
-    if (answered && _state->selectedKey == answered->run)
-        backToFleet(interaction);
-    interaction.notice = std::format("reply not sent: {}", why);
-    _state->repaint = State::Repaint::Needed;
+    _state->refuseReply(std::format("reply not sent: {}", why));
 }
 
 void Dashboard::replyOutdated(std::string_view run)
 {
-    replyRefused({});
-    auto const row = std::ranges::find(_state->rows, run, &Row::run);
-    _state->interaction.notice = std::format(
-        "{} is no longer asking", row != _state->rows.end() ? std::string_view { row->name } : run);
+    auto const& rows = _state->rows;
+    auto const row = std::ranges::find(rows, run, &Row::run);
+    _state->refuseReply(
+        std::format("{} is no longer asking", row != rows.end() ? std::string_view { row->name } : run));
 }
 
 void Dashboard::dispatchRefused(DispatchRefusal refusal)
@@ -1247,8 +1260,7 @@ std::string Dashboard::frame()
         state.repaint = State::Repaint::Needed;
     }
     // An answered agent may still ask: the frame says so.
-    if (auto const& answered = state.interaction.answered;
-        answered && state.nowMonoMs() >= answered->atMs + StillAsksAfterMs)
+    if (auto const due = state.stillAsksDueMs(); due && state.nowMonoMs() >= *due)
         state.repaint = State::Repaint::Needed;
     // A board's age moved on.
     if (auto const due = state.focusPanels.board.ageChangeMs;

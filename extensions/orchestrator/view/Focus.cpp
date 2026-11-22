@@ -38,6 +38,8 @@ namespace
     constexpr auto Caret = "▏"sv;
     /// The cells between two reply chips.
     constexpr auto ChipGap = 3;
+    /// The cells of a box's width its chips do not take: its border, its padding, and one spare.
+    constexpr auto ChipInset = 5;
 
     /// @return The cells @p reply's chip takes: its digit, a space, its label.
     [[nodiscard]] int chipColumnsOf(QuickReply const& reply)
@@ -262,7 +264,7 @@ int bottomRowsOf(BottomBox box, Row const* row, std::string_view draft, int colu
             return 3
                    + static_cast<int>(chipLinesOf(row != nullptr ? std::span { row->replies }
                                                                  : std::span<QuickReply const> {},
-                                                  std::max(1, columns - 1))
+                                                  std::max(1, columns - ChipInset))
                                           .size());
         case BottomBox::Message: break;
     }
@@ -425,7 +427,7 @@ void Focus::renderAsking(Canvas& canvas)
         return;
     }
     auto y = 1;
-    for (auto const& line: chipLinesOf(row.replies, std::max(1, width - 1)))
+    for (auto const& line: chipLinesOf(row.replies, std::max(1, canvas.width() - ChipInset)))
     {
         auto x = 1;
         for (auto const* const reply: line)
