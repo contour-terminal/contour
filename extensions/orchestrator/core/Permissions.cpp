@@ -4,12 +4,14 @@
 #include <algorithm>
 #include <array>
 #include <expected>
+#include <format>
 #include <map>
 #include <optional>
 #include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <glaze/glaze.hpp>
@@ -221,6 +223,27 @@ std::string settingsJsonOf(PermissionProfile const& resolved)
     if (glz::write_json(settings, text))
         return "{}";
     return text;
+}
+
+std::string permissionsText(std::string_view profile, std::string_view settingsJson)
+{
+    // What each mode leaves to the agent, as the line says it.
+    constexpr auto ModeTexts = std::array {
+        "Claude Code asks for the rest"sv, // Default
+        "edits need no approval"sv,        // AcceptEdits
+        "it plans and changes nothing"sv,  // Plan
+    };
+    static_assert(ModeTexts.size() == PermissionModeNames.size(), "ModeTexts has one row per PermissionMode");
+    if (profile.empty())
+        return {};
+    auto const summary = summaryOfSettings(settingsJson);
+    if (!summary)
+        return std::string { profile };
+    auto const modeText = ModeTexts[std::to_underlying(summary->mode)];
+    if (summary->allowed == 0 && summary->denied == 0)
+        return std::format("{} · {}", profile, modeText);
+    return std::format(
+        "{} · {} allowed · {} denied · {}", profile, summary->allowed, summary->denied, modeText);
 }
 
 std::optional<SettingsSummary> summaryOfSettings(std::string_view settingsJson)

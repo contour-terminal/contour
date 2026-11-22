@@ -883,7 +883,7 @@ TEST_CASE("an issue branch never tracks the default branch", "[orchestrator][com
     CHECK(envValue(agent->environment, "GIT_CONFIG_VALUE_0") == "upstream");
     CHECK(envValue(agent->environment, "GIT_CONFIG_KEY_1") == "push.autoSetupRemote");
     CHECK(envValue(agent->environment, "GIT_CONFIG_VALUE_1") == "true");
-    // No permission flag and no --settings: exactly these words, the board's instruction as the system
+    // No permission flag: the run's profile travels as --settings, and the board's instruction as the system
     // prompt's addition.
     CHECK(std::ranges::equal(agent->argv,
                              std::array { "claude"sv,
@@ -891,6 +891,8 @@ TEST_CASE("an issue branch never tracks the default branch", "[orchestrator][com
                                           "{model}"sv,
                                           "--session-id"sv,
                                           "{session}"sv,
+                                          "--settings"sv,
+                                          "{settings}"sv,
                                           "--append-system-prompt"sv,
                                           "{board}"sv,
                                           "{prompt}"sv }));
@@ -899,9 +901,15 @@ TEST_CASE("an issue branch never tracks the default branch", "[orchestrator][com
     REQUIRE(plain != nullptr);
     CHECK(std::ranges::equal(
         plain->environment, agent->environment, {}, &EnvironmentVariable::name, &EnvironmentVariable::name));
-    CHECK(std::ranges::equal(
-        plain->argv,
-        std::array { "claude"sv, "--model"sv, "{model}"sv, "--session-id"sv, "{session}"sv, "{prompt}"sv }));
+    CHECK(std::ranges::equal(plain->argv,
+                             std::array { "claude"sv,
+                                          "--model"sv,
+                                          "{model}"sv,
+                                          "--session-id"sv,
+                                          "{session}"sv,
+                                          "--settings"sv,
+                                          "{settings}"sv,
+                                          "{prompt}"sv }));
 }
 
 TEST_CASE("git configuration is set only where it is declared", "[orchestrator][commands]")
@@ -983,8 +991,8 @@ TEST_CASE("manifestLines spells the declared tables", "[orchestrator][commands][
 {
     static constexpr auto Expected = std::array {
         "command git-status short @worktrees = git status --porcelain --untracked-files=normal --ignore-submodules=none"sv,
-        "pane agent @worktrees = claude --model {model} --session-id {session} --append-system-prompt {board} {prompt}"sv,
-        "pane agent-plain @worktrees = claude --model {model} --session-id {session} {prompt}"sv,
+        "pane agent @worktrees = claude --model {model} --session-id {session} --settings {settings} --append-system-prompt {board} {prompt}"sv,
+        "pane agent-plain @worktrees = claude --model {model} --session-id {session} --settings {settings} {prompt}"sv,
         "arg board = text"sv,
         "command-env-for git-status GIT_ATTR_SOURCE = 4b825dc642cb6eb9a060e54bf8d69288fbee4904"sv,
         "command-env-for git-status GIT_OPTIONAL_LOCKS = 0"sv,

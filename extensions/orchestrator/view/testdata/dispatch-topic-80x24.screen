@@ -11,14 +11,14 @@
 │ ▾ │ worktree  /home/u/worktrees/contour/topic-investigate-why-the-shell- │   │
 │   │             integration-te-…                                         │n… │
 │   │ board     STATUS.md, asked for in the agent's system prompt          │e… │
-╰───│ command   claude --model opus --session-id                           │───╯
-╭─ D│             00000001-0000-4000-8000-000000000000                     │───╮
-│ Sa│             --append-system-prompt '{board}' 'Investigate why the    │e… │
-│   │             shell integration test hangs on CI'                      │   │
-│ br│                                                                      │   │
-│ ch│ 0 of 4 running                                                       │   │
-│ ur│ enter dispatch · tab next field · esc cancel                         │   │
-│   ╰──────────────────────────────────────────────────────────────────────╯   │
-╰──────────────────────────────────────────────────────────────────────────────╯
+╰───│ perms     standard · 19 allowed · 4 denied · edits need no approval  │───╯
+╭─ D│ command   claude --model opus --session-id                           │───╮
+│ Sa│             00000001-0000-4000-8000-000000000000 --settings          │e… │
+│   │             '{settings}' --append-system-prompt '{board}'            │   │
+│ br│             'Investigate why the shell integration test hangs on CI' │   │
+│ ch│                                                                      │   │
+│ ur│ 0 of 4 running                                                       │   │
+│   │ enter dispatch · tab next field · esc cancel                         │   │
+╰───╰──────────────────────────────────────────────────────────────────────╯───╯
  ↑↓ move · enter open · d dispatch · ? help · b board · t transcript · / filter 
  ⬢ agents 0/4 · ✗2                                                              

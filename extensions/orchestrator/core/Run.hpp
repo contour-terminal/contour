@@ -207,6 +207,10 @@ struct Run
     std::string prompt;              ///< The agent's first prompt: a Text.
     std::string board {};            ///< What its system prompt asks about its status board, a Text; empty:
                                      ///< nothing (`status_board: off`), and the plain pane template.
+    std::string permissions {};      ///< The permission profile it started with, a Name; empty: stored before
+                                     ///< profiles existed.
+    std::string settings {};         ///< What its agent's `--settings` carries (settingsJsonOf()), a Text;
+                                     ///< empty: `{}`, Claude Code's own settings alone.
     std::string session;             ///< The agent's session: a Uuid.
     std::string branch;              ///< `agent/<id>`: a Ref.
     std::string worktree;            ///< The worktree's directory: a Path.
@@ -234,7 +238,8 @@ struct Run
 /// The arguments the agent's pane template is opened with for @p run: the one place OpenPane's arguments,
 /// a preview's argv and the check before a tab is asked for come from.
 /// @param run A run.
-/// @return Its model, session and prompt, and its board's instruction when it has one, by placeholder.
+/// @return Its model, session, settings and prompt, and its board's instruction when it has one, by
+///         placeholder.
 [[nodiscard]] std::vector<Argument> agentPaneArguments(Run const& run);
 
 /// A host call's result: the command exited 0.

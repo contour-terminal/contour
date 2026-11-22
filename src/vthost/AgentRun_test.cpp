@@ -608,13 +608,15 @@ TEST_CASE("dispatching a PR opens its agent tab beside the dashboard", "[daemon]
     REQUIRE(spawned.size() == 1);
     auto const& exec = spawned.front();
     CHECK(exec.program == "claude");
-    // The system prompt's addition asks for the status board the dashboard shows.
-    REQUIRE(exec.arguments.size() == 7);
+    // The run's permission profile travels as --settings, and the system prompt's addition asks for the
+    // status board the dashboard shows.
+    REQUIRE(exec.arguments.size() == 9);
     CHECK(std::vector(exec.arguments.begin(), exec.arguments.begin() + 5)
-          == std::vector<std::string> {
-              "--model", "sonnet", "--session-id", run.session, "--append-system-prompt" });
-    CHECK(exec.arguments[5].contains("STATUS.md"));
-    CHECK(exec.arguments[6] == FixCiPrompt);
+          == std::vector<std::string> { "--model", "sonnet", "--session-id", run.session, "--settings" });
+    CHECK(exec.arguments[5].starts_with(R"js({"permissions":{"defaultMode":"acceptEdits",)js"));
+    CHECK(exec.arguments[6] == "--append-system-prompt");
+    CHECK(exec.arguments[7].contains("STATUS.md"));
+    CHECK(exec.arguments[8] == FixCiPrompt);
     CHECK(dispatched.formPage.contains("claude --model sonnet"));
     CHECK(exec.workingDirectory == run.worktree);
     REQUIRE(exec.directory != nullptr);
@@ -665,11 +667,11 @@ TEST_CASE("dispatching an issue uses a new branch", "[daemon][e2e][agents]")
     auto const spawned = d.world.spawnedAgents();
     REQUIRE(spawned.size() == 1);
     auto const& arguments = spawned.front().arguments;
-    REQUIRE(arguments.size() == 7);
+    REQUIRE(arguments.size() == 9);
     CHECK(std::vector(arguments.begin(), arguments.begin() + 5)
-          == std::vector<std::string> {
-              "--model", "opus", "--session-id", run.session, "--append-system-prompt" });
-    CHECK(arguments[6]
+          == std::vector<std::string> { "--model", "opus", "--session-id", run.session, "--settings" });
+    CHECK(arguments[6] == "--append-system-prompt");
+    CHECK(arguments[8]
           == "/contour-workflows:work-issue https://github.com/contour-terminal/contour/issues/2356");
 }
 

@@ -1878,6 +1878,33 @@ void checkSame(Run const& actual, Run const& expected)
 
 } // namespace
 
+TEST_CASE("a run's permission profile round-trips, and one stored before profiles reads as none",
+          "[orchestrator][run]")
+{
+    auto run = makeRun(Item::Pr, Running {});
+    auto const argumentOf = [](orchestrator::Run const& of, std::string_view name) {
+        auto const arguments = orchestrator::agentPaneArguments(of);
+        auto const at = std::ranges::find(arguments, name, &orchestrator::Argument::name);
+        return at != arguments.end() ? std::optional { at->value } : std::nullopt;
+    };
+    // Stored before profiles existed: its agent got Claude Code's own settings alone.
+    CHECK(argumentOf(run, "settings") == "{}");
+    auto const without = orchestrator::toJson(run);
+    CHECK_FALSE(without.contains("permissions"));
+    CHECK_FALSE(without.contains("settings"));
+
+    run.permissions = "standard";
+    run.settings = R"({"permissions":{"defaultMode":"acceptEdits","allow":["Read"],"deny":[]}})";
+    CHECK(argumentOf(run, "settings") == run.settings);
+    auto const read = orchestrator::runFromJson(orchestrator::toJson(run));
+    REQUIRE(read.has_value());
+    CHECK(read->permissions == run.permissions);
+    CHECK(read->settings == run.settings);
+
+    run.permissions = "a b";
+    CHECK_FALSE(orchestrator::isStorable(run));
+}
+
 TEST_CASE("nearTab round-trips under the key near, and an absent one reads as none", "[orchestrator][run]")
 {
     auto run = makeRun(Item::Pr, Running {});

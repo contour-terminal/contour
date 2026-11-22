@@ -34,6 +34,8 @@ namespace
         ArgumentDecl { .name = "query", .kind = ArgumentKind::Text, .root = std::nullopt },
         ArgumentDecl { .name = "prompt", .kind = ArgumentKind::Text, .root = std::nullopt },
         ArgumentDecl { .name = "board", .kind = ArgumentKind::Text, .root = std::nullopt },
+        // A JSON document starts with `{`, so it is never read as an option.
+        ArgumentDecl { .name = "settings", .kind = ArgumentKind::Text, .root = std::nullopt },
         ArgumentDecl { .name = "plugin", .kind = ArgumentKind::Text, .root = std::nullopt },
         ArgumentDecl { .name = "source", .kind = ArgumentKind::Text, .root = std::nullopt },
         ArgumentDecl { .name = "page", .kind = ArgumentKind::Number, .root = std::nullopt },
@@ -446,15 +448,17 @@ namespace
     // }}}
     // {{{ panes
 
-    /// No permission flag and no `--settings`: the agent runs with the user's own Claude Code settings. The
-    /// system prompt asks for the status board the dashboard shows (`status_board`).
+    /// `--settings` carries the run's permission profile (`permissions`), on top of the user's own Claude
+    /// Code settings. The system prompt asks for the status board the dashboard shows (`status_board`).
     constexpr auto AgentPaneArgv = std::array {
-        "claude"sv,  "--model"sv,  "{model}"sv, "--session-id"sv, "{session}"sv, "--append-system-prompt"sv,
-        "{board}"sv, "{prompt}"sv,
+        "claude"sv,    "--model"sv,    "{model}"sv,    "--session-id"sv,
+        "{session}"sv, "--settings"sv, "{settings}"sv, "--append-system-prompt"sv,
+        "{board}"sv,   "{prompt}"sv,
     };
     /// The same without the board's instruction: `status_board: off`.
     constexpr auto AgentPlainPaneArgv = std::array {
-        "claude"sv, "--model"sv, "{model}"sv, "--session-id"sv, "{session}"sv, "{prompt}"sv,
+        "claude"sv,    "--model"sv,    "{model}"sv,    "--session-id"sv,
+        "{session}"sv, "--settings"sv, "{settings}"sv, "{prompt}"sv,
     };
 
     constexpr auto PaneTable = std::array {

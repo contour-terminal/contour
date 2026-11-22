@@ -24,6 +24,7 @@
 #include <orchestrator/core/Hooks.hpp>
 #include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Overloaded.hpp>
+#include <orchestrator/core/Permissions.hpp>
 #include <orchestrator/core/Provider.hpp>
 #include <orchestrator/core/Run.hpp>
 
@@ -4056,6 +4057,67 @@ TEST_CASE("every agent's system prompt asks for its board, unless status_board i
         auto const pane = openedWith({ .limits = R"("status_board": "off",)" });
         CHECK(pane.paneTemplate == "agent-plain");
         CHECK_FALSE(argumentOf(pane, "board").has_value());
+    }
+}
+
+TEST_CASE("every agent starts with its permission profile as --settings",
+          "[orchestrator][engine][permissions]")
+{
+    auto const argumentOf = [](OpenPane const& pane, std::string_view name) {
+        auto const at = std::ranges::find(pane.arguments, name, &Argument::name);
+        return at != pane.arguments.end() ? std::optional { at->value } : std::nullopt;
+    };
+    auto const builtin = [](std::string_view name) {
+        auto const profiles = resolveProfiles({});
+        REQUIRE(profiles.has_value());
+        auto const profile = std::ranges::find(*profiles, name, &PermissionProfile::name);
+        REQUIRE(profile != profiles->end());
+        return *profile;
+    };
+    auto const openedWith = [](Settings const& settings, Dispatch dispatch) {
+        auto harness = Harness { contextFor(settings) };
+        harness.boot();
+        harness.feed(std::move(dispatch));
+        harness.finish("git-fetch", ok());
+        harness.finish("git-worktree-add", ok());
+        auto const opened = all<OpenPane>(harness.finish("gh-pr-checkout", ok()));
+        REQUIRE(opened.size() == 1);
+        REQUIRE(harness.engine().runs().size() == 1);
+        return std::pair { opened.front(), harness.engine().runs().front() };
+    };
+
+    SECTION("by default, standard")
+    {
+        auto const [pane, run] = openedWith({}, prDispatch());
+        CHECK(run.permissions == "standard");
+        CHECK(run.settings == settingsJsonOf(builtin("standard")));
+        CHECK(argumentOf(pane, "settings") == run.settings);
+    }
+    SECTION("the default the configuration names")
+    {
+        auto const [pane, run] = openedWith({ .limits = R"("permissions": "ask",)" }, prDispatch());
+        CHECK(run.permissions == "ask");
+        CHECK(argumentOf(pane, "settings")
+              == R"({"permissions":{"defaultMode":"default","allow":[],"deny":[]}})");
+    }
+    SECTION("the dispatch's own, over the default")
+    {
+        auto dispatch = prDispatch();
+        dispatch.permissions = "trusted";
+        auto const [pane, run] = openedWith({}, std::move(dispatch));
+        CHECK(run.permissions == "trusted");
+        CHECK(argumentOf(pane, "settings")->contains("Bash(git push:*)"));
+    }
+    SECTION("an unknown profile is refused")
+    {
+        auto harness = Harness { contextFor({}) };
+        harness.boot();
+        auto dispatch = prDispatch();
+        dispatch.permissions = "nope";
+        auto const refused = all<DispatchRefused>(harness.feed(std::move(dispatch)));
+        REQUIRE(refused.size() == 1);
+        CHECK(refused.front().reason == DispatchRefusal::UnknownProfile);
+        CHECK(harness.engine().runs().empty());
     }
 }
 

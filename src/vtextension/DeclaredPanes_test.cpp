@@ -118,6 +118,7 @@ struct Fixture
 {
     return { { "model", "opus" },
              { "session", std::string { SessionId } },
+             { "settings", R"({"permissions":{"defaultMode":"acceptEdits","allow":[],"deny":[]}})" },
              { "board", "Keep STATUS.md." },
              { "prompt", "/x {url}" } };
 }
@@ -141,16 +142,19 @@ TEST_CASE("pane-open spawns the template's argv", "[vtextension][panes]")
     REQUIRE(opened == "pane-1");
     REQUIRE(f.host.spawns.size() == 1);
     auto const& spawn = f.host.spawns.front();
-    // One word per value: the prompt's space and braces stay inside its word.
-    CHECK(spawn.argv
-          == std::vector<std::string> { "claude",
-                                        "--model",
-                                        "opus",
-                                        "--session-id",
-                                        std::string { SessionId },
-                                        "--append-system-prompt",
-                                        "Keep STATUS.md.",
-                                        "/x {url}" });
+    // One word per value: the prompt's space and braces stay inside its word, and so do the settings' quotes.
+    CHECK(
+        spawn.argv
+        == std::vector<std::string> { "claude",
+                                      "--model",
+                                      "opus",
+                                      "--session-id",
+                                      std::string { SessionId },
+                                      "--settings",
+                                      R"({"permissions":{"defaultMode":"acceptEdits","allow":[],"deny":[]}})",
+                                      "--append-system-prompt",
+                                      "Keep STATUS.md.",
+                                      "/x {url}" });
     REQUIRE(spawn.directory != nullptr);
     CHECK(spawn.directory->resolvedPath() == "/w/run-1");
     CHECK(spawn.cwd == "/w/run-1");
@@ -170,7 +174,7 @@ TEST_CASE("pane-open runs the executable the configuration names for the templat
 
     REQUIRE(f.host.spawns.size() == 1);
     auto const& argv = f.host.spawns.front().argv;
-    REQUIRE(argv.size() == 8);
+    REQUIRE(argv.size() == 10);
     CHECK(argv.front() == "/home/u/.local/bin/claude");
     // Only the program is replaced: an argument spelled like a configured program stays as it is.
     CHECK(argv[1] == "--model");

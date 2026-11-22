@@ -118,4 +118,13 @@ struct SettingsSummary
 /// @return Its mode and counts; nothing when it is not such a document.
 [[nodiscard]] std::optional<SettingsSummary> summaryOfSettings(std::string_view settingsJson);
 
+/// What the dispatch form and a run's details say about the profile a run starts with.
+/// @param profile The profile's name.
+/// @param settingsJson What settingsJsonOf() wrote for it.
+/// @return Such as `standard · 19 allowed · 4 denied · edits need no approval`, or `ask · Claude Code asks
+/// for
+///         the rest` for a profile with no rules; the name alone when @p settingsJson cannot be read; empty
+///         for a run stored before profiles existed (an empty @p profile).
+[[nodiscard]] std::string permissionsText(std::string_view profile, std::string_view settingsJson);
+
 } // namespace orchestrator

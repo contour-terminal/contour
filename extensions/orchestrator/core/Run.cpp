@@ -968,6 +968,8 @@ std::vector<Argument> agentPaneArguments(Run const& run)
     auto arguments = std::vector<Argument> { { .name = "model", .value = run.model },
                                              { .name = "session", .value = run.session },
                                              { .name = "prompt", .value = run.prompt } };
+    arguments.push_back(
+        { .name = "settings", .value = run.settings.empty() ? std::string { "{}" } : run.settings });
     if (!run.board.empty())
         arguments.push_back({ .name = "board", .value = run.board });
     return arguments;
@@ -998,6 +1000,10 @@ bool isStorable(Run const& run) noexcept
         return false;
     // No board is asked for when it is empty; one that is must be passable as the prompt is.
     if (!run.board.empty() && !fits(Shape::Prompt, run.board))
+        return false;
+    if (!run.permissions.empty() && !fits(Shape::Name, run.permissions))
+        return false;
+    if (!run.settings.empty() && !fits(Shape::Prompt, run.settings))
         return false;
     if (run.pane && !fits(Shape::Name, *run.pane))
         return false;
@@ -1185,6 +1191,10 @@ std::string toJson(Run const& run)
     json.prompt = run.prompt;
     if (!run.board.empty())
         json.board = run.board;
+    if (!run.permissions.empty())
+        json.permissions = run.permissions;
+    if (!run.settings.empty())
+        json.settings = run.settings;
     json.session = run.session;
     json.branch = run.branch;
     json.worktree = run.worktree;
@@ -1259,6 +1269,8 @@ std::optional<Run> runFromJson(std::string_view text)
         .model = std::move(json.model),
         .prompt = std::move(json.prompt),
         .board = std::move(json.board).value_or(std::string {}),
+        .permissions = std::move(json.permissions).value_or(std::string {}),
+        .settings = std::move(json.settings).value_or(std::string {}),
         .session = std::move(json.session),
         .branch = std::move(json.branch),
         .worktree = std::move(json.worktree),

@@ -59,6 +59,8 @@ struct JsonRun
     std::string model;
     std::string prompt;
     std::optional<std::string> board; ///< Absent: no board asked for, as in a run stored before it existed.
+    std::optional<std::string> permissions; ///< Absent: a run stored before profiles existed.
+    std::optional<std::string> settings;    ///< Absent: as for permissions; its agent got `--settings {}`.
     std::string session;
     std::string branch;
     std::string worktree;

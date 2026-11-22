@@ -8,21 +8,21 @@
 │ ✗ #1847 Adds ability to set Contour as default terminal on Windows … │ │             al/contour/pull/2375            │
 │                                                                      │ │                                             │
 │ ISSUES WITHOUT A PR                                                  │ │                                             │
-│ ▾ contour · 5                                                        │ │                                             │
-│   #2356 Report the╭─ Dispatch an agent ──────────────────────────────────────────────────────────╮                   │
-│   #2338 Flaky on W│ repo      ‹ contour ›                                                        │                   │
-│   #2253 Switch `da│ topic     Investigate why the shell integration test hangs on CI▏            │                   │
-│   #2163 OSC 133: o│ task      ‹ topic ›                                                          │                   │
-│   #2162 OSC 9;9 (C│ model     ‹ opus ›                                                           │                   │
-│                   │ prompt    Investigate why the shell integration test hangs on CI             │                   │
-│ AGENTS · 0 OF 4 RU│ checkout  new branch agent/topic-investigate-why-the-shell-integration-te-…  │                   │
-│ no agents         │ worktree  /home/u/worktrees/contour/topic-investigate-why-the-shell-integrat │                   │
-│                   │             ion-te-…                                                         │                   │
-│ FINISHED · 0 NEW  │ board     STATUS.md, asked for in the agent's system prompt                  │                   │
+│ ▾ contour · 5     ╭─ Dispatch an agent ──────────────────────────────────────────────────────────╮                   │
+│   #2356 Report the│ repo      ‹ contour ›                                                        │                   │
+│   #2338 Flaky on W│ topic     Investigate why the shell integration test hangs on CI▏            │                   │
+│   #2253 Switch `da│ task      ‹ topic ›                                                          │                   │
+│   #2163 OSC 133: o│ model     ‹ opus ›                                                           │                   │
+│   #2162 OSC 9;9 (C│ prompt    Investigate why the shell integration test hangs on CI             │                   │
+│                   │ checkout  new branch agent/topic-investigate-why-the-shell-integration-te-…  │                   │
+│ AGENTS · 0 OF 4 RU│ worktree  /home/u/worktrees/contour/topic-investigate-why-the-shell-integrat │                   │
+│ no agents         │             ion-te-…                                                         │                   │
+│                   │ board     STATUS.md, asked for in the agent's system prompt                  │                   │
+│ FINISHED · 0 NEW  │ perms     standard · 19 allowed · 4 denied · edits need no approval          │                   │
 │ nothing finished  │ command   claude --model opus --session-id                                   │                   │
-│                   │             00000001-0000-4000-8000-000000000000 --append-system-prompt      │                   │
-│                   │             '{board}' 'Investigate why the shell integration test hangs on   │                   │
-│                   │             CI'                                                              │                   │
+│                   │             00000001-0000-4000-8000-000000000000 --settings '{settings}'     │                   │
+│                   │             --append-system-prompt '{board}' 'Investigate why the shell      │                   │
+│                   │             integration test hangs on CI'                                    │                   │
 │                   │                                                                              │                   │
 │                   │ 0 of 4 running                                                               │                   │
 │                   │ enter dispatch · tab next field · esc cancel                                 │                   │

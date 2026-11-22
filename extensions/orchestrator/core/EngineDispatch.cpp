@@ -14,6 +14,7 @@
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/core/Naming.hpp>
+#include <orchestrator/core/Permissions.hpp>
 #include <orchestrator/core/Prompt.hpp>
 #include <orchestrator/core/Reconcile.hpp>
 #include <orchestrator/core/Sanitize.hpp>
@@ -143,6 +144,10 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
     }
     if (!prompt || !id)
         return std::unexpected { DispatchRefusal::BadPrompt };
+    auto const* const profile = request.permissions.empty() ? &_config->profileFor(task->id)
+                                                            : _config->findProfile(request.permissions);
+    if (profile == nullptr)
+        return std::unexpected { DispatchRefusal::UnknownProfile };
     if (isTaken(*id))
         return std::unexpected { DispatchRefusal::AlreadyRunning };
 
@@ -160,6 +165,8 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
                      .model = model,
                      .prompt = std::move(*prompt),
                      .board = _config->boardInstruction(),
+                     .permissions = profile->name,
+                     .settings = settingsJsonOf(*profile),
                      .session = request.session,
                      .branch = branchName(*id),
                      .worktree = worktreePath(_config->worktreeRoot(), repo->name, *id),

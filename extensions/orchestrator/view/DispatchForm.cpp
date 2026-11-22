@@ -22,6 +22,7 @@
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Naming.hpp>
 #include <orchestrator/core/Overloaded.hpp>
+#include <orchestrator/core/Permissions.hpp>
 #include <orchestrator/core/Utf8.hpp>
 #include <orchestrator/view/Keys.hpp>
 #include <orchestrator/view/Sections.hpp>
@@ -47,8 +48,9 @@ namespace
         "an agent already works on this item"sv,                                    // AlreadyRunning
         "the base branch is not known yet: it is read with the next refresh (R)"sv, // BaseUnknown
         "the prompt or the note cannot be passed to the agent"sv,                   // BadPrompt
+        "the permission profile is no longer configured"sv,                         // UnknownProfile
     };
-    static_assert(RefusalTexts.size() == std::to_underlying(DispatchRefusal::BadPrompt) + 1U,
+    static_assert(RefusalTexts.size() == std::to_underlying(DispatchRefusal::UnknownProfile) + 1U,
                   "RefusalTexts has one row per DispatchRefusal");
 
     /// What Enter does, indexed by HooksWarning: once the warning is confirmed, it asks for a second Enter.
@@ -65,6 +67,8 @@ namespace
 
     /// How the command line shows the board's instruction: by its placeholder, the paragraph being long.
     constexpr auto BoardPlaceholder = "{board}"sv;
+    /// How the command line shows the run's settings: by their placeholder, the document being long.
+    constexpr auto SettingsPlaceholder = "{settings}"sv;
 
     /// What a topic form says instead of a refusal while its topic is still empty.
     constexpr auto TypeATopicText = "type a topic"sv;
@@ -307,9 +311,18 @@ namespace
                           Role::Text,
                           LabelColumns,
                           width);
+            // So are the permissions: a JSON document, named by its placeholder, and summed up on its own
+            // line.
+            appendWrapped(lines,
+                          "perms"sv,
+                          permissionsText(preview->run.permissions, preview->run.settings),
+                          Role::Text,
+                          LabelColumns,
+                          width);
             auto shown = preview->agentArgv;
             if (!preview->run.board.empty())
                 std::ranges::replace(shown, preview->run.board, std::string { BoardPlaceholder });
+            std::ranges::replace(shown, preview->run.settings, std::string { SettingsPlaceholder });
             appendWrapped(lines, "command"sv, shellQuoted(shown), Role::Dim, LabelColumns, width);
         }
         else if (isTopicForm(form) && form.note.empty())
