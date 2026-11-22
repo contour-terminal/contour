@@ -109,9 +109,10 @@ Item {
         font: chromeStyle.type.footnoteStrong
     }
 
-    // A text's width: whole cells on the Terminal row.
+    // A text's width as a Text lays it out (chromeStyle.textWidth, not the metrics' advance, which falls short
+    // of it for a bold face): whole cells on the Terminal row.
     function _span(metrics, text) {
-        const width = metrics.advanceWidth(text)
+        const width = chromeStyle.textWidth(metrics.font, text)
         return root.bracketed ? Math.ceil(width / chromeStyle.cellWidth) * chromeStyle.cellWidth : width
     }
 

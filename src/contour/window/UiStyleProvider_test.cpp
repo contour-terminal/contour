@@ -518,6 +518,34 @@ TEST_CASE("UiStyleProvider.paletteRevision changes when the application palette 
     CHECK(notified >= 2); // Once for the change, once for the restore.
 }
 
+TEST_CASE("chromeStyle.textWidth is the width a Text lays the label out in", "[contour][uistyle][qml]")
+{
+    // A budget made of it equals the label drawn. FontMetrics.advanceWidth() does not: Qt gives a bold face
+    // at exactly weight 700 a pixel more in the layout than in the advance, which a chip budget fell short
+    // by.
+    auto engine = QQmlEngine();
+    contour::test::installChromeStyle(engine);
+    auto const weight = GENERATE(400, 600, 700, 900);
+    auto const text = GENERATE(as<QString> {}, QStringLiteral("docs"), QStringLiteral("billing \u25BE"));
+    INFO("weight " << weight << ", text " << text.toStdString());
+
+    auto component = QQmlComponent(&engine);
+    component.setData("import QtQuick\n"
+                      "Text {\n"
+                      "    textFormat: Text.PlainText\n"
+                      "    font.pixelSize: 11\n"
+                      "    readonly property real budget: chromeStyle.textWidth(font, text)\n"
+                      "}\n",
+                      QUrl());
+    auto const label = std::unique_ptr<QObject>(component.create());
+    REQUIRE(label);
+    auto font = label->property("font").value<QFont>();
+    font.setWeight(static_cast<QFont::Weight>(weight));
+    label->setProperty("font", font);
+    label->setProperty("text", text);
+    CHECK(label->property("budget").toReal() == label->property("implicitWidth").toReal());
+}
+
 TEST_CASE("chromeStyle.statusColor bindings re-evaluate on a palette change", "[contour][uistyle][qml]")
 {
     auto engine = QQmlEngine();
