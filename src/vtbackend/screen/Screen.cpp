@@ -5929,9 +5929,10 @@ void Screen::replyKittyGraphics(kitty_graphics::Command const& command, std::str
     if (command.quietAlways || (command.quietOnSuccess && !isError))
         return;
 
-    // An unsolicited response would desynchronise an application that never identified its image,
-    // so a command carrying no identity is answered only when it failed.
-    if (command.imageId == 0 && command.imageNumber == 0 && !isError)
+    // A command carrying no identity is never answered, not even its failure, as in kitty's
+    // finish_command_response(): the application that sent it reads no reply, so one would land in
+    // its input as typed keys.
+    if (command.imageId == 0 && command.imageNumber == 0)
         return;
 
     if (command.imageNumber != 0)
@@ -6170,8 +6171,9 @@ void Screen::processKittyGraphics(std::string_view body)
     auto parsed = parseCommand(body);
     if (!parsed)
     {
-        auto const failed = Command {};
-        replyKittyGraphics(failed, std::format("{}:bad control data", errorCode(parsed.error())));
+        // Control data that does not parse names no image to answer to, so it is only logged, as in kitty.
+        terminalLog()("Ignoring kitty graphics command with bad control data ({}).",
+                      errorCode(parsed.error()));
         return;
     }
     auto command = std::move(parsed.value());
@@ -6231,11 +6233,6 @@ void Screen::processKittyGraphics(std::string_view body)
             return;
         case Action::Delete: {
             auto const deleted = deleteKittyGraphics(command);
-            // The unimplemented deletes are the positional ones, which usually name no image -- and an
-            // application that named none reads no reply, so an unsolicited error would land in its
-            // input as typed keys. Only a command that identified itself hears about it.
-            if (!deleted && command.imageId == 0 && command.imageNumber == 0)
-                return;
             replyKittyGraphics(command, deleted ? "OK"sv : deleted.error());
             return;
         }

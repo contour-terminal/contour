@@ -273,6 +273,31 @@ TEST_CASE("KittyGraphics.a_delete_aborts_a_chunked_transmission", "[kitty]")
     CHECK(mock.terminal.peekInput().contains("ENOENT"));
 }
 
+TEST_CASE("KittyGraphics.a_command_naming_no_image_is_never_answered", "[kitty]")
+{
+    // kitty answers only a command carrying `i=` or `I=`. An application that named no image reads no
+    // reply, so even an error would land in its input as typed keys.
+    auto mock = KittyTerm { PageSize { LineCount(4), ColumnCount(8) } };
+
+    SECTION("a transmission it cannot store")
+    {
+        mock.writeToScreen("\033_Ga=t,f=24;AAAA\033\\"sv);
+        CHECK(mock.terminal.peekInput().empty());
+    }
+
+    SECTION("a put of nothing")
+    {
+        mock.writeToScreen("\033_Ga=p\033\\"sv);
+        CHECK(mock.terminal.peekInput().empty());
+    }
+
+    SECTION("control data that does not parse")
+    {
+        mock.writeToScreen("\033_Ga=t,zz\033\\"sv);
+        CHECK(mock.terminal.peekInput().empty());
+    }
+}
+
 TEST_CASE("KittyGraphics.an_endless_chunk_stream_is_abandoned_not_accumulated", "[kitty]")
 {
     // Every byte a remote host writes ends up in the reassembly buffer, and a stream that never
