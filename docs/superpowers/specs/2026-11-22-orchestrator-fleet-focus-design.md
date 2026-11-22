@@ -26,7 +26,16 @@ The dashboard grew one screen and one key per feature, and it now asks too much 
 ## Goal
 
 Working with an agent means **seeing it, reading it and talking to it in one place**, with no screen to open and
-nothing to memorise beyond `↑↓ ⏎ esc tab ^K n`. What the screen offers adapts to what is selected.
+nothing to memorise beyond `↑↓ ⏎ esc n ^K`, plus `1 2 3` once you have seen an agent ask. What the screen offers
+adapts to what is selected, and the action bar always names what `⏎` will do.
+
+Three rules hold everywhere, and the rest of this spec follows from them:
+
+- **A letter never does two things.** In the Fleet a letter is a command; in a text field (the message box, the
+  launcher, the palette, the filter) every printable key types. There is no "start typing to write" shortcut.
+- **`⏎` acts, `esc` steps back.** `⏎` does what the action bar lists first. `esc` closes the innermost popup or
+  field and loses nothing: a draft, a query and a selection survive it. `esc` never sends, ends or answers anything.
+- **Every action says what happened.** Its result shows on the action bar until the next key (see "Feedback").
 
 ## Layout
 
@@ -38,90 +47,145 @@ nothing to memorise beyond `↑↓ ⏎ esc tab ^K n`. What the screen offers ada
 │ WORKING · 2 OF 4                   │ │ ☑ reproduced on master                                 │
 │   issue-2338  fix          ⠋ 12m   │ │ ☐ fix the reflow   ← now                               │
 │   topic  reflow docs       ⠋  3m   │ │                                                        │
-│ DONE · TO REVIEW                   │ │ ── latest ──────────────────────────────────────────── │
-│   pr-2369  fix CI     PR updated   │ │ May I run `ctest -R reflow`?                           │
-│ FINISHED                           │ │ [1 yes] [2 always] [3 no]                              │
-│   pr-2366  completed      removed  │ │ ╭ message to pr-2375 ────────────────────────────────╮ │
-│                                    │ │ │ █                                                  │ │
+│ TO REVIEW · 1                      │ │ ── latest ──────────────────────────────────────────── │
+│   pr-2369  fix CI     PR updated   │ │ 14:30 claude The pending wrap is now cleared…          │
+│ FINISHED · 3                       │ │ ╭ ? pr-2375 asks ────────────────────────────────────╮ │
+│   pr-2366  completed      removed  │ │ │ Bash  ctest -R reflow --output-on-failure          │ │
+│                                    │ │ │ 1 yes   2 always   3 no, and say why               │ │
 │ + new agent                        │ │ ╰────────────────────────────────────────────────────╯ │
 ╰────────────────────────────────────╯ ╰────────────────────────────────────────────────────────╯
- ⏎ reply · 1 2 3 answer · t transcript · e end · ^k all actions               ⬢ 3/4 · 2 need you
+ 1 2 3 answer · ⏎ see request · e end · n new · ^k all actions                ⬢ 3/4 · 2 need you
 ```
+
+While the selected agent asks, the asking box takes the message box's place: Claude Code's menu is not reading
+messages, so there is nothing to type into (see "Quick replies"). The sketch shows the Board because the user
+chose it with `b`; an asking run otherwise opens on its Transcript, at the request.
 
 ### Left pane: the Fleet, agents only
 
 - The Fleet lists runs only, grouped by **what they need from you**, in this order:
-  - **Needs you:** asking (a permission prompt), waiting for input, or stopped by an error;
-  - **Working;**
-  - **Done · to review:** the agent reported done, and the run is still open;
-  - **Finished:** today's Finished section, folded to its newest five.
+  - **Needs you:** asking (a permission prompt), waiting for input (including an agent whose turn ended without
+    reporting done, hook status `idle`), or stopped by an error;
+  - **Working:** working, or starting (its pane is open, no hook has reported yet);
+  - **To review:** the agent reported done, and the run is still open;
+  - **Finished:** every recorded run not dismissed, newest first, folded to its newest five. `⏎` on the header
+    unfolds it, and `/` searches all of it, so yesterday's run is a filter away.
 
-  Within a group the longest-waiting run comes first. A run moves between groups as its state changes, and the
-  selection stays on the run, not on the position.
+  Within a group the longest-waiting run comes first, so `home` always selects the run that has waited longest
+  for you. A run moves between groups as its state changes, and the selection stays on the run, not on the
+  position; a run entering Needs you never takes the selection.
 - Pull requests, issues and Jira issues are no longer listed on the dashboard. You browse and start them from the
   launcher (`n`), which opens on the items that need attention.
 - `+ new agent` is the last Fleet row; `⏎` on it opens the launcher.
+
+**Empty and first run.** With no runs, the Fleet shows only `+ new agent`, selected, and the Focus shows a
+three-line primer in place of a run:
+
+```
+No agents yet. ⏎ or n starts one on a pull request, an issue, or anything you type.
+Once agents run: ⏎ talks to the selected one, 1 2 3 answers one that asks, esc steps back.
+Everything else is in ^K.
+```
+
+The primer returns whenever the Fleet is empty. Unconfigured, the Fleet shows today's "Nothing to list until the
+orchestrator is configured" text, and `n` says what is missing instead of opening the launcher.
 
 ### Right pane: Focus, the selected run
 
 The header shows the run, its task, its model and its state with its age.
 
-There are three tabs, switched with `[` and `]` (or `^←`/`^→` while typing):
+There are three tabs, each on its own letter, which the tab strip underlines: **`b` Board**, **`t` Transcript**,
+**`d` Details**. They work from the Fleet and from the Focus; in a text field they type, as every letter does.
 
 - **Board:** the rendered `STATUS.md`, re-read every five seconds, as the details panel shows it today.
 - **Transcript:** follows the agent while it runs. It shows the last page, re-read every five seconds, and stays
-  pinned to the end unless you scroll up. A `↓ new` marker brings you back.
-- **Details:** what the details panel lists today: branch, worktree, URL, checks, kept reasons and failure words.
+  pinned to the end unless you scroll up. A `↓ live` chip shows while you are away from the end; `end` returns.
+- **Details:** what the details panel lists today: branch, worktree, URL, checks, kept reasons, failure words and
+  the permissions the run was started with.
 
-The Focus remembers the last tab per run kind:
-- an asking agent opens on Transcript;
-- a working agent opens on Board;
-- a finished run opens on Details.
+**Which tab opens.** A run opens on the tab its state names in the action table ("Opens on"). A tab you choose
+with `b`, `t` or `d` sticks for that run until its state changes, so a run that starts asking shows you the
+request even if you left it on Board.
 
 Under the tab, **latest** shows the last three transcript entries, unless the Transcript tab is open.
 
-The **message box** is always present for a run whose pane is open. For a finished run it is replaced by that run's
-actions (run again, dismiss).
+Nothing inside a tab takes `⏎`: there is no cursor in the Focus. An edit's diff shows its first eight lines and
+`+N lines`; the Transcript tab, or the agent's own tab (`r`), shows the rest.
+
+The bottom of the Focus depends on the run's state:
+
+| State | Bottom of the Focus |
+| --- | --- |
+| Asking | the **asking box**: tool, command, and the reply chips `1 2 3` |
+| Starting, Working, Waiting, Errored | the **message box**: `⏎ to write to pr-2375` when the Fleet has the keys, a cursor when it has them |
+| Done | a done box: `✓ reported done`, and `⏎ follow up · o open PR · e end` |
+| Finished, Kept | how it ended, and its actions |
 
 ### Bands
 
-- **Wide (≥ 100 columns):** both panes side by side.
-- **Medium (60–99):** Fleet above, Focus below at 60 % of the height; `tab` gives the Focus the whole body and back.
-- **Narrow (< 60):** one pane at a time. `⏎`/`→` opens the Focus, and `esc` returns. That is the only depth.
+The user is in one of two **places**, the **Fleet** or the **Focus**, shown by the accent border. The band decides
+only what stays visible while you are in the Focus:
 
-## Focus model and keys
+| Band | Fleet place | Focus place |
+| --- | --- | --- |
+| **Wide** (≥ 100 columns) | both panes, side by side | both panes, side by side |
+| **Medium** (60–99) | Fleet above, Focus below at 60 % of the height | the Focus takes the whole body |
+| **Narrow** (< 60) | the Fleet alone | the Focus alone |
 
-The user is in one of two places, shown by the highlighted border.
+There is no other depth. In every band, `⏎` on a live run (and `tab` on any run) goes to the Focus, and `esc` comes
+back. The top bar's `● N need you` pill stays visible in every band, so a new request shows while you type.
 
-**Fleet (the default).** Keys select and act:
+**Small terminals.** At 80×24 (Medium) and 50×20 (Narrow) the furniture gives way in this order, so the content
+keeps at least eight rows:
+
+1. the Focus header's second line (title, branch, profile);
+2. latest, while the Board tab is open;
+3. the top bar, whose gauge and pill move to the right end of the action bar;
+4. the tab strip, whose active tab moves into the header as `· board`;
+5. the Fleet's second row lines, except for Needs you rows, whose question or error stays, so `1 2 3` can be
+   answered from the Fleet without opening anything.
+
+The message box is one line while empty and grows with its draft, up to a third of the Focus.
+
+## Places and keys
+
+**Fleet (the default).** Letters are commands:
 
 | Key | Does |
 | --- | --- |
-| `↑↓` `jk` `home` `end` | move |
-| `⏎` | the selected row's **primary action** (see "Actions") |
-| `tab` `→` | into the message box (Wide, Medium) or into the Focus (Narrow) |
-| `[` `]` | switch the Focus tab without leaving the Fleet |
+| `↑↓` `jk` `home` `end` | move; `home` is the run that has waited longest for you |
+| `⏎` | the selected row's **primary action**, which the action bar lists first |
+| `tab` | to the Focus |
+| `esc` | clear the filter; otherwise nothing |
 | `pgup` `pgdn` | scroll the Focus tab |
+| `b` `t` `d` | the Focus tab |
 | `n` | the launcher |
 | `/` | filter the rows |
-| `^K`, `?` | the command palette |
-| `1` `2` `3` | the quick replies, while the selected agent is asking |
-| `t` `b` `e` `m` `d` `del` `z` `R` `I` `x` | today's shortcuts, kept; the palette and the action bar show them |
+| `^K` `?` | the command palette |
+| `1` `2` `3` | answer the selected agent, while it asks and its asking box (or, Narrow, its question) is on screen |
+| `e` `o` `r` `x` `del` `z` | end, open PR, reveal the agent's tab, retry removal, dismiss, fold; offered only where they apply |
 
-**Message box.** It is entered with `tab` or `→`, with `m`, with `⏎` when the primary action is *reply*, or by
-starting to type `i`.
+`m`, `R`, `I`, `Z`, `[` and `]` are gone as keys: `⏎` writes to any live run, and refresh, install plugins and
+fold all are palette commands.
+
+**Focus.** For a run with a message box, the box has the keys:
 
 | Key | Does |
 | --- | --- |
-| printable keys | type |
+| printable keys, digits included | type |
 | `⏎` | send |
 | `alt+⏎` | new line; a paste keeps its line feeds |
+| `^←` `^→` | move by word, as in any text field |
+| `pgup` `pgdn` `end` | scroll the tab; `end` back to live |
 | `esc` | back to the Fleet, keeping the draft (drafts are kept per run, in memory) |
-| `^←` `^→` | switch the Focus tab |
-| `pgup` `pgdn` | scroll it |
-| `1` `2` `3` | quick replies, while the draft is empty and the agent is asking; otherwise they type |
+| `^K` | the command palette |
 
-A refused send keeps the draft and shows why on the action bar, as the message line does today.
+For any other run (asking, done, finished), the Focus takes the Fleet's letters and digits, and `↑↓` scroll
+instead of moving.
+
+**After a send** the draft clears, the message shows in latest as `you · sent 14:31`, the keys return to the Fleet,
+and the selection stays on the run. A refused send keeps the draft, keeps the keys in the box, and shows why on
+the action bar, as the message line does today.
 
 ## Actions: one table, adapted to the row
 
@@ -137,36 +201,58 @@ struct ActionRow {
 };
 ```
 
-`RowState` is one enum. The ranked actions for each state:
+`RowState` is one enum. The ranked actions for each state, and the Focus tab it opens on:
 
-| RowState | Actions |
-| --- | --- |
-| `Asking` | `⏎ reply` · `1 2 3 answer` · `t transcript` · `e end` |
-| `Waiting` | `⏎ reply` · `t transcript` · `b board` · `e end` |
-| `Errored` | `⏎ transcript` · `m message` · `e end` · `d run again` |
-| `Working` | `⏎ board` · `m message` · `t transcript` · `e end` |
-| `Done` | `⏎ open PR` (or `transcript` without a PR) · `m follow up` · `e end` |
-| `Finished` | `⏎ run again` · `del dismiss` · `t transcript` |
-| `Kept` | `⏎ details` · `x retry removal` · `del dismiss` |
-| `NewAgent` | `⏎ new agent` |
-| `GroupHeader` | `⏎ fold` |
+| RowState | Group | Actions, rank order | Opens on |
+| --- | --- | --- | --- |
+| `Asking` | Needs you | `1 2 3 answer` · `⏎ see request` · `r agent tab` · `e end` | Transcript, at the request |
+| `Waiting` | Needs you | `⏎ reply` · `t transcript` · `b board` · `e end` | Transcript |
+| `Errored` | Needs you | `⏎ reply` · `t transcript` · `d details` · `e end` | Transcript |
+| `Starting` | Working | `⏎ message` · `r agent tab` · `e end` | Board |
+| `Working` | Working | `⏎ message` · `t transcript` · `b board` · `e end` | Board |
+| `Done` | To review | `⏎ follow up` · `o open PR` · `t transcript` · `e end` | Board |
+| `Finished` | Finished | `⏎ run again` · `t transcript` · `del dismiss` | Details |
+| `Kept` | Finished | `⏎ retry removal` · `d details` · `del dismiss` | Details, at the kept reasons |
+| `NewAgent` | — | `⏎ new agent` | the primer, while the Fleet is empty |
+| `GroupHeader` | — | `⏎ fold` | — |
 
-- The bar shows the actions that fit, in rank order, then `^k all actions`.
+- **`⏎` on a live run always writes to it.** The label changes (reply, message, follow up); the action does not.
+  The one exception is `Asking`, where the menu takes keys, not messages, so `⏎` shows the request instead.
+- **The bar shows the actions that fit, in rank order, then `^k all actions`.** For `Asking` the chips come first,
+  because the digits are the answer.
 - An action that does not apply to a state has no row, so it is never offered.
 - Adding a state or an action is one row.
-- The existing `KeyRow` table stays the source of key → command. `ActionRow` only says which commands apply and in
-  what order.
+- The existing `KeyRow` table stays the source of key → command. `ActionRow` only says which commands apply, in
+  what order, and which tab a state opens on.
+- A run whose agent fails before its pane opens is `Finished`, with the failure words on its second line and in
+  Details; `⏎ run again` opens the launcher with the same choice.
+
+## Feedback, confirmation and undo
+
+Every action answers on the action bar, in the colour of its outcome, until the next key.
+
+| Action | Asks first? | What you see after it |
+| --- | --- | --- |
+| Start (launcher `⏎`) | only with a setup warning: `⏎ again to start anyway` | the launcher closes; the new run is selected in Working as `starting`, its Board says `waiting for the agent's first report` |
+| Send a message | no | `sent to pr-2375`; the message in latest as `you · sent 14:31` |
+| Quick reply `1 2 3` | no | the chip fills, `answered yes`; the asking box stays, dimmed, until the hook leaves asking. After 10 s still asking: `pr-2375 still asks · r opens its tab` |
+| `3` no, and say why | no | as above, then the message box opens for that run, empty, so the next keys are the reason |
+| End `e` | yes, once: `end pr-2375? e again to end · esc keeps it` (as today) | the run moves to Finished, `removed`, or `kept` with the reason |
+| Dismiss `del` (Finished only) | no: it changes no files | the row leaves the Finished group; `dismissed pr-2366` |
+| Retry removal `x` | no: removal is never forced | `removed`, or the reason it is still kept |
+| Open PR `o` | no | `opened #2369` or why not (see "Errors") |
 
 ## The command palette (`^K`, `?`)
 
 core-cpp's `CommandPalettePopup` lists every command:
 - the selected row's actions first, from the table above;
-- then the global ones: new agent, filter, refresh, install plugins, fold all, show the last 24 hours (the timeline, as a popup);
-- each with its key.
+- then the global ones: new agent, filter, refresh the lists, install the missing plugins, fold every group, show
+  the last 24 hours (the timeline, as a popup);
+- each with its key, or `palette only`.
 
-Typing filters it fuzzily, and `⏎` runs the chosen command. It replaces the help overlay: `?` opens it too.
-Commands that do not apply to the selection are listed dimmed, with the reason (for example, "e end · no run
-selected").
+Typing filters it fuzzily, `⏎` runs the chosen command, and `esc` closes it. It replaces the help overlay: `?`
+opens it too. Commands that do not apply to the selection are listed dimmed, with the reason (for example, "e end
+· no run selected"). The palette holds the rarely-used commands, so the Fleet needs no key for them.
 
 ## The launcher (`n` or `+ new agent`): browse and start
 
@@ -177,13 +263,24 @@ selected").
 │   #2338 Flaky on Windows: SessionHost…   issue contour  │
 │   #2375 Say why the stdio relay failed…  PR    contour  │
 │─────────────────────────────────────────────────────────│
-│ task fix ◂▸   model sonnet ◂▸   repo contour ◂▸         │
+│ task fix · model sonnet · perms standard · repo contour │
 │ new branch agent/topic-flaky-reflow-… in ~/worktrees/…  │
 ╰─────────────────────────────────────────────────────────╯
 ```
 
 It is one popup, built on `FuzzyPickerPopup` for the list. It replaces the item lists on today's dashboard,
-`DispatchForm`, `d`, the task letter keys and `n`.
+`DispatchForm`, `d`, the task letter keys and `n`. The query field has the keys, so every printable key types; the
+launcher has no letter commands.
+
+| Key | Does |
+| --- | --- |
+| printable keys | type the query |
+| `↑↓` | move in the list |
+| `tab` `shift+tab` | move through the settings (task, model, perms, repo) and back to the list |
+| `←→` | change the focused setting; in the query, move the cursor |
+| `⏎` | start the highlighted row, from anywhere in the popup |
+| `alt+p` | expand the full prompt and command line, as the dispatch form shows them today |
+| `esc` | close, starting nothing |
 
 - **Empty query: browse.** The items are listed in three groups:
   - **Needs attention:** your PRs with failing CI or requested changes;
@@ -191,32 +288,45 @@ It is one popup, built on `FuzzyPickerPopup` for the list. It replaces the item 
   - **Issues without a PR** and Jira.
 
   Each group is ordered as today's lists are. CI, review and "an agent is on it" (`⬢`) are aligned glyph columns.
-  One detail line describes the highlighted item: the failing job, the checks count, and the live agent's state.
-  `o` opens it in the browser.
-
+  One detail line describes the highlighted item: the failing job, the checks count, the live agent's state, and
+  its URL as an OSC 8 link the user's own terminal can open, wherever the daemon runs.
 - **The query** filters the PRs, issues and Jira issues of every configured repository, matching their number and
-  title. While the query is not empty, the first row is always **topic "<query>"**.
-- **The settings line** shows the task, model and repository for the highlighted row:
+  title. While the query is not empty, it always offers **topic "<query>"**:
+  - the topic row is first and highlighted;
+  - except when the query names an item (`2375`, `#2375`, `CT-412`, or a pasted PR or issue URL) and that item
+    exists: then the item is first and highlighted, and the topic row second. Typing a number never starts a topic
+    called "2375".
+- **Starting on an item that already has a live agent** highlights `⬢` and asks once: `pr-2375 already runs ·
+  ⏎ again starts a second agent · esc`.
+- **The settings line** shows the task, model, permission profile and repository for the highlighted row:
   - the task is the first that applies to it;
-  - the model is the task's;
-  - the repository is the item's, or the selected run's for a topic.
-
-  `tab` moves into the line, `←→` change a value, and `tab` returns to the list.
-- **The preview line** shows the checkout (new branch or PR head) and the worktree. `alt+p` expands the full prompt
-  and command line, as the dispatch form shows them today.
+  - the model and the profile are the task's;
+  - the repository is the item's, or for a topic the one last used for a topic (the first configured, at first).
+- **The preview line** shows the checkout (new branch or PR head), the worktree and the profile.
 - **Setup warnings** keep the current rule: missing hooks, missing plugins, or the run limit reached. The warning
-  is drawn on the settings line, and `⏎` asks again before it dispatches.
+  is drawn on the settings line with what fixes it (`plugins missing · ^K install`), and `⏎` asks again before it
+  dispatches.
+- **The lists are read when the launcher opens** if they are older than a minute; until then the groups show a
+  spinner, and the topic row already works. If they cannot be read, the browse area says why, and topics still
+  start.
 - Opened from an item, the query is the item's number and the item is highlighted.
-- From a finished run, `run again` opens it with that run's item or topic, task and model.
+- From a finished run, `run again` opens it with that run's item or topic, task, model and profile.
 
 ## Quick replies
 
 While the selected agent is **asking**, Claude Code shows its select menu (1 yes · 2 yes, and don't ask again ·
-3 no). The Focus shows the replies as chips, and `1`, `2` or `3` answers.
+3 no). The Focus shows the asking box with the replies as chips, and `1`, `2` or `3` answers.
+
+- **Where the digits work.** In the Fleet, and in the Focus of an asking run. There is no message box while a run
+  asks, so a digit never has to choose between answering and typing.
+- **Only what you can see.** A digit answers only while the selected run's request is on screen: the asking box,
+  or in Narrow and at 80×24 the row's second line. Otherwise it does nothing and the bar says `select the
+  request first`.
+- **`3` leaves the agent waiting for a reason.** The run turns `Waiting`, and the message box opens for it.
 
 **Asking versus waiting.** `AgentStatus::Blocked` splits into `Asking` and `Waiting`, from the status hook's
 Notification `notification_type` (`permission_prompt` versus `idle_prompt`). Where the hook cannot tell, the run is
-`Waiting` and shows no chips.
+`Waiting` and shows no chips: you answer it in its tab (`r`), and its second line says so.
 
 **Host: a key, not a paste.** A menu choice is a key press, not a message. `pane-send` wraps its text in a
 bracketed paste and adds Enter, which a select menu does not take as a choice. So:
@@ -303,13 +413,17 @@ tasks:
 - **Per task:** `permissions: <profile>` on a task overrides the default (for example, `fix-ci` may push).
 - **Per dispatch:** the launcher's settings line gains a `perms` value (`◂▸` cycles the profiles), defaulted from
   the task, so a single run can be given more or less.
+- **Fixed for the run's life.** Claude Code reads `--settings` once, at launch, so a running agent's profile cannot
+  change. To widen one run, answer `2 always` when it asks; to change the profile, end it and `run again`, which
+  opens the launcher with the run's choice and lets you pick another `perms`. Details says this beside the profile:
+  `standard · fixed at start · run again to change`.
 - **Off:** `permissions: { default: ask }` restores Claude Code's own prompts.
 - **Refused in config:** `bypassPermissions` mode, and a rule naming no tool. A full bypass is never one config line
   away. A profile may only allow and deny named rules.
 
 **Visible and recorded.**
 - The run keeps its profile name and the resolved JSON (persisted, additive to `contract/agent-runs/`).
-- The Details tab shows `perms standard · 19 allowed · 4 denied`, and expands the rules on `⏎`.
+- The Details tab shows `perms standard · 19 allowed · 4 denied`, and lists the rules below it, grouped.
 - The launcher's preview shows the profile, and its expanded preview shows the `--settings` value.
 
 **Consent.** The extension now decides what its agents may do unasked, so the manifest's consent text gains: "It
@@ -318,12 +432,14 @@ in the manifest, so the consent dialog shows it as it shows `board`.
 
 ## Attention
 
-- A run that enters **Needs you** moves there. The status line shows `<run> needs you` until you select it. If the
-  tab is not active, it requests the attention of the tab, through the existing notification path, if the host
-  offers one; no host change otherwise.
+- A run that enters **Needs you** moves there, without taking the selection. The top bar's `● N need you` pill
+  counts it, and the action bar's right end names it (`pr-2375 needs you · home`) until you select it. If the tab
+  is not active, it requests the attention of the tab, through the existing notification path, if the host offers
+  one; no host change otherwise.
 - **Unseen markers:**
-  - a run whose transcript or board changed since you last looked gets a `•`;
-  - the Fleet tab label counts the runs that need you: `Fleet · 2!`.
+  - a run whose transcript or board changed since you last looked gets a `•`, and so does the tab that changed;
+  - the dashboard's own terminal tab title counts the runs that need you, `Orchestrator · 2!`, written as OSC 2
+    through `tab-write`, so a user in another tab sees it.
 - Working rows show a core-cpp `Spinner` frame, advanced on the existing redraw tick (no extra timer).
 
 ## Mouse (its own late phase)
@@ -340,8 +456,8 @@ in the manifest, so the consent dialog shows it as it shows `board`.
 ## Architecture
 
 **Core (small additions):**
-- `Run`: `AgentStatus::Asking` (from the split of `Blocked`); the `unseen` digest per run (board hash and
-  transcript size as last shown).
+- `Run`: `AgentStatus::Asking` (from the split of `Blocked`); `Starting` until the first hook reports; the
+  `unseen` digest per run (board hash and transcript size as last shown).
 - `Engine`:
   - attention ordering for the Fleet;
   - transcript tail (the last three entries) and follow (the last page re-read every five seconds) for the
@@ -364,7 +480,7 @@ in the manifest, so the consent dialog shows it as it shows `board`.
 | `view/ActionBar.{hpp,cpp}` | draws the ranked actions that fit |
 | `view/Palette.{hpp,cpp}` | adapts the action table and `KeyRow`s to `CommandPalettePopup` |
 | `view/Launcher.{hpp,cpp}` | the query, the candidates (items and the topic row), the settings and preview lines; on `FuzzyPickerPopup` |
-| `view/Composer.{hpp,cpp}` | per-run drafts, editing, paste, quick replies |
+| `view/Composer.{hpp,cpp}` | per-run drafts, editing, paste |
 | `view/HitMap.{hpp,cpp}` | mouse phase only |
 
 **Removed:**
@@ -372,11 +488,12 @@ in the manifest, so the consent dialog shows it as it shows `board`.
 - the help overlay;
 - `DispatchForm`, which is absorbed by `Launcher`, reusing its preview logic;
 - `MessageDraft`, absorbed by `Composer`;
-- the per-screen `ScreenSet` rows.
+- the per-screen `ScreenSet` rows;
+- the keys `m`, `R`, `I`, `[`, `]` and the task letter keys; refresh and install plugins move to the palette.
 
 **`Interaction`** loses `screen`, `back`, `subject`, `form`, `message` and `overlay`. It gains:
-- `Place {Fleet, Composer}`;
-- `FocusTab {Board, Transcript, Details}`;
+- `Place {Fleet, Focus}` (the Focus of a run with a message box gives the box the keys);
+- `FocusTab {Board, Transcript, Details}`, with the per-run choice that sticks until the state changes;
 - per-tab scroll and follow;
 - `std::optional<LauncherState>` and `std::optional<PaletteState>`.
 
@@ -413,10 +530,15 @@ drawable in a terminal: box drawing, block and braille glyphs, and truecolor wit
 finished, `⚑` kept. A `•` in the accent colour marks unseen news.
 
 **Top bar.** One line, above the panes:
-- the brand mark and host;
+- the brand mark and host (the host matters when you supervise a remote machine);
 - the fleet gauge, `⬢ 3/4` with `▰▱`;
 - a `● N need you` pill in the asking colour;
+- a setup warning, only while something is missing (`plugins missing · ^K install`);
 - the clock.
+
+**Bottom line.** One line: the ranked actions on the left, and on the right the newest notice
+(`pr-2375 needs you · home`). There is no separate status line; setup checks that pass are not shown. Feedback
+for an action replaces the actions until the next key.
 
 **Two-line agent rows (Wide).**
 - **Line 1:** glyph, run, task, then state and age on the right.
@@ -426,25 +548,29 @@ finished, `⚑` kept. A `•` in the accent colour marks unseen news.
 - **Selection:** the row's background, plus a `▍` bar in the accent colour.
 - **Medium:** rows fold to one line, with the context after the name.
 
-**Section headers.** Bold, in the group's colour, with a count chip; for example `NEEDS YOU 2`, `WORKING 2 of 4`.
+**Section headers.** Bold, in the group's colour, with a count chip: `NEEDS YOU 2`, `WORKING 2 of 4`,
+`TO REVIEW 1`, `FINISHED 3`. These four names are the only group names, in the spec and on screen.
 
 **Focus.**
 - **Header:** the run, task and model, with state and age on the right. A second line holds the title, the branch
   and the permission profile.
-- **Tab strip:** the active tab is a filled chip with an accent underline beneath it.
+- **Tab strip:** the active tab is a filled chip with an accent underline beneath it; each label's key letter
+  (`B`oard, `T`ranscript, `D`etails) is underlined. No `[ ] switch` hint.
 
 **Transcript.**
 - Entries carry a coloured left gutter: neutral for claude, the working colour for tools, the asking colour for
   permissions.
-- A tool call is one summary line, and `⏎` expands an edit's diff.
+- A tool call is one summary line; an edit shows its first eight diff lines, then `+N lines`.
 - An answered permission stays visible, with who answered and when.
 - A `↓ live` chip shows when you have scrolled away from the end.
 
-**Asking box.** An asking-coloured frame above the message box. It names the tool and command, and shows the reply
-chips.
+**Asking box.** An asking-coloured frame in the message box's place (there is no message box while a run asks).
+It names the tool and command, and shows the reply chips with their digits: `1 yes  2 always  3 no, and say why`.
+The chip labels come from `quick_replies:`, never from the pane.
 
-**State boxes.** A done run shows a done-coloured box with its actions (open PR, follow up, end) where the message
-box would be.
+**State boxes.** A done run shows a done-coloured box with its actions (follow up, open PR, end) where the message
+box would be. The message box, unfocused, reads `⏎ to write to pr-2375`; focused, it has a cursor and the bar
+reads `⏎ send · alt⏎ line · esc keep draft`.
 
 **Details.** Aligned facts, including time and tokens. A PERMISSIONS block shows:
 - the profile and where it came from;
@@ -461,8 +587,9 @@ box would be.
 - Matched letters underlined in the accent colour.
 - In the palette, commands that do not apply are dimmed, with the reason.
 
-**New keys the canvas uses:** `o` (open the item or PR in the browser), `r` (reveal the agent's tab) and `Z` (fold
-every group). These go into the `KeyRow` table and the action table.
+**New keys the canvas uses:** `o` (open the run's PR) and `r` (reveal the agent's tab). They go into the `KeyRow`
+table and the action table. Fold every group is a palette command, not a key; the launcher has no `o` (its detail
+line carries the link), since its query takes every letter.
 
 ## Errors
 
@@ -472,19 +599,30 @@ every group). These go into the `KeyRow` table and the action table.
 | Send or key refused | The draft is kept; the action bar shows the reason until the next key. |
 | A quick reply on a run no longer asking | Not sent; "pr-2375 is no longer asking". |
 | The launcher's query matches nothing | Only the topic row is shown. |
-| Narrow tab lower than 20 rows | The tab strip and latest collapse first, then the action bar, as the furniture does today. |
+| The launcher's lists cannot be read | The browse area says why; topics still start. |
+| A quick reply that does not take effect | After 10 s still asking: "pr-2375 still asks · r opens its tab". |
+| A run's agent fails before its pane opens | The run is `Finished` with the failure words; `⏎ run again` reopens the launcher with the same choice. |
+| `o` where the host cannot open a URL | The link is copied with OSC 52 through `tab-write`: "copied #2369's link". |
+| A tab lower than its furniture needs | The furniture gives way in the order under "Small terminals". |
 
 ## Testing
 
 - **Actions:** a table test of `rowStateOf` and of `actionsFor` per `RowState`. Every `ActionRow` command must have
   a `KeyRow`, and every state must have exactly one rank-0 action.
-- **Fleet:** ordering by attention and age; selection follows the run across a regroup.
-- **Focus:** golden screens for each tab, with latest, chips and the message box, at 120×40, 80×24 and 50×20.
-  Follow pins and unpins on scroll.
-- **Launcher:** filtering, the topic row, the settings cycling, the setup warnings and the second `⏎`, and dispatch
+- **Fleet:** ordering by attention and age; `idle` and `idle_prompt` land in Needs you, a run with no report yet
+  in Working as `starting`; selection follows the run across a regroup and is never taken by a new Needs you run;
+  the empty-Fleet primer.
+- **Focus:** golden screens for each tab, with latest, the asking box and the message box, at 120×40, 80×24 and
+  50×20, including the furniture order. Follow pins and unpins on scroll. The opening tab per state, and a chosen
+  tab sticking until the state changes.
+- **Launcher:** filtering, the topic row (and an item reference outranking it), the live-agent second `⏎`, the
+  settings cycling, the setup warnings and the second `⏎`, and dispatch
   equivalence with today's form (the same `Dispatch` for the same choice). Goldens at 120×40 and 80×24.
 - **Palette:** ordering and dimmed reasons; running a command equals pressing its key.
-- **Composer:** per-run drafts, paste, `alt+⏎`, quick replies only while asking with an empty draft.
+- **Keys:** no letter is both a command and text in one place; digits type in the message box and answer only
+  while a request is on screen; `esc` never sends, ends or answers.
+- **Composer:** per-run drafts, paste, `alt+⏎`; after a send the keys return to the Fleet.
+- **Feedback:** each row of the feedback table shows its notice; `e` asks once.
 - **Host:** the `pane-key` policy (owned, declared, enum only), the manifest corpus, the WIT ABI checks, and
   delivery through a fake session.
 - **Engine:** the `Asking`/`Waiting` split from hook payloads; tail and follow scheduling (one read in flight, the
@@ -507,7 +645,7 @@ usable on its own.
 0. **Default permissions.** The `settings` argument, the profiles, the per-task override, Details and consent.
    This phase is independent of the layout, and it cuts the number of `Asking` states first. The launcher's
    `perms` value lands with phase 3.
-1. **Fleet + Focus.** The two panes and the left tabs. The Focus tabs replace the board and transcript screens,
+1. **Fleet + Focus.** The two panes, the empty-Fleet primer and the small-terminal order. The Focus tabs replace the board and transcript screens,
    with follow, tail and latest. The message box replaces the message line. Bands and goldens.
 2. **Actions and the palette.** `RowState`, the `ActionRow` table, the adaptive action bar, `⏎` as the primary
    action, and the palette replacing the help.
