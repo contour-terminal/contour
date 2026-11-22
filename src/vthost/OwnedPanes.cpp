@@ -19,7 +19,7 @@ std::optional<PaneStatus> paneStatusOf(std::span<vtbackend::ProgramStatusRecord 
     for (auto const source: PaneStatusSources)
         if (auto const found = std::ranges::find(records, source, &vtbackend::ProgramStatusRecord::id);
             found != records.end())
-            return PaneStatus { .state = found->state, .message = found->message };
+            return PaneStatus { .state = found->state, .kind = found->kind, .message = found->message };
     return std::nullopt;
 }
 

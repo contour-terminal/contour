@@ -414,6 +414,7 @@ enum class PaneLiveness : uint8_t
 struct PaneStatus
 {
     vtbackend::ProgramState state = vtbackend::ProgramState::Idle; ///< What it is doing.
+    vtbackend::BlockedKind kind = vtbackend::BlockedKind::None; ///< Why it is blocked; None unless Blocked.
     std::string message;                                           ///< Its reason line; may be empty.
 
     bool operator==(PaneStatus const&) const = default;

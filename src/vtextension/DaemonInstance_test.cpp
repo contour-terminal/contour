@@ -434,7 +434,7 @@ TEST_CASE("pane-open, pane-close, panes and pane-reveal are served", "[daemon][i
     guest.services.listedPanes =
         std::vector<PaneInfo> { PaneInfo { .pane = "0e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b",
                                            .tag = "run-1",
-                                           .status = AgentStatus::Blocked,
+                                           .status = AgentStatus::Asking,
                                            .message = {},
                                            .program = PaneProgram::Alive } };
     guest.services.paneAnswer = std::unexpected(HostError::NotOwned);
@@ -446,6 +446,7 @@ TEST_CASE("pane-open, pane-close, panes and pane-reveal are served", "[daemon][i
     auto closed = std::optional<HostResult> {};
     auto listed = std::optional<ListResult> {};
     auto revealed = std::optional<HostResult> {};
+    auto pressed = std::optional<HostResult> {};
     guest.onUpdate = [&](std::span<uint32_t>) -> std::expected<void, wasm::CallFailure> {
         auto memory = FakeInstanceMemory { guest.guest() };
         guest.put(TemplateAddress, "agent");
@@ -499,6 +500,9 @@ TEST_CASE("pane-open, pane-close, panes and pane-reveal are served", "[daemon][i
         // pane, origin 7, the result.
         REQUIRE(guest.call(DaemonImport::PaneReveal, { PaneAddress, 6, 7, ResultAddress }).has_value());
         revealed = *abi::Codec<HostResult>::load(memory, ResultAddress);
+        // pane, digit-3, the result.
+        REQUIRE(guest.call(DaemonImport::PaneKey, { PaneAddress, 6, 2, ResultAddress }).has_value());
+        pressed = *abi::Codec<HostResult>::load(memory, ResultAddress);
         return {};
     };
     REQUIRE((*instance)->update(DaemonHint::Panes).has_value());
@@ -508,7 +512,8 @@ TEST_CASE("pane-open, pane-close, panes and pane-reveal are served", "[daemon][i
                            DaemonImport::PaneOpen,
                            DaemonImport::PaneClose,
                            DaemonImport::Panes,
-                           DaemonImport::PaneReveal });
+                           DaemonImport::PaneReveal,
+                           DaemonImport::PaneKey });
     REQUIRE(guest.services.paneOpens.size() == 2);
     auto const& open = guest.services.paneOpens.front();
     CHECK(open.paneTemplate == "agent");
@@ -527,6 +532,9 @@ TEST_CASE("pane-open, pane-close, panes and pane-reveal are served", "[daemon][i
     CHECK(listed == guest.services.listedPanes);
     CHECK(guest.services.paneReveals == std::vector { std::pair { std::string { "pane-9" }, Origin { 7 } } });
     CHECK(revealed == HostResult { std::unexpect, HostError::NotOwned });
+    CHECK(guest.services.paneKeys
+          == std::vector { std::pair { std::string { "pane-9" }, PaneKeyName::Digit3 } });
+    CHECK(pressed == HostResult { std::unexpect, HostError::NotOwned });
 }
 
 TEST_CASE("DaemonInstance: file-read is served", "[daemon][instance][file-read]")

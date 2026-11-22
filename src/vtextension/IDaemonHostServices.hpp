@@ -142,6 +142,12 @@ class IDaemonHostServices
     [[nodiscard]] virtual std::expected<void, HostError> paneSend(std::string_view pane,
                                                                   std::string_view text) = 0;
 
+    /// `pane-key`: presses one key of a fixed set in a pane the extension opened (IPaneService).
+    /// @param pane The pane's id.
+    /// @param key The key.
+    /// @return Nothing; or why it was not pressed.
+    [[nodiscard]] virtual std::expected<void, HostError> paneKey(std::string_view pane, PaneKeyName key) = 0;
+
     /// `tab-open`: opens the extension's served tab where the origin's window is (IServedTabService).
     /// @param scheme What the tab is served as.
     /// @param origin The connection the invoked action came from.

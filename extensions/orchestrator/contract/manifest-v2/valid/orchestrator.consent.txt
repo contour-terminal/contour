@@ -110,6 +110,6 @@ It may open tabs running: agent-plain (in worktrees): claude --model {model} --s
   GIT_CONFIG_VALUE_0=upstream
   GIT_CONFIG_KEY_1=push.autoSetupRemote
   GIT_CONFIG_VALUE_1=true
-It may type text you write into those tabs, when you send it from its own tab
+It may type text you write into those tabs, or press a number key you choose, when you send it from its own tab
 It may read files in: worktrees
 It shows its own tab: orchestrator://

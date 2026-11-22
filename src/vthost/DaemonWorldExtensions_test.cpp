@@ -1089,22 +1089,29 @@ TEST_CASE("DaemonWorldExtensions: the pane calls reach the host's owned panes in
     {
         std::optional<vtbackend::ProgramState> status;
         std::optional<vtextension::AgentStatus> agentStatus;
+        vtbackend::BlockedKind kind = vtbackend::BlockedKind::None;
     };
+    using vtbackend::BlockedKind;
+    using vtbackend::ProgramState;
+    using vtextension::AgentStatus;
+    // A block for a permission is a menu that takes a key: asking; any other block is blocked.
     auto const row = GENERATE(Row { std::nullopt, std::nullopt },
-                              Row { vtbackend::ProgramState::Idle, vtextension::AgentStatus::Idle },
-                              Row { vtbackend::ProgramState::Working, vtextension::AgentStatus::Working },
-                              Row { vtbackend::ProgramState::Done, vtextension::AgentStatus::Done },
-                              Row { vtbackend::ProgramState::Blocked, vtextension::AgentStatus::Blocked },
-                              Row { vtbackend::ProgramState::Error, vtextension::AgentStatus::Error });
-    panes.listAnswer =
-        std::vector { vthost::OwnedPaneInfo { .pane = "pane-1",
-                                              .tag = "run-1",
-                                              .status = row.status.transform([](auto state) {
-                                                  return vthost::PaneStatus { .state = state,
-                                                                              .message = "Waiting" };
-                                              }),
-                                              .program = vthost::PaneLiveness::Gone,
-                                              .state = vthost::OwnedPaneState::Open } };
+                              Row { ProgramState::Idle, AgentStatus::Idle },
+                              Row { ProgramState::Working, AgentStatus::Working },
+                              Row { ProgramState::Done, AgentStatus::Done },
+                              Row { ProgramState::Blocked, AgentStatus::Blocked },
+                              Row { ProgramState::Blocked, AgentStatus::Asking, BlockedKind::Permission },
+                              Row { ProgramState::Blocked, AgentStatus::Blocked, BlockedKind::Question },
+                              Row { ProgramState::Blocked, AgentStatus::Blocked, BlockedKind::Auth },
+                              Row { ProgramState::Error, AgentStatus::Error });
+    panes.listAnswer = std::vector { vthost::OwnedPaneInfo {
+        .pane = "pane-1",
+        .tag = "run-1",
+        .status = row.status.transform([&](auto state) {
+            return vthost::PaneStatus { .state = state, .kind = row.kind, .message = "Waiting" };
+        }),
+        .program = vthost::PaneLiveness::Gone,
+        .state = vthost::OwnedPaneState::Open } };
     CHECK(host->list()
           == std::expected<std::vector<vtextension::PaneInfo>, vtextension::PaneError> {
               std::vector { vtextension::PaneInfo { .pane = "pane-1",

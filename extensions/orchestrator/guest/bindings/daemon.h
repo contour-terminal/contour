@@ -160,7 +160,9 @@ typedef struct terminal_extensions_daemon_host_chunk_t {
   uint32_t   remaining;
 } terminal_extensions_daemon_host_chunk_t;
 
-// What the program in a pane reports about its work.
+// What the program in a pane reports about its work. `blocked` waits for the user for a reason other than
+// a permission, or for none it named; `asking` waits for the user to grant a permission, in a menu that
+// takes a key (`pane-key`). `asking` is last, so that the others keep their numbers.
 typedef uint8_t terminal_extensions_daemon_host_agent_status_t;
 
 #define TERMINAL_EXTENSIONS_DAEMON_HOST_AGENT_STATUS_IDLE 0
@@ -168,6 +170,22 @@ typedef uint8_t terminal_extensions_daemon_host_agent_status_t;
 #define TERMINAL_EXTENSIONS_DAEMON_HOST_AGENT_STATUS_DONE 2
 #define TERMINAL_EXTENSIONS_DAEMON_HOST_AGENT_STATUS_BLOCKED 3
 #define TERMINAL_EXTENSIONS_DAEMON_HOST_AGENT_STATUS_ERROR 4
+#define TERMINAL_EXTENSIONS_DAEMON_HOST_AGENT_STATUS_ASKING 5
+
+// A key `pane-key` presses: a menu's choice, never text.
+typedef uint8_t terminal_extensions_daemon_host_pane_key_name_t;
+
+#define TERMINAL_EXTENSIONS_DAEMON_HOST_PANE_KEY_NAME_DIGIT_1 0
+#define TERMINAL_EXTENSIONS_DAEMON_HOST_PANE_KEY_NAME_DIGIT_2 1
+#define TERMINAL_EXTENSIONS_DAEMON_HOST_PANE_KEY_NAME_DIGIT_3 2
+#define TERMINAL_EXTENSIONS_DAEMON_HOST_PANE_KEY_NAME_DIGIT_4 3
+#define TERMINAL_EXTENSIONS_DAEMON_HOST_PANE_KEY_NAME_DIGIT_5 4
+#define TERMINAL_EXTENSIONS_DAEMON_HOST_PANE_KEY_NAME_DIGIT_6 5
+#define TERMINAL_EXTENSIONS_DAEMON_HOST_PANE_KEY_NAME_DIGIT_7 6
+#define TERMINAL_EXTENSIONS_DAEMON_HOST_PANE_KEY_NAME_DIGIT_8 7
+#define TERMINAL_EXTENSIONS_DAEMON_HOST_PANE_KEY_NAME_DIGIT_9 8
+// The Escape key: dismisses a menu.
+#define TERMINAL_EXTENSIONS_DAEMON_HOST_PANE_KEY_NAME_ESCAPE 9
 
 // Whether the program the host spawned in a pane is still the pane's program.
 typedef uint8_t terminal_extensions_daemon_host_program_t;
@@ -511,6 +529,10 @@ extern bool terminal_extensions_daemon_host_file_read(daemon_string_t *root, dae
 // holds a control character other than a line feed or a tab, or that is longer than 16 KiB is
 // `bad-argument`, and so is any text without `pane-input`.
 extern bool terminal_extensions_daemon_host_pane_send(daemon_string_t *pane, daemon_string_t *text, terminal_extensions_daemon_host_host_error_t *err);
+// Presses one key from a fixed set in a pane the extension owns, its manifest declaring `pane-input`: a
+// menu's choice, such as an agent's permission prompt, never text. It is written alone, with no bracketed
+// paste and no Enter. Without `pane-input` it is `bad-argument`.
+extern bool terminal_extensions_daemon_host_pane_key(daemon_string_t *pane, terminal_extensions_daemon_host_pane_key_name_t key, terminal_extensions_daemon_host_host_error_t *err);
 
 // Exported Functions from `daemon`
 void exports_daemon_load(daemon_string_t *config_json, daemon_host_info_t *info);

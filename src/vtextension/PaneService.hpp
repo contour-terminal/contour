@@ -113,6 +113,13 @@ class IPaneService
     /// @return Nothing; or why it was not typed.
     [[nodiscard]] virtual std::expected<void, PaneError> send(std::string_view pane,
                                                               std::string_view text) = 0;
+
+    /// `pane-key`: presses one key of a fixed set in a pane the extension opened, its manifest declaring
+    /// `pane-input`: a menu's choice, written alone, with no paste around it and no Enter after it.
+    /// @param pane Its id.
+    /// @param key The key.
+    /// @return Nothing; or why it was not pressed.
+    [[nodiscard]] virtual std::expected<void, PaneError> press(std::string_view pane, PaneKeyName key) = 0;
 };
 
 /// The host side a checked spawn is forwarded to: what owns the panes, bound to one extension.
@@ -181,6 +188,12 @@ class UnservedPanes final: public IPaneService
 
     [[nodiscard]] std::expected<void, PaneError> send(std::string_view /*pane*/,
                                                       std::string_view /*text*/) override
+    {
+        return std::unexpected(PaneError::NotSupportedYet);
+    }
+
+    [[nodiscard]] std::expected<void, PaneError> press(std::string_view /*pane*/,
+                                                       PaneKeyName /*key*/) override
     {
         return std::unexpected(PaneError::NotSupportedYet);
     }

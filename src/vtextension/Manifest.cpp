@@ -593,7 +593,8 @@ namespace
         return refuse(ManifestFault::UnsupportedLine);
     }
 
-    /// `pane-input`: no words. It lets `pane-send` type into the panes, so it means nothing without one.
+    /// `pane-input`: no words. It lets `pane-send` type and `pane-key` press keys into the panes, so it means
+    /// nothing without one.
     [[nodiscard]] LineResult allowPaneInput(ParseState& state, Line const& line)
     {
         if (!line.head.empty())

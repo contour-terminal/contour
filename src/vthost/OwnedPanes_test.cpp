@@ -41,6 +41,8 @@
 #include <vector>
 
 #include <vtcontrol/testing/SequentialUuidSource.hpp>
+#include <vtextension/DaemonWorld.hpp>
+#include <vtextension/DeclaredPanes.hpp>
 #include <vthost/ExtensionHosting.hpp>
 #include <vthost/LoopDrain.hpp>
 #include <vthost/OwnedPaneStore.hpp>
@@ -640,6 +642,29 @@ TEST_CASE("pane-send's bytes reach the agent's device, and only an open pane of 
           == std::expected<void, OwnedPaneError> { std::unexpect, OwnedPaneError::Gone });
 }
 
+TEST_CASE("pane-key's key reaches the agent's device alone, and never another extension's pane",
+          "[vthost][panes]")
+{
+    auto b = PanesBench {};
+    auto const pane = b.openNow(b.spawn());
+    auto const foreign = b.openNow(b.spawn(Other, "run-2"));
+    REQUIRE(b.devices.size() == 3);
+    auto* const device = b.devices[1];
+    auto* const foreignDevice = b.devices.back();
+
+    // What DeclaredPanes::press() makes of `1`: the digit, with no paste around it and no Enter.
+    auto const digit = vtextension::bytesOf(vtextension::PaneKeyName::Digit1);
+    REQUIRE(b.panes().write(Orchestrator, pane, digit).has_value());
+    REQUIRE(b.eventually([&] { return device->stdinSnapshot().contains(digit); }));
+    CHECK_FALSE(device->stdinSnapshot().contains("\x1b[200~"));
+
+    // Another extension's pane is refused, and its program reads nothing.
+    CHECK(b.panes().write(Orchestrator, foreign, digit)
+          == std::expected<void, OwnedPaneError> { std::unexpect, OwnedPaneError::NotOwned });
+    b.settle();
+    CHECK_FALSE(foreignDevice->stdinSnapshot().contains(digit));
+}
+
 // {{{ pane-reveal
 
 TEST_CASE("pane-reveal in the origin's workspace activates", "[vthost][panes]")
@@ -1101,6 +1126,15 @@ TEST_CASE("each status change of a pane raises Panes once", "[vthost][panes]")
                == PaneStatus { .state = vtbackend::ProgramState::Idle, .message = "Waiting for tests" };
     }));
     REQUIRE(b.eventually([&] { return b.paneHints() == 4; }));
+
+    // Why it is blocked travels with it: a permission is a menu the extension may answer with a key.
+    device->feed("\033]7501;state=blocked:kind=permission:id=claude-code\033\\");
+    REQUIRE(b.eventually([&] {
+        return b.infoOf(Orchestrator, pane)->status
+               == PaneStatus { .state = vtbackend::ProgramState::Blocked,
+                               .kind = vtbackend::BlockedKind::Permission,
+                               .message = {} };
+    }));
 }
 
 TEST_CASE("pane-open is refused while an upgrade runs", "[vthost][panes]")

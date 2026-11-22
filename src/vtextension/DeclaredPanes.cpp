@@ -20,6 +20,8 @@
 #include <vtextension/DeclaredArguments.hpp>
 #include <vtextension/Utf8.hpp>
 
+using namespace std::string_view_literals;
+
 namespace vtextension
 {
 
@@ -255,6 +257,24 @@ std::expected<void, PaneError> DeclaredPanes::send(std::string_view pane, std::s
     if (!isSendableText(text))
         return std::unexpected(PaneError::TextRefused);
     return _host.write(pane, std::format("{}{}{}{}", PasteStart, text, PasteEnd, SendKey));
+}
+
+std::string_view bytesOf(PaneKeyName key) noexcept
+{
+    // Indexed by PaneKeyName.
+    constexpr auto KeyBytes = std::array {
+        "1"sv, "2"sv, "3"sv, "4"sv, "5"sv, "6"sv, "7"sv, "8"sv, "9"sv, "\x1b"sv,
+    };
+    static_assert(KeyBytes.size() == std::to_underlying(PaneKeyName::Escape) + 1U, "every key has its bytes");
+    return KeyBytes.at(std::to_underlying(key));
+}
+
+std::expected<void, PaneError> DeclaredPanes::press(std::string_view pane, PaneKeyName key)
+{
+    // The same policy as pane-send: a key is input, so it takes the manifest's `pane-input`.
+    if (_config.manifest.paneInput != PaneInput::Typed)
+        return std::unexpected(PaneError::InputNotDeclared);
+    return _host.write(pane, bytesOf(key));
 }
 
 } // namespace vtextension

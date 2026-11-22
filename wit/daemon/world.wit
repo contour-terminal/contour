@@ -179,8 +179,17 @@ interface host {
         remaining: u32,
     }
 
-    /// What the program in a pane reports about its work.
-    enum agent-status { idle, working, done, blocked, error }
+    /// What the program in a pane reports about its work. `blocked` waits for the user for a reason other than
+    /// a permission, or for none it named; `asking` waits for the user to grant a permission, in a menu that
+    /// takes a key (`pane-key`). `asking` is last, so that the others keep their numbers.
+    enum agent-status { idle, working, done, blocked, error, asking }
+
+    /// A key `pane-key` presses: a menu's choice, never text.
+    enum pane-key-name {
+        digit-1, digit-2, digit-3, digit-4, digit-5, digit-6, digit-7, digit-8, digit-9,
+        /// The Escape key: dismisses a menu.
+        escape,
+    }
 
     /// Whether the program the host spawned in a pane is still the pane's program.
     enum program {
@@ -320,6 +329,10 @@ interface host {
     /// holds a control character other than a line feed or a tab, or that is longer than 16 KiB is
     /// `bad-argument`, and so is any text without `pane-input`.
     pane-send: func(pane: string, text: string) -> result<_, host-error>;
+    /// Presses one key from a fixed set in a pane the extension owns, its manifest declaring `pane-input`: a
+    /// menu's choice, such as an agent's permission prompt, never text. It is written alone, with no bracketed
+    /// paste and no Enter. Without `pane-input` it is `bad-argument`.
+    pane-key: func(pane: string, key: pane-key-name) -> result<_, host-error>;
 }
 
 /// An extension that runs in a terminal's daemon.

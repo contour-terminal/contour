@@ -142,8 +142,24 @@ enum class AgentStatus : uint8_t
     Idle,    ///< It waits for input.
     Working, ///< It is working.
     Done,    ///< It finished its task.
-    Blocked, ///< It needs the user.
+    Blocked, ///< It needs the user, for a reason other than a permission or for none it named.
     Error,   ///< It failed.
+    Asking,  ///< It asks the user for a permission, in a menu that takes a key (`pane-key`).
+};
+
+/// A key `pane-key` presses: the world's `pane-key-name`.
+enum class PaneKeyName : uint8_t
+{
+    Digit1, ///< `1`.
+    Digit2, ///< `2`.
+    Digit3, ///< `3`.
+    Digit4, ///< `4`.
+    Digit5, ///< `5`.
+    Digit6, ///< `6`.
+    Digit7, ///< `7`.
+    Digit8, ///< `8`.
+    Digit9, ///< `9`.
+    Escape, ///< The Escape key.
 };
 
 /// Whether the program the host spawned in a pane is still its program: the world's `program`.
@@ -250,7 +266,8 @@ template <> inline constexpr uint32_t EnumCaseCount<FileError> = 8;
 template <> inline constexpr uint32_t EnumCaseCount<ProcStream> = 2;
 template <> inline constexpr uint32_t EnumCaseCount<ProcCompletion> = 3;
 template <> inline constexpr uint32_t EnumCaseCount<OutputExtent> = 2;
-template <> inline constexpr uint32_t EnumCaseCount<AgentStatus> = 5;
+template <> inline constexpr uint32_t EnumCaseCount<AgentStatus> = 6;
+template <> inline constexpr uint32_t EnumCaseCount<PaneKeyName> = 10;
 template <> inline constexpr uint32_t EnumCaseCount<PaneProgram> = 2;
 // clang-format on
 

@@ -69,10 +69,17 @@ class FakePaneService final: public IPaneService
         return sendAnswer;
     }
 
+    [[nodiscard]] std::expected<void, PaneError> press(std::string_view pane, PaneKeyName key) override
+    {
+        presses.emplace_back(std::string { pane }, key);
+        return sendAnswer;
+    }
+
     std::vector<PaneOpenCall> opens;                        ///< Every open(), in order.
     std::vector<std::string> closes;                        ///< Every close(), in order.
     std::vector<std::pair<std::string, Origin>> reveals;    ///< Every reveal(), in order.
     std::vector<std::pair<std::string, std::string>> sends; ///< Every send(), in order.
+    std::vector<std::pair<std::string, PaneKeyName>> presses; ///< Every press(), in order.
     std::expected<std::string, PaneError> openAnswer { std::unexpect, PaneError::NotSupportedYet };
     std::expected<void, PaneError> closeAnswer { std::unexpect, PaneError::NotSupportedYet };
     std::expected<std::vector<PaneInfo>, PaneError> listAnswer { std::unexpect, PaneError::NotSupportedYet };

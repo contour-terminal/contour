@@ -107,7 +107,7 @@ struct PaneTemplate
 enum class PaneInput : uint8_t
 {
     Refused = 0, ///< Nothing may be typed into them: the default.
-    Typed,       ///< `pane-send` types text the user wrote into them.
+    Typed,       ///< `pane-send` types text the user wrote into them, and `pane-key` presses a key.
 };
 
 /// A palette row (`action <id> = title`).
@@ -156,7 +156,8 @@ struct Manifest
     /// The programs the extension may put in a tab.
     std::vector<PaneTemplate> panes {};
 
-    /// Whether `pane-send` may type text the user wrote into those tabs (`pane-input`).
+    /// Whether `pane-send` may type text the user wrote into those tabs, and `pane-key` press a key
+    /// (`pane-input`).
     PaneInput paneInput = PaneInput::Refused;
 
     /// The scheme of the tabs the extension serves (`serve <scheme>`), if any.

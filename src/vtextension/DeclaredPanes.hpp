@@ -42,6 +42,10 @@ inline constexpr std::string_view SendKey = "\r";
 ///         in.
 [[nodiscard]] bool isSendableText(std::string_view text) noexcept;
 
+/// @param key A key `pane-key` presses.
+/// @return The bytes a terminal sends for it: the digit, or ESC.
+[[nodiscard]] std::string_view bytesOf(PaneKeyName key) noexcept;
+
 /// The longest tag a pane may have, in bytes: `[A-Za-z0-9][A-Za-z0-9._-]*`.
 inline constexpr std::size_t MaxPaneTagBytes = 128;
 
@@ -126,6 +130,7 @@ class DeclaredPanes final: public IPaneService
     [[nodiscard]] std::expected<std::vector<PaneInfo>, PaneError> list() override;
     [[nodiscard]] std::expected<void, PaneError> reveal(std::string_view pane, Origin origin) override;
     [[nodiscard]] std::expected<void, PaneError> send(std::string_view pane, std::string_view text) override;
+    [[nodiscard]] std::expected<void, PaneError> press(std::string_view pane, PaneKeyName key) override;
 
   private:
     DeclaredPanesConfig _config;

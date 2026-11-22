@@ -164,6 +164,16 @@ namespace
     static_assert(AgentStatusOf.size() == std::to_underlying(vtbackend::ProgramState::Error) + 1U,
                   "every ProgramState has a row");
 
+    /// @return What the world calls @p status: a block for a permission is `asking`, a menu that takes a key;
+    ///         a block for any other reason, or none named, stays `blocked`.
+    [[nodiscard]] constexpr vtextension::AgentStatus agentStatusOf(PaneStatus const& status) noexcept
+    {
+        if (status.state == vtbackend::ProgramState::Blocked
+            && status.kind == vtbackend::BlockedKind::Permission)
+            return vtextension::AgentStatus::Asking;
+        return AgentStatusOf.at(std::to_underlying(status.state));
+    }
+
     /// One extension's agent panes, on the host's owned panes.
     class PaneHostAdapter final: public vtextension::IPaneHost
     {
@@ -204,9 +214,7 @@ namespace
                             return vtextension::PaneInfo {
                                 .pane = info.pane,
                                 .tag = info.tag,
-                                .status = info.status.transform([](PaneStatus const& status) {
-                                    return AgentStatusOf.at(std::to_underlying(status.state));
-                                }),
+                                .status = info.status.transform(agentStatusOf),
                                 .message = info.status ? info.status->message : std::string {},
                                 .program = info.program == PaneLiveness::Alive
                                                ? vtextension::PaneProgram::Alive

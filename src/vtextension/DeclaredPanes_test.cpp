@@ -11,11 +11,13 @@
 #include <expected>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include <vtextension/DaemonWorld.hpp>
 #include <vtextension/DeclaredPanes.hpp>
 #include <vtextension/PaneService.hpp>
 #include <vtextension/ProcessService.hpp>
@@ -398,4 +400,44 @@ TEST_CASE("pane-send refuses text that could end its paste, and any text without
     REQUIRE(panes.has_value());
     CHECK((*panes)->send("pane-1", "hello") == std::unexpected(PaneError::InputNotDeclared));
     CHECK(host.writes.empty());
+}
+
+TEST_CASE("pane-key presses one key alone, and nothing without pane-input", "[vtextension][panes]")
+{
+    auto f = Fixture {};
+    REQUIRE(f.panes->press("pane-1", PaneKeyName::Digit1).has_value());
+    REQUIRE(f.panes->press("pane-1", PaneKeyName::Digit9).has_value());
+    REQUIRE(f.panes->press("pane-1", PaneKeyName::Escape).has_value());
+    CHECK(f.host.writes
+          == std::vector<std::pair<std::string, std::string>> {
+              { "pane-1", "1" }, { "pane-1", "9" }, { "pane-1", "\x1b" } });
+
+    auto manifest = orchestratorManifest();
+    manifest.paneInput = PaneInput::Refused;
+    auto directories = FakeDirectoryOpener {};
+    for (auto const* path: { "/w", "/r" })
+        directories.add(path);
+    auto host = RecordingPaneHost {};
+    auto panes =
+        DeclaredPanes::create(DeclaredPanesConfig { .manifest = manifest,
+                                                    .roots = { { .label = "worktrees", .paths = { "/w" } },
+                                                               { .label = "repos", .paths = { "/r" } } },
+                                                    .inheritedEnvironment = {} },
+                              directories,
+                              host);
+    REQUIRE(panes.has_value());
+    CHECK((*panes)->press("pane-1", PaneKeyName::Digit1) == std::unexpected(PaneError::InputNotDeclared));
+    CHECK(host.writes.empty());
+}
+
+TEST_CASE("every pane key has its own bytes", "[vtextension][panes]")
+{
+    auto seen = std::vector<std::string_view> {};
+    for (auto const index: std::views::iota(0U, abi::EnumCaseCount<PaneKeyName>))
+    {
+        auto const bytes = bytesOf(static_cast<PaneKeyName>(index));
+        CHECK(bytes.size() == 1);
+        CHECK_FALSE(std::ranges::contains(seen, bytes));
+        seen.push_back(bytes);
+    }
 }

@@ -175,6 +175,13 @@ class FakeDaemonHostServices final: public IDaemonHostServices
         return paneAnswer;
     }
 
+    [[nodiscard]] std::expected<void, HostError> paneKey(std::string_view pane, PaneKeyName key) override
+    {
+        called(DaemonImport::PaneKey);
+        paneKeys.emplace_back(std::string(pane), key);
+        return paneAnswer;
+    }
+
     [[nodiscard]] std::expected<std::string, HostError> tabOpen(std::string_view scheme,
                                                                 Origin origin) override
     {
@@ -258,6 +265,7 @@ class FakeDaemonHostServices final: public IDaemonHostServices
     std::vector<std::string> paneCloses;                                     ///< Every paneClose().
     std::vector<std::pair<std::string, Origin>> paneReveals;                 ///< Every paneReveal().
     std::vector<std::pair<std::string, std::string>> paneSends;              ///< Every paneSend().
+    std::vector<std::pair<std::string, PaneKeyName>> paneKeys;               ///< Every paneKey().
     std::expected<void, HostError> paneAnswer; ///< What paneClose() and paneReveal() answer.
     std::expected<std::vector<PaneInfo>, HostError> listedPanes;           ///< What panes() answers.
     std::vector<std::pair<std::string, Origin>> tabOpens;                  ///< Every tabOpen().

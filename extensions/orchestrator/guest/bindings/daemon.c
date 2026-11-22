@@ -80,6 +80,9 @@ extern void __wasm_import_terminal_extensions_daemon_host_file_read(uint8_t *, s
 __attribute__((__import_module__("terminal-extensions:daemon/host@0.1.0"), __import_name__("pane-send")))
 extern void __wasm_import_terminal_extensions_daemon_host_pane_send(uint8_t *, size_t, uint8_t *, size_t, uint8_t *);
 
+__attribute__((__import_module__("terminal-extensions:daemon/host@0.1.0"), __import_name__("pane-key")))
+extern void __wasm_import_terminal_extensions_daemon_host_pane_key(uint8_t *, size_t, int32_t, uint8_t *);
+
 // Exported Functions from `daemon`
 
 
@@ -1003,6 +1006,31 @@ bool terminal_extensions_daemon_host_pane_send(daemon_string_t *pane, daemon_str
   uint8_t ret_area[2];
   uint8_t *ptr = (uint8_t *) &ret_area;
   __wasm_import_terminal_extensions_daemon_host_pane_send((uint8_t *) (*pane).ptr, (*pane).len, (uint8_t *) (*text).ptr, (*text).len, ptr);
+  terminal_extensions_daemon_host_result_void_host_error_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool terminal_extensions_daemon_host_pane_key(daemon_string_t *pane, terminal_extensions_daemon_host_pane_key_name_t key, terminal_extensions_daemon_host_host_error_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_terminal_extensions_daemon_host_pane_key((uint8_t *) (*pane).ptr, (*pane).len, (int32_t) key, ptr);
   terminal_extensions_daemon_host_result_void_host_error_t result;
   switch ((int32_t) *((uint8_t*) (ptr + 0))) {
     case 0: {
