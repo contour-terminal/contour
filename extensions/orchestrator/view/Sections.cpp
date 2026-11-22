@@ -35,9 +35,9 @@
 #include <orchestrator/core/Reconcile.hpp>
 #include <orchestrator/core/Run.hpp>
 #include <orchestrator/core/Sanitize.hpp>
-#include <orchestrator/core/Timeline.hpp>
 #include <orchestrator/core/Utf8.hpp>
 #include <orchestrator/view/BoardMarkdown.hpp>
+#include <orchestrator/view/Fleet.hpp>
 #include <orchestrator/view/StatusBoard.hpp>
 
 using namespace std::string_view_literals;
@@ -255,127 +255,7 @@ namespace
         return lists.prefix == RepoPrefix::Shown ? clean(repo) : std::string {};
     }
 
-    /// What a running run's row says of its agent: the reason line of an agent waiting on its own work (idle,
-    /// such as `Waiting for Build pace`), else the name of what it reported.
-    [[nodiscard]] std::string runningText(Lists const& lists, Run const& run)
-    {
-        auto const status = run.lastStatus.value_or(AgentStatus::Working);
-        if (auto const message = lists.engine->reportedMessageOf(run);
-            status == AgentStatus::Idle && !message.empty())
-            return clean(message);
-        return std::string { agentStatusName(status) };
-    }
-
-    /// What a done run's row says: its agent's turn ended with nothing in flight, so it waits for you,
-    /// whether it finished its task or asked you something.
-    constexpr auto WaitingForYou = "waiting for you"sv;
-
-    /// What a pull request's or an issue's row says while an agent works on it.
-    struct AgentCue
-    {
-        std::string status; ///< The row's status: the agent's mark and state, such as `○ agent working`.
-        Role role;          ///< How it is drawn: as the agent's own row draws its state.
-        DetailLine detail;  ///< The details' first line: the task and the state.
-    };
-
-    /// @return What the row of @p item says while an active run works on it; std::nullopt while none does.
-    [[nodiscard]] std::optional<AgentCue> agentCueFor(Lists const& lists,
-                                                      std::string_view repo,
-                                                      ItemRef const& item)
-    {
-        auto const* const run = lists.engine->activeRunOn(repo, item);
-        if (run == nullptr)
-            return std::nullopt;
-        auto const reported = [&](AgentStatus fallback) {
-            return std::string { agentStatusName(run->lastStatus.value_or(fallback)) };
-        };
-        auto const [mark, role, state] = std::visit(
-            Overloaded {
-                [&](Running const&) { return std::tuple { "○"sv, Role::Accent, runningText(lists, *run) }; },
-                [&](Blocked const&) {
-                    return std::tuple { "●"sv, Role::Warning, reported(AgentStatus::Blocked) };
-                },
-                [](Done const&) {
-                    return std::tuple { "●"sv, Role::Warning, std::string { WaitingForYou } };
-                },
-                [&](auto const&) { return std::tuple { "◌"sv, Role::Dim, runStateText(*run) }; },
-            },
-            run->state);
-        return AgentCue {
-            .status = std::format("{} agent {}", mark, state),
-            .role = role,
-            .detail =
-                DetailLine { .label = "agent",
-                             .value = clean(std::format(
-                                 "{} · {} · enter shows its tab", taskLabel(lists.config, *run), state)),
-                             .role = role },
-        };
-    }
-
     // }}}
-    // {{{ one row per item
-
-    [[nodiscard]] Row pullRequestRow(Lists const& lists, std::string_view repo, ChangeRequest const& request)
-    {
-        auto const& ci = entryOf(CiLooks, request.ci);
-        auto const& review = entryOf(ReviewLooks, request.review);
-        auto const cue = agentCueFor(lists, repo, ChangeRequestRef { request.number });
-        // An agent at work comes first, so that a short details panel still shows it.
-        auto details = std::vector<DetailLine> {};
-        if (cue)
-            details.push_back(cue->detail);
-        details.push_back(DetailLine { .label = "branch",
-                                       .value = clean(std::format("{} → {}", request.head, request.base)) });
-        details.push_back(
-            DetailLine { .label = "checks", .value = std::string { ci.word }, .role = ci.role });
-        for (auto const& check: request.failingChecks)
-            details.push_back(DetailLine {
-                .label = "", .value = clean(std::format("✗ {}", check)), .role = Role::Failing });
-        if (!review.word.empty())
-            details.push_back(
-                DetailLine { .label = "review", .value = std::string { review.word }, .role = review.role });
-        if (request.readiness == Readiness::Draft)
-            details.push_back(DetailLine { .label = "state", .value = "draft" });
-        if (request.origin == HeadOrigin::Fork)
-            details.push_back(DetailLine { .label = "head", .value = "in a fork" });
-        details.push_back(DetailLine { .label = "url", .value = clean(request.url), .role = Role::Dim });
-        return Row { .kind = RowKind::PullRequest,
-                     .mark = std::string { ci.mark },
-                     .markRole = ci.role,
-                     .prefix = prefixOf(lists, repo),
-                     .text = clean(std::format("#{} {}{}",
-                                               request.number,
-                                               request.title,
-                                               request.readiness == Readiness::Draft ? " · draft"sv : ""sv)),
-                     .status = !cue                  ? std::string { review.word }
-                               : review.word.empty() ? cue->status
-                                                     : std::format("{} · {}", cue->status, review.word),
-                     .statusRole = cue ? cue->role : review.role,
-                     .repo = std::string { repo },
-                     .item = ChangeRequestRef { request.number },
-                     .title = clean(request.title),
-                     .details = std::move(details) };
-    }
-
-    [[nodiscard]] Row issueRow(Lists const& lists, std::string_view repo, Issue const& issue)
-    {
-        auto const cue = agentCueFor(lists, repo, issue.item);
-        auto details = std::vector<DetailLine> {};
-        if (cue)
-            details.push_back(cue->detail);
-        details.push_back(DetailLine { .label = "issue", .value = clean(itemLabel(issue.item)) });
-        details.push_back(DetailLine { .label = "url", .value = clean(issue.url), .role = Role::Dim });
-        return Row { .kind = RowKind::Issue,
-                     .prefix = prefixOf(lists, repo),
-                     .text = clean(std::format("{} {}", itemLabel(issue.item), issue.title)),
-                     .status = cue ? cue->status : std::string {},
-                     .statusRole = cue ? cue->role : Role::Dim,
-                     .repo = std::string { repo },
-                     .item = issue.item,
-                     .title = clean(issue.title),
-                     .details = std::move(details) };
-    }
-
     // {{{ statistics
 
     /// The most tools a run's details name.
@@ -481,130 +361,6 @@ namespace
     }
 
     // }}}
-    // {{{ the timeline
-
-    /// The bars a chart is drawn with, lowest first; an hour with nothing draws the first.
-    constexpr auto Bars = std::array { "·"sv, "▁"sv, "▂"sv, "▃"sv, "▄"sv, "▅"sv, "▆"sv, "▇"sv, "█"sv };
-
-    /// @return @p values as bars, each scaled to the largest; a value above nothing draws at least the
-    /// lowest.
-    [[nodiscard]] std::string barsOf(std::span<uint64_t const> values)
-    {
-        auto const top = std::ranges::max(values);
-        auto bars = std::string {};
-        for (auto const value: values)
-        {
-            auto const level = value == 0 || top == 0
-                                   ? std::size_t { 0 }
-                                   : std::max<std::size_t>(1, (value * (Bars.size() - 1) + top - 1) / top);
-            bars += Bars[level];
-        }
-        return bars;
-    }
-
-    template <typename T>
-    [[nodiscard]] std::array<uint64_t, TimelineBuckets> widened(std::array<T, TimelineBuckets> const& values)
-    {
-        auto wide = std::array<uint64_t, TimelineBuckets> {};
-        std::ranges::copy(values, wide.begin());
-        return wide;
-    }
-
-    /// One line of the timeline: what it charts, and what that adds up to.
-    struct ChartLine
-    {
-        std::string_view label;
-        std::array<uint64_t, TimelineBuckets> (*series)(Timeline const&);
-        std::string (*summary)(Timeline const&);
-    };
-
-    /// The timeline's lines, in order: a new one is a row here.
-    constexpr auto ChartLines = std::array {
-        ChartLine { .label = "agents active"sv,
-                    .series = [](Timeline const& timeline) { return widened(timeline.active); },
-                    .summary =
-                        [](Timeline const& timeline) {
-                            return std::format(
-                                "peak {} · now {}", std::ranges::max(timeline.active), timeline.activeNow);
-                        } },
-        ChartLine { .label = "tokens out"sv,
-                    .series = [](Timeline const& timeline) { return timeline.tokens; },
-                    .summary =
-                        [](Timeline const& timeline) {
-                            auto total = uint64_t { 0 };
-                            for (auto const tokens: timeline.tokens)
-                                total += tokens;
-                            return std::format("{} in 24h", countText(total));
-                        } },
-        ChartLine { .label = "runs started"sv,
-                    .series = [](Timeline const& timeline) { return widened(timeline.started); },
-                    .summary =
-                        [](Timeline const& timeline) {
-                            auto started = uint64_t { 0 };
-                            auto ended = uint64_t { 0 };
-                            for (auto const index: std::views::iota(std::size_t { 0 }, TimelineBuckets))
-                            {
-                                started += timeline.started[index];
-                                ended += timeline.ended[index];
-                            }
-                            return std::format("{} started · {} ended", started, ended);
-                        } },
-    };
-
-    void appendSection(std::vector<Row>& rows,
-                       std::string heading,
-                       std::string_view placeholder,
-                       std::vector<Row> items);
-
-    /// Appends one repository's @p items as a group: its header, which folds them, then the items, each
-    /// marked with the group and whether it is folded. A repository with no items has no group.
-    void appendGroup(std::vector<Row>& rows,
-                     Engine const& engine,
-                     std::string group,
-                     std::string_view repo,
-                     std::vector<Row> items)
-    {
-        if (items.empty())
-            return;
-        auto const fold = engine.isFolded(group) ? Fold::Folded : Fold::Open;
-        rows.push_back(
-            Row { .kind = RowKind::Group,
-                  .mark = fold == Fold::Folded ? "▸" : "▾",
-                  .markRole = Role::Dim,
-                  .text = clean(std::format("{} · {}", repo, items.size())),
-                  .repo = std::string { repo },
-                  .group = group,
-                  .fold = fold,
-                  .title = clean(repo),
-                  .details = { DetailLine {
-                      .label = "", .value = "folded: enter or z shows its items", .role = Role::Dim } } });
-        for (auto& item: items)
-        {
-            item.prefix.clear();
-            item.group = group;
-            item.fold = fold;
-            rows.push_back(std::move(item));
-        }
-    }
-
-    /// Appends the timeline of the last day, when a run was active or dispatched in it.
-    void appendTimeline(std::vector<Row>& rows, Engine const& engine)
-    {
-        auto const timeline = timelineOf(engine.runs(), engine.wallMs());
-        if (timeline == Timeline {})
-            return;
-        auto chart = std::vector<Row> {};
-        for (auto const& line: ChartLines)
-            chart.push_back(Row { .kind = RowKind::Chart,
-                                  .prefix = std::string { line.label },
-                                  .text = barsOf(line.series(timeline)),
-                                  .status = line.summary(timeline),
-                                  .statusRole = Role::Dim });
-        appendSection(rows, "TIMELINE · LAST 24 HOURS, AN HOUR A BAR", {}, std::move(chart));
-    }
-
-    // }}}
-
     /// The details every run row shows.
     [[nodiscard]] std::vector<DetailLine> runDetails(Lists const& lists, Run const& run)
     {
@@ -621,7 +377,11 @@ namespace
         if (std::holds_alternative<TopicRef>(run.item))
             details.push_back(DetailLine { .label = "topic", .value = clean(run.topic) });
         else
-            details.push_back(DetailLine { .label = "url", .value = clean(run.url), .role = Role::Dim });
+            details.push_back(DetailLine { .label = "url",
+                                           .value = clean(run.url),
+                                           .role = Role::Dim,
+                                           .fit = DetailFit::Cut,
+                                           .link = run.url });
         // What its agent may do without asking, as it was started: read from the run, not the configuration.
         // Last, below where it works, which a short panel must keep.
         if (auto const perms = permissionsText(run.permissions, run.settings); !perms.empty())
@@ -629,79 +389,103 @@ namespace
         return details;
     }
 
-    /// The most lines of a board an agent's details show: the `b` screen shows it whole.
-    constexpr auto MaxBoardDetailLines = std::size_t { 60 };
-
-    /// The run's board, rendered, as the last lines of its details: what its agent says it is doing, read for
-    /// the tab while the run is selected (Dashboard). Nothing while it was not read or holds nothing.
-    [[nodiscard]] std::vector<DetailLine> boardDetails(Lists const& lists, Run const& run)
+    /// @return The item's title, as the engine lists it; a topic's text; empty for an item no longer listed.
+    [[nodiscard]] std::string itemTitleOf(Engine const& engine, Run const& run)
     {
-        auto const* const board = lists.engine->board(run.id);
+        return std::visit(Overloaded {
+                              [&](ChangeRequestRef const& ref) {
+                                  auto const requests = engine.changeRequests(run.repo);
+                                  auto const found =
+                                      std::ranges::find(requests, ref.number, &ChangeRequest::number);
+                                  return found != requests.end() ? clean(found->title) : std::string {};
+                              },
+                              [&](TopicRef const&) { return clean(run.topic); },
+                              [&](auto const&) {
+                                  auto const issues = engine.unclaimedIssues(run.repo);
+                                  auto const found = std::ranges::find(issues, run.item, &Issue::item);
+                                  return found != issues.end() ? clean(found->title) : std::string {};
+                              },
+                          },
+                          run.item);
+    }
+
+    /// @return What the run's board says of its progress, where it was read.
+    [[nodiscard]] std::optional<BoardProgress> progressOf(Engine const& engine, Run const& run)
+    {
+        auto const* const board = engine.board(run.id);
         if (board == nullptr || board->state != BoardState::Read)
-            return {};
-        auto const lines = renderBoardMarkdown(displayLines(board->bytes, MaxBoardLines, MaxBoardLineChars));
-        if (lines.empty())
-            return {};
-        auto details = std::vector<DetailLine> { DetailLine {} };
-        details.push_back(
-            DetailLine { .label = "board", .value = "STATUS.md · b shows it whole", .role = Role::Dim });
-        for (auto const& line: lines | std::views::take(MaxBoardDetailLines))
-            details.push_back(
-                DetailLine { .label = "",
-                             .value = line.text,
-                             .role = line.role,
-                             .fit = line.fit == BoardFit::Cut ? DetailFit::Aligned : DetailFit::Wrap });
-        if (lines.size() > MaxBoardDetailLines)
-            details.push_back(DetailLine { .label = "", .value = "…", .role = Role::Dim });
-        return details;
+            return std::nullopt;
+        return boardProgressOf(
+            renderBoardMarkdown(displayLines(board->bytes, MaxBoardLines, MaxBoardLineChars)));
+    }
+
+    /// What a live run's second line says when its agent reported no reason and its board names no task, by
+    /// the word of its look.
+    struct QuietContext
+    {
+        std::string_view word = {}; ///< RunLook::word.
+        std::string_view text = {}; ///< What the second line says.
+    };
+
+    constexpr auto QuietContexts = std::array {
+        QuietContext { .word = "starting"sv, .text = "waiting for the agent's first report"sv },
+        QuietContext { .word = "asking"sv, .text = "asks in its tab · r shows it"sv },
+        QuietContext { .word = "waiting"sv, .text = "waiting for your answer"sv },
+        QuietContext { .word = "error"sv, .text = "stopped by an error · t shows why"sv },
+        QuietContext { .word = "done"sv, .text = "reported done"sv },
+    };
+
+    /// The commands every run row offers, and those that apply only to some.
+    [[nodiscard]] std::vector<KeyCommand> runOffers(Engine const& engine, Run const& run)
+    {
+        auto offers =
+            std::vector<KeyCommand> { KeyCommand::TranscriptTab, KeyCommand::DetailsTab, KeyCommand::Fold };
+        if (keepsWorktree(run))
+            offers.push_back(KeyCommand::BoardTab);
+        if (!run.url.empty())
+            offers.push_back(KeyCommand::OpenLink);
+        if (hasAgentTab(&engine, run.id))
+            offers.push_back(KeyCommand::Reveal);
+        return offers;
     }
 
     [[nodiscard]] Row agentRow(Lists const& lists, Run const& run)
     {
         auto const scope = lists.engine->scopeOf(run);
-        auto const look = agentLookOf(run, scope, lists.nowMonoMs);
-        auto const age = ageOf(run, scope, lists.nowMonoMs);
-        auto const reported = [&](AgentStatus fallback) {
-            return agentStatusName(run.lastStatus.value_or(fallback));
-        };
-        auto [mark, role, status] = std::visit(
-            Overloaded {
-                [&](Running const&) {
-                    return std::tuple { "○"sv,
-                                        Role::Text,
-                                        std::format("{}{}", runningText(lists, run), age) };
-                },
-                [&](Blocked const&) {
-                    return std::tuple { "●"sv,
-                                        Role::Warning,
-                                        std::format("{}{}", reported(AgentStatus::Blocked), age) };
-                },
-                [&](Done const&) {
-                    auto const ends =
-                        lists.config != nullptr && lists.config->endDoneAfterFor(run.task).count() != 0
-                            ? "ends by itself"sv
-                            : "e ends it"sv;
-                    return std::tuple { "●"sv, Role::Warning, std::format("{} · {}", WaitingForYou, ends) };
-                },
-                [&](auto const&) { return std::tuple { "◌"sv, Role::Dim, runStateText(run) }; },
-            },
-            run.state);
+        auto const look = runLookOf(run);
+        auto status = std::format("{}{}", look.word, ageOf(run, scope, lists.nowMonoMs));
+        auto statusRole = look.role;
         // An active run outside the configuration stays endable: its cleanup works from what the run stored.
-        auto offers = std::vector<KeyCommand> { KeyCommand::Board, KeyCommand::Transcript };
+        auto offers = runOffers(*lists.engine, run);
         if (countsAsActive(run))
             offers.push_back(KeyCommand::EndRun);
-        // What the row stands out for comes first, so that a short details panel still shows it.
+        // What the row stands out for comes first, so that a short Details tab still shows it.
         auto details = std::vector<DetailLine> {};
         if (scope == RunScope::Outside)
             details.push_back(outsideDetail());
-        auto statusRole = role == Role::Text ? Role::Dim : role;
-        switch (look)
+        auto const progress = progressOf(*lists.engine, run);
+        // What it needs from the user comes before what its board says it is on.
+        auto const quiet = std::ranges::find(QuietContexts, look.word, &QuietContext::word);
+        auto const needsYou = fleetGroupOf(run) == FleetGroup::NeedsYou;
+        auto context = clean(lists.engine->reportedMessageOf(run));
+        if (context.empty() && needsYou && quiet != QuietContexts.end())
+            context = quiet->text;
+        if (context.empty() && progress && !progress->current.empty())
+            context = clean(progress->current);
+        if (context.empty() && quiet != QuietContexts.end())
+            context = quiet->text;
+        if (context.empty() && !std::holds_alternative<Running>(run.state))
+            context = clean(runStateText(run));
+        auto contextRole = Role::Dim;
+        switch (agentLookOf(run, scope, lists.nowMonoMs))
         {
             case AgentLook::Reported: break;
             case AgentLook::AwaitsTrust:
                 // Only a pointer to the tab: the prompt is the user's to answer.
                 status = "waiting? see its tab";
                 statusRole = Role::Warning;
+                context = "may be waiting for a folder-trust prompt in its tab";
+                contextRole = Role::Warning;
                 details.push_back(DetailLine { .label = "",
                                                .value = "may be waiting for a folder-trust prompt in its tab",
                                                .role = Role::Warning });
@@ -720,21 +504,22 @@ namespace
                     ageText(static_cast<uint64_t>(lists.config->endDoneAfterFor(run.task).count()))),
                 .role = Role::Warning });
         std::ranges::move(runDetails(lists, run), std::back_inserter(details));
-        std::ranges::move(boardDetails(lists, run), std::back_inserter(details));
-        // A run whose STATUS.md was found says so: `b` shows it.
-        if (lists.engine->hasBoard(run.id))
-            status = std::format("{} {}", BoardCue, status);
-        auto const text = std::format("{} · {} · {}", itemName(run), taskLabel(lists.config, run), run.model);
         return Row { .kind = RowKind::Agent,
-                     .mark = std::string { mark },
-                     .markRole = role,
+                     .mark = std::string { look.mark },
+                     .markRole = look.role,
                      .prefix = prefixOf(lists, run.repo),
-                     .text = clean(text),
+                     .text = clean(std::format("{} · {}", itemName(run), taskLabel(lists.config, run))),
                      .status = clean(status),
                      .statusRole = statusRole,
+                     .context = std::move(context),
+                     .contextRole = contextRole,
+                     .progress = progress,
                      .run = run.id,
+                     .name = clean(itemName(run)),
                      .offers = std::move(offers),
-                     .title = clean(text),
+                     .attention = fleetGroupOf(run),
+                     .state = std::string { look.word },
+                     .title = itemTitleOf(*lists.engine, run),
                      .details = std::move(details) };
     }
 
@@ -746,32 +531,29 @@ namespace
         // configured repository.
         auto const scope = lists.engine->scopeOf(run);
         auto const isRetryable = kept && !isChecking && scope != RunScope::Outside;
-        // Its outcome is the row's status; where it belongs is in its details.
-        auto status = std::string {};
-        auto statusRole = Role::Passing;
-        if (isChecking)
-            std::tie(status, statusRole) = std::tuple { std::string { "checking again" }, Role::Dim };
-        else if (run.failure)
-            std::tie(status, statusRole) = std::tuple { std::string { "failed" }, Role::Failing };
-        else if (kept)
-            std::tie(status, statusRole) =
-                std::tuple { std::format("kept: {} {}",
-                                         finished.entries.size(),
-                                         finished.entries.size() == 1 ? "entry" : "entries"),
-                             Role::Warning };
-        else
-            status = "removed";
+        auto const look = runLookOf(run);
 
-        // A new run on its item goes through the dispatch form, as every dispatch does. Its board went with
-        // its worktree, its transcript did not.
-        auto offers =
-            keepsWorktree(run)
-                ? std::vector<KeyCommand> { KeyCommand::Board, KeyCommand::Transcript, KeyCommand::Dispatch }
-                : std::vector<KeyCommand> { KeyCommand::Transcript, KeyCommand::Dispatch };
+        // Running it again goes through the launcher, as every dispatch does. Its board went with its
+        // worktree, its transcript did not.
+        auto offers = runOffers(*lists.engine, run);
         if (isRetryable)
             offers.push_back(KeyCommand::RetryRemoval);
         if (!isChecking)
             offers.push_back(KeyCommand::Dismiss);
+
+        // How it ended, then why it failed or what kept its worktree.
+        auto context = std::string { endedText(finished.ended) };
+        auto contextRole = Role::Dim;
+        if (run.failure)
+        {
+            context = std::format("{} · {}", context, plainFailure(run.failure->why));
+            contextRole = Role::Failing;
+        }
+        else if (kept)
+            context = std::format("{} · {} {}",
+                                  context,
+                                  finished.entries.size(),
+                                  finished.entries.size() == 1 ? "entry kept" : "entries kept");
 
         auto details = std::vector<DetailLine> {};
         if (scope == RunScope::Outside)
@@ -785,26 +567,30 @@ namespace
                 details.push_back(
                     DetailLine { .label = "", .value = clean(words->detail), .role = Role::Dim });
         }
+        if (!finished.entries.empty())
+            details.push_back(
+                DetailLine { .label = "kept", .value = "what kept its worktree:", .role = Role::Warning });
         for (auto const& entry: finished.entries)
             details.push_back(DetailLine { .label = "", .value = clean(entry), .role = Role::Warning });
         if (isRetryable)
             details.push_back(
-                DetailLine { .label = "", .value = "x tries the removal again", .role = Role::Dim });
+                DetailLine { .label = "", .value = "x or enter tries the removal again", .role = Role::Dim });
 
-        auto const text = std::format(
-            "{} · {} · {}", itemName(run), taskLabel(lists.config, run), endedText(finished.ended));
-        auto const isNew = finished.seen == Seen::New;
         return Row { .kind = RowKind::Finished,
-                     .mark = isNew ? std::string { "●" } : std::string {},
-                     .markRole = Role::Text,
+                     .mark = std::string { look.mark },
+                     .markRole = look.role,
                      .prefix = prefixOf(lists, run.repo),
-                     .text = clean(text),
-                     .status = std::move(status),
-                     .statusRole = statusRole,
+                     .text = clean(std::format("{} · {}", itemName(run), taskLabel(lists.config, run))),
+                     .status = std::string { look.word },
+                     .statusRole = look.role,
+                     .context = clean(context),
+                     .contextRole = contextRole,
                      .run = run.id,
+                     .name = clean(itemName(run)),
                      .offers = std::move(offers),
-                     .onOpen = isNew ? OpenEffect::MarkSeen : OpenEffect::None,
-                     .title = clean(text),
+                     .attention = FleetGroup::Finished,
+                     .state = std::string { look.word },
+                     .title = itemTitleOf(*lists.engine, run),
                      .details = std::move(details) };
     }
 
@@ -861,53 +647,76 @@ namespace
                                       .value = "git refuses while it holds changes; its branch stays",
                                       .role = Role::Dim });
         return Row { .kind = RowKind::Orphan,
+                     .mark = "⚑",
+                     .markRole = Role::Warning,
                      .prefix = prefixOf(lists, repo),
                      .text = clean(orphan.path),
                      .status = branch,
+                     .context = "no run uses this worktree",
                      .repo = std::string { repo },
+                     .offers = { KeyCommand::DetailsTab },
                      .title = clean(orphan.path),
                      .details = std::move(details) };
     }
 
     // }}}
 
-    /// Appends a section: a spacer before all but the first, its heading, and its items or its placeholder.
-    void appendSection(std::vector<Row>& rows,
-                       std::string heading,
-                       std::string_view placeholder,
-                       std::vector<Row> items)
+    /// @return The run that waited longest first; in Finished, the newest first.
+    [[nodiscard]] bool listedBefore(FleetGroup group, Run const& a, Run const& b) noexcept
     {
-        if (!rows.empty())
-            rows.push_back(Row { .kind = RowKind::Spacer });
-        rows.push_back(Row { .kind = RowKind::Heading, .text = std::move(heading) });
-        if (items.empty())
-            rows.push_back(Row { .kind = RowKind::Placeholder, .text = std::string { placeholder } });
-        std::ranges::move(items, std::back_inserter(rows));
+        auto const since = std::pair { waitingSinceOf(a), a.id };
+        auto const other = std::pair { waitingSinceOf(b), b.id };
+        return group == FleetGroup::Finished ? other < since : since < other;
     }
 
-    /// Appends the AGENTS and FINISHED sections: every stored run, in the engine's order.
-    void appendRunSections(std::vector<Row>& rows, Engine const& engine, Lists const& lists)
+    /// Appends the runs' groups: per group its heading and its runs, in order. A group the user folded lists
+    /// its heading alone; a folded Finished, its newest FinishedFoldedTo runs. A group with no run is left
+    /// out.
+    void appendRunGroups(std::vector<Row>& rows, Engine const& engine, Lists const& lists)
     {
-        auto agents = std::vector<Row> {};
-        auto finished = std::vector<Row> {};
-        for (auto const& run: engine.runs())
+        for (auto const& group: fleetGroups())
         {
-            if (auto const* const entry = finishedEntryOf(run))
-                finished.push_back(finishedRow(lists, run, *entry));
-            else
-                agents.push_back(agentRow(lists, run));
+            auto runs = std::vector<Run const*> {};
+            for (auto const& run: engine.runs())
+                if (fleetGroupOf(run) == group.group)
+                    runs.push_back(&run);
+            if (runs.empty())
+                continue;
+            std::ranges::sort(runs,
+                              [&](Run const* a, Run const* b) { return listedBefore(group.group, *a, *b); });
+            // The engine keeps the groups the user toggled: a group folded by default is unfolded by a
+            // toggle.
+            auto const folded = engine.isFolded(group.key) != (group.foldDefault == FoldDefault::Folded);
+            // Folded, a group lists nothing; Finished, its newest FinishedFoldedTo.
+            auto shown = runs.size();
+            if (folded)
+                shown =
+                    group.foldDefault == FoldDefault::Folded ? std::min(runs.size(), FinishedFoldedTo) : 0;
+            auto const hides = shown < runs.size();
+            auto count = std::format("{}", runs.size());
+            if (group.group == FleetGroup::Working && lists.config != nullptr)
+                count = std::format("{} of {}", runs.size(), lists.config->maxAgents());
+            if (hides && shown > 0)
+                count = std::format("{} of {} · enter shows all", shown, runs.size());
+            rows.push_back(Row { .kind = RowKind::Heading,
+                                 .mark = hides ? "▸" : "",
+                                 .markRole = group.role,
+                                 .text = std::string { group.name },
+                                 .status = std::move(count),
+                                 .statusRole = Role::Dim,
+                                 .group = std::string { group.key },
+                                 .fold = hides ? Fold::Folded : Fold::Open });
+            for (auto const index: std::views::iota(std::size_t { 0 }, runs.size()))
+            {
+                auto const& run = *runs[index];
+                auto row = group.group == FleetGroup::Finished
+                               ? finishedRow(lists, run, *finishedEntryOf(run))
+                               : agentRow(lists, run);
+                row.group = std::string { group.key };
+                row.fold = index < shown ? Fold::Open : Fold::Folded;
+                rows.push_back(std::move(row));
+            }
         }
-        auto const active = std::ranges::count_if(engine.runs(), countsAsActive);
-        appendSection(rows,
-                      lists.config != nullptr
-                          ? std::format("AGENTS · {} OF {} RUNNING", active, lists.config->maxAgents())
-                          : std::format("AGENTS · {} RUNNING", active),
-                      "no agents",
-                      std::move(agents));
-        appendSection(rows,
-                      std::format("FINISHED · {} NEW", newFinishedCount(engine.runs())),
-                      "nothing finished",
-                      std::move(finished));
     }
 
     /// The rows without a configuration: what to configure, then the runs the store holds, which stay
@@ -924,7 +733,7 @@ namespace
             Row { .kind = RowKind::Notice, .text = "The line above says what is missing or wrong." },
         };
         if (hasRuns)
-            appendRunSections(rows, engine, Lists { .engine = &engine, .nowMonoMs = nowMonoMs });
+            appendRunGroups(rows, engine, Lists { .engine = &engine, .nowMonoMs = nowMonoMs });
         return rows;
     }
 } // namespace
@@ -961,80 +770,56 @@ std::vector<Row> buildRows(Engine const& engine, uint64_t nowMonoMs)
                                .config = config,
                                .prefix = repos.size() > 1 ? RepoPrefix::Shown : RepoPrefix::Omitted,
                                .nowMonoMs = nowMonoMs };
-
-    // One group per repository: its header names the repository, so its items do not.
-    auto pullRequests = std::vector<Row> {};
-    auto issues = std::vector<Row> {};
-    for (auto const& repo: repos)
-    {
-        auto requestRows = std::vector<Row> {};
-        for (auto const& request: engine.changeRequests(repo))
-            requestRows.push_back(pullRequestRow(lists, repo, request));
-        appendGroup(pullRequests, engine, std::format("prs/{}", repo), repo, std::move(requestRows));
-        auto issueRows = std::vector<Row> {};
-        for (auto const& issue: engine.unclaimedIssues(repo))
-            issueRows.push_back(issueRow(lists, repo, issue));
-        appendGroup(issues, engine, std::format("issues/{}", repo), repo, std::move(issueRows));
-    }
-
     auto rows = std::vector<Row> {};
-    appendSection(rows, "MY PULL REQUESTS", "no open pull requests", std::move(pullRequests));
-    appendSection(rows, "ISSUES WITHOUT A PR", "no issues without a pull request", std::move(issues));
-    appendTimeline(rows, engine);
-    appendRunSections(rows, engine, lists);
+    appendRunGroups(rows, engine, lists);
 
-    // Only while there is one: an orphan is the exception, and an empty section would say nothing.
+    // Only while there is one: an orphan is the exception, and an empty group would say nothing.
     auto orphans = std::vector<Row> {};
     for (auto const& repo: repos)
         for (auto const& orphan: engine.orphans(repo))
             orphans.push_back(orphanRow(lists, repo, orphan));
     if (!orphans.empty())
-        appendSection(rows, "LEFTOVER WORKTREES", {}, std::move(orphans));
+    {
+        rows.push_back(Row { .kind = RowKind::Heading,
+                             .markRole = Role::Warning,
+                             .text = "LEFTOVER WORKTREES",
+                             .status = std::format("{}", orphans.size()) });
+        std::ranges::move(orphans, std::back_inserter(rows));
+    }
+    rows.push_back(
+        Row { .kind = RowKind::NewAgent, .mark = "+", .markRole = Role::Accent, .text = "new agent" });
     return rows;
 }
 
 namespace
 {
-    /// @return Whether @p row holds @p filter, ignoring ASCII case: in its text, its repository, or its
-    /// group.
+    /// @return Whether @p row holds @p filter, ignoring ASCII case: in its text, its repository, its status
+    /// or its second line.
     [[nodiscard]] bool matchesFilter(Row const& row, std::string_view filter)
     {
-        return containsIgnoringCase(std::format("{} {} {}", row.prefix, row.repo, row.text), filter);
+        return containsIgnoringCase(
+            std::format("{} {} {} {} {}", row.prefix, row.repo, row.text, row.status, row.context), filter);
     }
 } // namespace
 
-std::vector<std::size_t> visibleRows(std::span<Row const> rows,
-                                     std::string_view filter,
-                                     Furniture furniture,
-                                     ChartRows charts)
+std::vector<std::size_t> visibleRows(std::span<Row const> rows, std::string_view filter)
 {
     auto kept = std::vector<std::size_t> {};
     for (auto const index: std::views::iota(std::size_t { 0 }, rows.size()))
     {
         auto const& row = rows[index];
-        if (row.isFurniture() && furniture == Furniture::Collapsed)
+        // A folded group hides some of its runs, but while a filter is typed, which looks at all of them.
+        if (row.kind != RowKind::Heading && row.fold == Fold::Folded && filter.empty())
             continue;
-        // A chart that is not drawn takes its heading, and the spacer before that, with it.
-        auto const startsChart = [&](std::size_t at) {
-            return at < rows.size() && rows[at].kind == RowKind::Chart;
-        };
-        auto const headsChart = [&](std::size_t at) {
-            return at < rows.size() && rows[at].kind == RowKind::Heading && startsChart(at + 1);
-        };
-        if (charts == ChartRows::Hidden
-            && (row.kind == RowKind::Chart || headsChart(index)
-                || (row.kind == RowKind::Spacer && headsChart(index + 1))))
+        // Under a filter a group's heading stays while one of its runs does.
+        if (row.kind == RowKind::Heading && !filter.empty()
+            && !std::ranges::any_of(rows, [&](Row const& item) {
+                   return item.kind != RowKind::Heading && !item.group.empty() && item.group == row.group
+                          && matchesFilter(item, filter);
+               }))
             continue;
-        // A folded group lists its header only, but while a filter is typed, which looks inside it.
-        if (row.kind != RowKind::Group && row.fold == Fold::Folded && filter.empty())
-            continue;
-        // Under a filter a group's header stays while one of its items does.
-        if (row.kind == RowKind::Group && !filter.empty() && !std::ranges::any_of(rows, [&](Row const& item) {
-                return item.kind != RowKind::Group && item.group == row.group && matchesFilter(item, filter);
-            }))
-            continue;
-        if (row.isSelectable() && row.kind != RowKind::Group && !filter.empty()
-            && !matchesFilter(row, filter))
+        if (row.isSelectable() && row.kind != RowKind::Heading && row.kind != RowKind::NewAgent
+            && !filter.empty() && !matchesFilter(row, filter))
             continue;
         kept.push_back(index);
     }
@@ -1178,9 +963,9 @@ std::string itemLabel(ItemRef const& item)
                       item);
 }
 
-void drawFrame(core::tui::Canvas& canvas, std::string_view title)
+void drawFrame(core::tui::Canvas& canvas, std::string_view title, Role borderRole)
 {
-    auto const& border = styleOf(canvas.theme(), Role::Border);
+    auto const& border = styleOf(canvas.theme(), borderRole);
     canvas.drawBox(canvas.area(), core::tui::BorderStyle::Rounded, border);
     // A blank either side of the title, which cut() would trim.
     if (auto const text = cut(title, canvas.width() - 6); !text.empty())
@@ -1193,6 +978,33 @@ core::tui::Canvas insideFrame(core::tui::Canvas const& canvas)
                                               .y = 1,
                                               .width = std::max(0, canvas.width() - 2),
                                               .height = std::max(0, canvas.height() - 2) });
+}
+
+int putLinked(
+    core::tui::Canvas& canvas, int row, int column, std::string_view text, core::tui::Style const& style)
+{
+    constexpr auto Schemes = std::array { "https://"sv, "http://"sv };
+    auto const taken = canvas.putString(row, column, text, style);
+    // A URL runs to the next blank; what precedes it is measured in cells, not bytes.
+    auto offset = std::size_t { 0 };
+    for (auto const word: std::views::split(text, ' '))
+    {
+        auto const token = std::string_view { word.begin(), word.end() };
+        for (auto const scheme: Schemes)
+            if (auto const at = token.find(scheme); at != std::string_view::npos)
+            {
+                auto const url = token.substr(at);
+                // A URL cut short ends in the ellipsis cut() adds: its link would lead elsewhere.
+                if (!url.ends_with(Ellipsis) && isPrintableAscii(url))
+                    canvas.addHyperlink(row,
+                                        column + columnsOf(text.substr(0, offset + at)),
+                                        static_cast<int>(url.size()),
+                                        url);
+                break;
+            }
+        offset += token.size() + 1;
+    }
+    return taken;
 }
 
 std::string joinHints(std::span<std::string_view const> hints, int columns)

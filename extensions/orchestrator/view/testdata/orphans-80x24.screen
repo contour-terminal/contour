@@ -1,24 +1,24 @@
-╭─ Agents ─────────────────────────────────────────────────────────────────────╮
-│   #2163 OSC 133: optional nonce to reject forged command lines and marks     │
-│   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead of settin… │
+╭─ Agents 0 ───────────────────────────────────────────────────────────────────╮
+│ LEFTOVER WORKTREES 2                                                         │
+│ ⚑ /home/u/worktrees/contour/pr-2-20260101-000000 · no run uses thi… detached │
+│▍⚑ /home/u/worktrees/contour/it's a test · no run… agent/pr-1-20260101-000000 │
 │                                                                              │
-│ AGENTS · 0 OF 4 RUNNING                                                      │
-│ no agents                                                                    │
+│ + new agent                                                                  │
 │                                                                              │
-│ FINISHED · 0 NEW                                                             │
-│ nothing finished                                                             │
 │                                                                              │
-│ LEFTOVER WORKTREES                                                           │
-│   /home/u/worktrees/contour/pr-2-20260101-000000                    detached │
-│   /home/u/worktrees/contour/it's a test           agent/pr-1-20260101-000000 │
+│                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Details ────────────────────────────────────────────────────────────────────╮
-│ /home/u/worktrees/contour/it's a test                                        │
-│                                                                              │
+╭─ leftover worktree · details ──────────────────── agent/pr-1-20260101-000000 ╮
 │           no agent run uses this worktree any more; the orchestrator never   │
 │             removes it                                                       │
 │           a run ended without removing it, or it was made by hand under      │
-│             worktree_root…                                                   │
+│             worktree_root                                                    │
+│ branch    agent/pr-1-20260101-000000                                         │
+│ to remove git -C /home/u/projects/contour worktree remove '/home/u/worktree… │
+│           git refuses while it holds changes; its branch stays               │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- ↑↓ move · enter open · d new run · ? help · b board · t transcript · / filter  
- ⬢ agents 0/4                                                                   
+ ↑↓ move · ⏎ open · tab focus · d details · n new agent · / filter   ⬢ 0/4 ▱▱▱▱ 

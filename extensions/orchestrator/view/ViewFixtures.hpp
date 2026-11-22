@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <map>
 #include <optional>
 #include <string>
@@ -106,6 +107,21 @@ class CountingUuids final: public IUuidSource
     std::size_t taken = 0; ///< How many were taken.
 };
 
+/// What the guest answers the reads a dashboard asks for.
+struct Answers
+{
+    std::optional<ProcessOutcome> transcript = std::nullopt; ///< A transcript page's; none: left unanswered.
+    std::optional<std::expected<std::string, FileReadError>> board =
+        std::nullopt;                 ///< A board's; none: left unanswered.
+    uint64_t boardModifiedWallMs = 0; ///< The board's modification time.
+};
+
+/// @return What the verb printed: @p stdoutText, exit 0.
+[[nodiscard]] ProcessOutcome printed(std::string stdoutText);
+
+/// @return What a failed verb printed: @p stderrText, exit 1.
+[[nodiscard]] ProcessOutcome failedWith(std::string stderrText);
+
 /// A dashboard over an engine, with the clock it reads and its source of session ids, served in tab Tab.
 struct DashboardFixture
 {
@@ -122,6 +138,20 @@ struct DashboardFixture
 
     /// Draws a frame and returns the screen as text.
     [[nodiscard]] std::string screen();
+
+    /// Carries out what the dashboard asked, as the guest does: a transcript page read, a board shown or
+    /// hidden, and the reads they lead to answered as @p answers says (a statistics read fails); then tells
+    /// the dashboard the engine changed.
+    /// @return The `agent-transcript` commands the engine ran.
+    std::vector<RunCommand> carryOut(std::vector<UiAction> const& actions, Answers const& answers = {});
+
+    /// The guest's turn before a frame: what the dashboard asks with no key typed (Dashboard::dueActions()),
+    /// carried out.
+    /// @return The `agent-transcript` commands the engine ran.
+    std::vector<RunCommand> settle(Answers const& answers = {});
+
+    /// @return Now on the fixture's clock, in the engine's monotonic milliseconds.
+    [[nodiscard]] uint64_t monoMs() const;
 
     /// Answers the commands World::held kept back, and what they lead to, as the world says; then tells
     /// the dashboard the engine changed.

@@ -331,12 +331,17 @@ class Desk
         }
         workspace = connection.client->selectedWorkspace();
         connection.client->invokeExtensionAction(std::string(OrchestratorName), "open");
-        REQUIRE(until([&] {
+        auto shown = std::string {};
+        auto const opened = until([&] {
             auto const session = vthost::testing::servedIn(_live.host, workspace);
-            if (session && vthost::testing::showsFixtureLists(_live.pageText(*session)))
+            if (session)
+                shown = _live.pageText(*session);
+            if (session && vthost::testing::showsDashboard(shown))
                 dashboard = *session;
             return dashboard.value != 0;
-        }));
+        });
+        INFO("dashboard: " << shown);
+        REQUIRE(opened);
     }
 
     /// @see Window::until()
@@ -405,19 +410,19 @@ void checkAgentStart(vthost::testing::AgentReport const& report, StoredRun const
     CHECK(report.holds("GIT_CONFIG_VALUE_2=true"));
 }
 
-/// Selects the row @p downs below the first, and opens the launcher on it, showing the command line (Ctrl+P).
-/// @return The dashboard's screen once the launcher shows it.
-[[nodiscard]] std::string openForm(Desk& desk, std::size_t downs)
+/// Opens the launcher (`n`) on the item numbered @p number, its query naming it, and shows the command line
+/// (Ctrl+P).
+/// @return The dashboard's screen once the launcher shows the item highlighted, read from the lists.
+[[nodiscard]] std::string openForm(Desk& desk, std::string_view number)
 {
-    desk.type(Home);
-    for ([[maybe_unused]] auto const _: std::views::iota(std::size_t { 0 }, downs))
-        desk.type(Down);
-    desk.type(Enter);
+    desk.type("n");
+    desk.type(number);
     desk.type("\x10");
     auto page = std::string {};
     auto const shown = desk.until([&] {
         page = desk.page();
-        return page.contains("enter start") && page.contains("command");
+        return page.contains("enter start") && page.contains("command")
+               && page.contains(std::format("#{} · contour", number));
     });
     INFO("dashboard: " << page);
     REQUIRE(shown);
@@ -454,30 +459,44 @@ void checkAgentStart(vthost::testing::AgentReport const& report, StoredRun const
     return dispatched;
 }
 
-/// Selects the row @p downs below the first, dispatches on it with the task Enter offers, and waits until the
+/// Dispatches on the item numbered @p number from the launcher, with the task it offers, and waits until the
 /// run whose id begins with @p prefix runs in its agent's tab.
 /// @return The run and its agent's session.
 [[nodiscard]] Dispatched dispatch(
-    Desk& desk, LiveHost& live, OrchestratorWorld& world, std::size_t downs, std::string_view prefix)
+    Desk& desk, LiveHost& live, OrchestratorWorld& world, std::string_view number, std::string_view prefix)
 {
-    auto const form = openForm(desk, downs);
+    auto const form = openForm(desk, number);
     desk.type(Enter);
     auto dispatched = awaitRunning(desk, live, world, prefix);
     dispatched.formPage = form;
     return dispatched;
 }
 
-/// The selectable rows above the runs': the fixture's five pull requests and five issues without one.
-constexpr auto RowsAboveRuns = std::size_t { 10 };
+/// @return How the dashboard names the run @p run: its id without the dispatch time, such as `pr-2375` for
+///         `pr-2375-20261113-150847`.
+[[nodiscard]] std::string_view runName(std::string_view run)
+{
+    // The time is `-YYYYMMDD-HHMMSS`, a counter after it when two runs share a second.
+    constexpr auto TimeLength = std::string_view { "-YYYYMMDD-HHMMSS" }.size();
+    for (auto const at: std::views::iota(std::size_t { 0 }, run.size()))
+    {
+        auto const rest = run.substr(at);
+        if (rest.size() >= TimeLength && rest[0] == '-' && rest[9] == '-'
+            && std::ranges::all_of(rest.substr(1, 8), [](char c) { return c >= '0' && c <= '9'; })
+            && std::ranges::all_of(rest.substr(10, 6), [](char c) { return c >= '0' && c <= '9'; }))
+            return run.substr(0, at);
+    }
+    return run;
+}
 
-/// Selects the @p index-th run's row -- AGENTS' first, then FINISHED's -- which shows @p run, and waits until
-/// its details do.
+/// Selects the @p index-th run's row in the Fleet, which shows @p run, and waits until its Focus does.
 void selectRun(Desk& desk, std::size_t index, std::string_view run)
 {
     desk.type(Home);
-    for ([[maybe_unused]] auto const _: std::views::iota(std::size_t { 0 }, RowsAboveRuns + index))
+    for ([[maybe_unused]] auto const _: std::views::iota(std::size_t { 0 }, index))
         desk.type(Down);
-    auto const shown = desk.until([&] { return desk.page().contains(run); });
+    // The Focus's border names the selected run.
+    auto const shown = desk.until([&] { return desk.page().contains(std::format("─ {} · ", runName(run))); });
     INFO("dashboard: " << desk.page());
     REQUIRE(shown);
 }
@@ -562,7 +581,7 @@ void checkAgentCarried(LiveHost& next, OrchestratorWorld& world, Dispatched cons
     // The new guest listed the pane and kept the run: a second later it still runs, nothing removed.
     auto const reopened = vthost::testing::openDashboard(next, world);
     CHECK(reopened.questions == 0);
-    REQUIRE(next.eventually([&] { return next.pageText(*reopened.session).contains("agents 1/4"); }));
+    REQUIRE(next.eventually([&] { return next.pageText(*reopened.session).contains("⬢ 1/4"); }));
     auto const settled = std::chrono::steady_clock::now() + 1s;
     std::ignore = turnUntil(next, world, [&] { return std::chrono::steady_clock::now() >= settled; });
     auto const run = storedRun(world, before.run.id);
@@ -582,7 +601,7 @@ TEST_CASE("dispatching a PR opens its agent tab beside the dashboard", "[daemon]
     auto d = AgentDaemon {};
     auto desk = Desk { *d.live, d.world };
 
-    auto const dispatched = dispatch(desk, *d.live, d.world, 0, "pr-2375-");
+    auto const dispatched = dispatch(desk, *d.live, d.world, "2375", "pr-2375-");
     auto const& run = dispatched.run;
     INFO(runsOf(d.world));
 
@@ -632,10 +651,10 @@ TEST_CASE("dispatching a PR opens its agent tab beside the dashboard", "[daemon]
     CHECK_FALSE(std::ranges::contains(exec.removedEnvironment, "GIT_SSH_COMMAND"));
     CHECK_FALSE(std::ranges::contains(exec.removedEnvironment, "GIT_CONFIG_KEY_0"));
 
-    // Enter on the item now reveals its agent, to the window the dashboard was opened from -- not to another
-    // window attached meanwhile.
+    // The run the launcher started is selected: `r` reveals its agent, to the window the dashboard was opened
+    // from -- not to another window attached meanwhile.
     auto other = Window { *d.live, d.world };
-    desk.type(Enter);
+    desk.type("r");
     REQUIRE(desk.until([&] { return desk.revealsOf(dispatched.agent) == 1; }));
     auto const settled = std::chrono::steady_clock::now() + 500ms;
     std::ignore = desk.until([&] { return std::chrono::steady_clock::now() >= settled; });
@@ -649,8 +668,7 @@ TEST_CASE("dispatching an issue uses a new branch", "[daemon][e2e][agents]")
     auto d = AgentDaemon {};
     auto desk = Desk { *d.live, d.world };
 
-    // The first issue is below the five pull requests.
-    auto const dispatched = dispatch(desk, *d.live, d.world, 5, "issue-2356-");
+    auto const dispatched = dispatch(desk, *d.live, d.world, "2356", "issue-2356-");
     auto const& run = dispatched.run;
     INFO(runsOf(d.world));
     CHECK(ranInOrder(runCommands(d.world),
@@ -680,7 +698,7 @@ TEST_CASE("the agent's tab closing removes the worktree", "[daemon][e2e][agents]
 {
     auto d = AgentDaemon {};
     auto desk = Desk { *d.live, d.world };
-    auto const dispatched = dispatch(desk, *d.live, d.world, 0, "pr-2375-");
+    auto const dispatched = dispatch(desk, *d.live, d.world, "2375", "pr-2375-");
     report(*d.live, dispatched.agent, "working");
     REQUIRE(desk.until([&] { return reported(d.world, "pr-2375-", "working"); }));
     auto const before = runCommands(d.world).size();
@@ -700,7 +718,7 @@ TEST_CASE("a kept worktree is checked again on the next poll", "[daemon][e2e][ag
 {
     auto d = AgentDaemon {};
     auto desk = Desk { *d.live, d.world };
-    auto const dispatched = dispatch(desk, *d.live, d.world, 0, "pr-2375-");
+    auto const dispatched = dispatch(desk, *d.live, d.world, "2375", "pr-2375-");
     report(*d.live, dispatched.agent, "working");
     REQUIRE(desk.until([&] { return reported(d.world, "pr-2375-", "working"); }));
 
@@ -727,14 +745,14 @@ TEST_CASE("e on a Done run ends it", "[daemon][e2e][agents]")
 {
     auto d = AgentDaemon {};
     auto desk = Desk { *d.live, d.world };
-    auto const dispatched = dispatch(desk, *d.live, d.world, 0, "pr-2375-");
+    auto const dispatched = dispatch(desk, *d.live, d.world, "2375", "pr-2375-");
     report(*d.live, dispatched.agent, "done");
     REQUIRE(desk.until([&] { return runIs(d.world, "pr-2375-", "done"); }));
 
     // The first `e` on its row asks; nothing ends yet.
     selectRun(desk, 0, dispatched.run.id);
     desk.type("e");
-    auto const asked = desk.until([&] { return desk.page().contains("e to confirm"); });
+    auto const asked = desk.until([&] { return desk.page().contains("e again to end"); });
     INFO("dashboard: " << desk.page());
     REQUIRE(asked);
     CHECK(runIs(d.world, "pr-2375-", "done"));
@@ -756,7 +774,7 @@ TEST_CASE("a live upgrade mid-run keeps the agent pane", "[daemon][e2e][agents][
     auto dashboard = SessionId {};
     {
         auto desk = Desk { *u.live, world };
-        dispatched = dispatch(desk, *u.live, world, 0, "pr-2375-");
+        dispatched = dispatch(desk, *u.live, world, "2375", "pr-2375-");
         report(*u.live, dispatched.agent, "working");
         REQUIRE(desk.until([&] { return reported(world, "pr-2375-", "working"); }));
         dashboard = desk.dashboard;
@@ -779,7 +797,7 @@ TEST_CASE("a keeper recovery mid-run keeps the agent pane", "[daemon][e2e][agent
     auto dashboard = SessionId {};
     {
         auto desk = Desk { *d.live, d.world };
-        dispatched = dispatch(desk, *d.live, d.world, 0, "pr-2375-");
+        dispatched = dispatch(desk, *d.live, d.world, "2375", "pr-2375-");
         report(*d.live, dispatched.agent, "working");
         REQUIRE(desk.until([&] { return reported(d.world, "pr-2375-", "working"); }));
         dashboard = desk.dashboard;
@@ -801,7 +819,7 @@ TEST_CASE("a cold restart ends the run through the removal checks", "[daemon][e2
     auto dispatched = Dispatched {};
     {
         auto desk = Desk { *d.live, d.world };
-        dispatched = dispatch(desk, *d.live, d.world, 0, "pr-2375-");
+        dispatched = dispatch(desk, *d.live, d.world, "2375", "pr-2375-");
         report(*d.live, dispatched.agent, "working");
         REQUIRE(desk.until([&] { return reported(d.world, "pr-2375-", "working"); }));
         desk.leave();
@@ -826,7 +844,7 @@ TEST_CASE("a guest fault mid-dispatch adopts the pane by tag", "[daemon][e2e][ag
 {
     auto d = AgentDaemon {};
     auto desk = Desk { *d.live, d.world };
-    std::ignore = openForm(desk, 0);
+    std::ignore = openForm(desk, "2375");
 
     // The host opens the pane, but the guest hears of it only after its deadline: it faults before it could
     // store that its run runs. The guest that replaces it finds the pane by its tag.
@@ -846,12 +864,12 @@ TEST_CASE("the same item twice is refused", "[daemon][e2e][agents]")
 {
     auto d = AgentDaemon {};
     auto desk = Desk { *d.live, d.world };
-    std::ignore = dispatch(desk, *d.live, d.world, 0, "pr-2375-");
+    std::ignore = dispatch(desk, *d.live, d.world, "2375", "pr-2375-");
     auto const fetches = d.world.processRunner.startsOf("git", "fetch");
 
-    // `d` opens the form on the item all the same; it says why, and Enter dispatches nothing.
-    desk.type(Home);
-    desk.type("d");
+    // The launcher opens on the item all the same; it says why, and Enter dispatches nothing.
+    desk.type("n");
+    desk.type("2375");
     REQUIRE(desk.until([&] { return desk.page().contains("already"); }));
     desk.type(Enter);
     REQUIRE(desk.until([&] { return d.world.isRunning() && d.world.pollDone(); }));
@@ -902,7 +920,7 @@ void writeBoard(OrchestratorWorld const& world,
 /// @return The run as it was while it ran.
 [[nodiscard]] StoredRun finishedRun(Desk& desk, AgentDaemon& d)
 {
-    auto const dispatched = dispatch(desk, *d.live, d.world, 0, "pr-2375-");
+    auto const dispatched = dispatch(desk, *d.live, d.world, "2375", "pr-2375-");
     report(*d.live, dispatched.agent, "working");
     REQUIRE(desk.until([&] { return reported(d.world, "pr-2375-", "working"); }));
     d.live->host.closeSession(dispatched.agent);
@@ -926,11 +944,11 @@ void writeBoard(OrchestratorWorld const& world,
 
 } // namespace
 
-TEST_CASE("b shows the board an agent wrote, with its age", "[daemon][e2e][agents]")
+TEST_CASE("b shows the board an agent wrote, with its age, in the Focus", "[daemon][e2e][agents]")
 {
     auto d = AgentDaemon {};
     auto desk = Desk { *d.live, d.world };
-    auto const dispatched = dispatch(desk, *d.live, d.world, 0, "pr-2375-");
+    auto const dispatched = dispatch(desk, *d.live, d.world, "2375", "pr-2375-");
     writeBoard(d.world, dispatched.run.worktree, AgentBoard, std::chrono::minutes { 3 });
 
     selectRun(desk, 0, dispatched.run.id);
@@ -942,17 +960,18 @@ TEST_CASE("b shows the board an agent wrote, with its age", "[daemon][e2e][agent
     });
     INFO("dashboard: " << page);
     REQUIRE(shown);
-    CHECK(page.contains(std::format("STATUS.md · {}", dispatched.run.id)));
+    // The Focus names the run, and the board's age; the keys to its other tabs are offered.
+    CHECK(page.contains("pr-2375 · fix CI · sonnet"));
     CHECK(page.contains("updated 3 min ago"));
     CHECK(page.contains("t transcript"));
-    CHECK(page.contains("d new run"));
+    CHECK(page.contains("d details"));
 }
 
 TEST_CASE("a board that appears later is picked up while shown", "[daemon][e2e][agents]")
 {
     auto d = AgentDaemon {};
     auto desk = Desk { *d.live, d.world };
-    auto const dispatched = dispatch(desk, *d.live, d.world, 0, "pr-2375-");
+    auto const dispatched = dispatch(desk, *d.live, d.world, "2375", "pr-2375-");
 
     selectRun(desk, 0, dispatched.run.id);
     desk.type("b");
@@ -992,30 +1011,34 @@ TEST_CASE("t shows a finished run's transcript after its worktree is gone", "[da
     INFO("dashboard: " << page);
     INFO(runsOf(d.world));
     REQUIRE(shown);
-    CHECK(page.contains(std::format("Transcript · {} · page 1 of 1", run.id)));
-    CHECK(page.contains("tool Bash"));
+    CHECK(page.contains("pr-2375 · fix CI · sonnet"));
+    CHECK(page.contains("page 1 of 1"));
+    CHECK(page.contains("done."));
 
     // Read through the declared command alone, for the run's session and worktree, in the worktree root: the
-    // run's own worktree is gone.
+    // run's own worktree is gone. The Focus followed the agent while it ran, reading the same page each time.
     auto const reads = transcriptReads(d.world);
-    REQUIRE(reads.size() == 1);
-    CHECK(reads.front().first
-          == std::vector<std::string> { "contour",
-                                        "agent",
-                                        "transcript",
-                                        "--session",
-                                        run.session,
-                                        "--cwd",
-                                        run.worktree,
-                                        "--page",
-                                        "1",
-                                        "--format",
-                                        "1",
-                                        "--json" });
-    CHECK(reads.front().second == d.world.worktreeRoot());
+    REQUIRE_FALSE(reads.empty());
+    for (auto const& [argv, cwd]: reads)
+    {
+        CHECK(argv
+              == std::vector<std::string> { "contour",
+                                            "agent",
+                                            "transcript",
+                                            "--session",
+                                            run.session,
+                                            "--cwd",
+                                            run.worktree,
+                                            "--page",
+                                            "1",
+                                            "--format",
+                                            "1",
+                                            "--json" });
+        CHECK(cwd == d.world.worktreeRoot());
+    }
 }
 
-TEST_CASE("d on a finished run dispatches the same item again", "[daemon][e2e][agents]")
+TEST_CASE("enter on a finished run dispatches the same item again", "[daemon][e2e][agents]")
 {
     auto d = AgentDaemon {};
     auto desk = Desk { *d.live, d.world };
@@ -1023,7 +1046,7 @@ TEST_CASE("d on a finished run dispatches the same item again", "[daemon][e2e][a
     auto const first = finishedRun(desk, d);
 
     selectRun(desk, 0, first.id);
-    desk.type("d");
+    desk.type(Enter);
     auto page = std::string {};
     auto const opened = desk.until([&] {
         page = desk.page();
@@ -1064,7 +1087,7 @@ TEST_CASE("an agent that cannot start in its worktree here says so", "[daemon][e
     std::ignore = vthost::testing::spawnShells(live);
     auto desk = Desk { live, world };
 
-    std::ignore = openForm(desk, 0);
+    std::ignore = openForm(desk, "2375");
     desk.type(Enter);
     auto const failed =
         desk.until([&] { return finishedAs(world, "pr-2375-", "preparation-failed", "removed"); });
@@ -1078,8 +1101,8 @@ TEST_CASE("an agent that cannot start in its worktree here says so", "[daemon][e
     CHECK(run->failure->why == "not-supported-yet");
     CHECK(world.spawnedAgents().empty());
 
-    // Its row in FINISHED says so, in plain words, and keeps the code for diagnosis. Tab shows the details on
-    // the whole page: below the list they are cut before the failure line.
+    // Its row in Finished says so, in plain words, and its Details keep the code for diagnosis: Tab gives the
+    // Focus, which opens on them, the keys.
     selectRun(desk, 0, run->id);
     desk.type(Tab);
     auto const said = desk.until([&] {
@@ -1136,8 +1159,7 @@ TEST_CASE("ending runs keeps a worktree with work and removes a clean one, again
     auto runs = std::vector<Dispatched> {};
     for (auto const [index, prefix]: core::views::enumerate(prefixes))
     {
-        auto const& dispatched =
-            runs.emplace_back(dispatch(desk, live, world, static_cast<std::size_t>(index), prefix));
+        auto const& dispatched = runs.emplace_back(dispatch(desk, live, world, prefix.substr(3, 4), prefix));
         CHECK(live.pageText(dispatched.agent).contains(std::format("agent in {} ready", dispatched.run.id)));
         CHECK(std::filesystem::is_regular_file(std::filesystem::path(dispatched.run.worktree) / ".git"));
         work[static_cast<std::size_t>(index)](dispatched.run.worktree);
@@ -1146,7 +1168,7 @@ TEST_CASE("ending runs keeps a worktree with work and removes a clean one, again
         REQUIRE(desk.until([&] { return runIs(world, dispatched.run.id, "done"); }));
         selectRun(desk, 0, dispatched.run.id);
         desk.type("e");
-        REQUIRE(desk.until([&] { return desk.page().contains("e to confirm"); }));
+        REQUIRE(desk.until([&] { return desk.page().contains("e again to end"); }));
         desk.type("e");
         REQUIRE(desk.until([&] { return runIs(world, dispatched.run.id, "finished"); }));
     }

@@ -21,13 +21,23 @@ enum class Role : uint8_t
     Border,    ///< The frames of the panels.
     Accent,    ///< What stands out without warning: the user's own entries in a transcript.
     Note,      ///< A remark about the text rather than part of it: a transcript's note.
+    Working,   ///< A run at work: its glyph, its group's heading.
+    Focus,     ///< The border of the place that has the keys.
 };
 
-/// The dashboard's theme: core::tui's, with each role's style set from one table. The colours are the
-/// terminal's own (its default foreground and its palette's first eight), so the dashboard follows the
-/// user's colour scheme rather than imposing one.
-/// @return The theme the dashboard is drawn with by default.
-[[nodiscard]] core::tui::Theme dashboardTheme();
+/// How many colours the dashboard's theme may use.
+enum class ColorDepth : uint8_t
+{
+    Palette256 = 0, ///< The xterm 256-colour palette: what every terminal the dashboard is served in draws.
+    TrueColor,      ///< 24-bit colour.
+};
+
+/// The dashboard's theme: core::tui's, with each role's style set from one table, the design's palette in
+/// @p depth. Ordinary text and the background stay the terminal's own, so the dashboard stays legible on a
+/// light colour scheme too; the roles that stand out (muted, faint, accent, the states) take the palette.
+/// @param depth How many colours it may use.
+/// @return The theme the dashboard is drawn with.
+[[nodiscard]] core::tui::Theme dashboardTheme(ColorDepth depth = ColorDepth::Palette256);
 
 /// @param theme A theme the dashboard is drawn with.
 /// @param role What is drawn.

@@ -1,0 +1,20 @@
+ ✦ Agents                ⬢ 4/4 ▰▰▰▰  ● 2 need you 
+╭─ pr-2375 · fix CI · sonnet ────── ⠿ working 6m ╮
+│ Board  Transcript  Details                     │
+│ updated 9 min ago                              │
+│ Fixing CI                                      │
+│ ☑ reproduced on master                         │
+│ ☑ wrote the regression test                    │
+│ ☐ fix the reflow                               │
+│ ☐ watch CI                                     │
+│                                                │
+│                                                │
+│ ── latest ──────────────────────────────────── │
+│ 18:36 tool Bash {"command":"mkdir sub && cd s… │
+│ 18:36 result .                                 │
+│ 18:37 claude done.                             │
+│ ╭─ to pr-2375 ───────────────────────────────╮ │
+│ │ rebase on master first▏                    │ │
+│ ╰────────────────────────────────────────────╯ │
+╰────────────────────────────────────────────────╯
+ ⏎ send · alt⏎ line · esc keep draft              

@@ -2,6 +2,7 @@
 #include <orchestrator/view/Dashboard.hpp>
 
 #include <core/tui/Canvas.hpp>
+#include <core/tui/ClipboardProtocol.hpp>
 #include <core/tui/Component.hpp>
 #include <core/tui/HeadlessSurface.hpp>
 #include <core/tui/Responsive.hpp>
@@ -27,6 +28,8 @@
 #include <vector>
 
 #include <orchestrator/view/Band.hpp>
+#include <orchestrator/view/Fleet.hpp>
+#include <orchestrator/view/Focus.hpp>
 #include <orchestrator/view/Sections.hpp>
 #include <orchestrator/view/StatusBoard.hpp>
 #include <orchestrator/view/Theme.hpp>
@@ -46,22 +49,27 @@ namespace
     using core::tui::Size;
     namespace layout = core::tui::layout;
 
-    /// The rows the details panel's box takes below the list in the Medium band.
-    constexpr auto DetailsBelowRows = 8;
-    /// The cells a detail's label takes, its padding included.
-    constexpr auto LabelColumns = 10;
     /// How long a lone ESC that ended an input waits for the rest of a sequence before it is the Escape key.
     constexpr auto EscapeTimeout = std::chrono::milliseconds { 50 };
     /// How far an agent's age moves before the rows are built again for it.
     constexpr auto AgeTickMs = uint64_t { 1000 };
+    /// How often the transcript of a live run the Focus shows is read again.
+    constexpr auto TranscriptFollowMs = uint64_t { 5000 };
 
     /// The widest the launcher is in the Wide band.
     constexpr auto LauncherMaxColumns = 80;
     /// How much of the tab's width the launcher takes in the Medium band, in percent.
     constexpr auto LauncherMediumPercent = 90;
 
-    /// @return The cells the launcher is wide in @p band, in a tab @p columns wide: in the Wide band a
-    /// popup
+    /// The shares of the body the Fleet and the Focus take, side by side (Wide) or one above the other
+    /// (Medium, where the Focus takes 60 % of the height).
+    constexpr auto FleetShare = 2;
+    constexpr auto FocusShare = 3;
+
+    /// The cells the `▰▱` meters take.
+    constexpr auto MeterCells = 6;
+
+    /// @return The cells the launcher is wide in @p band, in a tab @p columns wide: in the Wide band a popup
     ///         of at most LauncherMaxColumns, in the Medium band most of the tab, in the Narrow band all of
     ///         it.
     [[nodiscard]] int launcherWidthIn(Band band, int columns) noexcept
@@ -75,13 +83,12 @@ namespace
         return columns;
     }
 
-    /// @return The index into BandBreakpoints that @p size chooses: the last one whose minima it meets.
+    /// @return The index into BandBreakpoints that @p size chooses: the last one whose minimum it meets.
     [[nodiscard]] std::size_t breakpointFor(Size size) noexcept
     {
         auto chosen = std::size_t { 0 };
         for (auto const index: std::views::iota(std::size_t { 0 }, BandBreakpoints.size()))
-            if (size.width >= BandBreakpoints[index].minColumns
-                && size.height >= BandBreakpoints[index].minRows)
+            if (size.width >= BandBreakpoints[index].minColumns)
                 chosen = index;
         return chosen;
     }
@@ -93,37 +100,52 @@ namespace
         Selected,   ///< Drawn in the selection's.
     };
 
-    /// Which pane or screen a panel is shown in.
+    /// A pane or bar that is shown or hidden as the user moves between the places.
     enum class PanelRole : uint8_t
     {
-        List,           ///< The list.
-        DetailsBelow,   ///< The details below the list (Medium).
-        DetailsPage,    ///< The details in the list's place, the whole width.
-        ListAndDetails, ///< The list and the details side by side (Wide).
-        Body,           ///< What holds the list and the details (Medium, Narrow): the dashboard's alone.
-        Board,          ///< A run's status board in the body's place.
-        Transcript,     ///< A run's transcript in the body's place.
-        Chrome, ///< The problem lines and the summary line, which a board or a transcript in the Narrow band
-                ///< covers.
+        TopBar, ///< The top bar, which gives way in a small tab.
+        Fleet,  ///< The Fleet.
+        Focus,  ///< The Focus.
     };
 
-    /// The pane each of the dashboard's roles is shown in, indexed by PanelRole up to Board.
-    constexpr auto ShownInPane = std::array { Pane::List, Pane::List, Pane::Details, Pane::List };
+    /// How wide the Focus is drawn while it has the keys.
+    enum class FocusWidth : uint8_t
+    {
+        Shared = 0, ///< Beside the Fleet, in the Wide band.
+        Whole,      ///< The whole tab: a worktree's details hold a command line, which wants every cell.
+    };
 
-    /// @return Whether a panel of @p role is shown while the user is at @p interaction, in @p band.
-    [[nodiscard]] bool isShown(PanelRole role, Interaction const& interaction, Band band) noexcept
+    /// @return Whether a panel of @p role is shown while the user is at @p place, in @p band, with @p given
+    ///         furniture given way and the Focus as wide as @p width.
+    [[nodiscard]] bool isShown(
+        PanelRole role, Place place, Band band, Furniture given, FocusWidth width) noexcept
     {
         switch (role)
         {
-            case PanelRole::Body: return interaction.screen == Screen::Dashboard;
-            case PanelRole::Board: return interaction.screen == Screen::Board;
-            case PanelRole::Transcript: return interaction.screen == Screen::Transcript;
-            // The Narrow band gives a board or a transcript the whole tab but for its keys.
-            case PanelRole::Chrome: return interaction.screen == Screen::Dashboard || band != Band::Narrow;
-            default: break;
+            case PanelRole::TopBar: return !holds(given, Furniture::TopBar);
+            case PanelRole::Fleet:
+                return place == Place::Fleet || (band == Band::Wide && width == FocusWidth::Shared);
+            case PanelRole::Focus: break;
         }
-        return interaction.screen == Screen::Dashboard
-               && ShownInPane[std::to_underlying(role)] == interaction.pane;
+        return band != Band::Narrow || place == Place::Focus;
+    }
+
+    /// @return How wide the Focus of @p row is drawn while it has the keys.
+    [[nodiscard]] FocusWidth focusWidthOf(Row const* row) noexcept
+    {
+        return row != nullptr && row->kind == RowKind::Orphan ? FocusWidth::Whole : FocusWidth::Shared;
+    }
+
+    /// @return The identity of @p row across a rebuild: its run, its worktree, its group, or its kind.
+    [[nodiscard]] std::string keyOf(Row const& row)
+    {
+        if (!row.run.empty())
+            return row.run;
+        if (row.kind == RowKind::Orphan)
+            return std::format("orphan:{}", row.text);
+        if (row.kind == RowKind::Heading)
+            return std::format("group:{}", row.group);
+        return std::format("kind:{}", std::to_underlying(row.kind));
     }
 } // namespace
 
@@ -154,8 +176,16 @@ struct Dashboard::State
     [[nodiscard]] std::unique_ptr<Component> buildLayout(std::size_t breakpoint);
     /// Rebuilds the rows from the engine when they are stale: the engine changed, or an age moved on.
     void ensureRows();
-    /// Applies the filter and the layout's furniture to the rows, and keeps the selection among them.
-    void refilter();
+    /// How refilter() keeps the selection.
+    enum class Keep : uint8_t
+    {
+        Row, ///< On the row it was on, by its identity: across a rebuild, so that a run that changes groups
+             ///< keeps it and a run that enters Needs you never takes it.
+        Position, ///< At the position a key moved it to.
+    };
+
+    /// Applies the filter to the rows, and keeps the selection as @p keep says.
+    void refilter(Keep keep);
     /// Applies keys the parser decoded: to the launcher while it is open, else by the key table.
     /// @param events The keys.
     /// @param hooksAtInput The form's HooksWarning as the input that holds them began.
@@ -167,14 +197,14 @@ struct Dashboard::State
     /// Resolves a held ESC that waited past EscapeTimeout into the Escape key.
     /// @return What the engine is asked, in order.
     [[nodiscard]] std::vector<UiAction> resolveOverdueEscape();
-    /// Shows the panels of the current pane and hides the others; places the help and the form.
+    /// Shows the panes of the current place and band and hides the others; sets what the Focus draws; places
+    /// the help and the launcher.
     void syncLayout();
     /// Gives a launcher just opened its agent's session id, from the dashboard's source.
     void mintSession();
     /// Shows the launcher where the band puts it, or hides it.
     void syncLauncher();
-    /// Keeps a board's or a transcript's scroll within what it holds, once the last draw knows its end: the
-    /// keys scroll past an end not yet wrapped, and a draw shows such a scroll from the end.
+    /// Keeps the Focus's scroll within what its tab holds, once the last draw knows its end.
     void clampScroll() noexcept;
     /// @return What a key is applied to.
     [[nodiscard]] KeyContext keyContext() const noexcept;
@@ -182,12 +212,23 @@ struct Dashboard::State
     [[nodiscard]] uint64_t nowMonoMs() const noexcept;
     /// @return The selected row among the visible ones; nullptr when there is none.
     [[nodiscard]] Row const* selectedRow() const noexcept;
-    /// Asks the engine to read the board of the run the dashboard selects, which its details show, and to
-    /// stop reading the one it showed before: appended to @p actions. A board or a transcript screen asks for
-    /// its own; the details ask again once the dashboard is back.
-    void syncDetailsBoard(std::vector<UiAction>& actions);
+    /// @return The selected row's run; nullptr when it stands for none the engine knows.
+    [[nodiscard]] Run const* selectedRun() const noexcept;
+    /// Asks the engine to read the board of the run the Focus shows, and to stop reading the one it showed
+    /// before: appended to @p actions.
+    void syncBoard(std::vector<UiAction>& actions);
+    /// Asks the engine to read the transcript page the Focus shows: on selection, again every
+    /// TranscriptFollowMs while its run is live and it follows the agent, and at once when the log grew a
+    /// page. Appended to @p actions.
+    void syncTranscript(std::vector<UiAction>& actions);
+    /// @return The transcript page the Focus asks for: the one turned to, else the last one the engine knows.
+    [[nodiscard]] uint32_t wantedPage() const noexcept;
+    /// @return When the transcript the Focus follows is read again; std::nullopt: it is not.
+    [[nodiscard]] std::optional<uint64_t> transcriptDueMs() const noexcept;
     /// @return The band the tab's size chooses.
     [[nodiscard]] Band band() const noexcept;
+    /// @return How many runs need the user: what the top bar's pill counts.
+    [[nodiscard]] std::size_t needYou() const noexcept;
 
     /// Whether the rows match the engine.
     enum class Rows : uint8_t
@@ -205,35 +246,39 @@ struct Dashboard::State
 
     Engine const& engine;
     core::IClock const& clock;
-    std::string detailsBoard {}; ///< The run whose board the details asked the engine for; empty: none.
-    IUuidSource& ids;            ///< Where the session ids of the agents it dispatches come from.
-    std::string tab;             ///< The tab it is served in.
-    std::string frameBytes;      ///< What the surface was handed since the last frame.
+    std::string shownBoard {};      ///< The run whose board the Focus asked the engine for; empty: none.
+    std::string shownTranscript {}; ///< The run whose transcript the Focus asked for last; empty: none.
+    uint64_t transcriptAskedMs = 0; ///< When it asked, in the engine's monotonic milliseconds.
+    IUuidSource& ids;               ///< Where the session ids of the agents it dispatches come from.
+    std::string tab;                ///< The tab it is served in.
+    std::string frameBytes;         ///< What the surface was handed since the last frame.
+    std::string clipboardBytes;     ///< An OSC 52 copy the next frame carries.
     core::tui::HeadlessSurface surface;
     core::tui::Screen screen;
     core::tui::VtParser parser;
     Size size;
     Interaction interaction;
+    std::string selectedKey;          ///< The identity (keyOf()) of the selected row, kept across rebuilds.
+    std::string startedSession;       ///< The session of a run the launcher started, selected once it is
+                                      ///< listed; empty: none.
     std::vector<Row> rows;            ///< Every row.
-    std::vector<std::size_t> visible; ///< The indices of the rows the filter and the layout keep.
+    std::vector<std::size_t> visible; ///< The indices of the rows the filter keeps.
     std::string visibleFilter;        ///< The filter @ref visible was made with.
-    Furniture visibleFurniture = Furniture::Shown; ///< The furniture @ref visible was made with.
-    ChartRows visibleCharts = ChartRows::Shown;    ///< Whether @ref visible kept the chart rows.
-    Rows rowsState = Rows::Stale;                  ///< Whether @ref rows must be built again.
-    uint64_t rowsBuiltAtMs = 0; ///< When @ref rows was built, in the engine's monotonic milliseconds.
-    std::size_t rowBuilds = 0;  ///< How often @ref rows was built.
+    Rows rowsState = Rows::Stale;     ///< Whether @ref rows must be built again.
+    uint64_t rowsBuiltAtMs = 0;       ///< When @ref rows was built, in the engine's monotonic milliseconds.
+    std::size_t rowBuilds = 0;        ///< How often @ref rows was built.
     std::optional<uint64_t>
         rowChangeMs; ///< When a row changes next with time alone (nextRowChange()); std::nullopt: none does.
     std::optional<core::SteadyTimePoint> escapeHeldSince; ///< When a lone ESC that ended an input arrived.
-    std::size_t scrollTop = 0;                            ///< The first visible row the list shows.
+    std::size_t scrollTop = 0;                            ///< The first visible row the Fleet shows.
     Component const* shownLayout = nullptr; ///< The layout @ref toggled and @ref problems belong to.
-    std::vector<std::pair<PanelRole, Component*>> toggled; ///< Its panels shown by pane.
+    std::vector<std::pair<PanelRole, Component*>> toggled; ///< Its panels shown by place.
     ProblemLines* problems = nullptr;                      ///< The current layout's problem lines.
     Repaint repaint = Repaint::Needed;
     std::unique_ptr<HelpOverlay> help;
     std::unique_ptr<LauncherView> launcherView; ///< Draws interaction.launcher.
-    BoardPanelState boardPanel;                 ///< What the board panel learnt drawing itself.
-    TranscriptPanelState transcriptPanel;       ///< What the transcript panel learnt drawing itself.
+    FocusFrame focus;                           ///< What the Focus draws this frame.
+    FocusPanels focusPanels;                    ///< What the Focus's tabs learnt drawing themselves.
     std::unique_ptr<core::tui::Responsive> root;
 };
 
@@ -257,7 +302,7 @@ namespace
             auto const& style = styleOf(canvas.theme(), Role::Warning);
             auto row = 0;
             for (auto const& line: _state.engine.problems() | std::views::take(std::max(0, canvas.height())))
-                canvas.putString(row++, 0, cut(line, canvas.width()), style);
+                canvas.putString(row++, 1, cut(line, canvas.width() - 2), style);
         }
 
         [[nodiscard]] Size preferredSize() const override
@@ -277,318 +322,329 @@ namespace
         std::size_t _count;
     };
 
-    /// The rows, in a box titled with the filter.
-    class ListPanel final: public Component
+    /// The fleet gauge, `⬢ 3/4 ▰▰▰▱`, and the `● 2 need you` pill.
+    struct Gauge
+    {
+        std::string fleet; ///< The gauge.
+        std::string pill;  ///< The pill; empty while nothing needs the user.
+    };
+
+    [[nodiscard]] Gauge gaugeOf(Dashboard::State const& state)
+    {
+        auto const active = state.engine.activeRuns();
+        auto const* const config = state.engine.config();
+        auto gauge = Gauge {};
+        if (config != nullptr)
+            gauge.fleet = std::format(
+                "⬢ {}/{} {}",
+                active,
+                config->maxAgents(),
+                meterOf(BoardProgress { .done = active, .total = config->maxAgents(), .current = {} },
+                        static_cast<int>(std::min<std::size_t>(config->maxAgents(), MeterCells))));
+        else
+            gauge.fleet = std::format("⬢ {}", active);
+        if (auto const count = state.needYou(); count > 0)
+            gauge.pill = std::format("● {} need you", count);
+        return gauge;
+    }
+
+    /// Draws the gauge and the pill so that they end at @p end, on @p row.
+    void drawGauge(Canvas& canvas, Gauge const& gauge, int row, int end)
+    {
+        auto const& theme = canvas.theme();
+        auto x = end;
+        if (!gauge.pill.empty())
+        {
+            x -= columnsOf(gauge.pill);
+            canvas.putString(row, x, gauge.pill, styleOf(theme, Role::Warning));
+            x -= 2;
+        }
+        x -= columnsOf(gauge.fleet);
+        canvas.putString(row, x, gauge.fleet, styleOf(theme, Role::Working));
+    }
+
+    /// The top bar: the brand, the fleet gauge, the pill, and a setup warning while something is missing.
+    class TopBar final: public Component
     {
       public:
-        explicit ListPanel(Dashboard::State& state): _state { state } {}
+        explicit TopBar(Dashboard::State const& state): _state { state } {}
+
+        void render(Canvas& canvas) override
+        {
+            auto const& theme = canvas.theme();
+            auto brand = styleOf(theme, Role::Accent);
+            brand.bold = true;
+            auto const x = 1 + canvas.putString(0, 1, "✦ Agents", brand);
+            if (!_state.engine.missingPlugins().empty())
+                canvas.putString(0,
+                                 x + 2,
+                                 cut("plugins missing · I installs", (canvas.width() / 2) - x),
+                                 styleOf(theme, Role::Warning));
+            drawGauge(canvas, gaugeOf(_state), 0, canvas.width() - 1);
+        }
+
+        [[nodiscard]] Size preferredSize() const override { return { .width = 0, .height = 1 }; }
+
+      private:
+        Dashboard::State const& _state;
+    };
+
+    /// The rows of the Fleet, in a box titled with their count and the filter. In the Wide band a run's row
+    /// takes two lines, its second what the agent is on; elsewhere one, but a Needs you run keeps its second
+    /// line, so that its question shows without opening anything.
+    class FleetPanel final: public Component
+    {
+      public:
+        FleetPanel(Dashboard::State& state, Band band): _state { state }, _band { band } {}
 
         void render(Canvas& canvas) override
         {
             auto const& interaction = _state.interaction;
-            auto title = std::string { "Agents" };
+            auto const runs = static_cast<std::size_t>(
+                std::ranges::count_if(_state.rows, [](Row const& row) { return !row.run.empty(); }));
+            auto title = std::format("Agents {}", runs);
             if (interaction.filtering == Filtering::Typing || !interaction.filter.empty())
                 title += std::format(
                     " · /{}{}", interaction.filter, interaction.filtering == Filtering::Typing ? "▏" : "");
-            drawFrame(canvas, title);
+            drawFrame(canvas, title, interaction.place == Place::Fleet ? Role::Focus : Role::Border);
             auto inside = insideFrame(canvas);
             auto const& rows = _state.visible;
-            auto const height = static_cast<std::size_t>(std::max(0, inside.height()));
+            auto const height = std::max(0, inside.height());
             auto const selected = positionOfSelectable(_state.rows, rows, interaction.selected);
+            auto heights =
+                std::ranges::to<std::vector<int>>(rows | std::views::transform([&](std::size_t index) {
+                                                      return heightOf(_state.rows[index]);
+                                                  }));
+            // `+ new agent` stands apart from the runs above it, where there are any.
+            auto const apart = rows.size() > 1 && _state.rows[rows.back()].kind == RowKind::NewAgent;
+            if (apart)
+                ++heights.back();
+            auto const linesBetween = [&](std::size_t from, std::size_t to) {
+                auto lines = 0;
+                for (auto const at: std::views::iota(from, to))
+                    lines += heights[at];
+                return lines;
+            };
             auto& top = _state.scrollTop;
+            top = std::min(top, rows.empty() ? 0 : rows.size() - 1);
             if (selected < rows.size())
             {
-                if (selected < top)
-                    top = selected;
-                else if (height > 0 && selected >= top + height)
-                    top = selected - height + 1;
-            }
-            // The selected row is never the first one shown with its section's heading hidden right above
-            // it, where both fit: not after scrolling up to it, nor when rows arrive above it (a list
-            // answered after the rows the selection first scrolled to).
-            // An open group's header counts as part of the heading above it: both come into view.
-            if (selected < rows.size() && selected >= top)
-            {
-                auto const isHeader = [&](std::size_t at) {
-                    auto const& row = _state.rows[rows[at]];
-                    return row.kind == RowKind::Heading
-                           || (row.kind == RowKind::Group && !row.isSelectable());
-                };
-                // Only headers stand between the top and the selection: the one above them comes into view
-                // too.
-                auto const onlyHeadersAbove = [&] {
-                    return std::ranges::all_of(std::views::iota(top, selected), isHeader);
-                };
-                while (top > 0 && selected - top + 1 < height && isHeader(top - 1) && onlyHeadersAbove())
+                top = std::min(top, selected);
+                while (top < selected && linesBetween(top, selected + 1) > height)
+                    ++top;
+                // The heading right above the selection comes into view with it, where both fit.
+                if (top == selected && top > 0 && _state.rows[rows[top - 1]].kind == RowKind::Heading
+                    && linesBetween(top - 1, selected + 1) <= height)
                     --top;
             }
-            top = std::min(top, rows.size() > height ? rows.size() - height : 0);
-            for (auto const line: std::views::iota(std::size_t { 0 }, std::min(height, rows.size() - top)))
+            // No blank space below the last row while rows above are hidden.
+            while (top > 0 && linesBetween(top - 1, rows.size()) <= height)
+                --top;
+            auto y = 0;
+            for (auto const at: std::views::iota(top, rows.size()))
+            {
+                if (y >= height)
+                    break;
+                auto const shift = apart && at + 1 == rows.size() ? 1 : 0;
                 drawRow(inside,
-                        static_cast<int>(line),
-                        _state.rows[rows[top + line]],
-                        top + line == selected ? Selection::Selected : Selection::Unselected);
+                        y + shift,
+                        _state.rows[rows[at]],
+                        at == selected ? Selection::Selected : Selection::Unselected);
+                y += heights[at];
+            }
         }
 
       private:
-        static void drawRow(Canvas& canvas, int line, Row const& row, Selection selection)
+        /// @return Whether @p row draws its second line in this band.
+        [[nodiscard]] bool hasSecondLine(Row const& row) const noexcept
+        {
+            if (row.context.empty() || row.kind == RowKind::Heading || row.kind == RowKind::Notice)
+                return false;
+            return _band == Band::Wide || row.attention == FleetGroup::NeedsYou;
+        }
+
+        /// @return The lines @p row takes, the blank above `+ new agent` aside.
+        [[nodiscard]] int heightOf(Row const& row) const noexcept { return hasSecondLine(row) ? 2 : 1; }
+
+        void drawRow(Canvas& canvas, int line, Row const& row, Selection selection) const
         {
             auto const& theme = canvas.theme();
             auto const width = canvas.width();
+            auto const isSelected = selection == Selection::Selected;
+            auto const pick = [&](Role role) {
+                auto style = styleOf(theme, role);
+                if (isSelected)
+                    style.bg = styleOf(theme, Role::Selection).bg;
+                return style;
+            };
             switch (row.kind)
             {
-                case RowKind::Spacer: return;
-                case RowKind::Heading:
-                case RowKind::Placeholder:
-                    canvas.putString(line, 1, cut(row.text, width - 2), styleOf(theme, Role::Dim));
-                    return;
                 case RowKind::Notice:
                     canvas.putString(line, 1, cut(row.text, width - 2), styleOf(theme, Role::Text));
                     return;
-                case RowKind::Chart: {
-                    // The label, the bars from its column on, and what they add up to on the right when it
-                    // fits.
-                    auto const bars = cut(row.text, std::max(0, width - 2 - ChartLabelColumns));
-                    auto const used = 1 + ChartLabelColumns + columnsOf(bars);
-                    auto const status = cut(row.status, std::max(0, width - 1 - used - 2));
-                    canvas.putString(
-                        line, 1, cut(row.prefix, ChartLabelColumns - 1), styleOf(theme, Role::Dim));
-                    canvas.putString(line, 1 + ChartLabelColumns, bars, styleOf(theme, Role::Text));
-                    canvas.putString(line, width - 1 - columnsOf(status), status, styleOf(theme, Role::Dim));
+                case RowKind::Heading: {
+                    auto heading = pick(row.markRole);
+                    heading.bold = true;
+                    if (isSelected)
+                        canvas.fill(
+                            Rect { .x = 0, .y = line, .width = width, .height = 1 }, ' ', pick(Role::Text));
+                    auto x = 1;
+                    if (!row.mark.empty())
+                        x += canvas.putString(line, x, row.mark, heading) + 1;
+                    x += canvas.putString(line, x, cut(row.text, width - x - 1), heading) + 1;
+                    canvas.putString(line, x, cut(row.status, width - x - 1), pick(Role::Dim));
                     return;
                 }
                 default: break;
             }
-            auto const pick = [&](Role role) -> core::tui::Style const& {
-                return styleOf(theme, selection == Selection::Selected ? Role::Selection : role);
-            };
-            if (selection == Selection::Selected)
-                canvas.fill(Rect { .x = 0, .y = line, .width = width, .height = 1 }, ' ', pick(Role::Text));
+            auto const lines = hasSecondLine(row) ? 2 : 1;
+            if (isSelected)
+            {
+                canvas.fill(
+                    Rect { .x = 0, .y = line, .width = width, .height = lines }, ' ', pick(Role::Text));
+                for (auto const at: std::views::iota(0, lines))
+                    canvas.putString(line + at, 0, "▍", pick(Role::Accent));
+            }
             canvas.putString(line, 1, cut(row.mark, 1), pick(row.markRole));
             auto column = 3;
             auto const end = width - 1;
-            auto const statusColumns = std::min(columnsOf(row.status), std::max(0, (end - column) / 2));
-            auto const status = cut(row.status, statusColumns);
+            auto const status =
+                cut(row.status, std::min(columnsOf(row.status), std::max(0, (end - column) / 2)));
             if (!row.prefix.empty())
-            {
-                auto const prefix = cut(row.prefix, std::max(0, (end - column) / 4));
-                column += canvas.putString(line, column, prefix, pick(Role::Dim)) + 1;
-            }
+                column += canvas.putString(
+                              line, column, cut(row.prefix, std::max(0, (end - column) / 4)), pick(Role::Dim))
+                          + 1;
             auto const textEnd = status.empty() ? end : end - columnsOf(status) - 1;
-            canvas.putString(line, column, cut(row.text, textEnd - column), pick(Role::Text));
+            column += canvas.putString(line, column, cut(row.text, textEnd - column), pick(Role::Text));
+            // Folded to one line, the second line's words follow the name.
+            if (lines == 1 && !row.context.empty() && textEnd - column > 4)
+                canvas.putString(line,
+                                 column + 1,
+                                 cut(std::format("· {}", row.context), textEnd - column - 1),
+                                 pick(row.contextRole));
             if (!status.empty())
                 canvas.putString(line, end - columnsOf(status), status, pick(row.statusRole));
+            if (lines == 1)
+                return;
+            auto contextEnd = end;
+            if (row.progress)
+            {
+                auto const meter = meterOf(*row.progress, MeterCells);
+                contextEnd -= MeterCells + 1;
+                canvas.putString(line + 1, end - MeterCells, meter, pick(Role::Working));
+            }
+            canvas.putString(line + 1, 3, cut(row.context, contextEnd - 3), pick(row.contextRole));
         }
 
         Dashboard::State& _state;
-    };
-
-    /// How far a detail's continuation lines are indented past its value.
-    constexpr auto ContinuationIndent = 2;
-
-    /// One drawn line of the details: a detail's first line with its label, or one of its continuations.
-    struct DetailText
-    {
-        std::string_view label = {}; ///< The detail's label on its first line; empty on a continuation.
-        std::string text = {};       ///< Sanitised and wrapped to its cells.
-        Role role = Role::Text;      ///< How it is drawn.
-        int indent = 0;              ///< The cells it starts past the value column.
-    };
-
-    /// @return The details fitted to @p columns cells as each says (fitted()), continuation lines indented.
-    [[nodiscard]] std::vector<DetailText> detailLinesOf(std::span<DetailLine const> details, int columns)
-    {
-        auto lines = std::vector<DetailText> {};
-        for (auto const& detail: details)
-        {
-            auto wrapped = fitted(detail.value, detail.fit, columns, columns - ContinuationIndent);
-            if (wrapped.empty())
-                wrapped.emplace_back();
-            for (auto const index: std::views::iota(std::size_t { 0 }, wrapped.size()))
-                lines.push_back(DetailText { .label = index == 0 ? std::string_view { detail.label } : ""sv,
-                                             .text = std::move(wrapped[index]),
-                                             .role = detail.role,
-                                             .indent = index == 0 ? 0 : ContinuationIndent });
-        }
-        return lines;
-    }
-
-    /// @return @p text with a `…` that says more follows, cut to fit @p columns.
-    [[nodiscard]] std::string endingInEllipsis(std::string_view text, int columns)
-    {
-        auto withEllipsis = std::format("{}…", text);
-        return columnsOf(withEllipsis) <= columns ? withEllipsis : cut(withEllipsis, columns);
-    }
-
-    /// The selected row's details, in a box.
-    class DetailsPanel final: public Component
-    {
-      public:
-        explicit DetailsPanel(Dashboard::State const& state): _state { state } {}
-
-        void render(Canvas& canvas) override
-        {
-            drawFrame(canvas, "Details");
-            auto inside = insideFrame(canvas);
-            auto const& theme = canvas.theme();
-            auto const width = inside.width() - 2;
-            auto const* const row = _state.selectedRow();
-            if (row == nullptr)
-            {
-                inside.putString(0, 1, cut("Nothing selected.", width), styleOf(theme, Role::Dim));
-                return;
-            }
-            inside.putString(0, 1, cut(row->title, width), styleOf(theme, Role::Text));
-            auto const lines = detailLinesOf(row->details, width - LabelColumns);
-            auto const room = static_cast<std::size_t>(std::max(0, inside.height() - 2));
-            for (auto const index: std::views::iota(std::size_t { 0 }, std::min(room, lines.size())))
-            {
-                auto const& line = lines[index];
-                auto const y = 2 + static_cast<int>(index);
-                auto const columns = width - LabelColumns - line.indent;
-                // The last line that fits says that more follows.
-                auto const text = index + 1 == room && lines.size() > room
-                                      ? endingInEllipsis(line.text, columns)
-                                      : std::string { line.text };
-                inside.putString(y, 1, cut(line.label, LabelColumns - 1), styleOf(theme, Role::Dim));
-                inside.putString(y, 1 + LabelColumns + line.indent, text, styleOf(theme, line.role));
-            }
-        }
-
-      private:
-        Dashboard::State const& _state;
-    };
-
-    /// The keys that act now in a band and on the screen shown, by their hints.
-    class HintLine final: public Component
-    {
-      public:
-        HintLine(Dashboard::State const& state, Band band): _state { state }, _band { band } {}
-
-        void render(Canvas& canvas) override
-        {
-            auto const& interaction = _state.interaction;
-            auto hinted = std::vector<std::string_view> {};
-            for (auto const& row: keyRows())
-                if (isHintedIn(row, _band, interaction.screen) && isOffered(row))
-                    hinted.push_back(row.hint);
-            canvas.putString(0, 1, joinHints(hinted, canvas.width() - 2), styleOf(canvas.theme(), Role::Dim));
-        }
-
-      private:
-        /// @return Whether the row acts now. On the dashboard the hints are the keys of every row; on a
-        ///         board or a transcript Enter needs a run whose agent has a tab, and `b` a run whose
-        ///         worktree is there.
-        [[nodiscard]] bool isOffered(KeyRow const& row) const noexcept
-        {
-            auto const& interaction = _state.interaction;
-            if (interaction.screen == Screen::Dashboard)
-                return true;
-            if (row.command == KeyCommand::Enter)
-                return hasAgentTab(&_state.engine, interaction.subject);
-            if (row.command == KeyCommand::Board)
-                return hasBoardToShow(&_state.engine, interaction.subject);
-            return true;
-        }
-
-        Dashboard::State const& _state;
         Band _band;
     };
 
-    /// The extension's summary, as the status line shows it; or the question an `e` asks (D14).
-    class SummaryLine final: public Component
+    /// The action bar: a notice until the next key, the question an `e` asks, or the keys that act now; and
+    /// the gauge on its right while the top bar gave way.
+    class ActionBar final: public Component
     {
       public:
-        explicit SummaryLine(Dashboard::State const& state): _state { state } {}
+        explicit ActionBar(Dashboard::State const& state): _state { state } {}
 
         void render(Canvas& canvas) override
         {
-            // The dashboard shows no terminal cursor: the filter draws its own caret. A frame's buffer keeps
-            // the cursor visible unless something hides it, and this line is in every layout, so it is hidden
-            // here.
+            // The dashboard shows no terminal cursor: the filter and the message box draw their own caret. A
+            // frame's buffer keeps the cursor visible unless something hides it, and this line is in every
+            // layout, so it is hidden here.
             canvas.hideCursor();
-            auto const& pending = _state.interaction.pendingEnd;
-            if (auto const& message = _state.interaction.message)
+            auto const& theme = canvas.theme();
+            auto end = canvas.width() - 1;
+            if (holds(_state.focus.givenWay, Furniture::TopBar))
+            {
+                auto const gauge = gaugeOf(_state);
+                drawGauge(canvas, gauge, 0, end);
+                end -= columnsOf(gauge.fleet) + (gauge.pill.empty() ? 0 : columnsOf(gauge.pill) + 2) + 2;
+            }
+            auto const columns = end - 1;
+            auto const& interaction = _state.interaction;
+            if (!interaction.notice.empty())
+                canvas.putString(0, 1, cut(interaction.notice, columns), styleOf(theme, Role::Accent));
+            else if (!interaction.pendingEnd.empty())
                 canvas.putString(
                     0,
                     1,
-                    cut(std::format("to {}: {}▏ · enter sends · esc drops", message->run, message->text),
-                        canvas.width() - 2),
-                    styleOf(canvas.theme(), Role::Accent));
-            else if (auto const& notice = _state.interaction.notice; !notice.empty())
-                canvas.putString(
-                    0, 1, cut(notice, canvas.width() - 2), styleOf(canvas.theme(), Role::Failing));
-            else if (!pending.empty())
-                canvas.putString(
-                    0,
-                    1,
-                    cut(std::format("end {}? e to confirm · esc to keep", pending), canvas.width() - 2),
-                    styleOf(canvas.theme(), Role::Warning));
+                    cut(std::format("end {}? e again to end · esc keeps it", nameOf(interaction.pendingEnd)),
+                        columns),
+                    styleOf(theme, Role::Warning));
             else
-                canvas.putString(0,
-                                 1,
-                                 cut(_state.engine.published().shortText, canvas.width() - 2),
-                                 styleOf(canvas.theme(), Role::Text));
+                canvas.putString(0, 1, joinHints(hints(), columns), styleOf(theme, Role::Dim));
         }
 
       private:
+        /// @return The run's name, as its row says it.
+        [[nodiscard]] std::string_view nameOf(std::string_view run) const noexcept
+        {
+            auto const row = std::ranges::find(_state.rows, run, &Row::run);
+            return row != _state.rows.end() ? std::string_view { row->name } : run;
+        }
+
+        /// @return The hints of the keys that act now: the message box's while it has the keys; else those of
+        ///         the place, a row command's only where the selected row offers it.
+        [[nodiscard]] std::vector<std::string_view> hints() const
+        {
+            auto const* const row = _state.selectedRow();
+            auto const place = _state.interaction.place;
+            if (place == Place::Focus && hasMessageBox(&_state.engine, row))
+                return { "⏎ send"sv, "alt⏎ line"sv, "esc keep draft"sv, "pgup pgdn scroll"sv };
+            auto hinted = std::vector<std::string_view> {};
+            for (auto const& key: keyRows())
+            {
+                if (key.hint.empty() || !holds(key.on, place))
+                    continue;
+                if (isRowCommand(key.command)
+                    && (row == nullptr || !std::ranges::contains(row->offers, key.command)))
+                    continue;
+                hinted.push_back(key.hint);
+            }
+            return hinted;
+        }
+
         Dashboard::State const& _state;
     };
 
-    /// @return The hints of the dashboard's keys that have one, in the table's order.
-    [[nodiscard]] auto hints()
-    {
-        return keyRows()
-               | std::views::filter([](KeyRow const& row) { return holds(row.on, Screen::Dashboard); })
-               | std::views::transform(&KeyRow::hint)
-               | std::views::filter([](std::string_view hint) { return !hint.empty(); });
-    }
-
-    /// The keys and what they do, over the dashboard.
-    /// The keys and what they do, over the dashboard: the table's hints, then the configured tasks' keys.
+    /// The keys and what they do, over the dashboard: the table's hints.
     class HelpOverlay final: public Component
     {
       public:
-        explicit HelpOverlay(Engine const& engine): _engine { engine } {}
-
         void render(Canvas& canvas) override
         {
             canvas.clear(styleOf(canvas.theme(), Role::Text));
             drawFrame(canvas, "Keys");
             auto inside = insideFrame(canvas);
             auto line = 0;
-            for (auto const& [text, role]: lines() | std::views::take(std::max(0, inside.height())))
-                inside.putString(line++, 1, cut(text, inside.width() - 2), styleOf(canvas.theme(), role));
+            for (auto const hint: hints() | std::views::take(std::max(0, inside.height())))
+                inside.putString(
+                    line++, 1, cut(hint, inside.width() - 2), styleOf(canvas.theme(), Role::Text));
         }
 
         [[nodiscard]] Size preferredSize() const override
         {
-            auto const all = lines();
             auto widest = 0;
-            for (auto const& line: all)
-                widest = std::max(widest, columnsOf(line.first));
-            return { .width = widest + 4, .height = static_cast<int>(all.size()) + 2 };
+            auto count = 0;
+            for (auto const hint: hints())
+            {
+                widest = std::max(widest, columnsOf(hint));
+                ++count;
+            }
+            return { .width = widest + 4, .height = count + 2 };
         }
 
       private:
-        /// @return Each line and its role: the hints, then a `tasks` heading and one `<key> <label>` per
-        /// task.
-        [[nodiscard]] std::vector<std::pair<std::string, Role>> lines() const
+        /// @return The hints of the keys that have one, each once, in the table's order.
+        [[nodiscard]] static std::vector<std::string_view> hints()
         {
-            auto all = std::vector<std::pair<std::string, Role>> {};
-            for (auto const hint: hints())
-                all.emplace_back(std::string { hint }, Role::Text);
-            auto const* const config = _engine.config();
-            if (config == nullptr || config->tasks().empty())
-                return all;
-            all.emplace_back(std::string {}, Role::Text);
-            all.emplace_back("tasks", Role::Dim);
-            for (auto const& task: config->tasks())
-                all.emplace_back(std::format("{} {}", task.key, task.label), Role::Text);
+            auto all = std::vector<std::string_view> {};
+            for (auto const& row: keyRows())
+                if (!row.hint.empty() && !std::ranges::contains(all, row.hint))
+                    all.push_back(row.hint);
             return all;
         }
-
-        Engine const& _engine;
     };
 
 } // namespace
@@ -609,13 +665,13 @@ Dashboard::State::State(Engine const& engine,
     surface { size, [this](std::string_view bytes) { frameBytes.append(bytes); } },
     screen { surface, core::tui::ScreenConfig {}, clock },
     size { size },
-    help { std::make_unique<HelpOverlay>(engine) },
+    help { std::make_unique<HelpOverlay>() },
     launcherView { std::make_unique<LauncherView>(engine, interaction.launcher) },
     root { std::make_unique<core::tui::Responsive>(std::ranges::to<std::vector<core::tui::Breakpoint>>(
         std::views::iota(std::size_t { 0 }, BandBreakpoints.size())
         | std::views::transform([this](std::size_t index) {
               return core::tui::Breakpoint { .minColumns = BandBreakpoints[index].minColumns,
-                                             .minRows = BandBreakpoints[index].minRows,
+                                             .minRows = 0,
                                              .make = [this, index] { return buildLayout(index); } };
           }))) }
 {
@@ -634,57 +690,30 @@ Dashboard::State::~State()
 
 std::unique_ptr<Component> Dashboard::State::buildLayout(std::size_t breakpoint)
 {
-    auto const& chosen = BandBreakpoints[breakpoint];
+    auto const band = BandBreakpoints[breakpoint].band;
     toggled.clear();
     // Shown or hidden once added: adding a child shows it.
-    auto const toggle = [this, &chosen](PanelRole role, Component& panel) {
-        panel.setVisible(isShown(role, interaction, chosen.band));
+    auto const toggle = [this, band](PanelRole role, Component& panel) {
+        panel.setVisible(isShown(role, interaction.place, band, focus.givenWay, focusWidthOf(focus.row)));
         toggled.emplace_back(role, &panel);
     };
-    auto const filling = layout::Style { .grow = 1, .basis = 0 };
 
     auto column = std::make_unique<FlexBox>(layout::Style { .direction = layout::Direction::Column });
+    toggle(PanelRole::TopBar, column->add(std::make_unique<TopBar>(*this), layout::Style { .shrink = 0 }));
     auto problemLines = std::make_unique<ProblemLines>(*this);
     problems = problemLines.get();
-    toggle(PanelRole::Chrome, column->add(std::move(problemLines), layout::Style { .shrink = 0 }));
-    switch (chosen.band)
-    {
-        case Band::Wide: {
-            auto body =
-                std::make_unique<FlexBox>(layout::Style { .direction = layout::Direction::Row, .gap = 1 });
-            body->add(std::make_unique<ListPanel>(*this), layout::Style { .grow = 3, .basis = 0 });
-            body->add(std::make_unique<DetailsPanel>(*this), layout::Style { .grow = 2, .basis = 0 });
-            toggle(PanelRole::ListAndDetails, column->add(std::move(body), filling));
-            toggle(PanelRole::DetailsPage, column->add(std::make_unique<DetailsPanel>(*this), filling));
-            break;
-        }
-        case Band::Medium: {
-            auto body = std::make_unique<FlexBox>(layout::Style { .direction = layout::Direction::Column });
-            toggle(PanelRole::List, body->add(std::make_unique<ListPanel>(*this), filling));
-            toggle(PanelRole::DetailsBelow,
-                   body->add(std::make_unique<DetailsPanel>(*this),
-                             layout::Style { .shrink = 0, .basis = DetailsBelowRows }));
-            toggle(PanelRole::DetailsPage, body->add(std::make_unique<DetailsPanel>(*this), filling));
-            toggle(PanelRole::Body, column->add(std::move(body), filling));
-            break;
-        }
-        case Band::Narrow: {
-            auto body = std::make_unique<FlexBox>(layout::Style { .direction = layout::Direction::Column });
-            toggle(PanelRole::List, body->add(std::make_unique<ListPanel>(*this), filling));
-            toggle(PanelRole::DetailsPage, body->add(std::make_unique<DetailsPanel>(*this), filling));
-            toggle(PanelRole::Body, column->add(std::move(body), filling));
-            break;
-        }
-    }
-    toggle(PanelRole::Board,
-           column->add(std::make_unique<StatusBoardPanel>(engine, interaction, clock, boardPanel), filling));
-    toggle(
-        PanelRole::Transcript,
-        column->add(std::make_unique<TranscriptPanel>(engine, interaction, tab, transcriptPanel), filling));
-    if (chosen.furniture == Furniture::Shown)
-        column->add(std::make_unique<HintLine>(*this, chosen.band), layout::Style { .shrink = 0 });
-    toggle(PanelRole::Chrome,
-           column->add(std::make_unique<SummaryLine>(*this), layout::Style { .shrink = 0 }));
+    column->add(std::move(problemLines), layout::Style { .shrink = 0 });
+    auto body = std::make_unique<FlexBox>(
+        layout::Style { .direction = band == Band::Wide ? layout::Direction::Row : layout::Direction::Column,
+                        .gap = band == Band::Wide ? 1 : 0 });
+    toggle(PanelRole::Fleet,
+           body->add(std::make_unique<FleetPanel>(*this, band),
+                     layout::Style { .grow = FleetShare, .basis = 0 }));
+    toggle(PanelRole::Focus,
+           body->add(std::make_unique<Focus>(engine, interaction, focus, tab, clock, focusPanels),
+                     layout::Style { .grow = FocusShare, .basis = 0 }));
+    column->add(std::move(body), layout::Style { .grow = 1, .basis = 0 });
+    column->add(std::make_unique<ActionBar>(*this), layout::Style { .shrink = 0 });
     shownLayout = column.get();
     return column;
 }
@@ -709,49 +738,72 @@ void Dashboard::State::ensureRows()
     rowsBuiltAtMs = now;
     ++rowBuilds;
     visible.clear();
-    refilter();
+    refilter(Keep::Row);
 }
 
-void Dashboard::State::refilter()
+void Dashboard::State::refilter(Keep keep)
 {
-    auto const& breakpoint = BandBreakpoints[breakpointFor(size)];
-    auto const furniture = breakpoint.furniture;
-    // A chart needs the Wide band's width: its hours would be cut to nothing in a narrower list.
-    auto const charts = breakpoint.band == Band::Wide ? ChartRows::Shown : ChartRows::Hidden;
-    if (!visible.empty() && interaction.filter == visibleFilter && furniture == visibleFurniture
-        && charts == visibleCharts)
-        return;
-    visible = visibleRows(rows, interaction.filter, furniture, charts);
-    visibleFilter = interaction.filter;
-    visibleFurniture = furniture;
-    visibleCharts = charts;
-    auto const selectable = selectableCount(rows, visible);
-    interaction.selected = selectable == 0 ? 0 : std::min(interaction.selected, selectable - 1);
-    // A group just folded selects its header, its items gone; one just unfolded, its first item.
-    if (!interaction.followGroup.empty())
-    {
-        auto ordinal = std::size_t { 0 };
-        for (auto const index: visible)
+    // A run the launcher started takes the selection once the engine lists it.
+    if (!startedSession.empty())
+        if (auto const run = std::ranges::find(engine.runs(), startedSession, &Run::session);
+            run != engine.runs().end())
         {
-            if (!rows[index].isSelectable())
-                continue;
-            // Whichever of the header and the first item is selectable now: folded, the header; else the
-            // item.
-            if (rows[index].group == interaction.followGroup)
-            {
-                interaction.selected = ordinal;
-                break;
-            }
-            ++ordinal;
+            selectedKey = run->id;
+            keep = Keep::Row;
+            startedSession.clear();
         }
-        interaction.followGroup.clear();
+    if (visible.empty() || interaction.filter != visibleFilter)
+    {
+        visible = visibleRows(rows, interaction.filter);
+        visibleFilter = interaction.filter;
     }
+    auto const selectable = selectableCount(rows, visible);
+    // The selection stays on its row across a rebuild: by its identity, not by its position.
+    auto ordinal = std::size_t { 0 };
+    auto found = std::optional<std::size_t> {};
+    for (auto const index: visible)
+    {
+        if (!rows[index].isSelectable())
+            continue;
+        // A group just folded selects its heading, its runs gone; one just unfolded, its first run.
+        if (!interaction.followGroup.empty() && rows[index].group == interaction.followGroup)
+        {
+            found = ordinal;
+            break;
+        }
+        if (keep == Keep::Row && interaction.followGroup.empty() && !selectedKey.empty()
+            && keyOf(rows[index]) == selectedKey)
+            found = ordinal;
+        ++ordinal;
+    }
+    interaction.followGroup.clear();
+    if (found)
+        interaction.selected = *found;
+    interaction.selected = selectable == 0 ? 0 : std::min(interaction.selected, selectable - 1);
+    auto const* const row = selectedRow();
+    selectedKey = row != nullptr ? keyOf(*row) : std::string {};
 }
 
 Row const* Dashboard::State::selectedRow() const noexcept
 {
     auto const position = positionOfSelectable(rows, visible, interaction.selected);
     return position < visible.size() ? &rows[visible[position]] : nullptr;
+}
+
+Run const* Dashboard::State::selectedRun() const noexcept
+{
+    auto const* const row = selectedRow();
+    if (row == nullptr || row->run.empty())
+        return nullptr;
+    auto const runs = engine.runs();
+    auto const found = std::ranges::find(runs, row->run, &Run::id);
+    return found != runs.end() ? &*found : nullptr;
+}
+
+std::size_t Dashboard::State::needYou() const noexcept
+{
+    return static_cast<std::size_t>(std::ranges::count_if(
+        engine.runs(), [](Run const& run) { return fleetGroupOf(run) == FleetGroup::NeedsYou; }));
 }
 
 Band Dashboard::State::band() const noexcept
@@ -761,16 +813,17 @@ Band Dashboard::State::band() const noexcept
 
 KeyContext Dashboard::State::keyContext() const noexcept
 {
-    // What the keys scroll: the board or the transcript shown.
-    auto const isTranscript = interaction.screen == Screen::Transcript;
-    return KeyContext { .band = band(),
-                        .selectable = selectableCount(rows, visible),
-                        .selected = selectedRow(),
+    auto const* const row = selectedRow();
+    auto const tab = activeTabOf(interaction, row);
+    auto const [lines, shown] = focusPanels.extentOf(tab);
+    auto const* const view = row != nullptr ? engine.transcript(this->tab, row->run) : nullptr;
+    return KeyContext { .selectable = selectableCount(rows, visible),
+                        .selected = row,
                         .engine = &engine,
-                        .task = std::nullopt,
-                        .lines = isTranscript ? transcriptPanel.lines : boardPanel.lines,
-                        .rows = isTranscript ? transcriptPanel.rows : boardPanel.rows,
-                        .tab = tab };
+                        .tab = tab,
+                        .lines = lines,
+                        .rows = shown,
+                        .pages = view != nullptr && view->content ? view->content->pages : 0 };
 }
 
 std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEvent> const& events,
@@ -787,7 +840,7 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
         if (auto const* const paste = std::get_if<core::tui::PasteEvent>(&event))
         {
             interaction.notice.clear();
-            pasteInto(interaction, engine, paste->text);
+            pasteInto(interaction, keyContext(), paste->text);
             continue;
         }
         auto const* const key = std::get_if<core::tui::KeyEvent>(&event);
@@ -797,46 +850,82 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
         if (interaction.launcher)
         {
             if (auto dispatched = applyLauncherKey(*key, interaction.launcher, engine, hooksAtInput, tab))
+            {
+                // The run it starts is selected once it is listed: its session is the one the launcher
+                // minted.
+                startedSession = dispatched->session;
                 actions.emplace_back(std::move(*dispatched));
+            }
             continue;
         }
-        auto const wasOnBoard = interaction.screen == Screen::Board;
-        auto action = applyKey(*key, interaction, keyContext());
-        // A board the key left, for the dashboard or a transcript, is no longer read.
-        if (wasOnBoard && interaction.screen != Screen::Board)
-        {
-            actions.emplace_back(HideBoardAction {});
-            detailsBoard.clear();
-        }
-        if (action)
+        if (auto action = applyKey(*key, interaction, keyContext()))
             actions.push_back(std::move(*action));
+        // A copy the key asked for goes out with the next frame.
+        if (!interaction.clipboard.empty())
+            core::tui::appendOsc52(clipboardBytes,
+                                   std::exchange(interaction.clipboard, {}),
+                                   core::tui::ClipboardTarget::Clipboard);
         // A launcher a key opened gets its agent's session id now.
         mintSession();
-        refilter();
+        refilter(Keep::Position);
     }
-    if (interaction != before)
+    if (interaction != before || !clipboardBytes.empty())
         repaint = Repaint::Needed;
     return actions;
 }
 
-void Dashboard::State::syncDetailsBoard(std::vector<UiAction>& actions)
+void Dashboard::State::syncBoard(std::vector<UiAction>& actions)
 {
-    // A board or a transcript screen asks for what it shows; the one it replaced is the engine's to forget.
-    if (interaction.screen != Screen::Dashboard)
-    {
-        detailsBoard.clear();
-        return;
-    }
     auto const* const row = selectedRow();
-    auto wanted =
-        row != nullptr && std::ranges::contains(row->offers, KeyCommand::Board) ? row->run : std::string {};
-    if (wanted == detailsBoard)
+    auto wanted = row != nullptr && std::ranges::contains(row->offers, KeyCommand::BoardTab) ? row->run
+                                                                                             : std::string {};
+    if (wanted == shownBoard)
         return;
     if (!wanted.empty())
         actions.emplace_back(ShowBoardAction { .run = wanted });
     else
         actions.emplace_back(HideBoardAction {});
-    detailsBoard = std::move(wanted);
+    shownBoard = std::move(wanted);
+}
+
+uint32_t Dashboard::State::wantedPage() const noexcept
+{
+    if (interaction.page != 0)
+        return interaction.page;
+    auto const* const row = selectedRow();
+    auto const* const view = row != nullptr ? engine.transcript(tab, row->run) : nullptr;
+    return view != nullptr && view->content ? std::max(view->content->pages, uint32_t { 1 }) : 1;
+}
+
+std::optional<uint64_t> Dashboard::State::transcriptDueMs() const noexcept
+{
+    auto const* const run = selectedRun();
+    if (run == nullptr || !countsAsActive(*run) || interaction.follow != Follow::Live
+        || shownTranscript != run->id)
+        return std::nullopt;
+    return transcriptAskedMs + TranscriptFollowMs;
+}
+
+void Dashboard::State::syncTranscript(std::vector<UiAction>& actions)
+{
+    auto const* const run = selectedRun();
+    // The engine reads no transcript while its configuration is refused.
+    if (run == nullptr || engine.config() == nullptr)
+        return;
+    auto const page = wantedPage();
+    auto const* const view = engine.transcript(tab, run->id);
+    auto const now = nowMonoMs();
+    auto const due = transcriptDueMs();
+    // Asked for anew when the Focus shows another run, when the engine dropped the page (from its cache) or
+    // keeps another, and while it follows a live agent, every TranscriptFollowMs; never while a read is in
+    // flight, which answers first.
+    auto const stale = shownTranscript != run->id || view == nullptr || view->page != page;
+    auto const followed = !stale && due && now >= *due && view->state != FetchState::Loading;
+    if (!stale && !followed)
+        return;
+    actions.emplace_back(ReadTranscriptAction { .run = run->id, .page = page });
+    shownTranscript = run->id;
+    transcriptAskedMs = now;
 }
 
 std::vector<UiAction> Dashboard::State::resolveOverdueEscape()
@@ -862,8 +951,50 @@ void Dashboard::State::syncLayout()
         toggled.clear();
         problems = nullptr;
     }
+    auto const* const row = selectedRow();
+    auto const currentBand = band();
+    focus.row = row;
+    focus.tab = activeTabOf(interaction, row);
+    focus.place = interaction.place;
+    focus.box = bottomBoxOf(engine, row, interaction.place);
+    auto const hasRuns = std::ranges::any_of(rows, [](Row const& candidate) {
+        return candidate.isSelectable() && candidate.kind != RowKind::NewAgent;
+    });
+    focus.content = FleetContent::Unconfigured;
+    if (engine.config() != nullptr)
+        focus.content = hasRuns ? FleetContent::Runs : FleetContent::Empty;
+    auto const* const view = row != nullptr ? engine.transcript(tab, row->run) : nullptr;
+    focus.subject = FocusSubject { .run = row != nullptr ? row->run : std::string {},
+                                   .page = view != nullptr ? view->page : wantedPage(),
+                                   .scroll = interaction.scroll,
+                                   .follow = interaction.follow };
+    // The top bar gives way, in its turn, when the Focus would keep too few rows for its tab.
+    focus.givenWay = Furniture::None;
+    if (isShown(PanelRole::Focus, interaction.place, currentBand, Furniture::None, FocusWidth::Shared)
+        && row != nullptr && (!row->run.empty() || row->kind == RowKind::Orphan))
+    {
+        auto const shared = currentBand == Band::Medium && interaction.place == Place::Fleet;
+        auto const focusOf = [&](int body) {
+            return shared ? body * FocusShare / (FleetShare + FocusShare) : body;
+        };
+        auto const body = size.height - static_cast<int>(engine.problems().size()) - 2;
+        auto const draft = interaction.drafts.find(row->run);
+        auto const given = furnitureGivingWay(FocusRows {
+            .height = focusOf(body),
+            .topBarRows = focusOf(body + 1) - focusOf(body),
+            .bottomRows =
+                bottomRowsOf(focus.box,
+                             draft != interaction.drafts.end() ? std::string_view { draft->second } : ""sv,
+                             size.width,
+                             focusOf(body)),
+            .tab = focus.tab });
+        if (holds(given, Furniture::TopBar))
+            focus.givenWay = Furniture::TopBar;
+    }
     for (auto const& [role, panel]: toggled)
-        if (auto const shown = isShown(role, interaction, band()); panel->visible() != shown)
+        if (auto const shown =
+                isShown(role, interaction.place, currentBand, focus.givenWay, focusWidthOf(row));
+            panel->visible() != shown)
             panel->setVisible(shown);
     if (problems != nullptr)
         problems->refresh();
@@ -881,11 +1012,10 @@ void Dashboard::State::syncLayout()
 
 void Dashboard::State::clampScroll() noexcept
 {
-    auto const& [lines, rows] = interaction.screen == Screen::Transcript
-                                    ? std::pair { transcriptPanel.lines, transcriptPanel.rows }
-                                    : std::pair { boardPanel.lines, boardPanel.rows };
-    if (interaction.screen != Screen::Dashboard)
-        interaction.scroll = std::min(interaction.scroll, lines > rows ? lines - rows : 0);
+    // The keys scroll past an end not yet wrapped; the draw that wrapped it knows where it is.
+    auto const [lines, shown] = focusPanels.extentOf(focus.tab);
+    if (interaction.follow == Follow::Away || focus.tab != FocusTab::Transcript)
+        interaction.scroll = std::min(interaction.scroll, lines > shown ? lines - shown : 0);
 }
 
 void Dashboard::State::mintSession()
@@ -906,7 +1036,7 @@ void Dashboard::State::syncLauncher()
         return;
     }
     // Centred; the Narrow band gives it the whole tab.
-    auto const band = BandBreakpoints[breakpointFor(size)].band;
+    auto const band = this->band();
     auto const width = launcherWidthIn(band, size.width);
     auto const height =
         band == Band::Narrow ? size.height : std::min(launcherView->heightAt(width), size.height);
@@ -957,13 +1087,18 @@ std::optional<core::SteadyTimePoint> Dashboard::pendingEscapeDeadline() const no
 
 std::optional<core::SteadyTimePoint> Dashboard::nextRepaintDue() const noexcept
 {
-    // A board shows no rows: only its age moves on with time. A transcript shows nothing that does.
-    auto const screen = _state->interaction.screen;
-    if (screen == Screen::Transcript)
-        return std::nullopt;
-    auto const& due = screen == Screen::Board ? _state->boardPanel.ageChangeMs : _state->rowChangeMs;
-    return due ? std::optional { core::SteadyTimePoint { std::chrono::milliseconds { *due } } }
-               : std::nullopt;
+    auto const& state = *_state;
+    // An agent's age moves on in its row; a board's in the Board tab; a followed transcript is read again.
+    auto earliest = state.rowChangeMs;
+    auto const consider = [&](std::optional<uint64_t> due) {
+        if (due)
+            earliest = earliest ? std::min(*earliest, *due) : *due;
+    };
+    if (state.focus.tab == FocusTab::Board)
+        consider(state.focusPanels.board.ageChangeMs);
+    consider(state.transcriptDueMs());
+    return earliest ? std::optional { core::SteadyTimePoint { std::chrono::milliseconds { *earliest } } }
+                    : std::nullopt;
 }
 
 std::size_t Dashboard::rowBuilds() const noexcept
@@ -1008,26 +1143,24 @@ std::vector<UiAction> Dashboard::select(std::string_view run)
     {
         state.interaction.filter.clear();
         state.interaction.filtering = Filtering::Off;
-        state.refilter();
+        state.refilter(State::Keep::Position);
         found = selectableIndexOf();
     }
     if (!found)
         return {};
+    if (state.interaction.selected != *found)
+    {
+        state.interaction.scroll = 0;
+        state.interaction.follow = Follow::Live;
+        state.interaction.page = 0;
+    }
     state.interaction.selected = *found;
+    state.selectedKey = std::string { run };
     // An end that waited for its confirmation was for the row selected before.
     state.interaction.pendingEnd.clear();
+    backToFleet(state.interaction);
     state.repaint = State::Repaint::Needed;
-    // The row is shown on the dashboard: a board or a transcript shown in its place is left, and a board no
-    // longer read.
-    auto const wasOnBoard = state.interaction.screen == Screen::Board;
-    leaveSubject(state.interaction);
-    auto actions = std::vector<UiAction> {};
-    if (wasOnBoard)
-    {
-        actions.emplace_back(HideBoardAction {});
-        state.detailsBoard.clear();
-    }
-    return actions;
+    return {};
 }
 
 void Dashboard::openLauncherOn(std::string_view repo, ItemRef const& item, std::string_view task)
@@ -1045,7 +1178,16 @@ std::optional<LauncherState> const& Dashboard::launcher() const noexcept
 
 void Dashboard::messageRefused(std::string_view why)
 {
-    _state->interaction.notice = std::format("message not sent: {}", why);
+    auto& interaction = _state->interaction;
+    // The draft comes back, and the keys to the box, so that nothing written is lost.
+    if (auto sent = std::exchange(interaction.sent, std::nullopt))
+    {
+        auto& draft = interaction.drafts[sent->run];
+        draft = draft.empty() ? std::move(sent->text) : std::format("{}\n{}", sent->text, draft);
+        if (_state->selectedKey == sent->run)
+            interaction.place = Place::Focus;
+    }
+    interaction.notice = std::format("message not sent: {}", why);
     _state->repaint = State::Repaint::Needed;
 }
 
@@ -1065,19 +1207,10 @@ std::vector<UiAction> Dashboard::dueActions()
 {
     auto& state = *_state;
     auto actions = state.resolveOverdueEscape();
-    // A transcript whose page the engine keeps no view of for this tab -- dropped from its cache -- is asked
-    // for again; while its run is gone or the configuration is refused, the screen says so instead.
-    auto const& interaction = state.interaction;
-    if (interaction.screen == Screen::Transcript && state.engine.config() != nullptr
-        && std::ranges::contains(state.engine.runs(), interaction.subject, &Run::id))
-        if (auto const* const view = state.engine.transcript(state.tab, interaction.subject);
-            view == nullptr || view->page != interaction.page)
-            actions.emplace_back(
-                ReadTranscriptAction { .run = interaction.subject, .page = interaction.page });
-    // The selected agent's details show its board: the engine reads it for this tab while it is selected. The
-    // rows as they stand say which agent that is; building them here would take a row change that fell due
-    // from the frame that draws it.
-    state.syncDetailsBoard(actions);
+    // The rows as they stand say which run the Focus shows; building them here would take a row change that
+    // fell due from the frame that draws it.
+    state.syncBoard(actions);
+    state.syncTranscript(actions);
     return actions;
 }
 
@@ -1091,29 +1224,31 @@ std::string Dashboard::frame()
     if (state.rowChangeMs && state.nowMonoMs() >= *state.rowChangeMs)
     {
         state.rowsState = State::Rows::Stale;
-        if (state.interaction.screen == Screen::Dashboard)
-            state.repaint = State::Repaint::Needed;
+        state.repaint = State::Repaint::Needed;
     }
     // A board's age moved on.
-    if (auto const due = state.boardPanel.ageChangeMs;
-        state.interaction.screen == Screen::Board && due && state.nowMonoMs() >= *due)
+    if (auto const due = state.focusPanels.board.ageChangeMs;
+        state.focus.tab == FocusTab::Board && due && state.nowMonoMs() >= *due)
         state.repaint = State::Repaint::Needed;
     if (state.repaint == State::Repaint::Clean)
         return {};
     state.ensureRows();
-    state.refilter();
+    state.refilter(State::Keep::Row);
     state.syncLayout();
     state.screen.draw();
     state.clampScroll();
+    // A copy asked for goes out before the frame's cells.
+    auto bytes = std::exchange(state.clipboardBytes, {});
     // The cursor rests at the top-left, hidden: every frame addresses its cells absolutely, and a shorter tab
     // then cuts its bottom rows rather than pushing its top ones into a history -- in the terminal and in
     // every window that mirrors it.
     // Bracketed paste on, in every frame, so that a tab the host drew in the meantime gets it back: a paste
     // arrives as text, never as the keys it spells (an Enter in it would confirm the form).
-    state.frameBytes += BracketedPasteOn;
-    state.frameBytes += RestingCursor;
+    bytes += std::exchange(state.frameBytes, {});
+    bytes += BracketedPasteOn;
+    bytes += RestingCursor;
     state.repaint = State::Repaint::Clean;
-    return std::exchange(state.frameBytes, {});
+    return bytes;
 }
 
 core::tui::Buffer const& Dashboard::rendered() const noexcept

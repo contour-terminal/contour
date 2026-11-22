@@ -198,11 +198,6 @@ namespace
         return DismissRun { .run = dismiss.run, .monoMs = monoMs };
     }
 
-    [[nodiscard]] Input inputOf(view::MarkSeenAction const& seen, uint64_t monoMs)
-    {
-        return MarkRunSeen { .run = seen.run, .monoMs = monoMs };
-    }
-
     [[nodiscard]] Input inputOf(view::ToggleFoldAction const& toggle, uint64_t monoMs)
     {
         return ToggleFold { .group = toggle.group, .monoMs = monoMs };

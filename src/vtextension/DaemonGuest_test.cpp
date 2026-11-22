@@ -992,7 +992,9 @@ TEST_CASE("DaemonGuest: the guest draws its tab and moves on a key", "[daemon][g
     CHECK(rig.tab.firstFrame.starts_with("\x1b[?2026h"));
     std::ignore = rig.tab.takeWritten();
 
-    rig.tab.type(DownKey);
+    // With no run the Fleet holds `+ new agent` alone, which no move leaves: `?`, which shows the keys, is
+    // the key that changes the screen.
+    rig.tab.type("?");
     rig.update(DaemonHint::Tabs);
     CHECK(rig.tab.takeWritten() > 0);
 

@@ -763,12 +763,10 @@ struct Served
     return count;
 }
 
-/// @return The index into BandBreakpoints of a band with its furniture shown.
+/// @return The index into BandBreakpoints of a band.
 [[nodiscard]] std::size_t shownBreakpointOf(view::Band band)
 {
-    auto const found = std::ranges::find_if(view::BandBreakpoints, [&](view::BandBreakpoint const& row) {
-        return row.band == band && row.furniture == view::Furniture::Shown;
-    });
+    auto const found = std::ranges::find(view::BandBreakpoints, band, &view::BandBreakpoint::band);
     return static_cast<std::size_t>(std::ranges::distance(view::BandBreakpoints.begin(), found));
 }
 
@@ -1430,6 +1428,8 @@ TEST_CASE("show-blocked opens the tab on the first blocked agent", "[guest]")
     served.host.paneListing = listing;
     served.load();
     served.invoke("open");
+    // The blocked run comes first in the Fleet: another is selected, as the user may have left it.
+    CHECK(served.driver->dashboard("tab-1")->select(RunningId).empty());
     REQUIRE(served.dashboard().selectedRun() != BlockedId);
 
     served.invoke("show-blocked");
@@ -1439,7 +1439,7 @@ TEST_CASE("show-blocked opens the tab on the first blocked agent", "[guest]")
     CHECK(served.dashboard().selectedRun() == BlockedId);
 }
 
-TEST_CASE("show-blocked leaves a board and stops reading it", "[guest][board]")
+TEST_CASE("show-blocked selects the blocked run and reads its board instead", "[guest][board]")
 {
     constexpr auto RunningId = "pr-2375-20261113-150847"sv;
     constexpr auto BlockedId = "pr-2379-20261113-151500"sv;
@@ -1462,17 +1462,19 @@ TEST_CASE("show-blocked leaves a board and stops reading it", "[guest][board]")
     served.load();
     served.invoke("open");
     CHECK(served.driver->dashboard("tab-1")->select(RunningId).empty());
-    served.type("b");
-    REQUIRE(served.dashboard().interaction().screen == view::Screen::Board);
+    served.type("b\t");
+    REQUIRE(served.dashboard().interaction().place == view::Place::Focus);
     REQUIRE(served.driver->engine().board(RunningId) != nullptr);
 
     served.invoke("show-blocked");
 
-    CHECK(served.dashboard().interaction().screen == view::Screen::Dashboard);
+    // The Fleet has the keys again, on the blocked run, whose board the Focus reads instead.
+    CHECK(served.dashboard().interaction().place == view::Place::Fleet);
     CHECK(served.dashboard().selectedRun() == BlockedId);
-    auto const hidden = served.observer.inputsOf<HideBoard>();
-    REQUIRE(hidden.size() == 1);
-    CHECK(hidden.front().tab == "tab-1");
+    auto const shown = served.observer.inputsOf<ShowBoard>();
+    REQUIRE_FALSE(shown.empty());
+    CHECK(shown.back().run == BlockedId);
+    CHECK(shown.back().tab == "tab-1");
     CHECK(served.driver->engine().board(RunningId) == nullptr);
 }
 
@@ -1769,7 +1771,8 @@ TEST_CASE("a served tab that closes stops showing its board and its transcript",
     CHECK(boardViewReads(served.observer) == 1);
 }
 
-TEST_CASE("b and a held ESC show and hide a board through the engine", "[guest][board]")
+TEST_CASE("the selected run's board is read through the engine, and a held ESC leaves the Focus",
+          "[guest][board]")
 {
     constexpr auto Run = "pr-2375-20261113-150847"sv;
     auto served = Served {};
@@ -1779,25 +1782,23 @@ TEST_CASE("b and a held ESC show and hide a board through the engine", "[guest][
     served.invoke("open");
     CHECK(served.driver->dashboard("tab-1")->select(Run).empty());
 
-    served.type("b");
+    served.type("b\t");
     auto const shown = served.observer.inputsOf<ShowBoard>();
     REQUIRE(shown.size() == 1);
     CHECK(shown.front().run == Run);
     CHECK(shown.front().tab == "tab-1");
-    CHECK(served.dashboard().interaction().screen == view::Screen::Board);
-    CHECK(core::tui::test::canvasToString(served.dashboard().rendered()).contains("STATUS.md"));
+    CHECK(served.dashboard().interaction().place == view::Place::Focus);
+    CHECK(core::tui::test::canvasToString(served.dashboard().rendered()).contains("updated"));
 
     served.type("\x1b");
     REQUIRE_FALSE(served.host.wakes.empty());
     served.host.clock.monoMs += served.host.wakes.back();
     served.driver->update(Hint::Wake);
 
-    auto const hidden = served.observer.inputsOf<HideBoard>();
-    REQUIRE(hidden.size() == 1);
-    CHECK(hidden.front().tab == "tab-1");
-    // Back on the dashboard the agent is still selected, and its details read the board on.
+    // Back in the Fleet the agent is still selected, and the Focus reads its board on.
+    CHECK(served.observer.inputsOf<HideBoard>().empty());
     CHECK(served.driver->engine().board(Run) != nullptr);
-    CHECK(served.dashboard().interaction().screen == view::Screen::Dashboard);
+    CHECK(served.dashboard().interaction().place == view::Place::Fleet);
 }
 
 TEST_CASE("ReadTranscriptAction reaches the engine", "[guest][transcript]")
@@ -1848,6 +1849,7 @@ TEST_CASE("a message is typed into its run's agent tab, and a refusal is said", 
 TEST_CASE("a key split across two tab reads moves once", "[guest]")
 {
     auto served = Served {};
+    addAgent(served);
     served.load();
     served.invoke("open");
     REQUIRE(served.dashboard().interaction().selected == 0);

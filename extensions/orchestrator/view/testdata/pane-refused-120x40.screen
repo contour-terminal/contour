@@ -1,40 +1,40 @@
-╭─ Agents ─────────────────────────────────────────────────────────────╮ ╭─ Details ───────────────────────────────────╮
-│ MY PULL REQUESTS                                                     │ │ pr-2366 · fix CI · preparation failed       │
-│ no open pull requests                                                │ │                                             │
-│                                                                      │ │ task      fix CI                            │
-│ ISSUES WITHOUT A PR                                                  │ │ model     sonnet                            │
-│ ▾ contour · 5                                                        │ │ state     preparation failed, worktree      │
-│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │             removed, new: pane:             │
-│   #2338 Flaky on Windows: SessionHost.extension.controlVerb require… │ │             not-supported-yet               │
-│   #2253 Switch `daemon` Same `client`                                │ │ branch    agent/pr-2366-20261113-140211     │
-│   #2163 OSC 133: optional nonce to reject forged command lines and … │ │ worktree  /home/u/worktrees/contour/pr-2366 │
-│   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead o… │ │             -20261113-140211                │
-│                                                                      │ │ url       https://github.com/contour-termin │
-│ TIMELINE · LAST 24 HOURS, AN HOUR A BAR                              │ │             al/contour/pull/2366            │
-│ agents active  ························               peak 0 · now 0 │ │ failure   agents can't start here yet       │
-│ tokens out     ························                     0 in 24h │ │           a Flatpak or Windows build, or an │
-│ runs started   ·······················█          1 started · 1 ended │ │             older host, opens no agent tab  │
-│                                                                      │ │             in a worktree                   │
-│ AGENTS · 0 OF 4 RUNNING                                              │ │                                             │
-│ no agents                                                            │ │                                             │
-│                                                                      │ │                                             │
-│ FINISHED · 1 NEW                                                     │ │                                             │
-│ ● pr-2366 · fix CI · preparation failed                       failed │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
- ↑↓ move · enter open · d new run · ? help · b board · t transcript · / filter · z fold · R refresh · e end run         
- ⬢ agents 0/4 · ✓1 new                                                                                                  
+ ✦ Agents                                                                                                    ⬢ 0/4 ▱▱▱▱ 
+╭─ Agents 1 ───────────────────────────────────╮ ╭─ pr-2366 · fix CI · sonnet ─────────────────────────────── ✗ failed ╮
+│ FINISHED 1                                   │ │ agent/pr-2366-20261113-140211                                       │
+│▍✗ pr-2366 · fix CI                    failed │ │ Transcript  Details                                                 │
+│▍  preparation failed · agents can't start h… │ │ task      fix CI                                                    │
+│                                              │ │ model     sonnet                                                    │
+│ + new agent                                  │ │ state     preparation failed, worktree removed, seen: pane:         │
+│                                              │ │             not-supported-yet                                       │
+│                                              │ │ branch    agent/pr-2366-20261113-140211                             │
+│                                              │ │ worktree  /home/u/worktrees/contour/pr-2366-20261113-140211         │
+│                                              │ │ url       https://github.com/contour-terminal/contour/pull/2366     │
+│                                              │ │ failure   agents can't start here yet                               │
+│                                              │ │           a Flatpak or Windows build, or an older host, opens no    │
+│                                              │ │             agent tab in a worktree                                 │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │ ── latest ───────────────────────────────────────────────────────── │
+│                                              │ │ 18:36 tool Bash {"command":"mkdir sub && cd sub && ls -a ..","desc… │
+│                                              │ │ 18:36 result .                                                      │
+│                                              │ │ 18:37 claude done.                                                  │
+│                                              │ │ ╭─────────────────────────────────────────────────────────────────╮ │
+│                                              │ │ │ ✗ failed · preparation failed · agents can't start here yet · … │ │
+│                                              │ │ ╰─────────────────────────────────────────────────────────────────╯ │
+╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
+ ↑↓ move · ⏎ open · tab focus · t transcript · d details · n new agent · / filter · o copy link · del dismiss · z fold  

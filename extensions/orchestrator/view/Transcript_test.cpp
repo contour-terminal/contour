@@ -65,113 +65,23 @@ constexpr auto Narrow = Size { .width = 50, .height = 20 };
                                finishedRun(FinishedId, ChangeRequestRef { 2369 }) } };
 }
 
-/// @return Now on the fixture's clock, in the engine's monotonic milliseconds.
-[[nodiscard]] uint64_t monoOf(DashboardFixture const& fixture)
-{
-    return static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::milliseconds>(fixture.clock.now().time_since_epoch())
-            .count());
-}
-
-/// @return What the verb printed: @p stdoutText, exit 0.
-[[nodiscard]] ProcessOutcome printed(std::string stdoutText)
-{
-    return ProcessOutcome { .start = StartResult::Started,
-                            .completion = Completion::Exited,
-                            .exitCode = 0,
-                            .extent = OutputExtent::Whole,
-                            .stdoutText = std::move(stdoutText),
-                            .stderrText = {} };
-}
-
-/// @return What a failed verb printed: @p stderrText, exit 1.
-[[nodiscard]] ProcessOutcome failedWith(std::string stderrText)
-{
-    return ProcessOutcome { .start = StartResult::Started,
-                            .completion = Completion::Exited,
-                            .exitCode = 1,
-                            .extent = OutputExtent::Whole,
-                            .stdoutText = {},
-                            .stderrText = std::move(stderrText) };
-}
-
 /// @return The contract's page printed from the recorded log.
 [[nodiscard]] std::string basicPage()
 {
     return readFixture(FixtureRoot::Contract, "agent-transcript/format-1/basic-page-1.json");
 }
 
-/// What the guest does with an action of the dashboard: a transcript page asked for is answered with
-/// @p answer (none: left unanswered); a board shown or hidden reaches the engine.
-/// @return The `agent-transcript` commands the engine ran.
-std::vector<RunCommand> carryOut(DashboardFixture& fixture,
-                                 std::vector<UiAction> const& actions,
-                                 std::optional<ProcessOutcome> const& answer)
-{
-    auto commands = std::vector<RunCommand> {};
-    for (auto const& action: actions)
-    {
-        auto const now = monoOf(fixture);
-        auto effects = std::vector<Effect> {};
-        if (auto const* const read = std::get_if<ReadTranscriptAction>(&action))
-            effects = fixture.engine.step(ReadTranscript { .run = read->run,
-                                                           .tab = std::string { DashboardFixture::Tab },
-                                                           .page = read->page,
-                                                           .monoMs = now });
-        else if (auto const* const show = std::get_if<ShowBoardAction>(&action))
-            effects = fixture.engine.step(
-                ShowBoard { .run = show->run, .tab = std::string { DashboardFixture::Tab }, .monoMs = now });
-        else if (std::holds_alternative<HideBoardAction>(action))
-            effects = fixture.engine.step(
-                HideBoard { .tab = std::string { DashboardFixture::Tab }, .monoMs = now });
-        // What the answers lead to is followed too: a statistics read, which this test fails at once, may
-        // have held the transcript's back in the queue.
-        while (!effects.empty())
-        {
-            auto next = std::vector<Effect> {};
-            for (auto const& effect: effects)
-            {
-                auto const* const command = std::get_if<RunCommand>(&effect);
-                if (command == nullptr)
-                    continue;
-                auto const reply = [&](ProcessOutcome const& outcome) {
-                    std::ranges::move(fixture.engine.step(ProcessFinished {
-                                          .tag = command->tag, .outcome = outcome, .monoMs = now }),
-                                      std::back_inserter(next));
-                };
-                if (command->command == "agent-stats" || command->command == "agent-record")
-                    reply(ProcessOutcome { .start = StartResult::Started,
-                                           .completion = Completion::Exited,
-                                           .exitCode = 1,
-                                           .extent = OutputExtent::Whole,
-                                           .stdoutText = {},
-                                           .stderrText = "not in this test" });
-                else if (command->command == "agent-transcript")
-                {
-                    commands.push_back(*command);
-                    if (answer)
-                        reply(*answer);
-                }
-            }
-            effects = std::move(next);
-        }
-    }
-    fixture.dashboard.engineChanged();
-    return commands;
-}
-
-/// Selects @p run and presses `t`, as the user does, then carries the action out.
-/// @return The actions `t` asked for.
-std::vector<UiAction> openTranscript(DashboardFixture& fixture,
-                                     std::string_view run,
-                                     std::optional<ProcessOutcome> const& answer)
+/// Selects @p run and shows its Transcript tab, the Focus given the keys, as the user does; its page is read,
+/// answered with @p answer (none: left unanswered).
+void openTranscript(DashboardFixture& fixture,
+                    std::string_view run,
+                    std::optional<ProcessOutcome> const& answer)
 {
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.select(run).empty());
     REQUIRE(fixture.dashboard.selectedRun() == run);
-    auto actions = fixture.dashboard.input("t");
-    static_cast<void>(carryOut(fixture, actions, answer));
-    return actions;
+    CHECK(fixture.dashboard.input("t\t").empty());
+    static_cast<void>(fixture.settle(Answers { .transcript = answer }));
 }
 
 /// @return @p text as a JSON string literal.
@@ -192,14 +102,20 @@ std::vector<UiAction> openTranscript(DashboardFixture& fixture,
     return quoted + "\"";
 }
 
-/// @return The first @p count rows the transcript panel draws inside its frame: the frame, its padding and
-///         each row's trailing blanks taken off.
+/// @return The first @p count rows the Transcript tab draws, below the Focus's tab strip: the border, its
+///         padding and each row's trailing blanks taken off.
 [[nodiscard]] std::vector<std::string> contentRows(DashboardFixture& fixture, std::size_t count)
 {
     auto rows = std::vector<std::string> {};
-    for (auto const row: std::views::split(fixture.screen(), '\n') | std::views::drop(1))
+    auto inTab = false;
+    for (auto const row: std::views::split(fixture.screen(), '\n'))
     {
         auto text = std::string_view { row };
+        if (!inTab)
+        {
+            inTab = text.contains("Board  Transcript  Details");
+            continue;
+        }
         if (rows.size() == count || !text.starts_with("│ "))
             break;
         text.remove_prefix(std::string_view { "│ " }.size());
@@ -425,7 +341,8 @@ TEST_CASE("the command to read a page by hand names the contour the host runs",
     REQUIRE(command.has_value());
     CHECK(command->front() == std::format("'{}' agent transcript \\", Bundled));
 
-    auto const screen = failedScreenWith(run.worktree, Wide, programs);
+    // Wide enough for the Focus beside the Fleet to show its first line whole.
+    auto const screen = failedScreenWith(run.worktree, Size { .width = 160, .height = 40 }, programs);
     CHECK(screen.contains("To read it by hand, run:"));
     CHECK(screen.contains(std::format("'{}' agent transcript \\", Bundled)));
 
@@ -518,122 +435,97 @@ TEST_CASE("transcript golden screens", "[orchestrator][view][transcript]")
         }
 }
 
-TEST_CASE("a transcript's escapes are drawn inert", "[orchestrator][view][transcript]")
+TEST_CASE("a transcript's escapes are drawn inert, and its URLs are hyperlinks",
+          "[orchestrator][view][transcript]")
 {
     auto fixture = DashboardFixture { transcriptWorld(), Wide };
     openTranscript(
         fixture,
         RunningId,
         printed(pageJson({ { .kind = "assistant", .text = "ok\x1b]52;c;aGk=\x07 copied \x1b[2Jcleared" },
+                           { .kind = "assistant", .text = "opened https://github.com/o/r/pull/9 for review" },
                            { .kind = "tool-call", .text = "Ba\x1b[31msh {}" } })));
     auto const screen = fixture.screen();
     CHECK(screen.contains("copied"));
     CHECK(screen.contains("cleared"));
     CHECK_FALSE(screen.contains('\x1b'));
     CHECK_FALSE(screen.contains('\x07'));
+    CHECK(std::ranges::any_of(
+        fixture.dashboard.rendered().hyperlinks(),
+        [](core::tui::HyperlinkRegion const& link) { return link.uri == "https://github.com/o/r/pull/9"; }));
 }
 
 // }}}
 // {{{ keys
 
-TEST_CASE("t opens the selected run's transcript on page 1", "[orchestrator][view][transcript]")
+TEST_CASE("t shows the selected run's transcript, read for its session in its worktree",
+          "[orchestrator][view][transcript]")
 {
     auto fixture = DashboardFixture { transcriptWorld(), Medium };
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.select(FinishedId).empty());
-    auto const actions = fixture.dashboard.input("t");
-    CHECK(actions
-          == std::vector<UiAction> { ReadTranscriptAction { .run = std::string { FinishedId }, .page = 1 } });
-    auto const& interaction = fixture.dashboard.interaction();
-    CHECK(interaction.screen == Screen::Transcript);
-    CHECK(interaction.subject == FinishedId);
-    CHECK(interaction.page == 1);
-
-    // The engine runs the verb for the run's session in its worktree, also when the worktree is gone.
-    auto const commands = carryOut(fixture, actions, printed(basicPage()));
+    // A finished run opens on its Details; its transcript is read all the same, for latest.
+    auto const commands = fixture.settle(Answers { .transcript = printed(basicPage()) });
     REQUIRE(commands.size() == 1);
+    auto const& arguments = commands.front().arguments;
+    auto const valueOf = [&](std::string_view name) {
+        auto const found = std::ranges::find(arguments, name, &Argument::name);
+        return found != arguments.end() ? found->value : std::string {};
+    };
+    CHECK(valueOf("page") == "1");
+    CHECK(valueOf("path") == std::format("{}/contour/{}", WorktreeRoot, FinishedId));
+    CHECK(fixture.dashboard.input("t").empty());
     auto const screen = fixture.screen();
-    CHECK(screen.contains(std::format("Transcript · {} · page 1 of 1", FinishedId)));
-    CHECK(screen.contains("written by Claude Code 2.1.328"));
-    CHECK(screen.contains("←→ page"));
-
-    // Esc returns to the dashboard, asking nothing: a transcript is read only when a key asks for a page.
-    CHECK(fixture.dashboard.input("\x1b").empty());
-    CHECK(fixture.escapeTimesOut().empty());
-    CHECK(fixture.dashboard.interaction().screen == Screen::Dashboard);
-    CHECK(fixture.dashboard.interaction().subject.empty());
+    CHECK(screen.contains("page 1 of 1 · written by Claude Code 2.1.328"));
+    CHECK(screen.contains("claude · 18:37"));
+    // Nothing is read again for a finished run: its log no longer grows.
+    CHECK(fixture.settle().empty());
 }
 
-TEST_CASE("right asks for the next page, not past the last", "[orchestrator][view][transcript]")
+TEST_CASE("right and left turn the transcript's pages, read as they are turned to",
+          "[orchestrator][view][transcript]")
 {
     auto fixture = DashboardFixture { transcriptWorld(), Medium };
     openTranscript(fixture, RunningId, printed(pageJson({ { .kind = "user", .text = "one" } }, 1, 3)));
-    // Left on the first page asks for nothing.
+    // Following the agent, its last page is read once the count is known.
+    auto const last = fixture.settle(
+        Answers { .transcript = printed(pageJson({ { .kind = "user", .text = "three" } }, 3, 3)) });
+    REQUIRE(last.size() == 1);
+    CHECK(fixture.screen().contains("page 3 of 3"));
+    // Right on the last page turns nothing.
+    CHECK(fixture.dashboard.input("\x1b[C").empty());
+    CHECK(fixture.settle().empty());
+
     CHECK(fixture.dashboard.input("\x1b[D").empty());
-
-    auto actions = fixture.dashboard.input("\x1b[C");
-    CHECK(actions
-          == std::vector<UiAction> { ReadTranscriptAction { .run = std::string { RunningId }, .page = 2 } });
-    // While page 2 is read, the pages are known from page 1.
-    CHECK(fixture.screen().contains("reading the transcript…"));
-    static_cast<void>(
-        carryOut(fixture, actions, printed(pageJson({ { .kind = "user", .text = "two" } }, 2, 3))));
-    CHECK(fixture.screen().contains("page 2 of 3"));
-
-    actions = fixture.dashboard.input("\x1b[C");
-    CHECK(actions
-          == std::vector<UiAction> { ReadTranscriptAction { .run = std::string { RunningId }, .page = 3 } });
-    static_cast<void>(
-        carryOut(fixture, actions, printed(pageJson({ { .kind = "user", .text = "three" } }, 3, 3))));
-
-    // Past the last page there is nothing to ask for; the page shown is not asked for again.
-    CHECK(fixture.dashboard.input("\x1b[C").empty());
-    CHECK(fixture.dashboard.input("\x1b[F").empty());
-    CHECK(fixture.dashboard.interaction().page == 3);
-
-    CHECK(fixture.dashboard.input("\x1b[D")
-          == std::vector<UiAction> { ReadTranscriptAction { .run = std::string { RunningId }, .page = 2 } });
+    CHECK(fixture.dashboard.interaction().page == 2);
+    CHECK(fixture.dashboard.interaction().follow == Follow::Away);
+    REQUIRE(
+        fixture
+            .settle(Answers { .transcript = printed(pageJson({ { .kind = "user", .text = "two" } }, 2, 3)) })
+            .size()
+        == 1);
+    auto const screen = fixture.screen();
+    CHECK(screen.contains("page 2 of 3"));
+    CHECK(screen.contains("↓ live"));
 }
 
-TEST_CASE("end asks for the last page", "[orchestrator][view][transcript]")
+TEST_CASE("the transcript scrolls by screen, from its end", "[orchestrator][view][transcript]")
 {
-    auto fixture = DashboardFixture { transcriptWorld(), Medium };
-    openTranscript(fixture, RunningId, printed(pageJson({ { .kind = "user", .text = "one" } }, 1, 5)));
-    auto const actions = fixture.dashboard.input("\x1b[F");
-    CHECK(actions
-          == std::vector<UiAction> { ReadTranscriptAction { .run = std::string { RunningId }, .page = 5 } });
-    static_cast<void>(
-        carryOut(fixture, actions, printed(pageJson({ { .kind = "user", .text = "five" } }, 5, 5))));
-    CHECK(fixture.screen().contains("page 5 of 5"));
-    // Home goes back to the first.
-    CHECK(fixture.dashboard.input("\x1b[H")
-          == std::vector<UiAction> { ReadTranscriptAction { .run = std::string { RunningId }, .page = 1 } });
-}
-
-TEST_CASE("paging waits for a page's count before it goes past the first", "[orchestrator][view][transcript]")
-{
-    auto fixture = DashboardFixture { transcriptWorld(), Medium };
-    openTranscript(fixture, RunningId, std::nullopt);
-    CHECK(fixture.dashboard.input("\x1b[C").empty());
-    CHECK(fixture.dashboard.input("\x1b[F").empty());
-    CHECK(fixture.dashboard.interaction().page == 1);
-}
-
-TEST_CASE("the transcript scrolls by line and by screen", "[orchestrator][view][transcript]")
-{
-    auto fixture = DashboardFixture { transcriptWorld(), Medium };
+    auto fixture = DashboardFixture { transcriptWorld(), Wide };
     auto entries = std::vector<PageEntry> {};
     for (auto const index: std::views::iota(1, 31))
         entries.push_back({ .kind = "assistant", .text = std::format("entry {}", index) });
     openTranscript(fixture, RunningId, printed(pageJson(entries)));
-    CHECK(fixture.screen().contains("entry 1 "));
+    // Following the agent, it shows its end.
+    CHECK(fixture.screen().contains("entry 30"));
     auto const& interaction = fixture.dashboard.interaction();
-    CHECK(fixture.dashboard.input("j").empty());
-    CHECK(interaction.scroll == 1);
-    CHECK(fixture.dashboard.input("\x1b[6~").empty());
-    CHECK(interaction.scroll > 10);
-    CHECK(fixture.dashboard.input("\x1b[5~k").empty());
+    CHECK(fixture.dashboard.input("\x1b[5~").empty());
+    CHECK(interaction.follow == Follow::Away);
+    CHECK(interaction.scroll > 0);
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 5))
+        CHECK(fixture.dashboard.input("\x1b[5~").empty());
     CHECK(interaction.scroll == 0);
+    CHECK(fixture.screen().contains("entry 1 "));
 }
 
 TEST_CASE("a page of 1000 entries wraps only what is in view", "[orchestrator][view][transcript]")
@@ -644,11 +536,12 @@ TEST_CASE("a page of 1000 entries wraps only what is in view", "[orchestrator][v
         entries.push_back({ .kind = "assistant", .text = std::format("entry {} of a long page", index) });
     openTranscript(fixture, RunningId, printed(pageJson(entries)));
 
-    // The panel drawn on its own, so that what it wrapped can be counted.
-    auto interaction = fixture.dashboard.interaction();
+    // The panel drawn on its own, scrolled to its top, so that what it wrapped can be counted.
+    auto subject =
+        FocusSubject { .run = std::string { RunningId }, .page = 1, .scroll = 0, .follow = Follow::Away };
     auto const tab = std::string { DashboardFixture::Tab };
     auto state = TranscriptPanelState {};
-    auto panel = TranscriptPanel { fixture.engine, interaction, tab, state };
+    auto panel = TranscriptPanel { fixture.engine, subject, tab, state };
     auto buffer = core::tui::Buffer { Wide.height, Wide.width };
     auto const theme = dashboardTheme();
     auto canvas = core::tui::Canvas {
@@ -663,12 +556,12 @@ TEST_CASE("a page of 1000 entries wraps only what is in view", "[orchestrator][v
     auto const first = state.wrappedEntries;
     panel.render(canvas);
     CHECK(state.wrappedEntries == first);
-    interaction.scroll = 30;
+    subject.scroll = 30;
     panel.render(canvas);
     CHECK(state.wrappedEntries > first);
     CHECK(state.wrappedEntries < 35);
-    // Scrolled to the end, the whole page is wrapped, once.
-    interaction.scroll = UnknownLineCount;
+    // Following the agent, the whole page is wrapped, once.
+    subject.follow = Follow::Live;
     panel.render(canvas);
     CHECK(state.wrappedEntries == 1000);
     CHECK(state.lines == (1000 * 3) - 1);
@@ -682,10 +575,10 @@ TEST_CASE("the transcript is wrapped anew for a new width", "[orchestrator][view
         entries.push_back(
             { .kind = "assistant", .text = std::format("entry {} {}end", index, std::string(150, 'w')) });
     openTranscript(fixture, RunningId, printed(pageJson(entries)));
-    auto const interaction = fixture.dashboard.interaction();
+    auto const subject = FocusSubject { .run = std::string { RunningId }, .page = 1 };
     auto const tab = std::string { DashboardFixture::Tab };
     auto state = TranscriptPanelState {};
-    auto panel = TranscriptPanel { fixture.engine, interaction, tab, state };
+    auto panel = TranscriptPanel { fixture.engine, subject, tab, state };
 
     static_cast<void>(drawnAlone(panel, Wide));
     CHECK(state.wrappedEntries == 3);
@@ -705,19 +598,19 @@ TEST_CASE("the transcript is wrapped anew for a new page", "[orchestrator][view]
     openTranscript(fixture,
                    RunningId,
                    printed(pageJson({ { .kind = "assistant", .text = "on the first page" } }, 1, 2)));
-    auto interaction = fixture.dashboard.interaction();
+    auto subject = FocusSubject { .run = std::string { RunningId }, .page = 1 };
     auto const tab = std::string { DashboardFixture::Tab };
     auto state = TranscriptPanelState {};
-    auto panel = TranscriptPanel { fixture.engine, interaction, tab, state };
+    auto panel = TranscriptPanel { fixture.engine, subject, tab, state };
     CHECK(drawnAlone(panel, Wide).contains("on the first page"));
     CHECK(state.wrappedEntries == 1);
 
     // The same panel, the same width: the second page is wrapped, not the first one's lines kept.
-    static_cast<void>(
-        carryOut(fixture,
-                 { UiAction { ReadTranscriptAction { .run = std::string { RunningId }, .page = 2 } } },
-                 printed(pageJson({ { .kind = "assistant", .text = "on the second page" } }, 2, 2))));
-    interaction.page = 2;
+    static_cast<void>(fixture.carryOut(
+        { UiAction { ReadTranscriptAction { .run = std::string { RunningId }, .page = 2 } } },
+        Answers { .transcript =
+                      printed(pageJson({ { .kind = "assistant", .text = "on the second page" } }, 2, 2)) }));
+    subject.page = 2;
     auto const second = drawnAlone(panel, Wide);
     CHECK(second.contains("on the second page"));
     CHECK(!second.contains("on the first page"));
@@ -735,99 +628,27 @@ TEST_CASE("the transcript's end is reached by scrolling, and the scroll is kept 
     auto const& interaction = fixture.dashboard.interaction();
     static_cast<void>(fixture.screen());
     for ([[maybe_unused]] auto const _: std::views::iota(0, 20))
+        CHECK(fixture.dashboard.input("\x1b[5~").empty());
+    CHECK(interaction.scroll == 0);
+    static_cast<void>(fixture.screen());
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 20))
         CHECK(fixture.dashboard.input("\x1b[6~").empty());
     auto const screen = fixture.screen();
     CHECK(screen.contains("entry 30"));
-    // The draw that found the end keeps the scroll there: one line up shows one line more above.
-    auto const last = interaction.scroll;
-    CHECK(last > 0);
-    CHECK(last < UnknownLineCount);
-    CHECK(fixture.dashboard.input("k").empty());
-    CHECK(interaction.scroll == last - 1);
-}
-
-TEST_CASE("t from a board keeps the subject run", "[orchestrator][view][transcript]")
-{
-    auto fixture = DashboardFixture { transcriptWorld(), Medium };
-    static_cast<void>(fixture.dashboard.frame());
-    CHECK(fixture.dashboard.select(RunningId).empty());
-    static_cast<void>(carryOut(fixture, fixture.dashboard.input("b"), std::nullopt));
-    REQUIRE(fixture.dashboard.interaction().screen == Screen::Board);
-    CHECK(fixture.screen().contains("t transcript"));
-
-    // The board is left, so no longer read; the transcript of its run is asked for.
-    auto const actions = fixture.dashboard.input("t");
-    CHECK(actions
-          == std::vector<UiAction> { HideBoardAction {},
-                                     ReadTranscriptAction { .run = std::string { RunningId }, .page = 1 } });
-    CHECK(fixture.dashboard.interaction().screen == Screen::Transcript);
-    CHECK(fixture.dashboard.interaction().subject == RunningId);
-
-    // And `b` goes back to the board of the same run.
-    CHECK(fixture.dashboard.input("b")
-          == std::vector<UiAction> { ShowBoardAction { .run = std::string { RunningId } } });
-    CHECK(fixture.dashboard.interaction().screen == Screen::Board);
-    CHECK(fixture.dashboard.interaction().subject == RunningId);
-}
-
-TEST_CASE("b on a transcript shows no board once the run's worktree was removed",
-          "[orchestrator][view][transcript]")
-{
-    auto fixture = DashboardFixture { transcriptWorld(), Medium };
-    static_cast<void>(fixture.dashboard.frame());
-    CHECK(fixture.dashboard.select(FinishedId).empty());
-    static_cast<void>(carryOut(fixture, fixture.dashboard.input("t"), printed(basicPage())));
-    REQUIRE(fixture.dashboard.interaction().screen == Screen::Transcript);
-    auto const screen = fixture.screen();
-    CHECK(screen.contains("esc back"));
-    CHECK_FALSE(screen.contains("b board"));
-    CHECK(fixture.dashboard.input("b").empty());
-    CHECK(fixture.dashboard.interaction().screen == Screen::Transcript);
-}
-
-TEST_CASE("esc returns to where the transcript was opened from", "[orchestrator][view][transcript]")
-{
-    auto fixture = DashboardFixture { transcriptWorld(), Medium };
-    static_cast<void>(fixture.dashboard.frame());
-    CHECK(fixture.dashboard.select(RunningId).empty());
-    static_cast<void>(carryOut(fixture, fixture.dashboard.input("b"), std::nullopt));
-    static_cast<void>(carryOut(fixture, fixture.dashboard.input("t"), printed(basicPage())));
-    REQUIRE(fixture.dashboard.interaction().screen == Screen::Transcript);
-
-    // Opened from the board: Esc goes back to the board, which is read again; Esc there to the dashboard.
-    CHECK(fixture.dashboard.input("\x1b").empty());
-    CHECK(fixture.escapeTimesOut()
-          == std::vector<UiAction> { ShowBoardAction { .run = std::string { RunningId } } });
-    CHECK(fixture.dashboard.interaction().screen == Screen::Board);
-    checkGolden("transcript-back-to-board-80x24", fixture.screen());
-    CHECK(fixture.dashboard.input("\x1b").empty());
-    // Back on the dashboard, the selected agent's details ask for its board again.
-    CHECK(fixture.escapeTimesOut()
-          == std::vector<UiAction> { HideBoardAction {},
-                                     ShowBoardAction { .run = std::string { RunningId } } });
-    CHECK(fixture.dashboard.interaction().screen == Screen::Dashboard);
-
-    // A board opened from a transcript goes back to it, its page kept and not read again.
-    static_cast<void>(carryOut(fixture, fixture.dashboard.input("t"), printed(basicPage())));
-    static_cast<void>(carryOut(fixture, fixture.dashboard.input("b"), std::nullopt));
-    REQUIRE(fixture.dashboard.interaction().screen == Screen::Board);
-    CHECK(fixture.dashboard.input("\x1b").empty());
-    CHECK(fixture.escapeTimesOut() == std::vector<UiAction> { HideBoardAction {} });
-    CHECK(fixture.dashboard.interaction().screen == Screen::Transcript);
-    CHECK(fixture.screen().contains("written by Claude Code"));
-    CHECK(fixture.dashboard.input("\x1b").empty());
-    // The dashboard's details ask for the selected agent's board, which no screen reads now.
-    CHECK(fixture.escapeTimesOut()
-          == std::vector<UiAction> { ShowBoardAction { .run = std::string { RunningId } } });
-    CHECK(fixture.dashboard.interaction().screen == Screen::Dashboard);
+    // At the end it follows the agent again; a screen up stops following.
+    CHECK(interaction.follow == Follow::Live);
+    CHECK(fixture.dashboard.input("\x1b[5~").empty());
+    CHECK(interaction.follow == Follow::Away);
+    CHECK(interaction.scroll > 0);
+    CHECK(interaction.scroll < UnknownLineCount);
 }
 
 TEST_CASE("two tabs page one run, each on its own page", "[orchestrator][view][transcript]")
 {
     auto fixture = DashboardFixture { transcriptWorld(), Medium };
-    openTranscript(fixture, RunningId, printed(pageJson({ { .kind = "user", .text = "one" } }, 1, 3)));
+    openTranscript(fixture, RunningId, printed(pageJson({ { .kind = "user", .text = "one" } }, 1, 1)));
     // Another tab reads page 3 of the same run meanwhile.
-    auto const now = monoOf(fixture);
+    auto const now = fixture.monoMs();
     for (auto const& effect: fixture.engine.step(
              ReadTranscript { .run = std::string { RunningId }, .tab = "tab-2", .page = 3, .monoMs = now }))
         if (auto const* const command = std::get_if<RunCommand>(&effect))
@@ -838,7 +659,7 @@ TEST_CASE("two tabs page one run, each on its own page", "[orchestrator][view][t
     fixture.dashboard.engineChanged();
     REQUIRE(fixture.engine.transcript("tab-2", RunningId)->page == 3);
     auto const screen = fixture.screen();
-    CHECK(screen.contains("page 1 of 3"));
+    CHECK(screen.contains("page 1 of 1"));
     CHECK(screen.contains("one"));
     CHECK_FALSE(screen.contains("three"));
 }
@@ -848,18 +669,19 @@ TEST_CASE("a transcript the engine no longer keeps for the tab is asked for agai
 {
     auto fixture = DashboardFixture { transcriptWorld(), Medium };
     openTranscript(fixture, RunningId, printed(pageJson({ { .kind = "user", .text = "one" } }, 1, 1)));
-    CHECK(fixture.dashboard.dueActions().empty());
+    CHECK(fixture.settle().empty());
     // The engine dropped what it kept for this tab, as for a tab that closed.
     static_cast<void>(fixture.engine.step(
-        TabClosed { .tab = std::string { DashboardFixture::Tab }, .monoMs = monoOf(fixture) }));
+        TabClosed { .tab = std::string { DashboardFixture::Tab }, .monoMs = fixture.monoMs() }));
     fixture.dashboard.engineChanged();
     REQUIRE(fixture.engine.transcript(DashboardFixture::Tab, RunningId) == nullptr);
 
     auto const due = fixture.dashboard.dueActions();
-    CHECK(due
-          == std::vector<UiAction> { ReadTranscriptAction { .run = std::string { RunningId }, .page = 1 } });
-    carryOut(fixture, due, printed(pageJson({ { .kind = "user", .text = "one" } }, 1, 1)));
-    CHECK(fixture.dashboard.dueActions().empty());
+    CHECK(std::ranges::contains(
+        due, UiAction { ReadTranscriptAction { .run = std::string { RunningId }, .page = 1 } }));
+    fixture.carryOut(
+        due, Answers { .transcript = printed(pageJson({ { .kind = "user", .text = "one" } }, 1, 1)) });
+    CHECK(fixture.settle().empty());
     auto const screen = fixture.screen();
     CHECK(screen.contains("one"));
     CHECK_FALSE(screen.contains("reading the transcript"));
@@ -872,45 +694,34 @@ TEST_CASE("t is inert on an orphan row", "[orchestrator][view][transcript]")
         .worktrees = { WorktreeEntry { .path = "/home/u/worktrees/contour/pr-2-20260101-000000",
                                        .branch = std::nullopt } } } };
     static_cast<void>(fixture.dashboard.frame());
-    CHECK(fixture.dashboard.input("\x1b[F").empty());
     REQUIRE(fixture.dashboard.selectedRun().empty());
     CHECK(fixture.dashboard.input("t").empty());
-    CHECK(fixture.dashboard.interaction().screen == Screen::Dashboard);
+    CHECK_FALSE(fixture.dashboard.interaction().chosenTab.has_value());
+    CHECK(fixture.settle().empty());
 }
 
-TEST_CASE("enter on a transcript reveals an active run's tab", "[orchestrator][view][transcript]")
-{
-    auto fixture = DashboardFixture { transcriptWorld(), Medium };
-    openTranscript(fixture, RunningId, printed(basicPage()));
-    CHECK(fixture.screen().contains("enter agent tab"));
-    CHECK(fixture.dashboard.input("\r")
-          == std::vector<UiAction> { RevealAgentAction { .run = std::string { RunningId } } });
-
-    // A finished run has no tab to go to.
-    CHECK(fixture.dashboard.select(FinishedId).empty());
-    static_cast<void>(carryOut(fixture, fixture.dashboard.input("t"), printed(basicPage())));
-    CHECK_FALSE(fixture.screen().contains("enter agent tab"));
-    CHECK(fixture.dashboard.input("\r").empty());
-}
-
-TEST_CASE("selecting a row leaves a transcript", "[orchestrator][view][transcript]")
+TEST_CASE("selecting another run reads its transcript", "[orchestrator][view][transcript]")
 {
     auto fixture = DashboardFixture { transcriptWorld(), Medium };
     openTranscript(fixture, RunningId, printed(basicPage()));
     CHECK(fixture.dashboard.select(FinishedId).empty());
-    CHECK(fixture.dashboard.interaction().screen == Screen::Dashboard);
+    CHECK(fixture.dashboard.interaction().place == Place::Fleet);
     CHECK(fixture.dashboard.selectedRun() == FinishedId);
+    auto const due = fixture.dashboard.dueActions();
+    CHECK(std::ranges::contains(
+        due, UiAction { ReadTranscriptAction { .run = std::string { FinishedId }, .page = 1 } }));
 }
 
 // }}}
-// {{{ a new run on the item
+// {{{ running a finished run again
 
-TEST_CASE("d on a Finished row opens the form on its item and task", "[orchestrator][view][transcript]")
+TEST_CASE("enter on a Finished row opens the launcher on its item and task",
+          "[orchestrator][view][transcript]")
 {
     auto fixture = DashboardFixture { transcriptWorld(), Medium };
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.select(FinishedId).empty());
-    CHECK(fixture.dashboard.input("d").empty());
+    CHECK(fixture.dashboard.input("\r").empty());
     REQUIRE(fixture.dashboard.launcher().has_value());
     auto const& form = fixture.dashboard.launcher()->form;
     REQUIRE(form.has_value());
@@ -920,22 +731,10 @@ TEST_CASE("d on a Finished row opens the form on its item and task", "[orchestra
     CHECK_FALSE(form->session.empty());
     // Nothing starts before the launcher is confirmed.
     CHECK(fixture.screen().contains("New agent"));
-
-    SECTION("from its transcript")
-    {
-        CHECK(fixture.dashboard.input("\x1b").empty());
-        static_cast<void>(fixture.escapeTimesOut());
-        REQUIRE_FALSE(fixture.dashboard.launcher().has_value());
-        static_cast<void>(carryOut(fixture, fixture.dashboard.input("t"), printed(basicPage())));
-        CHECK(fixture.screen().contains("d new run"));
-        CHECK(fixture.dashboard.input("d").empty());
-        REQUIRE(fixture.dashboard.launcher().has_value());
-        CHECK(fixture.dashboard.launcher()->form->item == ItemRef { ChangeRequestRef { 2369 } });
-        CHECK(fixture.dashboard.interaction().screen == Screen::Transcript);
-    }
 }
 
-TEST_CASE("d offers the item's default task when the run's task is gone", "[orchestrator][view][transcript]")
+TEST_CASE("running again offers the item's default task when the run's task is gone",
+          "[orchestrator][view][transcript]")
 {
     constexpr auto RetiredId = "pr-2346-20261113-140211"sv;
     auto world = transcriptWorld();
@@ -943,13 +742,13 @@ TEST_CASE("d offers the item's default task when the run's task is gone", "[orch
     auto fixture = DashboardFixture { world, Medium };
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.select(RetiredId).empty());
-    CHECK(fixture.dashboard.input("d").empty());
+    CHECK(fixture.dashboard.input("\r").empty());
     REQUIRE(fixture.dashboard.launcher().has_value());
     CHECK(fixture.dashboard.launcher()->form->item == ItemRef { ChangeRequestRef { 2346 } });
     CHECK(fixture.dashboard.launcher()->form->task == 0); // fix_ci, the first task for a pull request
 }
 
-TEST_CASE("d on an item with an active run shows the refusal", "[orchestrator][view][transcript]")
+TEST_CASE("running again an item with an active run shows the refusal", "[orchestrator][view][transcript]")
 {
     constexpr auto EarlierId = "pr-2375-20261112-100000"sv;
     auto world = transcriptWorld();
@@ -957,21 +756,21 @@ TEST_CASE("d on an item with an active run shows the refusal", "[orchestrator][v
     auto fixture = DashboardFixture { world, Medium };
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.select(EarlierId).empty());
-    CHECK(fixture.dashboard.input("d").empty());
+    CHECK(fixture.dashboard.input("\r").empty());
     REQUIRE(fixture.dashboard.launcher().has_value());
     CHECK(fixture.screen().contains("refused"));
     // Enter confirms nothing the preview refuses.
     CHECK(fixture.dashboard.input("\r").empty());
 }
 
-TEST_CASE("d on an item no longer listed says so", "[orchestrator][view][transcript]")
+TEST_CASE("running again an item no longer listed says so", "[orchestrator][view][transcript]")
 {
     auto world = transcriptWorld();
     world.prs = { "github/prs-empty.json" };
     auto fixture = DashboardFixture { world, Medium };
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.select(FinishedId).empty());
-    CHECK(fixture.dashboard.input("d").empty());
+    CHECK(fixture.dashboard.input("\r").empty());
     CHECK_FALSE(fixture.dashboard.launcher().has_value());
     CHECK(fixture.dashboard.interaction().notice == "#2369 is not listed any more");
 }

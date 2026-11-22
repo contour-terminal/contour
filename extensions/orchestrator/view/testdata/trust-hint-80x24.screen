@@ -1,24 +1,24 @@
-╭─ Agents ─────────────────────────────────────────────────────────────────────╮
-│ no open pull requests                                                        │
+╭─ Agents 1 ───────────────────────────────────────────────────────────────────╮
+│ WORKING 1 of 4                                                               │
+│▍◌ pr-2375 · fix CI · may be waiting for a folder-trust… waiting? see its tab │
 │                                                                              │
-│ ISSUES WITHOUT A PR                                                          │
-│ ▾ contour · 5                                                                │
-│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key presses, then… │
-│   #2338 Flaky on Windows: SessionHost.extension.controlVerb requires the pe… │
-│   #2253 Switch `daemon` Same `client`                                        │
-│   #2163 OSC 133: optional nonce to reject forged command lines and marks     │
-│   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead of settin… │
+│ + new agent                                                                  │
 │                                                                              │
-│ AGENTS · 1 OF 4 RUNNING                                                      │
-│ ○ pr-2375 · fix CI · sonnet                             waiting? see its tab │
+│                                                                              │
+│                                                                              │
+│                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Details ────────────────────────────────────────────────────────────────────╮
-│ pr-2375 · fix CI · sonnet                                                    │
+╭─ pr-2375 · fix CI · sonnet · board ────────────────── ◌ waiting? see its tab ╮
+│ updated 9 min ago                                                            │
+│ Fixing CI                                                                    │
+│ ☑ reproduced on master                                                       │
+│ ☑ wrote the regression test                                                  │
+│ ☐ fix the reflow                                                             │
+│ ☐ watch CI                                                                   │
 │                                                                              │
-│           may be waiting for a folder-trust prompt in its tab                │
-│ task      fix CI                                                             │
-│ model     sonnet                                                             │
-│ state     running…                                                           │
+│                                                                              │
+│ ╭──────────────────────────────────────────────────────────────────────────╮ │
+│ │ ⏎ to write to pr-2375                                                    │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- ↑↓ move · enter open · d new run · ? help · b board · t transcript · / filter  
- ⬢ agents 1/4                                                                   
+ ↑↓ move · ⏎ open · tab focus · b board · t transcript · d details   ⬢ 1/4 ▰▱▱▱ 

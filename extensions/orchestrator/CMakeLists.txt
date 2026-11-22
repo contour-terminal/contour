@@ -123,6 +123,10 @@ add_library(orchestrator_view STATIC
     view/Band.hpp
     view/Dashboard.cpp
     view/Dashboard.hpp
+    view/Fleet.cpp
+    view/Fleet.hpp
+    view/Focus.cpp
+    view/Focus.hpp
     view/DispatchForm.cpp
     view/DispatchForm.hpp
     view/Launcher.cpp

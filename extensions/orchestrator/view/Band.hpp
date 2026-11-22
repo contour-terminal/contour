@@ -7,21 +7,19 @@
 namespace orchestrator::view
 {
 
-/// How wide the dashboard's tab is, which decides how the list and the details share it.
+/// How wide the dashboard's tab is, which decides how the Fleet and the Focus share it.
 enum class Band : uint8_t
 {
-    Wide,   ///< At least WideFromColumns: the list and the details side by side.
-    Medium, ///< MediumFromColumns to WideFromColumns - 1: the list, the details below it or swapped in with
-            ///< Tab.
-    Narrow, ///< Below MediumFromColumns: the list only; Enter opens the details as a page, Esc returns.
+    Wide,   ///< At least WideFromColumns: the Fleet and the Focus side by side.
+    Medium, ///< MediumFromColumns to WideFromColumns - 1: the Fleet above the Focus; the Focus takes the body
+            ///< while it has the keys.
+    Narrow, ///< Below MediumFromColumns: the Fleet or the Focus, one at a time.
 };
 
 /// The narrowest tab the Wide band is chosen at.
 inline constexpr int WideFromColumns = 100;
 /// The narrowest tab the Medium band is chosen at.
 inline constexpr int MediumFromColumns = 60;
-/// The lowest tab that shows the key-hint line and the section headings; below it they collapse first.
-inline constexpr int CollapseBelowRows = 20;
 
 /// @param columns The tab's width.
 /// @return The band a tab of that width is in.
@@ -34,42 +32,18 @@ inline constexpr int CollapseBelowRows = 20;
     return Band::Narrow;
 }
 
-/// Whether the dashboard shows what only explains it: the key-hint line, the section headings and the
-/// placeholders of empty sections.
-enum class Furniture : uint8_t
-{
-    Collapsed, ///< Left out: the tab is lower than CollapseBelowRows.
-    Shown,     ///< Shown.
-};
-
-/// One layout the dashboard is built in: the smallest tab it is chosen for, and what it shows.
+/// One layout the dashboard is built in: the narrowest tab it is chosen for, and its band.
 struct BandBreakpoint
 {
-    int minColumns = 0;                     ///< The narrowest tab it is chosen at.
-    int minRows = 0;                        ///< The lowest tab it is chosen at.
-    Band band = Band::Narrow;               ///< How the list and the details share the tab.
-    Furniture furniture = Furniture::Shown; ///< Whether the hints and headings are shown.
+    int minColumns = 0;       ///< The narrowest tab it is chosen at.
+    Band band = Band::Narrow; ///< How the Fleet and the Focus share the tab.
 };
 
 /// The dashboard's layouts, narrowest first: core::tui::Responsive chooses the last one a size meets.
 inline constexpr auto BandBreakpoints = std::array {
-    BandBreakpoint { .minColumns = 0, .minRows = 0, .band = Band::Narrow, .furniture = Furniture::Collapsed },
-    BandBreakpoint {
-        .minColumns = 0, .minRows = CollapseBelowRows, .band = Band::Narrow, .furniture = Furniture::Shown },
-    BandBreakpoint { .minColumns = MediumFromColumns,
-                     .minRows = 0,
-                     .band = Band::Medium,
-                     .furniture = Furniture::Collapsed },
-    BandBreakpoint { .minColumns = MediumFromColumns,
-                     .minRows = CollapseBelowRows,
-                     .band = Band::Medium,
-                     .furniture = Furniture::Shown },
-    BandBreakpoint {
-        .minColumns = WideFromColumns, .minRows = 0, .band = Band::Wide, .furniture = Furniture::Collapsed },
-    BandBreakpoint { .minColumns = WideFromColumns,
-                     .minRows = CollapseBelowRows,
-                     .band = Band::Wide,
-                     .furniture = Furniture::Shown },
+    BandBreakpoint { .minColumns = 0, .band = Band::Narrow },
+    BandBreakpoint { .minColumns = MediumFromColumns, .band = Band::Medium },
+    BandBreakpoint { .minColumns = WideFromColumns, .band = Band::Wide },
 };
 
 } // namespace orchestrator::view

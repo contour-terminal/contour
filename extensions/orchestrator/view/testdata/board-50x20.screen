@@ -1,4 +1,6 @@
-╭─ STATUS.md · pr-2375-20261113-150847 ──────────╮
+ ✦ Agents                              ⬢ 1/4 ▰▱▱▱ 
+╭─ pr-2375 · fix CI · sonnet ────── ⠿ working 6m ╮
+│ Board  Transcript  Details                     │
 │ updated 4 min ago                              │
 │ Status: fix the CI of #2375                    │
 │                                                │
@@ -7,14 +9,12 @@
 │ locally.                                       │
 │ • Found the cause: the grid reflow drops a     │
 │ wrapped line's last cell when the              │
-│   page is exactly as wide as the line.         │
-│     • Wrote a regression test that fails       │
-│     before the fix.                            │
-│     • Fixed Grid::reflow to keep the cell.     │
+│ ── latest ──────────────────────────────────── │
+│ nothing yet                                    │
 │                                                │
-│ In progress                                    │
-│ • Running the whole suite under ASan; it takes │
-│ a while on this machine, so expect this line   │
-│ to stay for a few minutes before it moves.     │
+│                                                │
+│ ╭─ to pr-2375 ───────────────────────────────╮ │
+│ │ ▏                                          │ │
+│ ╰────────────────────────────────────────────╯ │
 ╰────────────────────────────────────────────────╯
- ↑↓ scroll · enter agent tab · t transcript       
+ ⏎ send · alt⏎ line · esc keep draft              

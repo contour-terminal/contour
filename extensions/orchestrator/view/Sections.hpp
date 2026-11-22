@@ -16,6 +16,7 @@
 
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/view/Band.hpp>
+#include <orchestrator/view/Fleet.hpp>
 #include <orchestrator/view/Keys.hpp>
 #include <orchestrator/view/Theme.hpp>
 
@@ -27,30 +28,15 @@ namespace orchestrator::view
 /// while it asks. The hint only points at the tab; nothing answers the prompt.
 inline constexpr auto TrustPromptHintAfter = std::chrono::seconds { 30 };
 
-/// What an agent row's status starts with once a STATUS.md was found in its worktree.
-inline constexpr auto BoardCue = std::string_view { "▤" };
-
-/// What a row of the list stands for.
+/// What a row of the Fleet stands for.
 enum class RowKind : uint8_t
 {
-    Heading,     ///< A section's heading; furniture.
-    Spacer,      ///< The blank line before a heading; furniture.
-    Placeholder, ///< What an empty section says; furniture.
-    Chart,       ///< One line of a chart, such as the timeline's; furniture, drawn in the Wide band only.
-    Notice,      ///< What the dashboard says when it has nothing to list, such as what to configure.
-    Group,       ///< One repository's items in a section, such as its issues; selectable while folded.
-    PullRequest, ///< One of the user's open pull requests.
-    Issue,       ///< An open issue no pull request of the user's claims.
-    Agent,       ///< A run that has not finished.
-    Finished,    ///< An entry of the Finished list.
-    Orphan,      ///< A worktree no run accounts for; read-only.
-};
-
-/// What opening a row's details tells the engine.
-enum class OpenEffect : uint8_t
-{
-    None,     ///< Nothing.
-    MarkSeen, ///< The finished run was opened: it is no longer new.
+    Notice = 0, ///< What the dashboard says when it has nothing to list, such as what to configure.
+    Heading,    ///< A group's heading; selectable while the group hides some of its runs.
+    Agent,      ///< A run that has not finished.
+    Finished,   ///< A run of the Finished group.
+    Orphan,     ///< A worktree no run accounts for; read-only.
+    NewAgent,   ///< `+ new agent`: Enter opens the launcher.
 };
 
 /// How a detail's value too wide for the panel is drawn.
@@ -73,52 +59,55 @@ struct DetailLine
     std::string value = {};          ///< Sanitised; fitted to the panel when drawn.
     Role role = Role::Text;          ///< How the value is drawn.
     DetailFit fit = DetailFit::Wrap; ///< How it is fitted to the panel.
+    std::string link = {};           ///< The https URL its value is drawn as a hyperlink to; empty: none.
     [[nodiscard]] bool operator==(DetailLine const&) const = default;
 };
 
-/// Whether a group of the list shows its items.
+/// Whether a group of the Fleet shows all of its runs.
 enum class Fold : uint8_t
 {
     Open = 0,
     Folded,
 };
 
-/// One row of the list and the details it opens. Every text is sanitised: no control character, one line.
+/// One row of the Fleet and the details it opens. Every text is sanitised: no control character, one line.
 struct Row
 {
-    RowKind kind = RowKind::Notice;       ///< What it stands for.
-    std::string mark = {};                ///< One cell before the text, such as `✓`; empty: a blank.
-    Role markRole = Role::Text;           ///< How the mark is drawn.
-    std::string prefix = {};              ///< The repository's name, drawn dim; empty with one repository.
-    std::string text = {};                ///< The row's text.
-    std::string status = {};              ///< Right-aligned after the text, such as `approved`; may be empty.
-    Role statusRole = Role::Dim;          ///< How the status is drawn.
-    std::string run = {};                 ///< The run it stands for; empty for a pull request or an issue.
-    std::string repo = {};                ///< The repository of its item or orphan; empty for a run.
-    std::optional<ItemRef> item = {};     ///< The pull request or issue it stands for; absent for a run.
-    std::vector<KeyCommand> offers = {};  ///< The run commands it accepts: Board, Transcript, Dispatch,
-                                          ///< EndRun, RetryRemoval, Dismiss.
-    OpenEffect onOpen = OpenEffect::None; ///< What opening its details tells the engine.
-    std::string group = {};               ///< The group it heads or belongs to, such as `issues/pace`; empty:
-                                          ///< none. A group's key is what the engine keeps folded.
-    Fold fold = Fold::Open;               ///< Whether that group is folded: a folded group's items are not
-                                          ///< listed but while a filter is typed.
-    std::string title = {};               ///< The details' first line.
-    std::vector<DetailLine> details = {}; ///< The details' other lines.
+    RowKind kind = RowKind::Notice; ///< What it stands for.
+    std::string mark = {};          ///< One cell before the text, such as `✓`; empty: a blank.
+    Role markRole = Role::Text;     ///< How the mark is drawn.
+    std::string prefix = {};        ///< The repository's name, drawn dim; empty with one repository.
+    std::string text = {};          ///< The row's first line: the run and its task.
+    std::string status = {};        ///< Right-aligned after the text, such as `asking 2m`; may be empty.
+    Role statusRole = Role::Dim;    ///< How the status is drawn.
+    std::string context = {};       ///< Its second line: what the agent is on, or how the run ended.
+    Role contextRole = Role::Dim;   ///< How the second line is drawn.
+    std::optional<BoardProgress> progress = {}; ///< What its board's task boxes say, where a board was read.
+    std::string run = {};  ///< The run it stands for; empty for a heading, an orphan or a notice.
+    std::string name = {}; ///< How the run is named, such as `pr-2375` or a topic's text.
+    std::string repo = {}; ///< The repository of its orphan; empty for a run.
+    std::vector<KeyCommand> offers = {}; ///< The commands it accepts beyond moving: the Focus tabs, EndRun,
+                                         ///< RetryRemoval, Dismiss, Reveal, OpenLink.
+    std::string group = {}; ///< The group it heads or belongs to, such as `fleet/finished`; empty:
+                            ///< none. A group's key is what the engine keeps folded.
+    Fold fold = Fold::Open; ///< A heading: whether its group hides some runs; a run: whether it is
+                            ///< hidden, which it is not while a filter is typed.
+    std::optional<FleetGroup> attention = {}; ///< The group a run is listed in; none for any other row.
+    std::string state = {}; ///< The word of its run's look (runLookOf()): a tab the user chose
+                            ///< sticks until it changes.
+    std::string title = {}; ///< The Focus header's second line begins with it: the item's title.
+    std::vector<DetailLine> details = {}; ///< The Details tab's lines.
 
-    /// @return Whether the row can be selected: it stands for an item, not for the list's furniture.
-    /// A group's header only while folded: an open group is navigated through its items, as an ungrouped
-    /// list.
+    /// @return Whether the row can be selected: it stands for a run, a worktree or `+ new agent`; a heading
+    /// only while its group hides some of its runs.
     [[nodiscard]] bool isSelectable() const noexcept
     {
-        return kind > RowKind::Group || (kind == RowKind::Group && fold == Fold::Folded);
+        return kind > RowKind::Heading || (kind == RowKind::Heading && fold == Fold::Folded);
     }
-    /// @return Whether the row is furniture, which a collapsed layout leaves out.
-    [[nodiscard]] bool isFurniture() const noexcept { return kind <= RowKind::Chart; }
 };
 
-/// The rows of the list, in order: per section its heading and its items, the items of every configured
-/// repository in the configured order.
+/// The rows of the Fleet, in order: per group (fleetGroups()) its heading and its runs, longest waiting
+/// first, the Finished newest first; the worktrees no run accounts for; and `+ new agent`.
 /// @param engine The engine.
 /// @param nowMonoMs Now, in the monotonic milliseconds the engine's inputs carry: what an agent's age is
 ///        measured against.
@@ -132,28 +121,13 @@ struct Row
 ///         (TrustPromptHintAfter); std::nullopt when no row changes with time.
 [[nodiscard]] std::optional<uint64_t> nextRowChange(Engine const& engine, uint64_t nowMonoMs);
 
-/// The columns a chart row's label (Row::prefix) takes before its bars (Row::text), so that they line up.
-inline constexpr int ChartLabelColumns = 15;
-
-/// Whether a layout draws the chart rows: they need the Wide band's width to read.
-enum class ChartRows : uint8_t
-{
-    Hidden = 0,
-    Shown,
-};
-
-/// The rows a filter and a layout keep.
+/// The rows a filter keeps.
 /// @param rows Every row.
 /// @param filter Rows that can be selected and whose text does not hold it, ignoring ASCII case, are left
-/// out;
-///        empty: none is.
-/// @param furniture Whether headings, spacers, placeholders and charts are kept.
-/// @param charts Whether chart rows are kept, furniture aside.
+///        out, and a folded group shows every run that holds it; empty: none is, and a folded group's hidden
+///        runs are left out.
 /// @return The indices into @p rows of the rows kept, in order.
-[[nodiscard]] std::vector<std::size_t> visibleRows(std::span<Row const> rows,
-                                                   std::string_view filter,
-                                                   Furniture furniture,
-                                                   ChartRows charts);
+[[nodiscard]] std::vector<std::size_t> visibleRows(std::span<Row const> rows, std::string_view filter);
 
 /// @param rows Every row.
 /// @param shown Indices into @p rows, such as visibleRows() returns.
@@ -222,10 +196,24 @@ template <typename Entry, std::size_t N, typename Enum>
 [[nodiscard]] std::string itemLabel(ItemRef const& item);
 
 /// Draws a rounded box that fills @p canvas, @p title over its top border.
-void drawFrame(core::tui::Canvas& canvas, std::string_view title);
+/// @param canvas Where.
+/// @param title Its title; empty: none.
+/// @param border How the border is drawn: Role::Focus for the place that has the keys.
+void drawFrame(core::tui::Canvas& canvas, std::string_view title, Role border = Role::Border);
 
 /// @return The part of @p canvas inside a box's border.
 [[nodiscard]] core::tui::Canvas insideFrame(core::tui::Canvas const& canvas);
+
+/// Draws @p text, and makes every whole `https://` or `http://` URL in it a hyperlink (OSC 8): a URL cut
+/// short is drawn, never linked, since its link would lead elsewhere.
+/// @param canvas Where.
+/// @param row The row.
+/// @param column The first cell.
+/// @param text Sanitised text that fits.
+/// @param style How it is drawn.
+/// @return The cells it took.
+int putLinked(
+    core::tui::Canvas& canvas, int row, int column, std::string_view text, core::tui::Style const& style);
 
 /// What separates two hints on a hint line.
 inline constexpr auto HintSeparator = std::string_view { " · " };

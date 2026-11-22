@@ -1,40 +1,40 @@
-╭─ Agents ─────────────────────────────────────────────────────────────╮ ╭─ Details ───────────────────────────────────╮
-│ MY PULL REQUESTS                                                     │ │ Say why the stdio relay failed, and send a… │
-│ ▾ contour · 5                                                        │ │                                             │
-│ ● #2375 Say why the stdio relay failed, and send a hello before hal… │ │ branch    fix/stdio-attach-starter-hello →  │
-│ ✓ #2369 examples: add donut-animation, a full-screen animation done… │ │             master                          │
-│ ✓ #2346 contour: tab_style — shapes, fills, materials and widths fo… │ │ checks    running                           │
-│ ✗ #2114 vtbackend: WIP -- DEC mode 44 and a partial margin-bell tri… │ │ url       https://github.com/contour-termin │
-│ ✗ #1847 Adds ability to set Contour as default terminal on Windows … │ │             al/contour/pull/2375            │
-│                                                                      │ │                                             │
-│ ISSUES WITHOUT A PR                                                  │ │                                             │
-│ ▾ contour · 5                                                        │ │                                             │
-│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │                                             │
-│   #2338 Flaky on W╭─ ✦ New agent ────────────────────────────────────────────────────────────────╮                   │
-│   #2253 Switch `da│ › #2375▏                                    pull requests · issues · a topic │                   │
-│   #2163 OSC 133: o│                                                                              │                   │
-│   #2162 OSC 9;9 (C│ MY PULL REQUESTS                                                             │                   │
+ ✦ Agents                                                                                                    ⬢ 0/4 ▱▱▱▱ 
+╭─ Agents 0 ───────────────────────────────────╮ ╭─────────────────────────────────────────────────────────────────────╮
+│▍+ new agent                                  │ │ No agents yet. ⏎ or n starts one on a pull request, an issue, or    │
+│                                              │ │ anything you type.                                                  │
+│                                              │ │ Once agents run: ⏎ talks to the selected one, esc steps back.       │
+│                                              │ │ Everything else is in ? (the keys).                                 │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                   ╭─ ✦ New agent ────────────────────────────────────────────────────────────────╮                   │
+│                   │ › #2375▏                                    pull requests · issues · a topic │                   │
+│                   │                                                                              │                   │
+│                   │ MY PULL REQUESTS                                                             │                   │
 │                   │ ▍#2375 Say why the stdio relay failed, and send a hello before half… ●       │                   │
-│ AGENTS · 0 OF 4 RU│  ✎ topic “#2375”                                                  new branch │                   │
-│ no agents         │ ──────────────────────────────────────────────────────────────────────────── │                   │
+│                   │  ✎ topic “#2375”                                                  new branch │                   │
+│                   │ ──────────────────────────────────────────────────────────────────────────── │                   │
 │                   │ task ‹ fix CI ›   model ‹ sonnet ›   perms ‹ standard ›   note none          │                   │
-│ FINISHED · 0 NEW  │ #2375 · contour · checks running                                             │                   │
-│ nothing finished  │ checkout  gh pr checkout 2375 --branch agent/pr-2375-…                       │                   │
+│                   │ #2375 · contour · checks running                                             │                   │
+│                   │ checkout  gh pr checkout 2375 --branch agent/pr-2375-…                       │                   │
 │                   │ worktree  /home/u/worktrees/contour/pr-2375-…                                │                   │
 │                   │ perms     standard · 19 allowed · 4 denied · edits need no approval          │                   │
 │                   │                                                                              │                   │
 │                   │ enter start · ↑↓ choose · tab settings · ctrl+p more · esc close             │                   │
 │                   ╰──────────────────────────────────────────────────────────────────────────────╯                   │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
- ↑↓ move · enter open · d new run · ? help · b board · t transcript · / filter · z fold · R refresh · e end run         
- ⬢ agents 0/4 · ✗2                                                                                                      
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
+ ↑↓ move · ⏎ open · tab focus · n new agent · / filter · ? help · R refresh · I install plugins                         

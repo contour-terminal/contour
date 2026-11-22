@@ -61,17 +61,17 @@ struct BoardPanelState
         ageChangeMs = {}; ///< When the age it shows changes, in monotonic ms; none: never.
 };
 
-/// A run's status board, read-only, in a rounded box titled `STATUS.md · <run>`: its age, then its contents
-/// from Interaction::scroll on; or why there is nothing to show. Everything in it is drawn sanitised.
+/// A run's status board, read-only, as the Focus's Board tab draws it: its age, then its contents from
+/// FocusSubject::scroll on; or why there is nothing to show. Everything in it is drawn sanitised.
 class StatusBoardPanel final: public core::tui::Component
 {
   public:
     /// @param engine The engine whose board is drawn (Engine::board()).
-    /// @param interaction Where the user is: the board's run and how far it is scrolled.
+    /// @param subject The board's run and how far it is scrolled.
     /// @param clock Now, in the engine's monotonic milliseconds: what the board's age moves on with.
     /// @param state What the panel learnt drawing itself.
     StatusBoardPanel(Engine const& engine CORE_LIFETIMEBOUND,
-                     Interaction const& interaction CORE_LIFETIMEBOUND,
+                     FocusSubject const& subject CORE_LIFETIMEBOUND,
                      core::IClock const& clock CORE_LIFETIMEBOUND,
                      BoardPanelState& state CORE_LIFETIMEBOUND);
 
@@ -83,7 +83,7 @@ class StatusBoardPanel final: public core::tui::Component
     [[nodiscard]] std::span<BoardLine const> linesFor(std::string_view bytes, int columns, std::size_t count);
 
     Engine const& _engine;
-    Interaction const& _interaction;
+    FocusSubject const& _subject;
     core::IClock const& _clock;
     BoardPanelState& _state;
     std::string _wrappedBytes;       ///< The bytes @ref _logical was made from.

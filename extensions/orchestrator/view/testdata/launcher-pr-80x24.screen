@@ -1,24 +1,24 @@
-╭─ Agents ─────────────────────────────────────────────────────────────────────╮
-│ MY PULL REQUESTS                                                             │
-│ ▾ contour · 5                                                                │
-│ ● #2375 Say why the stdio relay failed, and send a hello before half-closin… │
-│ ✓ ╭─ ✦ New agent ────────────────────────────────────────────────────────╮   │
-│ ✓ │ › #2375▏                            pull requests · issues · a topic │a… │
-│ ✗ │                                                                      │d… │
-│ ✗ │ MY PULL REQUESTS                                                     │a… │
-│   │ ▍#2375 Say why the stdio relay failed, and send a hello bef… ●       │   │
-│ IS│  ✎ topic “#2375”                                          new branch │   │
-│ ▾ │ ──────────────────────────────────────────────────────────────────── │   │
-│   │ task ‹ fix CI ›   model ‹ sonnet ›   perms ‹ standard ›   note none  │n… │
-│   │ #2375 · contour · checks running                                     │e… │
-╰───│ checkout  gh pr checkout 2375 --branch agent/pr-2375-…               │───╯
-╭─ D│ worktree  /home/u/worktrees/contour/pr-2375-…                        │───╮
-│ Sa│ perms     standard · 19 allowed · 4 denied · edits need no approval  │e… │
+ ✦ Agents                                                            ⬢ 0/4 ▱▱▱▱ 
+╭─ Agents 0 ───────────────────────────────────────────────────────────────────╮
+│▍+ new agent                                                                  │
+│                                                                              │
+│   ╭─ ✦ New agent ────────────────────────────────────────────────────────╮   │
+│   │ › #2375▏                            pull requests · issues · a topic │   │
 │   │                                                                      │   │
-│ br│ enter start · ↑↓ choose · tab settings · ctrl+p more · esc close     │   │
-│ ch╰──────────────────────────────────────────────────────────────────────╯   │
-│ url       https://github.com/contour-terminal/contour/pull/2375              │
+│   │ MY PULL REQUESTS                                                     │   │
+│   │ ▍#2375 Say why the stdio relay failed, and send a hello bef… ●       │   │
+╰───│  ✎ topic “#2375”                                          new branch │───╯
+╭───│ ──────────────────────────────────────────────────────────────────── │───╮
+│ No│ task ‹ fix CI ›   model ‹ sonnet ›   perms ‹ standard ›   note none  │   │
+│ yo│ #2375 · contour · checks running                                     │   │
+│ On│ checkout  gh pr checkout 2375 --branch agent/pr-2375-…               │   │
+│ Ev│ worktree  /home/u/worktrees/contour/pr-2375-…                        │   │
+│   │ perms     standard · 19 allowed · 4 denied · edits need no approval  │   │
+│   │                                                                      │   │
+│   │ enter start · ↑↓ choose · tab settings · ctrl+p more · esc close     │   │
+│   ╰──────────────────────────────────────────────────────────────────────╯   │
+│                                                                              │
+│                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- ↑↓ move · enter open · d new run · ? help · b board · t transcript · / filter  
- ⬢ agents 0/4 · ✗2                                                              
+ ↑↓ move · ⏎ open · tab focus · n new agent · / filter · ? help · R refresh     

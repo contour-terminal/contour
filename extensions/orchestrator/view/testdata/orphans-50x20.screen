@@ -1,6 +1,7 @@
-╭─ Details ──────────────────────────────────────╮
+ ✦ Agents                              ⬢ 0/4 ▱▱▱▱ 
+╭─ leftover worktree ───── agent/pr-1-20260101-… ╮
 │ /home/u/worktrees/contour/it's a test          │
-│                                                │
+│ Details                                        │
 │           no agent run uses this worktree any  │
 │             more; the orchestrator never       │
 │             removes it                         │
@@ -16,5 +17,4 @@
 │                                                │
 │                                                │
 ╰────────────────────────────────────────────────╯
- ↑↓ move · enter open · d new run · ? help        
- ⬢ agents 0/4                                     
+ ↑↓ scroll · esc back · d details · n new agent   

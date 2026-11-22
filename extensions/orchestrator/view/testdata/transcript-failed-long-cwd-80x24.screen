@@ -1,5 +1,8 @@
-pr-2375-20261113-150847: outside the current configuration (/home/u/worktrees/c…
-╭─ Transcript · pr-2375-20261113-150847 · page 1 ──────────────────────────────╮
+ ✦ Agents                                                            ⬢ 1/4 ▰▱▱▱ 
+ pr-2375-20261113-150847: outside the current configuration (/home/u/worktrees… 
+╭─ pr-2375 · fix CI · sonnet ───────────────────── ⠿ outside the configuration ╮
+│ Say why the stdio relay failed, and send a hello before half-closing in the… │
+│ Board  Transcript  Details                                                   │
 │ no session log                                                               │
 │                                                                              │
 │ To read it by hand, run:                                                     │
@@ -14,11 +17,8 @@ pr-2375-20261113-150847: outside the current configuration (/home/u/worktrees/c�
 │                                                                              │
 │                                                                              │
 │                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
+│ ╭─ to pr-2375 ─────────────────────────────────────────────────────────────╮ │
+│ │ ▏                                                                        │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- ←→ page · ↑↓ scroll · b board · d new run · enter agent tab · esc back         
- ⬢ agents 1/4 · ✗2                                                              
+ ⏎ send · alt⏎ line · esc keep draft · pgup pgdn scroll                         

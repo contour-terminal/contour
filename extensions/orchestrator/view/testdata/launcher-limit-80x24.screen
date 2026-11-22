@@ -1,24 +1,24 @@
-╭─ Agents ─────────────────────────────────────────────────────────────────────╮
-│ MY PULL REQUESTS                                                             │
-│ ▾ contour · 5                                                                │
-│ ● #2375 Say why the stdio relay failed, and send a hello before half-closin… │
-│ ✓ #2369 examples: add donut-animation, a full-screen animat… ○ agent working │
-│ ✓ ╭─ ✦ New agent ────────────────────────────────────────────────────────╮ng │
-│ ✗ │ › #2375▏                            pull requests · issues · a topic │ng │
-│ ✗ │                                                                      │ng │
+╭─ Agents 4 ───────────────────────────────────────────────────────────────────╮
+│ WORKING 4 of 4                                                               │
+│▍⠿ pr-1847 · fix CI                                                working 6m │
+│ ⠿ pr-2114 · fix CI                                                working 6m │
+│ ⠿ pr-2346 · fix CI                                                working 6m │
+│ ⠿ ╭─ ✦ New agent ────────────────────────────────────────────────────────╮6m │
+│   │ › #2375▏                            pull requests · issues · a topic │   │
+│ + │                                                                      │   │
 │   │ MY PULL REQUESTS                                                     │   │
-│ IS│ ▍#2375 Say why the stdio relay failed, and send a hello bef… ●       │   │
-│ ▾ │  ✎ topic “#2375”                                          new branch │   │
-│   │ ──────────────────────────────────────────────────────────────────── │n… │
-│   │ task ‹ fix CI ›   model ‹ sonnet ›   perms ‹ standard ›   note none  │e… │
-╰───│ #2375 · contour · checks running                                     │───╯
-╭─ D│ refused   max_agents agents are running: end one first               │───╮
-│ Sa│                                                                      │e… │
+╰───│ ▍#2375 Say why the stdio relay failed, and send a hello bef… ●       │───╯
+╭─ p│  ✎ topic “#2375”                                          new branch │6m ╮
+│ re│ ──────────────────────────────────────────────────────────────────── │   │
+│   │ task ‹ fix CI ›   model ‹ sonnet ›   perms ‹ standard ›   note none  │   │
+│   │ #2375 · contour · checks running                                     │   │
+│   │ refused   max_agents agents are running: end one first               │   │
+│   │                                                                      │   │
 │   │ ↑↓ choose · tab settings · ctrl+p more · esc close                   │   │
-│ br╰──────────────────────────────────────────────────────────────────────╯   │
-│ checks    running                                                            │
-│ url       https://github.com/contour-terminal/contour/pull/2375              │
+│   ╰──────────────────────────────────────────────────────────────────────╯   │
 │                                                                              │
+│ ╭──────────────────────────────────────────────────────────────────────────╮ │
+│ │ ⏎ to write to pr-1847                                                    │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- ↑↓ move · enter open · d new run · ? help · b board · t transcript · / filter  
- ⬢ agents 4/4 · ✗2                                                              
+ ↑↓ move · ⏎ open · tab focus · b board · t transcript · d details   ⬢ 4/4 ▰▰▰▰ 

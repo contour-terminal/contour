@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <core/Clock.hpp>
+#include <core/tui/Buffer.hpp>
 #include <core/tui/TestHelpers.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -23,6 +24,7 @@
 #include <orchestrator/view/Dashboard.hpp>
 #include <orchestrator/view/Sections.hpp>
 #include <orchestrator/view/StatusBoard.hpp>
+#include <orchestrator/view/Theme.hpp>
 #include <orchestrator/view/ViewFixtures.hpp>
 
 using namespace std::string_literals;
@@ -174,61 +176,66 @@ void carryOut(DashboardFixture& fixture,
     fixture.dashboard.engineChanged();
 }
 
-/// Selects @p run and presses `b`, as the user does, then carries the action out.
-/// @return The actions `b` asked for.
-std::vector<UiAction> openBoard(DashboardFixture& fixture,
-                                std::string_view run,
-                                std::optional<std::expected<std::string, FileReadError>> const& content,
-                                uint64_t modifiedWallMs = 0)
+/// Selects @p run and shows its Board, as the user does: its board is read, as @p content says, and the
+/// Focus has the keys.
+void openBoard(DashboardFixture& fixture,
+               std::string_view run,
+               std::optional<std::expected<std::string, FileReadError>> const& content,
+               uint64_t modifiedWallMs = 0)
 {
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.select(run).empty());
     REQUIRE(fixture.dashboard.selectedRun() == run);
-    auto actions = fixture.dashboard.input("b");
-    for (auto const& action: actions)
+    for (auto const& action: fixture.dashboard.dueActions())
         carryOut(fixture, action, content, modifiedWallMs);
-    return actions;
+    CHECK(fixture.dashboard.input("b\t").empty());
 }
 
 /// Whether drawnBoard() shows a board from its top or scrolled to its end.
 enum class BoardScroll : uint8_t
 {
     Top = 0, ///< As opened.
-    ToEnd,   ///< After End.
+    ToEnd,   ///< At its end.
 };
 
-/// Opens the running agent's board, as @p bytes, on a tab of @p size, as the user does.
-/// @return Its contents as the panel draws them, a row each, below the age: the frame, its padding and the
-///         trailing blanks of each row taken off.
+/// Draws the running agent's board, as @p bytes, as the Board tab of a Focus of @p size draws it.
+/// @return Its contents, a row each, below the age: the padding and the trailing blanks of each row taken
+/// off.
 [[nodiscard]] std::vector<std::string> drawnBoard(std::string const& bytes,
                                                   Size size,
                                                   BoardScroll scroll = BoardScroll::Top)
 {
     auto fixture = DashboardFixture { boardWorld(), size };
-    openBoard(fixture, RunningId, bytes);
+    carryOut(fixture, ShowBoardAction { .run = std::string { RunningId } }, bytes);
+    auto subject = FocusSubject { .run = std::string { RunningId } };
+    auto state = BoardPanelState {};
+    auto panel = StatusBoardPanel { fixture.engine, subject, fixture.clock, state };
+    // Inside the Focus's border.
+    auto const area = Size { .width = size.width - 2, .height = size.height - 2 };
+    auto const draw = [&] {
+        auto buffer = core::tui::Buffer { area.height, area.width };
+        auto const theme = dashboardTheme();
+        auto canvas = core::tui::Canvas {
+            buffer, core::tui::Rect { .x = 0, .y = 0, .width = area.width, .height = area.height }, theme
+        };
+        panel.render(canvas);
+        return core::tui::test::canvasToString(buffer);
+    };
+    auto screen = draw();
     if (scroll == BoardScroll::ToEnd)
     {
-        // The keys scroll by what the last frame drew.
-        static_cast<void>(fixture.screen());
-        CHECK(fixture.dashboard.input("\x1b[F").empty());
+        // Scrolled as far as the keys scroll it: wrapped whole, then its last line at the bottom.
+        subject.scroll = MaxBoardLines * 4;
+        screen = draw();
+        subject.scroll = state.lines > state.rows ? state.lines - state.rows : 0;
+        screen = draw();
     }
     auto rows = std::vector<std::string> {};
-    auto inFrame = false;
-    for (auto const row: std::views::split(fixture.screen(), '\n'))
+    for (auto const row: std::views::split(screen, '\n'))
     {
         auto text = std::string_view { row };
-        if (text.starts_with("╰"))
-            break;
-        if (text.starts_with("╭"))
-        {
-            inFrame = true;
-            continue;
-        }
-        if (!inFrame || !text.starts_with("│ "))
-            continue;
-        text.remove_prefix(std::string_view { "│ " }.size());
-        if (text.ends_with("│"))
-            text.remove_suffix(std::string_view { "│" }.size());
+        if (text.starts_with(" "))
+            text.remove_prefix(1);
         rows.emplace_back(text.substr(0, text.find_last_not_of(' ') + 1));
     }
     // The first row is the board's age.
@@ -366,38 +373,25 @@ TEST_CASE("board golden screens", "[orchestrator][view][board]")
         }
 }
 
-TEST_CASE("a board whose run was dismissed says so", "[orchestrator][view][board]")
-{
-    auto fixture = DashboardFixture { keptBoardWorld(), Medium };
-    openBoard(fixture, KeptId, "# kept"s);
-    removeKeptWorktree(fixture);
-    // Dismissed from another tab: the engine forgets the run and its board.
-    static_cast<void>(
-        fixture.engine.step(DismissRun { .run = std::string { KeptId }, .monoMs = monoOf(fixture) }));
-    fixture.dashboard.engineChanged();
-    REQUIRE(fixture.engine.board(KeptId) == nullptr);
-    checkGolden("board-dismissed-80x24", fixture.screen());
-    CHECK(fixture.dashboard.interaction().screen == Screen::Board);
-
-    CHECK(fixture.dashboard.input("\x1b").empty());
-    CHECK(fixture.escapeTimesOut() == std::vector<UiAction> { HideBoardAction {} });
-    CHECK(fixture.dashboard.interaction().screen == Screen::Dashboard);
-}
-
 TEST_CASE("b is offered on a finished run only while its worktree is there", "[orchestrator][view][board]")
 {
     auto fixture = DashboardFixture { keptBoardWorld(), Medium };
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.select(FinishedId).empty());
+    CHECK_FALSE(fixture.screen().contains("b board"));
     CHECK(fixture.dashboard.input("b").empty());
-    CHECK(fixture.dashboard.interaction().screen == Screen::Dashboard);
+    CHECK_FALSE(fixture.dashboard.interaction().chosenTab.has_value());
 
     auto kept = DashboardFixture { keptBoardWorld(), Medium };
     static_cast<void>(kept.dashboard.frame());
     CHECK(kept.dashboard.select(KeptId).empty());
     CHECK(kept.screen().contains("b board"));
-    CHECK(kept.dashboard.input("b")
-          == std::vector<UiAction> { ShowBoardAction { .run = std::string { KeptId } } });
+    CHECK(kept.dashboard.input("b").empty());
+    REQUIRE(kept.dashboard.interaction().chosenTab.has_value());
+    CHECK(kept.dashboard.interaction().chosenTab->tab == FocusTab::Board);
+    // The Focus reads the board of the run it shows.
+    CHECK(std::ranges::contains(kept.dashboard.dueActions(),
+                                UiAction { ShowBoardAction { .run = std::string { KeptId } } }));
 }
 
 TEST_CASE("a kept run's board is read once and says plainly when there is none",
@@ -421,7 +415,9 @@ TEST_CASE("a board shown for a run whose worktree was removed says so", "[orches
     openBoard(fixture, KeptId, "# kept"s);
     REQUIRE(fixture.screen().contains("kept"));
     removeKeptWorktree(fixture);
-    checkGolden("board-removed-80x24", fixture.screen());
+    // Its Board tab gives way to Details; the board itself says why, where it is still drawn.
+    CHECK(boardScreenText(fixture.engine, KeptId)
+          == std::optional<std::string_view> { "The board was removed when the run ended." });
     CHECK_FALSE(fixture.screen().contains("STATUS.md yet"));
 }
 
@@ -430,75 +426,13 @@ TEST_CASE("a board under a refused configuration says so", "[orchestrator][view]
     auto world = boardWorld();
     world.configJson = "{}";
     auto fixture = DashboardFixture { world, Medium };
-    auto const actions = openBoard(fixture, RunningId, "# hi"s);
-    CHECK(actions == std::vector<UiAction> { ShowBoardAction { .run = std::string { RunningId } } });
+    openBoard(fixture, RunningId, "# hi"s);
     // The engine reads nothing without a configuration.
     CHECK(fixture.engine.board(RunningId) == nullptr);
     checkGolden("board-unconfigured-80x24", fixture.screen());
-    CHECK(fixture.dashboard.interaction().screen == Screen::Board);
-
-    // Back on the dashboard, the selected agent's details ask for its board again.
-    CHECK(fixture.dashboard.input("\x1b").empty());
-    CHECK(fixture.escapeTimesOut()
-          == std::vector<UiAction> { HideBoardAction {},
-                                     ShowBoardAction { .run = std::string { RunningId } } });
-    CHECK(fixture.dashboard.interaction().screen == Screen::Dashboard);
 }
 
-TEST_CASE("selecting a row leaves a board", "[orchestrator][view][board]")
-{
-    auto fixture = DashboardFixture { boardWorld(), Medium };
-    openBoard(fixture, RunningId, "# hi"s);
-    CHECK(fixture.dashboard.select(FinishedId) == std::vector<UiAction> { HideBoardAction {} });
-    CHECK(fixture.dashboard.interaction().screen == Screen::Dashboard);
-    CHECK(fixture.dashboard.selectedRun() == FinishedId);
-    // On the dashboard there is no board to leave.
-    CHECK(fixture.dashboard.select(RunningId).empty());
-}
-
-// }}}
-// {{{ keys
-
-TEST_CASE("b on an agent row opens its board", "[orchestrator][view][board]")
-{
-    auto fixture = DashboardFixture { boardWorld(), Medium };
-    auto const actions = openBoard(fixture, RunningId, "# hi"s);
-    CHECK(actions == std::vector<UiAction> { ShowBoardAction { .run = std::string { RunningId } } });
-    CHECK(fixture.dashboard.interaction().screen == Screen::Board);
-    CHECK(fixture.dashboard.interaction().subject == RunningId);
-    auto const screen = fixture.screen();
-    CHECK(screen.contains(std::format("STATUS.md · {}", RunningId)));
-    // Its Markdown is rendered: the heading without its marker.
-    CHECK(screen.contains("│ hi"));
-    CHECK_FALSE(screen.contains("# hi"));
-    CHECK(screen.contains("b reload"));
-
-    // `b` on the board reads it again now.
-    CHECK(fixture.dashboard.input("b")
-          == std::vector<UiAction> { ShowBoardAction { .run = std::string { RunningId } } });
-}
-
-TEST_CASE("esc on a board returns to the details, which show it", "[orchestrator][view][board]")
-{
-    auto fixture = DashboardFixture { boardWorld(), Medium };
-    openBoard(fixture, RunningId, "# hi"s);
-    REQUIRE(fixture.engine.board(RunningId) != nullptr);
-
-    CHECK(fixture.dashboard.input("\x1b").empty());
-    auto const actions = fixture.escapeTimesOut();
-    // The screen's board is hidden, and the selected agent's details ask for it again.
-    CHECK(actions
-          == std::vector<UiAction> { HideBoardAction {},
-                                     ShowBoardAction { .run = std::string { RunningId } } });
-    CHECK(fixture.dashboard.interaction().screen == Screen::Dashboard);
-    CHECK(fixture.dashboard.interaction().subject.empty());
-    for (auto const& action: actions)
-        carryOut(fixture, action, "# hi"s);
-    CHECK(fixture.engine.board(RunningId) != nullptr);
-    CHECK_FALSE(fixture.screen().contains("STATUS.md ·"));
-}
-
-TEST_CASE("the selected agent's details show its board, rendered", "[orchestrator][view][board]")
+TEST_CASE("the Focus reads the board of the run it shows, once", "[orchestrator][view][board]")
 {
     // Started with the default profile, which its details name on a line of their own.
     auto world = boardWorld();
@@ -509,22 +443,27 @@ TEST_CASE("the selected agent's details show its board, rendered", "[orchestrato
     auto fixture = DashboardFixture { std::move(world), Wide };
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.select(RunningId).empty());
-    auto const actions = fixture.dashboard.dueActions();
+    auto actions = fixture.dashboard.dueActions();
+    std::erase_if(
+        actions, [](UiAction const& action) { return std::holds_alternative<ReadTranscriptAction>(action); });
     REQUIRE(actions == std::vector<UiAction> { ShowBoardAction { .run = std::string { RunningId } } });
     carryOut(fixture, actions.front(), "# Fixing CI\n- [x] reproduced\n- [ ] fix the reflow"s);
     auto const screen = fixture.screen();
-    CHECK(screen.contains("STATUS.md · b shows it whole"));
     CHECK(screen.contains("Fixing CI"));
     CHECK(screen.contains("☑ reproduced"));
     CHECK(screen.contains("☐ fix the reflow"));
-    CHECK(screen.contains("perms     standard · 19 allowed · 4 denied"));
-    checkGolden("details-board-120x40", screen);
+    // The row says what the agent is on, and how far it got.
+    CHECK(screen.contains("fix the reflow"));
+    CHECK(screen.contains("▰▰▰▱▱▱"));
     // Asked for once: nothing more is due while the selection stays.
-    CHECK(fixture.dashboard.dueActions().empty());
+    CHECK(std::ranges::none_of(fixture.dashboard.dueActions(), [](UiAction const& action) {
+        return std::holds_alternative<ShowBoardAction>(action);
+    }));
 
     // A row with no board leaves it unread.
     CHECK(fixture.dashboard.select(FinishedId).empty());
-    CHECK(fixture.dashboard.dueActions() == std::vector<UiAction> { HideBoardAction {} });
+    auto const after = fixture.dashboard.dueActions();
+    CHECK(std::ranges::contains(after, UiAction { HideBoardAction {} }));
 }
 
 TEST_CASE("b is inert on an orphan row", "[orchestrator][view][board]")
@@ -534,52 +473,26 @@ TEST_CASE("b is inert on an orphan row", "[orchestrator][view][board]")
         .worktrees = { WorktreeEntry { .path = "/home/u/worktrees/contour/pr-2-20260101-000000",
                                        .branch = std::nullopt } } } };
     static_cast<void>(fixture.dashboard.frame());
-    CHECK(fixture.dashboard.input("\x1b[F").empty());
     REQUIRE(fixture.dashboard.selectedRun().empty());
     CHECK(fixture.dashboard.input("b").empty());
-    CHECK(fixture.dashboard.interaction().screen == Screen::Dashboard);
+    CHECK_FALSE(fixture.dashboard.interaction().chosenTab.has_value());
 }
 
-TEST_CASE("enter on a board reveals an active run's tab", "[orchestrator][view][board]")
+TEST_CASE("the board scrolls by screen, and by line where no message box has the keys",
+          "[orchestrator][view][board]")
 {
-    SECTION("an active run")
-    {
-        auto fixture = DashboardFixture { boardWorld(), Medium };
-        openBoard(fixture, RunningId, "# hi"s);
-        CHECK(fixture.screen().contains("enter agent tab"));
-        CHECK(fixture.dashboard.input("\r")
-              == std::vector<UiAction> { RevealAgentAction { .run = std::string { RunningId } } });
-        CHECK(fixture.dashboard.interaction().screen == Screen::Board);
-    }
-    SECTION("a finished run has no tab to go to")
-    {
-        auto fixture = DashboardFixture { keptBoardWorld(), Medium };
-        openBoard(fixture, KeptId, "# kept"s);
-        auto const screen = fixture.screen();
-        CHECK(screen.contains("kept"));
-        CHECK_FALSE(screen.contains("enter agent tab"));
-        CHECK(fixture.dashboard.input("\r").empty());
-    }
-}
-
-TEST_CASE("the board scrolls by line and by screen", "[orchestrator][view][board]")
-{
-    auto fixture = DashboardFixture { boardWorld(), Medium };
     auto board = std::string {};
     for (auto const index: std::views::iota(1, 101))
         board += std::format("line {}\n", index);
+    auto fixture = DashboardFixture { boardWorld(), Wide };
     openBoard(fixture, RunningId, board);
     CHECK(fixture.screen().contains("│ line 1 "));
     auto const& interaction = fixture.dashboard.interaction();
-
-    CHECK(fixture.dashboard.input("j").empty());
-    CHECK(interaction.scroll == 1);
-    CHECK_FALSE(fixture.screen().contains("│ line 1 "));
-    CHECK(fixture.dashboard.input("\x1b[A").empty());
-    CHECK(interaction.scroll == 0);
+    // The running agent's message box has the keys: the page keys scroll, letters type.
     CHECK(fixture.dashboard.input("\x1b[6~").empty());
     auto const page = interaction.scroll;
     CHECK(page > 10);
+    CHECK_FALSE(fixture.screen().contains("│ line 1 "));
     CHECK(fixture.dashboard.input("\x1b[5~").empty());
     CHECK(interaction.scroll == 0);
     CHECK(fixture.dashboard.input("\x1b[F").empty());
@@ -587,10 +500,19 @@ TEST_CASE("the board scrolls by line and by screen", "[orchestrator][view][board
     CHECK(fixture.screen().contains("│ line 100 "));
     // Past the end it stays at the end.
     auto const last = interaction.scroll;
-    CHECK(fixture.dashboard.input("jj\x1b[6~").empty());
+    CHECK(fixture.dashboard.input("\x1b[6~").empty());
     CHECK(interaction.scroll == last);
-    CHECK(fixture.dashboard.input("\x1b[H").empty());
-    CHECK(interaction.scroll == 0);
+
+    // A kept run has no message box: ↑↓ scroll its Focus.
+    auto kept = DashboardFixture { keptBoardWorld(), Wide };
+    openBoard(kept, KeptId, board);
+    CHECK(kept.dashboard.interaction().place == Place::Focus);
+    static_cast<void>(kept.screen());
+    CHECK(kept.dashboard.input("j").empty());
+    CHECK(kept.dashboard.interaction().scroll == 1);
+    CHECK_FALSE(kept.screen().contains("│ line 1 "));
+    CHECK(kept.dashboard.input("\x1b[A").empty());
+    CHECK(kept.dashboard.interaction().scroll == 0);
 }
 
 // }}}
@@ -615,89 +537,50 @@ TEST_CASE("a board's escapes are drawn inert", "[orchestrator][view][board]")
     CHECK(fixture.engine.board(RunningId)->bytes == hostile);
 }
 
+TEST_CASE("a board's URL is a hyperlink", "[orchestrator][view][board]")
+{
+    auto fixture = DashboardFixture { boardWorld(), Wide };
+    openBoard(fixture, RunningId, "see https://example.com/ci/42 for the log"s);
+    static_cast<void>(fixture.screen());
+    CHECK(std::ranges::any_of(fixture.dashboard.rendered().hyperlinks(),
+                              [](core::tui::HyperlinkRegion const& link) {
+                                  return link.uri == "https://example.com/ci/42" && link.cellArea.width == 25;
+                              }));
+}
+
 TEST_CASE("the board's age follows the clock", "[orchestrator][view][board]")
 {
-    auto fixture = DashboardFixture { boardWorld(), Medium };
+    auto fixture = DashboardFixture { boardWorld(), Wide };
     auto const readAt = monoOf(fixture);
     openBoard(fixture, RunningId, "# hi"s, wallOf(readAt));
     CHECK(fixture.screen().contains("updated just now"));
     auto const at = [](uint64_t monoMs) {
         return core::SteadyTimePoint { std::chrono::milliseconds { monoMs } };
     };
-    CHECK(fixture.dashboard.nextRepaintDue() == at(readAt + MinuteMs));
+    // The transcript the Focus follows is read again within it: the board's age is due first only once that
+    // stops.
+    auto const due = fixture.dashboard.nextRepaintDue();
+    REQUIRE(due.has_value());
+    CHECK(*due <= at(readAt + MinuteMs));
 
     fixture.clock.advance(std::chrono::seconds { 61 });
     CHECK_FALSE(fixture.dashboard.frame().empty());
     CHECK(core::tui::test::canvasToString(fixture.dashboard.rendered()).contains("updated 1 min ago"));
-    CHECK(fixture.dashboard.nextRepaintDue() == at(readAt + (2 * MinuteMs)));
-
-    // Within the minute it shows, nothing is drawn.
-    fixture.clock.advance(std::chrono::seconds { 30 });
-    CHECK(fixture.dashboard.frame().empty());
-}
-
-TEST_CASE("an agent row with a board shows the cue", "[orchestrator][view][board]")
-{
-    auto fixture = DashboardFixture { boardWorld(), Medium };
-    auto const cueOf = [&] {
-        auto const rows = buildRows(fixture.engine, monoOf(fixture));
-        auto const row = std::ranges::find(rows, RunningId, &Row::run);
-        REQUIRE(row != rows.end());
-        return row->status.starts_with(std::format("{} ", BoardCue));
-    };
-    CHECK_FALSE(cueOf());
-    openBoard(fixture, RunningId, std::unexpected { FileReadError::NotRegular });
-    CHECK_FALSE(cueOf());
-    CHECK(fixture.dashboard.input("b").size() == 1);
-    carryOut(fixture, ShowBoardAction { .run = std::string { RunningId } }, "# hi"s);
-    CHECK(cueOf());
-    static_cast<void>(fixture.dashboard.input("\x1b"));
-    fixture.escapeTimesOut();
-    CHECK(fixture.screen().contains(std::format("{} working", BoardCue)));
 }
 
 // }}}
 
-TEST_CASE("m writes to the selected agent; Enter sends it, Esc drops it", "[orchestrator][view][message]")
+TEST_CASE("a paste into the message box keeps its line feeds", "[orchestrator][view][message]")
 {
     auto fixture = DashboardFixture { boardWorld(), Wide };
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.select(RunningId).empty());
-    CHECK(fixture.dashboard.input("m").empty());
-    REQUIRE(fixture.dashboard.interaction().message.has_value());
-    // Every key is the line's while it is open: `d`, `e` and `q` are text.
-    CHECK(fixture.dashboard.input("rebase, then dequeue").empty());
-    CHECK(fixture.screen().contains(std::format("to {}: rebase, then dequeue▏", RunningId)));
-    CHECK(fixture.dashboard.input("\r")
-          == std::vector<UiAction> {
-              SendMessageAction { .run = std::string { RunningId }, .text = "rebase, then dequeue" } });
-    CHECK_FALSE(fixture.dashboard.interaction().message.has_value());
-
-    SECTION("a paste keeps its line feeds")
-    {
-        CHECK(fixture.dashboard.input("m\x1b[200~one\r\ntwo\x1b[201~").empty());
-        CHECK(fixture.dashboard.interaction().message->text == "one\ntwo");
-    }
-    SECTION("Esc drops it, and Enter on an empty line sends nothing")
-    {
-        CHECK(fixture.dashboard.input("m\r").empty());
-        CHECK(fixture.dashboard.input("x").empty());
-        CHECK(fixture.dashboard.input("\x1b").empty());
-        fixture.escapeTimesOut();
-        CHECK_FALSE(fixture.dashboard.interaction().message.has_value());
-    }
-    SECTION("a finished run has no agent tab to write to")
-    {
-        CHECK(fixture.dashboard.select(FinishedId).empty());
-        CHECK(fixture.dashboard.input("m").empty());
-        CHECK_FALSE(fixture.dashboard.interaction().message.has_value());
-        CHECK(fixture.screen().contains("its agent has no tab to send to"));
-    }
-    SECTION("from its board too")
-    {
-        CHECK(fixture.dashboard.input("b").size() == 1);
-        CHECK(fixture.dashboard.input("mok\r")
-              == std::vector<UiAction> {
-                  SendMessageAction { .run = std::string { RunningId }, .text = "ok" } });
-    }
+    CHECK(fixture.dashboard.input("\r\x1b[200~one\r\ntwo\x1b[201~").empty());
+    CHECK(fixture.dashboard.interaction().drafts.at(std::string { RunningId }) == "one\ntwo");
+    // A finished run has no message box: Enter runs it again instead.
+    CHECK(fixture.dashboard.input("\x1b").empty());
+    fixture.escapeTimesOut();
+    CHECK(fixture.dashboard.select(FinishedId).empty());
+    CHECK(fixture.dashboard.input("\r").empty());
+    CHECK(fixture.screen().contains("#2366 is not listed any more"));
 }

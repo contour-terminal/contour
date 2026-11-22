@@ -147,6 +147,20 @@ namespace
     }
 } // namespace
 
+TranscriptLine latestLineOf(TranscriptEntry const& entry, int columns)
+{
+    auto const& row = kindRowOf(entry.kind);
+    auto const [header, body] = headerAndBodyOf(entry);
+    // The header reads `<who> · <clock>`: the line puts the clock first, as a log does.
+    auto const separator = header.rfind(" · ");
+    auto const who = std::string_view { header }.substr(0, separator);
+    auto const firstLine = body.substr(0, std::min(body.find('\n'), body.size()));
+    return TranscriptLine { .text =
+                                cut(std::format("{} {} {}", entryClockOf(entry), who, firstLine), columns),
+                            .role = row.header,
+                            .fit = DetailFit::Cut };
+}
+
 std::string localClockOf(std::string_view isoTime, int32_t utcOffsetMinutes)
 {
     // `YYYY-MM-DDTHH:MM`: the time of day starts after the T.
@@ -254,7 +268,11 @@ std::optional<std::vector<TranscriptLine>> transcriptScreenText(Engine const& en
         return plain(LoadingText);
     switch (view->state)
     {
-        case FetchState::Loading: return plain(LoadingText);
+        // A page read again, as a followed transcript is, shows what it held until the new one comes.
+        case FetchState::Loading:
+            if (view->content && view->content->page == page)
+                return std::nullopt;
+            return plain(LoadingText);
         case FetchState::Loaded: return std::nullopt;
         case FetchState::FormatMismatch: return plain(FormatMismatchText, Role::Text);
         case FetchState::Failed: break;
@@ -279,11 +297,11 @@ std::optional<std::vector<TranscriptLine>> transcriptScreenText(Engine const& en
 }
 
 TranscriptPanel::TranscriptPanel(Engine const& engine,
-                                 Interaction const& interaction,
+                                 FocusSubject const& subject,
                                  std::string const& tab,
                                  TranscriptPanelState& state):
     _engine { engine },
-    _interaction { interaction },
+    _subject { subject },
     _tab { tab },
     _state { state },
     _wrapped { MaxTranscriptLines, ellipsisLine() }
@@ -311,23 +329,14 @@ std::span<TranscriptLine const> TranscriptPanel::linesFor(TranscriptPage const& 
 
 void TranscriptPanel::render(core::tui::Canvas& canvas)
 {
-    // The Narrow band shows the transcript alone, without the summary line that hides the cursor elsewhere.
-    canvas.hideCursor();
     auto const& theme = canvas.theme();
-    auto const* const view = _engine.transcript(_tab, _interaction.subject);
-    auto const pages = view != nullptr && view->content ? view->content->pages : 0;
-    // The run's id gives way first: the page is what the keys change.
-    auto const where = pages > 0 ? std::format("page {} of {}", _interaction.page, pages)
-                                 : std::format("page {}", _interaction.page);
-    auto const titleColumns = canvas.width() - 6;
-    auto const runColumns = titleColumns - columnsOf(std::format("Transcript ·  · {}", where));
-    drawFrame(canvas, std::format("Transcript · {} · {}", cut(_interaction.subject, runColumns), where));
-    auto inside = insideFrame(canvas);
+    auto const* const view = _engine.transcript(_tab, _subject.run);
+    auto& inside = canvas;
     auto const width = inside.width() - 2;
     auto const height = std::max(0, inside.height());
     _state = TranscriptPanelState { .lines = 0, .rows = 0, .wrappedEntries = _wrapped.wrappedBlocks() };
 
-    if (auto const text = transcriptScreenText(_engine, _tab, _interaction.subject, _interaction.page);
+    if (auto const text = transcriptScreenText(_engine, _tab, _subject.run, _subject.page);
         text || view == nullptr || !view->content)
     {
         auto line = 0;
@@ -345,14 +354,17 @@ void TranscriptPanel::render(core::tui::Canvas& canvas)
     }
 
     auto const& page = *view->content;
-    auto const footer = transcriptFooterOf(page);
-    auto const footerRows = footer.empty() ? 0 : 1;
-    auto const rows = static_cast<std::size_t>(std::max(0, height - footerRows));
-    // Wrapped as far as the lines shown: what lies below them is wrapped once it is scrolled to.
-    auto const lines = linesFor(page, width, _interaction.scroll + rows);
+    auto const written = transcriptFooterOf(page);
+    auto const where = std::format("page {} of {}", page.page, page.pages);
+    auto const footer = written.empty() ? where : std::format("{}{}{}", where, HintSeparator, written);
+    auto const rows = static_cast<std::size_t>(std::max(0, height - 1));
+    // Wrapped as far as the lines shown: what lies below them is wrapped once it is scrolled to. Following
+    // the agent shows the end, so the page is wrapped whole.
+    auto const follows = _subject.follow == Follow::Live;
+    auto const lines = linesFor(page, width, follows ? MaxTranscriptLines : _subject.scroll + rows);
     _state.lines = _wrapped.lineCount();
     _state.rows = rows;
-    if (footerRows > 0 && height > 0)
+    if (height > 0)
         inside.putString(height - 1, 1, cut(footer, width), styleOf(theme, Role::Dim));
     if (lines.empty())
     {
@@ -360,10 +372,11 @@ void TranscriptPanel::render(core::tui::Canvas& canvas)
         return;
     }
     // The keys keep the scroll within the page as last drawn; one that shrank since is shown from its end.
-    auto const top = std::min(_interaction.scroll, lines.size() > rows ? lines.size() - rows : 0);
+    auto const end = lines.size() > rows ? lines.size() - rows : 0;
+    auto const top = follows ? end : std::min(_subject.scroll, end);
     auto line = 0;
     for (auto const& [text, role, fit]: lines | std::views::drop(top) | std::views::take(rows))
-        inside.putString(line++, 1, text, styleOf(theme, role));
+        putLinked(inside, line++, 1, text, styleOf(theme, role));
 }
 
 } // namespace orchestrator::view

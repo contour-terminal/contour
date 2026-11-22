@@ -1,40 +1,40 @@
-contour: the pull request list failed: You are not logged into any GitHub hosts. To log in, run: gh auth login          
-contour: the pull request list is incomplete                                                                            
-╭─ Agents ─────────────────────────────────────────────────────────────╮ ╭─ Details ───────────────────────────────────╮
-│ MY PULL REQUESTS                                                     │ │ Report the Qt macOS bug that drops Ctrl+Cm… │
-│ no open pull requests                                                │ │                                             │
-│                                                                      │ │ issue     #2356                             │
-│ ISSUES WITHOUT A PR                                                  │ │ url       https://github.com/contour-termin │
-│ ▾ contour · 5                                                        │ │             al/contour/issues/2356          │
-│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │                                             │
-│   #2338 Flaky on Windows: SessionHost.extension.controlVerb require… │ │                                             │
-│   #2253 Switch `daemon` Same `client`                                │ │                                             │
-│   #2163 OSC 133: optional nonce to reject forged command lines and … │ │                                             │
-│   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead o… │ │                                             │
-│                                                                      │ │                                             │
-│ AGENTS · 0 OF 4 RUNNING                                              │ │                                             │
-│ no agents                                                            │ │                                             │
-│                                                                      │ │                                             │
-│ FINISHED · 0 NEW                                                     │ │                                             │
-│ nothing finished                                                     │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
- ↑↓ move · enter open · d new run · ? help · b board · t transcript · / filter · z fold · R refresh · e end run         
- ⬢ agents 0/4                                                                                                           
+ ✦ Agents                                                                                                    ⬢ 0/4 ▱▱▱▱ 
+ contour: the pull request list failed: You are not logged into any GitHub hosts. To log in, run: gh auth login         
+ contour: the pull request list is incomplete                                                                           
+╭─ Agents 0 ───────────────────────────────────╮ ╭─────────────────────────────────────────────────────────────────────╮
+│▍+ new agent                                  │ │ No agents yet. ⏎ or n starts one on a pull request, an issue, or    │
+│                                              │ │ anything you type.                                                  │
+│                                              │ │ Once agents run: ⏎ talks to the selected one, esc steps back.       │
+│                                              │ │ Everything else is in ? (the keys).                                 │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
+ ↑↓ move · ⏎ open · tab focus · n new agent · / filter · ? help · R refresh · I install plugins                         

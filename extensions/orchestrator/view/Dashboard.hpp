@@ -30,8 +30,9 @@ inline constexpr auto RestingCursor = std::string_view { "\033[H" };
 /// dashboard as one PasteEvent rather than as keys.
 inline constexpr auto BracketedPasteOn = std::string_view { "\033[?2004h" };
 
-/// The dashboard tab: the engine's lists drawn with core::tui, laid out by breakpoint (narrowest first, the
-/// last one the tab's size meets wins: BandBreakpoints), and the keys typed into it.
+/// The dashboard tab: the Fleet (the runs, by what they need) and the Focus (the selected run) drawn with
+/// core::tui, laid out by breakpoint (narrowest first, the last one the tab's size meets wins:
+/// BandBreakpoints), and the keys typed into it.
 ///
 /// It performs no I/O. Bytes the terminal sent go in through input(); frame() returns the bytes that bring
 /// the tab up to date, which the guest writes to it.
@@ -80,16 +81,16 @@ class Dashboard
     void engineChanged();
 
     /// Selects the row of a run, dropping the filter when it hides that row and an end waiting for its
-    /// confirmation, and returning from a board or a transcript to the dashboard; does nothing when no row
-    /// stands for the run.
+    /// confirmation, and giving the Fleet the keys; does nothing when no row stands for the run.
     /// @param run The run's id.
-    /// @return What the engine is asked: HideBoardAction when a board was left; else nothing.
+    /// @return What the engine is asked: nothing, as the Focus asks for its run's board and transcript in
+    ///         dueActions().
     [[nodiscard]] std::vector<UiAction> select(std::string_view run);
 
     /// Opens the launcher on an item the engine lists, its session id taken from the dashboard's source: what
-    /// `d` does on a finished run, a board or a transcript, through the same openLauncherFor(). The launcher
-    /// previews and refuses as every dispatch does; nothing starts before it is confirmed. When the engine
-    /// does not list the item, no launcher opens and the summary line says why.
+    /// Enter does on a finished run, through the same openLauncherFor(). The launcher previews and refuses as
+    /// every dispatch does; nothing starts before it is confirmed. When the engine does not list the item, no
+    /// launcher opens and the action bar says why.
     /// @param repo The repository's configured name.
     /// @param item The item.
     /// @param task The id of the task it starts on, such as a run's; when it no longer applies to the item,
@@ -99,11 +100,12 @@ class Dashboard
     /// @return The launcher while it is open.
     [[nodiscard]] std::optional<LauncherState> const& launcher() const noexcept;
 
-    /// The engine refused a dispatch confirmed here: the summary line says why, until the next key.
+    /// The engine refused a dispatch confirmed here: the action bar says why, until the next key.
     /// @param refusal Why.
     void dispatchRefused(DispatchRefusal refusal);
 
-    /// A message sent here was not typed into its agent's tab: the summary line says why, until the next key.
+    /// A message sent here was not typed into its agent's tab: the draft comes back to the message box, which
+    /// gets the keys again while its run is selected, and the action bar says why, until the next key.
     /// @param why The host's reason, in the failure words.
     void messageRefused(std::string_view why);
 
@@ -115,10 +117,10 @@ class Dashboard
     ///         it.
     [[nodiscard]] std::optional<core::SteadyTimePoint> pendingEscapeDeadline() const noexcept;
 
-    /// @return When an agent's row changes next with time alone (see nextRowChange()): the guest wakes by
-    /// then
-    ///         and calls frame(), which draws it; std::nullopt when none does. Valid after a frame or an
-    ///         input.
+    /// @return When the dashboard changes next with time alone: an agent's row (see nextRowChange()), the
+    ///         Board tab's age, or the transcript the Focus follows, read again every five seconds. The guest
+    ///         wakes by then and calls dueActions() and frame(); std::nullopt when nothing is due. Valid
+    ///         after a frame or an input.
     [[nodiscard]] std::optional<core::SteadyTimePoint> nextRepaintDue() const noexcept;
 
     /// @return How often the rows were built from the engine: once per input(), and in frame() only after
@@ -126,10 +128,11 @@ class Dashboard
     [[nodiscard]] std::size_t rowBuilds() const noexcept;
 
     /// What the dashboard asks of the engine with no key typed; the guest calls it before frame(), so that it
-    /// reaches the engine first. An ESC whose deadline passed (see pendingEscapeDeadline()) is the Escape key
-    /// (Esc on a board hides it); and the transcript shown is asked for again when the engine keeps no page
-    /// of it for this tab, so that the screen never waits for a page nobody reads. The board of the agent the
-    /// dashboard selects is asked for, its details showing it, and the one selected before is no longer read.
+    /// reaches the engine first. An ESC whose deadline passed (see pendingEscapeDeadline()) is the Escape
+    /// key. The board of the run the Focus shows is asked for, and the one shown before is no longer read.
+    /// Its transcript page is asked for when the selection moves to it, when the engine keeps no page of it
+    /// for this tab or keeps another, when the log grew a page while the tab follows the agent, and every
+    /// five seconds while the agent runs and the tab follows it; never while a read of it is in flight.
     /// @return What the engine is asked, in order; empty when nothing is due.
     [[nodiscard]] std::vector<UiAction> dueActions();
 

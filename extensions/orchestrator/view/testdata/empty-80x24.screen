@@ -1,5 +1,6 @@
-worktree_root: is required                                                      
-╭─ Agents ─────────────────────────────────────────────────────────────────────╮
+ ✦ Agents                                                                   ⬢ 0 
+ worktree_root: is required                                                     
+╭─ Agents 0 ───────────────────────────────────────────────────────────────────╮
 │ Nothing to list until the orchestrator is configured.                        │
 │ Configure daemon.extensions.orchestrator.config:                             │
 │ worktree_root, models, repos and tasks.                                      │
@@ -7,18 +8,17 @@ worktree_root: is required
 │                                                                              │
 │                                                                              │
 │                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Details ────────────────────────────────────────────────────────────────────╮
+╭──────────────────────────────────────────────────────────────────────────────╮
 │ Nothing selected.                                                            │
 │                                                                              │
 │                                                                              │
 │                                                                              │
 │                                                                              │
 │                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- ↑↓ move · enter open · d new run · ? help · b board · t transcript · / filter  
-                                                                                
+ ↑↓ move · ⏎ open · tab focus · n new agent · / filter · ? help · R refresh     

@@ -1,40 +1,40 @@
-╭─ Agents ─────────────────────────────────────────────────────────────╮ ╭─ Details ───────────────────────────────────╮
-│ MY PULL REQUESTS                                                     │ │ pr-2379 · fix CI · completed                │
-│ no open pull requests                                                │ │                                             │
-│                                                                      │ │ task      fix CI                            │
-│ ISSUES WITHOUT A PR                                                  │ │ model     sonnet                            │
-│ ▾ contour · 5                                                        │ │ state     completed, worktree removed, seen │
-│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │ time      30m 40s wall · 2m 30s active · 1m │
-│   #2338 Flaky on Windows: SessionHost.extension.controlVerb require… │ │             35s waiting for you             │
-│   #2253 Switch `daemon` Same `client`                                │ │ tokens    42.3k out · 152 in · 12.9M cache  │
-│   #2163 OSC 133: optional nonce to reject forged command lines and … │ │             read · 192.7k cache write       │
-│   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead o… │ │ cache     98.5% hit                         │
-│                                                                      │ │ cost      $0.12, as Claude Code reports it  │
-│ TIMELINE · LAST 24 HOURS, AN HOUR A BAR                              │ │ calls     4 API calls · 2 prompts · 1 API   │
-│ agents active  ························               peak 0 · now 0 │ │             error                           │
-│ tokens out     ························                     0 in 24h │ │ tools     Bash 2 · Read 1 · 1 failed        │
-│ runs started   ·······················█          1 started · 1 ended │ │ agents    2 subagents (3.1k out) · 1        │
-│                                                                      │ │             compaction                      │
-│ AGENTS · 0 OF 4 RUNNING                                              │ │ opened    #7 https://github.com/o/r/pull/7  │
-│ no agents                                                            │ │ branch    agent/pr-2379-20261113-150912     │
-│                                                                      │ │ worktree  /home/u/worktrees/contour/pr-2379 │
-│ FINISHED · 0 NEW                                                     │ │             -20261113-150912                │
-│   pr-2379 · fix CI · completed                               removed │ │ url       https://github.com/contour-termin │
-│                                                                      │ │             al/contour/pull/2379            │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
- ↑↓ move · enter open · d new run · ? help · b board · t transcript · / filter · z fold · R refresh · e end run         
- ⬢ agents 0/4                                                                                                           
+ ✦ Agents                                                                                                    ⬢ 0/4 ▱▱▱▱ 
+╭─ Agents 1 ───────────────────────────────────╮ ╭─ pr-2379 · fix CI · sonnet ────────────────────────────── · removed ╮
+│ FINISHED 1                                   │ │ agent/pr-2379-20261113-150912                                       │
+│▍· pr-2379 · fix CI                   removed │ │ Transcript  Details                                                 │
+│▍  completed                                  │ │ task      fix CI                                                    │
+│                                              │ │ model     sonnet                                                    │
+│ + new agent                                  │ │ state     completed, worktree removed, seen                         │
+│                                              │ │ time      30m 40s wall · 2m 30s active · 1m 35s waiting for you     │
+│                                              │ │ tokens    42.3k out · 152 in · 12.9M cache read · 192.7k cache      │
+│                                              │ │             write                                                   │
+│                                              │ │ cache     98.5% hit                                                 │
+│                                              │ │ cost      $0.12, as Claude Code reports it                          │
+│                                              │ │ calls     4 API calls · 2 prompts · 1 API error                     │
+│                                              │ │ tools     Bash 2 · Read 1 · 1 failed                                │
+│                                              │ │ agents    2 subagents (3.1k out) · 1 compaction                     │
+│                                              │ │ opened    #7 https://github.com/o/r/pull/7                          │
+│                                              │ │ branch    agent/pr-2379-20261113-150912                             │
+│                                              │ │ worktree  /home/u/worktrees/contour/pr-2379-20261113-150912         │
+│                                              │ │ url       https://github.com/contour-terminal/contour/pull/2379     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │ ── latest ───────────────────────────────────────────────────────── │
+│                                              │ │ 18:36 tool Bash {"command":"mkdir sub && cd sub && ls -a ..","desc… │
+│                                              │ │ 18:36 result .                                                      │
+│                                              │ │ 18:37 claude done.                                                  │
+│                                              │ │ ╭─────────────────────────────────────────────────────────────────╮ │
+│                                              │ │ │ · removed · completed · ⏎ runs it again · del dismiss           │ │
+│                                              │ │ ╰─────────────────────────────────────────────────────────────────╯ │
+╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
+ ↑↓ move · ⏎ open · tab focus · t transcript · d details · n new agent · / filter · o copy link · del dismiss · z fold  

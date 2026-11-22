@@ -1,4 +1,7 @@
-╭─ STATUS.md · pr-2360-20261113-130000 ────────────────────────────────────────╮
+ ✦ Agents                                                            ⬢ 1/4 ▰▱▱▱ 
+╭─ pr-2360 · fix CI · sonnet ────────────────────────────────────────── ⚑ kept ╮
+│ agent/pr-2360-20261113-130000                                                │
+│ Board  Transcript  Details                                                   │
 │ This run wrote no STATUS.md.                                                 │
 │                                                                              │
 │                                                                              │
@@ -10,15 +13,12 @@
 │                                                                              │
 │                                                                              │
 │                                                                              │
+│ ── latest ────────────────────────────────────────────────────────────────── │
+│ nothing yet                                                                  │
 │                                                                              │
 │                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
+│ ╭──────────────────────────────────────────────────────────────────────────╮ │
+│ │ ⚑ kept · completed · 1 entry kept · ⏎ retries the removal · del dismiss  │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- ↑↓ scroll · t transcript · d new run · b reload · esc back · m message         
- ⬢ agents 1/4                                                                   
+ ↑↓ scroll · esc back · b board · t transcript · d details · n new agent        

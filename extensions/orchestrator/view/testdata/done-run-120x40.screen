@@ -1,40 +1,40 @@
-╭─ Agents ─────────────────────────────────────────────────────────────╮ ╭─ Details ───────────────────────────────────╮
-│ MY PULL REQUESTS                                                     │ │ pr-2379 · fix CI · sonnet                   │
-│ ▾ contour · 5                                                        │ │                                             │
-│ ● #2375 Say why the stdio relay failed, and send a … ○ agent working │ │ task      fix CI                            │
-│ ✓ #2369 examples: add donut-animation, a full-screen animation done… │ │ model     sonnet                            │
-│ ✓ #2346 contour: tab_style — shapes, fills, materials and widths fo… │ │ state     done                              │
-│ ✗ #2114 vtbackend: WIP -- DEC mode 44 and a partial margin-bell tri… │ │ branch    agent/pr-2379-20261113-150912     │
-│ ✗ #1847 Adds ability to set Contour as default terminal on Windows … │ │ worktree  /home/u/worktrees/contour/pr-2379 │
-│                                                                      │ │             -20261113-150912                │
-│ ISSUES WITHOUT A PR                                                  │ │ url       https://github.com/contour-termin │
-│ ▾ contour · 5                                                        │ │             al/contour/pull/2379            │
-│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │                                             │
-│   #2338 Flaky on Windows: SessionHost.extension.controlVerb require… │ │                                             │
-│   #2253 Switch `daemon` Same `client`                                │ │                                             │
-│   #2163 OSC 133: optional nonce to reject forged command lines and … │ │                                             │
-│   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead o… │ │                                             │
-│                                                                      │ │                                             │
-│ TIMELINE · LAST 24 HOURS, AN HOUR A BAR                              │ │                                             │
-│ agents active  ·······················█               peak 2 · now 2 │ │                                             │
-│ tokens out     ························                     0 in 24h │ │                                             │
-│ runs started   ·······················█          2 started · 0 ended │ │                                             │
-│                                                                      │ │                                             │
-│ AGENTS · 2 OF 4 RUNNING                                              │ │                                             │
-│ ○ pr-2375 · fix CI · sonnet                               working 6m │ │                                             │
-│ ● pr-2379 · fix CI · sonnet              waiting for you · e ends it │ │                                             │
-│                                                                      │ │                                             │
-│ FINISHED · 0 NEW                                                     │ │                                             │
-│ nothing finished                                                     │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
- ↑↓ move · enter open · d new run · ? help · b board · t transcript · / filter · z fold · R refresh · e end run         
- ⬢ agents 2/4 · ✗2                                                                                                      
+ ✦ Agents                                                                                                    ⬢ 2/4 ▰▰▱▱ 
+╭─ Agents 2 ───────────────────────────────────╮ ╭─ pr-2379 · fix CI · sonnet ───────────────────────────────── ✓ done ╮
+│ WORKING 1 of 4                               │ │ agent/pr-2379-20261113-150912                                       │
+│ ⠿ pr-2375 · fix CI                working 6m │ │ Board  Transcript  Details                                          │
+│ TO REVIEW 1                                  │ │ updated 9 min ago                                                   │
+│▍✓ pr-2379 · fix CI                      done │ │ Fixing CI                                                           │
+│▍  fix the reflow                      ▰▰▰▱▱▱ │ │ ☑ reproduced on master                                              │
+│                                              │ │ ☑ wrote the regression test                                         │
+│ + new agent                                  │ │ ☐ fix the reflow                                                    │
+│                                              │ │ ☐ watch CI                                                          │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │ ── latest ───────────────────────────────────────────────────────── │
+│                                              │ │ 18:36 tool Bash {"command":"mkdir sub && cd sub && ls -a ..","desc… │
+│                                              │ │ 18:36 result .                                                      │
+│                                              │ │ 18:37 claude done.                                                  │
+│                                              │ │ ╭─────────────────────────────────────────────────────────────────╮ │
+│                                              │ │ │ ✓ reported done · ⏎ follow up · o copy link · e end             │ │
+│                                              │ │ ╰─────────────────────────────────────────────────────────────────╯ │
+╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
+ ↑↓ move · ⏎ open · tab focus · b board · t transcript · d details · n new agent · / filter · e end · o copy link       

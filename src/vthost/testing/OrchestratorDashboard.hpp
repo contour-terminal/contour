@@ -38,13 +38,6 @@ namespace vthost::testing
 /// The longest a window waits, in 1 ms loop ticks, for what it counts on.
 inline constexpr auto WaitTicks = 60'000;
 
-/// The pull requests github/prs-open.json lists, as the dashboard numbers them.
-inline constexpr auto FixturePullRequests = std::array { std::string_view { "#2375" },
-                                                         std::string_view { "#2369" },
-                                                         std::string_view { "#2346" },
-                                                         std::string_view { "#2114" },
-                                                         std::string_view { "#1847" } };
-
 /// @return A host that takes over @p image, its daemon world @p world's.
 [[nodiscard]] inline std::unique_ptr<LiveHost> takeOver(handover::HandoverImage image,
                                                         OrchestratorWorld& world)
@@ -54,24 +47,11 @@ inline constexpr auto FixturePullRequests = std::array { std::string_view { "#23
     return std::make_unique<LiveHost>(world.ptys(), std::move(config));
 }
 
-/// @return Whether @p page lists every fixture pull request beneath MY PULL REQUESTS, each on a row of the
-///         rounded box that holds the heading.
-[[nodiscard]] inline bool showsFixtureLists(std::string_view page)
+/// @return Whether @p page shows the dashboard: the Fleet's rounded box, titled with its count of runs.
+[[nodiscard]] inline bool showsDashboard(std::string_view page)
 {
-    auto const lines = pageLines(page);
-    auto const top = std::ranges::find_if(
-        lines, [](std::string const& line) { return line.starts_with("╭") && line.ends_with("╮"); });
-    auto const bottom = std::ranges::find_if(top, lines.end(), [](std::string const& line) {
-        return line.starts_with("╰") && line.ends_with("╯");
-    });
-    auto const heading = std::ranges::find_if(
-        top, bottom, [](std::string const& line) { return line.contains("MY PULL REQUESTS"); });
-    if (bottom == lines.end() || heading == bottom)
-        return false;
-    return std::ranges::all_of(FixturePullRequests, [&](std::string_view number) {
-        return std::ranges::any_of(heading, bottom, [&](std::string const& line) {
-            return line.starts_with("│") && line.ends_with("│") && line.contains(number);
-        });
+    return std::ranges::any_of(pageLines(page), [](std::string const& line) {
+        return line.starts_with("╭─ Agents ") && line.ends_with("╮");
     });
 }
 
@@ -100,7 +80,7 @@ inline constexpr auto FixturePullRequests = std::array { std::string_view { "#23
 /// The orchestrator's dashboard as a window opened it.
 struct OpenedDashboard
 {
-    std::optional<vtworkspace::SessionId> session; ///< Its tab's session, once it showed the lists.
+    std::optional<vtworkspace::SessionId> session; ///< Its tab's session, once it showed the dashboard.
     uint64_t workspace = 0;                        ///< The window's workspace, which holds it.
     std::size_t questions = 0; ///< How many grant questions the window was asked before it opened it.
 };
@@ -121,7 +101,7 @@ struct SecondOpen
 };
 
 /// The window's part: grants the orchestrator if it is asked, waits until its palette offers "open" with the
-/// extension running, invokes it, and waits until its workspace's served tab shows the lists -- answering
+/// extension running, invokes it, and waits until its workspace's served tab shows the dashboard -- answering
 /// every command the orchestrator runs meanwhile; then does what @p then says.
 inline core::async::Task<void> openAndLeave(LiveHost* live,
                                             OrchestratorWorld* world,
@@ -154,7 +134,7 @@ inline core::async::Task<void> openAndLeave(LiveHost* live,
         [&] {
             answering();
             auto const session = servedIn(live->host, opened->workspace);
-            if (session && showsFixtureLists(live->pageText(*session)))
+            if (session && showsDashboard(live->pageText(*session)))
                 opened->session = session;
             return opened->session.has_value();
         },
@@ -180,9 +160,9 @@ inline core::async::Task<void> openAndLeave(LiveHost* live,
 
 /// Opens the orchestrator's dashboard from a new window on @p live, as "Open Agents" in its palette does.
 /// @param intent Which workspace the window asks to be shown.
-/// @param then What the window does once the dashboard shows the lists.
+/// @param then What the window does once the dashboard is drawn.
 /// @param second Where what it saw of a second "open" is written, for ThenOpen::Again.
-/// @return The dashboard, once it shows the fixture lists.
+/// @return The dashboard, once it is drawn.
 [[nodiscard]] inline OpenedDashboard openDashboard(LiveHost& live,
                                                    OrchestratorWorld& world,
                                                    proto::AttachIntent intent = {},

@@ -1,6 +1,6 @@
-╭─ Details ──────────────────────────────────────╮
-│ pr-2379 · fix CI · completed                   │
-│                                                │
+ ✦ Agents                              ⬢ 0/4 ▱▱▱▱ 
+╭─ pr-2379 · fix CI · sonnet ───────── · removed ╮
+│ Transcript  Details                            │
 │ task      fix CI                               │
 │ model     sonnet                               │
 │ state     completed, worktree removed, seen    │
@@ -9,12 +9,12 @@
 │ tokens    42.3k out · 152 in · 12.9M cache     │
 │             read · 192.7k cache write          │
 │ cache     98.5% hit                            │
-│ cost      $0.12, as Claude Code reports it     │
-│ calls     4 API calls · 2 prompts · 1 API      │
-│             error                              │
-│ tools     Bash 2 · Read 1 · 1 failed           │
-│ agents    2 subagents (3.1k out) · 1           │
-│             compaction…                        │
+│ ── latest ──────────────────────────────────── │
+│ 18:36 tool Bash {"command":"mkdir sub && cd s… │
+│ 18:36 result .                                 │
+│ 18:37 claude done.                             │
+│ ╭────────────────────────────────────────────╮ │
+│ │ · removed · completed · ⏎ runs it again ·… │ │
+│ ╰────────────────────────────────────────────╯ │
 ╰────────────────────────────────────────────────╯
- ↑↓ move · enter open · d new run · ? help        
- ⬢ agents 0/4                                     
+ ↑↓ scroll · esc back · t transcript · d details  

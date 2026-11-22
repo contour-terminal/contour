@@ -143,11 +143,11 @@ std::optional<std::string_view> boardScreenText(Engine const& engine, std::strin
 }
 
 StatusBoardPanel::StatusBoardPanel(Engine const& engine,
-                                   Interaction const& interaction,
+                                   FocusSubject const& subject,
                                    core::IClock const& clock,
                                    BoardPanelState& state):
     _engine { engine },
-    _interaction { interaction },
+    _subject { subject },
     _clock { clock },
     _state { state },
     _wrapped { MaxBoardLines, BoardLine { .text = "…", .role = Role::Dim } }
@@ -181,17 +181,14 @@ std::span<BoardLine const> StatusBoardPanel::linesFor(std::string_view bytes, in
 
 void StatusBoardPanel::render(core::tui::Canvas& canvas)
 {
-    // The Narrow band shows the board alone, without the summary line that hides the cursor elsewhere.
-    canvas.hideCursor();
     auto const& theme = canvas.theme();
-    drawFrame(canvas, std::format("STATUS.md · {}", _interaction.subject));
-    auto inside = insideFrame(canvas);
+    auto& inside = canvas;
     auto const width = inside.width() - 2;
     auto const height = std::max(0, inside.height());
-    auto const* const shown = _engine.board(_interaction.subject);
+    auto const* const shown = _engine.board(_subject.run);
     _state = BoardPanelState {};
 
-    if (auto const text = boardScreenText(_engine, _interaction.subject); text || shown == nullptr)
+    if (auto const text = boardScreenText(_engine, _subject.run); text || shown == nullptr)
     {
         auto line = 0;
         for (auto const& piece: wrap(text.value_or(""), width, width) | std::views::take(height))
@@ -215,11 +212,11 @@ void StatusBoardPanel::render(core::tui::Canvas& canvas)
 
     auto const rows = static_cast<std::size_t>(std::max(0, height - 1));
     // Wrapped as far as the lines shown: a board scrolled to its end is wrapped whole.
-    auto const lines = linesFor(board.bytes, width, _interaction.scroll + rows);
+    auto const lines = linesFor(board.bytes, width, _subject.scroll + rows);
     _state.lines = _wrapped.lineCount();
     _state.rows = rows;
     // The keys keep the scroll within the board as last drawn; one that shrank since is shown from its end.
-    auto const top = std::min(_interaction.scroll, lines.size() > rows ? lines.size() - rows : 0);
+    auto const top = std::min(_subject.scroll, lines.size() > rows ? lines.size() - rows : 0);
     if (lines.empty())
     {
         inside.putString(1, 1, cut("STATUS.md is empty.", width), styleOf(theme, Role::Dim));
@@ -227,7 +224,7 @@ void StatusBoardPanel::render(core::tui::Canvas& canvas)
     }
     auto line = 1;
     for (auto const& shown: lines | std::views::drop(top) | std::views::take(rows))
-        inside.putString(line++, 1, shown.text, styleOf(theme, shown.role));
+        putLinked(inside, line++, 1, shown.text, styleOf(theme, shown.role));
 }
 
 } // namespace orchestrator::view

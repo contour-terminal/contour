@@ -1,40 +1,40 @@
-pr-2375-20261113-150847: outside the current configuration (/home/u/worktrees/retired/pr-2375-20261113-150847); left as…
-╭─ Agents ─────────────────────────────────────────────────────────────╮ ╭─ Details ───────────────────────────────────╮
-│ MY PULL REQUESTS                                                     │ │ issue-2356 · work on issue · ended by you   │
-│ no open pull requests                                                │ │                                             │
-│                                                                      │ │           outside the configuration         │
-│ ISSUES WITHOUT A PR                                                  │ │ task      work on issue                     │
-│ ▾ contour · 5                                                        │ │ model     sonnet                            │
-│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │ state     ended by you, worktree kept,      │
-│   #2338 Flaky on Windows: SessionHost.extension.controlVerb require… │ │             seen: M src/vtbackend/Grid.cpp  │
-│   #2253 Switch `daemon` Same `client`                                │ │ branch    agent/issue-2356-20261113-151001  │
-│   #2163 OSC 133: optional nonce to reject forged command lines and … │ │ worktree  /home/u/worktrees/retired/issue-2 │
-│   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead o… │ │             356-20261113-151001             │
-│                                                                      │ │ url       https://github.com/contour-termin │
-│ TIMELINE · LAST 24 HOURS, AN HOUR A BAR                              │ │             al/contour/issues/2356          │
-│ agents active  ·······················█               peak 1 · now 1 │ │           M src/vtbackend/Grid.cpp          │
-│ tokens out     ························                     0 in 24h │ │           ?? notes.txt                      │
-│ runs started   ·······················█          2 started · 1 ended │ │                                             │
-│                                                                      │ │                                             │
-│ AGENTS · 1 OF 4 RUNNING                                              │ │                                             │
-│ ○ pr-2375 · fix CI · sonnet                outside the configuration │ │                                             │
-│                                                                      │ │                                             │
-│ FINISHED · 0 NEW                                                     │ │                                             │
-│   issue-2356 · work on issue · ended by you          kept: 2 entries │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-│                                                                      │ │                                             │
-╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
- ↑↓ move · enter open · d new run · ? help · b board · t transcript · / filter · z fold · R refresh · e end run         
- ⬢ agents 1/4                                                                                                           
+ ✦ Agents                                                                                                    ⬢ 1/4 ▰▱▱▱ 
+ pr-2375-20261113-150847: outside the current configuration (/home/u/worktrees/retired/pr-2375-20261113-150847); left … 
+╭─ Agents 2 ───────────────────────────────────╮ ╭─ pr-2375 · fix CI · sonnet ──────────── ⠿ outside the configuration ╮
+│ WORKING 1 of 4                               │ │ agent/pr-2375-20261113-150847                                       │
+│▍⠿ pr-2375 · fix CI     outside the configur… │ │ Board  Transcript  Details                                          │
+│▍  fix the reflow                      ▰▰▰▱▱▱ │ │ updated 9 min ago                                                   │
+│ FINISHED 1                                   │ │ Fixing CI                                                           │
+│ ⚑ issue-2356 · work on issue            kept │ │ ☑ reproduced on master                                              │
+│   ended by you · 2 entries kept              │ │ ☑ wrote the regression test                                         │
+│                                              │ │ ☐ fix the reflow                                                    │
+│ + new agent                                  │ │ ☐ watch CI                                                          │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │ ── latest ───────────────────────────────────────────────────────── │
+│                                              │ │ 18:36 tool Bash {"command":"mkdir sub && cd sub && ls -a ..","desc… │
+│                                              │ │ 18:36 result .                                                      │
+│                                              │ │ 18:37 claude done.                                                  │
+│                                              │ │ ╭─────────────────────────────────────────────────────────────────╮ │
+│                                              │ │ │ ⏎ to write to pr-2375                                           │ │
+│                                              │ │ ╰─────────────────────────────────────────────────────────────────╯ │
+╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
+ ↑↓ move · ⏎ open · tab focus · b board · t transcript · d details · n new agent · / filter · e end · o copy link       

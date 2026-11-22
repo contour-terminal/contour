@@ -45,61 +45,43 @@ constexpr auto SixMinutes = uint64_t { 360'000 };
 
 } // namespace
 
-TEST_CASE("the sections come in order, each item under its heading", "[orchestrator][view]")
+TEST_CASE("the Fleet lists runs only, then + new agent", "[orchestrator][view]")
 {
     auto const engine = bootEngine({});
     auto const rows = buildRows(engine, StartMonoMs);
-    CHECK(textsOf(rows, RowKind::Heading)
-          == std::vector<std::string> {
-              "MY PULL REQUESTS", "ISSUES WITHOUT A PR", "AGENTS · 0 OF 4 RUNNING", "FINISHED · 0 NEW" });
-    CHECK(std::ranges::count(rows, RowKind::PullRequest, &Row::kind) == 5);
-    CHECK(std::ranges::count(rows, RowKind::Issue, &Row::kind)
-          == static_cast<std::ptrdiff_t>(engine.unclaimedIssues("contour").size()));
-    CHECK(textsOf(rows, RowKind::Placeholder)
-          == std::vector<std::string> { "no agents", "nothing finished" });
-    CHECK(rows.front().kind == RowKind::Heading);
-    // Each section's items come under one group per repository, its header naming it and their count.
-    CHECK(rows[1].kind == RowKind::Group);
-    CHECK(rows[1].text == "contour · 5");
-    CHECK(rows[1].group == "prs/contour");
-    CHECK(rows[2].text.starts_with("#2375 "));
-    CHECK(rows[2].group == "prs/contour");
+    // The pull requests and issues are the launcher's: with no run, the Fleet holds `+ new agent` alone.
+    REQUIRE(rows.size() == 1);
+    CHECK(rows.front().kind == RowKind::NewAgent);
+    CHECK(rows.front().isSelectable());
 }
 
-TEST_CASE("a folded group lists its header, and its items only under a filter", "[orchestrator][view]")
+TEST_CASE("a folded group lists its heading, and its runs only under a filter", "[orchestrator][view]")
 {
-    auto const header = [](Fold fold) {
-        return Row {
-            .kind = RowKind::Group, .text = "pace · 2", .repo = "pace", .group = "issues/pace", .fold = fold
-        };
+    auto const heading = [](Fold fold) {
+        return Row { .kind = RowKind::Heading, .text = "FINISHED", .group = "fleet/finished", .fold = fold };
     };
-    auto const item = [](std::string text, Fold fold) {
-        return Row { .kind = RowKind::Issue,
+    auto const run = [](std::string text, Fold fold) {
+        return Row { .kind = RowKind::Finished,
                      .text = std::move(text),
-                     .repo = "pace",
-                     .group = "issues/pace",
+                     .run = "r",
+                     .group = "fleet/finished",
                      .fold = fold };
     };
-    auto const open = std::vector { header(Fold::Open),
-                                    item("#1 crash on start", Fold::Open),
-                                    item("#2 docs", Fold::Open) };
-    auto const folded = std::vector { header(Fold::Folded),
-                                      item("#1 crash on start", Fold::Folded),
-                                      item("#2 docs", Fold::Folded) };
+    auto const open =
+        std::vector { heading(Fold::Open), run("pr-1  fix CI", Fold::Open), run("pr-2  docs", Fold::Open) };
+    auto const folded = std::vector { heading(Fold::Folded),
+                                      run("pr-1  fix CI", Fold::Open),
+                                      run("pr-2  docs", Fold::Folded) };
 
-    // Open, the header is no stop for the selection; folded, it is the only one.
-    CHECK(visibleRows(open, "", Furniture::Shown, ChartRows::Shown) == std::vector<std::size_t> { 0, 1, 2 });
-    CHECK(selectableCount(open, visibleRows(open, "", Furniture::Shown, ChartRows::Shown)) == 2);
-    CHECK(visibleRows(folded, "", Furniture::Shown, ChartRows::Shown) == std::vector<std::size_t> { 0 });
-    CHECK(selectableCount(folded, visibleRows(folded, "", Furniture::Shown, ChartRows::Shown)) == 1);
+    // Open, the heading is no stop for the selection; folded, it is one, and the hidden run is left out.
+    CHECK(visibleRows(open, "") == std::vector<std::size_t> { 0, 1, 2 });
+    CHECK(selectableCount(open, visibleRows(open, "")) == 2);
+    CHECK(visibleRows(folded, "") == std::vector<std::size_t> { 0, 1 });
+    CHECK(selectableCount(folded, visibleRows(folded, "")) == 2);
 
-    // A filter looks inside a folded group; a group none of whose items holds it goes, header and all.
-    CHECK(visibleRows(folded, "crash", Furniture::Shown, ChartRows::Shown)
-          == std::vector<std::size_t> { 0, 1 });
-    CHECK(visibleRows(folded, "nothing", Furniture::Shown, ChartRows::Shown).empty());
-    // The repository's name finds its items, now that they no longer carry it.
-    CHECK(visibleRows(open, "pace", Furniture::Shown, ChartRows::Shown)
-          == std::vector<std::size_t> { 0, 1, 2 });
+    // A filter looks at the hidden runs too; a group none of whose runs holds it goes, heading and all.
+    CHECK(visibleRows(folded, "docs") == std::vector<std::size_t> { 0, 2 });
+    CHECK(visibleRows(folded, "nothing").empty());
 }
 
 TEST_CASE("an unconfigured engine says what to configure", "[orchestrator][view]")
@@ -111,7 +93,7 @@ TEST_CASE("an unconfigured engine says what to configure", "[orchestrator][view]
     CHECK(std::ranges::any_of(rows, [](Row const& row) { return row.text.contains("worktree_root"); }));
 }
 
-TEST_CASE("an agent waiting on its own work says what for", "[orchestrator][view]")
+TEST_CASE("an agent waiting on its own work says what for, in Needs you", "[orchestrator][view]")
 {
     auto waiting = storedRun(Running {}, RunningId, ChangeRequestRef { 2375 });
     waiting.lastStatus = AgentStatus::Idle;
@@ -125,17 +107,15 @@ TEST_CASE("an agent waiting on its own work says what for", "[orchestrator][view
 
     auto const* const row = rowOfRun(rows, RunningId);
     REQUIRE(row != nullptr);
-    CHECK(row->status == "Waiting for Build pace 6m");
-    // An item's row says it too.
-    auto const item =
-        std::ranges::find_if(rows, [](Row const& candidate) { return candidate.text.starts_with("#2375 "); });
-    REQUIRE(item != rows.end());
-    CHECK(item->status == "○ agent Waiting for Build pace");
+    CHECK(row->attention == FleetGroup::NeedsYou);
+    CHECK(row->status == "waiting 6m");
+    CHECK(row->context == "Waiting for Build pace");
 
-    // Idle with nothing to say is idle.
+    // Idle with nothing to say waits for an answer.
     auto const* const quiet = rowOfRun(rows, DoneId);
     REQUIRE(quiet != nullptr);
-    CHECK(quiet->status == "idle 6m");
+    CHECK(quiet->attention == FleetGroup::NeedsYou);
+    CHECK(quiet->context == "waiting for your answer");
 }
 
 TEST_CASE("agent and finished rows", "[orchestrator][view]")
@@ -152,33 +132,46 @@ TEST_CASE("agent and finished rows", "[orchestrator][view]")
                                                  storedRun(Done {}, DoneId, ChangeRequestRef { 2379 }),
                                                  kept } });
     auto const rows = buildRows(engine, StartMonoMs + SixMinutes);
+    auto const offers = [](Row const& row, std::initializer_list<KeyCommand> commands) {
+        return std::ranges::all_of(
+            commands, [&](KeyCommand command) { return std::ranges::contains(row.offers, command); });
+    };
 
     auto const* const running = rowOfRun(rows, RunningId);
     REQUIRE(running != nullptr);
-    CHECK(running->text == "pr-2375 · fix CI · sonnet");
+    CHECK(running->text == "pr-2375 · fix CI");
+    CHECK(running->name == "pr-2375");
     CHECK(running->status == "working 6m");
-    CHECK(running->offers == std::vector { KeyCommand::Board, KeyCommand::Transcript, KeyCommand::EndRun });
+    CHECK(running->attention == FleetGroup::Working);
+    CHECK(offers(*running,
+                 { KeyCommand::BoardTab,
+                   KeyCommand::TranscriptTab,
+                   KeyCommand::DetailsTab,
+                   KeyCommand::EndRun,
+                   KeyCommand::Reveal,
+                   KeyCommand::OpenLink }));
+    CHECK_FALSE(offers(*running, { KeyCommand::Dismiss }));
 
     auto const* const done = rowOfRun(rows, DoneId);
     REQUIRE(done != nullptr);
-    CHECK(done->status == "waiting for you · e ends it");
-    CHECK(done->offers == std::vector { KeyCommand::Board, KeyCommand::Transcript, KeyCommand::EndRun });
+    CHECK(done->attention == FleetGroup::ToReview);
+    CHECK(done->status == "done");
+    CHECK(done->context == "reported done");
+    CHECK(offers(*done, { KeyCommand::EndRun, KeyCommand::Reveal }));
 
     auto const* const finished = rowOfRun(rows, KeptId);
     REQUIRE(finished != nullptr);
     CHECK(finished->kind == RowKind::Finished);
-    CHECK(finished->mark == "●");
-    CHECK(finished->text == "issue-2356 · work on issue · ended by you");
-    CHECK(finished->status == "kept: 2 entries");
-    CHECK(finished->offers
-          == std::vector { KeyCommand::Board,
-                           KeyCommand::Transcript,
-                           KeyCommand::Dispatch,
-                           KeyCommand::RetryRemoval,
-                           KeyCommand::Dismiss });
-    CHECK(finished->onOpen == OpenEffect::MarkSeen);
-    CHECK(std::ranges::contains(textsOf(rows, RowKind::Heading), "AGENTS · 2 OF 4 RUNNING"));
-    CHECK(std::ranges::contains(textsOf(rows, RowKind::Heading), "FINISHED · 1 NEW"));
+    CHECK(finished->mark == "⚑");
+    CHECK(finished->text == "issue-2356 · work on issue");
+    CHECK(finished->status == "kept");
+    CHECK(finished->context == "ended by you · 2 entries kept");
+    CHECK(offers(
+        *finished,
+        { KeyCommand::BoardTab, KeyCommand::TranscriptTab, KeyCommand::RetryRemoval, KeyCommand::Dismiss }));
+    CHECK_FALSE(offers(*finished, { KeyCommand::EndRun, KeyCommand::Reveal }));
+    CHECK(std::ranges::contains(textsOf(rows, RowKind::Heading), "WORKING"));
+    CHECK(std::ranges::contains(textsOf(rows, RowKind::Heading), "FINISHED"));
 }
 
 TEST_CASE("a run outside the configuration is marked and still endable", "[orchestrator][view]")
@@ -209,34 +202,20 @@ TEST_CASE("a run outside the configuration is marked and still endable", "[orche
     auto const* const active = rowOfRun(rows, RunningId);
     REQUIRE(active != nullptr);
     CHECK(active->status == "outside the configuration");
-    CHECK(active->offers == std::vector { KeyCommand::Board, KeyCommand::Transcript, KeyCommand::EndRun });
+    CHECK(std::ranges::contains(active->offers, KeyCommand::EndRun));
     CHECK(active->details.front() == outside);
 
-    // Its outcome wins in the row; the details still say where it belongs.
-    struct Expected
-    {
-        std::string_view id;
-        std::string_view status;
-    };
-    for (auto const& [id, status]: { Expected { .id = KeptId, .status = "kept: 1 entry" },
-                                     Expected { .id = RemovedId, .status = "removed" } })
+    // Its outcome wins in the row; the details still say where it belongs. Its removal is never retried.
+    for (auto const id: { KeptId, RemovedId })
     {
         CAPTURE(id);
         auto const* const finished = rowOfRun(rows, id);
         REQUIRE(finished != nullptr);
         CHECK(finished->kind == RowKind::Finished);
-        CHECK(finished->status == status);
-        // A removed run's board went with its worktree.
-        auto const expected =
-            id == KeptId ? std::vector { KeyCommand::Board,
-                                         KeyCommand::Transcript,
-                                         KeyCommand::Dispatch,
-                                         KeyCommand::Dismiss }
-                         : std::vector { KeyCommand::Transcript, KeyCommand::Dispatch, KeyCommand::Dismiss };
-        CHECK(finished->offers == expected);
         CHECK(finished->details.front() == outside);
-        CHECK(std::ranges::none_of(finished->details,
-                                   [](DetailLine const& line) { return line.value.contains("x tries"); }));
+        CHECK_FALSE(std::ranges::contains(finished->offers, KeyCommand::RetryRemoval));
+        // A removed run's board went with its worktree.
+        CHECK(std::ranges::contains(finished->offers, KeyCommand::BoardTab) == (id == KeptId));
     }
     // The entries a kept one holds are still shown.
     CHECK(std::ranges::contains(rowOfRun(rows, KeptId)->details, "?? notes.txt", &DetailLine::value));
@@ -254,8 +233,8 @@ TEST_CASE("a run outside the configuration the user ended shows its progress", "
     auto const rows = buildRows(engine, StartMonoMs + SixMinutes);
     auto const* const row = rowOfRun(rows, RunningId);
     REQUIRE(row != nullptr);
-    CHECK(row->status == runStateText(engine.runs().front()));
-    CHECK(row->status != "outside the configuration");
+    CHECK(row->status == "ending");
+    CHECK(row->context == runStateText(engine.runs().front()));
     CHECK(row->details.front().value == "outside the configuration");
 }
 
@@ -270,58 +249,46 @@ TEST_CASE("a refused configuration labels no run outside, and the trust hint sti
 
     auto const rows = buildRows(engine, StartMonoMs + 30'000);
     CHECK(rows.front().kind == RowKind::Notice);
-    CHECK(std::ranges::contains(textsOf(rows, RowKind::Heading), "AGENTS · 1 RUNNING"));
+    CHECK(std::ranges::contains(textsOf(rows, RowKind::Heading), "WORKING"));
     auto const* const row = rowOfRun(rows, RunningId);
     REQUIRE(row != nullptr);
     CHECK(row->status == "waiting? see its tab");
-    CHECK(row->offers == std::vector { KeyCommand::Board, KeyCommand::Transcript, KeyCommand::EndRun });
+    CHECK(std::ranges::contains(row->offers, KeyCommand::EndRun));
     CHECK(std::ranges::none_of(row->details, [](DetailLine const& line) {
         return line.value.contains("outside the configuration");
     }));
     CHECK(nextRowChange(engine, StartMonoMs + 29'000) == StartMonoMs + 30'000);
 }
 
-TEST_CASE("with more than one repository each has its own group, which names it", "[orchestrator][view]")
+TEST_CASE("with more than one repository each run names its own", "[orchestrator][view]")
 {
+    auto other = storedRun(Running {}, DoneId, ChangeRequestRef { 2379 });
+    other.repo = "other";
+    other.repoPath = std::string { OtherPath };
     auto const engine = bootEngine({
         .repos = R"([ { "name": "contour", "path": "~/projects/contour", "forge": "github", "issues": [] },
                       { "name": "other", "path": "~/projects/other", "forge": "github", "issues": [] } ])",
         .repoPaths = { std::string { ContourPath }, std::string { OtherPath } },
+        .stored = { storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }), other },
     });
     auto const rows = buildRows(engine, StartMonoMs);
-    auto groups = std::vector<std::string> {};
-    for (auto const& row: rows)
-        if (row.kind == RowKind::PullRequest)
-        {
-            groups.push_back(row.group);
-            // The group's header names the repository; the row no longer does.
-            CHECK(row.prefix.empty());
-        }
-    CHECK(std::ranges::count(groups, "prs/contour") == 5);
-    CHECK(std::ranges::count(groups, "prs/other") == 5);
-    CHECK(std::ranges::is_sorted(groups)); // in the configured order: contour first
-    CHECK(textsOf(rows, RowKind::Group) == std::vector<std::string> { "contour · 5", "other · 5" });
+    CHECK(rowOfRun(rows, RunningId)->prefix == "contour");
+    CHECK(rowOfRun(rows, DoneId)->prefix == "other");
 }
 
-TEST_CASE("a filter keeps the items that hold it; a collapsed layout drops the furniture",
-          "[orchestrator][view]")
+TEST_CASE("a filter keeps the runs that hold it, and their groups' headings", "[orchestrator][view]")
 {
-    auto const engine = bootEngine({});
+    auto const engine = bootEngine({ .stored = { storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }),
+                                                 storedRun(Done {}, DoneId, ChangeRequestRef { 2379 }) } });
     auto const rows = buildRows(engine, StartMonoMs);
-    auto const at = [&](std::size_t index) -> Row const& {
-        return rows[index];
-    };
-    auto const filtered = visibleRows(rows, "STDIO", Furniture::Shown, ChartRows::Shown);
-    CHECK(selectableCount(rows, filtered) == 1);
-    CHECK(
-        std::ranges::count_if(filtered, [&](std::size_t index) { return at(index).kind == RowKind::Heading; })
-        == 4);
-    auto const collapsed = visibleRows(rows, "", Furniture::Collapsed, ChartRows::Shown);
-    CHECK(std::ranges::none_of(collapsed, [&](std::size_t index) { return at(index).isFurniture(); }));
-    CHECK(selectableCount(rows, collapsed)
-          == static_cast<std::size_t>(std::ranges::count_if(rows, &Row::isSelectable)));
+    auto const filtered = visibleRows(rows, "2379");
+    // The run, its heading, and `+ new agent`, which every filter keeps.
+    CHECK(selectableCount(rows, filtered) == 2);
+    CHECK(std::ranges::count_if(filtered,
+                                [&](std::size_t index) { return rows[index].kind == RowKind::Heading; })
+          == 1);
     CHECK(positionOfSelectable(rows, filtered, 0) < filtered.size());
-    CHECK(positionOfSelectable(rows, filtered, 1) == filtered.size());
+    CHECK(positionOfSelectable(rows, filtered, 2) == filtered.size());
 }
 
 TEST_CASE("cut: text fits, or ends in an ellipsis within its cells", "[orchestrator][view]")
@@ -454,7 +421,7 @@ TEST_CASE("orphans have their own section", "[orchestrator][view]")
     REQUIRE(engine.orphans("contour").size() == 3);
     auto const rows = buildRows(engine, StartMonoMs);
     CHECK(textsOf(rows, RowKind::Heading).back() == "LEFTOVER WORKTREES");
-    CHECK(rows.back().kind == RowKind::Orphan);
+    CHECK(rows.back().kind == RowKind::NewAgent);
     CHECK(std::ranges::count(rows, RowKind::Orphan, &Row::kind) == 3);
 
     auto const* const quoted = rowOfOrphan(rows, QuotedOrphan);
@@ -462,11 +429,9 @@ TEST_CASE("orphans have their own section", "[orchestrator][view]")
     CHECK(quoted->text == QuotedOrphan);
     CHECK(quoted->status == "agent/pr-1-20260101-000000");
     CHECK(quoted->isSelectable());
-    // Read-only: no key acts on it; Enter and Tab show its details.
-    CHECK(quoted->offers.empty());
-    CHECK(quoted->onOpen == OpenEffect::None);
+    // Read-only: no key acts on it; its Focus shows its details.
+    CHECK(quoted->offers == std::vector { KeyCommand::DetailsTab });
     CHECK(quoted->run.empty());
-    CHECK(!quoted->item);
 
     // The command that removes it by hand pastes as one word per argument, whatever the path holds.
     // One line that works from any directory: git is told the checkout.
@@ -593,20 +558,4 @@ TEST_CASE("a 2 KiB unbroken word wraps to the same lines as cluster by cluster",
     CHECK(wrap("ab " + word, 40, 36) == after);
     // A word that is not ASCII alone is still broken between clusters.
     CHECK(wrap("日本語日本語", 4, 4) == std::vector<std::string> { "日本", "語日", "本語" });
-}
-
-TEST_CASE("a chart that is not drawn takes its heading with it", "[orchestrator][view]")
-{
-    auto const rows = std::vector {
-        Row { .kind = RowKind::Heading, .text = "MY PULL REQUESTS" },
-        Row { .kind = RowKind::Placeholder, .text = "no open pull requests" },
-        Row { .kind = RowKind::Spacer },
-        Row { .kind = RowKind::Heading, .text = "TIMELINE" },
-        Row { .kind = RowKind::Chart, .prefix = "agents active", .text = "··█" },
-        Row { .kind = RowKind::Spacer },
-        Row { .kind = RowKind::Heading, .text = "AGENTS" },
-    };
-    CHECK(visibleRows(rows, "", Furniture::Shown, ChartRows::Shown).size() == rows.size());
-    CHECK(visibleRows(rows, "", Furniture::Shown, ChartRows::Hidden)
-          == std::vector<std::size_t> { 0, 1, 5, 6 });
 }

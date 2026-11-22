@@ -20,7 +20,10 @@
 #include <orchestrator/core/Reconcile.hpp>
 #include <orchestrator/core/Stats.hpp>
 #include <orchestrator/view/Band.hpp>
+#include <orchestrator/view/BoardMarkdown.hpp>
 #include <orchestrator/view/Dashboard.hpp>
+#include <orchestrator/view/Fleet.hpp>
+#include <orchestrator/view/Focus.hpp>
 #include <orchestrator/view/Sections.hpp>
 #include <orchestrator/view/Theme.hpp>
 #include <orchestrator/view/ViewFixtures.hpp>
@@ -40,7 +43,6 @@ namespace
 constexpr auto RunningId = "pr-2375-20261113-150847"sv;
 constexpr auto DoneId = "pr-2379-20261113-150912"sv;
 constexpr auto NewId = "pr-2366-20261113-140211"sv;
-constexpr auto SeenId = "issue-2338-20261112-093000"sv;
 constexpr auto KeptId = "issue-2356-20261113-151001"sv;
 
 constexpr auto Wide = Size { .width = 120, .height = 40 };
@@ -94,38 +96,6 @@ using Fixture = DashboardFixture;
     return run;
 }
 
-/// A run that was active from @p hoursAgo to @p untilHoursAgo before the fixture's now, spending @p tokens.
-[[nodiscard]] Run pastRun(
-    std::string_view id, uint64_t number, double hoursAgo, double untilHoursAgo, uint64_t tokens)
-{
-    constexpr auto Hour = 3'600'000.0;
-    auto const from = DispatchWallMs - static_cast<uint64_t>(hoursAgo * Hour);
-    auto const to = DispatchWallMs - static_cast<uint64_t>(untilHoursAgo * Hour);
-    auto run = finishedRun(id, ChangeRequestRef { number }, Fate::Removed, Seen::Opened, "fix_ci");
-    run.startedWallMs = from;
-    std::get<Finished>(run.state).endedWallMs = to;
-    run.history = { StateChange { .wallMs = from, .state = "preparing" },
-                    StateChange { .wallMs = from, .state = "running" },
-                    StateChange { .wallMs = to, .state = "ending" },
-                    StateChange { .wallMs = to, .state = "finished" } };
-    run.stats = RunStats {};
-    run.stats->tokens.output = tokens;
-    return run;
-}
-
-/// A day of runs: a quiet night, a busy morning, and one still running.
-[[nodiscard]] std::vector<Run> dayOfRuns()
-{
-    return {
-        pastRun("pr-2001-20261112-160000", 2001, 22.5, 21.0, 30'000),
-        pastRun("pr-2002-20261112-230000", 2002, 9.0, 7.5, 60'000),
-        pastRun("pr-2003-20261113-000000", 2003, 8.5, 6.0, 120'000),
-        pastRun("pr-2004-20261113-010000", 2004, 7.5, 7.0, 15'000),
-        pastRun("pr-2005-20261113-120000", 2005, 3.0, 1.0, 90'000),
-        storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }),
-    };
-}
-
 /// A run whose tab the host refused to open: agents cannot start in a worktree from this sandbox.
 [[nodiscard]] Run paneRefusedRun()
 {
@@ -157,6 +127,67 @@ constexpr auto CommonDirReason =
                    } };
 }
 
+/// @return The page an `agent-transcript` command asks for.
+[[nodiscard]] std::string pageOf(RunCommand const& command)
+{
+    auto const page = std::ranges::find(command.arguments, std::string_view { "page" }, &Argument::name);
+    return page != command.arguments.end() ? page->value : std::string {};
+}
+
+/// What a status board an agent wrote says, with its task boxes.
+constexpr auto WorkingBoard = R"(# Fixing CI
+- [x] reproduced on master
+- [x] wrote the regression test
+- [ ] fix the reflow
+- [ ] watch CI
+)"sv;
+
+/// A world with a run in every group: one that asks, one waiting with its reason, one at work, one done, and
+/// three finished (removed, kept and failed).
+[[nodiscard]] World fleetWorld()
+{
+    constexpr auto AskingId = "pr-2346-20261113-150500"sv;
+    constexpr auto WaitingId = "issue-2253-20261113-150600"sv;
+    auto asking = storedRun(Blocked {}, AskingId, ChangeRequestRef { 2346 });
+    asking.lastStatus = AgentStatus::Blocked;
+    asking.history = { StateChange { .wallMs = DispatchWallMs - 120'000, .state = "blocked" } };
+    auto waiting = storedRun(Running {}, WaitingId, IssueRef { 2253 }, "issue");
+    waiting.lastStatus = AgentStatus::Idle;
+    waiting.history = { StateChange { .wallMs = DispatchWallMs - 60'000, .state = "running" } };
+    auto working = storedRun(Running {}, RunningId, ChangeRequestRef { 2375 });
+    working.history = { StateChange { .wallMs = DispatchWallMs - 600'000, .state = "running" } };
+    auto done = storedRun(Done {}, DoneId, ChangeRequestRef { 2379 });
+    auto kept = finishedRun(KeptId, IssueRef { 2356 }, Fate::Kept, Seen::Opened, "issue");
+    std::get<Finished>(kept.state).endedWallMs = DispatchWallMs - 60'000;
+    auto failed = storedRun(Finished { .ended = Ended::PreparationFailed,
+                                       .fate = Fate::Removed,
+                                       .entries = {},
+                                       .seen = Seen::New,
+                                       .endedWallMs = DispatchWallMs - 120'000 },
+                            "pr-2114-20261113-120000",
+                            ChangeRequestRef { 2114 });
+    failed.failure = RunFailure { .step = PrepareStep::OpenPane, .why = "not-supported-yet" };
+    return World {
+        .stored = { working,
+                    asking,
+                    waiting,
+                    done,
+                    finishedRun(NewId, ChangeRequestRef { 2366 }, Fate::Removed, Seen::New, "fix_ci"),
+                    kept,
+                    failed },
+        .paneMessages = { { std::string { WaitingId }, "Waiting for Build pace" } },
+    };
+}
+
+/// The answers the guest gives the dashboard's reads in the golden scenes.
+[[nodiscard]] Answers sceneAnswers()
+{
+    return Answers { .transcript = printed(
+                         readFixture(FixtureRoot::Contract, "agent-transcript/format-1/basic-page-1.json")),
+                     .board = std::string { WorkingBoard },
+                     .boardModifiedWallMs = DispatchWallMs - 180'000 };
+}
+
 /// The worlds the golden screens are drawn from.
 struct Scene
 {
@@ -164,11 +195,11 @@ struct Scene
     World world = {};
     std::string_view keys = {};                         ///< Typed before the screen is drawn.
     std::vector<Size> sizes = { Wide, Medium, Narrow }; ///< The sizes it is drawn at.
+    std::string_view select = {};                       ///< A run selected before the keys; empty: none.
 };
 
 [[nodiscard]] std::vector<Scene> scenes()
 {
-    auto const listsOnly = World { .issues = { "github/issues-open.json" } };
     auto const keptReasons =
         World { .prs = { "github/prs-empty.json" },
                 .stored = { storedRun(Finished { .ended = Ended::EndedByYou,
@@ -181,26 +212,34 @@ struct Scene
                                       "issue") } };
     auto const paneRefused = World { .prs = { "github/prs-empty.json" }, .stored = { paneRefusedRun() } };
     auto const withStats = World { .prs = { "github/prs-empty.json" }, .stored = { finishedWithStats() } };
+    auto const twoRuns = World { .stored = { storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }),
+                                             storedRun(Done {}, DoneId, ChangeRequestRef { 2379 }) } };
     return {
         Scene { .name = "empty", .world = World { .configJson = "{}" } },
-        Scene { .name = "lists", .world = listsOnly },
-        Scene { .name = "problem", .world = World { .prs = { "" } } },
-        Scene { .name = "incomplete", .world = World { .prs = { "github/prs-100.json" } } },
-        Scene { .name = "selected", .world = listsOnly, .keys = "jj" },
-        Scene { .name = "done-run",
-                .world = World { .stored = { storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }),
-                                             storedRun(Done {}, DoneId, ChangeRequestRef { 2379 }) } },
-                .keys = "\x1b[F"sv },
-        Scene { .name = "confirm-end",
-                .world = World { .stored = { storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }) } },
-                .keys = "\x1b[Fe"sv },
-        Scene { .name = "finished",
-                .world = World { .stored = {
-                                     finishedRun(NewId, ChangeRequestRef { 2366 }, Fate::Removed, Seen::New, "fix_ci"),
-                                     finishedRun(SeenId, IssueRef { 2338 }, Fate::Removed, Seen::Opened, "issue"),
-                                     finishedRun(KeptId, IssueRef { 2356 }, Fate::Kept, Seen::Opened, "issue"),
-                                 } },
-                .keys = "\x1b[F"sv },
+        // Configured, nothing run yet: the primer.
+        Scene { .name = "fleet-empty", .world = World {} },
+        Scene { .name = "problem", .world = World { .prs = { "" } }, .sizes = { Wide } },
+        // Every group; the working run selected, on its Board.
+        Scene { .name = "fleet", .world = fleetWorld(), .select = RunningId },
+        // Each tab of the Focus, chosen with its letter.
+        Scene { .name = "focus-board", .world = fleetWorld(), .keys = "b", .sizes = { Wide }, .select = RunningId },
+        Scene { .name = "focus-transcript",
+                .world = fleetWorld(),
+                .keys = "t",
+                .sizes = { Wide, Medium, Narrow },
+                .select = RunningId },
+        Scene { .name = "focus-details", .world = fleetWorld(), .keys = "d", .sizes = { Wide }, .select = RunningId },
+        // The run that asks opens on its transcript.
+        Scene { .name = "asking", .world = fleetWorld(), .sizes = { Wide } },
+        // The message box has the keys, and a draft.
+        Scene { .name = "message-box",
+                .world = fleetWorld(),
+                .keys = "\rrebase on master first",
+                .sizes = { Wide, Medium, Narrow },
+                .select = RunningId },
+        Scene { .name = "done-run", .world = twoRuns, .select = DoneId },
+        Scene { .name = "confirm-end", .world = twoRuns, .keys = "e", .select = RunningId },
+        Scene { .name = "finished", .world = fleetWorld(), .sizes = { Wide, Medium }, .select = NewId },
         Scene { .name = "outside",
                 .world = World { .prs = { "github/prs-empty.json" },
                                  .stored = {
@@ -208,46 +247,19 @@ struct Scene
                                      outsideConfiguration(
                                          finishedRun(KeptId, IssueRef { 2356 }, Fate::Kept, Seen::Opened, "issue")),
                                  } },
-                .keys = "\x1b[F"sv,
                 .sizes = { Wide, Narrow } },
         Scene { .name = "trust-hint",
                 .world = World { .prs = { "github/prs-empty.json" }, .stored = { unreportedRun() } },
-                .keys = "\x1b[F"sv,
                 .sizes = { Medium } },
-        Scene { .name = "kept-reasons",
-                .world = keptReasons,
-                .keys = "\x1b[F"sv,
-                .sizes = { Wide } },
-        Scene { .name = "kept-reasons",
-                .world = keptReasons,
-                .keys = "\x1b[F\t"sv,
-                .sizes = { Narrow } },
-        // The timeline charts a day of runs, an hour a bar, in the Wide band only.
-        Scene { .name = "timeline",
-                .world = World { .prs = { "github/prs-empty.json" }, .stored = dayOfRuns() },
-                .keys = {},
-                .sizes = { Wide, Medium } },
-        // A finished run's details carry what its agent spent and did, and how long it waited for the user.
-        Scene { .name = "finished-stats", .world = withStats, .keys = "\x1b[F"sv, .sizes = { Wide } },
-        Scene { .name = "finished-stats", .world = withStats, .keys = "\x1b[F\t"sv, .sizes = { Narrow } },
-        Scene { .name = "pane-refused", .world = paneRefused, .keys = "\x1b[F"sv, .sizes = { Wide } },
-        Scene { .name = "pane-refused", .world = paneRefused, .keys = "\x1b[F\t"sv, .sizes = { Narrow } },
-        Scene { .name = "orphans", .world = orphansWorld(), .keys = "\x1b[F"sv, .sizes = { Medium } },
-        // Enter opens an orphan's details on the whole width, for its command line.
-        Scene { .name = "orphans", .world = orphansWorld(), .keys = "\x1b[F\r"sv, .sizes = { Wide, Narrow } },
+        Scene { .name = "kept-reasons", .world = keptReasons, .sizes = { Wide } },
+        Scene { .name = "kept-reasons", .world = keptReasons, .keys = "\t", .sizes = { Narrow } },
+        Scene { .name = "finished-stats", .world = withStats, .sizes = { Wide } },
+        Scene { .name = "finished-stats", .world = withStats, .keys = "\t", .sizes = { Narrow } },
+        Scene { .name = "pane-refused", .world = paneRefused, .sizes = { Wide } },
+        Scene { .name = "orphans", .world = orphansWorld(), .keys = "\x1b[Hj", .sizes = { Wide, Medium } },
+        // Tab gives an orphan's details the whole tab in the Narrow band.
+        Scene { .name = "orphans", .world = orphansWorld(), .keys = "\x1b[Hj\t", .sizes = { Narrow } },
     };
-}
-
-/// The PR list with the first title replaced.
-[[nodiscard]] std::string prsTitled(std::string_view jsonTitle)
-{
-    auto prs = readFixture(FixtureRoot::Testdata, "github/prs-open.json");
-    constexpr auto Original =
-        "Say why the stdio relay failed, and send a hello before half-closing in the starter case"sv;
-    auto const at = prs.find(Original);
-    REQUIRE(at != std::string::npos);
-    prs.replace(at, Original.size(), jsonTitle);
-    return prs;
 }
 
 } // namespace
@@ -265,7 +277,7 @@ TEST_CASE("the breakpoints are ordered as choose() requires", "[orchestrator][vi
     auto breakpoints = std::vector<core::tui::Breakpoint> {};
     for (auto const& row: BandBreakpoints)
         breakpoints.push_back(
-            core::tui::Breakpoint { .minColumns = row.minColumns, .minRows = row.minRows, .make = {} });
+            core::tui::Breakpoint { .minColumns = row.minColumns, .minRows = 0, .make = {} });
     struct Case
     {
         Size size = {};
@@ -273,11 +285,9 @@ TEST_CASE("the breakpoints are ordered as choose() requires", "[orchestrator][vi
     };
     auto const cases = std::array {
         Case { .size = { .width = 59, .height = 19 }, .index = 0 },
-        Case { .size = { .width = 59, .height = 20 }, .index = 1 },
-        Case { .size = { .width = 60, .height = 19 }, .index = 2 },
-        Case { .size = { .width = 99, .height = 20 }, .index = 3 },
-        Case { .size = { .width = 100, .height = 19 }, .index = 4 },
-        Case { .size = { .width = 100, .height = 20 }, .index = 5 },
+        Case { .size = { .width = 60, .height = 19 }, .index = 1 },
+        Case { .size = { .width = 99, .height = 40 }, .index = 1 },
+        Case { .size = { .width = 100, .height = 12 }, .index = 2 },
     };
     for (auto const& [size, index]: cases)
     {
@@ -299,39 +309,31 @@ TEST_CASE("golden screens", "[orchestrator][view]")
             SECTION(name)
             {
                 auto fixture = Fixture { scene.world, size };
+                static_cast<void>(fixture.dashboard.frame());
+                if (!scene.select.empty())
+                    CHECK(fixture.dashboard.select(scene.select).empty());
+                // The guest's turn: the Focus run's board and transcript are read, and drawn.
+                fixture.settle(sceneAnswers());
+                static_cast<void>(fixture.dashboard.frame());
                 CHECK(fixture.dashboard.input(scene.keys).empty());
+                fixture.settle(sceneAnswers());
                 checkGolden(name, fixture.screen());
             }
         }
 }
 
-TEST_CASE("a resize from 100x40 to 100x18 collapses the hints and headings", "[orchestrator][view]")
-{
-    auto fixture = Fixture { World {}, { .width = 100, .height = 40 } };
-    auto const tall = fixture.screen();
-    CHECK(fixture.dashboard.breakpoint() == std::optional<std::size_t> { 5 });
-    CHECK(tall.contains("MY PULL REQUESTS"));
-    CHECK(tall.contains("enter open"));
-
-    fixture.dashboard.resize({ .width = 100, .height = 18 });
-    auto const low = fixture.screen();
-    CHECK(fixture.dashboard.breakpoint() == std::optional<std::size_t> { 4 });
-    CHECK(!low.contains("MY PULL REQUESTS"));
-    CHECK(!low.contains("enter open"));
-    checkGolden("lists-collapsed-100x18", low);
-}
-
 TEST_CASE("a resize repaints at the new band", "[orchestrator][view]")
 {
-    auto fixture = Fixture { World {}, Wide };
-    CHECK(fixture.screen().contains("Details"));
-    CHECK(fixture.dashboard.breakpoint() == std::optional<std::size_t> { 5 });
+    auto fixture = Fixture { fleetWorld(), Wide };
+    CHECK(fixture.screen().contains("Board"));
+    CHECK(fixture.dashboard.breakpoint() == std::optional<std::size_t> { 2 });
     fixture.dashboard.resize(Narrow);
     auto const bytes = fixture.dashboard.frame();
     CHECK(!bytes.empty());
-    CHECK(fixture.dashboard.breakpoint() == std::optional<std::size_t> { 1 });
+    CHECK(fixture.dashboard.breakpoint() == std::optional<std::size_t> { 0 });
+    // The Narrow band shows the Fleet alone while it has the keys.
     auto const narrow = core::tui::test::canvasToString(fixture.dashboard.rendered());
-    CHECK(!narrow.contains("Details"));
+    CHECK(!narrow.contains("Transcript"));
     CHECK(fixture.dashboard.rendered().cols() == Narrow.width);
 }
 
@@ -340,10 +342,10 @@ TEST_CASE("the dashboard shows no cursor, and rests it at the top-left", "[orche
     constexpr auto ShowCursor = "\033[?25h"sv;
     for (auto const size: { Wide, Medium, Narrow })
     {
-        auto fixture = Fixture { World {}, size };
+        auto fixture = Fixture { fleetWorld(), size };
         // Each frame draws into the other of the screen's two buffers, so several are looked at, among them
-        // the frames that open the filter and the help.
-        for (auto const keys: { ""sv, "j"sv, "/"sv, "\033"sv, "?"sv })
+        // the frames that open the filter, the help and the message box.
+        for (auto const keys: { ""sv, "j"sv, "/"sv, "\033"sv, "?"sv, "\033"sv, "\r"sv, "x"sv })
         {
             static_cast<void>(fixture.dashboard.input(keys));
             fixture.clock.advance(std::chrono::milliseconds { 60 });
@@ -358,56 +360,302 @@ TEST_CASE("the dashboard shows no cursor, and rests it at the top-left", "[orche
 }
 
 // }}}
-// {{{ what is drawn
+// {{{ the Fleet
 
-TEST_CASE("a title with an escape sequence is inert", "[orchestrator][view]")
+TEST_CASE("the Fleet lists the runs by what they need, the longest waiting first",
+          "[orchestrator][view][fleet]")
 {
-    auto fixture =
-        Fixture { World { .prs = { .fixture = "", .text = prsTitled(R"(\u001b]52;c;ZXZpbA==\u0007pwn)") } } };
-    auto const bytes = fixture.dashboard.frame();
-    CHECK(!bytes.empty());
-    CHECK(!bytes.contains("\x1b]"));
-    CHECK(!bytes.contains('\x07'));
-    CHECK(core::tui::test::canvasToString(fixture.dashboard.rendered()).contains("#2375 ]52;c;ZXZpbA==pwn"));
+    auto const engine = bootEngine(fleetWorld());
+    auto const rows = buildRows(engine, StartMonoMs);
+    auto order = std::vector<std::string> {};
+    for (auto const& row: rows)
+        order.push_back(row.kind == RowKind::Heading ? row.text : row.name.empty() ? row.text : row.name);
+    CHECK(order
+          == std::vector<std::string> { "NEEDS YOU",
+                                        "pr-2346",
+                                        "issue-2253",
+                                        "WORKING",
+                                        "pr-2375",
+                                        "TO REVIEW",
+                                        "pr-2379",
+                                        "FINISHED",
+                                        "pr-2366",
+                                        "issue-2356",
+                                        "pr-2114",
+                                        "new agent" });
+    // An idle agent's reason is its second line; a blocked one asks.
+    auto const waiting = std::ranges::find(rows, "issue-2253", &Row::name);
+    REQUIRE(waiting != rows.end());
+    CHECK(waiting->context == "Waiting for Build pace");
+    CHECK(waiting->status.starts_with("waiting"));
+    auto const asking = std::ranges::find(rows, "pr-2346", &Row::name);
+    REQUIRE(asking != rows.end());
+    CHECK(asking->status.starts_with("asking"));
 }
 
-TEST_CASE("wide characters at the column edge of a row", "[orchestrator][view]")
+TEST_CASE("a run that never reported is starting, in Working", "[orchestrator][view][fleet]")
 {
-    auto wide = std::string {};
-    while (columnsOf(wide) < 120)
-        wide += "語";
-    for (auto const size: { Wide, Medium, Narrow, Size { .width = 81, .height = 24 } })
-    {
-        CAPTURE(size.width);
-        auto fixture = Fixture { World { .prs = { .fixture = "", .text = prsTitled(wide) } }, size };
-        auto const screen = fixture.screen();
-        auto lines = std::vector<std::string> {};
-        for (auto const& line: screen | std::views::split('\n'))
-            lines.emplace_back(line.begin(), line.end());
-        auto const row =
-            std::ranges::find_if(lines, [](std::string const& line) { return line.contains("#2375 語"); });
-        REQUIRE(row != lines.end());
-        CHECK(row->contains("語…"));
-        CHECK(columnsOf(*row) == size.width);
-    }
+    auto const engine =
+        bootEngine(World { .prs = { "github/prs-empty.json" }, .stored = { unreportedRun() } });
+    auto const rows = buildRows(engine, StartMonoMs);
+    auto const row = std::ranges::find(rows, RunningId, &Row::run);
+    REQUIRE(row != rows.end());
+    CHECK(row->attention == FleetGroup::Working);
+    CHECK(row->state == "starting");
+    CHECK(row->context == "waiting for the agent's first report");
 }
 
-TEST_CASE("the help lists the keys that have a hint", "[orchestrator][view]")
+TEST_CASE("Finished is folded to its newest five; enter on its heading shows all",
+          "[orchestrator][view][fleet]")
 {
-    auto fixture = Fixture { World {} };
-    CHECK(!fixture.screen().contains(" Keys "));
-    CHECK(fixture.dashboard.input("?").empty());
-    auto const help = fixture.screen();
-    CHECK(help.contains("╭─ Keys "));
-    for (auto const& row: keyRows())
+    auto world = World { .prs = { "github/prs-empty.json" } };
+    for (auto const index: std::views::iota(0, 7))
     {
-        CAPTURE(row.key);
-        if (!row.hint.empty() && holds(row.on, Screen::Dashboard))
-            CHECK(help.contains(std::format("│ {} ", row.hint)));
+        auto run = finishedRun(std::format("pr-{}-20261113-1500{:02}", 3000 + index, index),
+                               ChangeRequestRef { static_cast<uint64_t>(3000 + index) },
+                               Fate::Removed,
+                               Seen::Opened,
+                               "fix_ci");
+        std::get<Finished>(run.state).endedWallMs = DispatchWallMs + (static_cast<uint64_t>(index) * 1000);
+        world.stored.push_back(std::move(run));
     }
-    CHECK(fixture.dashboard.input("\x1b").empty());
+    auto fixture = Fixture { world };
+    auto const folded = fixture.screen();
+    CHECK(folded.contains("FINISHED 5 of 7 · enter shows all"));
+    CHECK(folded.contains("pr-3006"));
+    CHECK_FALSE(folded.contains("pr-3001 "));
+    // The heading is selected first: it hides some runs.
+    CHECK(fixture.dashboard.input("\r")
+          == std::vector<UiAction> { ToggleFoldAction { .group = "fleet/finished" } });
+    static_cast<void>(fixture.engine.step(ToggleFold { .group = "fleet/finished", .monoMs = StartMonoMs }));
+    fixture.dashboard.engineChanged();
+    auto const open = fixture.screen();
+    CHECK(open.contains("pr-3001 "));
+    CHECK(open.contains("pr-3000 "));
+    // A filter looks at every run, folded or not.
+    static_cast<void>(fixture.engine.step(ToggleFold { .group = "fleet/finished", .monoMs = StartMonoMs }));
+    fixture.dashboard.engineChanged();
+    CHECK(fixture.dashboard.input("/3000\r").empty());
+    CHECK(fixture.screen().contains("pr-3000 "));
+}
+
+TEST_CASE("the selection stays on its run when the run changes groups", "[orchestrator][view][fleet]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    static_cast<void>(fixture.screen());
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    static_cast<void>(fixture.screen());
+    // The working run starts to ask: it moves to Needs you, above, and keeps the selection.
+    static_cast<void>(
+        fixture.engine.step(PanesListed { .panes = { PaneFact { .pane = std::format("p-{}", RunningId),
+                                                                .tag = std::string { RunningId },
+                                                                .status = AgentStatus::Blocked,
+                                                                .message = {},
+                                                                .program = ProgramLiveness::Alive } },
+                                          .requestedMonoMs = StartMonoMs + 1'000,
+                                          .listing = PaneListing::Tagged }));
+    fixture.dashboard.engineChanged();
+    static_cast<void>(fixture.screen());
+    CHECK(fixture.dashboard.selectedRun() == RunningId);
+
+    // And a run that enters Needs you never takes the selection from another.
+    CHECK(fixture.dashboard.select(DoneId).empty());
+    static_cast<void>(
+        fixture.engine.step(PanesListed { .panes = { PaneFact { .pane = std::format("p-{}", DoneId),
+                                                                .tag = std::string { DoneId },
+                                                                .status = AgentStatus::Error,
+                                                                .message = {},
+                                                                .program = ProgramLiveness::Alive } },
+                                          .requestedMonoMs = StartMonoMs + 2'000,
+                                          .listing = PaneListing::Tagged }));
+    fixture.dashboard.engineChanged();
+    static_cast<void>(fixture.screen());
+    CHECK(fixture.dashboard.selectedRun() == DoneId);
+}
+
+TEST_CASE("a board's task boxes are its meter and its first open box its row's second line",
+          "[orchestrator][view][fleet]")
+{
+    auto const lines =
+        renderBoardMarkdown(std::vector<std::string> { "- [x] a", "  - [ ] b", "- [ ] c", "- [X] d" });
+    auto const progress = boardProgressOf(lines);
+    REQUIRE(progress.has_value());
+    CHECK(*progress == BoardProgress { .done = 2, .total = 4, .current = "b" });
+    CHECK(meterOf(*progress, 6) == "▰▰▰▱▱▱");
+    CHECK(meterOf(BoardProgress { .done = 1, .total = 100, .current = {} }, 6) == "▰▱▱▱▱▱");
+    CHECK(meterOf(BoardProgress { .done = 99, .total = 100, .current = {} }, 6) == "▰▰▰▰▰▱");
+    CHECK(boardProgressOf(renderBoardMarkdown(std::vector<std::string> { "# no boxes" })) == std::nullopt);
+}
+
+TEST_CASE("the furniture gives way in its order", "[orchestrator][view][fleet]")
+{
+    // Plenty of rows: nothing gives way.
+    CHECK(furnitureGivingWay(
+              FocusRows { .height = 38, .topBarRows = 1, .bottomRows = 3, .tab = FocusTab::Board })
+          == Furniture::None);
+    // 80x24, the Board tab below the Fleet: the header's line, latest, the top bar and the strip, in turn.
+    CHECK(furnitureGivingWay(
+              FocusRows { .height = 13, .topBarRows = 1, .bottomRows = 3, .tab = FocusTab::Board })
+          == (Furniture::HeaderDetail | Furniture::Latest | Furniture::TopBar));
+    CHECK(furnitureGivingWay(
+              FocusRows { .height = 12, .topBarRows = 1, .bottomRows = 3, .tab = FocusTab::Board })
+          == (Furniture::HeaderDetail | Furniture::Latest | Furniture::TopBar | Furniture::TabStrip));
+    // The Transcript tab has no latest to give.
+    CHECK(furnitureGivingWay(
+              FocusRows { .height = 12, .topBarRows = 1, .bottomRows = 3, .tab = FocusTab::Transcript })
+          == (Furniture::HeaderDetail | Furniture::TopBar | Furniture::TabStrip));
+    // The Details tab keeps latest: only the Board tab's gives way.
+    CHECK(holds(furnitureGivingWay(
+                    FocusRows { .height = 13, .topBarRows = 1, .bottomRows = 3, .tab = FocusTab::Details }),
+                Furniture::TabStrip));
+    CHECK_FALSE(holds(furnitureGivingWay(FocusRows {
+                          .height = 13, .topBarRows = 1, .bottomRows = 3, .tab = FocusTab::Details }),
+                      Furniture::Latest));
+}
+
+// }}}
+// {{{ the Focus
+
+TEST_CASE("the transcript of a live run is read on selection and again every five seconds",
+          "[orchestrator][view][transcript]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    // A page longer than the tab, so that it can be scrolled away from its end.
+    auto entries = std::string {};
+    for (auto const index: std::views::iota(0, 30))
+        entries +=
+            std::format(R"({}{{"kind":"assistant","time":"2026-11-19T18:00:00.000Z","text":"entry {}"}})",
+                        index == 0 ? "" : ",",
+                        index);
+    auto const answers =
+        Answers { .transcript = printed(std::format(
+                      R"({{"format":1,"session":"00000000-0000-4000-8000-000000000001",)"
+                      R"("writtenBy":"2.1.328","page":1,"pages":1,"notUnderstood":0,"entries":[{}]}})",
+                      entries)) };
+    CHECK(fixture.settle(answers).size() == 1);
+    // Nothing more until five seconds have passed.
+    fixture.clock.advance(std::chrono::seconds { 4 });
+    CHECK(fixture.settle(answers).empty());
+    auto const due = fixture.dashboard.nextRepaintDue();
+    REQUIRE(due.has_value());
+    CHECK(*due <= fixture.clock.now() + std::chrono::seconds { 1 });
+    fixture.clock.advance(std::chrono::seconds { 1 });
+    auto const again = fixture.settle(answers);
+    REQUIRE(again.size() == 1);
+    CHECK(pageOf(again.front()) == "1");
+
+    // Scrolled up, it stops following: no more reads, and `↓ live` shows.
+    CHECK(fixture.dashboard.input("t\t").empty());
+    static_cast<void>(fixture.screen());
+    CHECK(fixture.dashboard.input("\x1b[5~").empty());
+    CHECK(fixture.dashboard.interaction().follow == Follow::Away);
+    fixture.clock.advance(std::chrono::seconds { 10 });
+    CHECK(fixture.settle(answers).empty());
+    CHECK(fixture.screen().contains("↓ live"));
+    // End returns to it, and it is read again.
+    CHECK(fixture.dashboard.input("\x1b[F").empty());
+    CHECK(fixture.dashboard.interaction().follow == Follow::Live);
+    CHECK(fixture.settle(answers).size() == 1);
+    CHECK_FALSE(fixture.screen().contains("↓ live"));
+}
+
+TEST_CASE("a finished run's transcript is read once", "[orchestrator][view][transcript]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.select(NewId).empty());
+    CHECK(fixture.settle(sceneAnswers()).size() == 1);
+    fixture.clock.advance(std::chrono::seconds { 30 });
+    CHECK(fixture.settle(sceneAnswers()).empty());
+}
+
+TEST_CASE("a transcript that grew a page is read at its last page", "[orchestrator][view][transcript]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    auto const page = [](uint32_t number, uint32_t pages) {
+        return printed(
+            std::format(R"({{"format":1,"session":"00000000-0000-4000-8000-000000000001",)"
+                        R"("writtenBy":"2.1.328","page":{},"pages":{},"notUnderstood":0,"entries":[]}})",
+                        number,
+                        pages));
+    };
+    REQUIRE(fixture.settle(Answers { .transcript = page(1, 3) }).size() == 1);
+    auto const last = fixture.settle(Answers { .transcript = page(3, 3) });
+    REQUIRE(last.size() == 1);
+    CHECK(pageOf(last.front()) == "3");
+}
+
+TEST_CASE("latest shows a message sent until the transcript does", "[orchestrator][view][message]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    fixture.settle(sceneAnswers());
+    auto const sent = fixture.dashboard.input("\rrebase first\r");
+    CHECK(sent
+          == std::vector<UiAction> {
+              SendMessageAction { .run = std::string { RunningId }, .text = "rebase first" } });
+    CHECK(fixture.dashboard.interaction().place == Place::Fleet);
+    CHECK(fixture.dashboard.selectedRun() == RunningId);
+    auto const screen = fixture.screen();
+    CHECK(screen.contains("you · sent 15:08 · rebase first"));
+    CHECK(screen.contains("sent to pr-2375"));
+}
+
+TEST_CASE("a refused message comes back to the box, with the keys", "[orchestrator][view][message]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    CHECK_FALSE(fixture.dashboard.input("\rrebase\r").empty());
+    fixture.dashboard.messageRefused("the host will not type this text");
+    CHECK(fixture.dashboard.interaction().place == Place::Focus);
+    CHECK(fixture.dashboard.interaction().drafts.at(std::string { RunningId }) == "rebase");
+    CHECK(fixture.screen().contains("message not sent: the host will not type this text"));
+}
+
+TEST_CASE("drafts are kept per run", "[orchestrator][view][message]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    CHECK(fixture.dashboard.input("\rfirst").empty());
     fixture.escapeTimesOut();
-    CHECK(!fixture.screen().contains(" Keys "));
+    CHECK(fixture.dashboard.select(DoneId).empty());
+    CHECK(fixture.dashboard.input("\rsecond").empty());
+    fixture.escapeTimesOut();
+    auto const& drafts = fixture.dashboard.interaction().drafts;
+    CHECK(drafts.at(std::string { RunningId }) == "first");
+    CHECK(drafts.at(std::string { DoneId }) == "second");
+}
+
+TEST_CASE("o copies the link with OSC 52 in the next frame", "[orchestrator][view]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.input("o").empty());
+    auto const bytes = fixture.dashboard.frame();
+    CHECK(bytes.contains("\x1b]52;c;"));
+    CHECK(core::tui::test::canvasToString(fixture.dashboard.rendered()).contains("copied #2375's link"));
+}
+
+TEST_CASE("a URL drawn is a hyperlink", "[orchestrator][view]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    CHECK(fixture.dashboard.input("d").empty());
+    static_cast<void>(fixture.screen());
+    auto const links = fixture.dashboard.rendered().hyperlinks();
+    CHECK(std::ranges::any_of(links, [](core::tui::HyperlinkRegion const& link) {
+        return link.uri == "https://github.com/contour-terminal/contour/pull/2375";
+    }));
 }
 
 // }}}
@@ -415,7 +663,6 @@ TEST_CASE("the help lists the keys that have a hint", "[orchestrator][view]")
 
 TEST_CASE("key input", "[orchestrator][view]")
 {
-    auto const lists = World {};
     auto const withRun = World { .prs = { "github/prs-empty.json" },
                                  .stored = { storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }) } };
     auto const withKept = World {
@@ -431,12 +678,7 @@ TEST_CASE("key input", "[orchestrator][view]")
         .stored = { outsideConfiguration(
             finishedRun(KeptId, IssueRef { 2356 }, Fate::Kept, Seen::Opened, "issue")) },
     };
-    auto const selectableIn = [](World const& world) {
-        auto fixture = Fixture { world };
-        return static_cast<std::size_t>(
-            std::ranges::count_if(buildRows(fixture.engine, StartMonoMs), &Row::isSelectable));
-    };
-    auto const last = selectableIn(lists) - 1;
+    auto const fleet = fleetWorld();
 
     struct Case
     {
@@ -448,118 +690,121 @@ TEST_CASE("key input", "[orchestrator][view]")
         std::vector<UiAction> actions = {};
     };
     auto const cases = std::vector<Case> {
-        { .name = "down", .world = &lists, .size = Wide, .keys = "\x1b[B", .expected = { .selected = 1 } },
-        { .name = "j", .world = &lists, .size = Wide, .keys = "j", .expected = { .selected = 1 } },
-        { .name = "j j k", .world = &lists, .size = Wide, .keys = "jjk", .expected = { .selected = 1 } },
+        { .name = "down", .world = &fleet, .size = Wide, .keys = "\x1b[B", .expected = { .selected = 1 } },
+        { .name = "j", .world = &fleet, .size = Wide, .keys = "j", .expected = { .selected = 1 } },
+        { .name = "j j k", .world = &fleet, .size = Wide, .keys = "jjk", .expected = { .selected = 1 } },
         { .name = "up at the top",
-          .world = &lists,
+          .world = &fleet,
           .size = Wide,
           .keys = "\x1b[A",
           .expected = { .selected = 0 } },
-        { .name = "end", .world = &lists, .size = Wide, .keys = "\x1b[F", .expected = { .selected = last } },
-        { .name = "end, down",
-          .world = &lists,
-          .size = Wide,
-          .keys = "\x1b[Fj",
-          .expected = { .selected = last } },
-        { .name = "home", .world = &lists, .size = Wide, .keys = "jj\x1b[H", .expected = { .selected = 0 } },
+        { .name = "end", .world = &fleet, .size = Wide, .keys = "\x1b[F", .expected = { .selected = 7 } },
+        { .name = "home", .world = &fleet, .size = Wide, .keys = "jj\x1b[H", .expected = { .selected = 0 } },
         { .name = "filter",
-          .world = &lists,
+          .world = &fleet,
           .size = Wide,
-          .keys = "/stdio",
-          .expected = { .filtering = Filtering::Typing, .filter = "stdio" } },
+          .keys = "/2375",
+          .expected = { .filtering = Filtering::Typing, .filter = "2375" } },
         { .name = "filter kept",
-          .world = &lists,
+          .world = &fleet,
           .size = Wide,
-          .keys = "/stdio\r",
-          .expected = { .filter = "stdio" } },
-        { .name = "filter dropped", .world = &lists, .size = Wide, .keys = "/stdio\x1b", .expected = {} },
-        { .name = "tab in Medium",
-          .world = &lists,
+          .keys = "/2375\r",
+          .expected = { .filter = "2375" } },
+        { .name = "filter dropped", .world = &fleet, .size = Wide, .keys = "/2375\x1b", .expected = {} },
+        { .name = "tab to the Focus",
+          .world = &fleet,
           .size = Medium,
           .keys = "\t",
-          .expected = { .pane = Pane::Details } },
-        { .name = "tab twice in Medium", .world = &lists, .size = Medium, .keys = "\t\t", .expected = {} },
-        { .name = "tab in Wide", .world = &lists, .size = Wide, .keys = "\t", .expected = {} },
-        { .name = "tab in Narrow",
-          .world = &lists,
-          .size = Narrow,
-          .keys = "\t",
-          .expected = { .pane = Pane::Details } },
-        { .name = "tab, esc in Narrow", .world = &lists, .size = Narrow, .keys = "\t\x1b", .expected = {} },
+          .expected = { .place = Place::Focus } },
+        { .name = "tab and back", .world = &fleet, .size = Narrow, .keys = "\t\t", .expected = {} },
+        { .name = "tab, esc", .world = &fleet, .size = Narrow, .keys = "\t\x1b", .expected = {} },
         { .name = "help",
-          .world = &lists,
+          .world = &fleet,
           .size = Wide,
           .keys = "?",
           .expected = { .overlay = Overlay::Help } },
-        { .name = "help closed", .world = &lists, .size = Wide, .keys = "?\x1b", .expected = {} },
+        { .name = "help closed", .world = &fleet, .size = Wide, .keys = "?\x1b", .expected = {} },
         { .name = "refresh",
-          .world = &lists,
+          .world = &fleet,
           .size = Wide,
           .keys = "R",
           .expected = {},
           .actions = { RefreshNowAction {} } },
-        { .name = "e on a pull request", .world = &lists, .size = Wide, .keys = "e", .expected = {} },
+        { .name = "b chooses the Board",
+          .world = &withRun,
+          .size = Wide,
+          .keys = "b",
+          .expected = { .selected = 0,
+                        .chosenTab = TabChoice { .run = std::string { RunningId },
+                                                 .state = "working",
+                                                 .tab = FocusTab::Board } } },
+        { .name = "r reveals the agent's tab",
+          .world = &withRun,
+          .size = Wide,
+          .keys = "r",
+          .expected = {},
+          .actions = { RevealAgentAction { .run = std::string { RunningId } } } },
         { .name = "e on an active run asks",
           .world = &withRun,
           .size = Wide,
-          .keys = "\x1b[Fe",
-          .expected = { .selected = selectableIn(withRun) - 1, .pendingEnd = std::string { RunningId } } },
+          .keys = "e",
+          .expected = { .pendingEnd = std::string { RunningId } } },
         { .name = "e, e on an active run",
           .world = &withRun,
           .size = Wide,
-          .keys = "\x1b[Fee",
-          .expected = { .selected = selectableIn(withRun) - 1 },
+          .keys = "ee",
+          .expected = {},
           .actions = { EndRunAction { .run = std::string { RunningId } } } },
         { .name = "e, k keeps the run and does not move",
           .world = &withRun,
           .size = Wide,
-          .keys = "\x1b[Fek",
-          .expected = { .selected = selectableIn(withRun) - 1 } },
-        { .name = "e, esc keeps the run",
+          .keys = "ek",
+          .expected = {} },
+        { .name = "e, esc keeps the run", .world = &withRun, .size = Wide, .keys = "e\x1b", .expected = {} },
+        { .name = "enter writes to a live run",
           .world = &withRun,
           .size = Wide,
-          .keys = "\x1b[Fe\x1b",
-          .expected = { .selected = selectableIn(withRun) - 1 } },
+          .keys = "\r",
+          .expected = { .place = Place::Focus } },
         { .name = "delete while typing a filter",
           .world = &withKept,
           .size = Wide,
-          .keys = "\x1b[F/\x1b[3~",
-          .expected = { .selected = selectableIn(withKept) - 1, .filtering = Filtering::Typing } },
+          .keys = "/\x1b[3~",
+          .expected = { .filtering = Filtering::Typing } },
         { .name = "x on a kept entry",
           .world = &withKept,
           .size = Wide,
-          .keys = "\x1b[Fx",
-          .expected = { .selected = selectableIn(withKept) - 1 },
+          .keys = "x",
+          .expected = {},
           .actions = { RetryRemovalAction { .run = std::string { KeptId } } } },
-        { .name = "enter on a new finished entry",
+        { .name = "enter on a kept entry retries its removal",
           .world = &withKept,
           .size = Wide,
-          .keys = "\x1b[F\r",
-          .expected = { .selected = selectableIn(withKept) - 1 },
-          .actions = { MarkSeenAction { .run = std::string { KeptId } } } },
+          .keys = "\r",
+          .expected = {},
+          .actions = { RetryRemovalAction { .run = std::string { KeptId } } } },
         { .name = "x on a kept entry outside the configuration",
           .world = &outsideKept,
           .size = Wide,
-          .keys = "\x1b[Fx",
-          .expected = { .selected = selectableIn(outsideKept) - 1 } },
+          .keys = "x",
+          .expected = {} },
         { .name = "e, e on an active run outside the configuration",
           .world = &outsideRun,
           .size = Wide,
-          .keys = "\x1b[Fee",
-          .expected = { .selected = selectableIn(outsideRun) - 1 },
+          .keys = "ee",
+          .expected = {},
           .actions = { EndRunAction { .run = std::string { RunningId } } } },
         { .name = "delete on a finished entry outside the configuration",
           .world = &outsideKept,
           .size = Wide,
-          .keys = "\x1b[F\x1b[3~",
-          .expected = { .selected = selectableIn(outsideKept) - 1 },
+          .keys = "\x1b[3~",
+          .expected = {},
           .actions = { DismissAction { .run = std::string { KeptId } } } },
         { .name = "delete on a finished entry",
           .world = &withKept,
           .size = Wide,
-          .keys = "\x1b[F\x1b[3~",
-          .expected = { .selected = selectableIn(withKept) - 1 },
+          .keys = "\x1b[3~",
+          .expected = {},
           .actions = { DismissAction { .run = std::string { KeptId } } } },
     };
     for (auto const& row: cases)
@@ -573,11 +818,41 @@ TEST_CASE("key input", "[orchestrator][view]")
     }
 }
 
+TEST_CASE("n opens the launcher; enter on + new agent too", "[orchestrator][view]")
+{
+    auto fixture = Fixture { World {} };
+    CHECK(fixture.dashboard.input("n").empty());
+    CHECK(fixture.dashboard.launcher().has_value());
+    CHECK(fixture.dashboard.input("\x1b").empty());
+    fixture.escapeTimesOut();
+    REQUIRE_FALSE(fixture.dashboard.launcher().has_value());
+    // `+ new agent` is the only row, selected.
+    CHECK(fixture.dashboard.input("\r").empty());
+    CHECK(fixture.dashboard.launcher().has_value());
+
+    // Unconfigured, `n` says what is missing.
+    auto unconfigured = Fixture { World { .configJson = "{}" } };
+    CHECK(unconfigured.dashboard.input("n").empty());
+    CHECK_FALSE(unconfigured.dashboard.launcher().has_value());
+    CHECK(unconfigured.screen().contains("not configured"));
+}
+
+TEST_CASE("enter on a finished run runs it again through the launcher", "[orchestrator][view]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.select(NewId).empty());
+    // Its item is no longer listed: the launcher does not open, and the action bar says why.
+    CHECK(fixture.dashboard.input("\r").empty());
+    CHECK_FALSE(fixture.dashboard.launcher().has_value());
+    CHECK(fixture.screen().contains("#2366 is not listed any more"));
+}
+
 TEST_CASE("an ESC that ends an input waits for the rest of its sequence", "[orchestrator][view]")
 {
     SECTION("ESC, then [B: one Down")
     {
-        auto fixture = Fixture { World {} };
+        auto fixture = Fixture { fleetWorld() };
         static_cast<void>(fixture.dashboard.frame());
         CHECK(fixture.dashboard.input("\x1b").empty());
         REQUIRE(fixture.dashboard.pendingEscapeDeadline().has_value());
@@ -589,7 +864,7 @@ TEST_CASE("an ESC that ends an input waits for the rest of its sequence", "[orch
     }
     SECTION("ESC alone, then its deadline: the Escape key")
     {
-        auto fixture = Fixture { World {} };
+        auto fixture = Fixture { fleetWorld() };
         CHECK(fixture.dashboard.input("?").empty());
         CHECK(fixture.dashboard.input("\x1b").empty());
         CHECK(fixture.dashboard.interaction() == Interaction { .overlay = Overlay::Help });
@@ -603,7 +878,7 @@ TEST_CASE("an ESC that ends an input waits for the rest of its sequence", "[orch
     }
     SECTION("ESC, then j: Alt+j, which does nothing")
     {
-        auto fixture = Fixture { World {} };
+        auto fixture = Fixture { fleetWorld() };
         CHECK(fixture.dashboard.input("?").empty());
         CHECK(fixture.dashboard.input("\x1b").empty());
         CHECK(fixture.dashboard.input("j").empty());
@@ -612,7 +887,7 @@ TEST_CASE("an ESC that ends an input waits for the rest of its sequence", "[orch
     }
     SECTION("ESC, then j after the deadline: Escape, then j")
     {
-        auto fixture = Fixture { World {} };
+        auto fixture = Fixture { fleetWorld() };
         CHECK(fixture.dashboard.input("?").empty());
         CHECK(fixture.dashboard.input("\x1b").empty());
         fixture.clock.advance(std::chrono::milliseconds { 60 });
@@ -623,59 +898,12 @@ TEST_CASE("an ESC that ends an input waits for the rest of its sequence", "[orch
 
 TEST_CASE("an escape sequence split across two input calls", "[orchestrator][view]")
 {
-    auto fixture = Fixture { World {} };
+    auto fixture = Fixture { fleetWorld() };
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.input("\x1b[").empty());
     CHECK(fixture.dashboard.interaction() == Interaction {});
     CHECK(fixture.dashboard.input("B").empty());
     CHECK(fixture.dashboard.interaction() == Interaction { .selected = 1 });
-}
-
-// {{{ Enter, d and the task keys
-
-namespace
-{
-
-/// A configuration whose `tasks` rows are @p tasks, and otherwise the default world's.
-[[nodiscard]] World withTasks(std::string_view tasks)
-{
-    return World { .configJson =
-                       std::format(R"({{ "worktree_root": "~/worktrees", "models": ["opus", "sonnet"],
-  "repos": {}, "tasks": [ {} ] }})",
-                                   OneRepository,
-                                   tasks) };
-}
-
-constexpr auto AddressReview = R"({ "id": "address_review", "key": "a", "label": "address review",
-    "applies_to": "pr", "model": "opus", "prompt": "/contour-workflows:address-review {url}" })"sv;
-constexpr auto WorkIssue = R"({ "id": "issue", "key": "w", "label": "work on issue", "applies_to": "issue",
-    "model": "opus", "prompt": "/contour-workflows:work-issue {url}" })"sv;
-constexpr auto FixCi =
-    R"({ "id": "fix_ci", "key": "f", "label": "fix CI", "applies_to": "pr", "model": "sonnet",
-    "prompt": "/contour-workflows:fix-ci {url}" })"sv;
-
-/// @return The id of the task the open form is on.
-[[nodiscard]] std::string formTask(DashboardFixture const& fixture)
-{
-    auto const& launcher = fixture.dashboard.launcher();
-    REQUIRE(launcher.has_value());
-    auto const& form = launcher->form;
-    REQUIRE(form.has_value());
-    auto const* const config = fixture.engine.config();
-    REQUIRE(config != nullptr);
-    return config->tasks()[form->task].id;
-}
-
-} // namespace
-
-TEST_CASE("the help lists the tasks' keys", "[orchestrator][view]")
-{
-    auto fixture = DashboardFixture { World {} };
-    CHECK(fixture.dashboard.input("?").empty());
-    auto const screen = fixture.screen();
-    CHECK(screen.contains(" tasks "));
-    CHECK(screen.contains("f fix CI"));
-    CHECK(screen.contains("w work on issue"));
 }
 
 TEST_CASE("a hint line is cut between hints, never inside one", "[orchestrator][view]")
@@ -687,63 +915,33 @@ TEST_CASE("a hint line is cut between hints, never inside one", "[orchestrator][
     CHECK(joinHints(Hints, 5).empty());
 }
 
-TEST_CASE("Enter's default task follows the tasks rows", "[orchestrator][view]")
+TEST_CASE("the action bar offers a run's keys only where they apply", "[orchestrator][view]")
 {
-    SECTION("without fix_ci, a pull request's first task is address_review")
-    {
-        auto fixture = DashboardFixture { withTasks(std::format("{}, {}", WorkIssue, AddressReview)) };
-        CHECK(fixture.dashboard.input("\r").empty());
-        CHECK(formTask(fixture) == "address_review");
-        CHECK_FALSE(fixture.dashboard.launcher()->form->session.empty());
-        CHECK(fixture.screen().contains("New agent"));
-    }
-    SECTION("with no task for a pull request, Enter on one opens nothing and says so")
-    {
-        auto fixture = DashboardFixture { withTasks(WorkIssue) };
-        CHECK(fixture.dashboard.input("\r").empty());
-        CHECK_FALSE(fixture.dashboard.launcher().has_value());
-        CHECK(fixture.screen().contains("no task applies"));
-        CHECK(fixture.ids.taken == 0);
-    }
-    SECTION("d opens the same form")
-    {
-        auto fixture = DashboardFixture { World {} };
-        CHECK(fixture.dashboard.input("d").empty());
-        CHECK(formTask(fixture) == "fix_ci");
-    }
+    auto fixture = Fixture { fleetWorld() };
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    auto const live = fixture.screen();
+    CHECK(live.contains("e end"));
+    CHECK_FALSE(live.contains("del dismiss"));
+    CHECK(fixture.dashboard.select(NewId).empty());
+    auto const finished = fixture.screen();
+    CHECK_FALSE(finished.contains("e end"));
+    CHECK(finished.contains("del dismiss"));
 }
 
-TEST_CASE("task keys open the form on that task", "[orchestrator][view]")
+TEST_CASE("the help lists the keys that have a hint", "[orchestrator][view]")
 {
-    auto fixture = DashboardFixture { withTasks(std::format("{}, {}, {}", FixCi, AddressReview, WorkIssue)) };
-    CHECK(fixture.dashboard.input("a").empty());
-    CHECK(formTask(fixture) == "address_review");
-    CHECK(fixture.dashboard.input("\x1b").empty());
-    fixture.escapeTimesOut();
-    REQUIRE_FALSE(fixture.dashboard.launcher().has_value());
-
-    CHECK(fixture.dashboard.input("f").empty());
-    CHECK(formTask(fixture) == "fix_ci");
-
-    // A task for issues does not apply to a pull request: the key says so and opens nothing.
-    auto other = DashboardFixture { withTasks(std::format("{}, {}", FixCi, WorkIssue)) };
-    CHECK(other.dashboard.input("w").empty());
-    CHECK_FALSE(other.dashboard.launcher().has_value());
-    CHECK(other.screen().contains("work on issue does not apply to this item"));
-}
-
-TEST_CASE("Enter on an item with an active run reveals its agent", "[orchestrator][view]")
-{
-    auto fixture = DashboardFixture { World {
-        .stored = { storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }) } } };
-    // The first row is #2375, whose agent runs.
-    auto const actions = fixture.dashboard.input("\r");
-    CHECK(actions == std::vector<UiAction> { RevealAgentAction { .run = std::string { RunningId } } });
-    CHECK_FALSE(fixture.dashboard.launcher().has_value());
-
-    // And on the agent's own row.
-    CHECK(fixture.dashboard.input("\x1b[F\r")
-          == std::vector<UiAction> { RevealAgentAction { .run = std::string { RunningId } } });
+    auto fixture = Fixture { fleetWorld() };
+    CHECK(!fixture.screen().contains(" Keys "));
+    CHECK(fixture.dashboard.input("?").empty());
+    auto const help = fixture.screen();
+    CHECK(help.contains("╭─ Keys "));
+    for (auto const& row: keyRows())
+    {
+        CAPTURE(row.key);
+        if (!row.hint.empty())
+            CHECK(help.contains(std::format("│ {} ", row.hint)));
+    }
 }
 
 // }}}
@@ -751,7 +949,7 @@ TEST_CASE("Enter on an item with an active run reveals its agent", "[orchestrato
 
 TEST_CASE("the rows are built once per input, not once per key", "[orchestrator][view]")
 {
-    auto fixture = Fixture { World {} };
+    auto fixture = Fixture { fleetWorld() };
     static_cast<void>(fixture.dashboard.frame());
     fixture.dashboard.engineChanged();
     auto const before = fixture.dashboard.rowBuilds();
@@ -768,25 +966,27 @@ TEST_CASE("the rows are built once per input, not once per key", "[orchestrator]
 
 TEST_CASE("the selected row is drawn in the selection's style", "[orchestrator][view]")
 {
-    auto fixture = Fixture { World {} };
-    // Row 0 is the frame, row 1 the first heading, row 2 its repository's group; the first pull request is on
-    // row 3.
+    auto fixture = Fixture { fleetWorld() };
+    // Row 0 is the top bar, row 1 the Fleet's frame, row 2 the first heading; the first run is on rows 3
+    // and 4.
     static_cast<void>(fixture.screen());
+    auto const selection = styleOf(dashboardTheme(), Role::Selection).bg;
     auto const isSelected = [&](int row) {
-        return core::tui::test::styleAt(fixture.dashboard.rendered(), row, 3).inverse;
+        return core::tui::test::styleAt(fixture.dashboard.rendered(), row, 3).bg == selection;
     };
     CHECK(!isSelected(2));
     CHECK(isSelected(3));
-    CHECK(!isSelected(4));
+    CHECK(isSelected(4));
+    CHECK(!isSelected(5));
     CHECK(fixture.dashboard.input("j").empty());
     static_cast<void>(fixture.screen());
     CHECK(!isSelected(3));
-    CHECK(isSelected(4));
+    CHECK(isSelected(5));
 }
 
 TEST_CASE("a second frame with nothing changed emits nothing", "[orchestrator][view]")
 {
-    auto fixture = Fixture { World {} };
+    auto fixture = Fixture { fleetWorld() };
     CHECK(!fixture.dashboard.frame().empty());
     CHECK(fixture.dashboard.frame().empty());
     // Neither does a key that changes nothing, or a resize to the size the tab has.
@@ -811,23 +1011,23 @@ TEST_CASE("select picks a run's row, dropping a filter that hides it", "[orchest
         Fixture { World { .stored = { storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }),
                                       storedRun(Blocked {}, BlockedId, ChangeRequestRef { 2379 }) } } };
     static_cast<void>(fixture.dashboard.frame());
-    CHECK(fixture.dashboard.selectedRun().empty());
-
-    CHECK(fixture.dashboard.select(BlockedId).empty());
+    // The run that waits for the user comes first.
     CHECK(fixture.dashboard.selectedRun() == BlockedId);
+
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    CHECK(fixture.dashboard.selectedRun() == RunningId);
     CHECK(!fixture.dashboard.frame().empty());
 
     // A filter that hides the row is dropped; an unknown run selects nothing else.
-    CHECK(fixture.dashboard.input("/2375\r").empty());
-    REQUIRE(fixture.dashboard.interaction().filter == "2375");
-    CHECK(fixture.dashboard.select(BlockedId).empty());
-    CHECK(fixture.dashboard.selectedRun() == BlockedId);
+    CHECK(fixture.dashboard.input("/2379\r").empty());
+    REQUIRE(fixture.dashboard.interaction().filter == "2379");
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    CHECK(fixture.dashboard.selectedRun() == RunningId);
     CHECK(fixture.dashboard.interaction().filter.empty());
     CHECK(fixture.dashboard.select("no-such-run").empty());
-    CHECK(fixture.dashboard.selectedRun() == BlockedId);
+    CHECK(fixture.dashboard.selectedRun() == RunningId);
 
     // An end that waits for its confirmation is dropped: it was asked of another row.
-    CHECK(fixture.dashboard.select(RunningId).empty());
     CHECK(fixture.dashboard.input("e").empty());
     REQUIRE(fixture.dashboard.interaction().pendingEnd == RunningId);
     CHECK(fixture.dashboard.select(BlockedId).empty());
@@ -866,11 +1066,10 @@ TEST_CASE("x is inert on a run outside the configuration", "[orchestrator][view]
                                      .stored = { outsideConfiguration(finishedRun(
                                          KeptId, IssueRef { 2356 }, Fate::Kept, Seen::Opened, "issue")) } } };
     static_cast<void>(fixture.dashboard.frame());
-    CHECK(fixture.dashboard.input("\x1b[F").empty());
     REQUIRE(fixture.dashboard.selectedRun() == KeptId);
     CHECK(fixture.dashboard.input("x").empty());
     CHECK(fixture.dashboard.input("xx").empty());
-    CHECK_FALSE(fixture.screen().contains("x tries the removal again"));
+    CHECK_FALSE(fixture.screen().contains("tries the removal again"));
 }
 
 TEST_CASE("the e prompt answered no does nothing", "[orchestrator][view]")
@@ -879,10 +1078,12 @@ TEST_CASE("the e prompt answered no does nothing", "[orchestrator][view]")
         Fixture { World { .prs = { "github/prs-empty.json" },
                           .stored = { storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }) } } };
     static_cast<void>(fixture.dashboard.frame());
-    CHECK(fixture.dashboard.input("\x1b[Fe").empty());
+    CHECK(fixture.dashboard.input("e").empty());
     REQUIRE(fixture.dashboard.interaction().pendingEnd == RunningId);
+    CHECK(fixture.screen().contains("end pr-2375? e again to end · esc keeps it"));
     CHECK(fixture.dashboard.input("n").empty());
     CHECK(fixture.dashboard.interaction().pendingEnd.empty());
+    CHECK_FALSE(fixture.dashboard.launcher().has_value());
     // Asked once, answered: a second e asks again rather than ending it.
     CHECK(fixture.dashboard.input("e").empty());
     CHECK(fixture.dashboard.interaction().pendingEnd == RunningId);
@@ -905,14 +1106,13 @@ TEST_CASE("a running agent with no status after 30 s hints at a trust prompt", "
                                    .role = Role::Warning };
 
     // 29 s: no hint yet; 30 s: the row points at the tab.
-    CHECK(statusAt(29'000).status == "working 29s");
+    CHECK(statusAt(29'000).status == "starting 29s");
     CHECK(!std::ranges::contains(statusAt(29'000).details, hint));
     CHECK(statusAt(30'000).status == "waiting? see its tab");
     CHECK(statusAt(30'000).statusRole == Role::Warning);
     CHECK(std::ranges::contains(statusAt(30'000).details, hint));
-    // Still endable, and nothing else: the hint answers nothing.
-    CHECK(statusAt(30'000).offers
-          == std::vector { KeyCommand::Board, KeyCommand::Transcript, KeyCommand::EndRun });
+    // Still endable: the hint answers nothing.
+    CHECK(std::ranges::contains(statusAt(30'000).offers, KeyCommand::EndRun));
 
     // The dashboard draws it at 30 s on its own, asking the engine nothing.
     auto clock = core::ManualClock { at(29'500) };
@@ -925,8 +1125,6 @@ TEST_CASE("a running agent with no status after 30 s hints at a trust prompt", "
     clock.advance(std::chrono::milliseconds { 500 });
     CHECK_FALSE(dashboard.frame().empty());
     CHECK(core::tui::test::canvasToString(dashboard.rendered()).contains("waiting? see its tab"));
-    // A hinted row shows no age: nothing ticks under it.
-    CHECK(dashboard.nextRepaintDue() == std::nullopt);
 
     // The agent reports: the run records it, and the hint is gone.
     static_cast<void>(engine.step(PanesListed { .panes = { PaneFact { .pane = std::format("p-{}", RunningId),
@@ -941,34 +1139,22 @@ TEST_CASE("a running agent with no status after 30 s hints at a trust prompt", "
     CHECK(!std::ranges::contains(statusAt(31'000).details, hint));
 }
 
-TEST_CASE("an orphan's row is read-only: Enter and Tab show its details", "[orchestrator][view]")
-{
-    auto fixture = Fixture { orphansWorld(), Narrow };
-    CHECK(fixture.dashboard.input("\x1b[F"sv).empty());
-    CHECK(!fixture.screen().contains("to remove git -C"));
-    // No key acts on it: nothing is asked, nothing reaches the engine.
-    for (auto const key: { "e"sv, "x"sv, "\x1b[3~"sv })
-    {
-        CAPTURE(key);
-        CHECK(fixture.dashboard.input(key).empty());
-        CHECK(!fixture.screen().contains("to confirm"));
-    }
-    CHECK(fixture.dashboard.input("\r"sv).empty());
-    CHECK(fixture.screen().contains("to remove git -C"));
-    static_cast<void>(fixture.dashboard.input("\x1b"sv));
-    fixture.escapeTimesOut();
-    CHECK(!fixture.screen().contains("to remove git -C"));
-    CHECK(fixture.dashboard.input("\t"sv).empty());
-    CHECK(fixture.screen().contains("to remove git -C"));
-}
-
-TEST_CASE("Enter on an orphan in the Wide band shows its details on the whole width", "[orchestrator][view]")
+TEST_CASE("an orphan's row is read-only: its Focus shows its details", "[orchestrator][view]")
 {
     constexpr auto Command =
         R"(git -C /home/u/projects/contour worktree remove '/home/u/worktrees/contour/it'\''s a test')"sv;
     auto fixture = Fixture { orphansWorld(), Wide };
-    CHECK(fixture.dashboard.input("\x1b[F"sv).empty());
-    // Beside the list the panel is too narrow for the line: it is cut, never wrapped.
+    static_cast<void>(fixture.screen());
+    CHECK(fixture.dashboard.input("\x1b[Hj"sv).empty());
+    // No key acts on it: nothing is asked, nothing reaches the engine.
+    for (auto const key: { "e"sv, "x"sv, "\x1b[3~"sv, "r"sv, "o"sv })
+    {
+        CAPTURE(key);
+        CHECK(fixture.dashboard.input(key).empty());
+        CHECK(!fixture.screen().contains("e again"));
+    }
+    // Beside the Fleet the Focus is too narrow for the line: it is cut, never wrapped. Given the keys, the
+    // Focus takes the whole tab, and shows it whole.
     CHECK(!fixture.screen().contains(Command));
     CHECK(fixture.dashboard.input("\r"sv).empty());
     auto const page = fixture.screen();
@@ -979,73 +1165,4 @@ TEST_CASE("Enter on an orphan in the Wide band shows its details on the whole wi
     CHECK(fixture.screen().contains("LEFTOVER WORKTREES"));
 }
 
-TEST_CASE("rows that arrive above the selection keep its heading in view", "[orchestrator][view]")
-{
-    // The worktree list answers before the pull requests: the selection first lands on an orphan, far down,
-    // and the list scrolls to it; the pull requests then arrive above and take the selection.
-    auto world = orphansWorld();
-    world.prs = { "github/prs-open.json" };
-    world.held = { "gh-prs", "gh-issues" };
-    for (auto const index: std::views::iota(0, 4))
-        world.worktrees.push_back(WorktreeEntry {
-            .path = std::format("/home/u/worktrees/contour/pr-{}", index), .branch = std::nullopt });
-    auto fixture = Fixture { world, Medium };
-    REQUIRE(!fixture.held.empty());
-    CHECK(!fixture.screen().contains("MY PULL REQUESTS"));
-    fixture.answerHeld();
-    auto const screen = fixture.screen();
-    CHECK(screen.contains("#2375"));
-    CHECK(screen.contains("MY PULL REQUESTS"));
-}
-
-TEST_CASE("scrolling back up to a section's first item shows its heading", "[orchestrator][view]")
-{
-    // At 80x24 the list is shorter than its rows: End scrolls the PULL REQUESTS heading away, and Home must
-    // bring it back with the first item, not stop at the item.
-    auto fixture = Fixture { World { .stored = { storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }),
-                                                 storedRun(Done {}, DoneId, ChangeRequestRef { 2379 }) } },
-                             Medium };
-    CHECK(fixture.dashboard.input("\x1b[F"sv).empty());
-    CHECK(!fixture.screen().contains("MY PULL REQUESTS"));
-    CHECK(fixture.dashboard.input("\x1b[H"sv).empty());
-    CHECK(fixture.screen().contains("MY PULL REQUESTS"));
-}
-
-TEST_CASE("z folds the selected item's group and selects its header; enter unfolds it",
-          "[orchestrator][view]")
-{
-    auto fixture = Fixture { World {} };
-    static_cast<void>(fixture.screen());
-    REQUIRE(fixture.dashboard.selectedRun().empty());
-    auto const toggle = std::vector<UiAction> { ToggleFoldAction { .group = "prs/contour" } };
-
-    CHECK(fixture.dashboard.input("z") == toggle);
-    static_cast<void>(fixture.engine.step(ToggleFold { .group = "prs/contour", .monoMs = StartMonoMs }));
-    fixture.dashboard.engineChanged();
-    auto const folded = fixture.screen();
-    CHECK(folded.contains("▸ contour · 5"));
-    CHECK_FALSE(folded.contains("#2375"));
-
-    // The header is selected now: Enter unfolds the group, and the selection moves to its first item.
-    CHECK(fixture.dashboard.input("\r") == toggle);
-    static_cast<void>(fixture.engine.step(ToggleFold { .group = "prs/contour", .monoMs = StartMonoMs }));
-    fixture.dashboard.engineChanged();
-    auto const open = fixture.screen();
-    CHECK(open.contains("▾ contour · 5"));
-    CHECK(open.contains("#2375"));
-    CHECK(fixture.dashboard.input("z") == toggle);
-}
-
-TEST_CASE("a section's heading stays in view above its first group's header", "[orchestrator][view]")
-{
-    // Scrolled so that the first group's header is the top row, the selection on the item below it: the
-    // section's heading comes back into view, above the header.
-    auto fixture = Fixture { World {}, Size { .width = 80, .height = 24 } };
-    static_cast<void>(fixture.screen());
-    CHECK(fixture.dashboard.input(std::string(12, 'j')).empty());
-    static_cast<void>(fixture.screen());
-    CHECK(fixture.dashboard.input("\x1b[H").empty());
-    auto const screen = fixture.screen();
-    CHECK(screen.contains("MY PULL REQUESTS"));
-    CHECK(screen.contains("▾ contour · 5"));
-}
+// }}}

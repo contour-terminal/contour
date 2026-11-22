@@ -1,5 +1,8 @@
-worktree_root: is required                                                      
-╭─ STATUS.md · pr-2375-20261113-150847 ────────────────────────────────────────╮
+ ✦ Agents                                                                   ⬢ 1 
+ worktree_root: is required                                                     
+╭─ pr-2375 · fix_ci · sonnet ──────────────────────────────────── ⠿ working 6m ╮
+│ agent/pr-2375-20261113-150847                                                │
+│ Board  Transcript  Details                                                   │
 │ STATUS.md is not read while the configuration is refused; fix it to see the  │
 │ board.                                                                       │
 │                                                                              │
@@ -10,15 +13,12 @@ worktree_root: is required
 │                                                                              │
 │                                                                              │
 │                                                                              │
+│ ── latest ────────────────────────────────────────────────────────────────── │
+│ nothing yet                                                                  │
 │                                                                              │
 │                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
+│ ╭─ to pr-2375 ─────────────────────────────────────────────────────────────╮ │
+│ │ ▏                                                                        │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- ↑↓ scroll · enter agent tab · t transcript · d new run · b reload · esc back   
-                                                                                
+ ⏎ send · alt⏎ line · esc keep draft · pgup pgdn scroll                         

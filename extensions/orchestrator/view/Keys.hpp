@@ -5,6 +5,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -14,8 +16,8 @@
 #include <vector>
 
 #include <orchestrator/core/Engine.hpp>
-#include <orchestrator/view/Band.hpp>
 #include <orchestrator/view/DispatchForm.hpp>
+#include <orchestrator/view/Fleet.hpp>
 #include <orchestrator/view/Launcher.hpp>
 
 namespace orchestrator::view
@@ -31,7 +33,7 @@ struct RefreshNowAction
     [[nodiscard]] bool operator==(RefreshNowAction const&) const = default;
 };
 
-/// The user sent a message to a run's agent from the message line (`m`): typed into its tab.
+/// The user sent a message to a run's agent from the message box: typed into its tab.
 struct SendMessageAction
 {
     std::string run;  ///< The run's id.
@@ -66,13 +68,6 @@ struct DismissAction
     [[nodiscard]] bool operator==(DismissAction const&) const = default;
 };
 
-/// The user opened a finished run's details.
-struct MarkSeenAction
-{
-    std::string run = {}; ///< The run's id.
-    [[nodiscard]] bool operator==(MarkSeenAction const&) const = default;
-};
-
 /// Bring a run's agent tab in front of the window the dashboard was opened from.
 struct RevealAgentAction
 {
@@ -93,7 +88,7 @@ struct HideBoardAction
     [[nodiscard]] bool operator==(HideBoardAction const&) const = default;
 };
 
-/// Fold or unfold a group of the list, such as one repository's issues.
+/// Fold or unfold a group of the Fleet, such as Finished.
 struct ToggleFoldAction
 {
     std::string group = {}; ///< The group's key.
@@ -118,7 +113,6 @@ using UiAction = std::variant<RefreshNowAction,
                               EndRunAction,
                               RetryRemovalAction,
                               DismissAction,
-                              MarkSeenAction,
                               RevealAgentAction,
                               DispatchAction,
                               ShowBoardAction,
@@ -132,115 +126,89 @@ using UiAction = std::variant<RefreshNowAction,
 /// What a key does on the dashboard.
 enum class KeyCommand : uint8_t
 {
-    Up,           ///< Select the row above.
-    Down,         ///< Select the row below.
-    Home,         ///< Select the first row.
-    End,          ///< Select the last row.
-    Enter,        ///< Dispatch on the selected item, reveal its agent, or open a finished run's details.
-    Back,         ///< Close what is open: a board or a transcript, the help, the details page, the filter.
-    Tab,          ///< In the Medium and Narrow bands, swap the details in for the list, and back.
-    Filter,       ///< Type a filter for the rows.
-    Help,         ///< Show or hide the keys.
-    Refresh,      ///< Read the lists again now.
-    EndRun,       ///< End the selected run.
-    RetryRemoval, ///< Check the selected kept worktree again.
-    Dismiss,      ///< Drop the selected finished run.
-    Dispatch,     ///< Open the launcher on the selected item, on the first task that applies to it; on a
-                  ///< finished run, a board or a transcript, on the run's item and task.
-    Task,         ///< Open the launcher on the selected item, on the task whose key was typed.
-    Board,        ///< Show the selected run's status board; on the board, read it again now.
-    Transcript,   ///< Show the transcript of the selected run, or of the board's run, from its first page.
-    ScrollPageUp, ///< Scroll a board or a transcript up by a screen.
-    ScrollPageDown, ///< Scroll a board or a transcript down by a screen.
+    Up,      ///< In the Fleet, select the row above; in the Focus, scroll its tab up a line.
+    Down,    ///< In the Fleet, select the row below; in the Focus, scroll its tab down a line.
+    Home,    ///< In the Fleet, select the first row, the run that waited longest; in the Focus, the top.
+    End,     ///< In the Fleet, select the last row; in the Focus, the end of the tab, the transcript live.
+    Enter,   ///< The selected row's primary action: to the Focus of a live run, run a finished one again,
+             ///< retry a kept one's removal, unfold a group, open the launcher.
+    Back,    ///< Back to the Fleet; in it, close the help or clear the filter.
+    Tab,     ///< To the Focus, and back.
+    Filter,  ///< Type a filter for the rows.
+    Help,    ///< Show or hide the keys.
+    Refresh, ///< Read the lists again now (the palette's, from phase 3).
+    EndRun,  ///< End the selected run; asks once.
+    RetryRemoval,   ///< Check the selected kept worktree again.
+    Dismiss,        ///< Drop the selected finished run.
+    BoardTab,       ///< Show the Focus's Board tab.
+    TranscriptTab,  ///< Show the Focus's Transcript tab.
+    DetailsTab,     ///< Show the Focus's Details tab.
+    ScrollPageUp,   ///< Scroll the Focus's tab up by a screen.
+    ScrollPageDown, ///< Scroll the Focus's tab down by a screen.
     PreviousPage,   ///< Show the transcript's previous page.
-    NextPage,       ///< Show the transcript's next page.
-    FirstPage,      ///< Show the transcript's first page.
-    LastPage,       ///< Show the transcript's last page.
-    Fold,           ///< Fold or unfold the group of the selected row, and select its header.
-    NewTopic,       ///< Open the launcher, empty: to browse the items, or to type a topic.
+    NextPage,       ///< Show the transcript's next page; its last follows the agent again.
+    Fold,           ///< Fold or unfold the group of the selected row, and select its heading.
+    NewAgent,       ///< Open the launcher, empty: to browse the items, or to type a topic.
     InstallPlugins, ///< Install the Claude Code plugins the agents need and lack; asks once first.
-    Message,        ///< Open the message line to the selected run's agent, or to the board's or transcript's.
-};
-
-/// A message being written to a run's agent (`m`): it takes every key until Enter sends it or Esc drops it.
-struct MessageDraft
-{
-    std::string run;  ///< The run whose agent it goes to.
-    std::string text; ///< What was written so far; line feeds come from a paste.
-    [[nodiscard]] bool operator==(MessageDraft const&) const = default;
+    Reveal,         ///< Bring the selected run's agent tab in front.
+    OpenLink,       ///< Copy the selected run's link with OSC 52, until the frontend can open it (phase 6).
 };
 
 /// How far the user got installing the missing plugins (`I`): it asks once, as ending a run does.
 enum class InstallConfirm : uint8_t
 {
     None = 0, ///< Not asked.
-    Asked,    ///< The summary line asked; the next `I` installs, any other key forgets it.
+    Asked,    ///< The action bar asked; the next `I` installs, any other key forgets it.
 };
 
-/// What the dashboard's tab shows.
-enum class Screen : uint8_t
+/// Where the user is: which pane has the keys.
+enum class Place : uint8_t
 {
-    Dashboard = 0, ///< The lists and the details.
-    Board,         ///< A run's status board (Interaction::subject).
-    Transcript,    ///< A run's transcript (Interaction::subject).
+    Fleet = 0, ///< The Fleet: letters are commands.
+    Focus,     ///< The Focus: its message box has the keys, where the run has one; else the Fleet's letters
+               ///< act and ↑↓ scroll.
 };
 
-/// The screens a key row acts and is hinted on: a bit per Screen.
-enum class ScreenSet : uint8_t
+/// The places a key row is hinted in: a bit per Place.
+enum class PlaceSet : uint8_t
 {
-    Dashboard = 0b001,  ///< The dashboard only.
-    Board = 0b010,      ///< The status board only.
-    Transcript = 0b100, ///< The transcript only.
-    All = 0b111,        ///< Every screen.
+    Fleet = 0b01, ///< The Fleet only.
+    Focus = 0b10, ///< The Focus only.
+    Both = 0b11,  ///< Either.
 };
 
-/// @param set Some screens.
-/// @param screen A screen.
-/// @return Whether @p set holds @p screen.
-[[nodiscard]] constexpr bool holds(ScreenSet set, Screen screen) noexcept
+/// @param set Some places.
+/// @param place A place.
+/// @return Whether @p set holds @p place.
+[[nodiscard]] constexpr bool holds(PlaceSet set, Place place) noexcept
 {
-    return ((std::to_underlying(set) >> std::to_underlying(screen)) & 1U) != 0;
+    return ((static_cast<unsigned>(std::to_underlying(set)) >> std::to_underlying(place)) & 1U) != 0;
 }
 
-/// One key: what it is called, what it does, and what the hint line calls it.
+/// One key: what it is called, what it does, and what the action bar calls it.
 struct KeyRow
 {
     std::string_view
         key = {}; ///< Its name: a printable character, or `up`, `down`, `enter`, `esc` and the like.
     KeyCommand command = KeyCommand::Up; ///< What it does.
-    std::string_view hint = {}; ///< How the hint line and the help name it; empty: neither shows the row.
-    std::optional<Band> hiddenIn =
-        std::nullopt; ///< The band whose hint line does not show it, where it does nothing; absent: none.
-    ScreenSet on = ScreenSet::Dashboard; ///< The screens it acts and is hinted on.
+    std::string_view hint = {};   ///< How the action bar and the help name it; empty: neither shows the row.
+    PlaceSet on = PlaceSet::Both; ///< Where its hint is shown; every row acts in both places.
 };
 
-/// @param row A key.
-/// @param band The tab's band.
-/// @param screen What the tab shows.
-/// @return Whether the hint line of a tab in @p band showing @p screen shows the row's hint.
-[[nodiscard]] constexpr bool isHintedIn(KeyRow const& row, Band band, Screen screen) noexcept
-{
-    return !row.hint.empty() && row.hiddenIn != band && holds(row.on, screen);
-}
-
-/// @return Every key the dashboard acts on now, in the order the hint line and the help show them.
+/// @return Every key the dashboard acts on, in the order the action bar and the help show them.
 [[nodiscard]] std::span<KeyRow const> keyRows() noexcept;
 
 /// @param key A key the terminal sent.
-/// @param screen What the tab shows.
-/// @return What it does on @p screen; std::nullopt for a key no row of that screen names, or one with Ctrl or
-///         Alt. A task's key is not in the table: applyKey() looks it up in the configuration.
-[[nodiscard]] std::optional<KeyCommand> commandFor(core::tui::KeyEvent const& key, Screen screen) noexcept;
+/// @return What it does; std::nullopt for a key no row names, or one with Ctrl or Alt.
+[[nodiscard]] std::optional<KeyCommand> commandFor(core::tui::KeyEvent const& key) noexcept;
+
+/// @param command A command.
+/// @return Whether it acts on the selected row only where the row offers it (Row::offers): the Focus tabs and
+///         the run commands. The action bar hints such a key only where it applies.
+[[nodiscard]] bool isRowCommand(KeyCommand command) noexcept;
 
 // }}}
 // {{{ the interaction
-
-/// What the body of the dashboard shows in the bands that cannot show the list and the details together.
-enum class Pane : uint8_t
-{
-    List,    ///< The list (in the Medium band, with the details below it).
-    Details, ///< The selected row's details in the list's place.
-};
 
 /// Whether the help is shown over the dashboard.
 enum class Overlay : uint8_t
@@ -256,62 +224,107 @@ enum class Filtering : uint8_t
     Typing, ///< Printable keys extend the filter; Backspace shortens it; Enter keeps it; Esc drops it.
 };
 
-/// Where the user is on the dashboard: what is selected, open and filtered.
+/// Whether the transcript follows the agent.
+enum class Follow : uint8_t
+{
+    Live = 0, ///< Its last page, pinned to the end, read again while the agent runs.
+    Away,     ///< Scrolled up, or turned to an earlier page: `↓ live` shows, `end` returns.
+};
+
+/// A Focus tab the user chose for a run: it sticks until the run's state changes.
+struct TabChoice
+{
+    std::string run = {};           ///< The run.
+    std::string state = {};         ///< Its state as it was chosen (Row::state).
+    FocusTab tab = FocusTab::Board; ///< The tab.
+    [[nodiscard]] bool operator==(TabChoice const&) const = default;
+};
+
+/// A message sent from the message box, kept until the transcript shows it, or the host refused it.
+struct SentMessage
+{
+    std::string run = {};   ///< The run whose agent it went to.
+    std::string text = {};  ///< What was sent.
+    std::string clock = {}; ///< When, as `HH:MM` in local time.
+    [[nodiscard]] bool operator==(SentMessage const&) const = default;
+};
+
+/// Where the user is on the dashboard: what is selected, open, filtered and written.
 struct Interaction
 {
     std::size_t selected = 0;             ///< The selected row, counted among the rows that can be selected.
-    Pane pane = Pane::List;               ///< What the body shows where the band cannot show both.
+    Place place = Place::Fleet;           ///< Which pane has the keys.
     Overlay overlay = Overlay::None;      ///< Whether the help is shown.
     Filtering filtering = Filtering::Off; ///< Whether typed text goes to the filter.
     std::string filter = {};              ///< Rows whose text does not hold it are left out; empty: none is.
     std::string pendingEnd = {}; ///< The run whose end waits for a second `e` (D14: asks once); empty: none.
     InstallConfirm pendingInstall =
         InstallConfirm::None;                   ///< Whether a second `I` installs the missing plugins.
-    std::optional<MessageDraft> message = {};   ///< The message line, while it is open: it takes every key.
     std::optional<LauncherState> launcher = {}; ///< The launcher, while it is open: it takes every key.
-    std::string notice = {}; ///< A one-line notice on the summary line, until the next key; empty: none.
-    Screen screen = Screen::Dashboard; ///< What the tab shows.
-    std::string subject = {};          ///< The run a board or a transcript is of; empty on the dashboard.
-    Screen back = Screen::Dashboard;   ///< Where Esc on a board or a transcript returns to: the screen it was
-                                       ///< opened from.
-    uint32_t page = 1;                 ///< The transcript's 1-based page.
-    std::size_t scroll = 0;            ///< The first line a board or a transcript shows.
-    std::string followGroup = {}; ///< A group whose header the selection moves to once the rows are built
-                                  ///< again, as folding from one of its items asks; empty: none.
+    std::string notice = {}; ///< A one-line notice on the action bar, until the next key; empty: none.
+    std::optional<TabChoice>
+        chosenTab = {};           ///< The tab the user chose for a run; none: each opens on its own.
+    std::size_t scroll = 0;       ///< The first line the Focus's tab shows.
+    Follow follow = Follow::Live; ///< Whether the transcript follows the agent.
+    uint32_t page = 0; ///< The transcript's 1-based page while Away on an earlier one; 0: its last.
+    std::map<std::string, std::string, std::less<>> drafts = {}; ///< The message box's draft, per run.
+    std::optional<SentMessage> sent = {}; ///< The last message sent, until it shows or is refused.
+    std::string clipboard = {};           ///< Text the next frame copies with OSC 52; empty: none.
+    std::string followGroup = {}; ///< A group whose heading the selection moves to once the rows are built
+                                  ///< again, as folding from one of its runs asks; empty: none.
     [[nodiscard]] bool operator==(Interaction const&) const = default;
+};
+
+/// What the Focus's Board and Transcript tabs draw: the run, and how far they are scrolled.
+struct FocusSubject
+{
+    std::string run = {};         ///< The run; empty: none.
+    uint32_t page = 1;            ///< The transcript's page asked for.
+    std::size_t scroll = 0;       ///< The first line shown, while not following.
+    Follow follow = Follow::Live; ///< Whether the transcript shows its end.
 };
 
 /// What a key is applied to besides the interaction.
 struct KeyContext
 {
-    Band band = Band::Wide;               ///< The tab's band.
-    std::size_t selectable = 0;           ///< How many rows can be selected.
-    Row const* selected = nullptr;        ///< The selected row; nullptr when there is none.
-    Engine const* engine = nullptr;       ///< Its runs, lists and tasks; nullptr: no key dispatches.
-    std::optional<std::size_t> task = {}; ///< For KeyCommand::Task: the task, an index into Config::tasks().
-    std::size_t lines = 0;                ///< How many lines a board or a transcript has, as last drawn.
-    std::size_t rows = 0;                 ///< How many of them the tab showed at once.
-    std::string_view tab = {};            ///< The tab, whose page of a transcript the engine keeps.
+    std::size_t selectable = 0;     ///< How many rows can be selected.
+    Row const* selected = nullptr;  ///< The selected row; nullptr when there is none.
+    Engine const* engine = nullptr; ///< Its runs, lists and tasks; nullptr: no key dispatches.
+    FocusTab tab = FocusTab::Board; ///< The Focus tab shown for the selected row (activeTabOf()).
+    std::size_t lines = 0;          ///< How many lines the Focus's tab has, as last drawn.
+    std::size_t rows = 0;           ///< How many of them it showed at once.
+    uint32_t pages = 0;             ///< How many pages the shown transcript has, as last read; 0: unknown.
 };
+
+/// @param interaction Where the user is.
+/// @param row The selected row; nullptr: none.
+/// @return The Focus tab shown for @p row: the one the user chose while the run's state did not change, else
+///         the one its group opens on (FleetGroupRow::opensOn); Details for a row without a run. A tab the
+///         row does not offer gives way to Details.
+[[nodiscard]] FocusTab activeTabOf(Interaction const& interaction, Row const* row) noexcept;
+
+/// @param engine The engine; nullptr: none.
+/// @param row The selected row; nullptr: none.
+/// @return Whether the row's run has a message box: it is active and its agent has a tab to type into.
+[[nodiscard]] bool hasMessageBox(Engine const* engine, Row const* row) noexcept;
 
 /// Applies one key's command.
 /// @param command What the key does.
 /// @param interaction Where the user is; changed by the command.
-/// @param context The band and the selected row.
+/// @param context The selected row, the engine and the Focus tab as last drawn.
 /// @return What the engine is asked, if anything.
 [[nodiscard]] std::optional<UiAction> dispatch(KeyCommand command,
                                                Interaction& interaction,
                                                KeyContext const& context);
 
-/// Returns from a board or a transcript to the dashboard. Leaving a board, the caller asks the engine to stop
-/// reading it (HideBoardAction).
+/// Shows the Fleet with the keys: the Focus's scroll, follow and page start over for the row selected next.
 /// @param interaction Where the user is.
-void leaveSubject(Interaction& interaction) noexcept;
+void backToFleet(Interaction& interaction) noexcept;
 
-/// Opens the launcher on an item, as `d` does on a finished run, a board or a transcript: on @p task while it
+/// Opens the launcher on an item, as Enter does on a finished run (run again): on @p task while it
 /// still applies to the item, else on the first task that does. The launcher previews and refuses as every
 /// dispatch does (an item with an active run shows the refusal); nothing starts before it is confirmed. When
-/// it does not open, the summary line says why.
+/// it does not open, the action bar says why.
 /// @param interaction Where the user is: its launcher opened, or its notice set. Its session id is left empty
 ///        for the caller, which holds the source of them, to mint.
 /// @param engine The engine: its configuration and its lists.
@@ -336,12 +349,6 @@ void openLauncherFor(Interaction& interaction,
 /// @return Whether the run is active and has an agent tab to go to.
 [[nodiscard]] bool hasAgentTab(Engine const* engine, std::string_view run) noexcept;
 
-/// @param engine The engine; nullptr: none.
-/// @param run A run's id.
-/// @return Whether the run has a board to show: it is known, and its worktree is still there
-///         (keepsWorktree()).
-[[nodiscard]] bool hasBoardToShow(Engine const* engine, std::string_view run) noexcept;
-
 /// @param command A command.
 /// @return Whether dispatch() has a row for it.
 [[nodiscard]] bool isDispatched(KeyCommand command) noexcept;
@@ -358,12 +365,13 @@ void dropLastCodepoint(std::string& text) noexcept;
 /// @return It as one line: line ends and tabs folded to a space each, every other control character dropped.
 [[nodiscard]] std::string pastedText(std::string_view text);
 
-/// Applies a paste: into the launcher's query while it is open, into the filter while it is typed;
-/// dropped anywhere else. A paste is text, never keys: nothing in it confirms, moves or acts.
-/// @param interaction Where the user is; its query or filter extended.
-/// @param engine The engine the launcher lists from.
+/// Applies a paste: into the launcher's query while it is open, into the message box while it has the keys
+/// (its line feeds kept), into the filter while it is typed; dropped anywhere else. A paste is text, never
+/// keys: nothing in it confirms, moves or acts.
+/// @param interaction Where the user is; its query, draft or filter extended.
+/// @param context The engine the launcher lists from, and the selected row.
 /// @param text What was pasted.
-void pasteInto(Interaction& interaction, Engine const& engine, std::string_view text);
+void pasteInto(Interaction& interaction, KeyContext const& context, std::string_view text);
 
 /// Whether a key went to the filter.
 enum class FilterInput : uint8_t
@@ -378,12 +386,12 @@ enum class FilterInput : uint8_t
 /// @return Whether the key was taken.
 [[nodiscard]] FilterInput typeIntoFilter(core::tui::KeyEvent const& key, Interaction& interaction);
 
-/// Applies one key: to the filter while it is typed, to a pending end's confirmation, else by the key table,
-/// or as a task's key when the configuration binds it. While an end waits for its confirmation, any key but
-/// `e` on the same run keeps the run and does nothing else.
+/// Applies one key: to the message box while it has the keys, to the filter while it is typed, to a pending
+/// end's confirmation, else by the key table. While an end waits for its confirmation, any key but `e` on the
+/// same run keeps the run and does nothing else.
 /// @param key A key the terminal sent.
 /// @param interaction Where the user is; changed by the key.
-/// @param context The band and the selected row.
+/// @param context The selected row, the engine and the Focus tab as last drawn.
 /// @return What the engine is asked, if anything.
 [[nodiscard]] std::optional<UiAction> applyKey(core::tui::KeyEvent const& key,
                                                Interaction& interaction,

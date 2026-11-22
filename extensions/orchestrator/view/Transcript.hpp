@@ -66,6 +66,13 @@ enum class EntryPlace : uint8_t
                                                      EntryPlace place,
                                                      int columns);
 
+/// One entry on one line, as the Focus's `latest` shows it: `HH:MM <who> <its first line>`, in its kind's
+/// role, sanitised and cut to @p columns.
+/// @param entry The entry, untrusted.
+/// @param columns The cells the line may take.
+/// @return The line.
+[[nodiscard]] TranscriptLine latestLineOf(TranscriptEntry const& entry, int columns);
+
 /// @param page A page that was read.
 /// @return The page's footer: `written by Claude Code <version>`, then `N entries not understood` when N > 0;
 ///         empty when it has neither.
@@ -104,18 +111,18 @@ struct TranscriptPanelState
     std::size_t wrappedEntries = 0; ///< How many entries the panel wrapped since it was made: for tests.
 };
 
-/// A run's transcript, a page at a time, read-only, in a rounded box titled `Transcript · <run> · page 2 of
-/// 5`: the page's entries from Interaction::scroll on, and its footer; or why there is nothing to show.
-/// Everything in it is drawn sanitised.
+/// A run's transcript, a page at a time, read-only, as the Focus's Transcript tab draws it: the page's
+/// entries from FocusSubject::scroll on, or its end while it follows the agent, and its footer (`page 2 of 5
+/// · written by …`); or why there is nothing to show. Everything in it is drawn sanitised.
 class TranscriptPanel final: public core::tui::Component
 {
   public:
     /// @param engine The engine whose transcript is drawn (Engine::transcript()).
-    /// @param interaction Where the user is: the transcript's run, its page and how far it is scrolled.
+    /// @param subject The transcript's run, its page and how far it is scrolled.
     /// @param tab The tab it is drawn in, whose page the engine keeps.
     /// @param state What the panel learnt drawing itself.
     TranscriptPanel(Engine const& engine CORE_LIFETIMEBOUND,
-                    Interaction const& interaction CORE_LIFETIMEBOUND,
+                    FocusSubject const& subject CORE_LIFETIMEBOUND,
                     std::string const& tab CORE_LIFETIMEBOUND,
                     TranscriptPanelState& state CORE_LIFETIMEBOUND);
 
@@ -129,7 +136,7 @@ class TranscriptPanel final: public core::tui::Component
                                                            std::size_t count);
 
     Engine const& _engine;
-    Interaction const& _interaction;
+    FocusSubject const& _subject;
     std::string const& _tab;
     TranscriptPanelState& _state;
     std::optional<TranscriptPage> _wrappedPage; ///< The page @ref _wrapped is made from.

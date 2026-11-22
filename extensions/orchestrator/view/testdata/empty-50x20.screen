@@ -1,5 +1,6 @@
-worktree_root: is required                        
-╭─ Agents ───────────────────────────────────────╮
+ ✦ Agents                                     ⬢ 0 
+ worktree_root: is required                       
+╭─ Agents 0 ─────────────────────────────────────╮
 │ Nothing to list until the orchestrator is con… │
 │ Configure daemon.extensions.orchestrator.conf… │
 │ worktree_root, models, repos and tasks.        │
@@ -16,5 +17,4 @@ worktree_root: is required
 │                                                │
 │                                                │
 ╰────────────────────────────────────────────────╯
- ↑↓ move · enter open · d new run · ? help        
-                                                  
+ ↑↓ move · ⏎ open · tab focus · n new agent       

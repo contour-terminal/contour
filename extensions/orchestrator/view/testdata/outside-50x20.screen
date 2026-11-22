@@ -1,20 +1,20 @@
-pr-2375-20261113-150847: outside the current conf…
-╭─ Agents ───────────────────────────────────────╮
-│ no open pull requests                          │
+ ✦ Agents                              ⬢ 1/4 ▰▱▱▱ 
+ pr-2375-20261113-150847: outside the current co… 
+╭─ Agents 2 ─────────────────────────────────────╮
+│ WORKING 1 of 4                                 │
+│▍⠿ pr-2375 · fix CI · f… outside the configura… │
+│ FINISHED 1                                     │
+│ ⚑ issue-2356 · work on issue · ended by … kept │
 │                                                │
-│ ISSUES WITHOUT A PR                            │
-│ ▾ contour · 5                                  │
-│   #2356 Report the Qt macOS bug that drops Ct… │
-│   #2338 Flaky on Windows: SessionHost.extensi… │
-│   #2253 Switch `daemon` Same `client`          │
-│   #2163 OSC 133: optional nonce to reject for… │
-│   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" … │
+│ + new agent                                    │
 │                                                │
-│ AGENTS · 1 OF 4 RUNNING                        │
-│ ○ pr-2375 · fix CI · s… outside the configura… │
 │                                                │
-│ FINISHED · 0 NEW                               │
-│   issue-2356 · work on issue … kept: 2 entries │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
 ╰────────────────────────────────────────────────╯
- ↑↓ move · enter open · d new run · ? help        
- ⬢ agents 1/4                                     
+ ↑↓ move · ⏎ open · tab focus · b board           

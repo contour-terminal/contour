@@ -1,20 +1,20 @@
-╭─ Details ──────────────────────────────────────╮
-│ issue-2356 · work on issue · ended by you      │
-│                                                │
+ ✦ Agents                              ⬢ 0/4 ▱▱▱▱ 
+╭─ issue-2356 · work on issue · sonnet ── ⚑ kept ╮
+│ Board  Transcript  Details                     │
 │ task      work on issue                        │
 │ model     sonnet                               │
 │ state     ended by you, worktree kept, seen:   │
-│             git uses another directory than    │
-│             the main checkout's .git; nothing  │
-│             more was run there                 │
+│             .git file was changed; nothing was │
+│             run there                          │
 │ branch    agent/issue-2356-20261113-151001     │
 │ worktree  /home/u/worktrees/contour/issue-2356 │
 │             -20261113-151001                   │
-│ url       https://github.com/contour-terminal/ │
-│             contour/issues/2356                │
-│           git uses another directory than the  │
-│             main checkout's .git; nothing more │
-│             was run there…                     │
+│ ── latest ──────────────────────────────────── │
+│ 18:36 tool Bash {"command":"mkdir sub && cd s… │
+│ 18:36 result .                                 │
+│ 18:37 claude done.                             │
+│ ╭────────────────────────────────────────────╮ │
+│ │ ⚑ kept · ended by you · 1 entry kept · ⏎ … │ │
+│ ╰────────────────────────────────────────────╯ │
 ╰────────────────────────────────────────────────╯
- ↑↓ move · enter open · d new run · ? help        
- ⬢ agents 0/4                                     
+ ↑↓ scroll · esc back · b board · t transcript    

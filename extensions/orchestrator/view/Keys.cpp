@@ -16,7 +16,6 @@
 #include <string_view>
 #include <variant>
 
-#include <orchestrator/core/Config.hpp>
 #include <orchestrator/core/Utf8.hpp>
 #include <orchestrator/view/Sections.hpp>
 
@@ -29,94 +28,58 @@ namespace
 {
     // {{{ the keys
 
-    // In the order the hint line shows them: the line is cut at the tab's edge, so the keys that find
+    // In the order the action bar shows them: the line is cut at the tab's edge, so the keys that find
     // everything else come first.
     constexpr auto KeyTable = std::array {
-        KeyRow { .key = "up"sv, .command = KeyCommand::Up, .hint = "↑↓ move"sv },
-        KeyRow { .key = "k"sv, .command = KeyCommand::Up, .hint = ""sv },
-        KeyRow { .key = "down"sv, .command = KeyCommand::Down, .hint = ""sv },
-        KeyRow { .key = "j"sv, .command = KeyCommand::Down, .hint = ""sv },
-        KeyRow { .key = "home"sv, .command = KeyCommand::Home, .hint = ""sv },
-        KeyRow { .key = "end"sv, .command = KeyCommand::End, .hint = ""sv },
-        KeyRow { .key = "enter"sv, .command = KeyCommand::Enter, .hint = "enter open"sv },
-        KeyRow { .key = "d"sv, .command = KeyCommand::Dispatch, .hint = "d new run"sv },
-        KeyRow { .key = "?"sv, .command = KeyCommand::Help, .hint = "? help"sv },
-        KeyRow { .key = "b"sv, .command = KeyCommand::Board, .hint = "b board"sv },
-        KeyRow { .key = "t"sv, .command = KeyCommand::Transcript, .hint = "t transcript"sv },
-        KeyRow { .key = "/"sv, .command = KeyCommand::Filter, .hint = "/ filter"sv },
-        KeyRow { .key = "z"sv, .command = KeyCommand::Fold, .hint = "z fold"sv },
-        KeyRow { .key = "R"sv, .command = KeyCommand::Refresh, .hint = "R refresh"sv },
-        KeyRow { .key = "e"sv, .command = KeyCommand::EndRun, .hint = "e end run"sv },
-        KeyRow { .key = "n"sv, .command = KeyCommand::NewTopic, .hint = "n new agent"sv },
-        KeyRow { .key = "I"sv, .command = KeyCommand::InstallPlugins, .hint = "I install plugins"sv },
-        KeyRow { .key = "m"sv, .command = KeyCommand::Message, .hint = "m message"sv },
+        KeyRow { .key = "up"sv, .command = KeyCommand::Up, .hint = "↑↓ move"sv, .on = PlaceSet::Fleet },
+        KeyRow { .key = "up"sv, .command = KeyCommand::Up, .hint = "↑↓ scroll"sv, .on = PlaceSet::Focus },
+        KeyRow { .key = "k"sv, .command = KeyCommand::Up },
+        KeyRow { .key = "down"sv, .command = KeyCommand::Down },
+        KeyRow { .key = "j"sv, .command = KeyCommand::Down },
+        KeyRow { .key = "home"sv, .command = KeyCommand::Home },
+        KeyRow { .key = "end"sv, .command = KeyCommand::End },
+        KeyRow { .key = "enter"sv, .command = KeyCommand::Enter, .hint = "⏎ open"sv, .on = PlaceSet::Fleet },
+        KeyRow { .key = "esc"sv, .command = KeyCommand::Back, .hint = "esc back"sv, .on = PlaceSet::Focus },
+        KeyRow { .key = "tab"sv, .command = KeyCommand::Tab, .hint = "tab focus"sv, .on = PlaceSet::Fleet },
+        KeyRow { .key = "b"sv, .command = KeyCommand::BoardTab, .hint = "b board"sv },
+        KeyRow { .key = "t"sv, .command = KeyCommand::TranscriptTab, .hint = "t transcript"sv },
+        KeyRow { .key = "d"sv, .command = KeyCommand::DetailsTab, .hint = "d details"sv },
+        KeyRow { .key = "n"sv, .command = KeyCommand::NewAgent, .hint = "n new agent"sv },
+        KeyRow { .key = "/"sv, .command = KeyCommand::Filter, .hint = "/ filter"sv, .on = PlaceSet::Fleet },
+        KeyRow { .key = "e"sv, .command = KeyCommand::EndRun, .hint = "e end"sv },
+        KeyRow { .key = "o"sv, .command = KeyCommand::OpenLink, .hint = "o copy link"sv },
+        KeyRow { .key = "r"sv, .command = KeyCommand::Reveal, .hint = "r agent tab"sv },
         KeyRow { .key = "x"sv, .command = KeyCommand::RetryRemoval, .hint = "x retry removal"sv },
         KeyRow { .key = "del"sv, .command = KeyCommand::Dismiss, .hint = "del dismiss"sv },
-        KeyRow {
-            .key = "tab"sv, .command = KeyCommand::Tab, .hint = "tab details"sv, .hiddenIn = Band::Wide },
-        KeyRow { .key = "esc"sv, .command = KeyCommand::Back, .hint = "esc back"sv },
-        // The status board: read-only, so its keys scroll, reload and leave.
-        KeyRow { .key = "up"sv, .command = KeyCommand::Up, .hint = "↑↓ scroll"sv, .on = ScreenSet::Board },
-        KeyRow { .key = "k"sv, .command = KeyCommand::Up, .hint = ""sv, .on = ScreenSet::Board },
-        KeyRow { .key = "down"sv, .command = KeyCommand::Down, .hint = ""sv, .on = ScreenSet::Board },
-        KeyRow { .key = "j"sv, .command = KeyCommand::Down, .hint = ""sv, .on = ScreenSet::Board },
-        KeyRow { .key = "pgup"sv, .command = KeyCommand::ScrollPageUp, .hint = ""sv, .on = ScreenSet::Board },
-        KeyRow {
-            .key = "pgdn"sv, .command = KeyCommand::ScrollPageDown, .hint = ""sv, .on = ScreenSet::Board },
-        KeyRow { .key = "home"sv, .command = KeyCommand::Home, .hint = ""sv, .on = ScreenSet::Board },
-        KeyRow { .key = "end"sv, .command = KeyCommand::End, .hint = ""sv, .on = ScreenSet::Board },
-        KeyRow { .key = "enter"sv,
-                 .command = KeyCommand::Enter,
-                 .hint = "enter agent tab"sv,
-                 .on = ScreenSet::Board },
-        KeyRow { .key = "t"sv,
-                 .command = KeyCommand::Transcript,
-                 .hint = "t transcript"sv,
-                 .on = ScreenSet::Board },
-        KeyRow {
-            .key = "d"sv, .command = KeyCommand::Dispatch, .hint = "d new run"sv, .on = ScreenSet::Board },
-        KeyRow { .key = "b"sv, .command = KeyCommand::Board, .hint = "b reload"sv, .on = ScreenSet::Board },
-        KeyRow { .key = "esc"sv, .command = KeyCommand::Back, .hint = "esc back"sv, .on = ScreenSet::Board },
-        KeyRow {
-            .key = "m"sv, .command = KeyCommand::Message, .hint = "m message"sv, .on = ScreenSet::Board },
-        // The transcript: read-only, a page at a time, so its keys page, scroll, switch to the board and
-        // leave.
-        KeyRow { .key = "left"sv,
-                 .command = KeyCommand::PreviousPage,
-                 .hint = "←→ page"sv,
-                 .on = ScreenSet::Transcript },
-        KeyRow {
-            .key = "right"sv, .command = KeyCommand::NextPage, .hint = ""sv, .on = ScreenSet::Transcript },
-        KeyRow {
-            .key = "up"sv, .command = KeyCommand::Up, .hint = "↑↓ scroll"sv, .on = ScreenSet::Transcript },
-        KeyRow { .key = "k"sv, .command = KeyCommand::Up, .hint = ""sv, .on = ScreenSet::Transcript },
-        KeyRow { .key = "down"sv, .command = KeyCommand::Down, .hint = ""sv, .on = ScreenSet::Transcript },
-        KeyRow { .key = "j"sv, .command = KeyCommand::Down, .hint = ""sv, .on = ScreenSet::Transcript },
-        KeyRow {
-            .key = "pgup"sv, .command = KeyCommand::ScrollPageUp, .hint = ""sv, .on = ScreenSet::Transcript },
-        KeyRow { .key = "pgdn"sv,
-                 .command = KeyCommand::ScrollPageDown,
-                 .hint = ""sv,
-                 .on = ScreenSet::Transcript },
-        KeyRow {
-            .key = "home"sv, .command = KeyCommand::FirstPage, .hint = ""sv, .on = ScreenSet::Transcript },
-        KeyRow { .key = "end"sv, .command = KeyCommand::LastPage, .hint = ""sv, .on = ScreenSet::Transcript },
-        KeyRow {
-            .key = "b"sv, .command = KeyCommand::Board, .hint = "b board"sv, .on = ScreenSet::Transcript },
-        KeyRow { .key = "d"sv,
-                 .command = KeyCommand::Dispatch,
-                 .hint = "d new run"sv,
-                 .on = ScreenSet::Transcript },
-        KeyRow { .key = "enter"sv,
-                 .command = KeyCommand::Enter,
-                 .hint = "enter agent tab"sv,
-                 .on = ScreenSet::Transcript },
-        KeyRow {
-            .key = "esc"sv, .command = KeyCommand::Back, .hint = "esc back"sv, .on = ScreenSet::Transcript },
-        KeyRow { .key = "m"sv,
-                 .command = KeyCommand::Message,
-                 .hint = "m message"sv,
-                 .on = ScreenSet::Transcript },
+        KeyRow { .key = "z"sv, .command = KeyCommand::Fold, .hint = "z fold"sv, .on = PlaceSet::Fleet },
+        KeyRow { .key = "pgup"sv, .command = KeyCommand::ScrollPageUp },
+        KeyRow { .key = "pgdn"sv, .command = KeyCommand::ScrollPageDown },
+        KeyRow { .key = "left"sv, .command = KeyCommand::PreviousPage },
+        KeyRow { .key = "right"sv, .command = KeyCommand::NextPage },
+        KeyRow { .key = "?"sv, .command = KeyCommand::Help, .hint = "? help"sv },
+        // The palette's commands from phase 3; keys until then, so that they stay reachable.
+        KeyRow { .key = "R"sv, .command = KeyCommand::Refresh, .hint = "R refresh"sv },
+        KeyRow { .key = "I"sv, .command = KeyCommand::InstallPlugins, .hint = "I install plugins"sv },
+    };
+
+    /// The commands that act on the selected row only where it offers them (Row::offers).
+    constexpr auto RowCommands = std::array {
+        KeyCommand::BoardTab, KeyCommand::TranscriptTab, KeyCommand::DetailsTab,
+        KeyCommand::EndRun,   KeyCommand::RetryRemoval,  KeyCommand::Dismiss,
+        KeyCommand::Reveal,   KeyCommand::OpenLink,      KeyCommand::Fold,
+    };
+
+    /// The Focus tab each tab command shows.
+    struct TabCommand
+    {
+        KeyCommand command = KeyCommand::BoardTab; ///< The command.
+        FocusTab tab = FocusTab::Board;            ///< The tab.
+    };
+
+    constexpr auto TabCommands = std::array {
+        TabCommand { .command = KeyCommand::BoardTab, .tab = FocusTab::Board },
+        TabCommand { .command = KeyCommand::TranscriptTab, .tab = FocusTab::Transcript },
+        TabCommand { .command = KeyCommand::DetailsTab, .tab = FocusTab::Details },
     };
 
     /// The name of a key that is not a character.
@@ -163,62 +126,52 @@ namespace
     // }}}
     // {{{ the commands
 
+    /// @return Whether the selected row offers @p command.
+    [[nodiscard]] bool offers(KeyContext const& context, KeyCommand command) noexcept
+    {
+        return context.selected != nullptr && std::ranges::contains(context.selected->offers, command);
+    }
+
+    /// Starts the Focus over for a row selected anew: its top, its transcript live on its last page.
+    void restartFocus(Interaction& interaction) noexcept
+    {
+        interaction.scroll = 0;
+        interaction.follow = Follow::Live;
+        interaction.page = 0;
+    }
+
     /// Moves the selection to @p index, kept within the rows that can be selected.
     void select(Interaction& interaction, KeyContext const& context, std::size_t index) noexcept
     {
-        interaction.selected = context.selectable == 0 ? 0 : std::min(index, context.selectable - 1);
+        auto const chosen = context.selectable == 0 ? 0 : std::min(index, context.selectable - 1);
+        if (chosen != interaction.selected)
+            restartFocus(interaction);
+        interaction.selected = chosen;
     }
 
     /// @return The run command @p command on the selected row, when the row accepts it.
     template <typename Action>
     [[nodiscard]] std::optional<UiAction> runAction(KeyCommand command, KeyContext const& context)
     {
-        if (context.selected == nullptr || !std::ranges::contains(context.selected->offers, command))
+        if (!offers(context, command))
             return std::nullopt;
         return UiAction { Action { .run = context.selected->run } };
     }
 
-    /// Opens the launcher on the selected item, on @p task: a task's key, Enter and `d`; or says why it
-    /// cannot.
-    void openLauncherOnSelected(Interaction& interaction, KeyContext const& context, TaskDef const* task)
+    /// @return The selected row's run; nullptr when it stands for none the engine knows.
+    [[nodiscard]] Run const* selectedRun(KeyContext const& context) noexcept
     {
-        auto const* const row = context.selected;
-        if (row == nullptr || !row->item || context.engine == nullptr)
-            return;
-        if (task == nullptr)
-        {
-            interaction.notice = "no task applies to this item";
-            return;
-        }
-        // A task's key names its task: one that does not apply is said, not swapped for another.
-        if (task->appliesTo != appliesToOf(*row->item))
-        {
-            interaction.notice = std::format("{} does not apply to this item", task->label);
-            return;
-        }
-        openLauncherFor(interaction, *context.engine, row->repo, *row->item, task->id, {});
-    }
-
-    /// @return The first task that applies to the selected item, as Enter and `d` offer it; nullptr when
-    /// none.
-    [[nodiscard]] TaskDef const* firstTaskOf(KeyContext const& context) noexcept
-    {
-        auto const* const config = context.engine != nullptr ? context.engine->config() : nullptr;
-        if (config == nullptr || context.selected == nullptr || !context.selected->item)
+        if (context.engine == nullptr || context.selected == nullptr || context.selected->run.empty())
             return nullptr;
-        return config->firstTaskFor(appliesToOf(*context.selected->item));
+        auto const runs = context.engine->runs();
+        auto const run = std::ranges::find(runs, context.selected->run, &Run::id);
+        return run != runs.end() ? &*run : nullptr;
     }
 
-    /// @return The furthest a board or a transcript scrolls: its last line at the bottom of the tab.
+    /// @return The furthest the Focus's tab scrolls: its last line at the bottom.
     [[nodiscard]] std::size_t lastScroll(KeyContext const& context) noexcept
     {
         return context.lines > context.rows ? context.lines - context.rows : 0;
-    }
-
-    /// Scrolls a board or a transcript to @p line, kept within what it holds.
-    void scrollTo(Interaction& interaction, KeyContext const& context, std::size_t line) noexcept
-    {
-        interaction.scroll = std::min(line, lastScroll(context));
     }
 
     /// @return The lines a page key scrolls by: what the tab shows, less one that stays in view.
@@ -227,66 +180,115 @@ namespace
         return context.rows > 1 ? context.rows - 1 : 1;
     }
 
-    /// Opens the launcher on a run's item and task (openLauncherFor()); does nothing for a run the engine
-    /// no longer knows.
-    void openLauncherOnRun(Interaction& interaction, KeyContext const& context, std::string_view runId)
+    /// @return Whether the transcript shown follows the agent: it is the tab shown, live on its last page.
+    [[nodiscard]] bool isFollowing(Interaction const& interaction, KeyContext const& context) noexcept
     {
-        if (context.engine == nullptr)
-            return;
-        auto const runs = context.engine->runs();
-        auto const run = std::ranges::find(runs, runId, &Run::id);
-        if (run != runs.end())
+        return context.tab == FocusTab::Transcript && interaction.follow == Follow::Live;
+    }
+
+    /// Scrolls the Focus's tab to @p line, kept within what it holds. The transcript follows the agent again
+    /// once its end on its last page is reached, and stops following once it is scrolled away from it.
+    void scrollTo(Interaction& interaction, KeyContext const& context, std::size_t line) noexcept
+    {
+        interaction.scroll = std::min(line, lastScroll(context));
+        if (context.tab == FocusTab::Transcript)
+            interaction.follow = interaction.page == 0 && interaction.scroll >= lastScroll(context)
+                                     ? Follow::Live
+                                     : Follow::Away;
+    }
+
+    /// @return The line the Focus's tab shows first: the end, while the transcript follows the agent.
+    [[nodiscard]] std::size_t scrollOf(Interaction const& interaction, KeyContext const& context) noexcept
+    {
+        return isFollowing(interaction, context) ? lastScroll(context) : interaction.scroll;
+    }
+
+    /// Opens the launcher on a run's item and task (openLauncherFor()), as running it again does.
+    void openLauncherOnRun(Interaction& interaction, KeyContext const& context)
+    {
+        if (auto const* const run = selectedRun(context))
             openLauncherFor(interaction, *context.engine, run->repo, run->item, run->task, run->topic);
     }
 
-    /// @return How many pages the shown transcript has, as its last page read says; 0 while none was read.
-    [[nodiscard]] uint32_t pagesOf(Interaction const& interaction, KeyContext const& context) noexcept
+    /// Turns the transcript to @p page, within the pages it has; its last page follows the agent again.
+    void turnTo(Interaction& interaction, KeyContext const& context, uint32_t page) noexcept
     {
-        auto const* const view = context.engine != nullptr
-                                     ? context.engine->transcript(context.tab, interaction.subject)
-                                     : nullptr;
-        return view != nullptr && view->content ? view->content->pages : 0;
-    }
-
-    /// Turns the transcript to @p page, kept within the pages it has; a page it shows or asked for already
-    /// is not asked for again.
-    /// @return What the engine is asked: the page; std::nullopt when the page does not change.
-    [[nodiscard]] std::optional<UiAction> turnTo(Interaction& interaction,
-                                                 KeyContext const& context,
-                                                 uint32_t page) noexcept
-    {
-        auto const pages = pagesOf(interaction, context);
-        // Before a page was read, the number of pages is not known: only the first is surely there.
-        auto const target = std::clamp(page, uint32_t { 1 }, std::max(pages, uint32_t { 1 }));
-        if (interaction.screen != Screen::Transcript || target == interaction.page)
-            return std::nullopt;
-        interaction.page = target;
+        if (context.tab != FocusTab::Transcript || context.pages == 0)
+            return;
+        auto const target = std::clamp(page, uint32_t { 1 }, context.pages);
         interaction.scroll = 0;
-        return UiAction { ReadTranscriptAction { .run = interaction.subject, .page = target } };
-    }
-
-    /// Leaves a board or a transcript for the screen it was opened from; one opened from the dashboard
-    /// returns there. The screen returned to returns to the dashboard in turn.
-    /// @return What the engine is asked: a board returned to is read again now, and a transcript page the
-    ///         engine no longer keeps for the tab is asked for again.
-    [[nodiscard]] std::optional<UiAction> goBack(Interaction& interaction, KeyContext const& context)
-    {
-        auto const back = std::exchange(interaction.back, Screen::Dashboard);
-        if (back == Screen::Dashboard || back == interaction.screen)
+        if (target == context.pages)
         {
-            leaveSubject(interaction);
-            return std::nullopt;
+            interaction.page = 0;
+            interaction.follow = Follow::Live;
+            return;
         }
-        interaction.screen = back;
-        interaction.scroll = 0;
-        if (back == Screen::Board)
-            return UiAction { ShowBoardAction { .run = interaction.subject } };
-        auto const* const view = context.engine != nullptr
-                                     ? context.engine->transcript(context.tab, interaction.subject)
-                                     : nullptr;
-        if (view != nullptr && view->page == interaction.page)
+        interaction.page = target;
+        interaction.follow = Follow::Away;
+    }
+
+    /// @return The transcript's page shown: the one turned to, else its last.
+    [[nodiscard]] uint32_t shownPage(Interaction const& interaction, KeyContext const& context) noexcept
+    {
+        return interaction.page != 0 ? interaction.page : context.pages;
+    }
+
+    /// Gives the Focus the keys, for a row it shows something of.
+    void toFocus(Interaction& interaction, KeyContext const& context) noexcept
+    {
+        auto const* const row = context.selected;
+        if (row != nullptr && (!row->run.empty() || row->kind == RowKind::Orphan))
+            interaction.place = Place::Focus;
+    }
+
+    /// Folds or unfolds the selected row's group, and has the selection follow its heading.
+    [[nodiscard]] std::optional<UiAction> toggleFold(Interaction& interaction, KeyContext const& context)
+    {
+        auto const* const row = context.selected;
+        if (row == nullptr || row->group.empty())
             return std::nullopt;
-        return UiAction { ReadTranscriptAction { .run = interaction.subject, .page = interaction.page } };
+        interaction.followGroup = row->group;
+        return UiAction { ToggleFoldAction { .group = row->group } };
+    }
+
+    /// `HH:MM`, the engine's wall clock in the host's local time.
+    [[nodiscard]] std::string clockOf(Engine const& engine)
+    {
+        constexpr auto MinuteMs = int64_t { 60'000 };
+        constexpr auto DayMinutes = int64_t { 24 } * 60;
+        auto const minutes =
+            (static_cast<int64_t>(engine.wallMs()) / MinuteMs) + engine.host().utcOffsetMinutes;
+        auto const ofDay = ((minutes % DayMinutes) + DayMinutes) % DayMinutes;
+        return std::format("{:02}:{:02}", ofDay / 60, ofDay % 60);
+    }
+
+    /// Shows the Focus tab @p command names, for the selected row: the choice sticks for its run until the
+    /// run's state changes.
+    [[nodiscard]] std::optional<UiAction> chooseTab(Interaction& interaction,
+                                                    KeyContext const& context,
+                                                    KeyCommand command)
+    {
+        auto const tab = std::ranges::find(TabCommands, command, &TabCommand::command);
+        if (tab == TabCommands.end() || !offers(context, command))
+            return std::nullopt;
+        if (activeTabOf(interaction, context.selected) != tab->tab)
+            restartFocus(interaction);
+        interaction.chosenTab =
+            TabChoice { .run = context.selected->run, .state = context.selected->state, .tab = tab->tab };
+        return std::nullopt;
+    }
+
+    /// Opens the launcher, empty; or says what is missing while the orchestrator is not configured.
+    [[nodiscard]] std::optional<UiAction> openNewAgent(Interaction& interaction, KeyContext const& context)
+    {
+        if (context.engine == nullptr)
+            return std::nullopt;
+        interaction.launcher = openLauncher(*context.engine, {}, {});
+        if (!interaction.launcher)
+            interaction.notice = "the orchestrator is not configured: the line above says what is missing";
+        else
+            interaction.overlay = Overlay::None;
+        return std::nullopt;
     }
 
     using Handler = std::optional<UiAction> (*)(Interaction&, KeyContext const&);
@@ -299,12 +301,15 @@ namespace
     };
 
     constexpr auto Commands = std::array {
-        // On a board or a transcript the moves scroll it; on the dashboard they move the selection.
+        // In the Fleet the moves move the selection; in the Focus they scroll its tab.
         CommandRow {
             .command = KeyCommand::Up,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                if (interaction.screen != Screen::Dashboard)
-                    scrollTo(interaction, context, interaction.scroll == 0 ? 0 : interaction.scroll - 1);
+                if (interaction.place == Place::Focus)
+                {
+                    auto const from = scrollOf(interaction, context);
+                    scrollTo(interaction, context, from == 0 ? 0 : from - 1);
+                }
                 else
                     select(interaction, context, interaction.selected == 0 ? 0 : interaction.selected - 1);
                 return std::nullopt;
@@ -312,8 +317,8 @@ namespace
         CommandRow {
             .command = KeyCommand::Down,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                if (interaction.screen != Screen::Dashboard)
-                    scrollTo(interaction, context, interaction.scroll + 1);
+                if (interaction.place == Place::Focus)
+                    scrollTo(interaction, context, scrollOf(interaction, context) + 1);
                 else
                     select(interaction, context, interaction.selected + 1);
                 return std::nullopt;
@@ -321,189 +326,118 @@ namespace
         CommandRow {
             .command = KeyCommand::Home,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                if (interaction.screen != Screen::Dashboard)
+                if (interaction.place == Place::Focus)
                     scrollTo(interaction, context, 0);
                 else
                     select(interaction, context, 0);
                 return std::nullopt;
             } },
+        // `end` in the Focus returns the transcript to the agent's last words.
         CommandRow {
             .command = KeyCommand::End,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                if (interaction.screen != Screen::Dashboard)
-                    scrollTo(interaction, context, lastScroll(context));
-                else
+                if (interaction.place == Place::Fleet)
+                {
                     select(interaction, context, context.selectable == 0 ? 0 : context.selectable - 1);
+                    return std::nullopt;
+                }
+                if (context.tab == FocusTab::Transcript)
+                {
+                    restartFocus(interaction);
+                    return std::nullopt;
+                }
+                scrollTo(interaction, context, lastScroll(context));
                 return std::nullopt;
             } },
         CommandRow {
             .command = KeyCommand::ScrollPageUp,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
+                auto const from = scrollOf(interaction, context);
                 auto const page = pageOf(context);
-                scrollTo(interaction, context, interaction.scroll > page ? interaction.scroll - page : 0);
+                scrollTo(interaction, context, from > page ? from - page : 0);
                 return std::nullopt;
             } },
         CommandRow {
             .command = KeyCommand::ScrollPageDown,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                scrollTo(interaction, context, interaction.scroll + pageOf(context));
+                scrollTo(interaction, context, scrollOf(interaction, context) + pageOf(context));
                 return std::nullopt;
             } },
-        // On the dashboard, `b` shows the selected run's board; on the board, it reads the board again now.
         CommandRow {
-            .command = KeyCommand::Board,
+            .command = KeyCommand::PreviousPage,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                if (interaction.screen == Screen::Board)
-                {
-                    if (!hasBoardToShow(context.engine, interaction.subject))
-                        return std::nullopt;
-                    return UiAction { ShowBoardAction { .run = interaction.subject } };
-                }
-                // From a transcript, the board of its run while its worktree is there; Esc then returns to
-                // the transcript.
-                auto run = interaction.subject;
-                if (interaction.screen == Screen::Dashboard)
-                {
-                    auto const* const row = context.selected;
-                    if (row == nullptr || !std::ranges::contains(row->offers, KeyCommand::Board))
-                        return std::nullopt;
-                    run = row->run;
-                }
-                else if (!hasBoardToShow(context.engine, run))
-                    return std::nullopt;
-                interaction.back = interaction.screen;
-                interaction.screen = Screen::Board;
-                interaction.subject = run;
-                interaction.scroll = 0;
-                interaction.overlay = Overlay::None;
-                return UiAction { ShowBoardAction { .run = std::move(run) } };
+                auto const page = shownPage(interaction, context);
+                turnTo(interaction, context, page > 1 ? page - 1 : 1);
+                return std::nullopt;
             } },
-        // `t` shows the transcript of the selected run, or of the board's, from its first page.
         CommandRow {
-            .command = KeyCommand::Transcript,
+            .command = KeyCommand::NextPage,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                auto run = interaction.subject;
-                if (interaction.screen == Screen::Dashboard)
-                {
-                    auto const* const row = context.selected;
-                    if (row == nullptr || !std::ranges::contains(row->offers, KeyCommand::Transcript))
-                        return std::nullopt;
-                    run = row->run;
-                }
-                // Esc returns to where it was opened from: the dashboard, or the board.
-                interaction.back = interaction.screen;
-                interaction.screen = Screen::Transcript;
-                interaction.subject = run;
-                interaction.page = 1;
-                interaction.scroll = 0;
-                interaction.overlay = Overlay::None;
-                return UiAction { ReadTranscriptAction { .run = std::move(run), .page = 1 } };
+                turnTo(interaction, context, shownPage(interaction, context) + 1);
+                return std::nullopt;
             } },
-        CommandRow { .command = KeyCommand::PreviousPage,
+        // `b`, `t` and `d` choose the Focus tab; the choice sticks for the run until its state changes.
+        CommandRow { .command = KeyCommand::BoardTab,
                      .handler =
                          [](Interaction& interaction, KeyContext const& context) {
-                             return turnTo(interaction, context, interaction.page - 1);
+                             return chooseTab(interaction, context, KeyCommand::BoardTab);
                          } },
-        CommandRow { .command = KeyCommand::NextPage,
+        CommandRow { .command = KeyCommand::TranscriptTab,
                      .handler =
                          [](Interaction& interaction, KeyContext const& context) {
-                             return turnTo(interaction, context, interaction.page + 1);
+                             return chooseTab(interaction, context, KeyCommand::TranscriptTab);
                          } },
-        CommandRow { .command = KeyCommand::FirstPage,
-                     .handler = [](Interaction& interaction,
-                                   KeyContext const& context) { return turnTo(interaction, context, 1); } },
-        CommandRow { .command = KeyCommand::LastPage,
+        CommandRow { .command = KeyCommand::DetailsTab,
                      .handler =
                          [](Interaction& interaction, KeyContext const& context) {
-                             return turnTo(interaction, context, pagesOf(interaction, context));
+                             return chooseTab(interaction, context, KeyCommand::DetailsTab);
                          } },
-        // Enter acts on what the row stands for: an agent is revealed, an item dispatched on (or its agent
-        // revealed), a finished run's or an orphan's details opened. Tab shows any row's details.
+        // Enter does the selected row's primary action: the table-driven version is phase 3's.
         CommandRow {
             .command = KeyCommand::Enter,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                // On a board or a transcript, Enter goes to the agent's tab while the run has one.
-                if (interaction.screen != Screen::Dashboard)
-                {
-                    if (!hasAgentTab(context.engine, interaction.subject))
-                        return std::nullopt;
-                    return UiAction { RevealAgentAction { .run = interaction.subject } };
-                }
                 auto const* const row = context.selected;
                 if (row == nullptr)
                     return std::nullopt;
                 switch (row->kind)
                 {
-                    case RowKind::Group:
-                        interaction.followGroup = row->group;
-                        return UiAction { ToggleFoldAction { .group = row->group } };
-                    case RowKind::Agent: return UiAction { RevealAgentAction { .run = row->run } };
-                    case RowKind::PullRequest:
-                    case RowKind::Issue:
-                        if (auto const* const run = context.engine != nullptr && row->item
-                                                        ? context.engine->activeRunOn(row->repo, *row->item)
-                                                        : nullptr)
-                            return UiAction { RevealAgentAction { .run = run->id } };
-                        openLauncherOnSelected(interaction, context, firstTaskOf(context));
+                    case RowKind::Heading: return toggleFold(interaction, context);
+                    case RowKind::NewAgent: return openNewAgent(interaction, context);
+                    case RowKind::Finished:
+                        // A kept worktree is checked again; any other finished run is run again.
+                        if (offers(context, KeyCommand::RetryRemoval))
+                            return runAction<RetryRemovalAction>(KeyCommand::RetryRemoval, context);
+                        openLauncherOnRun(interaction, context);
                         return std::nullopt;
-                    default: break;
+                    case RowKind::Agent:
+                    case RowKind::Orphan: toFocus(interaction, context); return std::nullopt;
+                    case RowKind::Notice: break;
                 }
-                // An orphan's details hold a command line, which wants the whole width.
-                if (context.band != Band::Wide || row->kind == RowKind::Orphan)
-                    interaction.pane = Pane::Details;
-                if (row->onOpen == OpenEffect::MarkSeen)
-                    return UiAction { MarkSeenAction { .run = row->run } };
                 return std::nullopt;
             } },
-        // `d` dispatches on the selected item; on a finished run, a board or a transcript, a new run on the
-        // run's item.
-        CommandRow {
-            .command = KeyCommand::Dispatch,
-            .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                auto const* const row = context.selected;
-                if (interaction.screen != Screen::Dashboard)
-                    openLauncherOnRun(interaction, context, interaction.subject);
-                else if (row != nullptr && std::ranges::contains(row->offers, KeyCommand::Dispatch))
-                    openLauncherOnRun(interaction, context, row->run);
-                else
-                    openLauncherOnSelected(interaction, context, firstTaskOf(context));
-                return std::nullopt;
-            } },
-        CommandRow {
-            .command = KeyCommand::Task,
-            .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                auto const* const config = context.engine != nullptr ? context.engine->config() : nullptr;
-                if (config == nullptr || !context.task || *context.task >= config->tasks().size())
-                    return std::nullopt;
-                openLauncherOnSelected(interaction, context, &config->tasks()[*context.task]);
-                return std::nullopt;
-            } },
-        CommandRow {
-            .command = KeyCommand::Back,
-            .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                // A board or a transcript returns to where it was opened from (a board left is no
-                // longer read: see Dashboard).
-                if (interaction.screen != Screen::Dashboard)
-                    return goBack(interaction, context);
-                if (interaction.overlay != Overlay::None)
-                    interaction.overlay = Overlay::None;
-                else if (interaction.pane == Pane::Details)
-                    interaction.pane = Pane::List;
-                else
-                    interaction.filter.clear();
-                return std::nullopt;
-            } },
+        CommandRow { .command = KeyCommand::Back,
+                     .handler = [](Interaction& interaction, KeyContext const&) -> std::optional<UiAction> {
+                         if (interaction.place == Place::Focus)
+                             backToFleet(interaction);
+                         else if (interaction.overlay != Overlay::None)
+                             interaction.overlay = Overlay::None;
+                         else
+                             interaction.filter.clear();
+                         return std::nullopt;
+                     } },
         CommandRow {
             .command = KeyCommand::Tab,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                if (context.band != Band::Wide)
-                    interaction.pane = interaction.pane == Pane::List ? Pane::Details : Pane::List;
+                if (interaction.place == Place::Focus)
+                    backToFleet(interaction);
+                else
+                    toFocus(interaction, context);
                 return std::nullopt;
             } },
         CommandRow { .command = KeyCommand::Filter,
                      .handler = [](Interaction& interaction, KeyContext const&) -> std::optional<UiAction> {
                          interaction.filtering = Filtering::Typing;
-                         interaction.pane = Pane::List;
+                         interaction.place = Place::Fleet;
                          return std::nullopt;
                      } },
         CommandRow { .command = KeyCommand::Help,
@@ -512,60 +446,13 @@ namespace
                              interaction.overlay == Overlay::Help ? Overlay::None : Overlay::Help;
                          return std::nullopt;
                      } },
-        // `z` folds the group of the selected row, an item's or its header's, and selects the header: the
-        // item
-        // it was on is gone from the list.
-        CommandRow {
-            .command = KeyCommand::Fold,
-            .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                auto const* const row = context.selected;
-                if (interaction.screen != Screen::Dashboard || row == nullptr || row->group.empty())
-                    return std::nullopt;
-                interaction.followGroup = row->group;
-                return UiAction { ToggleFoldAction { .group = row->group } };
-            } },
-        // `n` starts an agent on a topic the user types, in the repository the selection is in.
-        CommandRow {
-            .command = KeyCommand::NewTopic,
-            .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                if (interaction.screen != Screen::Dashboard || context.engine == nullptr)
-                    return std::nullopt;
-                auto repo = std::string_view {};
-                if (auto const* const row = context.selected; row != nullptr)
-                {
-                    repo = row->repo;
-                    auto const runs = context.engine->runs();
-                    if (auto const run = std::ranges::find(runs, row->run, &Run::id);
-                        repo.empty() && run != runs.end())
-                        repo = run->repo;
-                }
-                interaction.launcher = openLauncher(*context.engine, {}, {});
-                if (!interaction.launcher)
-                    interaction.notice = "no repository is configured";
-                return std::nullopt;
-            } },
+        // `z` folds the group of the selected row and selects its heading: the run it was on may be gone.
+        CommandRow { .command = KeyCommand::Fold, .handler = toggleFold },
+        CommandRow { .command = KeyCommand::NewAgent, .handler = openNewAgent },
         CommandRow { .command = KeyCommand::Refresh,
                      .handler = [](Interaction&, KeyContext const&) -> std::optional<UiAction> {
                          return UiAction { RefreshNowAction {} };
                      } },
-        // `m` writes to the selected run's agent; Enter on the line types it into the agent's tab.
-        CommandRow {
-            .command = KeyCommand::Message,
-            .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                // On a board or a transcript, its run; on the dashboard, the selected row's.
-                auto run = interaction.subject;
-                if (interaction.screen == Screen::Dashboard)
-                    run = context.selected != nullptr ? context.selected->run : std::string {};
-                if (run.empty())
-                    return std::nullopt;
-                if (!hasAgentTab(context.engine, run))
-                {
-                    interaction.notice = "its agent has no tab to send to";
-                    return std::nullopt;
-                }
-                interaction.message = MessageDraft { .run = run, .text = {} };
-                return std::nullopt;
-            } },
         // `I` installs the plugins the agents lack into the user's own Claude Code; it asks once first.
         CommandRow {
             .command = KeyCommand::InstallPlugins,
@@ -595,8 +482,7 @@ namespace
                 interaction.pendingInstall = InstallConfirm::None;
                 return UiAction { InstallPluginsAction {} };
             } },
-        // D14: ending a run asks once. The first `e` names the run on the summary line; a second on it ends
-        // it.
+        // D14: ending a run asks once. The first `e` names the run on the action bar; a second on it ends it.
         CommandRow {
             .command = KeyCommand::EndRun,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
@@ -621,6 +507,24 @@ namespace
                          [](Interaction&, KeyContext const& context) {
                              return runAction<DismissAction>(KeyCommand::Dismiss, context);
                          } },
+        CommandRow { .command = KeyCommand::Reveal,
+                     .handler =
+                         [](Interaction&, KeyContext const& context) {
+                             return runAction<RevealAgentAction>(KeyCommand::Reveal, context);
+                         } },
+        // `o` copies the run's link with OSC 52 until the frontend can open it (phase 6), and says so.
+        CommandRow {
+            .command = KeyCommand::OpenLink,
+            .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
+                auto const* const run =
+                    offers(context, KeyCommand::OpenLink) ? selectedRun(context) : nullptr;
+                if (run == nullptr)
+                    return std::nullopt;
+                interaction.clipboard = run->url;
+                interaction.notice =
+                    std::format("copied {}'s link · ctrl+click it to open", itemLabel(run->item));
+                return std::nullopt;
+            } },
     };
 
     // }}}
@@ -661,12 +565,13 @@ std::string pastedText(std::string_view text)
     return line;
 }
 
-void pasteInto(Interaction& interaction, Engine const& engine, std::string_view text)
+void pasteInto(Interaction& interaction, KeyContext const& context, std::string_view text)
 {
-    if (interaction.message)
+    if (interaction.place == Place::Focus && hasMessageBox(context.engine, context.selected))
     {
         // A message keeps its line feeds: the agent receives it as one paste. A CR LF is one line end, and
         // every other control character but a tab is dropped, as the host would refuse it.
+        auto& draft = interaction.drafts[context.selected->run];
         auto previous = '\0';
         for (auto const c: text)
         {
@@ -675,15 +580,16 @@ void pasteInto(Interaction& interaction, Engine const& engine, std::string_view 
                 continue;
             previous = c;
             if (isLineEnd)
-                interaction.message->text += '\n';
+                draft += '\n';
             else if (c == '\t' || (static_cast<unsigned char>(c) >= 0x20 && c != '\x7f'))
-                interaction.message->text += c;
+                draft += c;
         }
         return;
     }
     if (interaction.launcher)
     {
-        pasteIntoLauncher(interaction.launcher, engine, pastedText(text));
+        if (context.engine != nullptr)
+            pasteIntoLauncher(interaction.launcher, *context.engine, pastedText(text));
         return;
     }
     if (interaction.filtering == Filtering::Typing)
@@ -698,24 +604,40 @@ std::span<KeyRow const> keyRows() noexcept
     return KeyTable;
 }
 
-std::optional<KeyCommand> commandFor(core::tui::KeyEvent const& key, Screen screen) noexcept
+std::optional<KeyCommand> commandFor(core::tui::KeyEvent const& key) noexcept
 {
     if (isChord(key))
         return std::nullopt;
     auto const name = nameOf(key);
-    for (auto const& row: KeyTable)
-        if (row.key == name && holds(row.on, screen))
-            return row.command;
-    return std::nullopt;
+    auto const row = std::ranges::find(KeyTable, name, &KeyRow::key);
+    return row != KeyTable.end() ? std::optional { row->command } : std::nullopt;
 }
 
-void leaveSubject(Interaction& interaction) noexcept
+bool isRowCommand(KeyCommand command) noexcept
 {
-    interaction.screen = Screen::Dashboard;
-    interaction.subject.clear();
-    interaction.back = Screen::Dashboard;
-    interaction.page = 1;
-    interaction.scroll = 0;
+    return std::ranges::contains(RowCommands, command);
+}
+
+FocusTab activeTabOf(Interaction const& interaction, Row const* row) noexcept
+{
+    if (row == nullptr || !row->attention)
+        return FocusTab::Details;
+    auto const& chosen = interaction.chosenTab;
+    auto const tab = chosen && chosen->run == row->run && chosen->state == row->state
+                         ? chosen->tab
+                         : fleetGroupRow(*row->attention).opensOn;
+    auto const command = std::ranges::find(TabCommands, tab, &TabCommand::tab)->command;
+    return std::ranges::contains(row->offers, command) ? tab : FocusTab::Details;
+}
+
+bool hasMessageBox(Engine const* engine, Row const* row) noexcept
+{
+    return row != nullptr && row->kind == RowKind::Agent && hasAgentTab(engine, row->run);
+}
+
+void backToFleet(Interaction& interaction) noexcept
+{
+    interaction.place = Place::Fleet;
 }
 
 void openLauncherFor(Interaction& interaction,
@@ -725,7 +647,7 @@ void openLauncherFor(Interaction& interaction,
                      std::string_view task,
                      std::string_view topic)
 {
-    // What each refusal leaves on the summary line, indexed by LauncherRefusal; `{}` is the item's label.
+    // What each refusal leaves on the action bar, indexed by LauncherRefusal; `{}` is the item's label.
     constexpr auto RefusalNotices = std::array {
         "the orchestrator is not configured"sv, // NotConfigured
         "{} is not listed any more"sv,          // NotListed
@@ -776,15 +698,6 @@ bool hasAgentTab(Engine const* engine, std::string_view run) noexcept
     return found != runs.end() && countsAsActive(*found) && found->pane.has_value();
 }
 
-bool hasBoardToShow(Engine const* engine, std::string_view run) noexcept
-{
-    if (engine == nullptr)
-        return false;
-    auto const runs = engine->runs();
-    auto const found = std::ranges::find(runs, run, &Run::id);
-    return found != runs.end() && keepsWorktree(*found);
-}
-
 std::optional<UiAction> dispatch(KeyCommand command, Interaction& interaction, KeyContext const& context)
 {
     auto const row = std::ranges::find(Commands, command, &CommandRow::command);
@@ -798,42 +711,55 @@ bool isDispatched(KeyCommand command) noexcept
 
 namespace
 {
-    /// Types @p key into the open message line.
-    /// @return Nothing when no line is open, so that the key table decides; else what the key asks: the
+    /// Types @p key into the message box, while it has the keys.
+    /// @return Nothing when it does not have them, or the key scrolls the Focus's tab (`pgup`, `pgdn`, `end`,
+    ///         `←`, `→`) or leaves it (`tab`), so that the key table decides; else what the key asks: the
     ///         message to send, or nothing.
     [[nodiscard]] std::optional<std::optional<UiAction>> typeIntoMessage(core::tui::KeyEvent const& key,
-                                                                         Interaction& interaction)
+                                                                         Interaction& interaction,
+                                                                         KeyContext const& context)
     {
-        if (!interaction.message)
+        if (interaction.place != Place::Focus || !hasMessageBox(context.engine, context.selected))
             return std::nullopt;
-        auto& draft = *interaction.message;
-        // A key with Alt is how an Esc reads when the next key follows it in the same read: the line is
-        // dropped.
-        if (core::tui::hasModifier(key.modifiers, core::tui::Modifier::Alt)
-            || key.key == core::tui::KeyCode::Escape)
-        {
-            interaction.message.reset();
-            return std::optional<UiAction> {};
-        }
         switch (key.key)
         {
-            case core::tui::KeyCode::Enter: {
-                if (draft.text.empty())
-                    return std::optional<UiAction> {};
-                auto action = UiAction { SendMessageAction { .run = std::move(draft.run),
-                                                             .text = std::move(draft.text) } };
-                interaction.message.reset();
-                return std::optional { std::move(action) };
-            }
-            case core::tui::KeyCode::Backspace:
-                dropLastCodepoint(draft.text);
-                return std::optional<UiAction> {};
+            // The box has no cursor to move yet: ← and → turn the transcript's pages, as in the Fleet.
+            case core::tui::KeyCode::PageUp:
+            case core::tui::KeyCode::PageDown:
+            case core::tui::KeyCode::End:
+            case core::tui::KeyCode::Left:
+            case core::tui::KeyCode::Right:
+            case core::tui::KeyCode::Tab: return std::nullopt;
             default: break;
         }
-        if (auto const printable = printableOf(key);
-            printable && !core::tui::hasModifier(key.modifiers, core::tui::Modifier::Ctrl))
-            appendUtf8(draft.text, *printable);
-        // Every other key is the line's too: none acts on the dashboard while it is open.
+        auto const& run = context.selected->run;
+        auto& draft = interaction.drafts[run];
+        auto const alt = core::tui::hasModifier(key.modifiers, core::tui::Modifier::Alt);
+        // Alt+Enter adds a line. Any other key with Alt is how an Esc reads when the next key follows it in
+        // the same read: back to the Fleet, the draft kept.
+        if (alt && key.key == core::tui::KeyCode::Enter)
+            draft += '\n';
+        else if (alt || key.key == core::tui::KeyCode::Escape)
+            backToFleet(interaction);
+        else if (key.key == core::tui::KeyCode::Enter && !draft.empty())
+        {
+            auto text = std::move(draft);
+            interaction.drafts.erase(run);
+            interaction.sent = SentMessage { .run = run, .text = text, .clock = clockOf(*context.engine) };
+            interaction.notice = std::format("sent to {}", context.selected->name);
+            // The keys return to the Fleet; the selection stays on the run.
+            backToFleet(interaction);
+            return std::optional { UiAction { SendMessageAction { .run = run, .text = std::move(text) } } };
+        }
+        else if (key.key == core::tui::KeyCode::Backspace)
+            dropLastCodepoint(draft);
+        else if (auto const printable = printableOf(key))
+            appendUtf8(draft, *printable);
+        // A draft emptied is no draft: nothing is kept for the run.
+        if (auto const kept = interaction.drafts.find(run);
+            kept != interaction.drafts.end() && kept->second.empty())
+            interaction.drafts.erase(kept);
+        // Every other key is the box's too: no letter is a command while it has the keys.
         return std::optional<UiAction> {};
     }
 } // namespace
@@ -865,28 +791,11 @@ std::optional<UiAction> applyKey(core::tui::KeyEvent const& key,
                                  Interaction& interaction,
                                  KeyContext const& context)
 {
-    if (auto typed = typeIntoMessage(key, interaction))
+    if (auto typed = typeIntoMessage(key, interaction, context))
         return std::move(*typed);
     if (typeIntoFilter(key, interaction) == FilterInput::Taken)
         return std::nullopt;
-    auto command = commandFor(key, interaction.screen);
-    auto taskContext = context;
-    // A task's key, from the configuration: the table refuses one the dashboard binds (dashboardKeys()). Only
-    // the dashboard dispatches.
-    if (auto const* const config = context.engine != nullptr ? context.engine->config() : nullptr;
-        !command && config != nullptr && interaction.screen == Screen::Dashboard)
-        if (auto const printable = printableOf(key))
-        {
-            auto const tasks = config->tasks();
-            auto const task = std::ranges::find(tasks, *printable, [](TaskDef const& def) {
-                return static_cast<char32_t>(static_cast<unsigned char>(def.key));
-            });
-            if (task != tasks.end())
-            {
-                command = KeyCommand::Task;
-                taskContext.task = static_cast<std::size_t>(std::ranges::distance(tasks.begin(), task));
-            }
-        }
+    auto const command = commandFor(key);
     if (!interaction.pendingEnd.empty() && command != KeyCommand::EndRun)
     {
         interaction.pendingEnd.clear();
@@ -897,7 +806,7 @@ std::optional<UiAction> applyKey(core::tui::KeyEvent const& key,
         interaction.pendingInstall = InstallConfirm::None;
         return std::nullopt;
     }
-    return command ? dispatch(*command, interaction, taskContext) : std::nullopt;
+    return command ? dispatch(*command, interaction, context) : std::nullopt;
 }
 
 } // namespace orchestrator::view

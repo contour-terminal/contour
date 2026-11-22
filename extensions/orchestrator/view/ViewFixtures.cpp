@@ -151,6 +151,92 @@ std::vector<UiAction> DashboardFixture::escapeTimesOut()
     return actions;
 }
 
+ProcessOutcome printed(std::string stdoutText)
+{
+    return ProcessOutcome { .start = StartResult::Started,
+                            .completion = Completion::Exited,
+                            .exitCode = 0,
+                            .extent = OutputExtent::Whole,
+                            .stdoutText = std::move(stdoutText),
+                            .stderrText = {} };
+}
+
+ProcessOutcome failedWith(std::string stderrText)
+{
+    return ProcessOutcome { .start = StartResult::Started,
+                            .completion = Completion::Exited,
+                            .exitCode = 1,
+                            .extent = OutputExtent::Whole,
+                            .stdoutText = {},
+                            .stderrText = std::move(stderrText) };
+}
+
+uint64_t DashboardFixture::monoMs() const
+{
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(clock.now().time_since_epoch()).count());
+}
+
+std::vector<RunCommand> DashboardFixture::carryOut(std::vector<UiAction> const& actions,
+                                                   Answers const& answers)
+{
+    auto commands = std::vector<RunCommand> {};
+    auto const tab = std::string { Tab };
+    for (auto const& action: actions)
+    {
+        auto const now = monoMs();
+        auto const wall = DispatchWallMs + (now - StartMonoMs);
+        auto effects = std::vector<Effect> {};
+        if (auto const* const read = std::get_if<ReadTranscriptAction>(&action))
+            effects = engine.step(
+                ReadTranscript { .run = read->run, .tab = tab, .page = read->page, .monoMs = now });
+        else if (auto const* const show = std::get_if<ShowBoardAction>(&action))
+            effects = engine.step(ShowBoard { .run = show->run, .tab = tab, .monoMs = now });
+        else if (std::holds_alternative<HideBoardAction>(action))
+            effects = engine.step(HideBoard { .tab = tab, .monoMs = now });
+        // What the answers lead to is followed too: a statistics read, failed at once, may have held the
+        // transcript's back in the queue.
+        while (!effects.empty())
+        {
+            auto next = std::vector<Effect> {};
+            for (auto const& effect: effects)
+            {
+                if (auto const* const file = std::get_if<ReadFile>(&effect); file != nullptr && answers.board)
+                    std::ranges::move(engine.step(FileRead { .tag = file->tag,
+                                                             .content = *answers.board,
+                                                             .modifiedWallMs = answers.boardModifiedWallMs,
+                                                             .monoMs = now,
+                                                             .wallMs = wall }),
+                                      std::back_inserter(next));
+                auto const* const command = std::get_if<RunCommand>(&effect);
+                if (command == nullptr)
+                    continue;
+                auto const reply = [&](ProcessOutcome const& outcome) {
+                    std::ranges::move(engine.step(ProcessFinished {
+                                          .tag = command->tag, .outcome = outcome, .monoMs = now }),
+                                      std::back_inserter(next));
+                };
+                if (command->command == "agent-stats" || command->command == "agent-record")
+                    reply(failedWith("not in this test"));
+                else if (command->command == "agent-transcript")
+                {
+                    commands.push_back(*command);
+                    if (answers.transcript)
+                        reply(*answers.transcript);
+                }
+            }
+            effects = std::move(next);
+        }
+    }
+    dashboard.engineChanged();
+    return commands;
+}
+
+std::vector<RunCommand> DashboardFixture::settle(Answers const& answers)
+{
+    return carryOut(dashboard.dueActions(), answers);
+}
+
 std::string DashboardFixture::screen()
 {
     static_cast<void>(dashboard.frame());
