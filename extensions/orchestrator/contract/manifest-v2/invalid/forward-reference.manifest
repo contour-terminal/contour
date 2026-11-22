@@ -1,0 +1,5 @@
+# A name is declared before it is used.
+name = early
+version = 2
+read worktrees
+root worktrees = config:worktree_root

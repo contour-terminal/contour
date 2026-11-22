@@ -1,0 +1,5 @@
+# A declared root may be made readable.
+name = reader
+version = 2
+root worktrees = config:worktree_root
+read worktrees

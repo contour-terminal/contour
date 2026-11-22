@@ -1,0 +1,20 @@
+╭─ ✦ New agent ──────────────────────────────────╮
+│ › #2375▏      pull requests · issues · a topic │
+│                                                │
+│ MY PULL REQUESTS                               │
+│ ▍#2375 Say why the stdio relay failed… ●       │
+│  ✎ topic “#2375”                    new branch │
+│ ────────────────────────────────────────────── │
+│ task ‹ fix CI ›   model ‹ sonnet ›   perms ‹ … │
+│ #2375 · contour · checks running               │
+│ checkout  gh pr checkout 2375 --branch         │
+│             agent/pr-2375-…                    │
+│ worktree  /home/u/worktrees/contour/pr-2375-…  │
+│ perms     standard · 19 allowed · 4 denied ·   │
+│             edits need no approval             │
+│ Claude Code's status hooks are not installed:  │
+│ agents may not show as blocked or waiting for  │
+│ permission (contour agent setup)               │
+│                                                │
+│ enter confirms the warning · ↑↓ choose         │
+╰────────────────────────────────────────────────╯

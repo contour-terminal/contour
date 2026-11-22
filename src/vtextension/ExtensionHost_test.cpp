@@ -210,7 +210,7 @@ TEST_CASE("ExtensionHost.preparedRetired", "[vtextension]")
 TEST_CASE("EngineProvider.shares", "[vtextension]")
 {
     auto const backend = wasm::makeDefaultBackend();
-    auto provider = EngineProvider { *backend, ExtensionLimits {} };
+    auto provider = EngineProvider { *backend, vtextension::World::StatusLine, ExtensionLimits {} };
     auto first = provider.acquire();
     auto second = provider.acquire();
     REQUIRE(first.has_value());
@@ -231,7 +231,7 @@ TEST_CASE("EngineProvider.retirement", "[vtextension]")
 {
     // What a runner retires lives in the provider until an owner thread releases it.
     auto const backend = wasm::makeDefaultBackend();
-    auto provider = EngineProvider { *backend, ExtensionLimits {} };
+    auto provider = EngineProvider { *backend, vtextension::World::StatusLine, ExtensionLimits {} };
     auto engine = provider.acquire();
     REQUIRE(engine.has_value());
     auto const weak = std::weak_ptr<Engine>(*engine);
@@ -278,7 +278,7 @@ TEST_CASE("ExtensionHost.loadAcrossRuntimeGenerations", "[vtextension][threading
     using namespace std::chrono_literals;
     auto harness = RunnerHarness {};
     auto& backend = *harness.backend;
-    auto provider = EngineProvider { backend, ExtensionLimits {} };
+    auto provider = EngineProvider { backend, vtextension::World::StatusLine, ExtensionLimits {} };
     auto pool = ExtensionWorkerPool(backend, 1);
     auto const lane = pool.assignLane();
 

@@ -9,6 +9,7 @@
 
 #include <vtcontrol/Catalog.hpp>
 #include <vtextension/CommandPolicy.hpp>
+#include <vtextension/DaemonWorld.hpp>
 #include <vtextension/IHostServices.hpp>
 #include <vtextension/Manifest.hpp>
 
@@ -69,6 +70,30 @@ struct ConsentQuestion
 ///         (vtcontrol's consentPhraseOf), a permission that can run commands as `May {phrase} (can run
 ///         commands).` with that weight. Every text the guest chose goes through neutralizedForDisplay().
 [[nodiscard]] ConsentQuestion consentQuestion(ExtensionConsentRequest const& request);
+
+/// A daemon-scoped extension asking to run in the background: for its manifest and the directories its roots
+/// resolved to, the two things its grant is bound to (grantDigestOf()).
+struct DaemonConsentRequest
+{
+    std::string hostId;              ///< Which installed extension asks: its config key and its module.
+    Manifest manifest;               ///< What it declares.
+    std::vector<ResolvedRoot> roots; ///< Its roots, resolved from its configuration, in declaration order.
+    std::string grantDigest;         ///< What the answer is recorded for.
+};
+
+/// @param request A daemon-scoped extension's request.
+/// @return What the prompt asking it says. The title is `“{name}” wants to run in the background`. The lines,
+///         in order: `Module: {hostId}`; one `Directory ({label}): {path}` per resolved path, `Directory
+///         ({label}, created if missing): {path}` for a root declared `create`; `It may run only these, which
+///         can reach the network as you:`, then `Each of them with:` and one `  {NAME}={value}` per
+///         `command-env` variable, then one `{command} ({short|long}, in {root}): {argv}` per command, each
+///         followed by one `  {NAME}={value}` per variable of its own `command-env-for`; one `It may open
+///         tabs running: {pane} (in {root}): {argv}` per pane, followed by its `pane-env` variables alike;
+///         one `It may read files in: {root}` per readable root; `It shows its own tab: {scheme}://` for a
+///         served scheme. Commands, panes and every environment line weigh CanRunCommands, every other line
+///         Observes: what is granted is what is shown. Every text the guest or its configuration
+///         chose goes through neutralizedForDisplay(), every argv through displayedCommandLine()'s quoting.
+[[nodiscard]] ConsentQuestion daemonConsentQuestion(DaemonConsentRequest const& request);
 
 /// What the user answered.
 enum class ConsentAnswer : uint8_t

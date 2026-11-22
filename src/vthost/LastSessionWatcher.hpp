@@ -9,6 +9,7 @@
 #include <functional>
 #include <utility>
 
+#include <vthost/SessionEnd.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vtworkspace/SessionModel.hpp>
 
@@ -40,6 +41,11 @@ namespace vthost
 /// The posted callback therefore RE-READS the live session count rather than trusting the edge that
 /// armed it.
 ///
+/// A close a live upgrade makes itself (SessionEnd::Upgrade: a served session, which no new image adopts)
+/// does not arm it: the upgrade went on, or was rolled back and the daemon serves on with no session, exactly
+/// as the new image would; an attaching client gets its first tab as ever. sessionEnded() names the cause
+/// just before the sessionClosed() of the same session, so the watcher remembers it in between.
+///
 /// Lifetime: the posted callback captures `this`, so the watcher must outlive every turn of the loop
 /// that may still run it. A post still queued when `blockOn` returns IS run — by the owner's LoopDrain,
 /// which turns the loop again — so runDaemon declares its watchers before the drain; only the posts
@@ -63,11 +69,17 @@ class LastSessionWatcher final: public SessionStreamEvents
     /// The daemon's own observer, which shows no screen: it keeps no indicator row repainted.
     [[nodiscard]] bool mirrorsScreens() const noexcept override { return false; }
 
-    void sessionClosed(vtworkspace::SessionId /*session*/) override
+    void sessionEnded(vtworkspace::SessionId session, SessionEnd cause) override
+    {
+        _lastEnd = LastEnd { .session = session, .cause = cause };
+    }
+
+    void sessionClosed(vtworkspace::SessionId session) override
     {
         // At most one close can be the last one, so this arms at most once per zero-transition —
         // no latch needed.
-        if (_host.sessionCount() != 0)
+        if (_host.sessionCount() != 0
+            || (_lastEnd.session == session && _lastEnd.cause == SessionEnd::Upgrade))
             return;
 
         _loop.post([this] {
@@ -81,6 +93,13 @@ class LastSessionWatcher final: public SessionStreamEvents
     SessionHost& _host;
     core::net::EventLoop& _loop;
     std::function<void()> _requestShutdown;
+    /// The session sessionEnded() last named, and why it ended: the cause of its close, which follows.
+    struct LastEnd
+    {
+        vtworkspace::SessionId session {};
+        SessionEnd cause = SessionEnd::Exited;
+    };
+    LastEnd _lastEnd {}; ///< @see LastEnd
     /// Last member: registers `*this` only once every member above it is initialized. Spelled out
     /// rather than via makeScopedStreamSubscription, which every other call site uses: that factory
     /// returns by value and ScopedSubscription is non-movable, so it cannot initialize a member.

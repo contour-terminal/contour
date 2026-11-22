@@ -19,13 +19,20 @@ namespace vtextension
 /// after a fault the host re-instantiates without reading or checking the module again.
 ///
 /// Loading runs none of the module's code. It reads the manifest, and checks that the module speaks
-/// the statusline world: every import it declares is one the host provides (the world's `host`
-/// functions, the control interface's verbs, or WASI preview 1), and it exports `load`, `update`, `render`,
-/// `cabi_realloc` and its memory, each with the shape the Canonical ABI gives it. It has no start function:
-/// one would run during instantiation, where no deadline can guard it.
+/// its engine's world:
 ///
-/// The manifest is optional. A module without one is an extension that declares no commands, which
-/// therefore can never run one; a module whose manifest does not parse does not load.
+/// - **Imports.** Every import is one of the world's exact (module, name) pairs (detail::worldImports())
+///   or an allowed WASI preview 1 function, and the runtime satisfies it. The status line's are its
+///   `host` functions and the control interface's verbs; the daemon's are its `host` functions alone.
+/// - **Exports.** The status line's `load`, `update`, `render` and `cabi_realloc`; the daemon's `load`,
+///   `update` and `cabi_realloc`, and no `render`. Each has the shape the Canonical ABI gives it, and both
+///   export their memory.
+/// - **Placement.** The manifest's `placement` is the world's: `daemon` exactly on a daemon engine.
+/// - **No start function:** one would run during instantiation, where no deadline can guard it.
+///
+/// The manifest is optional for the status line. A module without one is an extension that declares no
+/// commands, which therefore can never run one; a module whose manifest does not parse does not load. A
+/// daemon-world module carries one: without it, it declares no placement, which is the status line's.
 class CompiledExtension: public std::enable_shared_from_this<CompiledExtension>
 {
     struct PrivateTag
@@ -39,7 +46,8 @@ class CompiledExtension: public std::enable_shared_from_this<CompiledExtension>
     /// @param bytes The module's bytes; the runtime's module keeps them.
     /// @return The loaded module; `InvalidComponent` if it is not a valid core module,
     ///         `ManifestInvalid` if its manifest does not parse, `WorldMismatch` if it imports
-    ///         something the host does not provide or lacks an export the world requires.
+    ///         something the engine's world does not provide, lacks an export the world requires, has one
+    ///         it forbids, or declares another world's placement.
     [[nodiscard]] static std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> load(
         Engine& engine, std::vector<std::byte> bytes);
 

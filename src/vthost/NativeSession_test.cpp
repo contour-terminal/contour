@@ -74,9 +74,11 @@
 #include <vthost/control/ControlService.hpp>
 #include <vthost/proto/PduTrace.hpp>
 #include <vthost/testing/FakeDaemonControl.hpp>
+#include <vthost/testing/FakeDaemonWorldHosting.hpp>
 #include <vthost/testing/FakeExtensionHosting.hpp>
 #include <vthost/testing/FakeProfileCatalog.hpp>
 #include <vthost/testing/PreNegotiationCodec.hpp>
+#include <vthost/testing/ServedTesting.hpp>
 #include <vthost/testing/ShippedCodec.hpp>
 #include <vthost/testing/TestHelpers.hpp>
 #include <vtworkspace/LayoutTree.hpp>
@@ -369,6 +371,8 @@ struct HarnessOptions
     vthost::InputWatermarks inputWatermarks {};
     /// The status-line extensions the hosted sessions run; none by default.
     std::shared_ptr<vthost::IExtensionHosting> extensions {};
+    /// What makes the host's daemon-scoped extensions; none by default.
+    vthost::DaemonWorldFactory daemonWorld {};
     /// What the hosted terminals' settings differ in from hostSettings()'s; nothing by default.
     std::function<void(vtbackend::Settings&)> adjustSettings {};
     /// What the connection is constructed with: its handshake policy among them.
@@ -456,6 +460,7 @@ struct NativeHarness
                                                    .workspaceGit = options.workspaceGit,
                                                    .inputWatermarks = options.inputWatermarks,
                                                    .extensions = options.extensions,
+                                                   .daemonWorld = options.daemonWorld,
                                                    .profiles = options.profiles,
                                                    .instance = options.instance } };
     core::net::testing::SocketPair pair = makeConnection(loop, options.pipeBytes);
@@ -4192,6 +4197,32 @@ TEST_CASE("NativeSession.extension.statusRowsMirrored", "[vthost][native][extens
     }
 }
 
+TEST_CASE("NativeSession.daemonExtension.summaryMirrored", "[vthost][native][daemon][summary]")
+{
+    // A client attaching after a daemon extension published its summary is sent the row that shows it: the
+    // client has no summary of its own to draw.
+    auto const journal = std::make_shared<std::vector<std::string>>();
+    auto world = std::shared_ptr<vthost::testing::FakeDaemonWorldHosting> {};
+    auto h = NativeHarness { HarnessOptions {
+        .daemonWorld =
+            [&](vthost::DaemonWorldEvents events,
+                vthost::OwnerPost post,
+                vthost::DaemonWorldWiring const& /*wiring*/) {
+                world = std::make_shared<vthost::testing::FakeDaemonWorldHosting>(
+                    journal, std::move(post), std::move(events));
+                return world;
+            },
+        .adjustSettings = showingIndicator("[{DaemonExtension:orchestrator}]") } };
+    std::ignore = newSession(h.host);
+    REQUIRE(world != nullptr);
+    world->publishSummary("orchestrator", "agents 1/4");
+    std::ignore = h.loop.runOnce(std::chrono::milliseconds { 0 });
+
+    auto const received = h.attach(AttachSnapshotFrames);
+    REQUIRE(received.size() == AttachSnapshotFrames);
+    CHECK(indicatorRowOf(received.back()) == "[agents 1/4]");
+}
+
 TEST_CASE("NativeSession.extension.reattachSnapshot", "[vthost][native][extensions]")
 {
     // A client that detaches and attaches again is sent the row as it is now, by extensions that kept
@@ -6955,7 +6986,7 @@ TEST_CASE("two clients: a SetSplitOrientation from one pushes the new axis to bo
     auto h = TwoClientHarness {};
     auto const* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
-    h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
     auto const* root = h.host.model().findTab(tab->id())->rootPane();
     auto const anchor = root->first()->session();
     auto const workspace = h.host.model().workspaceOfTab(tab->id()).value;
@@ -7003,7 +7034,7 @@ TEST_CASE("a SetSplitOrientation ends a layout batch, and a stale session or a s
     auto h = NativeHarness {};
     auto const* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
-    h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
     auto const anchor = h.host.model().findTab(tab->id())->rootPane()->first()->session();
     auto const workspace = h.host.model().workspaceOfTab(tab->id()).value;
     auto const hello =
@@ -7038,7 +7069,7 @@ TEST_CASE("a SetSplitOrientation without the move-node capability is refused",
     auto h = NativeHarness {};
     auto const* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
-    h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
     auto const anchor = h.host.model().findTab(tab->id())->rootPane()->first()->session();
 
     auto const received = h.exchangeUntil(
@@ -7066,7 +7097,7 @@ TEST_CASE("a MoveNode onto the only sibling's edge pushes the tab re-split along
     auto const* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
     auto const tabId = tab->id();
-    h.host.splitActivePane(tabId, vtworkspace::SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tabId, vtworkspace::SplitState::Vertical, 0.5);
     auto const* root = h.host.model().findTab(tabId)->rootPane();
     auto const left = root->first()->session();
     auto const right = root->second()->session();
@@ -7147,6 +7178,197 @@ TEST_CASE("a refused MoveNode answers MoveNodeRefused under its serial and chang
     CHECK(std::get<proto::MoveNodeRefused>(refusal->pdu).reason
           == std::to_underlying(vthost::NodeMoveError::StaleTab));
     CHECK(h.host.model().findSessionLeaf(draggedSession) == before);
+}
+
+namespace
+{
+
+/// A shell tab of two panes side by side, a one-pane shell tab, and a served tab, all in the host's
+/// workspace.
+struct ServedRestructuring
+{
+    NativeHarness h {};
+    vtworkspace::SessionId left {};
+    vtworkspace::SessionId right {};
+    vtworkspace::SessionId single {};
+    vtworkspace::SessionId served {};
+
+    ServedRestructuring()
+    {
+        auto const* pair = h.host.createTab();
+        REQUIRE(pair != nullptr);
+        std::ignore = h.host.splitActivePane(pair->id(), vtworkspace::SplitState::Vertical, 0.5);
+        left = pair->rootPane()->first()->session();
+        right = pair->rootPane()->second()->session();
+        auto const* alone = h.host.createTab();
+        REQUIRE(alone != nullptr);
+        single = alone->rootPane()->session();
+        auto const opened = vthost::testing::openServedTab(h.host);
+        REQUIRE(opened.has_value());
+        served = *opened;
+    }
+
+    /// @return Every session and the tab it is in, which a refused request leaves as it was.
+    [[nodiscard]] std::vector<std::pair<uint64_t, vtworkspace::TabId>> layout() const
+    {
+        auto placed = std::vector<std::pair<uint64_t, vtworkspace::TabId>> {};
+        for (auto const session: h.host.sessionIds())
+        {
+            auto const* tab = std::get<1>(h.host.model().findSessionLeaf(session));
+            placed.emplace_back(session.value, tab != nullptr ? tab->id() : vtworkspace::TabId {});
+        }
+        return placed;
+    }
+
+    /// Sends @p request and returns what arrived once the daemon answered @p Answer, or echoed the heartbeat
+    /// that follows the request.
+    template <typename Answer>
+    [[nodiscard]] std::vector<proto::DecodedFrame> send(proto::DecodedPdu const& request)
+    {
+        auto const hello = proto::ClientHello {
+            .capabilities = proto::CapabilitySet::of(
+                { proto::Capability::MoveNode, proto::Capability::TabMerge, proto::Capability::Heartbeat })
+        };
+        return h.exchangeUntil({ hello, request, proto::Heartbeat { .nonce = 7 } }, [](auto const& got) {
+            return std::ranges::any_of(got, [](proto::DecodedFrame const& frame) {
+                return std::holds_alternative<Answer>(frame.pdu)
+                       || std::holds_alternative<proto::Heartbeat>(frame.pdu);
+            });
+        });
+    }
+};
+
+/// @return A MoveNode of the pane hosting @p dragged onto @p onto's right edge.
+[[nodiscard]] proto::MoveNode ontoEdge(vtworkspace::SessionId dragged, vtworkspace::SessionId onto)
+{
+    return proto::MoveNode { .sourceKind = std::to_underlying(vtworkspace::MoveSourceKind::Pane),
+                             .sourceSessions = { dragged.value },
+                             .targetKind = std::to_underlying(vtworkspace::MoveTargetKind::Edge),
+                             .targetSession = onto.value,
+                             .side = std::to_underlying(vtworkspace::SplitSide::Right) };
+}
+
+/// @return A MergeTabIntoSplit of the one-pane tab of @p dragged beside @p onto.
+[[nodiscard]] proto::MergeTabIntoSplit mergeBeside(vtworkspace::SessionId dragged,
+                                                   vtworkspace::SessionId onto)
+{
+    return proto::MergeTabIntoSplit { .tabSessions = { dragged.value },
+                                      .targetSession = onto.value,
+                                      .side = std::to_underlying(vtworkspace::SplitSide::Right) };
+}
+
+/// @return The reason of the one @p Refusal in @p frames.
+template <typename Refusal>
+[[nodiscard]] std::optional<uint8_t> refusalIn(std::vector<proto::DecodedFrame> const& frames)
+{
+    for (auto const& frame: frames)
+        if (auto const* refusal = std::get_if<Refusal>(&frame.pdu))
+            return refusal->reason;
+    return std::nullopt;
+}
+
+} // namespace
+
+TEST_CASE("a served tab cannot be restructured over the native protocol", "[vthost][native][served][daemon]")
+{
+    auto s = ServedRestructuring {};
+    auto const before = s.layout();
+    auto const sessionsBefore = s.h.host.sessionCount();
+    constexpr auto MovedServed = std::to_underlying(vthost::NodeMoveError::Served);
+    constexpr auto MergedServed = std::to_underlying(vthost::TabMergeError::Served);
+
+    SECTION("SplitPane of the served pane spawns nothing")
+    {
+        std::ignore = s.send<proto::Heartbeat>(
+            proto::SplitPane { .session = s.served.value,
+                               .orientation = std::to_underlying(vtworkspace::SplitState::Vertical) });
+        CHECK(s.h.host.sessionCount() == sessionsBefore);
+    }
+    SECTION("MergeTabIntoSplit of a shell tab into the served tab")
+    {
+        CHECK(
+            refusalIn<proto::TabMergeRefused>(s.send<proto::TabMergeRefused>(mergeBeside(s.single, s.served)))
+            == MergedServed);
+    }
+    SECTION("MergeTabIntoSplit of the served tab into a shell tab")
+    {
+        CHECK(
+            refusalIn<proto::TabMergeRefused>(s.send<proto::TabMergeRefused>(mergeBeside(s.served, s.single)))
+            == MergedServed);
+    }
+    SECTION("MoveNode of a shell pane into the served tab")
+    {
+        CHECK(refusalIn<proto::MoveNodeRefused>(s.send<proto::MoveNodeRefused>(ontoEdge(s.left, s.served)))
+              == MovedServed);
+    }
+    SECTION("MoveNode swapping a shell pane with the served pane")
+    {
+        auto swap = ontoEdge(s.left, s.served);
+        swap.targetKind = std::to_underlying(vtworkspace::MoveTargetKind::Swap);
+        CHECK(refusalIn<proto::MoveNodeRefused>(s.send<proto::MoveNodeRefused>(swap)) == MovedServed);
+    }
+    SECTION("MoveNode of the served pane out of its tab")
+    {
+        CHECK(refusalIn<proto::MoveNodeRefused>(s.send<proto::MoveNodeRefused>(ontoEdge(s.served, s.single)))
+              == MovedServed);
+    }
+    CHECK(s.layout() == before);
+    CHECK(s.h.host.servedBy(s.served) != nullptr);
+}
+
+TEST_CASE("the requests a served tab refuses still work between shell tabs",
+          "[vthost][native][served][daemon]")
+{
+    auto s = ServedRestructuring {};
+    auto const tabOf = [&](vtworkspace::SessionId session) {
+        auto const* tab = std::get<1>(s.h.host.model().findSessionLeaf(session));
+        REQUIRE(tab != nullptr);
+        return tab->id();
+    };
+
+    SECTION("SplitPane")
+    {
+        auto const sessions = s.h.host.sessionCount();
+        std::ignore = s.send<proto::Heartbeat>(
+            proto::SplitPane { .session = s.single.value,
+                               .orientation = std::to_underlying(vtworkspace::SplitState::Vertical) });
+        CHECK(s.h.host.sessionCount() == sessions + 1);
+    }
+    SECTION("MergeTabIntoSplit")
+    {
+        CHECK_FALSE(
+            refusalIn<proto::TabMergeRefused>(s.send<proto::TabMergeRefused>(mergeBeside(s.single, s.left))));
+        CHECK(tabOf(s.single) == tabOf(s.left));
+    }
+    SECTION("MoveNode")
+    {
+        CHECK_FALSE(
+            refusalIn<proto::MoveNodeRefused>(s.send<proto::MoveNodeRefused>(ontoEdge(s.left, s.single))));
+        CHECK(tabOf(s.left) == tabOf(s.single));
+    }
+}
+
+TEST_CASE("a whole served tab still moves to another workspace", "[vthost][native][served][daemon]")
+{
+    auto s = ServedRestructuring {};
+    auto const* other = s.h.host.createWorkspace();
+    REQUIRE(other != nullptr);
+    auto const otherWorkspace = other->id();
+    auto move = intoTabWell(s.served, other->tabAt(0)->rootPane()->session());
+    // Dragged as the tab, or as its one pane: either way the served tab moves whole.
+    SECTION("as a tab")
+    {
+        move.sourceKind = std::to_underlying(vtworkspace::MoveSourceKind::Tab);
+    }
+    SECTION("as its one pane")
+    {
+    }
+
+    CHECK_FALSE(refusalIn<proto::MoveNodeRefused>(s.send<proto::MoveNodeRefused>(move)));
+    auto const* moved = std::get<0>(s.h.host.model().findSessionLeaf(s.served));
+    REQUIRE(moved != nullptr);
+    CHECK(moved->id() == otherWorkspace);
+    CHECK(s.h.host.servedBy(s.served) != nullptr);
 }
 
 TEST_CASE("an old daemon: the client sees no move-node capability", "[vthost][native][move][daemon]")
@@ -7359,7 +7581,7 @@ struct PaneIntoOtherWorkspace
     {
         auto const* tab = h.host.createTab();
         REQUIRE(tab != nullptr);
-        h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+        std::ignore = h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         dragged = h.host.model().findTab(tab->id())->activePane()->session();
         auto const* other = h.host.createWorkspace();
         REQUIRE(other != nullptr);

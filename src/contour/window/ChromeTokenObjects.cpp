@@ -344,6 +344,10 @@ ChromeHeaderOccupantNames::ChromeHeaderOccupantNames(QObject* parent): QObject {
 {
 }
 
+ChromePaneSourceNames::ChromePaneSourceNames(QObject* parent): QObject { parent }
+{
+}
+
 ChromeSecureInputNames::ChromeSecureInputNames(QObject* parent): QObject { parent }
 {
 }

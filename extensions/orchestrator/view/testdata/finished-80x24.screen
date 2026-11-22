@@ -1,0 +1,24 @@
+╭─ Agents 7 ───────────────────────────────────────────────────────────────────╮
+│ … issue-2253 · work on issue                                      waiting 6m │
+│   Waiting for Build pace                                                     │
+│ WORKING 1 of 4                                                               │
+│ ⠋ pr-2375 · fix CI                                                working 6m │
+│ TO REVIEW 1                                                                  │
+│ ✓ pr-2379 · fix CI · reported done                                      done │
+│ FINISHED 3                                                                   │
+│▍· pr-2366 · fix CI · completed                                       removed │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ pr-2366 · fix CI · sonnet · details ───────────────────────────── · removed ╮
+│ task      fix CI                                                             │
+│ model     sonnet                                                             │
+│ state     completed, worktree removed, seen                                  │
+│ branch    agent/pr-2366-20261113-140211                                      │
+│ ── latest ────────────────────────────────────────────────────────────────── │
+│ 18:36 tool Bash {"command":"mkdir sub && cd sub && ls -a ..","description":… │
+│ 18:36 result .                                                               │
+│ 18:37 claude done.                                                           │
+│ ╭──────────────────────────────────────────────────────────────────────────╮ │
+│ │ · removed · completed · ⏎ run again · t transcript · del dismiss         │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ ⏎ run again · t transcript · ^k all actions           ⬢ 4/4 ▰▰▰▰  ● 2 need you 

@@ -1,0 +1,20 @@
+╭─ ✦ All actions ────────────────────────────────╮
+│ › ▏type to filter the actions                  │
+│                                                │
+│▍ message                                     ⏎ │
+│  transcript                                  t │
+│  board                                       b │
+│  end                                         e │
+│  agent tab                                   r │
+│  details                                     d │
+│  open link                                   o │
+│  fold its group                              z │
+│  new agent                                   n │
+│  filter the agents                           / │
+│  refresh the lists                palette only │
+│  show the last 24 hours           palette only │
+│  ↓ 4 more                                      │
+│                                                │
+│ ⏎ run · ↑↓ choose · esc close                  │
+╰────────────────────────────────────────────────╯
+ ⏎ message · t transcript · ^k all actions        

@@ -47,12 +47,16 @@ class IDeadlineWatchdog
     IDeadlineWatchdog& operator=(IDeadlineWatchdog&&) = delete;
     virtual ~IDeadlineWatchdog() = default;
 
-    /// Arms a deadline: unless disarmed first, the token's deadline is marked expired after
-    /// @p timeout, and its instance interrupted. Arming a token that is already armed replaces its
-    /// deadline.
+    /// Arms a deadline: unless disarmed first, the token's deadline is marked expired once @p timeout is
+    /// spent, and its instance interrupted. Arming a token that is already armed replaces its deadline.
+    /// Called on the thread the guarded call runs on.
     /// @param token The instance to guard; neither its instance nor its state may be null.
-    /// @param timeout How long from now the instance may keep running.
+    /// @param timeout How much the instance may spend from now on.
     virtual void armDeadline(WatchToken token, std::chrono::milliseconds timeout) = 0;
+
+    /// @param token An instance.
+    /// @return How much of the token's armed deadline is left unspent; zero if it is not armed.
+    [[nodiscard]] virtual std::chrono::nanoseconds unspent(WatchToken token) = 0;
 
     /// Disarms the token's deadline. Once this returns, neither the instance nor the state is touched
     /// on that deadline's account.

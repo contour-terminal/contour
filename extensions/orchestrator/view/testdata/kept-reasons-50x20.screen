@@ -1,0 +1,20 @@
+ ✦ Agents                              ⬢ 0/4 ▱▱▱▱ 
+╭─ issue-2356 · work on issue · sonnet ── ⚑ kept ╮
+│ Board  Transcript  Details                     │
+│ task      work on issue                        │
+│ model     sonnet                               │
+│ state     ended by you, worktree kept, seen:   │
+│             .git file was changed; nothing was │
+│             run there                          │
+│ branch    agent/issue-2356-20261113-151001     │
+│ worktree  /home/u/worktrees/contour/issue-2356 │
+│             -20261113-151001                   │
+│ ── latest ──────────────────────────────────── │
+│ 18:36 tool Bash {"command":"mkdir sub && cd s… │
+│ 18:36 result .                                 │
+│ 18:37 claude done.                             │
+│ ╭────────────────────────────────────────────╮ │
+│ │ ⚑ kept · ended by you ·… · ⏎ retry removal │ │
+│ ╰────────────────────────────────────────────╯ │
+╰────────────────────────────────────────────────╯
+ ⏎ retry removal · d details · ^k all actions     

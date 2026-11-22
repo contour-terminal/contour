@@ -1,0 +1,40 @@
+ ✦ Agents                                                                                                    ⬢ 0/4 ▱▱▱▱ 
+╭─ Agents 1 ───────────────────────────────────╮ ╭─ issue-2356 · work on issue · sonnet ─────────────────────── ⚑ kept ╮
+│ FINISHED 1                                   │ │ Report the Qt macOS bug that drops Ctrl+Cmd+arrow key presses, the… │
+│▍⚑ issue-2356 · work on issue            kept │ │ Board  Transcript  Details                                          │
+│▍  ended by you · 1 entry kept                │ │ task      work on issue                                             │
+│                                              │ │ model     sonnet                                                    │
+│ + new agent                                  │ │ state     ended by you, worktree kept, seen: .git file was changed; │
+│                                              │ │             nothing was run there                                   │
+│                                              │ │ branch    agent/issue-2356-20261113-151001                          │
+│                                              │ │ worktree  /home/u/worktrees/contour/issue-2356-20261113-151001      │
+│                                              │ │ url       https://github.com/contour-terminal/contour/issues/2356   │
+│                                              │ │ kept      what kept its worktree:                                   │
+│                                              │ │           .git file was changed; nothing was run there              │
+│                                              │ │           x or enter tries the removal again                        │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │ ── latest ───────────────────────────────────────────────────────── │
+│                                              │ │ 18:36 tool Bash {"command":"mkdir sub && cd sub && ls -a ..","desc… │
+│                                              │ │ 18:36 result .                                                      │
+│                                              │ │ 18:37 claude done.                                                  │
+│                                              │ │ ╭─────────────────────────────────────────────────────────────────╮ │
+│                                              │ │ │ ⚑ kept · ended by you · 1 entry kept · ⏎ retry removal          │ │
+│                                              │ │ ╰─────────────────────────────────────────────────────────────────╯ │
+╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
+ ⏎ retry removal · d details · del dismiss · n new agent · ^k all actions                                               

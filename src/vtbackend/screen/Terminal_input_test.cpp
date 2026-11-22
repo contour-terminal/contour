@@ -1247,14 +1247,24 @@ TEST_CASE("Terminal.input tells its device which writes the user typed", "[termi
     using vtpty::InputKind;
     auto mc = MockTerm<KindRecordingPty> { PageSize { LineCount(5), ColumnCount(10) } };
     auto constexpr NoPixel = PixelCoordinate {};
-    mc.writeToScreen("\033[?1004h\033[?1000h\033[?1006h"sv);
+    // Any-event tracking: motion is reported too.
+    mc.writeToScreen("\033[?1004h\033[?1003h\033[?1006h"sv);
     auto& kinds = mc.mockPty().kinds;
     kinds.clear();
 
     std::ignore = mc.terminal.sendFocusInEvent();
+    mc.terminal.sendMouseMoveEvent(
+        Modifier::None, CellLocation { LineOffset(1), ColumnOffset(1) }, NoPixel, false);
+    std::ignore = mc.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::WheelUp, CellLocation {}, NoPixel, false);
+    CHECK(kinds == std::vector { InputKind::Other, InputKind::Other, InputKind::Other });
+
+    // A button the user pressed is theirs, and so is the report of it; its release and motion are not.
+    kinds.clear();
     std::ignore =
         mc.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, CellLocation {}, NoPixel, false);
-    CHECK(kinds == std::vector { InputKind::Other, InputKind::Other });
+    std::ignore = mc.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, NoPixel, false);
+    CHECK(kinds == std::vector { InputKind::ButtonPress, InputKind::Other });
 
     kinds.clear();
     mc.sendCharEvent(U'y');

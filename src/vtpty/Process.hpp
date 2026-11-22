@@ -3,6 +3,7 @@
 
 #include <vtpty/AdoptedChild.hpp>
 #include <vtpty/ChildProcess.hpp>
+#include <vtpty/DirectoryHandle.hpp>
 #include <vtpty/InheritedPty.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/ProgramLookup.hpp>
@@ -23,6 +24,21 @@
 
 namespace vtpty
 {
+
+/// Whether a spawn can start its program in a directory held open.
+enum class HeldDirectorySpawn : uint8_t
+{
+    Unsupported = 0, ///< It cannot: the spawn would have to name the path, which is what the handle replaces.
+    Supported,       ///< It can: the trampoline enters the handle.
+};
+
+/// @param host Where a spawn's program runs.
+/// @return Whether it can be started in a directory held open: only on this machine, where the trampoline is
+///         handed the descriptor; flatpak-spawn could only be handed the path.
+[[nodiscard]] constexpr HeldDirectorySpawn heldDirectorySpawnOn(ProgramHost host) noexcept
+{
+    return host == ProgramHost::ThisMachine ? HeldDirectorySpawn::Supported : HeldDirectorySpawn::Unsupported;
+}
 
 /**
  * Spawns and manages a child process with a pseudo terminal attached to it.
@@ -46,6 +62,11 @@ class [[nodiscard]] Process: public Pty, public ChildProcess
         Environment env;
         /// Variables dropped from the inherited environment (an `env` entry of the same name still applies).
         std::vector<std::string> removedEnvironment;
+        /// The directory the child starts in, held open and entered by its descriptor (POSIX: the
+        /// trampoline's fchdir()). Set, workingDirectory is only what the process reports as its directory
+        /// until the child has settled; it is never resolved again. A spawn that cannot enter it by
+        /// descriptor fails.
+        std::shared_ptr<DirectoryHandle const> directory {};
     };
 
     //! Returns login shell of current user.
@@ -64,7 +85,8 @@ class [[nodiscard]] Process: public Pty, public ChildProcess
     /// shell's configured default arguments. The working directory is overlaid independently of the
     /// program, so a directory-only pane can still redirect the shell's cwd.
     ///
-    /// The override's environment entries are laid over the shell's, an entry of the same name winning.
+    /// The override's environment entries are laid over the shell's, an entry of the same name winning; the
+    /// names it withholds are withheld too, and a directory it holds open is the one the child enters.
     /// @param shell            The shell config to overlay onto; modified in place.
     /// @param commandOverride  A session's command override, if any; no-op when nullopt.
     static void applyCommandOverride(ExecInfo& shell, std::optional<ExecInfo> const& commandOverride)
@@ -80,29 +102,26 @@ class [[nodiscard]] Process: public Pty, public ChildProcess
             shell.workingDirectory = commandOverride->workingDirectory;
         for (auto const& [name, value]: commandOverride->env)
             shell.env.insert_or_assign(name, value);
+        shell.removedEnvironment.insert(shell.removedEnvironment.end(),
+                                        commandOverride->removedEnvironment.begin(),
+                                        commandOverride->removedEnvironment.end());
+        if (commandOverride->directory)
+            shell.directory = commandOverride->directory;
     }
 
+    /// @param exe What to run, and where, and under which environment.
+    /// @param sandbox Whether the program runs on the sandbox's host (flatpak-spawn) or inside it.
     /// @param placement Moves each spawned child into its own resource domain before it runs; never
     ///                  null. @see ProcessPlacement.
     /// @param hangupGrace How long close() gives the child to end on the hangup before killing it.
-    Process(ExecInfo const& exe,
+    Process(ExecInfo exe,
             std::unique_ptr<Pty> pty,
-            bool escapeSandbox,
+            SandboxEscape sandbox,
             std::shared_ptr<ProcessPlacement> placement,
-            HangupGrace hangupGrace = {}):
-        Process(exe.program,
-                exe.arguments,
-                exe.workingDirectory,
-                exe.env,
-                exe.removedEnvironment,
-                escapeSandbox,
-                std::move(pty),
-                std::move(placement),
-                hangupGrace)
-    {
-    }
+            HangupGrace hangupGrace = {});
 
     /// @param removedEnvironment Variables the child must not inherit.
+    /// @param sandbox Whether the program runs on the sandbox's host (flatpak-spawn) or inside it.
     /// @param placement Moves each spawned child into its own resource domain before it runs; never
     ///                  null. @see ProcessPlacement.
     /// @param hangupGrace How long close() gives the child to end on the hangup before killing it.
@@ -111,10 +130,21 @@ class [[nodiscard]] Process: public Pty, public ChildProcess
             std::filesystem::path const& cwd,
             Environment const& env,
             std::vector<std::string> removedEnvironment,
-            bool escapeSandbox,
+            SandboxEscape sandbox,
             std::unique_ptr<Pty> pty,
             std::shared_ptr<ProcessPlacement> placement,
-            HangupGrace hangupGrace = {});
+            HangupGrace hangupGrace = {}):
+        Process(ExecInfo { .program = path,
+                           .arguments = args,
+                           .workingDirectory = cwd,
+                           .env = env,
+                           .removedEnvironment = std::move(removedEnvironment) },
+                std::move(pty),
+                sandbox,
+                std::move(placement),
+                hangupGrace)
+    {
+    }
 
     ~Process() override;
 
@@ -167,6 +197,20 @@ class [[nodiscard]] Process: public Pty, public ChildProcess
     /// @param escape The profile's `escape_sandbox`.
     /// @return The host the program runs on.
     [[nodiscard]] static ProgramHost programHost(SandboxEscape escape);
+
+    /// Whether a spawn from this process can start its program in a directory held open
+    /// (ExecInfo::directory): only on this machine's spawn trampoline -- never through flatpak-spawn to the
+    /// host, nor on Windows.
+    /// @param escape The profile's `escape_sandbox`.
+    /// @return Whether such a spawn can succeed here.
+    [[nodiscard]] static HeldDirectorySpawn heldDirectorySpawn(SandboxEscape escape);
+
+    /// Whether a spawn of @p exec on this machine would find its program: looked up as start() looks it up,
+    /// on the PATH the child is given -- @p exec's own, else the inherited one unless @p exec withholds it.
+    /// Asked before a spawn whose failure would otherwise say only that it failed.
+    /// @param exec What would be spawned.
+    /// @return Whether its program is found.
+    [[nodiscard]] static bool findsProgram(ExecInfo const& exec);
 
     // A Process has a child only once start() has spawned one. Before that, and for good when start()
     // failed before spawning, there is nothing to ask about, wait for or signal, and the calls below

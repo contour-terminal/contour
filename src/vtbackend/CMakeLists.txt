@@ -50,6 +50,7 @@ set(vtbackend_HEADERS
     core/FileUrl.hpp
     shell/Folding.hpp
     vt/Functions.hpp
+    vt/ServedTabSequences.hpp
     core/GraphicsAttributes.hpp
     grid/GraphemeClusters.hpp
     grid/Grid.hpp
@@ -416,6 +417,8 @@ if(LIBTERMINAL_TESTING)
         input/InputGenerator_test.cpp
         input/vi/Selector_test.cpp
         vt/Functions_test.cpp
+        vt/ServedTabSequences_test.cpp
+        screen/ServedSession_test.cpp
         grid/Grid_test.cpp
         core/FileUrl_test.cpp
         input/vi/HintModeHandler_test.cpp
@@ -501,7 +504,7 @@ if(LIBTERMINAL_TESTING)
         vt/VTWriter_test.cpp
     )
     # ZLIB::ZLIB for testing/Deflate.hpp, which compresses what the tests send.
-    target_link_libraries(vtbackend_test Catch2::Catch2 core::testing vtbackend contour_test_trace ZLIB::ZLIB)
+    target_link_libraries(vtbackend_test Catch2::Catch2 core::testing core::tui_core vtbackend contour_test_trace ZLIB::ZLIB)
     # Where the checked-in terminal-state goldens live.
     target_compile_definitions(vtbackend_test PRIVATE
         VTBACKEND_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/state/golden")

@@ -191,7 +191,7 @@ namespace
                 -> std::unique_ptr<vtpty::Pty> {
                 return std::make_unique<vtpty::Process>(benchExecInfo(self, arguments),
                                                         vtpty::createPty(size, std::nullopt),
-                                                        /*escapeSandbox=*/false,
+                                                        vtpty::SandboxEscape::Contained,
                                                         std::make_shared<vtpty::NoPlacement>());
             };
     }

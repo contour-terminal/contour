@@ -63,7 +63,7 @@ namespace
 
     /// The lowest number the parent copies a source descriptor to before mapping it onto its slot: above
     /// every slot, so that no copy sits on a number another copy is dup2()ed onto.
-    constexpr auto FirstTemporaryFd = 10;
+    constexpr auto FirstTemporaryFd = 11;
     static_assert(trampolineFd(static_cast<TrampolineSlot>(TrampolineSlotCount - 1)) < FirstTemporaryFd);
 
     /// How long spawnPlaced() waits, in milliseconds, for a detached program's trampoline to name the
@@ -361,7 +361,23 @@ namespace
 
         // Entered before the settle is said: until then the parent names the directory the child is about to
         // enter (Process::workingDirectory()), and from then on the child's own, which is this one already.
-        if (!launch.workingDirectory.empty() && ::chdir(launch.workingDirectory.c_str()) != 0)
+        // A directory handed over open is entered by its descriptor, never by the path, which only names it:
+        // what is at that name now may be something else.
+        if (auto const directory = slotFd(spec, TrampolineSlot::WorkingDirectory))
+        {
+            auto const entered = ::fchdir(*directory);
+            auto const failure = errno;
+            ::close(*directory);
+            if (entered != 0)
+            {
+                report(launch,
+                       std::format("Failed to enter the directory \"{}\". {}\n",
+                                   launch.workingDirectory,
+                                   errorText(failure)));
+                exitAfterReport(launch);
+            }
+        }
+        else if (!launch.workingDirectory.empty() && ::chdir(launch.workingDirectory.c_str()) != 0)
         {
             auto const failure = errno;
             report(

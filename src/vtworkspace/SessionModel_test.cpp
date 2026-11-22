@@ -1182,6 +1182,26 @@ TEST_CASE("SessionModel: previousActiveTab follows the last activation and toggl
     CHECK(win->previousActiveTabIndex() == 2);
 }
 
+TEST_CASE("SessionModel: a tab created in the background leaves the active and previous tabs",
+          "[vtworkspace][model][tab]")
+{
+    Fixture f;
+    auto* win = f.model.createWorkspace();
+    // The first tab of an empty workspace is active, background or not.
+    auto* t0 = f.model.createTab(win->id(), TabActivation::Background);
+    CHECK(win->activeTab() == t0);
+    auto* t1 = f.model.createTab(win->id()); // active=1, prev=0
+    f.events.log.clear();
+
+    auto* agent = f.model.createTab(win->id(), TabActivation::Background);
+
+    CHECK(win->tabCount() == 3);
+    CHECK(win->activeTab() == t1);
+    CHECK(win->previousActiveTab() == t0);
+    CHECK(f.events.sawPrefix(std::format("tabAdded:{}", agent->id().value)));
+    CHECK_FALSE(f.events.sawPrefix("activeTab:"));
+}
+
 TEST_CASE("SessionModel: closing the previous tab invalidates the previous-tab memory",
           "[vtworkspace][model][tab]")
 {

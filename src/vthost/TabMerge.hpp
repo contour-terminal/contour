@@ -27,6 +27,7 @@ enum class TabMergeError : uint8_t
     CrossWorkspace, ///< The tab and the target are in different workspaces: no client reconciles that yet.
     StaleTab,       ///< The tab no longer holds exactly the sessions the request named.
     Refused,        ///< The model refused: both sessions are in the same tab.
+    Served,         ///< The tab or the target is served by an extension, and a served tab stays whole.
 };
 
 /// @param error The refusal.
@@ -40,6 +41,7 @@ enum class TabMergeError : uint8_t
         case TabMergeError::CrossWorkspace: return "the tab and the target are in different workspaces";
         case TabMergeError::StaleTab: return "the tab no longer holds the sessions the request named";
         case TabMergeError::Refused: return "the model refused the merge";
+        case TabMergeError::Served: return "an extension serves the tab, which cannot be restructured";
     }
     return "unknown error";
 }

@@ -123,7 +123,7 @@ struct PersistenceHarness
         auto* const tab = host->createTab();
         REQUIRE(tab != nullptr);
         auto const first = tab->rootPane()->session();
-        host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical);
+        std::ignore = host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical);
         REQUIRE(tab->paneCount() == 2);
         return { first, tab->activePane()->session() };
     }

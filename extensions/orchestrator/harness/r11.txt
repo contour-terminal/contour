@@ -1,0 +1,1440 @@
+Git in an agent-controlled worktree
+git: 2.56.0
+GIT_ATTR_SOURCE=4b825dc642cb6eb9a060e54bf8d69288fbee4904 (the empty tree) when "on"; every run carries the manifest's
+command-env (core.fsmonitor=false, core.hooksPath=/dev/null via GIT_CONFIG_COUNT).
+Cleanup commands: status = git status --porcelain --untracked-files=normal --ignore-submodules=none;
+reachable = git for-each-ref --count=1 --contains HEAD refs/heads refs/tags refs/remotes;
+opstate = git -c status.displayCommentPrefix=false -c color.status=false status --long; clean = git clean -f -- STATUS.md;
+remove@wt / remove@repo = git worktree remove <abs path>, cwd the worktree / the repository.
+
+== Step 1: does a cleanup command run a clean filter the agent can name? ==
+Each run: fresh repository + worktree, filter x defined as a program that leaves a marker, every
+tracked file made stat-dirty, then the one command. Columns: exit code, filter ran.
+
+  case                                         command      attr off       attr on
+  baseline-no-filter-named                     status       exit=0 ran=no  exit=0 ran=no
+  baseline-no-filter-named                     reachable    exit=0 ran=no  exit=0 ran=no
+  baseline-no-filter-named                     opstate      exit=0 ran=no  exit=0 ran=no
+  baseline-no-filter-named                     clean        exit=0 ran=no  exit=0 ran=no
+  baseline-no-filter-named                     remove@wt    exit=0 ran=no  exit=0 ran=no
+  baseline-no-filter-named                     remove@repo  exit=0 ran=no  exit=0 ran=no
+  worktree-gitattributes                       status       exit=0 ran=yes exit=0 ran=no
+  worktree-gitattributes                       reachable    exit=0 ran=no  exit=0 ran=no
+  worktree-gitattributes                       opstate      exit=0 ran=yes exit=0 ran=no
+  worktree-gitattributes                       clean        exit=0 ran=no  exit=0 ran=no
+  worktree-gitattributes                       remove@wt    exit=0 ran=yes exit=0 ran=no
+  worktree-gitattributes                       remove@repo  exit=0 ran=yes exit=0 ran=no
+  worktree-gitattributes+global-config         status       exit=0 ran=yes exit=0 ran=no
+  worktree-gitattributes+global-config         reachable    exit=0 ran=no  exit=0 ran=no
+  worktree-gitattributes+global-config         opstate      exit=0 ran=yes exit=0 ran=no
+  worktree-gitattributes+global-config         clean        exit=0 ran=no  exit=0 ran=no
+  worktree-gitattributes+global-config         remove@wt    exit=0 ran=yes exit=0 ran=no
+  worktree-gitattributes+global-config         remove@repo  exit=0 ran=yes exit=0 ran=no
+  common-info-attributes                       status       exit=0 ran=yes exit=0 ran=yes
+  common-info-attributes                       reachable    exit=0 ran=no  exit=0 ran=no
+  common-info-attributes                       opstate      exit=0 ran=yes exit=0 ran=yes
+  common-info-attributes                       clean        exit=0 ran=no  exit=0 ran=no
+  common-info-attributes                       remove@wt    exit=0 ran=yes exit=0 ran=yes
+  common-info-attributes                       remove@repo  exit=0 ran=yes exit=0 ran=yes
+  core.attributesFile                          status       exit=0 ran=yes exit=0 ran=yes
+  core.attributesFile                          reachable    exit=0 ran=no  exit=0 ran=no
+  core.attributesFile                          opstate      exit=0 ran=yes exit=0 ran=yes
+  core.attributesFile                          clean        exit=0 ran=no  exit=0 ran=no
+  core.attributesFile                          remove@wt    exit=0 ran=yes exit=0 ran=yes
+  core.attributesFile                          remove@repo  exit=0 ran=yes exit=0 ran=yes
+  xdg-config-git-attributes                    status       exit=0 ran=yes exit=0 ran=yes
+  xdg-config-git-attributes                    reachable    exit=0 ran=no  exit=0 ran=no
+  xdg-config-git-attributes                    opstate      exit=0 ran=yes exit=0 ran=yes
+  xdg-config-git-attributes                    clean        exit=0 ran=no  exit=0 ran=no
+  xdg-config-git-attributes                    remove@wt    exit=0 ran=yes exit=0 ran=yes
+  xdg-config-git-attributes                    remove@repo  exit=0 ran=yes exit=0 ran=yes
+  commondir-redirect+info-attributes           status       exit=0 ran=yes exit=0 ran=yes
+  commondir-redirect+info-attributes           reachable    exit=0 ran=no  exit=0 ran=no
+  commondir-redirect+info-attributes           opstate      exit=0 ran=yes exit=0 ran=yes
+  commondir-redirect+info-attributes           clean        exit=0 ran=no  exit=0 ran=no
+  commondir-redirect+info-attributes           remove@wt    exit=128 ran=no exit=128 ran=no
+  commondir-redirect+info-attributes           remove@repo  exit=0 ran=yes exit=0 ran=yes
+  commondir-redirect+worktree-gitattributes    status       exit=0 ran=yes exit=0 ran=no
+  commondir-redirect+worktree-gitattributes    reachable    exit=0 ran=no  exit=0 ran=no
+  commondir-redirect+worktree-gitattributes    opstate      exit=0 ran=yes exit=0 ran=no
+  commondir-redirect+worktree-gitattributes    clean        exit=0 ran=no  exit=0 ran=no
+  commondir-redirect+worktree-gitattributes    remove@wt    exit=128 ran=no exit=128 ran=no
+  commondir-redirect+worktree-gitattributes    remove@repo  exit=0 ran=yes exit=0 ran=no
+
+  Non-zero exits above, first line of stderr:
+    commondir-redirect+info-attributes remove@wt attr off: fatal: validation failed, cannot remove working tree: '<case>/worktrees/wt' does not point back to '<case>/evil.git/worktrees/wt'
+    commondir-redirect+info-attributes remove@wt attr on: fatal: validation failed, cannot remove working tree: '<case>/worktrees/wt' does not point back to '<case>/evil.git/worktrees/wt'
+    commondir-redirect+worktree-gitattributes remove@wt attr off: fatal: validation failed, cannot remove working tree: '<case>/worktrees/wt' does not point back to '<case>/evil.git/worktrees/wt'
+    commondir-redirect+worktree-gitattributes remove@wt attr on: fatal: validation failed, cannot remove working tree: '<case>/worktrees/wt' does not point back to '<case>/evil.git/worktrees/wt'
+
+-- Forcing core.attributesFile=/dev/null as a third command-env key (attr on, git status --porcelain) --
+  core.attributesFile                          exit=0 ran=no
+  xdg-config-git-attributes                    exit=0 ran=no
+  common-info-attributes                       exit=0 ran=yes
+  commondir-redirect+info-attributes           exit=0 ran=yes
+
+-- What git itself reports about the common directory (attr on, cwd = worktree) --
+  baseline-no-filter-named                     git rev-parse --path-format=absolute --git-common-dir -> exit=0 <case>/repo/.git
+  commondir-redirect+info-attributes           git rev-parse --path-format=absolute --git-common-dir -> exit=0 <case>/evil.git
+
+-- LFS-style smudge filter on git worktree add (repository commits '*.bin filter=lfs') --
+  attr off exit=0 smudge ran=yes  a.bin in the new worktree: content:data
+  attr on  exit=0 smudge ran=no  a.bin in the new worktree: pointer:data
+  gh pr checkout: not measured — needs a real GitHub pull request (owner).
+
+-- core.fsmonitor and core.hooksPath set in the repository config --
+  ("bare" = no command-env; "env" = with the manifest's command-env)
+  core.fsmonitor=<hook>  git status --porcelain  bare exit=0 hook ran=yes
+  core.fsmonitor=<hook>  git status --porcelain  env  exit=0 hook ran=no
+  hooks in core.hooksPath    status       bare: exit=0 hooks=post-index-change env: exit=0 hooks=none
+  hooks in core.hooksPath    reachable    bare: exit=0 hooks=none          env: exit=0 hooks=none
+  hooks in core.hooksPath    opstate      bare: exit=0 hooks=post-index-change env: exit=0 hooks=none
+  hooks in core.hooksPath    clean        bare: exit=0 hooks=none          env: exit=0 hooks=none
+  hooks in core.hooksPath    remove@wt    bare: exit=0 hooks=post-index-change env: exit=0 hooks=none
+  hooks in core.hooksPath    remove@repo  bare: exit=0 hooks=post-index-change env: exit=0 hooks=none
+  hooks in common-hooks-dir  status       bare: exit=0 hooks=post-index-change env: exit=0 hooks=none
+  hooks in common-hooks-dir  reachable    bare: exit=0 hooks=none          env: exit=0 hooks=none
+  hooks in common-hooks-dir  opstate      bare: exit=0 hooks=post-index-change env: exit=0 hooks=none
+  hooks in common-hooks-dir  clean        bare: exit=0 hooks=none          env: exit=0 hooks=none
+  hooks in common-hooks-dir  remove@wt    bare: exit=0 hooks=post-index-change env: exit=0 hooks=none
+  hooks in common-hooks-dir  remove@repo  bare: exit=0 hooks=post-index-change env: exit=0 hooks=none
+
+-- The adopted cleanup environment, every cleanup command (as adopted) --
+  Each cleanup command's own environment replaces the global GIT_CONFIG_COUNT with the whole set:
+  core.fsmonitor=false, core.hooksPath=/dev/null, core.attributesFile=/dev/null; plus GIT_ATTR_SOURCE
+  and GIT_OPTIONAL_LOCKS=0. common-dir = git rev-parse --path-format=absolute --git-common-dir; index-flags = git ls-files -v --stage.
+  Expected to run: the main repository's own info/attributes (the documented residual), and the
+  redirected common dir (closed by the common-dir check, which runs first and reads no attributes).
+  baseline-no-filter-named                     common-dir   exit=0 ran=no
+  baseline-no-filter-named                     reachable    exit=0 ran=no
+  baseline-no-filter-named                     opstate      exit=0 ran=no
+  baseline-no-filter-named                     index-flags  exit=0 ran=no
+  baseline-no-filter-named                     status       exit=0 ran=no
+  baseline-no-filter-named                     clean        exit=0 ran=no
+  baseline-no-filter-named                     remove@wt    exit=0 ran=no
+  baseline-no-filter-named                     remove@repo  exit=0 ran=no
+  worktree-gitattributes                       common-dir   exit=0 ran=no
+  worktree-gitattributes                       reachable    exit=0 ran=no
+  worktree-gitattributes                       opstate      exit=0 ran=no
+  worktree-gitattributes                       index-flags  exit=0 ran=no
+  worktree-gitattributes                       status       exit=0 ran=no
+  worktree-gitattributes                       clean        exit=0 ran=no
+  worktree-gitattributes                       remove@wt    exit=0 ran=no
+  worktree-gitattributes                       remove@repo  exit=0 ran=no
+  worktree-gitattributes+global-config         common-dir   exit=0 ran=no
+  worktree-gitattributes+global-config         reachable    exit=0 ran=no
+  worktree-gitattributes+global-config         opstate      exit=0 ran=no
+  worktree-gitattributes+global-config         index-flags  exit=0 ran=no
+  worktree-gitattributes+global-config         status       exit=0 ran=no
+  worktree-gitattributes+global-config         clean        exit=0 ran=no
+  worktree-gitattributes+global-config         remove@wt    exit=0 ran=no
+  worktree-gitattributes+global-config         remove@repo  exit=0 ran=no
+  common-info-attributes                       common-dir   exit=0 ran=no
+  common-info-attributes                       reachable    exit=0 ran=no
+  common-info-attributes                       opstate      exit=0 ran=yes
+  common-info-attributes                       index-flags  exit=0 ran=no
+  common-info-attributes                       status       exit=0 ran=yes
+  common-info-attributes                       clean        exit=0 ran=no
+  common-info-attributes                       remove@wt    exit=0 ran=yes
+  common-info-attributes                       remove@repo  exit=0 ran=yes
+  core.attributesFile                          common-dir   exit=0 ran=no
+  core.attributesFile                          reachable    exit=0 ran=no
+  core.attributesFile                          opstate      exit=0 ran=no
+  core.attributesFile                          index-flags  exit=0 ran=no
+  core.attributesFile                          status       exit=0 ran=no
+  core.attributesFile                          clean        exit=0 ran=no
+  core.attributesFile                          remove@wt    exit=0 ran=no
+  core.attributesFile                          remove@repo  exit=0 ran=no
+  xdg-config-git-attributes                    common-dir   exit=0 ran=no
+  xdg-config-git-attributes                    reachable    exit=0 ran=no
+  xdg-config-git-attributes                    opstate      exit=0 ran=no
+  xdg-config-git-attributes                    index-flags  exit=0 ran=no
+  xdg-config-git-attributes                    status       exit=0 ran=no
+  xdg-config-git-attributes                    clean        exit=0 ran=no
+  xdg-config-git-attributes                    remove@wt    exit=0 ran=no
+  xdg-config-git-attributes                    remove@repo  exit=0 ran=no
+  commondir-redirect+info-attributes           common-dir   exit=0 ran=no
+  commondir-redirect+info-attributes           reachable    exit=0 ran=no
+  commondir-redirect+info-attributes           opstate      exit=0 ran=yes
+  commondir-redirect+info-attributes           index-flags  exit=0 ran=no
+  commondir-redirect+info-attributes           status       exit=0 ran=yes
+  commondir-redirect+info-attributes           clean        exit=0 ran=no
+  commondir-redirect+info-attributes           remove@wt    exit=128 ran=no
+  commondir-redirect+info-attributes           remove@repo  exit=0 ran=yes
+  commondir-redirect+worktree-gitattributes    common-dir   exit=0 ran=no
+  commondir-redirect+worktree-gitattributes    reachable    exit=0 ran=no
+  commondir-redirect+worktree-gitattributes    opstate      exit=0 ran=no
+  commondir-redirect+worktree-gitattributes    index-flags  exit=0 ran=no
+  commondir-redirect+worktree-gitattributes    status       exit=0 ran=no
+  commondir-redirect+worktree-gitattributes    clean        exit=0 ran=no
+  commondir-redirect+worktree-gitattributes    remove@wt    exit=128 ran=no
+  commondir-redirect+worktree-gitattributes    remove@repo  exit=0 ran=no
+  The global keys survive the override (hooks and fsmonitor in the repository config):
+  hooks in core.hooksPath    common-dir   exit=0 hooks=none fsmonitor ran=no
+  hooks in core.hooksPath    reachable    exit=0 hooks=none fsmonitor ran=no
+  hooks in core.hooksPath    opstate      exit=0 hooks=none fsmonitor ran=no
+  hooks in core.hooksPath    index-flags  exit=0 hooks=none fsmonitor ran=no
+  hooks in core.hooksPath    status       exit=0 hooks=none fsmonitor ran=no
+  hooks in core.hooksPath    clean        exit=0 hooks=none fsmonitor ran=no
+  hooks in core.hooksPath    remove@wt    exit=0 hooks=none fsmonitor ran=no
+  hooks in core.hooksPath    remove@repo  exit=0 hooks=none fsmonitor ran=no
+  hooks in common-hooks-dir  common-dir   exit=0 hooks=none fsmonitor ran=no
+  hooks in common-hooks-dir  reachable    exit=0 hooks=none fsmonitor ran=no
+  hooks in common-hooks-dir  opstate      exit=0 hooks=none fsmonitor ran=no
+  hooks in common-hooks-dir  index-flags  exit=0 hooks=none fsmonitor ran=no
+  hooks in common-hooks-dir  status       exit=0 hooks=none fsmonitor ran=no
+  hooks in common-hooks-dir  clean        exit=0 hooks=none fsmonitor ran=no
+  hooks in common-hooks-dir  remove@wt    exit=0 hooks=none fsmonitor ran=no
+  hooks in common-hooks-dir  remove@repo  exit=0 hooks=none fsmonitor ran=no
+
+-- The common-dir check: git's answer against <main checkout>/.git (adopted env, cwd = worktree) --
+  <main checkout> is the first entry of git worktree list --porcelain, run in the repository, as the
+  core reads it; the comparison is exact, one line end allowed.
+  intact                   .git file intact=yes exit=0 output=<case>/repo/.git       equals <main>/.git=yes
+  commondir-absolute       .git file intact=yes exit=0 output=<case>/evil.git        equals <main>/.git=no
+  commondir-relative       .git file intact=yes exit=0 output=<case>/evil.git        equals <main>/.git=no
+  repository-via-symlink   .git file intact=yes exit=0 output=<case>/repo/.git       equals <main>/.git=yes
+
+-- A nested repository whose own config defines filter f and whose info/attributes names it --
+  (adopted env). gitlink = committed as a submodule (mode 160000); untracked = never added;
+  uncached = committed, then git rm --cached. clean = just checked out; stat-dirty = its file
+  touched; modified = its file changed. index = what the index check (git ls-files -v --stage) shows.
+  gitlink   clean      index=1 gitlink
+      common-dir:exit=0,ran=no
+      reachable:exit=0,ran=no
+      opstate:exit=0,ran=yes
+      index-flags:exit=0,ran=no
+      status:exit=0,ran=yes
+      clean:exit=0,ran=no
+      remove@wt:exit=128,ran=no
+      remove@repo:exit=128,ran=no
+  gitlink   stat-dirty index=1 gitlink
+      common-dir:exit=0,ran=no
+      reachable:exit=0,ran=no
+      opstate:exit=0,ran=yes
+      index-flags:exit=0,ran=no
+      status:exit=0,ran=yes
+      clean:exit=0,ran=no
+      remove@wt:exit=128,ran=no
+      remove@repo:exit=128,ran=no
+  gitlink   modified   index=1 gitlink
+      common-dir:exit=0,ran=no
+      reachable:exit=0,ran=no
+      opstate:exit=0,ran=no
+      index-flags:exit=0,ran=no
+      status:exit=0,ran=no
+      clean:exit=0,ran=no
+      remove@wt:exit=128,ran=no
+      remove@repo:exit=128,ran=no
+  untracked clean      index=0 gitlink
+      common-dir:exit=0,ran=no
+      reachable:exit=0,ran=no
+      opstate:exit=0,ran=no
+      index-flags:exit=0,ran=no
+      status:exit=0,ran=no
+      clean:exit=0,ran=no
+      remove@wt:exit=128,ran=no
+      remove@repo:exit=128,ran=no
+  untracked stat-dirty index=0 gitlink
+      common-dir:exit=0,ran=no
+      reachable:exit=0,ran=no
+      opstate:exit=0,ran=no
+      index-flags:exit=0,ran=no
+      status:exit=0,ran=no
+      clean:exit=0,ran=no
+      remove@wt:exit=128,ran=no
+      remove@repo:exit=128,ran=no
+  untracked modified   index=0 gitlink
+      common-dir:exit=0,ran=no
+      reachable:exit=0,ran=no
+      opstate:exit=0,ran=no
+      index-flags:exit=0,ran=no
+      status:exit=0,ran=no
+      clean:exit=0,ran=no
+      remove@wt:exit=128,ran=no
+      remove@repo:exit=128,ran=no
+  uncached  clean      index=0 gitlink
+      common-dir:exit=0,ran=no
+      reachable:exit=0,ran=no
+      opstate:exit=0,ran=no
+      index-flags:exit=0,ran=no
+      status:exit=0,ran=no
+      clean:exit=0,ran=no
+      remove@wt:exit=128,ran=no
+      remove@repo:exit=128,ran=no
+  uncached  stat-dirty index=0 gitlink
+      common-dir:exit=0,ran=no
+      reachable:exit=0,ran=no
+      opstate:exit=0,ran=no
+      index-flags:exit=0,ran=no
+      status:exit=0,ran=no
+      clean:exit=0,ran=no
+      remove@wt:exit=128,ran=no
+      remove@repo:exit=128,ran=no
+  uncached  modified   index=0 gitlink
+      common-dir:exit=0,ran=no
+      reachable:exit=0,ran=no
+      opstate:exit=0,ran=no
+      index-flags:exit=0,ran=no
+      status:exit=0,ran=no
+      clean:exit=0,ran=no
+      remove@wt:exit=128,ran=no
+      remove@repo:exit=128,ran=no
+
+== Step 2 (a): is every cleanup command's output unchanged by GIT_ATTR_SOURCE? ==
+Each run: fresh repository + worktree in the named state; exit code, stdout and stderr compared.
+
+  -- clean
+    status       identical=yes exit off=0 on=0  filter ran off=no on=no
+    reachable    identical=yes exit off=0 on=0  filter ran off=no on=no
+    opstate      identical=yes exit off=0 on=0  filter ran off=no on=no
+    clean        identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@wt    identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@repo  identical=yes exit off=0 on=0  filter ran off=no on=no
+  -- clean-stat-dirty
+    status       identical=yes exit off=0 on=0  filter ran off=no on=no
+    reachable    identical=yes exit off=0 on=0  filter ran off=no on=no
+    opstate      identical=yes exit off=0 on=0  filter ran off=no on=no
+    clean        identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@wt    identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@repo  identical=yes exit off=0 on=0  filter ran off=no on=no
+  -- dirty
+    status       identical=yes exit off=0 on=0  filter ran off=no on=no
+      stdout:
+        |  M a.txt
+        | M  b.txt
+        | ?? c.txt
+    reachable    identical=yes exit off=0 on=0  filter ran off=no on=no
+    opstate      identical=yes exit off=0 on=0  filter ran off=no on=no
+    clean        identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@wt    identical=yes exit off=128 on=128  filter ran off=no on=no
+      stderr:
+        | fatal: '<case>/worktrees/wt' contains modified or untracked files, use --force to delete it
+    remove@repo  identical=yes exit off=128 on=128  filter ran off=no on=no
+  -- untracked-STATUS.md-only
+    status       identical=yes exit off=0 on=0  filter ran off=no on=no
+      stdout:
+        | ?? STATUS.md
+    reachable    identical=yes exit off=0 on=0  filter ran off=no on=no
+    opstate      identical=yes exit off=0 on=0  filter ran off=no on=no
+    clean        identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@wt    identical=yes exit off=128 on=128  filter ran off=no on=no
+      stderr:
+        | fatal: '<case>/worktrees/wt' contains modified or untracked files, use --force to delete it
+    remove@repo  identical=yes exit off=128 on=128  filter ran off=no on=no
+  -- ignored-only
+    status       identical=yes exit off=0 on=0  filter ran off=no on=no
+    reachable    identical=yes exit off=0 on=0  filter ran off=no on=no
+    opstate      identical=yes exit off=0 on=0  filter ran off=no on=no
+    clean        identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@wt    identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@repo  identical=yes exit off=0 on=0  filter ran off=no on=no
+  -- committed-eol=crlf
+    status       identical=no  exit off=0 on=0  filter ran off=no on=no
+      off:
+      (no output)
+      on:
+      stdout:
+        |  M a.txt
+        |  M b.txt
+    reachable    identical=yes exit off=0 on=0  filter ran off=no on=no
+    opstate      identical=no  exit off=0 on=0  filter ran off=no on=no
+      off:
+      stdout:
+        | On branch agent/x
+        | nothing to commit, working tree clean
+      on:
+      stdout:
+        | On branch agent/x
+        | Changes not staged for commit:
+        |   (use "git add <file>..." to update what will be committed)
+        |   (use "git restore <file>..." to discard changes in working directory)
+        | 	modified:   a.txt
+        | 	modified:   b.txt
+        |
+        | no changes added to commit (use "git add" and/or "git commit -a")
+    clean        identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@wt    identical=no  exit off=0 on=128  filter ran off=no on=no
+      off:
+      (no output)
+      on:
+      stderr:
+        | fatal: '<case>/worktrees/wt' contains modified or untracked files, use --force to delete it
+    remove@repo  identical=no  exit off=0 on=128  filter ran off=no on=no
+      off:
+      (no output)
+      on:
+      stderr:
+        | fatal: '<case>/worktrees/wt' contains modified or untracked files, use --force to delete it
+  -- committed-eol=crlf-stat-dirty
+    status       identical=no  exit off=0 on=0  filter ran off=no on=no
+      off:
+      (no output)
+      on:
+      stdout:
+        |  M a.txt
+        |  M b.txt
+    reachable    identical=yes exit off=0 on=0  filter ran off=no on=no
+    opstate      identical=no  exit off=0 on=0  filter ran off=no on=no
+      off:
+      stdout:
+        | On branch agent/x
+        | nothing to commit, working tree clean
+      on:
+      stdout:
+        | On branch agent/x
+        | Changes not staged for commit:
+        |   (use "git add <file>..." to update what will be committed)
+        |   (use "git restore <file>..." to discard changes in working directory)
+        | 	modified:   a.txt
+        | 	modified:   b.txt
+        |
+        | no changes added to commit (use "git add" and/or "git commit -a")
+    clean        identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@wt    identical=no  exit off=0 on=128  filter ran off=no on=no
+      off:
+      (no output)
+      on:
+      stderr:
+        | fatal: '<case>/worktrees/wt' contains modified or untracked files, use --force to delete it
+    remove@repo  identical=no  exit off=0 on=128  filter ran off=no on=no
+      off:
+      (no output)
+      on:
+      stderr:
+        | fatal: '<case>/worktrees/wt' contains modified or untracked files, use --force to delete it
+  -- committed-lfs-style-filter
+    status       identical=no  exit off=0 on=0  filter ran off=yes on=no
+      off:
+      (no output)
+      on:
+      stdout:
+        |  M a.bin
+    reachable    identical=yes exit off=0 on=0  filter ran off=no on=no
+    opstate      identical=no  exit off=0 on=0  filter ran off=yes on=no
+      off:
+      stdout:
+        | On branch agent/x
+        | nothing to commit, working tree clean
+      on:
+      stdout:
+        | On branch agent/x
+        | Changes not staged for commit:
+        |   (use "git add <file>..." to update what will be committed)
+        |   (use "git restore <file>..." to discard changes in working directory)
+        | 	modified:   a.bin
+        |
+        | no changes added to commit (use "git add" and/or "git commit -a")
+    clean        identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@wt    identical=no  exit off=0 on=128  filter ran off=yes on=no
+      off:
+      (no output)
+      on:
+      stderr:
+        | fatal: '<case>/worktrees/wt' contains modified or untracked files, use --force to delete it
+    remove@repo  identical=no  exit off=0 on=128  filter ran off=yes on=no
+      off:
+      (no output)
+      on:
+      stderr:
+        | fatal: '<case>/worktrees/wt' contains modified or untracked files, use --force to delete it
+  -- committed-lfs-style-filter-stat-dirty
+    status       identical=no  exit off=0 on=0  filter ran off=yes on=no
+      off:
+      (no output)
+      on:
+      stdout:
+        |  M a.bin
+    reachable    identical=yes exit off=0 on=0  filter ran off=no on=no
+    opstate      identical=no  exit off=0 on=0  filter ran off=yes on=no
+      off:
+      stdout:
+        | On branch agent/x
+        | nothing to commit, working tree clean
+      on:
+      stdout:
+        | On branch agent/x
+        | Changes not staged for commit:
+        |   (use "git add <file>..." to update what will be committed)
+        |   (use "git restore <file>..." to discard changes in working directory)
+        | 	modified:   a.bin
+        |
+        | no changes added to commit (use "git add" and/or "git commit -a")
+    clean        identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@wt    identical=no  exit off=0 on=128  filter ran off=yes on=no
+      off:
+      (no output)
+      on:
+      stderr:
+        | fatal: '<case>/worktrees/wt' contains modified or untracked files, use --force to delete it
+    remove@repo  identical=no  exit off=0 on=128  filter ran off=yes on=no
+      off:
+      (no output)
+      on:
+      stderr:
+        | fatal: '<case>/worktrees/wt' contains modified or untracked files, use --force to delete it
+  -- sha256-repository
+    status       identical=no  exit off=0 on=128  filter ran off=no on=no
+      off:
+      (no output)
+      on:
+      stderr:
+        | fatal: bad --attr-source or GIT_ATTR_SOURCE
+    reachable    identical=yes exit off=0 on=0  filter ran off=no on=no
+    opstate      identical=no  exit off=0 on=128  filter ran off=no on=no
+      off:
+      stdout:
+        | On branch agent/x
+        | nothing to commit, working tree clean
+      on:
+      stderr:
+        | fatal: bad --attr-source or GIT_ATTR_SOURCE
+    clean        identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@wt    identical=no  exit off=0 on=128  filter ran off=no on=no
+      off:
+      (no output)
+      on:
+      stderr:
+        | fatal: bad --attr-source or GIT_ATTR_SOURCE
+        | fatal: failed to run 'git status' on '<case>/worktrees/wt', code 128: Success
+    remove@repo  identical=no  exit off=0 on=128  filter ran off=no on=no
+      off:
+      (no output)
+      on:
+      stderr:
+        | fatal: bad --attr-source or GIT_ATTR_SOURCE
+        | fatal: failed to run 'git status' on '<case>/worktrees/wt', code 128: Success
+  -- sha256-repository-stat-dirty
+    status       identical=no  exit off=0 on=128  filter ran off=no on=no
+      off:
+      (no output)
+      on:
+      stderr:
+        | fatal: bad --attr-source or GIT_ATTR_SOURCE
+    reachable    identical=yes exit off=0 on=0  filter ran off=no on=no
+    opstate      identical=no  exit off=0 on=128  filter ran off=no on=no
+      off:
+      stdout:
+        | On branch agent/x
+        | nothing to commit, working tree clean
+      on:
+      stderr:
+        | fatal: bad --attr-source or GIT_ATTR_SOURCE
+    clean        identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@wt    identical=no  exit off=0 on=128  filter ran off=no on=no
+      off:
+      (no output)
+      on:
+      stderr:
+        | fatal: bad --attr-source or GIT_ATTR_SOURCE
+        | fatal: failed to run 'git status' on '<case>/worktrees/wt', code 128: Success
+    remove@repo  identical=no  exit off=0 on=128  filter ran off=no on=no
+      off:
+      (no output)
+      on:
+      stderr:
+        | fatal: bad --attr-source or GIT_ATTR_SOURCE
+        | fatal: failed to run 'git status' on '<case>/worktrees/wt', code 128: Success
+  -- sha256-repository-sha256-empty-tree
+    status       identical=yes exit off=0 on=0  filter ran off=no on=no
+    reachable    identical=yes exit off=0 on=0  filter ran off=no on=no
+    opstate      identical=yes exit off=0 on=0  filter ran off=no on=no
+    clean        identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@wt    identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@repo  identical=yes exit off=0 on=0  filter ran off=no on=no
+  -- clean-aged
+    status       identical=yes exit off=0 on=0  filter ran off=no on=no
+    reachable    identical=yes exit off=0 on=0  filter ran off=no on=no
+    opstate      identical=yes exit off=0 on=0  filter ran off=no on=no
+    clean        identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@wt    identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@repo  identical=yes exit off=0 on=0  filter ran off=no on=no
+  -- committed-eol=crlf-aged
+    status       identical=yes exit off=0 on=0  filter ran off=no on=no
+    reachable    identical=yes exit off=0 on=0  filter ran off=no on=no
+    opstate      identical=yes exit off=0 on=0  filter ran off=no on=no
+    clean        identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@wt    identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@repo  identical=yes exit off=0 on=0  filter ran off=no on=no
+  -- committed-lfs-style-filter-aged
+    status       identical=yes exit off=0 on=0  filter ran off=no on=no
+    reachable    identical=yes exit off=0 on=0  filter ran off=no on=no
+    opstate      identical=yes exit off=0 on=0  filter ran off=no on=no
+    clean        identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@wt    identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@repo  identical=yes exit off=0 on=0  filter ran off=no on=no
+  -- sha256-repository-aged
+    status       identical=yes exit off=0 on=0  filter ran off=no on=no
+    reachable    identical=yes exit off=0 on=0  filter ran off=no on=no
+    opstate      identical=yes exit off=0 on=0  filter ran off=no on=no
+    clean        identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@wt    identical=yes exit off=0 on=0  filter ran off=no on=no
+    remove@repo  identical=yes exit off=0 on=0  filter ran off=no on=no
+
+== Step 2 (b): which single invocation tells an operation in progress from none? ==
+The worktree's branch agent/x has commits w1, w2 changing a.txt; main has m1 changing a.txt
+(conflicts with both) and side changes s.txt only (conflicts with nothing).
+
+  -- none
+    git -c status.displayCommentPrefix=false -c color.status=false status --long   exit=0
+      classify: none
+      stdout:
+        | On branch agent/x
+        | nothing to commit, working tree clean
+    git status --long                                                              exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status                                                                     exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status --porcelain                                                         exit=0
+    git status --porcelain=v2 --branch                                             exit=0
+      stdout:
+        | # branch.oid <hash>
+        | # branch.head agent/x
+    git for-each-ref --include-root-refs --format=%(refname)                       exit=0
+      stdout:
+        | HEAD
+        | ORIG_HEAD
+        | refs/heads/agent/x
+        | refs/heads/main
+        | refs/heads/side
+    git branch --list                                                              exit=0
+      stdout:
+        | * agent/x
+        | + main
+        |   side
+    git rev-parse --verify --quiet REBASE_HEAD                                     exit=1
+    git rev-parse --verify --quiet MERGE_HEAD                                      exit=1
+    git rev-parse --verify --quiet CHERRY_PICK_HEAD                                exit=1
+    git rev-parse --verify --quiet REVERT_HEAD                                     exit=1
+    git bisect log                                                                 exit=1
+    git rebase --show-current-patch                                                exit=128
+    git rev-parse --git-path rebase-merge                                          exit=0
+      stdout:
+        | <case>/repo/.git/worktrees/wt/rebase-merge
+    git -c status.displayCommentPrefix=false -c color.status=false status --long: identical with GIT_ATTR_SOURCE=yes
+  -- rebase-conflict
+    git -c status.displayCommentPrefix=false -c color.status=false status --long   exit=0
+      classify: rebase
+      stdout:
+        | interactive rebase in progress; onto <hash>
+        | Last command done (1 command done):
+        |    pick <hash> # w1
+        | Next command to do (1 remaining command):
+        |    pick <hash> # w2
+        |   (use "git rebase --edit-todo" to view and edit)
+        | You are currently rebasing branch 'agent/x' on '<hash>'.
+        |   (fix conflicts and then run "git rebase --continue")
+        |   (use "git rebase --skip" to skip this patch)
+        |   (use "git rebase --abort" to check out the original branch)
+        |
+        | Unmerged paths:
+        |   (use "git restore --staged <file>..." to unstage)
+        |   (use "git add <file>..." to mark resolution)
+        | 	both modified:   a.txt
+        |
+        | no changes added to commit (use "git add" and/or "git commit -a")
+    git status --long                                                              exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status                                                                     exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status --porcelain                                                         exit=0
+    git status --porcelain=v2 --branch                                             exit=0
+      stdout:
+        | # branch.oid <hash>
+        | # branch.head (detached)
+        | u UU N... 100644 100644 100644 100644 <hash> <hash> <hash> a.txt
+    git for-each-ref --include-root-refs --format=%(refname)                       exit=0
+      stdout:
+        | AUTO_MERGE
+        | HEAD
+        | ORIG_HEAD
+        | REBASE_HEAD
+        | refs/heads/agent/x
+        | refs/heads/main
+        | refs/heads/side
+    git branch --list                                                              exit=0
+      stdout:
+        | * (no branch, rebasing agent/x)
+        |   agent/x
+        | + main
+        |   side
+    git rev-parse --verify --quiet REBASE_HEAD                                     exit=0
+    git rev-parse --verify --quiet MERGE_HEAD                                      exit=1
+    git rev-parse --verify --quiet CHERRY_PICK_HEAD                                exit=1
+    git rev-parse --verify --quiet REVERT_HEAD                                     exit=1
+    git bisect log                                                                 exit=1
+    git rebase --show-current-patch                                                exit=0
+    git rev-parse --git-path rebase-merge                                          exit=0
+      stdout:
+        | <case>/repo/.git/worktrees/wt/rebase-merge
+    git -c status.displayCommentPrefix=false -c color.status=false status --long: identical with GIT_ATTR_SOURCE=yes
+  -- rebase-apply-conflict
+    git -c status.displayCommentPrefix=false -c color.status=false status --long   exit=0
+      classify: rebase
+      stdout:
+        | rebase in progress; onto <hash>
+        | You are currently rebasing branch 'agent/x' on '<hash>'.
+        |   (fix conflicts and then run "git rebase --continue")
+        |   (use "git rebase --skip" to skip this patch)
+        |   (use "git rebase --abort" to check out the original branch)
+        |
+        | Unmerged paths:
+        |   (use "git restore --staged <file>..." to unstage)
+        |   (use "git add <file>..." to mark resolution)
+        | 	both modified:   a.txt
+        |
+        | no changes added to commit (use "git add" and/or "git commit -a")
+    git status --long                                                              exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status                                                                     exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status --porcelain                                                         exit=0
+    git status --porcelain=v2 --branch                                             exit=0
+      stdout:
+        | # branch.oid <hash>
+        | # branch.head (detached)
+        | u UU N... 100644 100644 100644 100644 <hash> <hash> <hash> a.txt
+    git for-each-ref --include-root-refs --format=%(refname)                       exit=0
+      stdout:
+        | AUTO_MERGE
+        | HEAD
+        | ORIG_HEAD
+        | REBASE_HEAD
+        | refs/heads/agent/x
+        | refs/heads/main
+        | refs/heads/side
+    git branch --list                                                              exit=0
+      stdout:
+        | * (no branch, rebasing agent/x)
+        |   agent/x
+        | + main
+        |   side
+    git rev-parse --verify --quiet REBASE_HEAD                                     exit=0
+    git rev-parse --verify --quiet MERGE_HEAD                                      exit=1
+    git rev-parse --verify --quiet CHERRY_PICK_HEAD                                exit=1
+    git rev-parse --verify --quiet REVERT_HEAD                                     exit=1
+    git bisect log                                                                 exit=1
+    git rebase --show-current-patch                                                exit=0
+    git rev-parse --git-path rebase-merge                                          exit=0
+      stdout:
+        | <case>/repo/.git/worktrees/wt/rebase-merge
+    git -c status.displayCommentPrefix=false -c color.status=false status --long: identical with GIT_ATTR_SOURCE=yes
+  -- rebase-i-break
+    git -c status.displayCommentPrefix=false -c color.status=false status --long   exit=0
+      classify: rebase
+      stdout:
+        | interactive rebase in progress; onto <hash>
+        | Last command done (1 command done):
+        |    break
+        | Next commands to do (2 remaining commands):
+        |    pick <hash> # w1
+        |    pick <hash> # w2
+        |   (use "git rebase --edit-todo" to view and edit)
+        | You are currently editing a commit while rebasing branch 'agent/x' on '<hash>'.
+        |   (use "git commit --amend" to amend the current commit)
+        |   (use "git rebase --continue" once you are satisfied with your changes)
+        |
+        | nothing to commit, working tree clean
+    git status --long                                                              exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status                                                                     exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status --porcelain                                                         exit=0
+    git status --porcelain=v2 --branch                                             exit=0
+      stdout:
+        | # branch.oid <hash>
+        | # branch.head (detached)
+    git for-each-ref --include-root-refs --format=%(refname)                       exit=0
+      stdout:
+        | HEAD
+        | ORIG_HEAD
+        | refs/heads/agent/x
+        | refs/heads/main
+        | refs/heads/side
+    git branch --list                                                              exit=0
+      stdout:
+        | * (no branch, rebasing agent/x)
+        |   agent/x
+        | + main
+        |   side
+    git rev-parse --verify --quiet REBASE_HEAD                                     exit=1
+    git rev-parse --verify --quiet MERGE_HEAD                                      exit=1
+    git rev-parse --verify --quiet CHERRY_PICK_HEAD                                exit=1
+    git rev-parse --verify --quiet REVERT_HEAD                                     exit=1
+    git bisect log                                                                 exit=1
+    git rebase --show-current-patch                                                exit=1
+    git rev-parse --git-path rebase-merge                                          exit=0
+      stdout:
+        | <case>/repo/.git/worktrees/wt/rebase-merge
+    git -c status.displayCommentPrefix=false -c color.status=false status --long: identical with GIT_ATTR_SOURCE=yes
+  -- merge-conflict
+    git -c status.displayCommentPrefix=false -c color.status=false status --long   exit=0
+      classify: unmerged
+      stdout:
+        | On branch agent/x
+        | You have unmerged paths.
+        |   (fix conflicts and run "git commit")
+        |   (use "git merge --abort" to abort the merge)
+        |
+        | Unmerged paths:
+        |   (use "git add <file>..." to mark resolution)
+        | 	both modified:   a.txt
+        |
+        | no changes added to commit (use "git add" and/or "git commit -a")
+    git status --long                                                              exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status                                                                     exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status --porcelain                                                         exit=0
+    git status --porcelain=v2 --branch                                             exit=0
+      stdout:
+        | # branch.oid <hash>
+        | # branch.head agent/x
+        | u UU N... 100644 100644 100644 100644 <hash> <hash> <hash> a.txt
+    git for-each-ref --include-root-refs --format=%(refname)                       exit=0
+      stdout:
+        | AUTO_MERGE
+        | HEAD
+        | ORIG_HEAD
+        | refs/heads/agent/x
+        | refs/heads/main
+        | refs/heads/side
+    git branch --list                                                              exit=0
+      stdout:
+        | * agent/x
+        | + main
+        |   side
+    git rev-parse --verify --quiet REBASE_HEAD                                     exit=1
+    git rev-parse --verify --quiet MERGE_HEAD                                      exit=0
+    git rev-parse --verify --quiet CHERRY_PICK_HEAD                                exit=1
+    git rev-parse --verify --quiet REVERT_HEAD                                     exit=1
+    git bisect log                                                                 exit=1
+    git rebase --show-current-patch                                                exit=128
+    git rev-parse --git-path rebase-merge                                          exit=0
+      stdout:
+        | <case>/repo/.git/worktrees/wt/rebase-merge
+    git -c status.displayCommentPrefix=false -c color.status=false status --long: identical with GIT_ATTR_SOURCE=yes
+  -- merge-no-commit
+    git -c status.displayCommentPrefix=false -c color.status=false status --long   exit=0
+      classify: merge
+      stdout:
+        | On branch agent/x
+        | All conflicts fixed but you are still merging.
+        |   (use "git commit" to conclude merge)
+        |
+        | Changes to be committed:
+        | 	new file:   s.txt
+    git status --long                                                              exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status                                                                     exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status --porcelain                                                         exit=0
+    git status --porcelain=v2 --branch                                             exit=0
+      stdout:
+        | # branch.oid <hash>
+        | # branch.head agent/x
+        | 1 A. N... 000000 100644 100644 <hash> <hash> s.txt
+    git for-each-ref --include-root-refs --format=%(refname)                       exit=0
+      stdout:
+        | AUTO_MERGE
+        | HEAD
+        | ORIG_HEAD
+        | refs/heads/agent/x
+        | refs/heads/main
+        | refs/heads/side
+    git branch --list                                                              exit=0
+      stdout:
+        | * agent/x
+        | + main
+        |   side
+    git rev-parse --verify --quiet REBASE_HEAD                                     exit=1
+    git rev-parse --verify --quiet MERGE_HEAD                                      exit=0
+    git rev-parse --verify --quiet CHERRY_PICK_HEAD                                exit=1
+    git rev-parse --verify --quiet REVERT_HEAD                                     exit=1
+    git bisect log                                                                 exit=1
+    git rebase --show-current-patch                                                exit=128
+    git rev-parse --git-path rebase-merge                                          exit=0
+      stdout:
+        | <case>/repo/.git/worktrees/wt/rebase-merge
+    git -c status.displayCommentPrefix=false -c color.status=false status --long: identical with GIT_ATTR_SOURCE=yes
+  -- cherry-pick-conflict
+    git -c status.displayCommentPrefix=false -c color.status=false status --long   exit=0
+      classify: cherry-pick
+      stdout:
+        | On branch agent/x
+        | You are currently cherry-picking commit <hash>.
+        |   (fix conflicts and run "git cherry-pick --continue")
+        |   (use "git cherry-pick --skip" to skip this patch)
+        |   (use "git cherry-pick --abort" to cancel the cherry-pick operation)
+        |
+        | Unmerged paths:
+        |   (use "git add <file>..." to mark resolution)
+        | 	both modified:   a.txt
+        |
+        | no changes added to commit (use "git add" and/or "git commit -a")
+    git status --long                                                              exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status                                                                     exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status --porcelain                                                         exit=0
+    git status --porcelain=v2 --branch                                             exit=0
+      stdout:
+        | # branch.oid <hash>
+        | # branch.head agent/x
+        | u UU N... 100644 100644 100644 100644 <hash> <hash> <hash> a.txt
+    git for-each-ref --include-root-refs --format=%(refname)                       exit=0
+      stdout:
+        | AUTO_MERGE
+        | CHERRY_PICK_HEAD
+        | HEAD
+        | ORIG_HEAD
+        | refs/heads/agent/x
+        | refs/heads/main
+        | refs/heads/side
+    git branch --list                                                              exit=0
+      stdout:
+        | * agent/x
+        | + main
+        |   side
+    git rev-parse --verify --quiet REBASE_HEAD                                     exit=1
+    git rev-parse --verify --quiet MERGE_HEAD                                      exit=1
+    git rev-parse --verify --quiet CHERRY_PICK_HEAD                                exit=0
+    git rev-parse --verify --quiet REVERT_HEAD                                     exit=1
+    git bisect log                                                                 exit=1
+    git rebase --show-current-patch                                                exit=128
+    git rev-parse --git-path rebase-merge                                          exit=0
+      stdout:
+        | <case>/repo/.git/worktrees/wt/rebase-merge
+    git -c status.displayCommentPrefix=false -c color.status=false status --long: identical with GIT_ATTR_SOURCE=yes
+  -- cherry-pick-sequence-resolved
+    git -c status.displayCommentPrefix=false -c color.status=false status --long   exit=0
+      classify: cherry-pick
+      stdout:
+        | On branch agent/x
+        | Cherry-pick currently in progress.
+        |   (run "git cherry-pick --continue" to continue)
+        |   (use "git cherry-pick --skip" to skip this patch)
+        |   (use "git cherry-pick --abort" to cancel the cherry-pick operation)
+        |
+        | nothing to commit, working tree clean
+    git status --long                                                              exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status                                                                     exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status --porcelain                                                         exit=0
+    git status --porcelain=v2 --branch                                             exit=0
+      stdout:
+        | # branch.oid <hash>
+        | # branch.head agent/x
+    git for-each-ref --include-root-refs --format=%(refname)                       exit=0
+      stdout:
+        | HEAD
+        | ORIG_HEAD
+        | refs/heads/agent/x
+        | refs/heads/main
+        | refs/heads/side
+    git branch --list                                                              exit=0
+      stdout:
+        | * agent/x
+        | + main
+        |   side
+    git rev-parse --verify --quiet REBASE_HEAD                                     exit=1
+    git rev-parse --verify --quiet MERGE_HEAD                                      exit=1
+    git rev-parse --verify --quiet CHERRY_PICK_HEAD                                exit=1
+    git rev-parse --verify --quiet REVERT_HEAD                                     exit=1
+    git bisect log                                                                 exit=1
+    git rebase --show-current-patch                                                exit=128
+    git rev-parse --git-path rebase-merge                                          exit=0
+      stdout:
+        | <case>/repo/.git/worktrees/wt/rebase-merge
+    git -c status.displayCommentPrefix=false -c color.status=false status --long: identical with GIT_ATTR_SOURCE=yes
+  -- revert-conflict
+    git -c status.displayCommentPrefix=false -c color.status=false status --long   exit=0
+      classify: revert
+      stdout:
+        | On branch agent/x
+        | You are currently reverting commit <hash>.
+        |   (fix conflicts and run "git revert --continue")
+        |   (use "git revert --skip" to skip this patch)
+        |   (use "git revert --abort" to cancel the revert operation)
+        |
+        | Unmerged paths:
+        |   (use "git restore --staged <file>..." to unstage)
+        |   (use "git add <file>..." to mark resolution)
+        | 	both modified:   a.txt
+        |
+        | no changes added to commit (use "git add" and/or "git commit -a")
+    git status --long                                                              exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status                                                                     exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status --porcelain                                                         exit=0
+    git status --porcelain=v2 --branch                                             exit=0
+      stdout:
+        | # branch.oid <hash>
+        | # branch.head agent/x
+        | u UU N... 100644 100644 100644 100644 <hash> <hash> <hash> a.txt
+    git for-each-ref --include-root-refs --format=%(refname)                       exit=0
+      stdout:
+        | AUTO_MERGE
+        | HEAD
+        | ORIG_HEAD
+        | REVERT_HEAD
+        | refs/heads/agent/x
+        | refs/heads/main
+        | refs/heads/side
+    git branch --list                                                              exit=0
+      stdout:
+        | * agent/x
+        | + main
+        |   side
+    git rev-parse --verify --quiet REBASE_HEAD                                     exit=1
+    git rev-parse --verify --quiet MERGE_HEAD                                      exit=1
+    git rev-parse --verify --quiet CHERRY_PICK_HEAD                                exit=1
+    git rev-parse --verify --quiet REVERT_HEAD                                     exit=0
+    git bisect log                                                                 exit=1
+    git rebase --show-current-patch                                                exit=128
+    git rev-parse --git-path rebase-merge                                          exit=0
+      stdout:
+        | <case>/repo/.git/worktrees/wt/rebase-merge
+    git -c status.displayCommentPrefix=false -c color.status=false status --long: identical with GIT_ATTR_SOURCE=yes
+  -- bisect-started
+    git -c status.displayCommentPrefix=false -c color.status=false status --long   exit=0
+      classify: bisect
+      stdout:
+        | On branch agent/x
+        | You are currently bisecting, started from branch 'agent/x'.
+        |   (use "git bisect reset" to get back to the original branch)
+        |
+        | nothing to commit, working tree clean
+    git status --long                                                              exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status                                                                     exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status --porcelain                                                         exit=0
+    git status --porcelain=v2 --branch                                             exit=0
+      stdout:
+        | # branch.oid <hash>
+        | # branch.head agent/x
+    git for-each-ref --include-root-refs --format=%(refname)                       exit=0
+      stdout:
+        | HEAD
+        | ORIG_HEAD
+        | refs/heads/agent/x
+        | refs/heads/main
+        | refs/heads/side
+    git branch --list                                                              exit=0
+      stdout:
+        | * agent/x
+        | + main
+        |   side
+    git rev-parse --verify --quiet REBASE_HEAD                                     exit=1
+    git rev-parse --verify --quiet MERGE_HEAD                                      exit=1
+    git rev-parse --verify --quiet CHERRY_PICK_HEAD                                exit=1
+    git rev-parse --verify --quiet REVERT_HEAD                                     exit=1
+    git bisect log                                                                 exit=0
+    git rebase --show-current-patch                                                exit=128
+    git rev-parse --git-path rebase-merge                                          exit=0
+      stdout:
+        | <case>/repo/.git/worktrees/wt/rebase-merge
+    git -c status.displayCommentPrefix=false -c color.status=false status --long: identical with GIT_ATTR_SOURCE=yes
+  -- bisect-running
+    git -c status.displayCommentPrefix=false -c color.status=false status --long   exit=0
+      classify: bisect
+      stdout:
+        | HEAD detached at <hash>
+        | You are currently bisecting, started from branch 'agent/x'.
+        |   (use "git bisect reset" to get back to the original branch)
+        |
+        | nothing to commit, working tree clean
+    git status --long                                                              exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status                                                                     exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status --porcelain                                                         exit=0
+    git status --porcelain=v2 --branch                                             exit=0
+      stdout:
+        | # branch.oid <hash>
+        | # branch.head (detached)
+    git for-each-ref --include-root-refs --format=%(refname)                       exit=0
+      stdout:
+        | BISECT_EXPECTED_REV
+        | HEAD
+        | ORIG_HEAD
+        | refs/bisect/bad
+        | refs/bisect/good-<hash>
+        | refs/heads/agent/x
+        | refs/heads/main
+        | refs/heads/side
+    git branch --list                                                              exit=0
+      stdout:
+        | * (no branch, bisect started on agent/x)
+        |   agent/x
+        | + main
+        |   side
+    git rev-parse --verify --quiet REBASE_HEAD                                     exit=1
+    git rev-parse --verify --quiet MERGE_HEAD                                      exit=1
+    git rev-parse --verify --quiet CHERRY_PICK_HEAD                                exit=1
+    git rev-parse --verify --quiet REVERT_HEAD                                     exit=1
+    git bisect log                                                                 exit=0
+    git rebase --show-current-patch                                                exit=128
+    git rev-parse --git-path rebase-merge                                          exit=0
+      stdout:
+        | <case>/repo/.git/worktrees/wt/rebase-merge
+    git -c status.displayCommentPrefix=false -c color.status=false status --long: identical with GIT_ATTR_SOURCE=yes
+  -- am-conflict
+    git -c status.displayCommentPrefix=false -c color.status=false status --long   exit=0
+      classify: am
+      stdout:
+        | On branch agent/x
+        | You are in the middle of an am session.
+        |   (fix conflicts and then run "git am --continue")
+        |   (use "git am --skip" to skip this patch)
+        |   (use "git am --abort" to restore the original branch)
+        |
+        | nothing to commit, working tree clean
+    git status --long                                                              exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status                                                                     exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status --porcelain                                                         exit=0
+    git status --porcelain=v2 --branch                                             exit=0
+      stdout:
+        | # branch.oid <hash>
+        | # branch.head agent/x
+    git for-each-ref --include-root-refs --format=%(refname)                       exit=0
+      stdout:
+        | HEAD
+        | ORIG_HEAD
+        | refs/heads/agent/x
+        | refs/heads/main
+        | refs/heads/side
+    git branch --list                                                              exit=0
+      stdout:
+        | * agent/x
+        | + main
+        |   side
+    git rev-parse --verify --quiet REBASE_HEAD                                     exit=1
+    git rev-parse --verify --quiet MERGE_HEAD                                      exit=1
+    git rev-parse --verify --quiet CHERRY_PICK_HEAD                                exit=1
+    git rev-parse --verify --quiet REVERT_HEAD                                     exit=1
+    git bisect log                                                                 exit=1
+    git rebase --show-current-patch                                                exit=128
+    git rev-parse --git-path rebase-merge                                          exit=0
+      stdout:
+        | <case>/repo/.git/worktrees/wt/rebase-merge
+    git -c status.displayCommentPrefix=false -c color.status=false status --long: identical with GIT_ATTR_SOURCE=yes
+  -- stash-pop-conflict
+    git -c status.displayCommentPrefix=false -c color.status=false status --long   exit=0
+      classify: none
+      stdout:
+        | On branch agent/x
+        | Unmerged paths:
+        |   (use "git restore --staged <file>..." to unstage)
+        |   (use "git add <file>..." to mark resolution)
+        | 	both modified:   a.txt
+        |
+        | no changes added to commit (use "git add" and/or "git commit -a")
+    git status --long                                                              exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status                                                                     exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status --porcelain                                                         exit=0
+    git status --porcelain=v2 --branch                                             exit=0
+      stdout:
+        | # branch.oid <hash>
+        | # branch.head agent/x
+        | u UU N... 100644 100644 100644 100644 <hash> <hash> <hash> a.txt
+    git for-each-ref --include-root-refs --format=%(refname)                       exit=0
+      stdout:
+        | AUTO_MERGE
+        | HEAD
+        | ORIG_HEAD
+        | refs/heads/agent/x
+        | refs/heads/main
+        | refs/heads/side
+        | refs/stash
+    git branch --list                                                              exit=0
+      stdout:
+        | * agent/x
+        | + main
+        |   side
+    git rev-parse --verify --quiet REBASE_HEAD                                     exit=1
+    git rev-parse --verify --quiet MERGE_HEAD                                      exit=1
+    git rev-parse --verify --quiet CHERRY_PICK_HEAD                                exit=1
+    git rev-parse --verify --quiet REVERT_HEAD                                     exit=1
+    git bisect log                                                                 exit=1
+    git rebase --show-current-patch                                                exit=128
+    git rev-parse --git-path rebase-merge                                          exit=0
+      stdout:
+        | <case>/repo/.git/worktrees/wt/rebase-merge
+    git -c status.displayCommentPrefix=false -c color.status=false status --long: identical with GIT_ATTR_SOURCE=yes
+  -- checkout-m-conflict
+    git -c status.displayCommentPrefix=false -c color.status=false status --long   exit=0
+      classify: none
+      stdout:
+        | On branch other
+        | Unmerged paths:
+        |   (use "git restore --staged <file>..." to unstage)
+        |   (use "git add <file>..." to mark resolution)
+        | 	both modified:   a.txt
+        |
+        | no changes added to commit (use "git add" and/or "git commit -a")
+    git status --long                                                              exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status                                                                     exit=0
+      (stdout identical to git -c status.displayCommentPrefix=false -c color.status=false status --long)
+    git status --porcelain                                                         exit=0
+    git status --porcelain=v2 --branch                                             exit=0
+      stdout:
+        | # branch.oid <hash>
+        | # branch.head other
+        | u UU N... 100644 100644 100644 100644 <hash> <hash> <hash> a.txt
+    git for-each-ref --include-root-refs --format=%(refname)                       exit=0
+      stdout:
+        | HEAD
+        | ORIG_HEAD
+        | refs/heads/agent/x
+        | refs/heads/main
+        | refs/heads/other
+        | refs/heads/side
+        | refs/stash
+    git branch --list                                                              exit=0
+      stdout:
+        |   agent/x
+        | + main
+        | * other
+        |   side
+    git rev-parse --verify --quiet REBASE_HEAD                                     exit=1
+    git rev-parse --verify --quiet MERGE_HEAD                                      exit=1
+    git rev-parse --verify --quiet CHERRY_PICK_HEAD                                exit=1
+    git rev-parse --verify --quiet REVERT_HEAD                                     exit=1
+    git bisect log                                                                 exit=1
+    git rebase --show-current-patch                                                exit=128
+    git rev-parse --git-path rebase-merge                                          exit=0
+      stdout:
+        | <case>/repo/.git/worktrees/wt/rebase-merge
+    git -c status.displayCommentPrefix=false -c color.status=false status --long: identical with GIT_ATTR_SOURCE=yes
+
+-- Does a configuration change how the state lines are read? --
+Each configuration is set in the user's global config file. Per state, the operation classify()
+reads from plain `git status` and from the proposed argv (strict column-0 prefixes, no colour
+stripping); ESC = whether stdout contains an escape sequence in any state.
+  states: none rebase-conflict rebase-i-break merge-conflict merge-no-commit cherry-pick-sequence-resolved revert-conflict bisect-running am-conflict
+  config: (none)
+    git status correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+    proposed  correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+  config: status.displayCommentPrefix=true
+    git status MISREAD  ESC=no  none none none none none none none none none
+    proposed  correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+  config: status.displayCommentPrefix=true core.commentChar=;
+    git status MISREAD  ESC=no  none none none none none none none none none
+    proposed  correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+  config: color.status=always
+    git status correct  ESC=yes none rebase rebase unmerged merge cherry-pick revert bisect am
+    proposed  correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+  config: color.ui=always
+    git status correct  ESC=yes none rebase rebase unmerged merge cherry-pick revert bisect am
+    proposed  correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+  config: status.short=true
+    git status MISREAD  ESC=no  none none none none none none none none none
+    proposed  correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+  config: status.branch=true
+    git status correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+    proposed  correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+  config: status.relativePaths=false
+    git status correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+    proposed  correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+  config: status.showUntrackedFiles=all
+    git status correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+    proposed  correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+  config: status.aheadBehind=false
+    git status correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+    proposed  correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+  config: status.showStash=true
+    git status correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+    proposed  correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+  config: status.submoduleSummary=true
+    git status correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+    proposed  correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+  config: status.renames=false
+    git status correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+    proposed  correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+  config: advice.statusHints=false
+    git status correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+    proposed  correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+  config: advice.statusUoption=false
+    git status correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+    proposed  correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+  config: advice.statusAheadBehind=false
+    git status correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+    proposed  correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+  config: status.displayCommentPrefix=true core.commentChar=; color.ui=always color.status=always status.short=true status.branch=true status.relativePaths=false status.showUntrackedFiles=all status.showStash=true advice.statusHints=false
+    git status MISREAD  ESC=yes none none none none none none none none none
+    proposed  correct  ESC=no  none rebase rebase unmerged merge cherry-pick revert bisect am
+
+-- The proposed argv under a translated locale (rebase-conflict, line 2) --
+  LC_ALL=de_DE.UTF-8 LANGUAGE=de           exit=0 classify=none line 2: Letzter Befehl erledigt (1 Befehl erledigt):
+  LANG=de_DE.UTF-8 LANGUAGE=de LC_ALL=C    exit=0 classify=rebase line 2: Last command done (1 command done):
+
+== Step 2 (c): where must git worktree remove run? ==
+
+  cwd=worktree, path=absolute                                exit=0 worktree gone=yes branch kept=yes
+  cwd=worktree, path=.                                       exit=0 worktree gone=yes branch kept=yes
+  cwd=repository, path=absolute                              exit=0 worktree gone=yes branch kept=yes
+  cwd=repository, path=relative (../worktrees/wt)            exit=0 worktree gone=yes branch kept=yes
+  cwd=worktree root outside the repository, path=absolute    exit=128 worktree gone=no branch kept=yes
+      stderr:
+        | fatal: not a git repository (or any of the parent directories): .git
+  cwd=worktree root inside the repository, path=absolute     exit=0 worktree gone=yes branch kept=yes
+  cwd=a sibling worktree, path=absolute                      exit=0 worktree gone=yes branch kept=yes
+  dirty (modified a.txt), cwd=worktree                       exit=128 worktree gone=no branch kept=yes
+      stderr:
+        | fatal: '<case>/worktrees/wt' contains modified or untracked files, use --force to delete it
+  untracked c.txt only, cwd=worktree                         exit=128 worktree gone=no branch kept=yes
+      stderr:
+        | fatal: '<case>/worktrees/wt' contains modified or untracked files, use --force to delete it
+  untracked STATUS.md only, cwd=worktree                     exit=128 worktree gone=no branch kept=yes
+      stderr:
+        | fatal: '<case>/worktrees/wt' contains modified or untracked files, use --force to delete it
+  git clean -f -- STATUS.md exit=0 stdout: Removing STATUS.md
+  after git clean -f -- STATUS.md, cwd=worktree              exit=0 worktree gone=yes branch kept=yes
+  ignored x.o only, cwd=worktree                             exit=0 worktree gone=yes branch kept=yes
+
+== Step 2 (d): a commit on a detached HEAD ==
+
+  commit on agent/x:     for-each-ref --contains HEAD exit=0 lines=1
+      stdout:
+        | <hash> commit	refs/heads/agent/x
+  commit on detached HEAD: for-each-ref --contains HEAD exit=0 lines=0
+  commit on detached HEAD: status --porcelain exit=0 lines=0
+  commit on detached HEAD: worktree remove exit=0
+  afterwards, refs containing the detached commit: 0
+  afterwards, refs/heads, refs/tags or refs/remotes containing it: 0
+
+== Step 2 (e): untracked work under status.showUntrackedFiles=no ==
+An agent can write the shared repository config (.git/config) from its worktree; the user's global
+config can carry the same key. The unforced remove reads the same configuration.
+
+  -- repo-config: untracked c.txt and new/d.txt
+    git status --porcelain                                                     exit=0 lines=0
+    git status --porcelain --untracked-files=normal --ignore-submodules=none   exit=0 lines=2
+      stdout:
+        | ?? c.txt
+        | ?? new/
+    git worktree remove <abs path>                                             exit=0 worktree gone=yes c.txt kept=no
+  -- global-config: untracked c.txt and new/d.txt
+    git status --porcelain                                                     exit=0 lines=0
+    git status --porcelain --untracked-files=normal --ignore-submodules=none   exit=0 lines=2
+      stdout:
+        | ?? c.txt
+        | ?? new/
+    git worktree remove <abs path>                                             exit=0 worktree gone=yes c.txt kept=no
+
+== Step 2 (f): a commit reachable only from the worktree's own refs/worktree/* ==
+
+  commit on agent/x:        git for-each-ref --count=1 --contains HEAD refs/heads refs/tags refs/remotes exit=0 lines=1
+      stdout:
+        | <hash> commit	refs/heads/agent/x
+  commit on detached HEAD:  git for-each-ref --count=1 --contains HEAD refs/heads refs/tags refs/remotes exit=0 lines=0
+  after git update-ref refs/worktree/x HEAD:
+    git for-each-ref --contains HEAD                                           exit=0 lines=1
+      stdout:
+        | <hash> commit	refs/worktree/x
+    git for-each-ref --count=1 --contains HEAD refs/heads refs/tags refs/remotes exit=0 lines=0
+    git status --porcelain                                                     exit=0 lines=0
+    from the repository, worktrees/wt/refs/worktree/x resolves: exit=0
+    git worktree remove <abs path>                                             exit=0 worktree gone=yes
+    afterwards, worktrees/wt/refs/worktree/x resolves: exit=1
+    afterwards, refs containing the commit: 0
+
+== Step 3: what git worktree list --porcelain -z prints ==
+
+A repository with a worktree of each kind cleanup and the orphan list meet: on an agent branch, detached,
+locked with a reason holding a space and a line end, prunable (its directory deleted), outside the
+worktree root with a space in its path, and two whose paths hold a line end, one of them forging a
+`locked` line. Fields are shown one per line, escaped as bash's printf %q does; <end> is the empty
+field that closes a record. The /home/u prefix stands for the scratch directory, <hash> for HEAD.
+
+  checkouts: git worktree list --porcelain -z, 1131 bytes, last byte NUL: yes
+        | worktree\ /home/u/projects/contour
+        | HEAD\ <hash>
+        | branch\ refs/heads/master
+        | <end>
+        | worktree\ /home/u/my\ work/contour\ feature
+        | HEAD\ <hash>
+        | branch\ refs/heads/feature/x
+        | <end>
+        | worktree\ /home/u/worktrees/contour/detached-20261113-150847
+        | HEAD\ <hash>
+        | detached
+        | <end>
+        | $'worktree /home/u/worktrees/contour/forged\nlocked'
+        | HEAD\ <hash>
+        | branch\ refs/heads/agent/forged
+        | <end>
+        | worktree\ /home/u/worktrees/contour/issue-12-20261113-150847
+        | HEAD\ <hash>
+        | branch\ refs/heads/agent/issue-12-20261113-150847
+        | $'locked busy now\nreally'
+        | <end>
+        | worktree\ /home/u/worktrees/contour/issue-17-20261113-150847
+        | HEAD\ <hash>
+        | branch\ refs/heads/agent/issue-17-20261113-150847
+        | prunable\ gitdir\ file\ points\ to\ non-existent\ location
+        | <end>
+        | $'worktree /home/u/worktrees/contour/new\nline'
+        | HEAD\ <hash>
+        | branch\ refs/heads/agent/new-line
+        | <end>
+        | worktree\ /home/u/worktrees/contour/pr-2334-20261113-150847
+        | HEAD\ <hash>
+        | branch\ refs/heads/agent/pr-2334-20261113-150847
+        | <end>
+
+  bare: git worktree list --porcelain -z, 192 bytes, last byte NUL: yes
+        | worktree\ /home/u/projects/contour.git
+        | bare
+        | <end>
+        | worktree\ /home/u/worktrees/contour/pr-7-20261113-150847
+        | HEAD\ <hash>
+        | branch\ refs/heads/agent/pr-7-20261113-150847
+        | <end>
+
+  the same repository without -z: a line end in a path splits its line; the lock reason is quoted
+        | worktree /home/u/projects/contour
+        | HEAD <hash>
+        | branch refs/heads/master
+        |
+        | worktree /home/u/my work/contour feature
+        | HEAD <hash>
+        | branch refs/heads/feature/x
+        |
+        | worktree /home/u/worktrees/contour/detached-20261113-150847
+        | HEAD <hash>
+        | detached
+        |
+        | worktree /home/u/worktrees/contour/forged
+        | locked
+        | HEAD <hash>
+        | branch refs/heads/agent/forged
+        |
+        | worktree /home/u/worktrees/contour/issue-12-20261113-150847
+        | HEAD <hash>
+        | branch refs/heads/agent/issue-12-20261113-150847
+        | locked "busy now\nreally"
+        |
+        | worktree /home/u/worktrees/contour/issue-17-20261113-150847
+        | HEAD <hash>
+        | branch refs/heads/agent/issue-17-20261113-150847
+        | prunable gitdir file points to non-existent location
+        |
+        | worktree /home/u/worktrees/contour/new
+        | line
+        | HEAD <hash>
+        | branch refs/heads/agent/new-line
+        |
+        | worktree /home/u/worktrees/contour/pr-2334-20261113-150847
+        | HEAD <hash>
+        | branch refs/heads/agent/pr-2334-20261113-150847
+        |

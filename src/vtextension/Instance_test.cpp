@@ -25,6 +25,7 @@
 #include <vtextension/CompiledExtension.hpp>
 #include <vtextension/Engine.hpp>
 #include <vtextension/Instance.hpp>
+#include <vtextension/ThreadCpuClock.hpp>
 #include <vtextension/testing/FakeWasmBackend.hpp>
 #include <vtextension/testing/Harness.hpp>
 #include <vtextension/testing/StandardStreamsCapture.hpp>
@@ -46,7 +47,7 @@ namespace
 [[nodiscard]] std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> loadModule(
     wasm::IWasmBackend& backend, std::vector<std::byte> module)
 {
-    auto const engine = Engine::create(backend, ExtensionLimits {});
+    auto const engine = Engine::create(backend, vtextension::World::StatusLine, ExtensionLimits {});
     REQUIRE(engine.has_value());
     return CompiledExtension::load(**engine, std::move(module));
 }
@@ -58,14 +59,13 @@ namespace
                                                       ExtensionLimits limits = {})
 {
     auto const backend = wasm::makeDefaultBackend();
-    auto const engine = Engine::create(*backend, limits);
+    auto const engine = Engine::create(*backend, vtextension::World::StatusLine, limits);
     REQUIRE(engine.has_value());
     auto const compiled = CompiledExtension::load(**engine, std::move(module));
     if (!compiled)
         return compiled.error();
     auto services = vtextension::testing::FakeHostServices {};
-    auto clock = core::platform::ManualClock {};
-    return errorOf(Instance::create(**engine, **compiled, services, clock, limits));
+    return errorOf(Instance::create(**engine, **compiled, services, limits));
 }
 
 } // namespace
@@ -138,14 +138,12 @@ TEST_CASE("Instance.memoryCap.atInstantiation", "[vtextension]")
     auto limits = ExtensionLimits {};
     limits.memoryBytes = std::size_t { 32 } * 1024;
     auto const backend = wasm::makeDefaultBackend();
-    auto const engine = Engine::create(*backend, limits);
+    auto const engine = Engine::create(*backend, vtextension::World::StatusLine, limits);
     REQUIRE(engine.has_value());
     auto const compiled = CompiledExtension::load(**engine, toModule(vtextension::testing::MinimalModule));
     REQUIRE(compiled.has_value());
     auto services = vtextension::testing::FakeHostServices {};
-    auto clock = core::platform::ManualClock {};
-    CHECK(errorOf(Instance::create(**engine, **compiled, services, clock, limits))
-          == ExtensionError::OutOfMemory);
+    CHECK(errorOf(Instance::create(**engine, **compiled, services, limits)) == ExtensionError::OutOfMemory);
 }
 
 TEST_CASE("Instance.malicious", "[vtextension]")
@@ -230,20 +228,26 @@ TEST_CASE("Instance.hostCallException", "[vtextension]")
 namespace
 {
 
-/// A clock that moves an hour on from every reading to the next.
-class HastyClock final: public core::platform::IClock
+/// A thread CPU clock that moves an hour on from every reading to the next.
+class HastyCpuClock final: public IThreadCpuClock
 {
   public:
-    [[nodiscard]] core::platform::SteadyTimePoint now() const noexcept override
+    [[nodiscard]] std::optional<ThreadCpuId> currentThread() const noexcept override
+    {
+        return ThreadCpuId { .value = 1 };
+    }
+
+    [[nodiscard]] std::optional<std::chrono::nanoseconds> consumed(
+        ThreadCpuId /*thread*/) const noexcept override
     {
         auto const lock = std::scoped_lock { _mutex };
-        _now += std::chrono::hours { 1 };
-        return _now;
+        _spent += std::chrono::hours { 1 };
+        return _spent;
     }
 
   private:
     mutable std::mutex _mutex;
-    mutable core::platform::SteadyTimePoint _now;
+    mutable std::chrono::nanoseconds _spent {};
 };
 
 } // namespace
@@ -253,14 +257,15 @@ TEST_CASE("Instance.deadlineSpentBeforeCommand", "[vtextension]")
     // When the call's deadline is spent by the time the guest asks for a command, the command does
     // not run, and the call fails as overrun.
     auto const backend = wasm::makeDefaultBackend();
-    auto const engine = Engine::create(*backend, ExtensionLimits {});
+    auto const cpuClock = HastyCpuClock {};
+    auto const engine =
+        Engine::create(*backend, vtextension::World::StatusLine, ExtensionLimits {}, cpuClock);
     REQUIRE(engine.has_value());
     auto const compiled = CompiledExtension::load(**engine, toModule(vtextension::testing::MaliciousModule));
     REQUIRE(compiled.has_value());
     auto services = vtextension::testing::FakeHostServices {};
     services.commandAnswer = "";
-    auto clock = HastyClock {};
-    auto instance = Instance::create(**engine, **compiled, services, clock, ExtensionLimits {});
+    auto instance = Instance::create(**engine, **compiled, services, ExtensionLimits {});
     REQUIRE(instance.has_value());
 
     CHECK(errorOf((*instance)->render(surface(80, 10))) == ExtensionError::DeadlineExceeded);
@@ -311,13 +316,12 @@ TEST_CASE("Instance.expiredBetweenCalls", "[vtextension]")
 
     auto limits = ExtensionLimits {};
     limits.callDeadline = std::chrono::milliseconds { 20 };
-    auto const engine = Engine::create(backend, limits);
+    auto const engine = Engine::create(backend, vtextension::World::StatusLine, limits);
     REQUIRE(engine.has_value());
     auto const compiled = CompiledExtension::load(**engine, toModule(vtextension::testing::MinimalModule));
     REQUIRE(compiled.has_value());
     auto services = vtextension::testing::FakeHostServices {};
-    auto clock = core::platform::ManualClock {};
-    auto const instance = Instance::create(**engine, **compiled, services, clock, limits);
+    auto const instance = Instance::create(**engine, **compiled, services, limits);
     REQUIRE(instance.has_value());
 
     CHECK(errorOf((*instance)->render(surface(80, 1))) == ExtensionError::DeadlineExceeded);
@@ -370,15 +374,14 @@ TEST_CASE("Instance.growthRefusedInHostCallAllocation", "[vtextension]")
         };
 
         auto const limits = ExtensionLimits {};
-        auto const engine = Engine::create(backend, limits);
+        auto const engine = Engine::create(backend, vtextension::World::StatusLine, limits);
         REQUIRE(engine.has_value());
         auto const compiled =
             CompiledExtension::load(**engine, toModule(vtextension::testing::MinimalModule));
         REQUIRE(compiled.has_value());
         auto services = vtextension::testing::FakeHostServices {};
         services.snapshot.title = "a title the host must allocate for";
-        auto clock = core::platform::ManualClock {};
-        auto const instance = Instance::create(**engine, **compiled, services, clock, limits);
+        auto const instance = Instance::create(**engine, **compiled, services, limits);
         REQUIRE(instance.has_value());
 
         CHECK(errorOf((*instance)->render(surface(80, 1))) == testCase.error);
@@ -733,11 +736,11 @@ TEST_CASE("Instance.spawner.commandErrors", "[vtextension][guest]")
 TEST_CASE("Instance.spawner.deadlineStandsStill", "[vtextension][guest]")
 {
     // A command may take longer than a call's deadline: the host bounds it, not the guest's deadline.
-    // An hour passes on the instance's clock while the command runs, and the call still succeeds.
+    // Twice the deadline passes in real time while the command runs, and the call still succeeds.
     auto guest = RunningGuest(readTestModule("spawner.wasm"));
     guest.services.commandAnswer = "slow";
-    guest.services.beforeCommandAnswer = [&] {
-        guest.clock.advance(std::chrono::hours { 1 });
+    guest.services.beforeCommandAnswer = [] {
+        std::this_thread::sleep_for(2 * ExtensionLimits {}.callDeadline);
     };
     CHECK(guest.loadAndRender({}) == "ok:0:slow:");
 }

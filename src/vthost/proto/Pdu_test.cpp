@@ -13,6 +13,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -966,9 +967,9 @@ TEST_CASE("ServerHello carries the daemon's release version, defaulting to empty
 {
     auto const hello = ServerHello { .releaseVersion = "0.8.1" };
     CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).releaseVersion == "0.8.1");
-    // The release string (length byte and five characters), and the followed-workspace count, the instance
-    // and the two restored counts behind it.
-    auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, /*bytesToDrop=*/10);
+    // The release string (length byte and five characters), and the followed-workspace count, the instance,
+    // the two restored counts and the consent nonce's presence byte behind it.
+    auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, /*bytesToDrop=*/11);
     CHECK(decodeAs<ServerHello>(legacy).releaseVersion.empty());
 }
 
@@ -1043,15 +1044,41 @@ TEST_CASE("the upgrade PDUs round-trip and keep their tags", "[vthost][proto][up
 TEST_CASE("a known PDU with bytes appended by a newer peer decodes as the PDU",
           "[vthost][proto][negotiation]")
 {
-    for (auto const& [tag, pdu]: vthost::testing::everyAlternative())
+    auto examples = vthost::testing::everyAlternative();
+    // A LayoutState's appended field follows its served tabs, which a newer peer writes first (empty as a 0
+    // count): the shape with them is the one a field is appended to.
+    examples.emplace_back(PduType::LayoutState, DecodedPdu { vthost::testing::servedLayoutState() });
+    for (auto const& [tag, pdu]: examples)
     {
         INFO("PDU " << std::to_underlying(tag));
+        if (auto const* layout = std::get_if<LayoutState>(&pdu); layout != nullptr && layout->served.empty())
+            continue;
         auto const frame = encodeWithFieldAppended(pdu);
         auto const decoded = decodePdu(frame);
         REQUIRE(decoded);
         CHECK(decoded->pdu == pdu);
         CHECK(decoded->consumed == frame.size());
     }
+}
+
+TEST_CASE("a LayoutState from a newer peer appends after an empty served list", "[vthost][proto][served]")
+{
+    // The catalog's shape, without served tabs: the newer peer writes the list as a 0 count, then its field.
+    auto const examples = vthost::testing::everyAlternative();
+    auto const example =
+        std::ranges::find(examples, PduType::LayoutState, [](auto const& entry) { return entry.first; });
+    REQUIRE(example != examples.end());
+    auto const layout = std::get<LayoutState>(example->second);
+    REQUIRE(layout.served.empty());
+    auto const frame = encodeWithFieldsEdited(DecodedPdu { layout }, [](std::span<std::byte const> fields) {
+        auto grown = std::vector<std::byte>(fields.begin(), fields.end());
+        grown.push_back(std::byte { 0x00 }); // the served list: empty
+        grown.push_back(std::byte { 0x2A }); // the newer field
+        return grown;
+    });
+    CHECK(decodeAs<LayoutState>(frame) == layout);
+    CHECK(roundTrip(DecodedPdu { vthost::testing::servedLayoutState() })
+          == DecodedPdu { vthost::testing::servedLayoutState() });
 }
 
 TEST_CASE("the frame helpers build what they say", "[vthost][proto][negotiation]")
@@ -1081,10 +1108,10 @@ TEST_CASE("the frame helpers build what they say", "[vthost][proto][negotiation]
                                          .machineId = "m",
                                          .hostname = "zeta",
                                          .releaseVersion = "r" };
-        // "r", "zeta" and their lengths, the followed-workspace count, the instance and the two restored
-        // counts
-        auto const frame = encodeWithoutTrailingField(hello, 11);
-        CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 11);
+        // "r", "zeta" and their lengths, the followed-workspace count, the instance, the two restored
+        // counts and the consent nonce's presence byte
+        auto const frame = encodeWithoutTrailingField(hello, 12);
+        CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 12);
         auto expected = hello;
         expected.hostname.clear();
         expected.releaseVersion.clear();
@@ -2204,9 +2231,9 @@ TEST_CASE("ServerHello carries the selected workspace; a refusal carries none", 
     CHECK(
         std::get<ServerHello>(roundTrip(DecodedPdu { ServerHello { .agreedVersion = 0 } })).selectedWorkspace
         == 0);
-    // A daemon from before the field: the workspace, the instance and the restored counts after it are
-    // missing.
-    auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, 4);
+    // A daemon from before the field: the workspace, the instance, the restored counts and the consent
+    // nonce's presence byte after it are missing.
+    auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, 5);
     CHECK(decodeAs<ServerHello>(legacy).selectedWorkspace == 0);
 }
 
@@ -2216,7 +2243,7 @@ TEST_CASE("ServerHello carries the daemon's instance; an older daemon's reads as
         ServerHello { .agreedVersion = 4, .selectedWorkspace = 1, .daemonInstance = 0xC0FFEE'0000'0001 };
     CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).daemonInstance == 0xC0FFEE'0000'0001);
     // A daemon from before the field: the selected workspace ends the blob.
-    auto const legacy = encodeWithoutTrailingField(DecodedPdu { ServerHello { .agreedVersion = 4 } }, 3);
+    auto const legacy = encodeWithoutTrailingField(DecodedPdu { ServerHello { .agreedVersion = 4 } }, 4);
     auto const decoded = decodeAs<ServerHello>(legacy);
     CHECK(decoded.daemonInstance == 0);
     CHECK(decoded.agreedVersion == 4);
@@ -2231,8 +2258,8 @@ TEST_CASE("ServerHello carries what a restore brought back; an older daemon's re
     CHECK(decoded.restoredWorkspaces == 2);
     CHECK(decoded.restoredTabs == 7);
     CHECK(decoded.daemonInstance == 7);
-    // A daemon from before the fields: the two varints at the blob's end are missing.
-    auto const legacy = decodeAs<ServerHello>(encodeWithoutTrailingField(DecodedPdu { hello }, 2));
+    // A daemon from before the fields: the two varints, and the presence byte after them, are missing.
+    auto const legacy = decodeAs<ServerHello>(encodeWithoutTrailingField(DecodedPdu { hello }, 3));
     CHECK(legacy.restoredWorkspaces == 0);
     CHECK(legacy.restoredTabs == 0);
     CHECK(legacy.daemonInstance == 7);
@@ -3082,6 +3109,63 @@ TEST_CASE("LayoutState carries the served edit, and a body from before it reads 
     CHECK(roundTrip(DecodedPdu { unstamped }) == DecodedPdu { unstamped });
 }
 
+TEST_CASE("LayoutState carries the served tabs after the served edit", "[vthost][proto][served]")
+{
+    auto const tab = WireTab { .tabId = 3, .activePane = 1, .root = WirePane { .paneId = 1, .session = 9 } };
+    auto const mark =
+        WireServedMark { .extension = "orchestrator", .title = "Agents", .moduleDigest = "3f9a0c1d2e4b5a69" };
+    auto const served = LayoutState { .workspace = 2,
+                                      .activeTab = 0,
+                                      .tabs = { tab },
+                                      .servedEdit = 7,
+                                      .served = { { .tabId = 3, .mark = mark } } };
+    CHECK(roundTrip(DecodedPdu { served }) == DecodedPdu { served });
+
+    // The list, as its sender appends it: its count, then the tab and its mark's three strings.
+    auto const listBytes = std::size_t { 1 + 1 } + (1 + mark.extension.size()) + (1 + mark.title.size())
+                           + (1 + mark.moduleDigest.size());
+
+    SECTION("an older sender's body ends before the list, which reads as empty")
+    {
+        auto withoutList = served;
+        withoutList.served.clear();
+        CHECK(decodeAs<LayoutState>(encodeWithoutTrailingField(DecodedPdu { served }, listBytes))
+              == withoutList);
+        CHECK(roundTrip(DecodedPdu { withoutList }) == DecodedPdu { withoutList });
+    }
+
+    SECTION("without the served edit, 0 is written before the list, and read back")
+    {
+        auto unstamped = served;
+        unstamped.servedEdit = std::nullopt;
+        auto expected = served;
+        expected.servedEdit = 0;
+        CHECK(roundTrip(DecodedPdu { unstamped }) == DecodedPdu { expected });
+        // 0 is one varint byte: dropping it with the list leaves the body of a sender from before both.
+        auto bare = served;
+        bare.servedEdit = std::nullopt;
+        bare.served.clear();
+        CHECK(decodeAs<LayoutState>(encodeWithoutTrailingField(DecodedPdu { unstamped }, listBytes + 1))
+              == bare);
+    }
+
+    SECTION("an empty list writes nothing: the body is the one without it")
+    {
+        auto empty = served;
+        empty.served.clear();
+        CHECK(bodyOf(DecodedPdu { empty }).size() + listBytes == bodyOf(DecodedPdu { served }).size());
+    }
+
+    SECTION("a list naming more tabs than the layout holds is malformed")
+    {
+        auto overfull = served;
+        overfull.served.push_back(overfull.served.front());
+        auto stream = Writer {};
+        encodePdu(stream, 1, DecodedPdu { overfull });
+        CHECK(decodePdu(stream.view()).error() == DecodeError::MalformedPdu);
+    }
+}
+
 TEST_CASE("the TabEditAcks capability is pinned", "[vthost][proto][tab-edit-acks]")
 {
     STATIC_CHECK(std::to_underlying(Capability::TabEditAcks) == 14);
@@ -3324,6 +3408,9 @@ TEST_CASE("Pdu.Input.kindRoundTripsWithAndWithoutCapability", "[vthost][proto][i
     auto const typed = Input { .session = 7, .data = bytes("ls\r"), .kind = InputKind::Keyboard };
     CHECK(roundTrip(DecodedPdu { other }) == DecodedPdu { other });
     CHECK(roundTrip(DecodedPdu { typed }) == DecodedPdu { typed });
+    auto const clicked =
+        Input { .session = 7, .data = bytes("\x1b[<0;1;1M"), .kind = InputKind::ButtonPress };
+    CHECK(roundTrip(DecodedPdu { clicked }) == DecodedPdu { clicked });
 
     // Without the capability a client sends Other, whose bytes are what an older client sends: no kind byte.
     auto const legacy = bodyOf(DecodedPdu { other });
@@ -3506,4 +3593,134 @@ TEST_CASE("the WorkspaceMeta of a named workspace is pinned", "[vthost][pdu][enc
     CHECK(decoded == meta);
     CHECK(decoded.name == "ops");
     CHECK(decoded.position == 5);
+}
+
+TEST_CASE("the daemon extension consent PDUs are tags 63 to 65 and round-trip", "[vthost][pdu][consent]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::ExtensionPermissionRequest) == 63);
+    STATIC_CHECK(std::to_underlying(PduType::ExtensionPermissionReply) == 64);
+    STATIC_CHECK(std::to_underlying(PduType::ExtensionPermissionSettled) == 65);
+
+    auto const request = DecodedPdu { ExtensionPermissionRequest {
+        .name = "orchestrator",
+        .grantDigest = "9a1b",
+        .title = "“orchestrator” wants to run in the background",
+        .lines = { WireConsentLine { .text = "Module: orchestrator@/x.wasm", .weight = 0 },
+                   WireConsentLine { .text = "gh-auth (short, in repos): gh auth status", .weight = 1 } } } };
+    CHECK(roundTrip(request) == request);
+    auto const reply = DecodedPdu { ExtensionPermissionReply {
+        .name = "orchestrator", .grantDigest = "9a1b", .grantState = 1 } };
+    CHECK(roundTrip(reply) == reply);
+    CHECK(vthost::grantStateOf(std::get<ExtensionPermissionReply>(roundTrip(reply)).grantState)
+          == vthost::GrantState::Granted);
+    auto const settled =
+        DecodedPdu { ExtensionPermissionSettled { .name = "orchestrator", .grantDigest = "9a1b" } };
+    CHECK(roundTrip(settled) == settled);
+
+    // A body cut short is malformed.
+    auto cut = Writer {};
+    cut.string("orchestrator");
+    CHECK_FALSE(decodePdu(frameOf(PduType::ExtensionPermissionSettled, cut.view())).has_value());
+    CHECK_FALSE(decodePdu(frameOf(PduType::ExtensionPermissionReply, cut.view())).has_value());
+}
+
+TEST_CASE("the consent proof is tag 66; the hello carries the nonce it answers", "[vthost][pdu][consent]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::ConsentProof) == 66);
+    auto proof = ConsentProof {};
+    proof.mac.fill(std::byte { 0xA5 });
+    CHECK(roundTrip(DecodedPdu { proof }) == DecodedPdu { proof });
+
+    auto hello = ServerHello { .layout = HelloLayout::Negotiating, .agreedVersion = 1 };
+    CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).consentNonce == std::nullopt);
+    auto nonce = std::array<std::byte, 32> {};
+    nonce.fill(std::byte { 0x3C });
+    hello.consentNonce = nonce;
+    CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).consentNonce == nonce);
+}
+
+TEST_CASE("the extension presence PDUs are tags 67 to 69 and round-trip", "[vthost][pdu][presence][proto]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::ExtensionPresence) == 67);
+    STATIC_CHECK(std::to_underlying(PduType::InvokeExtensionAction) == 68);
+    STATIC_CHECK(std::to_underlying(PduType::RevealPane) == 69);
+
+    auto const presence = DecodedPdu { ExtensionPresence {
+        .extensions = {
+            WireExtensionPresence {
+                .extension = "orchestrator",
+                .title = "Agents",
+                .state = WirePresenceState::Running,
+                .rows = { WireActionRow { .id = "open", .title = "Open Agents" },
+                          WireActionRow { .id = "refresh", .title = "Refresh Agents" },
+                          WireActionRow { .id = "show-blocked", .title = "Show blocked runs" } } },
+            WireExtensionPresence { .extension = "notes",
+                                    .title = "notes",
+                                    .state = WirePresenceState::AwaitingGrant,
+                                    .rows = {} } } } };
+    CHECK(roundTrip(presence) == presence);
+    auto const invoke =
+        DecodedPdu { InvokeExtensionAction { .extension = "orchestrator", .action = "open" } };
+    CHECK(roundTrip(invoke) == invoke);
+    auto const reveal = DecodedPdu { RevealPane { .session = 42 } };
+    CHECK(roundTrip(reveal) == reveal);
+
+    // A state byte no enumerator has reads as Unavailable: nothing an invocation could do.
+    auto unknown = Writer {};
+    unknown.varint(1);
+    unknown.string("x");
+    unknown.string("x");
+    unknown.u8(0xEE);
+    unknown.varint(0);
+    auto const decoded = decodePdu(frameOf(PduType::ExtensionPresence, unknown.view()));
+    REQUIRE(decoded.has_value());
+    CHECK(std::get<ExtensionPresence>(decoded->pdu).extensions.at(0).state == WirePresenceState::Unavailable);
+
+    // A body cut short is malformed.
+    auto cut = Writer {};
+    cut.string("orchestrator");
+    CHECK_FALSE(decodePdu(frameOf(PduType::InvokeExtensionAction, cut.view())).has_value());
+    CHECK_FALSE(decodePdu(frameOf(PduType::ExtensionPresence, cut.view())).has_value());
+}
+
+TEST_CASE("OpenUrl is tag 70 and round-trips", "[vthost][pdu][presence][proto]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::OpenUrl) == 70);
+    auto const open =
+        DecodedPdu { OpenUrl { .url = "https://github.com/contour-terminal/contour/pull/2369" } };
+    CHECK(roundTrip(open) == open);
+    CHECK_FALSE(decodePdu(frameOf(PduType::OpenUrl, {})).has_value());
+}
+
+namespace
+{
+/// What InvokeExtensionAction must stay: two names and nothing else.
+struct TwoStrings
+{
+    std::string first;
+    std::string second;
+};
+} // namespace
+
+TEST_CASE("InvokeExtensionAction has no arguments", "[vthost][pdu][presence][proto]")
+{
+    STATIC_CHECK(std::is_aggregate_v<InvokeExtensionAction>);
+    STATIC_CHECK(sizeof(InvokeExtensionAction) == sizeof(TwoStrings));
+
+    auto body = Writer {};
+    body.string("orchestrator");
+    body.string("open");
+    auto trailing = Writer {};
+    trailing.string("orchestrator");
+    trailing.string("open");
+    trailing.u8(0x01);
+    trailing.u8(0x02);
+    trailing.u8(0x03);
+    auto const plain = decodePdu(frameOf(PduType::InvokeExtensionAction, body.view()));
+    auto const extended = decodePdu(frameOf(PduType::InvokeExtensionAction, trailing.view()));
+    REQUIRE(plain.has_value());
+    REQUIRE(extended.has_value());
+    CHECK(extended->pdu == plain->pdu);
+    CHECK(std::get<InvokeExtensionAction>(extended->pdu)
+          == InvokeExtensionAction { .extension = "orchestrator", .action = "open" });
 }

@@ -50,6 +50,7 @@ class FakeDisplaySurface final: public session::DisplaySurface
     std::vector<input::MouseCursorShape> cursorShapes;
     std::vector<vtrasterizer::FontDescriptions> fontsSet;
     std::vector<text::FontSize> fontSizesRequested;
+    std::vector<vtrasterizer::BoxDrawingStyle> boxDrawingStylesSet;
     std::vector<std::pair<vtbackend::LineCount, vtbackend::ColumnCount>> pageResizeRequests;
     std::vector<std::pair<vtbackend::Width, vtbackend::Height>> pixelResizeRequests;
     std::vector<std::pair<vtrasterizer::Decorator, vtrasterizer::Decorator>> hyperlinkDecorations;
@@ -147,6 +148,10 @@ class FakeDisplaySurface final: public session::DisplaySurface
     {
         fontSizesRequested.push_back(newFontSize);
         return fontSizeApplies;
+    }
+    void setBoxDrawingStyle(vtrasterizer::BoxDrawingStyle style) override
+    {
+        boxDrawingStylesSet.push_back(style);
     }
     void setHyperlinkDecoration(vtrasterizer::Decorator normal, vtrasterizer::Decorator hover) override
     {

@@ -139,6 +139,19 @@ enum class Capability : uint8_t
     /// in WorkspaceMeta's colour field, in full and as a delta on each change. Without it a client does not
     /// send the PDU, and the daemon states no colour to it, so an older client's metadata is what it was.
     WorkspaceColor = 33,
+    /// The peer reads the daemon-scoped extensions' consent PDUs (ExtensionPermissionRequest, -Reply,
+    /// -Settled): a client that can ask its user in a window offers it. A client without it is never asked,
+    /// and a reply from it is ignored -- only a window may grant a daemon extension.
+    DaemonExtensionConsent = 34,
+    /// The peer reads the daemon extensions' palette PDUs (ExtensionPresence, InvokeExtensionAction,
+    /// RevealPane) and the served tabs trailing LayoutState: a client with a command palette offers it. A
+    /// client without it is never sent the extensions' rows or which tabs they serve, and an invocation from
+    /// it is dropped.
+    ExtensionPresence = 35,
+    /// The peer reads OpenUrl: a client that can open a web link on its own machine, as following a hyperlink
+    /// there does, offers it. A daemon sends a daemon extension's url-open only to such a client, and the
+    /// extension is told `not-supported-yet` for any other.
+    UrlOpen = 36,
 };
 
 /// One row of the table naming a Capability.
@@ -181,6 +194,9 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::LaunchFirstTab, .name = "launch-first-tab" },
     CapabilityRow { .capability = Capability::Names, .name = "names" },
     CapabilityRow { .capability = Capability::WorkspaceColor, .name = "workspace-color" },
+    CapabilityRow { .capability = Capability::DaemonExtensionConsent, .name = "daemon-extension-consent" },
+    CapabilityRow { .capability = Capability::ExtensionPresence, .name = "extension-presence" },
+    CapabilityRow { .capability = Capability::UrlOpen, .name = "url-open" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

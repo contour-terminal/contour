@@ -3,13 +3,17 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <filesystem>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <vtextension/ExtensionComposition.hpp>
+#include <vtextension/ExtensionError.hpp>
+#include <vtextension/testing/TestModules.hpp>
 
 using core::platform::testing::FileEntry;
 using core::platform::testing::InMemoryFileSystem;
@@ -131,4 +135,33 @@ TEST_CASE("ExtensionComposition: a profile's extensions, as a pane runs them", "
         CHECK(composed.diagnostics[0].contains("weather"));
         CHECK(composed.diagnostics[1].contains("gone.wasm"));
     }
+}
+
+TEST_CASE("ExtensionComposition: a daemon module under a profile is diagnosed and not run",
+          "[vtextension][extensions][daemon]")
+{
+    auto const daemonModule = vtextension::testing::daemonProbe();
+    auto fileSystem = installed();
+    auto text = std::string(daemonModule.size(), '\0');
+    std::ranges::transform(daemonModule, text.begin(), [](std::byte b) { return static_cast<char>(b); });
+    fileSystem.addFile(userModule().parent_path() / "orchestrator.wasm", std::move(text));
+    auto const directories = std::array { bundledDirectory() };
+    auto const lookup = ExtensionModuleLookup { .fileSystem = fileSystem, .bundledDirectories = directories };
+
+    auto declared = DeclaredExtensions {};
+    declared.extensions.push_back(
+        DeclaredExtension { .name = "orchestrator",
+                            .path = userModule().parent_path() / "orchestrator.wasm",
+                            .config = {},
+                            .runCommand = CommandPermission::Ask });
+    declared.extensions.push_back(bundled("git"));
+
+    auto const composed = composeExtensions(declared, lookup, {}, {});
+    REQUIRE(composed.host.extensions.size() == 2);
+    CHECK(composed.host.extensions[0].module.empty());
+    CHECK(composed.host.extensions[0].moduleError == vtextension::ExtensionError::WorldMismatch);
+    CHECK(composed.host.extensions[1].module == bytesOf("GIT"));
+    REQUIRE(composed.diagnostics.size() == 1);
+    CHECK(composed.diagnostics[0].contains(
+        "`orchestrator` is a daemon extension: configure it under `daemon.extensions.orchestrator`"));
 }

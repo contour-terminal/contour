@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <array>
 #include <format>
+#include <span>
+#include <string>
 #include <utility>
 
 #include <vtcontrol/Catalog.hpp>
@@ -29,37 +31,6 @@ namespace
         LogLevelName { .level = LogLevel::Error, .name = "error" },
     };
 
-    /// A range of code points, both ends included.
-    struct CodePointRange
-    {
-        char32_t first;
-        char32_t last;
-    };
-
-    /// What neutralizedForDisplay() shows as code points: what renders as nothing or as something else,
-    /// and what reorders or breaks the text around it.
-    constexpr auto DisguisingCodePoints = std::array {
-        CodePointRange { .first = 0x0000, .last = 0x001F },   // C0 controls
-        CodePointRange { .first = 0x007F, .last = 0x009F },   // DEL, C1 controls
-        CodePointRange { .first = 0x00AD, .last = 0x00AD },   // soft hyphen
-        CodePointRange { .first = 0x061C, .last = 0x061C },   // Arabic letter mark
-        CodePointRange { .first = 0x180E, .last = 0x180E },   // Mongolian vowel separator
-        CodePointRange { .first = 0x200B, .last = 0x200F },   // zero-width space/joiners, LRM, RLM
-        CodePointRange { .first = 0x2028, .last = 0x202E },   // line/paragraph separators, embeddings
-        CodePointRange { .first = 0x2060, .last = 0x2064 },   // word joiner, invisible operators
-        CodePointRange { .first = 0x2066, .last = 0x206F },   // isolates, deprecated format characters
-        CodePointRange { .first = 0xFEFF, .last = 0xFEFF },   // zero-width no-break space
-        CodePointRange { .first = 0xFFF9, .last = 0xFFFB },   // interlinear annotation
-        CodePointRange { .first = 0xE0000, .last = 0xE007F }, // tag characters
-    };
-
-    [[nodiscard]] bool disguises(char32_t codePoint) noexcept
-    {
-        return std::ranges::any_of(DisguisingCodePoints, [codePoint](CodePointRange const& range) {
-            return codePoint >= range.first && codePoint <= range.last;
-        });
-    }
-
     [[nodiscard]] bool needsQuotes(std::string_view element) noexcept
     {
         return element.empty() || element.contains(' ');
@@ -80,7 +51,7 @@ std::string neutralizedForDisplay(std::string_view text)
             continue;
         }
         auto const [codePoint, length] = *decoded;
-        if (disguises(codePoint))
+        if (disguisesText(codePoint))
             shown += std::format("<U+{:04X}>", static_cast<uint32_t>(codePoint));
         else
             shown += text.substr(0, length);
@@ -98,17 +69,54 @@ std::string extensionLogLine(std::string_view name, LogLevel level, std::string_
                        neutralizedForDisplay(message));
 }
 
+namespace
+{
+    /// @return @p argv as displayedCommandLine() shows a command's.
+    [[nodiscard]] std::string displayedArgv(std::span<std::string const> argv)
+    {
+        auto line = std::string {};
+        for (auto const& element: argv)
+        {
+            if (!line.empty())
+                line += ' ';
+            auto const shown = neutralizedForDisplay(element);
+            line += needsQuotes(element) ? std::format("'{}'", shown) : shown;
+        }
+        return line;
+    }
+
+    /// How the daemon question names a command's timeout class.
+    struct TimeoutWord
+    {
+        CommandTimeout timeout;
+        std::string_view word;
+    };
+
+    inline constexpr auto TimeoutWords = std::array {
+        TimeoutWord { .timeout = CommandTimeout::Short, .word = "short" },
+        TimeoutWord { .timeout = CommandTimeout::Long, .word = "long" },
+    };
+
+    /// @return The word for @p timeout.
+    [[nodiscard]] std::string_view timeoutWordOf(CommandTimeout timeout) noexcept
+    {
+        auto const row = std::ranges::find(TimeoutWords, timeout, &TimeoutWord::timeout);
+        return row != TimeoutWords.end() ? row->word : std::string_view { "?" };
+    }
+
+    /// @return How a root's directory line names it: its label, and that it is created when declared so.
+    [[nodiscard]] std::string directoryLabelOf(Manifest const& manifest, std::string_view label)
+    {
+        auto const declared = std::ranges::find(manifest.roots, label, &RootDecl::label);
+        auto const created =
+            declared != manifest.roots.end() && declared->creation == RootCreation::CreateIfMissing;
+        return std::format("{}{}", neutralizedForDisplay(label), created ? ", created if missing" : "");
+    }
+} // namespace
+
 std::string displayedCommandLine(DeclaredCommand const& command)
 {
-    auto line = std::string {};
-    for (auto const& element: command.argvTemplate)
-    {
-        if (!line.empty())
-            line += ' ';
-        auto const shown = neutralizedForDisplay(element);
-        line += needsQuotes(element) ? std::format("'{}'", shown) : shown;
-    }
-    return line;
+    return displayedArgv(command.argvTemplate);
 }
 
 ConsentQuestion consentQuestion(ExtensionConsentRequest const& request)
@@ -142,6 +150,70 @@ ConsentQuestion consentQuestion(ExtensionConsentRequest const& request)
                          weight == vtcontrol::ConsentWeight::CanRunCommands ? " (can run commands)" : ""),
              weight);
     }
+    return question;
+}
+
+ConsentQuestion daemonConsentQuestion(DaemonConsentRequest const& request)
+{
+    using vtcontrol::ConsentWeight;
+    auto const& manifest = request.manifest;
+    auto question = ConsentQuestion {
+        .title = std::format("“{}” wants to run in the background", neutralizedForDisplay(manifest.name)),
+        .lines = {},
+    };
+    auto const line = [&question](std::string text, ConsentWeight weight) {
+        question.lines.push_back(ConsentLine { .text = std::move(text), .weight = weight });
+    };
+    line(std::format("Module: {}", neutralizedForDisplay(request.hostId)), ConsentWeight::Observes);
+    for (auto const& root: request.roots)
+        for (auto const& path: root.paths)
+            line(std::format("Directory ({}): {}",
+                             directoryLabelOf(manifest, root.label),
+                             neutralizedForDisplay(path)),
+                 ConsentWeight::Observes);
+    // What a program runs with steers what it runs: every variable is shown, beneath what it is set for.
+    auto const environment = [&line](std::span<EnvironmentEntry const> entries) {
+        for (auto const& [name, value]: entries)
+            line(std::format("  {}={}", neutralizedForDisplay(name), neutralizedForDisplay(value)),
+                 ConsentWeight::CanRunCommands);
+    };
+    if (!manifest.commands.empty())
+        line("It may run only these, which can reach the network as you:", ConsentWeight::Observes);
+    if (!manifest.commands.empty() && !manifest.commandEnvironment.empty())
+    {
+        line("Each of them with:", ConsentWeight::CanRunCommands);
+        environment(manifest.commandEnvironment);
+    }
+    for (auto const& command: manifest.commands)
+    {
+        line(std::format("{} ({}, in {}): {}",
+                         neutralizedForDisplay(command.name),
+                         timeoutWordOf(command.timeout),
+                         neutralizedForDisplay(command.root),
+                         displayedArgv(command.argvTemplate)),
+             ConsentWeight::CanRunCommands);
+        environment(command.environment);
+    }
+    for (auto const& pane: manifest.panes)
+    {
+        line(std::format("It may open tabs running: {} (in {}): {}",
+                         neutralizedForDisplay(pane.name),
+                         neutralizedForDisplay(pane.root),
+                         displayedArgv(pane.argvTemplate)),
+             ConsentWeight::CanRunCommands);
+        environment(pane.environment);
+    }
+    if (manifest.paneInput == PaneInput::Typed)
+        line("It may type text you write into those tabs, or press a number key you choose, when you send it "
+             "from its own tab",
+             ConsentWeight::CanRunCommands);
+    for (auto const& root: manifest.readableRoots)
+        line(std::format("It may read files in: {}", neutralizedForDisplay(root)), ConsentWeight::Observes);
+    if (manifest.servedScheme)
+        line(std::format("It shows its own tab: {}://", neutralizedForDisplay(*manifest.servedScheme)),
+             ConsentWeight::Observes);
+    if (manifest.urlOpening == UrlOpening::Allowed)
+        line("It may ask your terminal to open web links you choose", ConsentWeight::Observes);
     return question;
 }
 

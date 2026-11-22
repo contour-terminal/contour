@@ -907,26 +907,37 @@ TEST_CASE("Headless, the split chrome is the configured row's tokens at one pixe
     auto app = TestApp(
         nullptr, nullptr, nullptr, nullptr, TestApp::testHostIdentity(), nullptr, {}, nullptr, services);
     auto const row = contour::config::resolveChromeStyle(app.app().config().uiStyle.value(), Host);
-    auto const expected = contour::window::splitChromeOf(
+    // A served pane's header, which keeps the row's own height whatever the density.
+    auto const alwaysHeaderAt = [&](double devicePixelRatio) {
+        return contour::window::splitChromeOf(contour::config::ChromeTokenRows[static_cast<std::size_t>(row)],
+                                              1.0,
+                                              1.0,
+                                              devicePixelRatio)
+            .leafHeader;
+    };
+    auto expected = contour::window::splitChromeOf(
         contour::config::resolveChromeTokens(
             row, app.app().accessibilityPreferences(), app.app().config().chromeDensity.value()),
         1.0,
         1.0,
         1.25);
+    expected.alwaysHeader = alwaysHeaderAt(1.25);
     CHECK(app.app().splitChrome(1.25) == expected);
     // And the ratio is the one asked about: the card's inset is counted on that device grid, which at
     // 1.25 is not what it is at 1.
-    auto const atOne = contour::window::splitChromeOf(
+    auto atOne = contour::window::splitChromeOf(
         contour::config::resolveChromeTokens(
             row, app.app().accessibilityPreferences(), app.app().config().chromeDensity.value()),
         1.0,
         1.0,
         1.0);
+    atOne.alwaysHeader = alwaysHeaderAt(1.0);
     REQUIRE(atOne != expected);
     CHECK(app.app().splitChrome(1.0) == atOne);
     // A card's header and inset are part of it, so a split leaf's window grows by more than the gap.
     CHECK(expected.leafHeader > 0);
     CHECK(expected.rootInset > 0);
+    CHECK(expected.alwaysHeader > 0);
 }
 
 namespace

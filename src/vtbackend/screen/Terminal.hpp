@@ -1056,6 +1056,9 @@ class Terminal: public IStatusLinePublishTarget
     /// @param extensionServices The status-line extensions to show and to tell about state changes; absent,
     ///                        `{Extension}` items render empty and every event hook is one untaken branch.
     ///                        The lifetime rules are StatusLineExtensionServices'.
+    /// @param daemonSummaries What the daemon's daemon-scoped extensions publish, for `{DaemonExtension}`
+    ///                        items; null in a terminal no daemon hosts (the GUI's own), where they render
+    ///                        empty. Borrowed: it must outlive the terminal.
     /// @param gitServices     Where `{Git}` looks up the branch, off the state lock; absent, `{Git}` shows
     ///                        nothing and nothing is read. The lifetime rules are GitHeadServices'. A
     ///                        ThreadPoolExecutor that was stopped runs what is submitted to it inline, so a
@@ -1071,6 +1074,7 @@ class Terminal: public IStatusLinePublishTarget
              SemanticBlockTokenSource sessionTokens,
              std::optional<LinkDetectionServices> linkServices = std::nullopt,
              std::optional<StatusLineExtensionServices> extensionServices = std::nullopt,
+             IDaemonExtensionSummaries const* daemonSummaries = nullptr,
              std::optional<GitHeadServices> gitServices = std::nullopt);
 
     /// Revokes the extensions' publish sink first, waiting for a delivery in flight, so that none reaches a
@@ -1546,6 +1550,13 @@ class Terminal: public IStatusLinePublishTarget
     /// @return Its frame's text; empty before the first frame, or without extension services.
     [[nodiscard]] std::string statusLineExtensionText(StatusLineDefinitions::Extension const& item) const;
 
+    /// What a `{DaemonExtension}` status-line item shows: the summary its daemon-scoped extension last
+    /// published, or why it failed.
+    /// @param item The item.
+    /// @return The text as the daemon gave it; empty without daemon summaries, or before the first.
+    [[nodiscard]] std::string statusLineDaemonExtensionText(
+        StatusLineDefinitions::DaemonExtension const& item) const;
+
     /// Tells the terminal that an extension published a frame, or changed its subscriptions: refreshes the
     /// cached subscriptions and asks for a repaint of the status line.
     ///
@@ -1568,10 +1579,15 @@ class Terminal: public IStatusLinePublishTarget
     void refreshIndicatorStatusLine();
 
     /// @return Whether the indicator status line shows what only this terminal knows, and a client mirroring
-    ///         it cannot: a take-over extension, an `{Extension}` item of its template, or a `{UserVar}`
-    ///         item (the client runs no parser, so it never sees the program's SetUserVar). Call with the
-    ///         state lock held.
+    ///         it cannot: a take-over extension, an `{Extension}` item of its template, a `{DaemonExtension}`
+    ///         item while the daemon's summaries are at hand, or a `{UserVar}` item (the client runs no
+    ///         parser, so it never sees the program's SetUserVar). Call with the state lock held.
     [[nodiscard]] bool indicatorStatusLineDependsOnHostState() const noexcept;
+
+    /// @return Whether the indicator status line's template holds a `{DaemonExtension}` item while the
+    ///         daemon's summaries are at hand: what a published summary must repaint. Call with the state
+    ///         lock held.
+    [[nodiscard]] bool indicatorStatusLineShowsDaemonSummaries() const noexcept;
 
     /// Shows @p row as the indicator status line in place of its template and of any take-over, until told
     /// none: what a mirror shows of the row its host drew. Call with the state lock held.
@@ -4158,6 +4174,9 @@ class Terminal: public IStatusLinePublishTarget
         return _userInputLock.load(std::memory_order_relaxed);
     }
 
+    /// @return What reads the keys typed into this terminal. @see Settings::inputReader
+    [[nodiscard]] InputReader inputReader() const noexcept { return _settings.inputReader; }
+
     /// Searches backwards for the word vi's `*` and `#` took from under the cursor: installs @p text as the
     /// pattern (SearchOrigin::WordUnderCursor, so always literal) and moves the viewport to make the match
     /// visible. Every search reads the page on display, the one the viewport shows.
@@ -4455,11 +4474,14 @@ class Terminal: public IStatusLinePublishTarget
     [[nodiscard]] ScreenNotification markScreenChanged();
 
     /// The frames one repaint of the indicator status line reads, at most one per extension name: what
-    /// statusLineExtensionText() reads while updateIndicatorStatusLine() runs.
+    /// statusLineExtensionText() and statusLineDaemonExtensionText() read while updateIndicatorStatusLine()
+    /// runs.
     struct StatusLineExtensionFrame
     {
         std::vector<std::pair<std::string_view, std::shared_ptr<StatusLineExtensionSnapshot const>>>
             snapshots;
+        /// The daemon-scoped extensions' summaries, each read once.
+        std::vector<std::pair<std::string_view, std::string>> summaries;
     };
 
     /// The take-over extension's frame @p snapshot, as the indicator row shows it: its top row with every
@@ -6019,7 +6041,8 @@ class Terminal: public IStatusLinePublishTarget
 
     InputGenerator _inputGenerator {};
     /// Keyboard while the bytes _inputGenerator holds include a key event, a paste or a user's raw input,
-    /// Other once they are all sent: what flushInput() tells the device they carry. Under _inputMutex.
+    /// else ButtonPress while they include the report of a mouse button pressed, Other once they are all
+    /// sent: what flushInput() tells the device they carry. Under _inputMutex.
     vtpty::InputKind _pendingInputKind = vtpty::InputKind::Other;
 
     ViCommands _viCommands;
@@ -6537,6 +6560,10 @@ class Terminal: public IStatusLinePublishTarget
     /// to this terminal in the constructor, revoked in the destructor.
     /// Not captured: wiring.
     StatusLinePublishSink* _publishSink;
+
+    /// What `{DaemonExtension}` items read; null in a terminal no daemon hosts. Fixed at construction.
+    /// Not captured: wiring.
+    IDaemonExtensionSummaries const* _daemonSummaries;
 
     /// The event kinds newly subscribed to whose current state the extensions are yet to be told. Set by
     /// statusLineExtensionsPublished() on an extension worker, which reads no terminal state; drained by the

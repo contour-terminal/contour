@@ -60,6 +60,7 @@ TEST_CASE("UiStyle: every style has a token row", "[uistyle]")
         CHECK(tokens.trafficLightGapUnits >= 0);
         CHECK(!tokens.closeGlyph.empty());
         CHECK(!tokens.zoomGlyph.empty());
+        CHECK(tokens.servedGlyph == contour::config::ServedTabGlyph);
         CHECK(!tokens.newTabGlyph.empty());
         CHECK(!tokens.menuGlyph.empty());
         // A sub-menu row that draws no marker is indistinguishable from one that runs a command.

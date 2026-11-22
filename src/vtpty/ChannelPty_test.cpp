@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <tuple>
 #include <vector>
@@ -81,6 +82,19 @@ TEST_CASE("EOF is reported only once closed and drained", "[vtpty][channelpty]")
     CHECK(pty.isClosed());
     // The fed data still drains first; only then does read report EOF.
     CHECK(readAll(pty, 100ms) == "tail");
+    CHECK(readAll(pty, 100ms).empty());
+    pty.waitForClosed();
+}
+
+TEST_CASE("output fed after the close is dropped", "[vtpty][channelpty]")
+{
+    auto pty = ChannelPty { testPageSize() };
+    pty.feed("before");
+    pty.close();
+    pty.feed(std::string(4096, 'x'));
+    pty.feedReplay("replayed");
+    CHECK(pty.bufferedOutputBytes() == std::string_view { "before" }.size());
+    CHECK(readAll(pty, 100ms) == "before");
     CHECK(readAll(pty, 100ms).empty());
     pty.waitForClosed();
 }

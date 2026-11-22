@@ -64,13 +64,18 @@ Item {
     // window-size solver counts it (window::splitChromeOf).
     readonly property real contentInset: isCard ? chromeStyle.paneCardContentInset(Screen.devicePixelRatio) : 0
 
+    // What draws the pane (window::PaneSource): a daemon-scoped extension when its session names one in a
+    // strip, a program otherwise.
+    readonly property int paneSource: session && (session.servedStrip ?? "") !== "" ? chromeStyle.paneSources.served
+                                                                                     : chromeStyle.paneSources.program
     // The provider's decision for this pane's header; an empty map (a value out of range) hides it.
     readonly property var policy: chromeStyle.paneHeader(headerReveal,
                                                          hover.hovered ? 1 : 0,
                                                          node ? node.focus : 0,
                                                          visiblePanes,
                                                          width,
-                                                         height)
+                                                         height,
+                                                         paneSource)
     readonly property bool headerShown: policy.content !== undefined && policy.content !== "hidden"
     readonly property bool headerInline: headerShown && policy.placement === "inline"
 
@@ -210,8 +215,11 @@ Item {
         width: card.width
         // Inline, it is floored to whole device pixels, so the grid below it starts on the device grid
         // (#2040) -- as the window-size solver counts it (window::splitChromeOf). The overlay moves nothing.
+        // A served pane's keeps the row's own height in every density (UiStyleProvider::servedPaneHeaderHeight):
+        // Minimal takes the inline header's away, but not the strip that says who draws the pane.
         height: card.policy.placement === "overlay" ? chromeStyle.overlayPaneHeader
-                                                    : chromeStyle.paneHeaderHeight(Screen.devicePixelRatio)
+              : card.paneSource === chromeStyle.paneSources.served ? chromeStyle.servedPaneHeaderHeight(Screen.devicePixelRatio)
+              : chromeStyle.paneHeaderHeight(Screen.devicePixelRatio)
         visible: card.headerShown
         session: card.session
         node: card.node

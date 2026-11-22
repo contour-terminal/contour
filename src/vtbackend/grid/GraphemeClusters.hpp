@@ -43,4 +43,11 @@ struct MeasuredCluster
 /// @return The sum of its clusters' columns.
 [[nodiscard]] ColumnCount columnsOnTheGrid(std::string_view text, ClusterWidthPolicy policy);
 
+/// @p text, cut at its END to at most @p maxWidth columns with a trailing "…" when it is wider.
+/// @param text The text, valid UTF-8.
+/// @param maxWidth The widest the result may be, in columns; at least one.
+/// @param policy How the screen measures a grapheme cluster.
+/// @return @p text itself, or its head and "…"; never cut inside a grapheme cluster.
+[[nodiscard]] std::string elideEnd(std::string_view text, ColumnCount maxWidth, ClusterWidthPolicy policy);
+
 } // namespace vtbackend

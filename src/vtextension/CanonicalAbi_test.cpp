@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <limits>
 #include <ranges>
 #include <span>
@@ -178,6 +179,19 @@ TEST_CASE("CanonicalAbi.roundTrip", "[vtextension]")
         CHECK(roundTrip(event) == event);
         CHECK(flatRoundTrip(event) == event);
     }
+}
+
+TEST_CASE("CanonicalAbi.resultWithoutValue", "[vtextension]")
+{
+    // `result<_, E>`: a case 0 without a payload, so a discriminant and the error's one flat value.
+    using VoidResult = std::expected<void, abi::CommandError>;
+    STATIC_CHECK(abi::Codec<VoidResult>::FlatCount == 2);
+    auto const ok = VoidResult {};
+    auto const failed = VoidResult { std::unexpected(abi::CommandError::Denied) };
+    CHECK(flatRoundTrip(ok) == ok);
+    CHECK(flatRoundTrip(failed) == failed);
+    CHECK(roundTrip(ok) == ok);
+    CHECK(roundTrip(failed) == failed);
 }
 
 TEST_CASE("CanonicalAbi.flatEvent", "[vtextension]")

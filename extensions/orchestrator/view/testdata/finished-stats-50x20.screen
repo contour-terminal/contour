@@ -1,0 +1,20 @@
+ ✦ Agents                              ⬢ 0/4 ▱▱▱▱ 
+╭─ pr-2379 · fix CI · sonnet ───────── · removed ╮
+│ Transcript  Details                            │
+│ task      fix CI                               │
+│ model     sonnet                               │
+│ state     completed, worktree removed, seen    │
+│ time      30m 40s wall · 2m 30s active · 1m    │
+│             35s waiting for you                │
+│ tokens    42.3k out · 152 in · 12.9M cache     │
+│             read · 192.7k cache write          │
+│ cache     98.5% hit                            │
+│ ── latest ──────────────────────────────────── │
+│ 18:36 tool Bash {"command":"mkdir sub && cd s… │
+│ 18:36 result .                                 │
+│ 18:37 claude done.                             │
+│ ╭────────────────────────────────────────────╮ │
+│ │ · removed · completed · ⏎ run again        │ │
+│ ╰────────────────────────────────────────────╯ │
+╰────────────────────────────────────────────────╯
+ ⏎ run again · t transcript · ^k all actions      

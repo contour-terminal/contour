@@ -51,6 +51,10 @@ class ManualScheduler final: public IExtensionScheduler
 
     [[nodiscard]] core::platform::IClock& clock() noexcept override { return _clock; }
 
+    /// @return The clock, for a test double that stands for time passing inside a job (a slow disk), with no
+    ///         timer fired.
+    [[nodiscard]] core::platform::ManualClock& manualClock() noexcept { return _clock; }
+
     /// Runs posted jobs, and the jobs they post, until none is left. Timers do not fire.
     void runPending()
     {

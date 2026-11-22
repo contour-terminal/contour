@@ -18,6 +18,7 @@
 /// terminal, which does not exist when `createPty` hands out the pty, so
 /// `bindTerminal` closes the cycle and primes the mirror.
 
+#include <contour/remote/PaneReveals.hpp>
 #include <contour/remote/ReactorThread.hpp>
 #include <contour/remote/RemoteController.hpp>
 #include <contour/remote/RemoteLayout.hpp>
@@ -204,6 +205,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
         SwitchRequests switchRequests = SwitchRequests::Answered;
         /// What the first connection does about a selected workspace that holds no tab.
         EmptyWorkspace emptyWorkspace = EmptyWorkspace::Wait;
+        /// Proves the daemon's consent key as each hello is answered, for the run that hello names; empty for
+        /// a daemon whose key this machine does not hold (another host's).
+        vthost::ConsentProver consentProver {};
     };
 
     /// @param config What the controller is built with.
@@ -313,6 +317,42 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param digest The manifest digest the answer is bound to.
     /// @param answer The user's answer.
     void answerPermission(std::string hostId, std::string digest, vthost::GrantState answer);
+
+    /// Takes what daemonExtensionConsentChanged() announced, oldest first: the daemon-scoped extensions'
+    /// questions to show in this connection's windows, and those answered elsewhere. GUI thread.
+    /// @return The events, as the daemon sent them.
+    [[nodiscard]] std::vector<vthost::client::NativeClient::DaemonConsentEvent> takeDaemonConsentEvents();
+
+    /// @return The daemon extensions and their palette rows, as the daemon last sent them
+    ///         (Capability::ExtensionPresence); empty before it did, or from a daemon that does not. Any
+    ///         thread.
+    [[nodiscard]] vthost::proto::ExtensionPresence extensionPresence() const;
+
+    /// Invokes a daemon extension's palette row (InvokeExtensionAction): sent only to a daemon sharing
+    /// Capability::ExtensionPresence. A no-op once disconnected.
+    /// @param extension WireExtensionPresence::extension.
+    /// @param action WireActionRow::id; empty for the row that asks for a grant or restarts.
+    void invokeExtensionAction(std::string extension, std::string action);
+
+    /// Takes the panes paneRevealRequested() announced, oldest first: the remote sessions whose window is to
+    /// raise itself and focus their pane, as a daemon extension revealed its tab. GUI thread.
+    /// @return The daemon's session ids, as RevealPane named them, each stamped with when it arrived (now()).
+    [[nodiscard]] std::vector<PendingReveal> takePaneReveals();
+
+    /// Takes the links urlOpenRequested() announced, oldest first: what a daemon extension asked this window
+    /// to open, just after its user typed or clicked into the extension's tab here. GUI thread.
+    /// @return The links, as OpenUrl named them; not checked yet (followUrlOpens()).
+    [[nodiscard]] std::vector<std::string> takeUrlOpens();
+
+    /// @return The time on the controller's clock: what takePaneReveals() stamps its reveals with.
+    [[nodiscard]] core::platform::SteadyTimePoint now() const { return _clock.now(); }
+
+    /// Answers a daemon-scoped extension's question takeDaemonConsentEvents() handed out. A no-op once
+    /// detached.
+    /// @param name ExtensionPermissionRequest::name.
+    /// @param grantDigest ExtensionPermissionRequest::grantDigest.
+    /// @param answer Granted or Denied.
+    void answerDaemonExtension(std::string name, std::string grantDigest, vthost::GrantState answer);
 
     /// Takes the switch requests switchRequested() announced, oldest first. GUI thread.
     /// @return The requests, as the daemon sent them.
@@ -741,9 +781,23 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// connect queued). The GUI takes the questions with takePermissionRequests().
     void extensionPermissionRequested();
 
+    /// The daemon asks this client's window to raise itself and focus a pane: a daemon extension revealed its
+    /// tab, which the daemon activated (fires on the reactor thread; connect queued). The GUI takes the panes
+    /// with takePaneReveals().
+    void paneRevealRequested();
+
+    /// The daemon asks this client to open a web link on this machine: a daemon extension's url-open (fires
+    /// on the reactor thread; connect queued). The GUI takes the links with takeUrlOpens().
+    void urlOpenRequested();
+
     /// The daemon asks this client to switch the window showing one of its workspaces (fires on the reactor
     /// thread; connect queued). The GUI takes the requests with takeSwitchRequests().
     void switchRequested();
+
+    /// The daemon asks this connection's windows about a daemon-scoped extension's grant, or says one asked
+    /// was answered (fires on the reactor thread; connect queued). The GUI takes them with
+    /// takeDaemonConsentEvents().
+    void daemonExtensionConsentChanged();
 
     /// The daemon refused a tab merge this client asked for, and changed nothing (fires on the reactor
     /// thread; connect queued). The GUI tells the user.
@@ -948,6 +1002,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
 
     /// Reactor-side: keeps a daemon extension's question for the GUI, and tells it.
     void onPermissionRequest(vthost::proto::PermissionRequest const& request);
+    /// Queues a daemon-scoped extension's question, or its settling, for the GUI. Reactor thread.
+    void onDaemonConsent(vthost::client::NativeClient::DaemonConsentEvent const& event);
+    /// Keeps the daemon extensions' palette rows for the GUI. Reactor thread.
+    void onExtensionEvent(vthost::client::NativeClient::ExtensionEvent const& event);
 
     /// Reactor-side: keeps a daemon's switch request for the GUI, and tells it.
     void onSwitchRequest(vthost::proto::SwitchRequest const& request);
@@ -1050,6 +1108,7 @@ class NativeController final: public QObject, public contour::session::SessionFa
     SessionSettingsSource _sessionSettings;
     /// The preference the app shows now, asked as every hello is built. @see Config::colorPreference
     ColorPreferenceSource _colorPreference;
+    vthost::ConsentProver _consentProver;
     vthost::latency::StartupTimeline& _timeline;
     vthost::client::BackoffSchedule _backoff;
     /// Filled, under _mutex, by the first callback after each accepted connection's ServerHello. @see
@@ -1132,6 +1191,14 @@ class NativeController final: public QObject, public contour::session::SessionFa
     std::vector<vthost::proto::PermissionRequest> _permissionRequests;
     /// The daemon's switch requests the GUI has not taken yet, oldest first. Guarded by _mutex.
     std::vector<vthost::proto::SwitchRequest> _switchRequestQueue;
+    /// What onDaemonConsent() queued for the GUI, oldest first. Under _mutex.
+    std::vector<vthost::client::NativeClient::DaemonConsentEvent> _daemonConsentEvents;
+    /// The daemon extensions' palette rows, as the daemon last sent them. Under _mutex.
+    vthost::proto::ExtensionPresence _extensionPresence;
+    /// The panes RevealPane named that the GUI has not taken yet, oldest first. Under _mutex.
+    std::vector<PendingReveal> _paneReveals;
+    /// The links OpenUrl named that the GUI has not taken yet, oldest first. Under _mutex.
+    std::vector<std::string> _urlOpens;
     /// Guards the geometry bookkeeping below, and ONLY that.
     ///
     /// A lock of its own because the resize sink is reached from inside a `_mutex`-holding frame:

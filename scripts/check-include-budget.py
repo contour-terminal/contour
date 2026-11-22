@@ -12,7 +12,8 @@ the failure names the include chain (a.hpp -> b.hpp -> c.hpp). A row naming a he
 exist also fails ("no such header"), so a rename cannot turn a row into a vacuous pass.
 
 The walk follows first-party `#include` lines, quoted or angle-bracket, resolved against the include
-roots (src/ and vendor/core-cpp/src/) and, for quoted ones, the including file's directory. It ignores
+roots (src/, vendor/core-cpp/src/, and extensions/ for the agent orchestrator's
+<orchestrator/...> spelling) and, for quoted ones, the including file's directory. It ignores
 `#if`: every include in a header counts whichever branch it sits in. That is deliberate, a conservative
 upper bound -- a header that reaches the forbidden one on any platform fails everywhere. Includes that
 resolve to no file (system and Qt headers) are leaves, known by spelling only.
@@ -33,7 +34,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BUDGET = REPO_ROOT / "scripts" / "include-budget.txt"
-INCLUDE_ROOTS = (Path("src"), Path("vendor/core-cpp/src"))
+INCLUDE_ROOTS = (Path("src"), Path("vendor/core-cpp/src"), Path("extensions"))
 
 INCLUDE_RE = re.compile(r'^\s*#\s*include\s*([<"])([^>"]+)[>"]', re.MULTILINE)
 ROW_RE = re.compile(r"^(\S+)\s+!(\S+)$")
@@ -146,6 +147,8 @@ def self_test() -> int:
             "src/p/clean.hpp": '#pragma once\n#include "leaf.hpp"\n#include <vector>\n',
             "src/p/leaf.hpp": "#pragma once\n",
             "vendor/core-cpp/src/core/v.hpp": "#pragma once\n",
+            "extensions/orchestrator/core/a.hpp": "#pragma once\n#include <orchestrator/core/b.hpp>\n",
+            "extensions/orchestrator/core/b.hpp": "#pragma once\n#include <glaze/glaze.hpp>\n",
         }
         for name, content in files.items():
             path = root / name
@@ -173,6 +176,9 @@ def self_test() -> int:
 
         out = check(root, "src/p/clean.hpp !vendor/core-cpp/src/core/v.hpp\n")
         expect("vendor root resolves and is clean", out == [])
+        out = check(root, "extensions/orchestrator/core/a.hpp !<glaze/glaze.hpp>\n")
+        expect("orchestrator spelling resolves",
+               len(out) == 1 and "extensions/orchestrator/core/b.hpp → <glaze/glaze.hpp>" in out[0])
         out = check(root, "# only a comment\n\n")
         expect("empty budget passes", out == [])
         out = check(root, "garbage\n")

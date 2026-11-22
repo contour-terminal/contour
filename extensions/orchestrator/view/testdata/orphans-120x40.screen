@@ -1,0 +1,40 @@
+ ✦ Agents                                                                                                    ⬢ 0/4 ▱▱▱▱ 
+╭─ Agents 0 ───────────────────────────────────╮ ╭─ leftover worktree ───────────────────── agent/pr-1-20260101-000000 ╮
+│ LEFTOVER WORKTREES 2                         │ │ /home/u/worktrees/contour/it's a test                               │
+│ ⚑ /home/u/worktrees/contour/pr-2-2… detached │ │ Details                                                             │
+│   no run uses this worktree                  │ │           no agent run uses this worktree any more; the             │
+│▍⚑ /home/u/worktrees/c… agent/pr-1-20260101-… │ │             orchestrator never removes it                           │
+│▍  no run uses this worktree                  │ │           a run ended without removing it, or it was made by hand   │
+│                                              │ │             under worktree_root                                     │
+│ + new agent                                  │ │ branch    agent/pr-1-20260101-000000                                │
+│                                              │ │ to remove git -C /home/u/projects/contour worktree remove '/home/u… │
+│                                              │ │           git refuses while it holds changes; its branch stays      │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
+ ⏎ details · n new agent · ^k all actions                                                                               

@@ -1,0 +1,4 @@
+# Only a single directory can be created.
+name = lister
+version = 2
+root repos create = config:repos/*/path

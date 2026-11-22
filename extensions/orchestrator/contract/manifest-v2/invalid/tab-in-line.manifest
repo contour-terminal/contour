@@ -1,0 +1,5 @@
+# Words are separated by single spaces; a tab is refused, never read as a blank.
+name = tabbed
+version = 2
+root repos = config:repos/*/path
+command gh-auth short @repos = gh	auth status

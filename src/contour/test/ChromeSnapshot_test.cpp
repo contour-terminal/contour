@@ -46,6 +46,7 @@
 #include <QtGui/QPalette>
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
+#include <QtQml/qqml.h>
 #include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 
@@ -186,6 +187,45 @@ void checkSplitCards(contour::test::snapshot::ChromeSnapshotScene const& scene,
         CHECK(visibleItemsNamed(content, QStringLiteral("paneCardSurface"))
               == (row.density == contour::config::ChromeDensity::Minimal ? 0 : panes));
     }
+}
+
+/// Checks that a served pane's strip has its row's own header height, whatever the density, and that the grid
+/// starts right below it: no cell under the strip.
+void checkServedStripRoom(contour::test::snapshot::ChromeSnapshotScene const& scene)
+{
+    auto const headers =
+        contour::test::itemsNamed(*scene.window().contentItem(), QStringLiteral("paneHeader"));
+    REQUIRE(headers.size() == 1);
+    auto const* header = headers.front();
+    CHECK(header->isVisible());
+    auto const terminals = scene.root().findChildren<contour::test::StubContourTerminal*>();
+    REQUIRE(terminals.size() == 1);
+    auto* const engine = qmlEngine(&scene.root());
+    REQUIRE(engine != nullptr);
+    auto const* provider = qobject_cast<contour::window::UiStyleProvider const*>(
+        engine->rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>());
+    REQUIRE(provider != nullptr);
+    auto const expected = provider->servedPaneHeaderHeight(scene.window().devicePixelRatio());
+    CHECK(expected > 0.0);
+    CHECK(header->height() == expected);
+    auto const headerBottom = header->mapToScene(QPointF { 0, header->height() }).y();
+    auto const gridTop = terminals.front()->mapToScene(QPointF { 0, 0 }).y();
+    CHECK(gridTop == headerBottom);
+}
+
+/// Checks what a served-tab script drew: the served tab is marked wherever the tab well shows it, active or
+/// at rest, and its pane's strip shows -- with room of its own -- while it is the tab shown, on no shell
+/// pane.
+void checkServedScript(contour::test::snapshot::ChromeSnapshotScene const& scene,
+                       contour::test::snapshot::SnapshotScriptRow const& row,
+                       QQuickItem const& content)
+{
+    auto const wellShown = contour::config::isTabBarShown(scene.look().tabBarVisibility, row.tabCount);
+    CHECK(visibleItemsNamed(content, QStringLiteral("tabServedMarker")) == (wellShown ? 1 : 0));
+    CHECK(visibleItemsNamed(content, QStringLiteral("paneHeaderServedStrip"))
+          == (row.activeTab == 0 ? 1 : 0));
+    if (row.activeTab == 0)
+        checkServedStripRoom(scene);
 }
 
 /// Checks what a script that shows the sample command block drew: the block menu, the ⋯ button, and the
@@ -1207,6 +1247,9 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                       == (!wellShown && bandShown ? 1 : 0));
                 break;
             }
+            case SnapshotScript::ServedTab:
+            case SnapshotScript::ServedTabInactive:
+            case SnapshotScript::ServedTabMinimal: checkServedScript(scene, row, content); break;
             case SnapshotScript::KeyboardFocus: {
                 // Keyboard focus is on the second tab, and on it alone: the ring (or, where cells cannot draw
                 // one, the focus fill) is drawn there and on no other tab.
@@ -1362,6 +1405,34 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 // It hangs from build's row, not from a tab strip the sidebar placement does not draw.
                 CHECK(flyout->property("parent").value<QQuickItem*>()->property("title").toString()
                       == QStringLiteral("build"));
+                break;
+            }
+            case SnapshotScript::DaemonConsentHeld:
+            case SnapshotScript::DaemonConsentArmed:
+            case SnapshotScript::DaemonConsentLong: {
+                // The window's daemon asks: the title, every line as plain text, Allow held until the hold
+                // passed.
+                auto const* dialog =
+                    scene.root().findChild<QObject*>(QStringLiteral("daemonExtensionConsentDialog"));
+                REQUIRE(dialog != nullptr);
+                CHECK(dialog->property("opened").toBool());
+                auto const* dialogContent = dialog->property("contentItem").value<QQuickItem*>();
+                REQUIRE(dialogContent != nullptr);
+                auto const lines =
+                    contour::test::itemsNamed(*dialogContent, QStringLiteral("daemonExtensionConsentLine"));
+                // The module, the directories, the header, two commands, the pane, the root it reads, the
+                // tab.
+                CHECK(lines.size() >= 9);
+                CHECK(std::ranges::all_of(lines, [](QQuickItem const* line) {
+                    return line->property("textFormat").toInt() == Qt::PlainText;
+                }));
+                auto const accept =
+                    contour::test::itemsNamed(*dialogContent, QStringLiteral("kitDialogAccept"));
+                REQUIRE(accept.size() == 1);
+                CHECK(accept.front()->property("enabled").toBool()
+                      == (variant.script != SnapshotScript::DaemonConsentHeld));
+                CHECK(contour::test::itemsNamed(*dialogContent, QStringLiteral("kitDialogClose")).size()
+                      == 1);
                 break;
             }
             case SnapshotScript::QuickTerminal: {

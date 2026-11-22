@@ -31,6 +31,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -106,6 +107,14 @@ enum class PduType : uint8_t
     Goodbye = 60,
     OpenFirstTab = 61,
     SetWorkspaceColor = 62,
+    ExtensionPermissionRequest = 63,
+    ExtensionPermissionReply = 64,
+    ExtensionPermissionSettled = 65,
+    ConsentProof = 66,
+    ExtensionPresence = 67,
+    InvokeExtensionAction = 68,
+    RevealPane = 69,
+    OpenUrl = 70,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -407,15 +416,20 @@ struct ServerHello
     uint32_t restoredWorkspaces = 0;
     /// The tabs of those workspaces; zero as @ref restoredWorkspaces is.
     uint32_t restoredTabs = 0;
+    /// What a client sharing Capability::DaemonExtensionConsent proves the daemon's consent key over
+    /// (ConsentProof): fresh per connection. Absent where the capability is not shared, and from a daemon
+    /// that predates it.
+    std::optional<std::array<std::byte, 32>> consentNonce = std::nullopt;
     bool operator==(ServerHello const&) const = default;
 };
 
 /// What the bytes of an Input carry (Capability::InputKinds).
 enum class InputKind : uint8_t
 {
-    Other =
-        0,    ///< Nothing the user typed: a reply, a focus or mouse report; also all a peer without it sends.
-    Keyboard, ///< The user's key events or paste are among them.
+    Other = 0,   ///< Nothing the user did: a reply, a focus, motion or wheel report; also all a peer without
+                 ///< the capability sends.
+    Keyboard,    ///< The user's key events or paste are among them.
+    ButtonPress, ///< No key, but the report of a mouse button the user pressed is among them.
 };
 
 /// Client input bytes for one session's PTY: keys and paste, but also the replies, focus and mouse reports
@@ -1241,6 +1255,24 @@ struct WireTab
     bool operator==(WireTab const&) const = default;
 };
 
+/// Which daemon-scoped extension draws a tab, as the window marks it: told by the daemon, never by what the
+/// tab's program titles it.
+struct WireServedMark
+{
+    std::string extension;    ///< The extension's name.
+    std::string title;        ///< Its display title (its manifest's `title`, else its name).
+    std::string moduleDigest; ///< The hex SHA-256 of the module that draws the tab; empty when unknown.
+    bool operator==(WireServedMark const&) const = default;
+};
+
+/// One served tab of a LayoutState: the tab, by its id, and who draws it.
+struct WireServedTab
+{
+    uint64_t tabId = 0;  ///< The tab, as WireTab::tabId names it.
+    WireServedMark mark; ///< Who draws it.
+    bool operator==(WireServedTab const&) const = default;
+};
+
 /// The workspace's whole tab/pane layout — replayed on attach and re-pushed on
 /// every model change, so a client reproduces the daemon's tabs and split trees
 /// instead of flattening to one tab per session.
@@ -1253,6 +1285,12 @@ struct LayoutState
     /// 0 for none yet. Appended by a later version (Capability::TabEditAcks), and written only to a client
     /// that shares it: absent, nothing is known of which edits the push has seen.
     std::optional<uint64_t> servedEdit = std::nullopt;
+    /// The tabs a daemon-scoped extension draws, after `servedEdit` (Capability::ExtensionPresence). Written
+    /// only when not empty, and then with `servedEdit` before it (0 when absent), so that its place is fixed;
+    /// absent reads as empty, which is what a client without the capability is always sent. A field appended
+    /// after it by a later version must first write the list, empty as a 0 count, as this one writes
+    /// `servedEdit` first: a body that ends before the list is the only shape without it.
+    std::vector<WireServedTab> served {};
     bool operator==(LayoutState const&) const = default;
 };
 
@@ -1277,7 +1315,8 @@ struct CreateTab
 };
 
 /// Client→server: split the pane hosting @p session (the daemon activates it
-/// first), backing the new leaf with a fresh session.
+/// first), backing the new leaf with a fresh session. A split the daemon refuses -- a pane an extension
+/// serves, a spawn that failed -- has no answer of its own: no layout push follows, and the daemon logs why.
 struct SplitPane
 {
     uint64_t session = 0;    ///< The pane to split, by the session it hosts.
@@ -1409,6 +1448,124 @@ struct PermissionReply
     /// for a byte no enumerator has.
     uint8_t grantState = 0;
     bool operator==(PermissionReply const&) const = default;
+};
+
+/// Client→server (Capability::DaemonExtensionConsent): HMAC-SHA256 of the daemon's consent key over the
+/// ServerHello's consentNonce. Until a connection proves the key, the daemon asks it no daemon extension's
+/// question and takes no answer from it; a wrong proof is final for the connection.
+struct ConsentProof
+{
+    std::array<std::byte, 32> mac = {}; ///< The proof (vthost::consentProofOf()).
+    bool operator==(ConsentProof const&) const = default;
+};
+
+/// One line of a daemon extension's question, as the daemon rendered it.
+struct WireConsentLine
+{
+    std::string text = {}; ///< Plain text, guest text neutralized by the daemon.
+    uint8_t weight = 0;    ///< vtcontrol::ConsentWeight as the wire spells it: 1 when it can run commands.
+    bool operator==(WireConsentLine const&) const = default;
+};
+
+/// Server→client (Capability::DaemonExtensionConsent): a daemon-scoped extension waits for its user's grant.
+/// Carries the question the daemon rendered, so a window and `contour extension list` show the same text.
+/// Sent to every client sharing the capability, and again to each one attaching while it waits; answered by
+/// an ExtensionPermissionReply, closed by an ExtensionPermissionSettled.
+struct ExtensionPermissionRequest
+{
+    std::string name = {};                   ///< What the daemon's configuration calls the extension.
+    std::string grantDigest = {};            ///< What an answer is recorded for: its manifest and roots.
+    std::string title = {};                  ///< The question's title.
+    std::vector<WireConsentLine> lines = {}; ///< Its lines, in order.
+    bool operator==(ExtensionPermissionRequest const&) const = default;
+};
+
+/// Client→server (Capability::DaemonExtensionConsent): the user's answer to an ExtensionPermissionRequest
+/// this connection was sent. Any other is ignored.
+struct ExtensionPermissionReply
+{
+    std::string name = {};        ///< ExtensionPermissionRequest::name.
+    std::string grantDigest = {}; ///< ExtensionPermissionRequest::grantDigest.
+    /// vthost::GrantState as the wire spells it, read through vthost::grantStateOf().
+    uint8_t grantState = 0;
+    bool operator==(ExtensionPermissionReply const&) const = default;
+};
+
+/// Server→client (Capability::DaemonExtensionConsent): an ExtensionPermissionRequest this connection was sent
+/// was answered elsewhere; a window showing it closes it.
+struct ExtensionPermissionSettled
+{
+    std::string name = {};        ///< ExtensionPermissionRequest::name.
+    std::string grantDigest = {}; ///< ExtensionPermissionRequest::grantDigest.
+    bool operator==(ExtensionPermissionSettled const&) const = default;
+};
+
+/// A daemon extension's state as the palette shows it: what an invocation of one of its rows does follows it.
+enum class WirePresenceState : uint8_t
+{
+    Running = 0,   ///< It runs; its declared actions are delivered to it.
+    Stopped,       ///< It is granted and stopped; an invocation starts it first.
+    AwaitingGrant, ///< It waits for its user's grant; an invocation asks the invoking window again.
+    Disabled,      ///< It faulted too often and was disabled; an invocation restarts it.
+    Unavailable,   ///< Denied, or failed to load: nothing an invocation could do. Also any unknown byte.
+};
+
+/// The palette row that restarts a disabled daemon extension (WirePresenceState::Disabled), as a format of
+/// its title. One wording for the row and for the host's frame in its served tabs, which names the row.
+inline constexpr auto RestartExtensionRowFormat = std::string_view { "{}: restart extension" };
+
+/// One declared `action` line of a daemon extension: a palette row.
+struct WireActionRow
+{
+    std::string id = {};    ///< What InvokeExtensionAction::action names.
+    std::string title = {}; ///< What the palette shows.
+    bool operator==(WireActionRow const&) const = default;
+};
+
+/// One daemon extension as the palette shows it.
+struct WireExtensionPresence
+{
+    std::string extension = {};                           ///< What the daemon's configuration calls it.
+    std::string title = {};                               ///< Its manifest's `title`, else its name.
+    WirePresenceState state = WirePresenceState::Running; ///< What invoking one of its rows does.
+    std::vector<WireActionRow> rows = {};                 ///< Its declared actions, in declaration order.
+    bool operator==(WireExtensionPresence const&) const = default;
+};
+
+/// Server→client (Capability::ExtensionPresence): the daemon's extensions and their palette rows, the whole
+/// set each time. Sent at attach and again whenever an extension's state or rows change.
+struct ExtensionPresence
+{
+    std::vector<WireExtensionPresence> extensions = {}; ///< Every daemon extension, in configuration order.
+    bool operator==(ExtensionPresence const&) const = default;
+};
+
+/// Client→server (Capability::ExtensionPresence): the user chose a daemon extension's palette row. It carries
+/// no argument: the body is the two names, and a field appended by a newer peer is ignored, never delivered.
+/// An empty @ref action is the row that asks for a grant or restarts a disabled extension.
+struct InvokeExtensionAction
+{
+    std::string extension = {}; ///< WireExtensionPresence::extension.
+    std::string action = {};    ///< WireActionRow::id.
+    bool operator==(InvokeExtensionAction const&) const = default;
+};
+
+/// Server→client (Capability::ExtensionPresence): raise this window and focus @ref session's pane. The daemon
+/// has already made its tab the active one; the window only follows.
+struct RevealPane
+{
+    uint64_t session = 0; ///< The pane to focus.
+    bool operator==(RevealPane const&) const = default;
+};
+
+/// Server→client (Capability::UrlOpen): open this web link on the client's machine, as following a hyperlink
+/// there does. A daemon extension asked for it (`url-open`) right after the user typed or clicked into its
+/// tab in this window. The daemon checked it already (vthost::checkUrlToOpen()); the client checks it again
+/// and opens nothing else.
+struct OpenUrl
+{
+    std::string url = {}; ///< An http or https URL.
+    bool operator==(OpenUrl const&) const = default;
 };
 
 /// Either direction, after the handshake: the frame with serial @ref refusedSerial carried a PDU tag this
@@ -2041,7 +2198,15 @@ using DecodedPdu = std::variant<Invalid,
                                 CloseWorkspace,
                                 Goodbye,
                                 OpenFirstTab,
-                                SetWorkspaceColor>;
+                                SetWorkspaceColor,
+                                ExtensionPermissionRequest,
+                                ExtensionPermissionReply,
+                                ExtensionPermissionSettled,
+                                ConsentProof,
+                                ExtensionPresence,
+                                InvokeExtensionAction,
+                                RevealPane,
+                                OpenUrl>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

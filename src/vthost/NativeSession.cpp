@@ -148,6 +148,34 @@ namespace
         return layout;
     }
 
+    /// The tabs of @p workspace that a daemon-scoped extension draws, each with who draws it: a tab is served
+    /// when one of its panes' sessions is.
+    /// @param workspace The workspace.
+    /// @param host Where each session says who draws it.
+    [[nodiscard]] std::vector<proto::WireServedTab> servedTabsOf(vtworkspace::Workspace& workspace,
+                                                                 SessionHost const& host)
+    {
+        auto served = std::vector<proto::WireServedTab> {};
+        for (auto const tabIndex: std::views::iota(0, workspace.tabCount()))
+        {
+            auto const* tab = workspace.tabAt(tabIndex);
+            if (tab == nullptr)
+                continue;
+            auto const sessions = tab->leafSessions();
+            for (auto const session: sessions)
+                if (auto const* by = host.servedBy(session))
+                {
+                    served.push_back(proto::WireServedTab {
+                        .tabId = tab->id().value,
+                        .mark = proto::WireServedMark { .extension = by->extension,
+                                                        .title = by->title,
+                                                        .moduleDigest = by->moduleDigest } });
+                    break;
+                }
+        }
+        return served;
+    }
+
     /// Whether a record went into a frame or would have overspent its budget.
     enum class RecordFit : uint8_t
     {
@@ -371,6 +399,7 @@ NativeSession::~NativeSession()
 {
     _upgradeLink->session = nullptr;
     _host.noteClientDetached(this, _detachKind);
+    _host.forgetActionOrigin(_id);
     // Beside the count it mirrors, so that the event and connectedClients() never disagree; only for a
     // connection that was told attached.
     if (_phase == ConnectionPhase::Viewing)
@@ -1006,6 +1035,124 @@ void NativeSession::sessionPermissionRequested(SessionId session, proto::Permiss
     send(0, proto::DecodedPdu { request });
 }
 
+ConsentDelivery NativeSession::daemonExtensionRequested(proto::ExtensionPermissionRequest const& request,
+                                                        ConsentOffer offer)
+{
+    if (!asksDaemonConsent() || _closed)
+        return ConsentDelivery::NotSent;
+    auto const sent = std::ranges::any_of(_consentTickets, [&](ConsentTicket const& ticket) {
+        return ticket.name() == request.name && ticket.grantDigest() == request.grantDigest;
+    });
+    if (sent && offer == ConsentOffer::IfNotSent)
+        return ConsentDelivery::NotSent;
+    if (!sent)
+        _consentTickets.push_back(ConsentTicket { request.name, request.grantDigest });
+    send(0, proto::DecodedPdu { request });
+    return ConsentDelivery::Sent;
+}
+
+void NativeSession::daemonExtensionSettled(proto::ExtensionPermissionSettled const& settled)
+{
+    auto const dropped = std::erase_if(_consentTickets, [&](ConsentTicket const& ticket) {
+        return ticket.name() == settled.name && ticket.grantDigest() == settled.grantDigest;
+    });
+    if (dropped != 0 && !_closed)
+        send(0, proto::DecodedPdu { settled });
+}
+
+void NativeSession::extensionPresenceChanged(proto::ExtensionPresence const& presence)
+{
+    if (showsExtensionPresence() && !_closed)
+        send(0, proto::DecodedPdu { presence });
+}
+
+void NativeSession::revealPane(SessionId session)
+{
+    if (showsExtensionPresence() && !_closed)
+        send(0, proto::DecodedPdu { proto::RevealPane { .session = session.value } });
+}
+
+LinkOpening NativeSession::linkOpening() const noexcept
+{
+    return _negotiated.has_value() && _negotiated->shared.contains(proto::Capability::UrlOpen)
+               ? LinkOpening::Able
+               : LinkOpening::Unable;
+}
+
+void NativeSession::openUrl(std::string_view url)
+{
+    if (linkOpening() == LinkOpening::Able && !_closed)
+        send(0, proto::DecodedPdu { proto::OpenUrl { .url = std::string(url) } });
+}
+
+void NativeSession::invokeExtensionAction(proto::InvokeExtensionAction const& invoke)
+{
+    if (!showsExtensionPresence())
+    {
+        sessionLog()("{}: dropping an extension invocation from a client without a palette for it", _id);
+        return;
+    }
+    if (_host.invokeExtensionAction(_id, invoke.extension, invoke.action) != InvocationEffect::AskAgain)
+        return;
+    // Asked again here only: the invoking window. One that did not prove the consent key is sent nothing.
+    for (auto const& request: _host.pendingDaemonExtensionRequests())
+        if (request.name == invoke.extension)
+            std::ignore = daemonExtensionRequested(request, ConsentOffer::Again);
+}
+
+void NativeSession::acceptConsentProof(proto::ConsentProof const& proof)
+{
+    auto const& gate = _services.handshake.consent;
+    // One proof per connection, against the nonce of its own hello: a second, or one nobody asked for, counts
+    // for nothing. Not an error a peer can fill the log with: a debug line, as any ignored PDU.
+    if (!gate || !_consentNonce || _consentStanding != ConsentStanding::Unproven)
+    {
+        connectionLog()("{}: ignoring a consent proof nothing asked for", _id);
+        return;
+    }
+    auto const context = ConsentContext { .daemonInstance = _host.instance(), .socket = gate->socket };
+    if (checkConsentProof(gate->key, context, *_consentNonce, proof.mac) != ConsentProofCheck::Proven)
+    {
+        _consentStanding = ConsentStanding::Refused;
+        errorLog()(
+            "{}: refusing a wrong consent proof: this connection is asked no daemon extension's question",
+            _id);
+        return;
+    }
+    _consentStanding = ConsentStanding::Proven;
+    connectionLog()("{}: proved the consent key: asked the daemon extensions' questions", _id);
+    for (auto const& request: _host.pendingDaemonExtensionRequests())
+        std::ignore = daemonExtensionRequested(request, ConsentOffer::IfNotSent);
+}
+
+void NativeSession::answerDaemonExtension(proto::ExtensionPermissionReply const& reply)
+{
+    // Only a window may grant: a connection that cannot show the question, or was never sent it, records
+    // nothing, whatever it names.
+    if (!asksDaemonConsent())
+    {
+        errorLog()("{}: ignoring a daemon extension reply from a client that cannot be asked", _id);
+        return;
+    }
+    auto const ticket = std::ranges::find_if(_consentTickets, [&](ConsentTicket const& held) {
+        return held.name() == reply.name && held.grantDigest() == reply.grantDigest;
+    });
+    if (ticket == _consentTickets.end())
+    {
+        errorLog()("{}: ignoring a daemon extension reply to a question it was not sent", _id);
+        return;
+    }
+    auto const answer = grantStateOf(reply.grantState);
+    if (!answer || *answer == GrantState::Pending)
+    {
+        errorLog()("{}: ignoring a daemon extension reply with answer {}", _id, reply.grantState);
+        return;
+    }
+    auto spent = std::move(*ticket);
+    _consentTickets.erase(ticket);
+    _host.answerDaemonExtension(std::move(spent), *answer);
+}
+
 void NativeSession::emitSessionEvent(proto::SessionEventPdu const& event)
 {
     if (_phase != ConnectionPhase::Viewing || _closed)
@@ -1044,7 +1191,10 @@ void NativeSession::sendWorkspaceLayout(vtworkspace::Workspace& workspace)
     // Asked before the layout goes out, and streamed after it: the client has the pane by then.
     if (workspace.id().value == _selectedWorkspace)
         requestArrivedSnapshots(workspace);
-    sendLayout(serializeLayout(workspace, _host.objects(), controlSpelling()));
+    auto layout = serializeLayout(workspace, _host.objects(), controlSpelling());
+    if (showsExtensionPresence())
+        layout.served = servedTabsOf(workspace, _host);
+    sendLayout(std::move(layout));
     announceWorkspaceMeta(workspace);
 }
 
@@ -1052,6 +1202,12 @@ void NativeSession::sendLayout(proto::LayoutState layout)
 {
     if (_negotiated.has_value() && _negotiated->shared.contains(proto::Capability::TabEditAcks))
         layout.servedEdit = _servedEdit;
+    // The served tabs follow the served edit, which a window that marks them is therefore always sent (0 when
+    // it does not track its edits), so that the list's place is fixed; any other window is sent no list.
+    if (showsExtensionPresence())
+        layout.servedEdit = layout.servedEdit.value_or(0);
+    else
+        layout.served.clear();
     send(0, proto::DecodedPdu { std::move(layout) });
 }
 
@@ -1168,6 +1324,7 @@ void NativeSession::refreshSelection()
     {
         _selectedWorkspace = 0;
         _selectedTabs = SelectedTabs::NeverHeld;
+        _host.noteSelected(*this);
         forgetUnmirroredSessions();
         announcePanes();
         return;
@@ -2331,10 +2488,14 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
             leaf != nullptr)
         {
             model.setActivePane(tab->id(), leaf->id());
-            _host.splitActivePane(tab->id(),
-                                  static_cast<vtworkspace::SplitState>(split->orientation),
-                                  proto::fromWireRatio(split->ratio),
-                                  spawnRequest(split->profileName, SessionId { split->session }));
+            // The protocol has no refusal for a split: one that fails pushes no layout, and is logged.
+            if (auto const created =
+                    _host.splitActivePane(tab->id(),
+                                          static_cast<vtworkspace::SplitState>(split->orientation),
+                                          proto::fromWireRatio(split->ratio),
+                                          spawnRequest(split->profileName, SessionId { split->session }));
+                !created)
+                errorLog()("{}: ignoring {}: {}", _id, proto::describe(frame.pdu), describe(created.error()));
         }
         return;
     }
@@ -2386,6 +2547,21 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
         _host.closeSession(vtworkspace::SessionId { close->session });
         return;
     }
+    if (auto const* reply = std::get_if<proto::ExtensionPermissionReply>(&frame.pdu))
+    {
+        answerDaemonExtension(*reply);
+        return;
+    }
+    if (auto const* proof = std::get_if<proto::ConsentProof>(&frame.pdu))
+    {
+        acceptConsentProof(*proof);
+        return;
+    }
+    if (auto const* invoke = std::get_if<proto::InvokeExtensionAction>(&frame.pdu))
+    {
+        invokeExtensionAction(*invoke);
+        return;
+    }
     if (auto const* reply = std::get_if<proto::PermissionReply>(&frame.pdu))
     {
         // Read, never cast: a byte no answer has records nothing, and leaves the question open.
@@ -2430,7 +2606,7 @@ NativeSession::TabVerb NativeSession::serveTabVerb(proto::DecodedFrame const& fr
         }
         // Applied to the model, so the layout push that reaches every client, this one included, is the
         // answer: the dragged tab's sessions move into the target tab and none is spawned or closed.
-        if (auto const merged = applyTabMerge(_host.model(), *merge); !merged)
+        if (auto const merged = _host.mergeTabIntoSplit(*merge); !merged)
         {
             errorLog()("{}: ignoring {}: {}", _id, proto::describe(frame.pdu), describe(merged.error()));
             // Said, so the user whose drop did nothing is told: no layout push follows a refusal.
@@ -2453,13 +2629,16 @@ NativeSession::TabVerb NativeSession::serveTabVerb(proto::DecodedFrame const& fr
         // open names this request, so the client can tell its move landed.
         _servingMove = frame.serial;
         auto const moved =
-            applyMoveNode(_host.model(),
-                          *move,
-                          MoveWorkspaceHooks { .create = [this] { return _host.createEmptyWorkspace().id(); },
-                                               .discard =
-                                                   [this](vtworkspace::WorkspaceId workspace) {
-                                                       _host.discardWorkspace(workspace);
-                                                   } });
+            readMoveNode(_host.model(), *move).and_then([this](NodeMoveRequest const& request) {
+                return _host.moveNode(
+                    request.source,
+                    request.target,
+                    MoveWorkspaceHooks { .create = [this] { return _host.createEmptyWorkspace().id(); },
+                                         .discard =
+                                             [this](vtworkspace::WorkspaceId workspace) {
+                                                 _host.discardWorkspace(workspace);
+                                             } });
+            });
         _servingMove = 0;
         if (!moved)
         {
@@ -3091,6 +3270,15 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
         proto::Negotiated { .version = *agreed,
                             .peerCapabilities = hello->capabilities,
                             .shared = proto::intersect(policy.capabilities, hello->capabilities) };
+    // A window that can be asked a daemon extension's question must first prove it read the daemon's consent
+    // key: a fresh nonce for it to answer, and no question nor answer until it has.
+    if (policy.consent && hello->role == proto::ConnectionRole::Attach
+        && negotiated.shared.contains(proto::Capability::DaemonExtensionConsent))
+    {
+        auto& nonce = _consentNonce.emplace();
+        policy.consent->random.get().fill(nonce);
+        reply.consentNonce = nonce;
+    }
     switch (hello->role)
     {
         case proto::ConnectionRole::Attach:
@@ -3217,6 +3405,9 @@ void NativeSession::attachClient(uint64_t serial,
     send(serial, proto::DecodedPdu { std::move(reply) });
     _negotiated = std::move(negotiated);
     _phase = ConnectionPhase::Viewing;
+    // Published again now that what the client can do is known (linkOpening()): the attach plan published
+    // the selection before the handshake's outcome was kept.
+    _host.noteSelected(*this);
     // The role is stated once, whatever it is, so a window never has to assume one; a change is sent as it
     // happens.
     if (summarizesPanes())
@@ -3286,6 +3477,11 @@ void NativeSession::attachClient(uint64_t serial,
     for (auto const& request: _host.pendingPermissionRequests())
         if (asks(request) && mirrorsSession(SessionId { request.session }))
             send(0, proto::DecodedPdu { request });
+    // A daemon-scoped extension's question belongs to no pane: every window that can answer it is asked.
+    for (auto const& request: _host.pendingDaemonExtensionRequests())
+        std::ignore = daemonExtensionRequested(request, ConsentOffer::IfNotSent);
+    // The daemon-scoped extensions' palette rows, to a client with a palette for them.
+    extensionPresenceChanged(_host.extensionPresence());
 }
 
 std::vector<WorkspaceSummary> NativeSession::workspaceSummaries() const

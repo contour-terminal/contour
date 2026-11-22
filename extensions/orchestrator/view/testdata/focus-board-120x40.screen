@@ -1,0 +1,40 @@
+ ✦ Agents                                                                                      ⬢ 4/4 ▰▰▰▰  ● 2 need you 
+╭─ Agents 7 ───────────────────────────────────╮ ╭─ pr-2375 · fix CI · sonnet ─────────────────────────── ⠋ working 6m ╮
+│ NEEDS YOU 2                                  │ │ Say why the stdio relay failed, and send a hello before half-closi… │
+│ ? pr-2346 · fix CI                 asking 6m │ │ Board  Transcript  Details                                          │
+│   Bash: ctest -R reflow --output-on-failure  │ │ updated 9 min ago                                                   │
+│ … issue-2253 · work on issue      waiting 6m │ │ Fixing CI                                                           │
+│   Waiting for Build pace                     │ │ ☑ reproduced on master                                              │
+│ WORKING 1 of 4                               │ │ ☑ wrote the regression test                                         │
+│▍⠋ pr-2375 · fix CI                working 6m │ │ ☐ fix the reflow                                                    │
+│▍  fix the reflow                      ▰▰▰▱▱▱ │ │ ☐ watch CI                                                          │
+│ TO REVIEW 1                                  │ │                                                                     │
+│ ✓ pr-2379 · fix CI                      done │ │                                                                     │
+│   reported done                              │ │                                                                     │
+│ FINISHED 3                                   │ │                                                                     │
+│ · pr-2366 · fix CI                   removed │ │                                                                     │
+│   completed                                  │ │                                                                     │
+│ ⚑ issue-2356 · work on issue            kept │ │                                                                     │
+│   ended by you · 1 entry kept                │ │                                                                     │
+│ ✗ pr-2114 · fix CI                    failed │ │                                                                     │
+│   preparation failed · agents can't start h… │ │                                                                     │
+│                                              │ │                                                                     │
+│ + new agent                                  │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │ ── latest ───────────────────────────────────────────────────────── │
+│                                              │ │ 18:36 tool Bash {"command":"mkdir sub && cd sub && ls -a ..","desc… │
+│                                              │ │ 18:36 result .                                                      │
+│                                              │ │ 18:37 claude done.                                                  │
+│                                              │ │ ╭─────────────────────────────────────────────────────────────────╮ │
+│                                              │ │ │ ⏎ to write to pr-2375                                           │ │
+│                                              │ │ ╰─────────────────────────────────────────────────────────────────╯ │
+╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
+ ⏎ message · t transcript · b board · e end · n new agent · ^k all actions                                              

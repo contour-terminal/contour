@@ -237,7 +237,7 @@ namespace detail
     std::expected<std::string, std::string> inlineSchemaRefs(std::string_view schema)
     {
         auto document = glz::generic {};
-        if (glz::read_json(document, schema))
+        if (glz::read<vtcontrol::ViewReadOptions>(document, schema))
             return std::unexpected("malformed schema");
         auto* root = document.get_if<Object>();
         if (root == nullptr)

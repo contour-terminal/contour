@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <vthost/SessionSnapshotCodec.hpp>
@@ -351,6 +352,35 @@ TEST_CASE("daemonSnapshotPath keys a daemon at a socket of its own by that socke
     SECTION("a label no file can be named for")
     {
         CHECK_FALSE(daemonSnapshotPath("/s/contour", "a/b", "/tmp/x", own));
+    }
+}
+
+TEST_CASE("the store directory names the daemon's name", "[vthost][snapshot][store]")
+{
+    auto const own = fs::path { "/run/user/1000/contour/default" };
+    SECTION("the name's own socket keeps the name")
+    {
+        CHECK(daemonExtensionStoreDirectory("/s/contour", "default", own, own, "orchestrator")
+              == fs::path { "/s/contour/extensions/default/orchestrator/store" });
+    }
+    SECTION("another socket qualifies the name with the snapshot's hash")
+    {
+        auto const store =
+            daemonExtensionStoreDirectory("/s/contour", "default", "/tmp/x", own, "orchestrator");
+        auto const snapshot = daemonSnapshotPath("/s/contour", "default", "/tmp/x", own);
+        REQUIRE(store);
+        REQUIRE(snapshot);
+        auto const qualified = snapshot->stem().string();
+        CHECK(qualified.size() == std::string_view { "default@" }.size() + 16);
+        CHECK(*store == fs::path { "/s/contour/extensions" } / qualified / "orchestrator" / "store");
+        CHECK(daemonExtensionStoreDirectory("/s/contour", "default", "/tmp/y", own, "orchestrator") != store);
+    }
+    SECTION("a name or an extension no directory can be named for")
+    {
+        CHECK_FALSE(daemonExtensionStoreDirectory("/s/contour", "..", own, own, "orchestrator"));
+        CHECK_FALSE(daemonExtensionStoreDirectory("/s/contour", "a/b", "/tmp/x", own, "orchestrator"));
+        CHECK_FALSE(daemonExtensionStoreDirectory("/s/contour", "default", own, own, "../x"));
+        CHECK_FALSE(daemonExtensionStoreDirectory("/s/contour", "default", own, own, ""));
     }
 }
 

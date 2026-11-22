@@ -2031,11 +2031,38 @@ profiles:
         shell: /bin/sh
 )"sv);
 
-    using Box = vtrasterizer::BoxDrawingRenderer;
+    using Box = vtrasterizer::BoxDrawingStyle;
     CHECK(config.boxArcStyle.value() == Box::ArcStyle::Elliptic);
     CHECK(config.brailleStyle.value() == Box::BrailleStyle::AASquare);
     CHECK(config.gitDrawings.value().branchStyle == Box::GitDrawingsStyle::BranchStyle::Double);
     CHECK(config.gitDrawings.value().mergeCommitStyle == Box::GitDrawingsStyle::MergeCommitStyle::Solid);
+
+    // The three keys reach the renderer as one value, whatever order they were read in.
+    auto const style = contour::config::boxDrawingStyleFor(config);
+    CHECK(style.arcStyle == Box::ArcStyle::Elliptic);
+    CHECK(style.brailleStyle == Box::BrailleStyle::AASquare);
+    CHECK(style.gitDrawings == config.gitDrawings.value());
+}
+
+TEST_CASE("Config: elliptic git arcs with a branch style other than thin draw round git arcs", "[config]")
+{
+    // `arc_style` has effect only where `branch_style` is `thin`, whatever `box_arc_style` says.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+box_arc_style: elliptic
+git_drawings:
+    arc_style: elliptic
+    branch_style: thick
+    merge_commit_style: bullet
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+
+    using Box = vtrasterizer::BoxDrawingStyle;
+    CHECK(config.gitDrawings.value().arcStyle == Box::ArcStyle::Elliptic); // parsed as written
+    CHECK(contour::config::boxDrawingStyleFor(config).effectiveGitArcStyle() == Box::ArcStyle::Round);
 }
 
 TEST_CASE("Config: on_mouse_select action parses each enum arm", "[config]")
@@ -2761,4 +2788,51 @@ profiles:
     // NewTerminal and ReloadConfig without a profile still bind (argless fallback); the rest are
     // rejected. The document loads regardless.
     CHECK(config.profile("main") != nullptr);
+}
+
+TEST_CASE("Config: an ExtensionAction binding names its extension and action, and round-trips",
+          "[config][presence]")
+{
+    using namespace contour::actions;
+
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control, Shift], key: F8, action: ExtensionAction, extension: orchestrator, id: open }
+    - { mods: [Control, Shift], key: F9, action: ExtensionAction, extension: orchestrator }
+    - { mods: [Control, Shift], key: F10, action: ExtensionAction, id: open }
+)"sv);
+
+    // A binding missing either name is dropped, as every other parameterized action's is.
+    auto const& mappings = config.inputMappings.value().keyMappings;
+    auto const invocations = std::ranges::count_if(
+        mappings, [](auto const& m) { return std::holds_alternative<ExtensionAction>(m.binding.at(0)); });
+    CHECK(invocations == 1);
+    auto const bound = std::ranges::find_if(
+        mappings, [](auto const& m) { return std::holds_alternative<ExtensionAction>(m.binding.at(0)); });
+    REQUIRE(bound != mappings.end());
+    auto const& action = std::get<ExtensionAction>(bound->binding.at(0));
+    CHECK(action == ExtensionAction { .extension = "orchestrator", .id = "open" });
+
+    // What the writer spells reads back the same, a comma and a '#' in it too.
+    auto const written = ExtensionAction { .extension = "orchestrator", .id = "open, #now" };
+    QTemporaryDir again;
+    auto const reread = loadFromYaml(again,
+                                     std::format(R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - {{ mods: [Control, Shift], key: F8, action: {} }}
+)",
+                                                 Action { written }));
+    auto const& rereadMappings = reread.inputMappings.value().keyMappings;
+    REQUIRE(rereadMappings.size() == 1);
+    REQUIRE(std::holds_alternative<ExtensionAction>(rereadMappings.at(0).binding.at(0)));
+    CHECK(std::get<ExtensionAction>(rereadMappings.at(0).binding.at(0)) == written);
 }

@@ -1,0 +1,20 @@
+ ✦ Agents                              ⬢ 0/4 ▱▱▱▱ 
+╭─ leftover worktree ───── agent/pr-1-20260101-… ╮
+│ /home/u/worktrees/contour/it's a test          │
+│ Details                                        │
+│           no agent run uses this worktree any  │
+│             more; the orchestrator never       │
+│             removes it                         │
+│           a run ended without removing it, or  │
+│             it was made by hand under          │
+│             worktree_root                      │
+│ branch    agent/pr-1-20260101-000000           │
+│ to remove git -C /home/u/projects/contour wor… │
+│           git refuses while it holds changes;  │
+│             its branch stays                   │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+╰────────────────────────────────────────────────╯
+ ⏎ details · esc back · ^k all actions            

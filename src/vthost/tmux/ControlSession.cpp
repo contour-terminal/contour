@@ -744,14 +744,12 @@ ControlSession::HandlerResult ControlSession::commandSplitWindow(std::vector<std
     auto request = SessionSpawnRequest {};
     if (auto const directory = startDirectoryOf(arguments, target->tab->activePane()))
         startIn(request, *directory);
-    auto const panesBefore = target->tab->paneCount();
-    _host.splitActivePane(target->tab->id(), orientation, 0.5, request);
-    if (target->tab->paneCount() == panesBefore)
+    if (auto const split = _host.splitActivePane(target->tab->id(), orientation, 0.5, request); !split)
     {
         // The split did not happen, so the pane the target made active must not stay so.
         if (previous != nullptr && previous != target->tab->activePane())
             _host.model().setActivePane(target->tab->id(), previous->id());
-        return std::unexpected("split failed");
+        return std::unexpected(std::format("split failed: {}", describe(split.error())));
     }
     return std::vector<std::string> {};
 }

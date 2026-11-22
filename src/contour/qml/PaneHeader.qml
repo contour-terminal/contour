@@ -62,6 +62,10 @@ Item {
     readonly property string name: chromeStyle.paneHeaderName(session ? session.foregroundProcessName : "",
                                                                session ? session.title : "")
     readonly property string workingDirectory: session ? session.displayWorkingDirectory : ""
+    // Who draws the pane, for a daemon-scoped extension's served tab (TerminalSession.servedStrip, decided by
+    // window::servedChromeOf); empty for a program's pane. Shown, it holds the name's slot.
+    readonly property string servedStrip: session ? (session.servedStrip ?? "") : ""
+    readonly property bool servedShown: servedStrip !== ""
     /// The sticky command header, `{ glyph, command, detail, statusRole, jumpLabel, ... }`; empty while the
     /// pane's header is not where it lives, or there is nothing to show.
     readonly property var sticky: session && session.stickyHeader !== undefined ? session.stickyHeader : ({})
@@ -259,7 +263,7 @@ Item {
         // While the sticky header is shown it holds this slot instead, and the name is not drawn.
         width: header.stickyShown ? stickyItem.width
                                   : Math.min(implicitWidth, Math.max(0, actions.x - header.gap - x))
-        visible: !header.stickyShown
+        visible: !header.stickyShown && !header.servedShown
         text: header.shownName
         elide: Text.ElideRight
         font: chromeStyle.type.paneHeader
@@ -270,7 +274,8 @@ Item {
     Text {
         id: cwdLabel
         objectName: "paneHeaderCwd"
-        visible: !header.trailingHeld && !header.stickyShown && header.policy.content === "nameAndCwd" && width > 0
+        visible: !header.trailingHeld && !header.stickyShown && !header.servedShown
+                 && header.policy.content === "nameAndCwd" && width > 0
         x: nameLabel.x + nameLabel.width + header.gap
         anchors.verticalCenter: parent.verticalCenter
         width: Math.max(0, actions.x - header.gap - x)
@@ -282,11 +287,29 @@ Item {
         Accessible.ignored: true
     }
 
+    // The served strip, in the name's slot and drawn as the name is: which extension draws the pane, and with
+    // which module. Read-only text, so assistive technology reads it as itself.
+    Text {
+        id: servedLabel
+        objectName: "paneHeaderServedStrip"
+        visible: header.servedShown
+        x: nameLabel.x
+        anchors.verticalCenter: parent.verticalCenter
+        width: Math.min(implicitWidth, Math.max(0, actions.x - header.gap - x))
+        textFormat: Text.PlainText
+        text: header.servedStrip
+        elide: Text.ElideRight
+        font: chromeStyle.type.paneHeader
+        color: header.text
+        Accessible.role: Accessible.StaticText
+        Accessible.name: text
+    }
+
     // The sticky command header: its glyph, its command and its detail, in the name's slot.
     Item {
         id: stickyItem
         objectName: "paneHeaderSticky"
-        visible: header.stickyShown
+        visible: header.stickyShown && !header.servedShown
         x: nameLabel.x
         anchors.verticalCenter: parent.verticalCenter
         height: stickyCommand.height

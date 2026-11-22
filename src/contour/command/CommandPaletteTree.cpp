@@ -331,7 +331,8 @@ PaletteTree buildPaletteTree(std::vector<Command> commands)
     for (auto const index: std::views::iota(std::size_t { 0 }, tree.commands.size()))
     {
         auto const& action = tree.commands[index].action;
-        if (actions::isParameterized(action))
+        if (tree.commands[index].placement == PalettePlacement::UnderItsAction
+            && actions::isParameterized(action))
             childrenByAction[action.index()].push_back(index);
         else
             tree.plain.push_back(index);

@@ -414,6 +414,24 @@ struct StatusLineExtensionServices
     std::size_t maxUserVars;
 };
 
+/// Where a terminal hosted by a daemon reads what the daemon's daemon-scoped extensions publish of
+/// themselves, for its `{DaemonExtension}` items. vtbackend runs no extension: the daemon implements it.
+class IDaemonExtensionSummaries
+{
+  public:
+    IDaemonExtensionSummaries() = default;
+    IDaemonExtensionSummaries(IDaemonExtensionSummaries const&) = delete;
+    IDaemonExtensionSummaries(IDaemonExtensionSummaries&&) = delete;
+    IDaemonExtensionSummaries& operator=(IDaemonExtensionSummaries const&) = delete;
+    IDaemonExtensionSummaries& operator=(IDaemonExtensionSummaries&&) = delete;
+    virtual ~IDaemonExtensionSummaries() = default;
+
+    /// @param name What the daemon's configuration calls the extension.
+    /// @return Its one-line summary, neutralized (no control character, bidi control or zero-width
+    ///         character in it); empty for none. Called from any thread; never blocks for long.
+    [[nodiscard]] virtual std::string summaryOf(std::string_view name) const = 0;
+};
+
 /// Makes the image a fragment holds in place of the one it held: which pool, which id, which remover.
 using ImageRehome = std::function<std::shared_ptr<Image const>(Image const& image)>;
 

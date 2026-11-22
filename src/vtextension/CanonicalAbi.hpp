@@ -916,11 +916,13 @@ struct Codec<std::variant<Ts...>>
     }
 };
 
-/// Results: a variant whose case 0 is the value and case 1 the error.
+/// Results: a variant whose case 0 is the value and case 1 the error. A result without a value
+/// (`result<_, E>`, `std::expected<void, E>`) has a case 0 without a payload.
 template <typename T, typename E>
 struct Codec<std::expected<T, E>>
 {
-    using Variant = std::variant<T, E>;
+    using Value = std::conditional_t<std::is_void_v<T>, std::monostate, T>;
+    using Variant = std::variant<Value, E>;
     using VariantCodec = Codec<Variant>;
     static constexpr uint32_t Size = VariantCodec::Size;
     static constexpr uint32_t Alignment = VariantCodec::Alignment;
@@ -928,16 +930,22 @@ struct Codec<std::expected<T, E>>
 
     [[nodiscard]] static Variant toVariant(std::expected<T, E> const& value)
     {
-        if (value)
+        if (!value)
+            return Variant { std::in_place_index<1>, value.error() };
+        if constexpr (std::is_void_v<T>)
+            return Variant { std::in_place_index<0> };
+        else
             return Variant { std::in_place_index<0>, *value };
-        return Variant { std::in_place_index<1>, value.error() };
     }
 
     [[nodiscard]] static std::expected<T, E> fromVariant(Variant value)
     {
-        if (value.index() == 0)
+        if (value.index() == 1)
+            return std::unexpected(std::move(std::get<1>(value)));
+        if constexpr (std::is_void_v<T>)
+            return {};
+        else
             return std::move(std::get<0>(value));
-        return std::unexpected(std::move(std::get<1>(value)));
     }
 
     [[nodiscard]] static Result<void> store(IGuestMemory& memory,

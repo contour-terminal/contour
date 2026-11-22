@@ -614,6 +614,62 @@ namespace
                    +[](DecodedPdu const& pdu) {
                        return std::format("workspace={}", std::get<OpenFirstTab>(pdu).workspace);
                    } },
+        TraceRow { PduType::ExtensionPermissionRequest,
+                   "ExtensionPermissionRequest",
+                   +[](DecodedPdu const& pdu) {
+                       // The question is counted, never transcribed: its text is the guest's own.
+                       auto const& value = std::get<ExtensionPermissionRequest>(pdu);
+                       return std::format(
+                           "name={} digest={} lines={}", value.name, value.grantDigest, value.lines.size());
+                   } },
+        TraceRow { PduType::ExtensionPermissionReply,
+                   "ExtensionPermissionReply",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<ExtensionPermissionReply>(pdu);
+                       return std::format(
+                           "name={} digest={} grant={}", value.name, value.grantDigest, value.grantState);
+                   } },
+        TraceRow { PduType::ExtensionPermissionSettled,
+                   "ExtensionPermissionSettled",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<ExtensionPermissionSettled>(pdu);
+                       return std::format("name={} digest={}", value.name, value.grantDigest);
+                   } },
+        TraceRow { PduType::ConsentProof,
+                   "ConsentProof",
+                   +[](DecodedPdu const&) {
+                       // A proof of a secret: never shown, not even in part.
+                       return std::string { "mac=<32B>" };
+                   } },
+        TraceRow { PduType::ExtensionPresence,
+                   "ExtensionPresence",
+                   +[](DecodedPdu const& pdu) {
+                       // Counted, never transcribed: the titles are the extensions' own text.
+                       auto const& value = std::get<ExtensionPresence>(pdu);
+                       auto rows = std::size_t { 0 };
+                       for (auto const& extension: value.extensions)
+                           rows += extension.rows.size();
+                       return std::format("extensions={} rows={}", value.extensions.size(), rows);
+                   } },
+        TraceRow { PduType::InvokeExtensionAction,
+                   "InvokeExtensionAction",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<InvokeExtensionAction>(pdu);
+                       return std::format(R"(extension="{}" action="{}")",
+                                          core::escape(value.extension),
+                                          core::escape(value.action));
+                   } },
+        TraceRow { PduType::RevealPane,
+                   "RevealPane",
+                   +[](DecodedPdu const& pdu) {
+                       return std::format("session={}", std::get<RevealPane>(pdu).session);
+                   } },
+        // A link can carry a token in its query: the trace counts its bytes and never writes it.
+        TraceRow { PduType::OpenUrl,
+                   "OpenUrl",
+                   +[](DecodedPdu const& pdu) {
+                       return std::format("bytes={}", std::get<OpenUrl>(pdu).url.size());
+                   } },
         TraceRow { PduType::SoftFontState,
                    "SoftFontState",
                    +[](DecodedPdu const& pdu) {

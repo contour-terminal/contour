@@ -1393,10 +1393,10 @@ TEST_CASE("Gutter.terminal.aRingOmitsTheEdgesABlockContinuesPast", "[gutter][blo
 
     SECTION("the whole block on the page")
     {
-        auto small = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
-        runASuccessAndAFailure(small, RailGutter);
-        small.terminal.setHoveredCommandBlock(small.terminal.commandBlockAt(LineOffset(0))->id);
-        auto const lit = renderOf(small.terminal).blockHighlight;
+        auto smallTerm = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+        runASuccessAndAFailure(smallTerm, RailGutter);
+        smallTerm.terminal.setHoveredCommandBlock(smallTerm.terminal.commandBlockAt(LineOffset(0))->id);
+        auto const lit = renderOf(smallTerm.terminal).blockHighlight;
         REQUIRE(lit.has_value());
         CHECK(lit->continues.none());
     }

@@ -154,6 +154,10 @@ namespace
                 [](CycleDaemon const& a) { return std::format(", direction: {}", a.direction); },
                 [](SwitchToDaemon const& a) { return formatDaemonRef(a.daemon); },
                 [](OpenDaemon const& a) { return formatDaemonRef(a.daemon); },
+                [](ExtensionAction const& a) {
+                    // Quoted as a daemon's name is: a comma or a '#' would end the flow map's value.
+                    return std::format(", extension: '{}', id: '{}'", a.extension, a.id);
+                },
                 [](SaveLayout const& a) {
                     // A nameless SaveLayout opens the save-as prompt, so — like a colorless SetTabColor below
                     // — it has no argument to write; a named one round-trips its name.
@@ -479,6 +483,8 @@ span<ActionCatalogEntry const> actionCatalog()
         ActionCatalogEntry { "ShowSwitcher", Action { ShowSwitcher {} }, documentation::ShowSwitcher },
         ActionCatalogEntry { "NewDaemon", Action { NewDaemon {} }, documentation::NewDaemon },
         ActionCatalogEntry { "UpgradeDaemon", Action { UpgradeDaemon {} }, documentation::UpgradeDaemon },
+        ActionCatalogEntry {
+            "ExtensionAction", Action { ExtensionAction {} }, documentation::ExtensionAction },
     };
     static_assert(std::tuple_size_v<std::remove_cvref_t<decltype(catalog)>>
                       == std::variant_size_v<Action::Variant>,

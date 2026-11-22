@@ -1887,35 +1887,57 @@ TEST_CASE("UiStyleProvider: paneHeader answers the pure policy", "[contour][uist
     using contour::window::UiStyleProvider;
 
     auto const comfortable = UiStyleProvider(densityInputs(ChromeStyle::MacOS, ChromeDensity::Comfortable));
-    auto const header = comfortable.paneHeader(0, 1, 1, 2, 400, 300);
+    auto const header = comfortable.paneHeader(0, 1, 1, 2, 400, 300, 0);
     CHECK(header.value("content").toString() == QStringLiteral("nameAndCwd"));
     CHECK(header.value("actions").toString() == QStringLiteral("shown"));
     CHECK(header.value("placement").toString() == QStringLiteral("inline"));
     CHECK(header.value("emphasis").toString() == QStringLiteral("primary"));
     // A lone pane has no header, and a pane too short for the header and a row of cells neither.
-    CHECK(comfortable.paneHeader(0, 1, 1, 1, 400, 300).value("content").toString()
+    CHECK(comfortable.paneHeader(0, 1, 1, 1, 400, 300, 0).value("content").toString()
           == QStringLiteral("hidden"));
-    CHECK(comfortable.paneHeader(0, 1, 1, 2, 400, 22).value("content").toString()
+    CHECK(comfortable.paneHeader(0, 1, 1, 2, 400, 22, 0).value("content").toString()
           == QStringLiteral("hidden"));
     // Each enum's first value past its end, as QML could pass it, answers nothing.
     auto constexpr PastReveal = static_cast<int>(contour::window::HeaderRevealCount);
     auto constexpr PastPointer = static_cast<int>(contour::window::PointerPresenceCount);
     auto constexpr PastFocus = static_cast<int>(contour::window::PaneFocusCount);
-    CHECK(comfortable.paneHeader(-1, 0, 0, 2, 400, 300).isEmpty());
-    CHECK(comfortable.paneHeader(PastReveal, 0, 0, 2, 400, 300).isEmpty());
-    CHECK(comfortable.paneHeader(0, PastPointer, 0, 2, 400, 300).isEmpty());
-    CHECK(comfortable.paneHeader(0, 0, PastFocus, 2, 400, 300).isEmpty());
-    CHECK(!comfortable.paneHeader(PastReveal - 1, PastPointer - 1, PastFocus - 1, 2, 400, 300).isEmpty());
+    CHECK(comfortable.paneHeader(-1, 0, 0, 2, 400, 300, 0).isEmpty());
+    CHECK(comfortable.paneHeader(PastReveal, 0, 0, 2, 400, 300, 0).isEmpty());
+    CHECK(comfortable.paneHeader(0, PastPointer, 0, 2, 400, 300, 0).isEmpty());
+    CHECK(comfortable.paneHeader(0, 0, PastFocus, 2, 400, 300, 0).isEmpty());
+    CHECK(!comfortable.paneHeader(PastReveal - 1, PastPointer - 1, PastFocus - 1, 2, 400, 300, 0).isEmpty());
+    CHECK(comfortable.paneHeader(0, 0, 0, 2, 400, 300, static_cast<int>(contour::window::PaneSourceCount))
+              .isEmpty());
+    // A served pane's header shows alone: name only, inline, no actions.
+    auto const served =
+        comfortable.paneHeader(0, 1, 1, 1, 400, 300, static_cast<int>(contour::window::PaneSource::Served));
+    CHECK(served.value("content").toString() == QStringLiteral("name"));
+    CHECK(served.value("actions").toString() == QStringLiteral("hidden"));
+    CHECK(served.value("placement").toString() == QStringLiteral("inline"));
 
     auto const minimal = UiStyleProvider(densityInputs(ChromeStyle::MacOS, ChromeDensity::Minimal));
-    CHECK(minimal.paneHeader(1, 0, 0, 2, 400, 300).value("placement").toString()
+    CHECK(minimal.paneHeader(1, 0, 0, 2, 400, 300, 0).value("placement").toString()
           == QStringLiteral("overlay"));
-    CHECK(minimal.paneHeader(0, 0, 0, 2, 400, 300).value("content").toString() == QStringLiteral("hidden"));
+    CHECK(minimal.paneHeader(0, 0, 0, 2, 400, 300, 0).value("content").toString()
+          == QStringLiteral("hidden"));
+    // Minimal takes the inline header away, but not a served pane's: it keeps the row's own height.
+    auto constexpr Served = static_cast<int>(contour::window::PaneSource::Served);
+    CHECK(minimal.paneHeaderHeight(1.0) == 0.0);
+    CHECK(minimal.servedPaneHeaderHeight(1.0) == comfortable.paneHeaderHeight(1.0));
+    CHECK(minimal.servedPaneHeaderHeight(1.0) > 0.0);
+    CHECK(minimal.paneHeader(0, 0, 0, 1, 400, 300, Served).value("placement").toString()
+          == QStringLiteral("inline"));
+    // Too short for that height and a row of cells, it gives way: the policy is asked with the real height.
+    CHECK(minimal.paneHeader(0, 0, 0, 1, 400, minimal.servedPaneHeaderHeight(1.0), Served)
+              .value("content")
+              .toString()
+          == QStringLiteral("hidden"));
 
     // The Terminal row shows the actions on the focused pane too.
     auto const terminal = UiStyleProvider(densityInputs(ChromeStyle::Terminal, ChromeDensity::Comfortable));
-    CHECK(terminal.paneHeader(0, 0, 1, 2, 400, 300).value("actions").toString() == QStringLiteral("shown"));
-    CHECK(comfortable.paneHeader(0, 0, 1, 2, 400, 300).value("actions").toString()
+    CHECK(terminal.paneHeader(0, 0, 1, 2, 400, 300, 0).value("actions").toString()
+          == QStringLiteral("shown"));
+    CHECK(comfortable.paneHeader(0, 0, 1, 2, 400, 300, 0).value("actions").toString()
           == QStringLiteral("hidden"));
 
     CHECK(comfortable.paneHeaderName(QStringLiteral("vim"), QStringLiteral("~/src"))

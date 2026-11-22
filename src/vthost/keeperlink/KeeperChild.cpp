@@ -28,11 +28,16 @@ namespace vthost::keeperlink
 
 namespace
 {
-    /// The most descriptors a keeper spawn carries: every trampoline slot and the spec socket, all but the
-    /// process handle of what the keeper keeps, and the executable.
-    constexpr auto MostSpawnDescriptors = std::size_t { vtpty::TrampolineSlotCount } + 1
+    /// The most descriptors a keeper spawn carries. It is always a terminal launch
+    /// (prepareTrampolineSpawn()), so it fills at most vtpty::TerminalLaunchSlots -- Gate, Settle, Terminal,
+    /// FastPipe and WorkingDirectory, never a detached launch's Input or Output -- beside the spec socket;
+    /// then all but the process handle of what the keeper keeps (Master, FastPipeReader, Gate, Settle); then
+    /// the executable: 5 + 1 + 4 + 1 = 11. keeper::Spawn::MaxDescriptors is not to be raised for it: an older
+    /// keeper refuses more than 12.
+    constexpr auto MostSpawnDescriptors = vtpty::TerminalLaunchSlotCount + 1
                                           + (core::codec::EnumWire<keeper::KeptDescriptor>::Values.size() - 1)
                                           + 1;
+    static_assert(MostSpawnDescriptors == 11);
     static_assert(MostSpawnDescriptors <= keeper::Spawn::MaxDescriptors,
                   "a keeper spawn must fit the descriptors a Spawn may carry");
 
@@ -234,6 +239,8 @@ vtpty::StartResult KeeperChild::spawn()
 {
     auto prepared = vtpty::prepareTrampolineSpawn(
         *_pty, _config.exec, _config.sandbox, _config.placement->childOomScoreAdjust());
+    // The spawn holds its own copy of the directory's descriptor now: the handle is let go, as Process does.
+    _config.exec.directory.reset();
     if (!prepared)
         return std::unexpected(prepared.error());
     auto const terminal = _pty->handover();

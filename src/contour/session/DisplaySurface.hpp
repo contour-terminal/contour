@@ -7,6 +7,7 @@
 #include <vtbackend/core/Image.hpp>
 #include <vtbackend/core/Primitives.hpp>
 
+#include <vtrasterizer/BoxDrawingStyle.hpp>
 #include <vtrasterizer/Decorator.hpp>
 #include <vtrasterizer/FontDescriptions.hpp>
 #include <vtrasterizer/GridMetrics.hpp>
@@ -173,6 +174,11 @@ class DisplaySurface
     /// @param newFontSize The requested size.
     /// @return True if the size was applied; false if it was rejected or the fonts failed to load.
     virtual bool setFontSize(text::FontSize newFontSize) = 0;
+
+    /// Draws the box-drawing, git-graph and Braille glyphs in @p style from the next frame on (a config
+    /// reload).
+    /// @param style The style to draw them with.
+    virtual void setBoxDrawingStyle(vtrasterizer::BoxDrawingStyle style) = 0;
 
     /// Sets how hyperlinks are underlined, normally and while hovered.
     /// @param normal The decoration for a hyperlink at rest.

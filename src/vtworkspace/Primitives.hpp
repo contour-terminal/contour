@@ -60,6 +60,14 @@ enum class FocusDirection : uint8_t
     Down,
 };
 
+/// Whether a new tab becomes its workspace's active one.
+enum class TabActivation : uint8_t
+{
+    Activate = 0, ///< It does, as every tab the user opens: the tab that was active becomes the previous one.
+    Background, ///< It does not: the active and previous tabs stay (an extension's agent tab). The first tab
+                ///< of an empty workspace is activated all the same.
+};
+
 /// The side of a pane that a new half is placed on when a whole tab is grafted beside it.
 enum class SplitSide : uint8_t
 {

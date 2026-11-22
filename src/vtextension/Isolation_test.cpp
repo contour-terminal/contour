@@ -202,7 +202,7 @@ TEST_CASE("Isolation.hookNeverBlocks", "[vtextension][isolation][threading]")
     constexpr auto HookCalls = 100'000;
 
     auto harness = RunnerHarness {};
-    auto engines = EngineProvider { *harness.backend, ExtensionLimits {} };
+    auto engines = EngineProvider { *harness.backend, vtextension::World::StatusLine, ExtensionLimits {} };
     auto pool = ExtensionWorkerPool(*harness.backend, 1); // one worker: parking it parks every lane
     auto sink = vtbackend::StatusLinePublishSink {};
     auto services = harness.services(pool, engines);
@@ -318,7 +318,7 @@ TEST_CASE("Isolation.renderNotOnParserThread", "[vtextension][isolation][threadi
     // by the host's `log` call -- and every frame published happen off the thread that parses the output
     // which caused them, and off the thread that set the pane up.
     auto harness = RunnerHarness {};
-    auto engines = EngineProvider { *harness.backend, ExtensionLimits {} };
+    auto engines = EngineProvider { *harness.backend, vtextension::World::StatusLine, ExtensionLimits {} };
     auto pool = ExtensionWorkerPool(*harness.backend, 1);
     auto sink = vtbackend::StatusLinePublishSink {};
     auto renders = ThreadIds {};

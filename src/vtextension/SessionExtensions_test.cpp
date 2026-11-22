@@ -57,7 +57,7 @@ struct Fixture
 {
     RunnerHarness harness;
     vtextension::ExtensionLimits limits {}; ///< What the engines are created with, and each extension costs.
-    vtextension::EngineProvider engines { *harness.backend, limits };
+    vtextension::EngineProvider engines { *harness.backend, vtextension::World::StatusLine, limits };
     core::async::testing::ManualExecutor builds;
     core::platform::testing::InMemoryFileSystem fileSystem;
     std::shared_ptr<QueuedOwner> owner = std::make_shared<QueuedOwner>();

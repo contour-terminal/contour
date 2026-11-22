@@ -107,7 +107,9 @@ template <typename Map>
 /// Whether row @p row of a listing is a child of a parameterised action (not a plain command).
 [[nodiscard]] bool isChildRow(PaletteTree const& tree, PaletteEntry const& row)
 {
-    return row.kind == PaletteEntryKind::Command && actions::isParameterized(tree.commands[row.index].action);
+    auto const& command = tree.commands[row.index];
+    return row.kind == PaletteEntryKind::Command && command.placement == PalettePlacement::UnderItsAction
+           && actions::isParameterized(command.action);
 }
 
 /// The byte length of a child's qualifier, e.g. "Change Profile · " (the separator's dot is two bytes).
@@ -163,6 +165,64 @@ TEST_CASE("paletteTree.parameterisedActionsCollapse", "[palettetree]")
     }));
     CHECK(tree.find("ChangeProfile:dark") != nullptr);
     CHECK(tree.find("ChangeProfile:gone") == nullptr);
+}
+
+namespace
+{
+/// The rows a daemon extension's palette shows: "Open Agents", for the orchestrator's `open`.
+class OpenAgentsRow final: public ExtensionRowsProvider
+{
+  public:
+    [[nodiscard]] std::vector<ExtensionRow> extensionRows() const override
+    {
+        return { ExtensionRow { .extension = "orchestrator", .id = "open", .title = "Open Agents" } };
+    }
+};
+} // namespace
+
+TEST_CASE("paletteTree.aRowOnItsOwnIsListedAndFoundByItsTitle", "[palettetree]")
+{
+    // The same parameterised action twice: the extension's named row (OnItsOwn), and a binding of another
+    // extension's action that no row names (UnderItsAction), which stays a child of the drill-in.
+    auto const provider = OpenAgentsRow {};
+    auto const extension = ExtensionCommandSource { provider };
+    auto mappings = config::InputMappings {};
+    mappings.keyMappings.push_back(config::KeyInputMapping {
+        .modes { vtbackend::MatchModes {} },
+        .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+        .input = vtbackend::Key::F11,
+        .binding = { { actions::ExtensionAction { .extension = "notes", .id = "jot" } } } });
+    auto const bound = BoundCommandSource { mappings };
+    auto const sources = std::array<CommandSource const*, 2> { &extension, &bound };
+    auto const tree = buildPaletteTree(collectCommands(sources));
+
+    auto const& parent = tree.parents[parentIndex(tree, "ExtensionAction")];
+    REQUIRE(parent.children.size() == 1);
+    CHECK(tree.commands[parent.children.front()].id == "ExtensionAction:notes:jot");
+    CHECK(std::ranges::count_if(tree.plain,
+                                [&](std::size_t index) {
+                                    return tree.commands[index].id == "ExtensionAction:orchestrator:open";
+                                })
+          == 1);
+
+    SECTION("unfiltered, it is a row of its group under its title")
+    {
+        auto const rows = listPalette(tree, PaletteQuery { .filter = {}, .level = {}, .recent = {} });
+        auto const open = rowTitled(rows, "Open Agents");
+        REQUIRE(open < rows.size());
+        CHECK(rows[open].kind == PaletteEntryKind::Command);
+        CHECK(groupOf(rows, open) == "Daemons");
+    }
+
+    SECTION("a filter finds it by the words of its title, and the child by its argument only")
+    {
+        auto const agents = listPalette(tree, PaletteQuery { .filter = "Agents", .level = {}, .recent = {} });
+        CHECK(rowTitled(agents, "Open Agents") < agents.size());
+
+        auto const notes = listPalette(tree, PaletteQuery { .filter = "jot", .level = {}, .recent = {} });
+        CHECK(rowTitled(notes, "Extension Action · notes jot") < notes.size());
+        CHECK(rowTitled(notes, "Open Agents") == notes.size());
+    }
 }
 
 TEST_CASE("paletteTree.unfilteredTopIsRecentThenGroups", "[palettetree]")

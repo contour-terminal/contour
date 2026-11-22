@@ -538,7 +538,7 @@ TEST_CASE("Terminal.extensions.font", "[extensions]")
     // The font is told to every extension, subscribed or not -- each one's surface takes its cell size from
     // it -- once per change, and again to extensions loaded or subscribing later.
     using namespace StatusLineEvents;
-    auto const small =
+    auto const smallFont =
         StatusLineFontMetrics { .pointSize = 12, .cellPixelSize = ImageSize { Width(9), Height(18) } };
     auto const large =
         StatusLineFontMetrics { .pointSize = 16, .cellPixelSize = ImageSize { Width(12), Height(24) } };
@@ -563,11 +563,11 @@ TEST_CASE("Terminal.extensions.font", "[extensions]")
 
     SECTION("told to every extension, once per change")
     {
-        setFont(small);
+        setFont(smallFont);
         REQUIRE(extensions.posted().size() == 1);
-        CHECK(extensions.posted().back() == StatusLineEvent { FontChanged { .metrics = small } });
+        CHECK(extensions.posted().back() == StatusLineEvent { FontChanged { .metrics = smallFont } });
 
-        setFont(small);
+        setFont(smallFont);
         CHECK(extensions.posted().size() == 1);
 
         setFont(large);
@@ -577,18 +577,18 @@ TEST_CASE("Terminal.extensions.font", "[extensions]")
 
     SECTION("metrics known before a subscription are replayed to it")
     {
-        setFont(small);
+        setFont(smallFont);
         extensions.subscribe(StatusLineEventKinds { StatusLineEventKind::Font });
         terminal.statusLineExtensionsPublished();
         terminal.refreshRenderBuffer();
         REQUIRE(fontEvents() == 2);
-        CHECK(extensions.posted().back() == StatusLineEvent { FontChanged { .metrics = small } });
+        CHECK(extensions.posted().back() == StatusLineEvent { FontChanged { .metrics = smallFont } });
     }
 
     SECTION("replaced extensions are told the metrics before the size they draw at")
     {
         // A frame is drawn once the size is known; it must not be drawn at a cell size told after it.
-        setFont(small);
+        setFont(smallFont);
         terminal.runUnderStateLock([&] { terminal.statusLineExtensionsReplaced(); });
         auto const postedAtResize = extensions.postedAtResize();
         REQUIRE(!postedAtResize.empty());
@@ -597,11 +597,11 @@ TEST_CASE("Terminal.extensions.font", "[extensions]")
 
     SECTION("replaced extensions are told the metrics once, subscribed or not")
     {
-        setFont(small);
+        setFont(smallFont);
         extensions.subscribe(StatusLineEventKinds { StatusLineEventKind::Font });
         terminal.runUnderStateLock([&] { terminal.statusLineExtensionsReplaced(); });
         REQUIRE(fontEvents() == 2);
-        CHECK(extensions.posted().back() == StatusLineEvent { FontChanged { .metrics = small } });
+        CHECK(extensions.posted().back() == StatusLineEvent { FontChanged { .metrics = smallFont } });
     }
 }
 
@@ -791,6 +791,67 @@ TEST_CASE("Terminal.extensions.drivenByExtensions", "[extensions]")
         auto mock = MockTerm { ExtensionPageSize, extensions.services() };
         showIndicator(mock.terminal, "template");
         CHECK(mock.terminal.indicatorStatusLineDependsOnHostState());
+    }
+}
+
+TEST_CASE("Terminal.extensions.daemonSummariesDriveTheRow", "[extensions][statusline][summary]")
+{
+    // A daemon whose only extension is daemon-scoped still draws the indicator row: its clients have no
+    // summary to read.
+    class Summaries final: public IDaemonExtensionSummaries
+    {
+      public:
+        [[nodiscard]] std::string summaryOf(std::string_view name) const override
+        {
+            return name == "orchestrator" ? "agents 1/4" : "";
+        }
+    };
+    auto const summaries = Summaries {};
+
+    SECTION("a daemon whose only extension is daemon-scoped still draws the indicator row")
+    {
+        auto mock = MockTerm { ExtensionPageSize, summaries };
+        showIndicator(mock.terminal, "[{DaemonExtension:orchestrator}]");
+        CHECK(mock.terminal.indicatorStatusLineDependsOnHostState());
+        CHECK(mock.terminal.indicatorStatusLineShowsDaemonSummaries());
+        CHECK(indicatorText(mock.terminal) == "[agents 1/4]");
+    }
+
+    SECTION("without the item it does not")
+    {
+        auto mock = MockTerm { ExtensionPageSize, summaries };
+        showIndicator(mock.terminal, "{Title} {Clock}");
+        CHECK_FALSE(mock.terminal.indicatorStatusLineDependsOnHostState());
+        CHECK_FALSE(mock.terminal.indicatorStatusLineShowsDaemonSummaries());
+    }
+
+    SECTION("one repaint reads each summary once, however many items show it")
+    {
+        class Counting final: public IDaemonExtensionSummaries
+        {
+          public:
+            [[nodiscard]] std::string summaryOf(std::string_view /*name*/) const override
+            {
+                return std::format("read {}", ++reads);
+            }
+            mutable int reads = 0;
+        };
+        auto const counting = Counting {};
+        auto mock = MockTerm { ExtensionPageSize, counting };
+        showIndicator(mock.terminal, "[{DaemonExtension:orchestrator}|{DaemonExtension:orchestrator}]");
+        auto const before = counting.reads;
+        mock.terminal.setStatusDisplay(StatusDisplayType::None);
+        mock.terminal.runUnderStateLock([&] { mock.terminal.refreshIndicatorStatusLine(); });
+        CHECK(counting.reads == before + 1);
+        CHECK(indicatorText(mock.terminal) == std::format("[read {0}|read {0}]", counting.reads));
+    }
+
+    SECTION("without summaries the item draws nothing, and depends on nothing")
+    {
+        auto mock = MockTerm { ExtensionPageSize };
+        showIndicator(mock.terminal, "[{DaemonExtension:orchestrator}]");
+        CHECK_FALSE(mock.terminal.indicatorStatusLineDependsOnHostState());
+        CHECK(indicatorText(mock.terminal) == "[]");
     }
 }
 

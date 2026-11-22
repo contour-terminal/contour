@@ -31,6 +31,8 @@
 #include <contour/window/ProgramStatusBadge.hpp>
 #include <contour/window/SaveLayoutCheck.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
+#include <contour/window/ServedChrome.hpp>
+#include <contour/window/ServedChromeText.hpp>
 #include <contour/window/SidebarMenuState.hpp>
 #include <contour/window/SidebarModel.hpp>
 #include <contour/window/SidebarToggle.hpp>
@@ -156,6 +158,7 @@ class WindowController:
     public QAbstractListModel,
     public command::TabTitleProvider,
     public command::DaemonRowsProvider,
+    public command::ExtensionRowsProvider,
     public SwitcherHost,
     public display::WindowHost,
     public session::InProcessWindow
@@ -272,6 +275,9 @@ class WindowController:
     // The window's own daemon's drift (window::DaemonDriftModel), which its drift badge shows; null for a
     // local window. Read anew whenever the window is bound to another host.
     Q_PROPERTY(QObject* daemonDrift READ daemonDrift NOTIFY hostLabelChanged)
+    // The window's own daemon's extensions' questions (window::DaemonExtensionConsentModel), which its
+    // consent dialog shows; null for a local window. Read anew whenever the window is bound to another host.
+    Q_PROPERTY(QObject* daemonExtensionConsent READ daemonExtensionConsent NOTIFY hostLabelChanged)
     // The window's host for ssh's login prompts (window::PromptHost), which its AskpassDialog shows.
     Q_PROPERTY(QObject* promptHost READ promptHost CONSTANT)
     // A window::HostChipState as its underlying value: where the connection to that host stands.
@@ -322,6 +328,13 @@ class WindowController:
         //!< (`chromeStyle.tabIconKinds`), and the initial of a Monogram or the file URL of an Image. Re-read
         //!< with the title, as is the program name it comes from.
         IconRole = Qt::UserRole + 14,
+        //!< "Served by {title}" for a tab a daemon-scoped extension draws (window::servedByText: translated;
+        //!< its accessible description and its tooltip's first line), empty for any other: the tab shows the
+        //!< served marker exactly when it is not empty.
+        ServedByRole = Qt::UserRole + 15,
+        //!< The served pane's header strip (window::servedStripText); empty for a tab whose panes run
+        //!< programs.
+        ServedStripRole = Qt::UserRole + 16,
     };
 
     /// @param manager  The session-lifetime service + model host (must outlive this controller).
@@ -1007,6 +1020,10 @@ class WindowController:
     /// refreshing the local daemon discovery behind it, and answers from what it knew before.
     [[nodiscard]] command::DaemonRowsState daemonRows() const override;
 
+    /// The daemon extensions' palette rows of this window's daemon, from what it last sent
+    /// (command::ExtensionRowsProvider); none for a window with no daemon behind it.
+    [[nodiscard]] std::vector<command::ExtensionRow> extensionRows() const override;
+
     /// The label the strip shows for one tab, read as tabTitles() reads each row. Resolving a label
     /// takes that tab's terminal lock, so naming one tab this way waits on no other tab's parser.
     /// @param tab The tab to name.
@@ -1272,7 +1289,7 @@ class WindowController:
     // }}}
 
     /// This window's currently focused display (for window services + status-line targeting).
-    [[nodiscard]] display::TerminalDisplay* activeDisplay() const noexcept { return _activeDisplay; }
+    [[nodiscard]] display::TerminalDisplay* activeDisplay() const noexcept;
 
     // {{{ Window-geometry authority
     // The controller is the ONLY component that mutates QWindow geometry (WM size hints, window show
@@ -1657,6 +1674,7 @@ class WindowController:
     /// What this window's drift badge shows: whether the daemon of its own link runs another release.
     /// @return Its window::DaemonDriftModel; null for a local window.
     [[nodiscard]] QObject* daemonDrift() const;
+    [[nodiscard]] QObject* daemonExtensionConsent() const;
 
     /// @return The window's window::PromptHost: where the ssh logins this window started ask their questions.
     [[nodiscard]] QObject* promptHost() const noexcept;
@@ -1891,6 +1909,13 @@ class WindowController:
     [[nodiscard]] TabBadge tabBadge(vtworkspace::Tab const& tab) const;
     /// @return Whether any pane of @p tab shows the lock.
     [[nodiscard]] SecureIndicator tabSecureIndicator(vtworkspace::Tab const& tab) const;
+
+    /// @param tab A tab of this window.
+    /// @return Who draws @p tab, as the daemon said of its panes; nullopt for a tab whose panes run programs.
+    [[nodiscard]] std::optional<ServedMark> tabServedMark(vtworkspace::Tab const& tab) const;
+    /// @param leaf A pane of this window.
+    /// @return Whether a daemon-scoped extension draws @p leaf, as the daemon said.
+    [[nodiscard]] bool isServedLeaf(vtworkspace::Pane const& leaf) const;
     /// @p session's foreground process name, asked once until the next TitleRole refresh (@ref
     /// _processNames). Only a TitleRole change re-reads it, so a tab keeps the name of the process it first
     /// found until its title changes; Step 2's foreground poll is what invalidates it on a process change.
@@ -2295,6 +2320,7 @@ class WindowController:
     command::LayoutCommandSource _layoutCommands;
     command::HostCommandSource _hostCommands;
     command::DaemonCommandSource _daemonCommands;
+    command::ExtensionCommandSource _extensionCommands;
     command::BoundCommandSource _boundCommands;
     command::ActionCommandSource _actionCommands;
     // The two sources that offer actions without knowing the window, minus the switching actions a window
@@ -2347,7 +2373,12 @@ class WindowController:
     /// What a click on the tray message last shown does, besides bringing the window forward.
     std::function<void()> _trayMessageClicked;
 
-    display::TerminalDisplay* _activeDisplay = nullptr;
+    // This window's focused display. A QPointer, like _osWindow below: closeWindow() unregisters the
+    // controller before the QML engine destroys the window's displays, so the manager's detachDisplay()
+    // fan-out (onDisplayDetached()) no longer reaches it — yet the band still reports its widths into the
+    // controller while it awaits its deferred delete. onDisplayDetached() clears it earlier, from inside
+    // ~TerminalDisplay, while the controller is still registered.
+    QPointer<display::TerminalDisplay> _activeDisplay;
     // The OS window (QQuickWindow) this controller adapts, adopted from the first display that focuses in.
     // Lets the manager route a focus/close to the controller that owns a given display's window. A QPointer:
     // the QML engine destroys the window before the controller, and a daemon link released after that (the

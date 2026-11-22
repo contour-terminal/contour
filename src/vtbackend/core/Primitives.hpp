@@ -754,6 +754,14 @@ enum class UserInputLock : uint8_t
     Locked,       ///< No input reaches the application.
 };
 
+/// What reads the keys typed into a terminal, as far as what the terminal says about them.
+enum class InputReader : uint8_t
+{
+    Program = 0, ///< A program in a pane: in Insert mode what is typed is its text.
+    Extension,   ///< A daemon-scoped extension that serves the pane: the keys are commands to the view it
+                 ///< draws.
+};
+
 // Mandates the position to show the statusline at.
 enum class StatusDisplayPosition : uint8_t
 {

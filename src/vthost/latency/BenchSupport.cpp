@@ -125,7 +125,7 @@ std::expected<std::unique_ptr<BenchProcess>, std::string> BenchProcess::start(
 {
     auto process = std::make_unique<vtpty::Process>(benchExecInfo(program, std::move(arguments)),
                                                     vtpty::createPty(ChildPageSize, std::nullopt),
-                                                    /*escapeSandbox=*/false,
+                                                    vtpty::SandboxEscape::Contained,
                                                     std::make_shared<vtpty::NoPlacement>());
     if (auto const started = process->start(); !started)
         return std::unexpected(std::format("cannot start {}", program.string()));

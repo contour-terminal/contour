@@ -28,6 +28,7 @@
 #include <contour/window/CloseDialogTable.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
+#include <contour/window/DaemonExtensionConsentModel.hpp>
 #include <contour/window/DropZonePolicy.hpp>
 #include <contour/window/HeaderBarLayout.hpp>
 #include <contour/window/HostChipState.hpp>
@@ -74,6 +75,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <iterator>
 #include <limits>
 #include <mutex>
 #include <ranges>
@@ -234,6 +236,7 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     _layoutCommands { manager.app().config() },
     _hostCommands { manager.app().config() },
     _daemonCommands { *this },
+    _extensionCommands { *this },
     _boundCommands { manager.app().config().inputMappings.value() },
     _gatedBoundCommands { _boundCommands, *this },
     _gatedActionCommands { _actionCommands, *this },
@@ -244,6 +247,7 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
                                                      &_layoutCommands,
                                                      &_hostCommands,
                                                      &_daemonCommands,
+                                                     &_extensionCommands,
                                                      &_gatedBoundCommands,
                                                      &_gatedActionCommands },
         command::shortcutStyleFor(manager.app().config().keyboardPlatformKind),
@@ -679,6 +683,11 @@ QObject* WindowController::daemonDrift() const
     return _manager.daemonDriftOf(_displayed);
 }
 
+QObject* WindowController::daemonExtensionConsent() const
+{
+    return _manager.daemonExtensionConsentOf(_displayed);
+}
+
 QString WindowController::shortcutText(QString const& commandName) const
 {
     auto const chords = command::chordIndex(_manager.app().config());
@@ -924,6 +933,14 @@ command::DaemonSwitching WindowController::switchingAvailability() const
                                                : command::DaemonSwitching::Unavailable;
 }
 
+std::vector<command::ExtensionRow> WindowController::extensionRows() const
+{
+    auto rows = std::vector<command::ExtensionRow> {};
+    for (auto const& extension: _manager.extensionPresenceOf(_displayed).extensions)
+        std::ranges::move(command::extensionRowsOf(extension), std::back_inserter(rows));
+    return rows;
+}
+
 command::DaemonRowsState WindowController::daemonRows() const
 {
     auto state = command::DaemonRowsState {};
@@ -1090,6 +1107,8 @@ QHash<int, QByteArray> WindowController::roleNames() const
         { static_cast<int>(Roles::BadgeProgressRole), "badgeProgress" },
         { static_cast<int>(Roles::SecureRole), "tabSecure" },
         { static_cast<int>(Roles::IconRole), "tabIcon" },
+        { static_cast<int>(Roles::ServedByRole), "servedBy" },
+        { static_cast<int>(Roles::ServedStripRole), "servedStrip" },
     };
 }
 
@@ -1142,6 +1161,10 @@ QVariant WindowController::data(QModelIndex const& index, int role) const
         case Roles::SecureRole: return tab != nullptr ? static_cast<int>(tabSecureIndicator(*tab)) : 0;
         case Roles::IconRole:
             return session != nullptr ? tabIconVariant(tabIconFor(*session)) : QVariantMap {};
+        case Roles::ServedByRole:
+            return servedByText(servedChromeOf(tab != nullptr ? tabServedMark(*tab) : std::nullopt));
+        case Roles::ServedStripRole:
+            return servedStripText(servedChromeOf(tab != nullptr ? tabServedMark(*tab) : std::nullopt));
         default: return {};
     }
 }
@@ -1268,6 +1291,21 @@ SecureIndicator WindowController::tabSecureIndicator(vtworkspace::Tab const& tab
                 strongest = std::max(strongest, static_cast<SecureIndicator>(session->secureIndicator()));
         });
     return strongest;
+}
+
+bool WindowController::isServedLeaf(vtworkspace::Pane const& leaf) const
+{
+    auto const* terminal = leaf.isLeaf() ? _manager.sessionForId(leaf.session()) : nullptr;
+    return terminal != nullptr && terminal->servedMark().has_value();
+}
+
+std::optional<ServedMark> WindowController::tabServedMark(vtworkspace::Tab const& tab) const
+{
+    for (auto const session: tab.leafSessions())
+        if (auto const* terminal = _manager.sessionForId(session);
+            terminal != nullptr && terminal->servedMark())
+            return terminal->servedMark();
+    return std::nullopt;
 }
 
 std::string const& WindowController::cachedProcessName(session::TerminalSession const& session) const
@@ -2606,6 +2644,11 @@ bool WindowController::isMultimediaReady() const noexcept
     return _manager.isMultimediaReady();
 }
 // }}}
+
+display::TerminalDisplay* WindowController::activeDisplay() const noexcept
+{
+    return _activeDisplay.data();
+}
 
 void WindowController::focusDisplay(display::TerminalDisplay* display)
 {
@@ -4523,7 +4566,9 @@ bool WindowController::applyContentDrivenResize(session::DisplaySurface& request
         *leaf,
         vtworkspace::LayoutSize { .width = leafContentLogical.width, .height = leafContentLogical.height },
         _manager.app().splitChrome(osWindow->devicePixelRatio()),
-        *layoutRoot);
+        *layoutRoot,
+        // A served pane shows its header alone too (window::resolvePaneHeader), and the window makes room.
+        isServedLeaf(*leaf) ? vtworkspace::LeafHeader::Always : vtworkspace::LeafHeader::InSplit);
 
     display::displayLog()("Content-driven window resize: leaf {}x{} -> content {}x{} + {} chrome.",
                           leafContentLogical.width,

@@ -36,6 +36,10 @@ extend-exclude = [
     # A verbatim copy of core-cpp, pinned by its MANIFEST: a misspelling there is fixed upstream and
     # re-vendored, never here (vendor/README.md).
     "vendor/**",
+    # The agent orchestrator's recorded CLI output is the tools' own text, kept byte for
+    # byte, and its invalid manifests are malformed on purpose; neither is prose.
+    "extensions/orchestrator/**/testdata/**",
+    "extensions/orchestrator/contract/**/invalid/**",
 ]
 
 [default]
@@ -59,6 +63,7 @@ countr_zero = "countr_zero"       # std::countr_zero, C++20 <bit>.
 tio = "tio"                       # The POSIX idiom for a local `struct termios`.
 iy = "iy"                         # Item-space y coordinate, paired with `ix`.
 msg_controllen = "msg_controllen" # The control-buffer length field of POSIX `struct msghdr`.
+unexpect = "unexpect"             # C++23 std::unexpect, the tag constructing std::expected's error.
 
 [default.extend-words]
 # Domain vocabulary that is genuinely tree-wide in a terminal emulator.
@@ -129,3 +134,10 @@ extend-glob = ["AuthorizedKeys_test.cpp"]
 
 [type.authorized-keys-test.extend-words]
 Fo = "Fo" # Inside a base64 SSH public key blob, not prose.
+
+# git accepts any unambiguous prefix of a long option (`--fo` for `--force`), so the orchestrator's
+# command screening must refuse those spellings too, and Commands_test spells each prefix out on
+# purpose. Only that literal token is exempt, and only in that one file.
+[type.orchestrator-commands-test]
+extend-glob = ["Commands_test.cpp"]
+extend-ignore-re = ['"--fo"']

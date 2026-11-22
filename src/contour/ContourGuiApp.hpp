@@ -93,6 +93,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <vthost/DaemonConsentKey.hpp>
 #include <vthost/DaemonSpawn.hpp>
 #include <vthost/KnownDaemons.hpp>
 #include <vthost/SshTransport.hpp>
@@ -735,7 +736,10 @@ class ContourGuiApp:
     }
 
     /// The external-resource launcher (URL opening, child-process spawning) for this app's sessions.
-    [[nodiscard]] platform::ExternalLauncher& externalLauncher() noexcept { return *_externalLauncher; }
+    [[nodiscard]] platform::ExternalLauncher& externalLauncher() noexcept override
+    {
+        return *_externalLauncher;
+    }
 
     /// The voice this app's sessions read selections through.
     ///
@@ -775,6 +779,11 @@ class ContourGuiApp:
     /// @param config What the link connects with.
     /// @return The link, owned by the app.
     remote::DaemonLink& startDaemonLink(remote::DaemonLinkConfig config);
+
+    /// @param controlPath The socket of a daemon on this machine.
+    /// @return What proves the consent key that daemon keeps, for its windows: read for the run each hello
+    /// names.
+    [[nodiscard]] vthost::ConsentProver localConsentProver(std::filesystem::path const& controlPath) const;
 
     /// @return The app's links, in the order they were made, the ended ones not yet destroyed among them.
     [[nodiscard]] std::span<std::unique_ptr<remote::DaemonLink> const> daemonLinks() const noexcept

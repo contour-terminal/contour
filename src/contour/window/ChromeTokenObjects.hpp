@@ -2174,6 +2174,25 @@ class ChromePaneStateNames: public QObject
     [[nodiscard]] static constexpr int of(PaneState state) noexcept { return static_cast<int>(state); }
 };
 
+/// The QML names of what draws a pane, `chromeStyle.paneSources`, for paneHeader()'s `source`.
+class ChromePaneSourceNames: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int program READ program CONSTANT)
+    Q_PROPERTY(int served READ served CONSTANT)
+
+  public:
+    /// @param parent Qt ownership.
+    explicit ChromePaneSourceNames(QObject* parent);
+
+    /// @return Each window::PaneSource as its underlying value.
+    [[nodiscard]] static constexpr int program() noexcept { return of(PaneSource::Program); }
+    [[nodiscard]] static constexpr int served() noexcept { return of(PaneSource::Served); }
+
+  private:
+    [[nodiscard]] static constexpr int of(PaneSource source) noexcept { return static_cast<int>(source); }
+};
+
 /// The QML names of what holds a pane header's trailing area, `chromeStyle.headerOccupants`, for
 /// PaneHeader's `trailingOccupant`.
 class ChromeHeaderOccupantNames: public QObject

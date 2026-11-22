@@ -1,0 +1,5 @@
+# The @root follows the pane's name; nowhere else binds it.
+name = misplaced
+version = 2
+root worktrees = config:worktree_root
+pane @worktrees agent = claude

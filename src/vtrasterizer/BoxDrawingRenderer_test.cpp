@@ -4,16 +4,27 @@
 #include <vtrasterizer/BoxDrawingRenderer.hpp>
 #include <vtrasterizer/GridMetrics.hpp>
 #include <vtrasterizer/RendererTestHelpers.hpp>
+#include <vtrasterizer/TextClusterGrouper.hpp>
 #include <vtrasterizer/TextureAtlas.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
+#include <array>
 #include <format>
+#include <memory>
 #include <ranges>
+#include <span>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 using namespace vtrasterizer;
 using namespace vtbackend;
+using namespace std::string_view_literals;
 
 // Forward declare the test class to match the friend declaration
 namespace vtrasterizer
@@ -21,22 +32,26 @@ namespace vtrasterizer
 class BoxDrawingRendererTest
 {
   public:
-    static std::optional<atlas::Buffer> buildBoxElements(char32_t codepoint,
+    /// Builds a box-drawing table glyph through a renderer of @p style.
+    static std::optional<atlas::Buffer> buildBoxElements(BoxDrawingStyle style,
+                                                         char32_t codepoint,
                                                          ImageSize size,
                                                          int lineThickness,
                                                          size_t supersampling = 1)
     {
-        return BoxDrawingRenderer::buildBoxElements(codepoint, size, lineThickness, supersampling);
+        auto const gridMetrics = gridMetricsFor(size, lineThickness);
+        auto const renderer = BoxDrawingRenderer(gridMetrics, style);
+        return renderer.buildBoxElements(codepoint, size, lineThickness, supersampling);
     }
 
-    /// Builds elements via the non-static buildElements() path using a minimal GridMetrics.
-    static std::optional<atlas::Buffer> buildElements(char32_t codepoint, ImageSize size, int lineThickness)
+    /// Builds elements via the non-static buildElements() path through a renderer of @p style.
+    static std::optional<atlas::Buffer> buildElements(BoxDrawingStyle style,
+                                                      char32_t codepoint,
+                                                      ImageSize size,
+                                                      int lineThickness)
     {
-        auto gridMetrics = GridMetrics { .pageSize = { LineCount(24), ColumnCount(80) },
-                                         .cellSize = size,
-                                         .baseline = 0,
-                                         .underline = { .position = 1, .thickness = lineThickness } };
-        auto renderer = BoxDrawingRenderer(gridMetrics);
+        auto const gridMetrics = gridMetricsFor(size, lineThickness);
+        auto renderer = BoxDrawingRenderer(gridMetrics, style);
         return renderer.buildElements(codepoint, size, lineThickness);
     }
 };
@@ -62,8 +77,8 @@ TEST_CASE("Powerline inverse dividers complement the solid dividers", "[boxdrawi
             auto const inverse = solid == 0xE0B0 ? char32_t { 0xE0D7 } : char32_t { 0xE0D6 };
             CAPTURE(unbox<int>(size.width), unbox<int>(size.height), static_cast<unsigned>(solid));
             REQUIRE(BoxDrawingRenderer::renderable(inverse));
-            auto const divider = BoxDrawingRendererTest::buildElements(solid, size, 1);
-            auto const cutout = BoxDrawingRendererTest::buildElements(inverse, size, 1);
+            auto const divider = BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, solid, size, 1);
+            auto const cutout = BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, inverse, size, 1);
             REQUIRE(divider);
             REQUIRE(cutout);
             REQUIRE(divider->size() == cutout->size());
@@ -113,22 +128,23 @@ TEST_CASE("Powerline basic separators fit their tiles and preserve diagonal alia
              { U'\uE0B1', U'\uE0B3', U'\uE0B8', U'\uE0B9', U'\uE0BB', U'\uE0BD', U'\uE0BF' })
         {
             REQUIRE(BoxDrawingRenderer::renderable(codepoint));
-            auto const tile = BoxDrawingRendererTest::buildElements(codepoint, size, 1);
+            auto const tile = BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, codepoint, size, 1);
             REQUIRE(tile);
             CHECK(tile->size() == size.area());
             CHECK(countLitPixels(*tile) > 0);
             CHECK(countLitPixels(*tile) < tile->size());
         }
-        auto const lowerLeft = BoxDrawingRendererTest::buildElements(U'\uE0B8', size, 1);
+        auto const lowerLeft = BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, U'\uE0B8', size, 1);
         REQUIRE(lowerLeft);
         CHECK(lowerLeft->front() == 255);
         CHECK(lowerLeft->back() == 0);
         for (auto const& pair: { std::pair { U'\uE0B9', U'\uE0BF' }, std::pair { U'\uE0BB', U'\uE0BD' } })
-            CHECK(BoxDrawingRendererTest::buildElements(pair.first, size, 1)
-                  == BoxDrawingRendererTest::buildElements(pair.second, size, 1));
+            CHECK(BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, pair.first, size, 1)
+                  == BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, pair.second, size, 1));
         for (auto const codepoint: { U'\uE0B1', U'\uE0B3' })
         {
-            auto const chevron = BoxDrawingRendererTest::buildElements(codepoint, size, 1);
+            auto const chevron =
+                BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, codepoint, size, 1);
             REQUIRE(chevron);
             auto const width = size.width.as<size_t>();
             auto const middle = size.height.as<size_t>() / 2;
@@ -162,8 +178,8 @@ TEST_CASE("BoxDrawingRenderer", "[renderer]")
         auto const size = ImageSize { Width(5), Height(5) }; // Smaller size for easier matching
         auto const lineThickness = 1;
 
-        auto const buffer =
-            vtrasterizer::BoxDrawingRendererTest::buildBoxElements(codepoint, size, lineThickness);
+        auto const buffer = vtrasterizer::BoxDrawingRendererTest::buildBoxElements(
+            BoxDrawingStyle {}, codepoint, size, lineThickness);
         REQUIRE(buffer.has_value());
         REQUIRE(buffer->size() == size.area());
 
@@ -187,8 +203,8 @@ TEST_CASE("BoxDrawingRenderer", "[renderer]")
         auto const size = ImageSize { Width(5), Height(5) };
         auto const lineThickness = 1;
 
-        auto const buffer =
-            vtrasterizer::BoxDrawingRendererTest::buildBoxElements(codepoint, size, lineThickness);
+        auto const buffer = vtrasterizer::BoxDrawingRendererTest::buildBoxElements(
+            BoxDrawingStyle {}, codepoint, size, lineThickness);
         REQUIRE(buffer.has_value());
 
         auto const tileData = TestTileData { .bitmapSize = size,
@@ -211,8 +227,8 @@ TEST_CASE("BoxDrawingRenderer", "[renderer]")
         auto const size = ImageSize { Width(10), Height(10) };
         auto const lineThickness = 1;
 
-        auto const buffer =
-            vtrasterizer::BoxDrawingRendererTest::buildBoxElements(codepoint, size, lineThickness);
+        auto const buffer = vtrasterizer::BoxDrawingRendererTest::buildBoxElements(
+            BoxDrawingStyle {}, codepoint, size, lineThickness);
         REQUIRE(buffer.has_value());
 
         auto const tileData = TestTileData { .bitmapSize = size,
@@ -266,7 +282,8 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.extensions", "[renderer]")
 
     SECTION("0x23AA CURLY BRACKET EXTENSION produces non-empty vertical line")
     {
-        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x23AA }, size, lineThickness);
+        auto const buffer = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x23AA }, size, lineThickness);
         REQUIRE(buffer.has_value());
         REQUIRE(buffer->size() == size.area());
         auto const litPixels = countLitPixels(*buffer);
@@ -288,8 +305,10 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.extensions", "[renderer]")
 
     SECTION("0x23AE INTEGRAL EXTENSION produces same output as 0x23AA")
     {
-        auto const extBuf = BoxDrawingRendererTest::buildElements(char32_t { 0x23AA }, size, lineThickness);
-        auto const intBuf = BoxDrawingRendererTest::buildElements(char32_t { 0x23AE }, size, lineThickness);
+        auto const extBuf = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x23AA }, size, lineThickness);
+        auto const intBuf = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x23AE }, size, lineThickness);
         REQUIRE(extBuf.has_value());
         REQUIRE(intBuf.has_value());
         CHECK(*extBuf == *intBuf);
@@ -297,7 +316,8 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.extensions", "[renderer]")
 
     SECTION("0x23AF HORIZONTAL LINE EXTENSION produces non-empty horizontal line")
     {
-        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x23AF }, size, lineThickness);
+        auto const buffer = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x23AF }, size, lineThickness);
         REQUIRE(buffer.has_value());
         REQUIRE(buffer->size() == size.area());
         auto const litPixels = countLitPixels(*buffer);
@@ -328,7 +348,8 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.hooks", "[renderer]")
         for (auto cp: { char32_t { 0x23A7 }, char32_t { 0x23A9 }, char32_t { 0x23AB }, char32_t { 0x23AD } })
         {
             INFO("Codepoint: U+" << std::hex << static_cast<uint32_t>(cp));
-            auto const buffer = BoxDrawingRendererTest::buildElements(cp, size, lineThickness);
+            auto const buffer =
+                BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, cp, size, lineThickness);
             REQUIRE(buffer.has_value());
             REQUIRE(buffer->size() == size.area());
             CHECK(countLitPixels(*buffer) > 0);
@@ -337,8 +358,10 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.hooks", "[renderer]")
 
     SECTION("left upper hook is vertical mirror of left lower hook")
     {
-        auto const upper = BoxDrawingRendererTest::buildElements(char32_t { 0x23A7 }, size, lineThickness);
-        auto const lower = BoxDrawingRendererTest::buildElements(char32_t { 0x23A9 }, size, lineThickness);
+        auto const upper = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x23A7 }, size, lineThickness);
+        auto const lower = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x23A9 }, size, lineThickness);
         REQUIRE(upper.has_value());
         REQUIRE(lower.has_value());
         auto const mirrored = verticalMirror(*upper, size);
@@ -353,9 +376,10 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.hooks", "[renderer]")
 
     SECTION("left and right upper hooks are approximate horizontal mirrors")
     {
-        auto const leftHook = BoxDrawingRendererTest::buildElements(char32_t { 0x23A7 }, size, lineThickness);
-        auto const rightHook =
-            BoxDrawingRendererTest::buildElements(char32_t { 0x23AB }, size, lineThickness);
+        auto const leftHook = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x23A7 }, size, lineThickness);
+        auto const rightHook = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x23AB }, size, lineThickness);
         REQUIRE(leftHook.has_value());
         REQUIRE(rightHook.has_value());
         auto const mirrored = horizontalMirror(*leftHook, size);
@@ -377,7 +401,8 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.middle_pieces", "[renderer]")
         for (auto cp: { char32_t { 0x23A8 }, char32_t { 0x23AC } })
         {
             INFO("Codepoint: U+" << std::hex << static_cast<uint32_t>(cp));
-            auto const buffer = BoxDrawingRendererTest::buildElements(cp, size, lineThickness);
+            auto const buffer =
+                BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, cp, size, lineThickness);
             REQUIRE(buffer.has_value());
             REQUIRE(buffer->size() == size.area());
             CHECK(countLitPixels(*buffer) > 0);
@@ -386,8 +411,10 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.middle_pieces", "[renderer]")
 
     SECTION("left and right middle pieces are approximate horizontal mirrors")
     {
-        auto const leftMid = BoxDrawingRendererTest::buildElements(char32_t { 0x23A8 }, size, lineThickness);
-        auto const rightMid = BoxDrawingRendererTest::buildElements(char32_t { 0x23AC }, size, lineThickness);
+        auto const leftMid = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x23A8 }, size, lineThickness);
+        auto const rightMid = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x23AC }, size, lineThickness);
         REQUIRE(leftMid.has_value());
         REQUIRE(rightMid.has_value());
         auto const mirrored = horizontalMirror(*leftMid, size);
@@ -409,7 +436,8 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.sections", "[renderer]")
         for (auto cp: { char32_t { 0x23B0 }, char32_t { 0x23B1 } })
         {
             INFO("Codepoint: U+" << std::hex << static_cast<uint32_t>(cp));
-            auto const buffer = BoxDrawingRendererTest::buildElements(cp, size, lineThickness);
+            auto const buffer =
+                BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, cp, size, lineThickness);
             REQUIRE(buffer.has_value());
             REQUIRE(buffer->size() == size.area());
             CHECK(countLitPixels(*buffer) > 0);
@@ -427,7 +455,8 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.summation", "[renderer]")
         for (auto cp: { char32_t { 0x23B2 }, char32_t { 0x23B3 } })
         {
             INFO("Codepoint: U+" << std::hex << static_cast<uint32_t>(cp));
-            auto const buffer = BoxDrawingRendererTest::buildElements(cp, size, lineThickness);
+            auto const buffer =
+                BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, cp, size, lineThickness);
             REQUIRE(buffer.has_value());
             REQUIRE(buffer->size() == size.area());
             CHECK(countLitPixels(*buffer) > 0);
@@ -436,8 +465,10 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.summation", "[renderer]")
 
     SECTION("summation top and bottom are approximate vertical mirrors")
     {
-        auto const top = BoxDrawingRendererTest::buildElements(char32_t { 0x23B2 }, size, lineThickness);
-        auto const bottom = BoxDrawingRendererTest::buildElements(char32_t { 0x23B3 }, size, lineThickness);
+        auto const top = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x23B2 }, size, lineThickness);
+        auto const bottom = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x23B3 }, size, lineThickness);
         REQUIRE(top.has_value());
         REQUIRE(bottom.has_value());
         auto const mirrored = verticalMirror(*top, size);
@@ -459,7 +490,8 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.parenthesis_hooks", "[renderer]")
         for (auto cp: { char32_t { 0x239B }, char32_t { 0x239D }, char32_t { 0x239E }, char32_t { 0x23A0 } })
         {
             INFO("Codepoint: U+" << std::hex << static_cast<uint32_t>(cp));
-            auto const buffer = BoxDrawingRendererTest::buildElements(cp, size, lineThickness);
+            auto const buffer =
+                BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, cp, size, lineThickness);
             REQUIRE(buffer.has_value());
             REQUIRE(buffer->size() == size.area());
             CHECK(countLitPixels(*buffer) > 0);
@@ -468,8 +500,10 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.parenthesis_hooks", "[renderer]")
 
     SECTION("left upper hook is vertical mirror of left lower hook")
     {
-        auto const upper = BoxDrawingRendererTest::buildElements(char32_t { 0x239B }, size, lineThickness);
-        auto const lower = BoxDrawingRendererTest::buildElements(char32_t { 0x239D }, size, lineThickness);
+        auto const upper = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x239B }, size, lineThickness);
+        auto const lower = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x239D }, size, lineThickness);
         REQUIRE(upper.has_value());
         REQUIRE(lower.has_value());
         auto const mirrored = verticalMirror(*upper, size);
@@ -483,9 +517,10 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.parenthesis_hooks", "[renderer]")
 
     SECTION("left and right upper hooks are approximate horizontal mirrors")
     {
-        auto const leftHook = BoxDrawingRendererTest::buildElements(char32_t { 0x239B }, size, lineThickness);
-        auto const rightHook =
-            BoxDrawingRendererTest::buildElements(char32_t { 0x239E }, size, lineThickness);
+        auto const leftHook = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x239B }, size, lineThickness);
+        auto const rightHook = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x239E }, size, lineThickness);
         REQUIRE(leftHook.has_value());
         REQUIRE(rightHook.has_value());
         auto const mirrored = horizontalMirror(*leftHook, size);
@@ -504,7 +539,8 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.parenthesis_extensions", "[renderer]"
 
     SECTION("left extension: non-empty, lit pixels only in left half")
     {
-        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x239C }, size, lineThickness);
+        auto const buffer = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x239C }, size, lineThickness);
         REQUIRE(buffer.has_value());
         REQUIRE(buffer->size() == size.area());
         auto const litPixels = countLitPixels(*buffer);
@@ -523,7 +559,8 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.parenthesis_extensions", "[renderer]"
 
     SECTION("right extension: non-empty, lit pixels only in right half")
     {
-        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x239F }, size, lineThickness);
+        auto const buffer = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x239F }, size, lineThickness);
         REQUIRE(buffer.has_value());
         REQUIRE(buffer->size() == size.area());
         auto const litPixels = countLitPixels(*buffer);
@@ -542,8 +579,10 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.parenthesis_extensions", "[renderer]"
 
     SECTION("left extension is exact horizontal mirror of right extension")
     {
-        auto const leftExt = BoxDrawingRendererTest::buildElements(char32_t { 0x239C }, size, lineThickness);
-        auto const rightExt = BoxDrawingRendererTest::buildElements(char32_t { 0x239F }, size, lineThickness);
+        auto const leftExt = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x239C }, size, lineThickness);
+        auto const rightExt = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x239F }, size, lineThickness);
         REQUIRE(leftExt.has_value());
         REQUIRE(rightExt.has_value());
         auto const mirrored = horizontalMirror(*leftExt, size);
@@ -565,7 +604,8 @@ TEST_CASE("BoxDrawingRenderer.shade_characters", "[renderer]")
 
     SECTION("0x2591 LIGHT SHADE produces ~25% lit pixels")
     {
-        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x2591 }, size, lineThickness);
+        auto const buffer = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x2591 }, size, lineThickness);
         REQUIRE(buffer.has_value());
         REQUIRE(buffer->size() == size.area());
         auto const litPixels = countLitPixels(*buffer);
@@ -575,7 +615,8 @@ TEST_CASE("BoxDrawingRenderer.shade_characters", "[renderer]")
 
     SECTION("0x2592 MEDIUM SHADE produces ~50% lit pixels")
     {
-        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x2592 }, size, lineThickness);
+        auto const buffer = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x2592 }, size, lineThickness);
         REQUIRE(buffer.has_value());
         REQUIRE(buffer->size() == size.area());
         auto const litPixels = countLitPixels(*buffer);
@@ -585,7 +626,8 @@ TEST_CASE("BoxDrawingRenderer.shade_characters", "[renderer]")
 
     SECTION("0x2593 DARK SHADE produces ~75% lit pixels")
     {
-        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x2593 }, size, lineThickness);
+        auto const buffer = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x2593 }, size, lineThickness);
         REQUIRE(buffer.has_value());
         REQUIRE(buffer->size() == size.area());
         auto const litPixels = countLitPixels(*buffer);
@@ -595,8 +637,10 @@ TEST_CASE("BoxDrawingRenderer.shade_characters", "[renderer]")
 
     SECTION("LIGHT SHADE and DARK SHADE are complementary")
     {
-        auto const light = BoxDrawingRendererTest::buildElements(char32_t { 0x2591 }, size, lineThickness);
-        auto const dark = BoxDrawingRendererTest::buildElements(char32_t { 0x2593 }, size, lineThickness);
+        auto const light = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x2591 }, size, lineThickness);
+        auto const dark = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x2593 }, size, lineThickness);
         REQUIRE(light.has_value());
         REQUIRE(dark.has_value());
         // Every pixel that is lit in light shade is dark in dark shade and vice versa
@@ -606,7 +650,8 @@ TEST_CASE("BoxDrawingRenderer.shade_characters", "[renderer]")
 
     SECTION("0x2591 LIGHT SHADE bitmap pattern")
     {
-        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x2591 }, size, lineThickness);
+        auto const buffer = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x2591 }, size, lineThickness);
         REQUIRE(buffer.has_value());
 
         auto const tileData = TestTileData { .bitmapSize = size,
@@ -628,7 +673,8 @@ TEST_CASE("BoxDrawingRenderer.shade_characters", "[renderer]")
 
     SECTION("0x2592 MEDIUM SHADE bitmap pattern")
     {
-        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x2592 }, size, lineThickness);
+        auto const buffer = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x2592 }, size, lineThickness);
         REQUIRE(buffer.has_value());
 
         auto const tileData = TestTileData { .bitmapSize = size,
@@ -650,7 +696,8 @@ TEST_CASE("BoxDrawingRenderer.shade_characters", "[renderer]")
 
     SECTION("0x2593 DARK SHADE bitmap pattern")
     {
-        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x2593 }, size, lineThickness);
+        auto const buffer = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x2593 }, size, lineThickness);
         REQUIRE(buffer.has_value());
 
         auto const tileData = TestTileData { .bitmapSize = size,
@@ -706,7 +753,8 @@ TEST_CASE("BoxDrawingRenderer.solidTriangles", "[boxdrawing]")
 
     SECTION("0x25BC BLACK DOWN-POINTING TRIANGLE has its base on top")
     {
-        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x25BC }, Size, LineThickness);
+        auto const buffer = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x25BC }, Size, LineThickness);
         REQUIRE(buffer.has_value());
 
         // The atlas buffer is bottom-up -- row 0 is the BOTTOM of the glyph, as U+2580 UPPER HALF
@@ -729,7 +777,8 @@ TEST_CASE("BoxDrawingRenderer.solidTriangles", "[boxdrawing]")
 
     SECTION("0x25B6 BLACK RIGHT-POINTING TRIANGLE has its base on the left")
     {
-        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x25B6 }, Size, LineThickness);
+        auto const buffer = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle {}, char32_t { 0x25B6 }, Size, LineThickness);
         REQUIRE(buffer.has_value());
 
         // Full height down the left edge, tapering to an apex at mid-width: pointing right.
@@ -766,7 +815,8 @@ TEST_CASE("BoxDrawingRenderer.foldHeadGlyphsInTinyCells", "[boxdrawing]")
             for (auto const codepoint: { char32_t { 0x10F000 }, char32_t { 0x10F001 } })
             {
                 CAPTURE(static_cast<uint32_t>(codepoint));
-                auto const buffer = BoxDrawingRendererTest::buildElements(codepoint, cell, 1);
+                auto const buffer =
+                    BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, codepoint, cell, 1);
                 REQUIRE(buffer.has_value());
                 CHECK(buffer->size() == static_cast<size_t>(width * height));
             }
@@ -797,7 +847,8 @@ TEST_CASE("BoxDrawingRenderer.foldHeadGlyphs", "[boxdrawing]")
 
     SECTION("U+10F000 fold head, open: a boxed minus with a stem into the body below")
     {
-        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x10F000 }, Cell, 1);
+        auto const buffer =
+            BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, char32_t { 0x10F000 }, Cell, 1);
         REQUIRE(buffer.has_value());
 
         vtrasterizer::verifyBitmap(
@@ -812,7 +863,8 @@ TEST_CASE("BoxDrawingRenderer.foldHeadGlyphs", "[boxdrawing]")
 
     SECTION("U+10F001 fold head, closed: a boxed plus, and no stem")
     {
-        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x10F001 }, Cell, 1);
+        auto const buffer =
+            BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, char32_t { 0x10F001 }, Cell, 1);
         REQUIRE(buffer.has_value());
 
         // No stem: a collapsed block has nothing below it for the column to continue into.
@@ -848,12 +900,12 @@ TEST_CASE("BoxDrawingRenderer.foldHeadGlyphs", "[boxdrawing]")
                                                       std::tuple { 0x10F00C, 0x10F00E, 0x10F00F } })
                 {
                     CAPTURE(unbox<int>(size.width), thickness, open);
-                    auto const headBuffer =
-                        BoxDrawingRendererTest::buildElements(char32_t(open), size, thickness);
-                    auto const bodyBuffer =
-                        BoxDrawingRendererTest::buildElements(char32_t(body), size, thickness);
-                    auto const endBuffer =
-                        BoxDrawingRendererTest::buildElements(char32_t(end), size, thickness);
+                    auto const headBuffer = BoxDrawingRendererTest::buildElements(
+                        BoxDrawingStyle {}, char32_t(open), size, thickness);
+                    auto const bodyBuffer = BoxDrawingRendererTest::buildElements(
+                        BoxDrawingStyle {}, char32_t(body), size, thickness);
+                    auto const endBuffer = BoxDrawingRendererTest::buildElements(
+                        BoxDrawingStyle {}, char32_t(end), size, thickness);
                     REQUIRE(headBuffer.has_value());
                     REQUIRE(bodyBuffer.has_value());
                     REQUIRE(endBuffer.has_value());
@@ -872,9 +924,12 @@ TEST_CASE("BoxDrawingRenderer.foldHeadGlyphs", "[boxdrawing]")
 
     SECTION("the heavy fold column is twice the weight, the heavier three times")
     {
-        auto const light = BoxDrawingRendererTest::buildElements(char32_t { 0x10F006 }, Cell, 1);
-        auto const heavy = BoxDrawingRendererTest::buildElements(char32_t { 0x10F00A }, Cell, 1);
-        auto const heavier = BoxDrawingRendererTest::buildElements(char32_t { 0x10F00E }, Cell, 1);
+        auto const light =
+            BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, char32_t { 0x10F006 }, Cell, 1);
+        auto const heavy =
+            BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, char32_t { 0x10F00A }, Cell, 1);
+        auto const heavier =
+            BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, char32_t { 0x10F00E }, Cell, 1);
         REQUIRE(light.has_value());
         REQUIRE(heavy.has_value());
         REQUIRE(heavier.has_value());
@@ -895,8 +950,10 @@ TEST_CASE("BoxDrawingRenderer.foldHeadGlyphs", "[boxdrawing]")
             {
                 CAPTURE(unbox<int>(size.width), closed);
                 auto const w = unbox<int>(size.width);
-                auto const box = BoxDrawingRendererTest::buildElements(char32_t(closed), size, 1);
-                auto const head = BoxDrawingRendererTest::buildElements(char32_t(open), size, 1);
+                auto const box =
+                    BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, char32_t(closed), size, 1);
+                auto const head =
+                    BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, char32_t(open), size, 1);
                 REQUIRE(box.has_value());
                 REQUIRE(head.has_value());
                 auto boxColumns = std::vector<int> {};
@@ -917,7 +974,8 @@ TEST_CASE("BoxDrawingRenderer.foldHeadGlyphs", "[boxdrawing]")
 
     SECTION("the body's end turns right at the row's middle, out to the cell's edge")
     {
-        auto const end = BoxDrawingRendererTest::buildElements(char32_t { 0x10F007 }, Cell, 1);
+        auto const end =
+            BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, char32_t { 0x10F007 }, Cell, 1);
         REQUIRE(end.has_value());
         vtrasterizer::verifyBitmap(
             TestTileData {
@@ -954,7 +1012,7 @@ TEST_CASE("BoxDrawingRenderer.gutterStatusMarks", "[boxdrawing]")
     // in every font, centred on the row the fold column's stem runs down. A realistic 9x20 cell.
     auto constexpr Cell = ImageSize { Width(9), Height(20) };
     auto const build = [&](char32_t codepoint) {
-        auto buffer = BoxDrawingRendererTest::buildElements(codepoint, Cell, 1);
+        auto buffer = BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, codepoint, Cell, 1);
         REQUIRE(buffer.has_value());
         return *std::move(buffer);
     };
@@ -1032,7 +1090,7 @@ TEST_CASE("BoxDrawingRenderer.railMarks", "[boxdrawing][renderer]")
     // cells wide, as the rail draws them, so they size to the row.
     auto constexpr Cell = ImageSize { Width(18), Height(20) };
     auto const build = [&](char32_t codepoint) {
-        auto buffer = BoxDrawingRendererTest::buildElements(codepoint, Cell, 1);
+        auto buffer = BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, codepoint, Cell, 1);
         REQUIRE(buffer.has_value());
         return *std::move(buffer);
     };
@@ -1061,7 +1119,7 @@ TEST_CASE("BoxDrawingRenderer.gutterGlyphsDrawnTwoCellsWideAreTwiceTheSize", "[b
     auto constexpr Cell = ImageSize { Width(10), Height(19) };
     auto constexpr Wide = ImageSize { Width(20), Height(19) };
     auto const lit = [](char32_t codepoint, ImageSize size) {
-        auto buffer = BoxDrawingRendererTest::buildElements(codepoint, size, 1);
+        auto buffer = BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, codepoint, size, 1);
         REQUIRE(buffer.has_value());
         CHECK(buffer->size() == unbox<size_t>(size.width) * unbox<size_t>(size.height));
         return countLitPixels(*buffer);
@@ -1095,10 +1153,444 @@ TEST_CASE("BoxDrawingRenderer.gutterStatusMarksInTinyCells", "[boxdrawing]")
                                          char32_t { 0x10F004 },
                                          char32_t { 0x10F005 } })
             {
-                auto const buffer = BoxDrawingRendererTest::buildElements(codepoint, cell, 1);
+                auto const buffer =
+                    BoxDrawingRendererTest::buildElements(BoxDrawingStyle {}, codepoint, cell, 1);
                 REQUIRE(buffer.has_value());
                 CHECK(buffer->size() == static_cast<size_t>(width * height));
             }
         }
     }
+}
+
+namespace
+{
+using ArcStyle = BoxDrawingStyle::ArcStyle;
+using BranchStyle = BoxDrawingStyle::GitDrawingsStyle::BranchStyle;
+using BrailleStyle = BoxDrawingStyle::BrailleStyle;
+
+auto constexpr StyleCell = ImageSize { Width(16), Height(32) };
+
+/// A git-graph style with @p arcs and @p branch, under box-drawing arcs @p boxArcs.
+BoxDrawingStyle gitStyle(ArcStyle boxArcs, ArcStyle arcs, BranchStyle branch)
+{
+    return BoxDrawingStyle { .arcStyle = boxArcs,
+                             .gitDrawings = { .arcStyle = arcs, .branchStyle = branch } };
+}
+
+/// Draws @p codepoint from the box-drawing table as a renderer of @p style would.
+std::optional<atlas::Buffer> drawn(BoxDrawingStyle style, char32_t codepoint)
+{
+    return BoxDrawingRendererTest::buildBoxElements(style, codepoint, StyleCell, 1, 4);
+}
+
+/// A BoxDrawingRenderer drawing through a real texture atlas onto a recording backend, so a test sees
+/// which tile each glyph samples -- the lookup a style change must not alias.
+///
+/// The atlas must outlive the renderer's use of it and the render target must outlive the atlas, which is
+/// why these are members rather than locals in a helper function.
+class AtlasProbe
+{
+  public:
+    /// @param style The style the renderer starts with.
+    explicit AtlasProbe(BoxDrawingStyle style):
+        _gridMetrics { gridMetricsFor(StyleCell, 1) }, _renderer { _gridMetrics, style }
+    {
+        _renderer.setRenderTarget(_renderTarget, _allocator);
+        _atlas = makeTestAtlas(
+            _renderTarget, _allocator, StyleCell, atlas::Format::RGBA, crispy::LRUCapacity { 64 });
+        _renderer.setTextureAtlas(*_atlas);
+    }
+
+    /// The renderer under test.
+    [[nodiscard]] BoxDrawingRenderer& renderer() noexcept { return _renderer; }
+
+    /// One drawn cell: the tile it sampled and the pixels that tile was uploaded with.
+    struct DrawnTile
+    {
+        std::pair<uint32_t, uint32_t> location; ///< The tile's place in the atlas.
+        atlas::Buffer bitmap;                   ///< What was uploaded there.
+    };
+
+    /// Renders @p codepoint at the origin on a row with @p flags.
+    /// @return What render() returned, and every tile it drew, in order.
+    [[nodiscard]] std::pair<bool, std::vector<DrawnTile>> render(char32_t codepoint, LineFlags flags = {})
+    {
+        auto& backend = _renderTarget.getMockBackend();
+        auto const before = backend.renderCommands.size();
+        auto const drew = _renderer.render(LineOffset(0), ColumnOffset(0), codepoint, flags, RGBColor {});
+
+        auto tiles = std::vector<DrawnTile> {};
+        for (auto const& command: std::span(backend.renderCommands).subspan(before))
+        {
+            auto const location = std::pair { command.tileLocation.x.value, command.tileLocation.y.value };
+            // The latest upload to a location is what it holds now.
+            auto const upload = std::ranges::find_if(
+                backend.uploadCommands | std::views::reverse, [&location](atlas::UploadTile const& tile) {
+                    return std::pair { tile.location.x.value, tile.location.y.value } == location;
+                });
+            REQUIRE(upload != (backend.uploadCommands | std::views::reverse).end());
+            tiles.push_back(DrawnTile { .location = location, .bitmap = upload->bitmap });
+        }
+        return { drew, std::move(tiles) };
+    }
+
+    /// How many tiles have been uploaded so far.
+    [[nodiscard]] size_t uploadCount() { return _renderTarget.getMockBackend().uploadCommands.size(); }
+
+    /// How many tiles have been drawn so far.
+    [[nodiscard]] size_t renderCount() { return _renderTarget.getMockBackend().renderCommands.size(); }
+
+  private:
+    GridMetrics _gridMetrics;
+    MockRenderTarget _renderTarget;
+    Renderable::DirectMappingAllocator _allocator {};
+    BoxDrawingRenderer _renderer;
+    std::unique_ptr<Renderable::TextureAtlas> _atlas;
+};
+} // namespace
+
+TEST_CASE("BoxDrawingStyle: git arcs keep their own style only on thin branches", "[boxdrawing]")
+{
+    // Elliptic arcs are drawn thin only, so `arc_style` has effect only where `branch_style` is `thin` --
+    // whatever the box-drawing arc style, which the git arcs do not consult.
+    struct Row
+    {
+        BranchStyle branch;
+        ArcStyle boxArcs;
+        ArcStyle effective; ///< The arc style an elliptic git arc is drawn with.
+    };
+    static constexpr auto Rows = std::array {
+        Row { .branch = BranchStyle::Thin, .boxArcs = ArcStyle::Round, .effective = ArcStyle::Elliptic },
+        Row { .branch = BranchStyle::Thin, .boxArcs = ArcStyle::Elliptic, .effective = ArcStyle::Elliptic },
+        Row { .branch = BranchStyle::Thick, .boxArcs = ArcStyle::Round, .effective = ArcStyle::Round },
+        Row { .branch = BranchStyle::Thick, .boxArcs = ArcStyle::Elliptic, .effective = ArcStyle::Round },
+        Row { .branch = BranchStyle::Double, .boxArcs = ArcStyle::Round, .effective = ArcStyle::Round },
+        Row { .branch = BranchStyle::Double, .boxArcs = ArcStyle::Elliptic, .effective = ArcStyle::Round },
+    };
+    auto constexpr Arc = char32_t { 0xF5D6 }; // git graph: arc down and right
+
+    for (auto const& row: Rows)
+    {
+        CAPTURE(static_cast<int>(row.branch), static_cast<int>(row.boxArcs));
+        auto const elliptic = gitStyle(row.boxArcs, ArcStyle::Elliptic, row.branch);
+        auto const round = gitStyle(row.boxArcs, ArcStyle::Round, row.branch);
+        CHECK(elliptic.effectiveGitArcStyle() == row.effective);
+        CHECK(round.effectiveGitArcStyle() == ArcStyle::Round);
+
+        // The probe engages: where the elliptic arc is kept, it is visibly different from the round one.
+        auto const asDrawn = drawn(elliptic, Arc);
+        REQUIRE(asDrawn.has_value());
+        CHECK((asDrawn == drawn(round, Arc)) == (row.effective == ArcStyle::Round));
+    }
+}
+
+TEST_CASE("BoxDrawingRenderer: renderers of different styles coexist", "[boxdrawing]")
+{
+    // Nothing about the style is process-wide: building one renderer leaves another's glyphs alone. Both
+    // are built before either draws, so a style the later one leaked into the earlier would show.
+    auto constexpr Corner = char32_t { 0x256D };      // ╭
+    auto constexpr OtherCorner = char32_t { 0x256E }; // ╮
+    auto round = AtlasProbe(BoxDrawingStyle { .arcStyle = ArcStyle::Round });
+    auto elliptic = AtlasProbe(BoxDrawingStyle { .arcStyle = ArcStyle::Elliptic });
+
+    auto const [roundDrew, roundTiles] = round.render(Corner);
+    auto const [ellipticDrew, ellipticTiles] = elliptic.render(Corner);
+    REQUIRE(roundDrew);
+    REQUIRE(ellipticDrew);
+    REQUIRE(roundTiles.size() == 1);
+    REQUIRE(ellipticTiles.size() == 1);
+    CHECK(roundTiles[0].bitmap != ellipticTiles[0].bitmap);
+
+    // The first renderer draws again after the second one drew, a glyph not yet in its atlas so it is
+    // rasterized afresh: a style leaked through shared state after construction would show here too.
+    auto const [roundAgainDrew, roundAgainTiles] = round.render(OtherCorner);
+    auto const [ellipticAgainDrew, ellipticAgainTiles] = elliptic.render(OtherCorner);
+    auto reference = AtlasProbe(BoxDrawingStyle { .arcStyle = ArcStyle::Round });
+    auto const [referenceDrew, referenceTiles] = reference.render(OtherCorner);
+    REQUIRE(roundAgainDrew);
+    REQUIRE(ellipticAgainDrew);
+    REQUIRE(referenceDrew);
+    REQUIRE(roundAgainTiles.size() == 1);
+    REQUIRE(ellipticAgainTiles.size() == 1);
+    REQUIRE(referenceTiles.size() == 1);
+    CHECK(roundAgainTiles[0].bitmap == referenceTiles[0].bitmap);
+    CHECK(roundAgainTiles[0].bitmap != ellipticAgainTiles[0].bitmap);
+}
+
+TEST_CASE("BoxDrawingRenderer: a style that leaves glyphs to the font declines them", "[boxdrawing]")
+{
+    auto constexpr BrailleDots = char32_t { 0x28FF };
+    auto constexpr GitLine = char32_t { 0xF5D0 };
+    auto constexpr Horizontal = char32_t { 0x2500 };
+
+    // Claimed whatever the style, so the cluster grouper can ask without a renderer at hand.
+    CHECK(BoxDrawingRenderer::renderable(BrailleDots));
+    CHECK(BoxDrawingRenderer::renderable(GitLine));
+
+    /// Renders @p codepoint under @p style: whether render() took it, and how many tiles it touched.
+    auto const rendered = [](BoxDrawingStyle style, char32_t codepoint) {
+        auto probe = AtlasProbe(style);
+        auto const [drew, tiles] = probe.render(codepoint);
+        return std::tuple { drew, probe.renderCount(), probe.uploadCount() };
+    };
+
+    SECTION("Braille")
+    {
+        auto const font = BoxDrawingStyle { .brailleStyle = BrailleStyle::Font };
+        CHECK(BoxDrawingRenderer(gridMetricsFor(StyleCell, 1), font).leavesToFont(BrailleDots));
+        CHECK(rendered(font, BrailleDots) == std::tuple { false, 0zu, 0zu });
+        CHECK(rendered(BoxDrawingStyle { .brailleStyle = BrailleStyle::Solid }, BrailleDots)
+              == std::tuple { true, 1zu, 1zu });
+
+        // A style touches only the glyphs it names.
+        CHECK(rendered(font, Horizontal) == std::tuple { true, 1zu, 1zu });
+        CHECK(rendered(font, GitLine) == std::tuple { true, 1zu, 1zu });
+    }
+
+    SECTION("Braille styles draw differently")
+    {
+        auto const solidDots = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle { .brailleStyle = BrailleStyle::Solid }, BrailleDots, StyleCell, 1);
+        auto const circleDots = BoxDrawingRendererTest::buildElements(
+            BoxDrawingStyle { .brailleStyle = BrailleStyle::Circle }, BrailleDots, StyleCell, 1);
+        REQUIRE(solidDots.has_value());
+        REQUIRE(circleDots.has_value());
+        CHECK(solidDots != circleDots);
+    }
+
+    SECTION("git graph")
+    {
+        auto const none = gitStyle(ArcStyle::Round, ArcStyle::Round, BranchStyle::None);
+        CHECK(rendered(none, GitLine) == std::tuple { false, 0zu, 0zu });
+        CHECK(rendered(gitStyle(ArcStyle::Round, ArcStyle::Round, BranchStyle::Thin), GitLine)
+              == std::tuple { true, 1zu, 1zu });
+        CHECK(rendered(none, BrailleDots) == std::tuple { true, 1zu, 1zu });
+    }
+}
+
+TEST_CASE("BoxDrawingRenderer: a glyph the style declines is drawn as text", "[boxdrawing]")
+{
+    // The cluster grouper hands every glyph renderable() claims to the box-drawing renderer first, and
+    // what render() declines falls through to the text path -- which is how a style leaves a glyph to the
+    // font. Wired here the way TextRenderer wires the two.
+    struct Recorder final: TextClusterGrouper::Events
+    {
+        BoxDrawingRenderer* boxDrawing = nullptr;
+        std::u32string text;
+        std::u32string boxDrawn;
+
+        void renderTextGroup(std::u32string_view codepoints,
+                             gsl::span<unsigned> /*clusters*/,
+                             std::span<uint8_t const> /*cellWidths*/,
+                             CellLocation /*initialPenPosition*/,
+                             TextStyle /*style*/,
+                             RGBColor /*color*/,
+                             LineFlags /*flags*/,
+                             GlyphSizing const& /*sizing*/) override
+        {
+            text += codepoints;
+        }
+
+        bool renderBoxDrawingCell(CellLocation position,
+                                  char32_t codepoint,
+                                  RGBColor foregroundColor,
+                                  LineFlags flags) override
+        {
+            if (!boxDrawing->render(position.line, position.column, codepoint, flags, foregroundColor))
+                return false;
+            boxDrawn += codepoint;
+            return true;
+        }
+    };
+
+    auto constexpr Line = U"⣿─⣿"sv; // ⣿─⣿
+    auto const brailleStyle = GENERATE(BrailleStyle::Font, BrailleStyle::Solid);
+    CAPTURE(static_cast<int>(brailleStyle));
+
+    auto probe = AtlasProbe(BoxDrawingStyle { .brailleStyle = brailleStyle });
+    auto recorder = Recorder {};
+    recorder.boxDrawing = &probe.renderer();
+    auto grouper = TextClusterGrouper(recorder);
+
+    grouper.beginFrame();
+    grouper.renderLine(Line, LineOffset(0), RGBColor {}, TextStyle::Regular, LineFlag::None);
+    grouper.endFrame();
+
+    if (brailleStyle == BrailleStyle::Font)
+    {
+        CHECK(recorder.text == U"⣿⣿"sv);
+        CHECK(recorder.boxDrawn == U"─"sv);
+    }
+    else
+    {
+        CHECK(recorder.text.empty());
+        CHECK(recorder.boxDrawn == Line);
+    }
+}
+
+TEST_CASE("BoxDrawingRenderer: a style change never aliases another tile of the same glyph", "[boxdrawing]")
+{
+    // Through the atlas, which outlives the style change: the tiles drawn under the old style are still
+    // there, and only the style in their key keeps the new one from finding them. A double-width row draws
+    // a glyph as two tiles, its halves, told apart in the atlas key by subIndex and the row's flags. The
+    // style must take bits of its own: folded into the same bits, one style's left half was the other
+    // style's right half, and a reload drew the halves of a gutter glyph swapped.
+    auto constexpr Corner = char32_t { 0x256D };
+    auto const doubleWidth = LineFlags { LineFlag::DoubleWidth };
+    auto const [from, to, flags] =
+        GENERATE_COPY(std::tuple { BoxDrawingStyle { .arcStyle = ArcStyle::Round },
+                                   BoxDrawingStyle { .arcStyle = ArcStyle::Elliptic },
+                                   LineFlags {} },
+                      std::tuple { BoxDrawingStyle { .arcStyle = ArcStyle::Round },
+                                   BoxDrawingStyle { .arcStyle = ArcStyle::Elliptic },
+                                   doubleWidth },
+                      std::tuple { BoxDrawingStyle { .brailleStyle = BrailleStyle::Circle },
+                                   BoxDrawingStyle { .brailleStyle = BrailleStyle::Solid },
+                                   doubleWidth },
+                      std::tuple { BoxDrawingStyle { .brailleStyle = BrailleStyle::Font },
+                                   BoxDrawingStyle { .brailleStyle = BrailleStyle::AASquareEmpty },
+                                   doubleWidth });
+    auto const tileCount = flags.contains(LineFlag::DoubleWidth) ? 2zu : 1zu;
+
+    auto probe = AtlasProbe(from);
+    auto const [fromDrew, before] = probe.render(Corner, flags);
+    REQUIRE(fromDrew);
+    REQUIRE(before.size() == tileCount);
+
+    probe.renderer().setStyle(to);
+    auto const [toDrew, after] = probe.render(Corner, flags);
+    REQUIRE(toDrew);
+    REQUIRE(after.size() == tileCount);
+
+    // All tiles distinct: no tile under the new style is found under the old one.
+    for (auto const& tile: after)
+        for (auto const& old: before)
+            CHECK(tile.location != old.location);
+
+    // Each tile is the one a renderer built with the new style draws, in its place.
+    auto fresh = AtlasProbe(to);
+    auto const [freshDrew, expected] = fresh.render(Corner, flags);
+    REQUIRE(freshDrew);
+    REQUIRE(expected.size() == tileCount);
+    for (auto const index: std::views::iota(0zu, tileCount))
+        CHECK(after[index].bitmap == expected[index].bitmap);
+
+    // The halves differ, so the comparison above would see them swapped.
+    if (tileCount == 2)
+        CHECK(after[0].bitmap != after[1].bitmap);
+}
+
+namespace
+{
+/// A side of a cell.
+enum class Edge : uint8_t
+{
+    Left,
+    Right,
+    Top,
+    Bottom,
+};
+
+/// The side of the neighbouring cell that touches @p edge.
+[[nodiscard]] constexpr Edge facing(Edge edge) noexcept
+{
+    switch (edge)
+    {
+        case Edge::Left: return Edge::Right;
+        case Edge::Right: return Edge::Left;
+        case Edge::Top: return Edge::Bottom;
+        case Edge::Bottom: return Edge::Top;
+    }
+    return edge;
+}
+
+/// The outermost pixels of a glyph along one side of its cell.
+/// @param buffer The glyph's alpha buffer, bottom-up.
+/// @param size The glyph's size.
+/// @param edge The side to read.
+/// @return The alpha of each pixel along @p edge, bottom to top or left to right.
+[[nodiscard]] std::vector<uint8_t> edgeAlphas(atlas::Buffer const& buffer, ImageSize size, Edge edge)
+{
+    auto const width = unbox<size_t>(size.width);
+    auto const height = unbox<size_t>(size.height);
+    auto const vertical = edge == Edge::Left || edge == Edge::Right;
+    auto const pixelAt = [&](size_t index) -> uint8_t {
+        switch (edge)
+        {
+            case Edge::Left: return buffer[index * width];
+            case Edge::Right: return buffer[(index * width) + width - 1];
+            // Atlas buffers run bottom-up: row 0 is the cell's bottom, the last row its top.
+            case Edge::Top: return buffer[((height - 1) * width) + index];
+            case Edge::Bottom: return buffer[index];
+        }
+        return 0;
+    };
+    return std::ranges::to<std::vector<uint8_t>>(
+        std::views::transform(std::views::iota(0zu, vertical ? height : width), pixelAt));
+}
+} // namespace
+
+TEST_CASE("BoxDrawingRenderer.arcsMeetTheirLines", "[boxdrawing]")
+{
+    // A rounded corner is drawn in one cell and the line it continues into in the next: on the edge the two
+    // cells share, the arc's end must lie exactly over the line's end, or the box shows a step or a notch.
+    struct Corner
+    {
+        char32_t codepoint;
+        Edge towardsHorizontal; ///< The edge it shares with the ─ it continues into.
+        Edge towardsVertical;   ///< The edge it shares with the │ it continues into.
+    };
+    // ╭ ╮ ╯ ╰, in that order.
+    static constexpr auto Corners = std::array {
+        Corner { .codepoint = 0x256D, .towardsHorizontal = Edge::Right, .towardsVertical = Edge::Bottom },
+        Corner { .codepoint = 0x256E, .towardsHorizontal = Edge::Left, .towardsVertical = Edge::Bottom },
+        Corner { .codepoint = 0x256F, .towardsHorizontal = Edge::Left, .towardsVertical = Edge::Top },
+        Corner { .codepoint = 0x2570, .towardsHorizontal = Edge::Right, .towardsVertical = Edge::Top },
+    };
+    static constexpr auto ArcStyles = std::array { ArcStyle::Elliptic, ArcStyle::Round };
+    // The cell's light line thickness, which grows with the DPR and doubles on DECDWL/DECDHL rows; both
+    // arc styles draw with it.
+    static constexpr auto Thicknesses = std::array { 1, 2, 3 };
+    // 1×, an odd size, 2× and 3× device pixel ratios.
+    static constexpr auto CellSizes = std::array {
+        ImageSize { Width(8), Height(16) },
+        ImageSize { Width(10), Height(21) },
+        ImageSize { Width(16), Height(32) },
+        ImageSize { Width(24), Height(48) },
+    };
+    auto constexpr Supersampling = size_t { 4 };     // As the renderer draws arcs.
+    auto constexpr Horizontal = char32_t { 0x2500 }; // ─
+    auto constexpr Vertical = char32_t { 0x2502 };   // │
+
+    for (auto const arcStyle: ArcStyles)
+        for (auto const size: CellSizes)
+            for (auto const thickness: Thicknesses)
+            {
+                auto const style = BoxDrawingStyle { .arcStyle = arcStyle };
+                auto const build = [&](char32_t codepoint) {
+                    return BoxDrawingRendererTest::buildBoxElements(
+                        style, codepoint, size, thickness, Supersampling);
+                };
+                auto const horizontal = build(Horizontal);
+                auto const vertical = build(Vertical);
+                REQUIRE(horizontal);
+                REQUIRE(vertical);
+
+                for (auto const& corner: Corners)
+                {
+                    CAPTURE(static_cast<int>(arcStyle),
+                            unbox<int>(size.width),
+                            unbox<int>(size.height),
+                            thickness,
+                            static_cast<uint32_t>(corner.codepoint));
+                    auto const arc = build(corner.codepoint);
+                    REQUIRE(arc);
+
+                    // Exact alphas, not a coverage threshold: a faint extra row is a half-step too.
+                    CHECK(edgeAlphas(*arc, size, corner.towardsHorizontal)
+                          == edgeAlphas(*horizontal, size, facing(corner.towardsHorizontal)));
+                    CHECK(edgeAlphas(*arc, size, corner.towardsVertical)
+                          == edgeAlphas(*vertical, size, facing(corner.towardsVertical)));
+                }
+            }
 }

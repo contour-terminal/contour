@@ -340,6 +340,7 @@ interface types {
         forbidden,
         failed,
         limit-reached,
+        not-pending,
     }
 
     record control-error {

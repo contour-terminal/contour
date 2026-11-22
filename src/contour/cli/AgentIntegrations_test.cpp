@@ -148,6 +148,42 @@ TEST_CASE("claude: Stop is done, with the first line when there is one", "[conto
                 "done",
                 "",
                 "All green");
+    checkReport(
+        claude(R"({"hook_event_name":"Stop","background_tasks":[],"session_crons":[]})"), "done", "", "");
+}
+
+TEST_CASE("claude: a Stop with background work in flight waits for it, idle", "[contour][cli][agent]")
+{
+    // The turn ended to wait for the build; the task's notification starts the next one.
+    checkReport(
+        claude(
+            R"({"hook_event_name":"Stop","last_assistant_message":"Once the build finishes I'll test.",)"
+            R"("background_tasks":[{"id":"b1","type":"shell","status":"running","description":"Build pace",)"
+            R"("command":"cmake --build out"}],"session_crons":[]})"),
+        "idle",
+        "",
+        "Waiting for Build pace");
+    // Without a description, the command, then the type; a count of the rest.
+    checkReport(claude(R"({"hook_event_name":"Stop","background_tasks":[)"
+                       R"({"id":"b1","type":"shell","status":"running","command":"make\n-j4"},)"
+                       R"({"id":"b2","type":"subagent","status":"running"}]})"),
+                "idle",
+                "",
+                "Waiting for make (+1 more)");
+    checkReport(claude(R"({"hook_event_name":"Stop","background_tasks":[{"id":"m","type":"monitor"}]})"),
+                "idle",
+                "",
+                "Waiting for monitor");
+}
+
+TEST_CASE("claude: a Stop with a wake-up scheduled waits for it, idle", "[contour][cli][agent]")
+{
+    checkReport(
+        claude(R"({"hook_event_name":"Stop","background_tasks":[],"session_crons":[)"
+               R"({"id":"c1","schedule":"*/5 * * * *","recurring":true,"prompt":"check CI\nthen fix"}]})"),
+        "idle",
+        "",
+        "Waiting for a wake-up: check CI");
 }
 
 TEST_CASE("claude: SessionEnd clears, the unknown is ignored", "[contour][cli][agent]")

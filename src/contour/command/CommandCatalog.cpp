@@ -3,12 +3,15 @@
 #include <contour/config/HostUrl.hpp>
 
 #include <array>
+#include <cstddef>
 #include <format>
 #include <ranges>
 #include <string>
-#include <unordered_set>
+#include <unordered_map>
 #include <variant>
 #include <vector>
+
+#include <vthost/proto/Pdu.hpp>
 
 namespace contour::command
 {
@@ -173,6 +176,7 @@ namespace
         ActionCategory { .name = "ShowSwitcher", .category = CommandCategory::Daemons },
         ActionCategory { .name = "NewDaemon", .category = CommandCategory::Daemons },
         ActionCategory { .name = "UpgradeDaemon", .category = CommandCategory::Daemons },
+        ActionCategory { .name = "ExtensionAction", .category = CommandCategory::Daemons },
     };
 
     // A missing row would make commandCategory() read past the end; a misplaced one is the test's to catch.
@@ -209,6 +213,7 @@ namespace
             .action = std::move(action),
             .category = category,
             .argument = argumentOf(arguments.title),
+            .placement = PalettePlacement::UnderItsAction,
         };
     }
 
@@ -239,7 +244,7 @@ CommandCategory commandCategory(actions::Action const& action) noexcept
 std::vector<Command> collectCommands(std::span<CommandSource const* const> sources)
 {
     auto result = std::vector<Command> {};
-    auto seen = std::unordered_set<std::string> {};
+    auto seen = std::unordered_map<std::string, std::size_t> {}; // id -> index into result
 
     for (auto const* source: sources)
     {
@@ -248,11 +253,19 @@ std::vector<Command> collectCommands(std::span<CommandSource const* const> sourc
 
         for (auto& command: source->commands())
         {
-            // First source wins, so a source given precedence can override a later one's version of
-            // the same command (see collectCommands()'s contract).
-            if (!seen.insert(command.id).second)
+            auto const [kept, inserted] = seen.try_emplace(command.id, result.size());
+            if (inserted)
+            {
+                result.push_back(std::move(command));
                 continue;
-            result.push_back(std::move(command));
+            }
+            // First source wins, so a source given precedence can override a later one's version of the
+            // same command -- except that a row its source named itself (PalettePlacement::OnItsOwn) beats
+            // a generic one whatever their order (see collectCommands()'s contract).
+            auto& keptCommand = result[kept->second];
+            if (keptCommand.placement == PalettePlacement::UnderItsAction
+                && command.placement == PalettePlacement::OnItsOwn)
+                keptCommand = std::move(command);
         }
     }
 
@@ -349,6 +362,84 @@ namespace
         return command;
     }
 } // namespace
+
+namespace
+{
+    /// Which of an extension's rows the palette shows, by where it stands.
+    enum class ExtensionRowsShown : uint8_t
+    {
+        None = 0, ///< No row: nothing an invocation could do.
+        Declared, ///< One row per declared action, under its own title.
+        Single,   ///< One row naming no action, titled by ExtensionRowText::format.
+    };
+
+    /// One row of what the palette shows of an extension in one state.
+    struct ExtensionRowText
+    {
+        vthost::proto::WirePresenceState state;
+        ExtensionRowsShown shown;
+        std::string_view format; ///< A format of the extension's title, for ExtensionRowsShown::Single.
+    };
+
+    constexpr auto ExtensionRowTexts = std::array {
+        ExtensionRowText { .state = vthost::proto::WirePresenceState::Running,
+                           .shown = ExtensionRowsShown::Declared,
+                           .format = {} },
+        ExtensionRowText { .state = vthost::proto::WirePresenceState::Stopped,
+                           .shown = ExtensionRowsShown::Declared,
+                           .format = {} },
+        ExtensionRowText { .state = vthost::proto::WirePresenceState::AwaitingGrant,
+                           .shown = ExtensionRowsShown::Single,
+                           .format = "{}: grant access…" },
+        ExtensionRowText { .state = vthost::proto::WirePresenceState::Disabled,
+                           .shown = ExtensionRowsShown::Single,
+                           .format = vthost::proto::RestartExtensionRowFormat },
+        ExtensionRowText { .state = vthost::proto::WirePresenceState::Unavailable,
+                           .shown = ExtensionRowsShown::None,
+                           .format = {} },
+    };
+} // namespace
+
+std::vector<ExtensionRow> extensionRowsOf(vthost::proto::WireExtensionPresence const& presence)
+{
+    auto rows = std::vector<ExtensionRow> {};
+    auto const text = std::ranges::find(ExtensionRowTexts, presence.state, &ExtensionRowText::state);
+    if (text == ExtensionRowTexts.end())
+        return rows;
+    switch (text->shown)
+    {
+        case ExtensionRowsShown::None: break;
+        case ExtensionRowsShown::Declared:
+            for (auto const& row: presence.rows)
+                rows.push_back(
+                    ExtensionRow { .extension = presence.extension, .id = row.id, .title = row.title });
+            break;
+        case ExtensionRowsShown::Single:
+            rows.push_back(
+                ExtensionRow { .extension = presence.extension,
+                               .id = {},
+                               .title = std::vformat(text->format, std::make_format_args(presence.title)) });
+            break;
+    }
+    return rows;
+}
+
+std::vector<Command> ExtensionCommandSource::commands() const
+{
+    auto result = std::vector<Command> {};
+    for (auto const& row: _rows.extensionRows())
+    {
+        // Each row is named by its extension ("Open Agents"), so it is listed and found by that name, not
+        // under the generic Extension Action drill-in by "orchestrator open"; its description says whose it
+        // is, so a row whose title a built-in command shares can still be told apart.
+        auto command = titledCommand(actions::ExtensionAction { .extension = row.extension, .id = row.id },
+                                     row.title,
+                                     std::format(ExtensionRowDescriptionFormat, row.extension));
+        command.placement = PalettePlacement::OnItsOwn;
+        result.push_back(std::move(command));
+    }
+    return result;
+}
 
 std::vector<Command> DaemonCommandSource::commands() const
 {

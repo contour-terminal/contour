@@ -1,0 +1,4 @@
+# A root takes no word but create.
+name = maker
+version = 2
+root worktrees make = config:worktree_root

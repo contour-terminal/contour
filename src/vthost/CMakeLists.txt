@@ -63,12 +63,19 @@ add_library(vthost STATIC
     DaemonControl.cpp
     DaemonControl.hpp
     DaemonControlWire.hpp
+    DaemonConsentKey.cpp
+    DaemonConsentKey_posix.cpp
+    DaemonConsentKey_win32.cpp
+    DaemonSpawnLock_posix.cpp
+    DaemonSpawnLock_win32.cpp
     DaemonIdentity.cpp
     DaemonIdentity.hpp
     DaemonLifecycle.hpp
     RelocationRequest.hpp
     ConnectionRegistry.cpp
     ConnectionRegistry.hpp
+    ConnectionWorkspaces.cpp
+    ConnectionWorkspaces.hpp
     DaemonRuntime.cpp
     DaemonUpgradeHooks.cpp
     DaemonUpgradeHooks.hpp
@@ -98,6 +105,7 @@ add_library(vthost STATIC
     GracefulClose.hpp
     HistorySeed.cpp
     HistorySeed.hpp
+    RepeatedText.hpp
     HostIdentity.cpp
     HostIdentity.hpp
     LoopDrain.hpp
@@ -105,6 +113,8 @@ add_library(vthost STATIC
     RerunPolicy.hpp
     ConnectionAcceptor.cpp
     ConnectionAcceptor.hpp
+    ExtensionActions.cpp
+    ExtensionActions.hpp
     ListeningSocket.hpp
     NativeSession.cpp
     NodeMove.cpp
@@ -113,9 +123,20 @@ add_library(vthost STATIC
     NativeSession.hpp
     ObjectRegistry.cpp
     ObjectRegistry.hpp
+    OwnedPaneStore.cpp
+    OwnedPaneStore.hpp
+    OwnedPanes.cpp
+    OwnedPanes.hpp
     PduPump.hpp
+    RevealOnLoop.cpp
+    RevealOnLoop.hpp
+    ServedSessions.cpp
+    ServedSessions.hpp
     SessionHost.cpp
     SessionHost.hpp
+    ShellPtyFactory.cpp
+    ShellPtyFactory.hpp
+    UrlToOpen.hpp
     WorkspaceGit.cpp
     WorkspaceGit.hpp
     CommandRunner.hpp
@@ -337,12 +358,14 @@ target_include_directories(vthost PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
 )
-# The status-line extensions of the hosted sessions. Without them nothing of vtextension is linked, and
+# The status-line extensions of the hosted sessions, and the daemon's own. Without them nothing of vtextension is linked, and
 # vthost's own types keep one layout in both builds (@see ExtensionHosting.hpp).
 if(CONTOUR_EXTENSIONS)
     target_sources(vthost PRIVATE
         DaemonExtensions.cpp
         DaemonExtensions.hpp
+        DaemonWorldExtensions.cpp
+        DaemonWorldExtensions.hpp
         client/DaemonGrantReplies.cpp
         client/DaemonGrantReplies.hpp
     )
@@ -358,6 +381,7 @@ if(VTHOST_TESTING)
         AttachPlan_test.cpp
         ViewRouting_test.cpp
         AuthorizedKeys_test.cpp
+        DaemonConsentKey_test.cpp
         DaemonIdentity_test.cpp
         KnownDaemons_test.cpp
         ByteStream_test.cpp
@@ -369,7 +393,11 @@ if(VTHOST_TESTING)
         LoopDrain_test.cpp
         NodeMove_test.cpp
         ObjectRegistry_test.cpp
+        OwnedPanes_test.cpp
+        ServedSessions_test.cpp
         SessionHost_test.cpp
+        ShellPtyFactory_test.cpp
+        UrlToOpen_test.cpp
         FlushPolicy_test.cpp
         SessionSettings_test.cpp
         SessionEnd_test.cpp
@@ -388,6 +416,9 @@ if(VTHOST_TESTING)
         CommandRunner_test.cpp
         WorkspaceGit_test.cpp
         DaemonControl_test.cpp
+        DaemonConsent_test.cpp
+        ExtensionActions_test.cpp
+        DaemonWorldHosting_test.cpp
         DaemonRuntime_test.cpp
         ConnectionRegistry_test.cpp
         DaemonUpgradeHooks_test.cpp
@@ -437,6 +468,7 @@ if(VTHOST_TESTING)
         testing/ControlHarness.hpp
         testing/FakeCommandRunner.hpp
         testing/FakeDaemonControl.hpp
+        testing/FakeDaemonWorldHosting.hpp
         testing/FakeExtensionHosting.hpp
         testing/FakeHandoverMemory.hpp
         testing/FakeImageLeases.hpp
@@ -446,6 +478,7 @@ if(VTHOST_TESTING)
         testing/ForwardingFileSystem.hpp
         testing/GatedFileSystem.hpp
         testing/HandoverTesting.hpp
+        testing/ServedTesting.hpp
         testing/MemoryByteStream.hpp
         testing/StagingFileSystem.hpp
         testing/TestHelpers.hpp
@@ -509,11 +542,13 @@ if(VTHOST_TESTING)
         target_sources(vthost_test PRIVATE
             KeeperCrash_test.cpp keeperlink/KeeperChild_test.cpp keeperlink/KeeperDaemon_test.cpp
             keeperlink/KeeperLink_test.cpp
-            keeperlink/Recovery_test.cpp keeperlink/Structure_test.cpp testing/StartTrace_test.cpp)
+            keeperlink/Recovery_test.cpp keeperlink/Structure_test.cpp testing/StartTrace_test.cpp
+            ServedSession_test.cpp)
         target_link_libraries(vthost_test vthost_keeper_harness)
     endif()
     # vthost links no WebAssembly runtime; its tests compose one, as `contour daemon` does.
     if(CONTOUR_EXTENSIONS)
+        target_sources(vthost_test PRIVATE DaemonWorldExtensions_test.cpp)
         target_link_libraries(vthost_test vtextension_runtime)
     endif()
     # The release check reads which releases metainfo.xml names (@see proto/ReleasedVersions.hpp).
@@ -523,6 +558,20 @@ if(VTHOST_TESTING)
         target_compile_definitions(vthost_test PRIVATE
             VTHOST_TEST_SPAWNER_WASM="${CONTOUR_CARGO_TARGET_DIR}/${CONTOUR_WASM_TARGET}/release/spawner.wasm")
         add_dependencies(vthost_test spawner_wasm)
+    endif()
+    # The daemon world end to end, with the agent orchestrator's module (extensions/orchestrator, added before
+    # src/) and its recorded fixtures, where the C++ guests are built: here
+    # and in ServedSession_test.cpp, whose dashboard cases cross a live upgrade and a keeper recovery (POSIX).
+    if(CONTOUR_EXTENSIONS AND CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST)
+        target_sources(vthost_test PRIVATE DaemonWorldE2E_test.cpp testing/OrchestratorWorld.hpp)
+        # An agent run end to end, across a live upgrade and a keeper recovery (POSIX).
+        if(NOT WIN32)
+            target_sources(vthost_test PRIVATE AgentRun_test.cpp)
+        endif()
+        target_compile_definitions(vthost_test PRIVATE
+            VTHOST_TEST_ORCHESTRATOR_WASM="${CONTOUR_ORCHESTRATOR_WASM_MODULE}"
+            VTHOST_TEST_ORCHESTRATOR_TESTDATA="${PROJECT_SOURCE_DIR}/extensions/orchestrator/core/testdata")
+        add_dependencies(vthost_test orchestrator_wasm)
     endif()
     # The daemon's font behaviour is checked with the echo guest, which renders the state it reads.
     if(CONTOUR_EXTENSIONS AND TARGET echo_wasm)

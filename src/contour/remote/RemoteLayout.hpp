@@ -44,7 +44,8 @@ using LayoutSnapshot = std::map<uint64_t, std::shared_ptr<vthost::proto::LayoutS
 enum class TabSelection : uint8_t
 {
     /// The window's own: the daemon's active tab and pane are whichever window activated one last, and do
-    /// not move this window's.
+    /// not move this window's. A tab the window shows for the first time is the exception: it is active here
+    /// only if the daemon made it so (a tab the user opened is; an extension's agent tab is not).
     Keep = 0,
     /// The daemon's: the window shows the workspace for the first time.
     Seed,

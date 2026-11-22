@@ -1,0 +1,7 @@
+# Typing into the panes: `pane-send` may type text the user wrote into the extension's own tabs.
+name = panes
+version = 2
+root worktrees = config:worktree_root
+arg prompt = text
+pane agent @worktrees = claude {prompt}
+pane-input

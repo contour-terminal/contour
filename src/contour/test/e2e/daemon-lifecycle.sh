@@ -106,8 +106,10 @@ grep -q "listen-tcp" "$OUT/access-alone.txt" \
 # Foreground, backgrounded by this shell, so $! is the PTY keeper's pid -- `contour daemon` keeps the daemon,
 # its child, which it starts -- exact, and safe to signal: the keeper forwards a stop to the daemon.
 # (`--background` re-execs a detached copy and reports success on stdout, but hands back no pid,
-# which would leave this script guessing which process to stop.)
-"$CONTOUR" daemon --socket "$SOCKET" --log-file "$OUT/daemon.log" > "$OUT/daemon.out" 2>&1 &
+# which would leave this script guessing which process to stop.) Its configuration is the defaults (an empty
+# XDG_CONFIG_HOME), whatever the developer's own file declares.
+XDG_CONFIG_HOME="$OUT/config" "$CONTOUR" daemon --socket "$SOCKET" --log-file "$OUT/daemon.log" \
+    > "$OUT/daemon.out" 2>&1 &
 DAEMON_PID=$!
 
 waited=0
@@ -163,6 +165,13 @@ SERVING_PID="$(sed -n 's/^daemon: *running (pid \([0-9]*\))$/\1/p' "$OUT/status.
     || fail "daemon status names no daemon of its own beside the keeper: '$SERVING_PID'"
 [ "$(ps -o ppid= -p "$SERVING_PID" | tr -d ' ')" = "$DAEMON_PID" ] \
     || fail "the daemon $SERVING_PID is not the keeper $DAEMON_PID's child"
+
+# A daemon without extensions keeps no consent key. The key exists to prove a window's grant of a daemon
+# extension; one that declares none -- checked once status has been answered, so long after the key would
+# have been made -- makes no key file, and so offers no window the question (vthost_test pins that a daemon
+# without a key does not advertise DaemonExtensionConsent).
+[ -e "$XDG_STATE_HOME/contour/consent" ] \
+    && fail "a daemon without extensions made a consent key in $XDG_STATE_HOME/contour/consent"
 
 "$CONTOUR" daemon logs --socket "$SOCKET" > "$OUT/logs.txt" 2>&1 \
     || fail "daemon logs against a running daemon did not exit 0"

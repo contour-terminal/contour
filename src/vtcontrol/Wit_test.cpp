@@ -100,10 +100,11 @@ TEST_CASE("each WIT func says what it needs granted", "[vtcontrol][wit]")
     CHECK(wit.contains("    /// Needs `write`.\n    pane-close: func("));
 }
 
-TEST_CASE("the WIT spells the control API's error codes, limit-reached included", "[vtcontrol][wit]")
+TEST_CASE("the WIT spells the control API's error codes, limit-reached and not-pending included",
+          "[vtcontrol][wit]")
 {
     auto const wit = vtcontrol::renderControlWit();
-    CHECK(wit.contains("        failed,\n        limit-reached,\n    }\n"));
+    CHECK(wit.contains("        failed,\n        limit-reached,\n        not-pending,\n    }\n"));
 }
 
 TEST_CASE("the WIT declares no empty record", "[vtcontrol][wit]")

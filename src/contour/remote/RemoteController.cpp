@@ -216,7 +216,7 @@ core::platform::SteadyTimePoint RemoteController::extendedByProgress(core::platf
     return std::max(deadline, lastProgress + budget.handshake + promptedSince);
 }
 
-std::expected<void, std::string> RemoteController::awaitConnected(vthost::AttachBudget budget)
+std::expected<void, std::string> RemoteController::awaitConnected(vthost::AttachBudget const& budget)
 {
     bindPromptPause(budget.pause);
     startConnecting();
@@ -273,7 +273,8 @@ std::expected<void, std::string> RemoteController::awaitConnected(vthost::Attach
     }
 }
 
-std::optional<core::platform::SteadyTimePoint> RemoteController::attachDeadline(vthost::AttachBudget budget)
+std::optional<core::platform::SteadyTimePoint> RemoteController::attachDeadline(
+    vthost::AttachBudget const& budget)
 {
     if (!_pollStartedAt)
         _pollStartedAt = _clock.now();
@@ -298,7 +299,8 @@ std::optional<core::platform::SteadyTimePoint> RemoteController::attachDeadline(
     return std::nullopt;
 }
 
-std::optional<std::chrono::milliseconds> RemoteController::untilAttachDeadline(vthost::AttachBudget budget)
+std::optional<std::chrono::milliseconds> RemoteController::untilAttachDeadline(
+    vthost::AttachBudget const& budget)
 {
     auto const deadline = attachDeadline(budget);
     if (!deadline)
@@ -307,7 +309,8 @@ std::optional<std::chrono::milliseconds> RemoteController::untilAttachDeadline(v
                     std::chrono::ceil<std::chrono::milliseconds>(*deadline - _clock.now()));
 }
 
-std::optional<std::expected<void, std::string>> RemoteController::pollConnected(vthost::AttachBudget budget)
+std::optional<std::expected<void, std::string>> RemoteController::pollConnected(
+    vthost::AttachBudget const& budget)
 {
     bindPromptPause(budget.pause);
     startConnecting();
@@ -327,7 +330,7 @@ std::optional<std::expected<void, std::string>> RemoteController::pollConnected(
     return std::nullopt;
 }
 
-std::expected<void, std::string> RemoteController::connectAndWait(vthost::AttachBudget timeout)
+std::expected<void, std::string> RemoteController::connectAndWait(vthost::AttachBudget const& timeout)
 {
     bindPromptPause(timeout.pause);
     startConnecting();

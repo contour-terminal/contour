@@ -276,18 +276,19 @@ TEST_CASE("UnixPty.pageSize.seesAConcurrentResize", "[vtpty][unixpty][threading]
     // The daemon's loop thread resizes a PTY while its reader thread asks for its size. Read unlocked, the
     // size raced the locked write; under the clang-tsan tree that is reported on every run.
     constexpr auto Rounds = 2000;
-    auto const small = vtpty::PageSize { .lines = vtpty::LineCount(24), .columns = vtpty::ColumnCount(80) };
+    auto const smallSize =
+        vtpty::PageSize { .lines = vtpty::LineCount(24), .columns = vtpty::ColumnCount(80) };
     auto const large = vtpty::PageSize { .lines = vtpty::LineCount(50), .columns = vtpty::ColumnCount(132) };
-    auto pty = vtpty::UnixPty { small, std::nullopt };
+    auto pty = vtpty::UnixPty { smallSize, std::nullopt };
     REQUIRE(pty.start().has_value());
     auto resizer = std::thread { [&] {
         for (auto const round: std::views::iota(0, Rounds))
-            pty.resizeScreen(round % 2 == 0 ? large : small);
+            pty.resizeScreen(round % 2 == 0 ? large : smallSize);
     } };
     for ([[maybe_unused]] auto const round: std::views::iota(0, Rounds))
     {
         auto const size = pty.pageSize();
-        CHECK((size == small || size == large));
+        CHECK((size == smallSize || size == large));
     }
     resizer.join();
     pty.close();

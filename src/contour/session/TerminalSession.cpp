@@ -445,6 +445,7 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                 vtbackend::randomSemanticBlockTokens(),
                 app.linkDetectionServices(),
                 terminalExtensionServices(),
+                nullptr, // A window's own session hosts no daemon-scoped extension.
                 app.gitHeadServices() },
     _exitWatcherThread { std::make_unique<ExitWatcherThread>(*this) },
     // _config is declared before _desktopNotifier, so reading it here is well-defined. The delay is
@@ -531,6 +532,14 @@ void TerminalSession::setHostConnection(vthost::client::ConnectionState state)
         emit reconnectingChanged();
     if (paneState() != lastPaneState)
         emit paneStateChanged();
+}
+
+void TerminalSession::setServedMark(std::optional<window::ServedMark> mark)
+{
+    if (_hosting != SessionHosting::Remote || _servedMark == mark)
+        return;
+    _servedMark = std::move(mark);
+    emit servedChanged();
 }
 
 TerminalSession::~TerminalSession()
@@ -7712,6 +7721,12 @@ bool TerminalSession::operator()(actions::UpgradeDaemon)
     return true;
 }
 
+bool TerminalSession::operator()(actions::ExtensionAction const& event)
+{
+    _manager->invokeExtensionAction(*this, event.extension, event.id);
+    return true;
+}
+
 bool TerminalSession::operator()(actions::SaveLayout const& event)
 {
     // Naming no layout means "ask me for one": open the save-as prompt (the mirror of a colorless
@@ -7758,6 +7773,10 @@ bool TerminalSession::reloadConfig(config::Config newConfig, string const& profi
     // clang-format on
 
     _config = std::move(newConfig);
+    // Global rather than per-profile, so it rides on the reload, not on activateProfile(). The renderer was
+    // built with the previous style and keeps it until told.
+    if (_display != nullptr)
+        _display->setBoxDrawingStyle(config::boxDrawingStyleFor(_config));
     // Passive config-file reload: keep the user's live window size (default Preserve policy). Only an
     // explicit profile switch re-fits the window to the profile's terminal_size.
     activateProfile(profileName);

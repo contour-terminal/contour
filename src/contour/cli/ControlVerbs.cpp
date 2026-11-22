@@ -41,9 +41,11 @@ namespace
 
     /// The reply of a daemon of another release may carry keys this one does not know; reading it for
     /// people must not fail on them, unlike reading a request.
-    inline constexpr auto ReplyOptions = glz::opts { .error_on_unknown_keys = false,
-                                                     .skip_null_members = true,
-                                                     .error_on_missing_keys = false };
+    inline constexpr auto ReplyOptions =
+        glz::opts { .null_terminated = false, // See vtcontrol::ViewReadOptions.
+                    .error_on_unknown_keys = false,
+                    .skip_null_members = true,
+                    .error_on_missing_keys = false };
 
     /// @param text A reply's JSON.
     /// @return The reply as @p T, or nothing when it does not read as one.
@@ -296,6 +298,130 @@ namespace
                                    durationCell(block.durationMs),
                                    block.command.value_or("-"));
         });
+    }
+
+    /// `extension list`: one `NAME  STATE` line per extension, a pending one's question beneath it.
+    void humanExtensionList(std::string_view replyJson, std::ostream& out)
+    {
+        printDecoded<vtcontrol::ExtensionListReply>(replyJson, out, [&](auto const& reply) {
+            for (auto const& extension: reply.extensions)
+            {
+                out << std::format("{}  {}\n", extension.name, extension.state);
+                if (!extension.question)
+                    continue;
+                out << std::format("  {}\n", extension.question->title);
+                for (auto const& line: extension.question->lines)
+                    out << std::format("  {}\n", line.text);
+            }
+        });
+    }
+
+    /// `extension grant`: where the user answers, and that someone must open a window when none is attached.
+    void humanExtensionGrant(std::string_view replyJson, std::ostream& out)
+    {
+        printDecoded<vtcontrol::ExtensionGrantReply>(replyJson, out, [&](auto const& reply) {
+            out << "confirm in a Contour window\n";
+            if (reply.windows == 0)
+                out << "no window is attached; open Contour to answer\n";
+        });
+    }
+
+    void humanExtensionRevoke(std::string_view replyJson, std::ostream& out)
+    {
+        printDecoded<vtcontrol::ExtensionRevokeReply>(replyJson, out, [&](auto const& /*reply*/) {
+            out << "revoked; it asks again when it next starts\n";
+        });
+    }
+
+    /// `extension status`: the summary the extension last published, then its detail.
+    void humanExtensionStatus(std::string_view replyJson, std::ostream& out)
+    {
+        printDecoded<vtcontrol::ExtensionStatusReply>(replyJson, out, [&](auto const& reply) {
+            if (!reply.summary.empty())
+                out << reply.summary << '\n';
+            if (reply.detail.empty())
+                return;
+            out << reply.detail;
+            if (!reply.detail.ends_with('\n'))
+                out << '\n';
+        });
+    }
+
+    /// What `extension status` says of an extension in one state, and the status it exits with.
+    struct ExtensionStateNote
+    {
+        std::string_view state;
+        /// A format of the extension's name and, where `detail` names one, that field of the reply; empty for
+        /// no note.
+        std::string_view note;
+        ExitStatus status;
+        std::string vtcontrol::ExtensionStatusReply::* detail = nullptr; ///< What the note says why with.
+    };
+
+    inline constexpr auto ExtensionStateNotes = std::array {
+        ExtensionStateNote { .state = "running", .note = "", .status = ExitStatus::Ok },
+        ExtensionStateNote { .state = "stopped", .note = "{} is not running", .status = ExitStatus::Failed },
+        ExtensionStateNote { .state = "pending",
+                             .note = "{} waits for its grant in a Contour window",
+                             .status = ExitStatus::Failed },
+        ExtensionStateNote {
+            .state = "denied", .note = "{} was denied its grant", .status = ExitStatus::Failed },
+        ExtensionStateNote { .state = "disabled",
+                             .note = "{} faulted too often, and is disabled; its last fault: {}",
+                             .status = ExitStatus::Failed,
+                             .detail = &vtcontrol::ExtensionStatusReply::lastFault },
+        ExtensionStateNote { .state = "failed",
+                             .note = "{} failed: {}",
+                             .status = ExitStatus::Failed,
+                             .detail = &vtcontrol::ExtensionStatusReply::problem },
+    };
+
+    /// The most bytes of a reason a status note shows: one line of a terminal, give or take.
+    constexpr auto MaxNoteDetailBytes = std::size_t { 200 };
+
+    /// @return @p text as one line of a note: up to its first line break, at most MaxNoteDetailBytes bytes,
+    ///         never cut inside a UTF-8 sequence, "…" where it was cut; "unknown" when empty. The daemon
+    ///         neutralized it already; this only keeps the note one line however the reply was made.
+    [[nodiscard]] std::string oneLineDetail(std::string_view text)
+    {
+        if (text.empty())
+            return "unknown";
+        auto const lineEnd = text.find_first_of("\r\n");
+        auto line = text.substr(0, lineEnd);
+        auto const cut = lineEnd != std::string_view::npos || line.size() > MaxNoteDetailBytes;
+        if (line.size() > MaxNoteDetailBytes)
+        {
+            auto end = MaxNoteDetailBytes;
+            // Back to the start of the sequence the bound fell into.
+            while (end > 0 && (static_cast<unsigned char>(line[end]) & 0b1100'0000U) == 0b1000'0000U)
+                --end;
+            line = line.substr(0, end);
+        }
+        return cut ? std::string(line) + "\u2026" : std::string(line);
+    }
+
+    /// `extension status` succeeds only for an extension that runs; for any other it says why on @p err.
+    int extensionStatusExitStatus(std::string_view replyJson, std::ostream& err)
+    {
+        auto const reply = decodeReply<vtcontrol::ExtensionStatusReply>(replyJson);
+        if (!reply)
+        {
+            err << "Error: the daemon's reply could not be read: " << replyJson << '\n';
+            return exitCode(ExitStatus::Failed);
+        }
+        auto const row = std::ranges::find(ExtensionStateNotes, reply->state, &ExtensionStateNote::state);
+        if (row == ExtensionStateNotes.end())
+        {
+            err << std::format("{} is {}\n", reply->name, reply->state);
+            return exitCode(ExitStatus::Failed);
+        }
+        if (!row->note.empty())
+        {
+            auto const detail =
+                row->detail != nullptr ? oneLineDetail((*reply).*(row->detail)) : std::string {};
+            err << std::vformat(row->note, std::make_format_args(reply->name, detail)) << '\n';
+        }
+        return exitCode(row->status);
     }
 
     void humanBlockRead(std::string_view replyJson, std::ostream& out)
@@ -669,6 +795,32 @@ namespace
         return vtcontrol::encodeJson(vtcontrol::ApiDescribeRequest { .name = std::string { words[0] } });
     }
 
+    /// @return The request of an `extension` verb that names one extension, `{"name":NAME}`.
+    template <typename Request>
+    [[nodiscard]] Params buildExtensionNamed(CLI::FlagStore const& flags, std::string_view path)
+    {
+        auto const& words = VerbFlags { flags, path }.words();
+        if (words.size() != 1)
+            return std::unexpected(
+                std::format("extension {} takes exactly one NAME", path.substr(path.find('.') + 1)));
+        return vtcontrol::encodeJson(Request { .name = std::string { words[0] } });
+    }
+
+    [[nodiscard]] Params buildExtensionGrant(CLI::FlagStore const& flags)
+    {
+        return buildExtensionNamed<vtcontrol::ExtensionGrantRequest>(flags, "extension.grant");
+    }
+
+    [[nodiscard]] Params buildExtensionRevoke(CLI::FlagStore const& flags)
+    {
+        return buildExtensionNamed<vtcontrol::ExtensionRevokeRequest>(flags, "extension.revoke");
+    }
+
+    [[nodiscard]] Params buildExtensionStatus(CLI::FlagStore const& flags)
+    {
+        return buildExtensionNamed<vtcontrol::ExtensionStatusRequest>(flags, "extension.status");
+    }
+
     [[nodiscard]] Params buildApiCall(CLI::FlagStore const& flags)
     {
         auto const& words = VerbFlags { flags, "api.call" }.words();
@@ -1006,6 +1158,49 @@ namespace
                 .buildParams = buildSwitch,
                 .printHuman = humanSwitch,
                 .replyExitStatus = switchExitStatus,
+            },
+            ControlVerb {
+                .path = "extension.list",
+                .method = "extension.list",
+                .usage = "extension list",
+                .summary = "Lists the daemon's extensions, and the question each pending one asks.",
+                .options = [] { return withConnectionOptions({}); },
+                .verbatim = std::nullopt,
+                .buildParams = buildNothing,
+                .printHuman = humanExtensionList,
+            },
+            ControlVerb {
+                .path = "extension.grant",
+                .method = "extension.grant",
+                .usage = "extension grant NAME",
+                .summary = "Asks the attached Contour windows again for NAME's pending grant; only a window "
+                           "grants it.",
+                .options = [] { return withConnectionOptions({}); },
+                .verbatim = CLI::Verbatim { "NAME", "The daemon extension." },
+                .buildParams = buildExtensionGrant,
+                .printHuman = humanExtensionGrant,
+            },
+            ControlVerb {
+                .path = "extension.revoke",
+                .method = "extension.revoke",
+                .usage = "extension revoke NAME",
+                .summary = "Forgets NAME's grant and stops it; it asks again.",
+                .options = [] { return withConnectionOptions({}); },
+                .verbatim = CLI::Verbatim { "NAME", "The daemon extension." },
+                .buildParams = buildExtensionRevoke,
+                .printHuman = humanExtensionRevoke,
+            },
+            ControlVerb {
+                .path = "extension.status",
+                .method = "extension.status",
+                .usage = "extension status NAME",
+                .summary =
+                    "Prints what NAME last published of itself; fails, saying why, when it does not run.",
+                .options = [] { return withConnectionOptions({}); },
+                .verbatim = CLI::Verbatim { "NAME", "The daemon extension." },
+                .buildParams = buildExtensionStatus,
+                .printHuman = humanExtensionStatus,
+                .replyExitStatus = extensionStatusExitStatus,
             },
             ControlVerb {
                 .path = "api.list",
@@ -1441,7 +1636,8 @@ ExitStatus exitStatusFor(vtcontrol::ControlErrorCode code) noexcept
         case ControlErrorCode::Unsupported:
         case ControlErrorCode::Forbidden:
         case ControlErrorCode::Failed:
-        case ControlErrorCode::LimitReached: break;
+        case ControlErrorCode::LimitReached:
+        case ControlErrorCode::NotPending: break;
     }
     return ExitStatus::Failed;
 }
@@ -1500,6 +1696,8 @@ std::span<ControlVerbGroup const> controlVerbGroups()
         ControlVerbGroup { "workspace", "Opens, closes and reorders workspaces." },
         ControlVerbGroup { "tab", "Moves tabs." },
         ControlVerbGroup { "api", "Explores and calls the control API." },
+        ControlVerbGroup { "extension",
+                           "Lists, asks for and revokes the grants of the daemon's extensions." },
     };
     return Groups;
 }

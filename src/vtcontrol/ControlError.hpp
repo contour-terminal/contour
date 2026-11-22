@@ -22,6 +22,7 @@ enum class ControlErrorCode : uint8_t
     Forbidden,      ///< The connection's grants do not cover the method.
     Failed,         ///< Anything else.
     LimitReached,   ///< The connection holds as many subscriptions or waits as it may; end one first.
+    NotPending,     ///< The daemon extension waits for no answer: there is nothing to ask the windows.
 };
 
 template <>
@@ -36,6 +37,7 @@ struct EnumTable<ControlErrorCode>
         EnumName { ControlErrorCode::Forbidden, "forbidden" },
         EnumName { ControlErrorCode::Failed, "failed" },
         EnumName { ControlErrorCode::LimitReached, "limitReached" },
+        EnumName { ControlErrorCode::NotPending, "notPending" },
     };
 };
 

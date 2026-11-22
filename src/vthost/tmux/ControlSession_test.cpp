@@ -25,6 +25,7 @@
 #include <span>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include <vthost/SessionHost.hpp>
@@ -507,7 +508,7 @@ TEST_CASE("a failed split-window leaves the active pane where it was", "[vthost]
     auto h = ControlHarness {};
     h.host.createTab();
     auto const* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
-    h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Horizontal, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Horizontal, 0.5);
     REQUIRE(tab->paneCount() == 2);
     auto const active = tab->activePane()->id();
     auto const sessions = tab->leafSessions();

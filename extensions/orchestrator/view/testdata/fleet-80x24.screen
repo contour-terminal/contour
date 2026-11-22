@@ -1,0 +1,24 @@
+╭─ Agents 7 ───────────────────────────────────────────────────────────────────╮
+│ NEEDS YOU 2                                                                  │
+│ ? pr-2346 · fix CI                                                 asking 6m │
+│   Bash: ctest -R reflow --output-on-failure                                  │
+│ … issue-2253 · work on issue                                      waiting 6m │
+│   Waiting for Build pace                                                     │
+│ WORKING 1 of 4                                                               │
+│▍⠋ pr-2375 · fix CI · fix the reflow                               working 6m │
+│ TO REVIEW 1                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ pr-2375 · fix CI · sonnet · board ──────────────────────────── ⠋ working 6m ╮
+│ updated 9 min ago                                                            │
+│ Fixing CI                                                                    │
+│ ☑ reproduced on master                                                       │
+│ ☑ wrote the regression test                                                  │
+│ ☐ fix the reflow                                                             │
+│ ☐ watch CI                                                                   │
+│                                                                              │
+│                                                                              │
+│ ╭──────────────────────────────────────────────────────────────────────────╮ │
+│ │ ⏎ to write to pr-2375                                                    │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ ⏎ message · t transcript · b board · ^k all actions   ⬢ 4/4 ▰▰▰▰  ● 2 need you 

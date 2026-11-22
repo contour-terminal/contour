@@ -21,6 +21,7 @@
 #include <vtbackend/screen/TerminalClocks.hpp>
 #include <vtbackend/state/TerminalState.hpp>
 
+#include <vtpty/ChannelPty.hpp>
 #include <vtpty/ImageSize.hpp>
 #include <vtpty/PageSize.hpp>
 #include <vtpty/Process.hpp>
@@ -64,16 +65,24 @@
 #include <vthost/ClientSizePolicy.hpp>
 #include <vthost/CommandInterruption.hpp>
 #include <vthost/ConnectionId.hpp>
+#include <vthost/ConnectionWorkspaces.hpp>
+#include <vthost/ConsentTicket.hpp>
+#include <vthost/ExtensionActions.hpp>
 #include <vthost/ExtensionHosting.hpp>
 #include <vthost/HistorySeed.hpp>
+#include <vthost/NodeMove.hpp>
 #include <vthost/ObjectRegistry.hpp>
+#include <vthost/OwnedPaneStore.hpp>
+#include <vthost/OwnedPanes.hpp>
 #include <vthost/PermissionWire.hpp>
 #include <vthost/ProfileCatalog.hpp>
 #include <vthost/RestoredCounts.hpp>
+#include <vthost/ServedSessions.hpp>
 #include <vthost/SessionEnd.hpp>
 #include <vthost/SessionSettings.hpp>
 #include <vthost/SessionSnapshot.hpp>
 #include <vthost/SessionSnapshotStore.hpp>
+#include <vthost/TabMerge.hpp>
 #include <vthost/ViewRouting.hpp>
 #include <vthost/WorkspaceGit.hpp>
 #include <vthost/WorkspaceVisibility.hpp>
@@ -133,6 +142,7 @@ enum class OperationError : uint8_t
 {
     UnknownSession = 0, ///< No hosted session has that id: it exited, or never existed.
     UnknownOperation,   ///< The operation is not one this host knows, as from a newer client.
+    Served,             ///< It would write to a served session's grid, which only its extension draws.
 };
 
 /// Why the host closed no workspace.
@@ -154,6 +164,29 @@ enum class WorkspaceCloseError : uint8_t
     return "unknown error";
 }
 
+/// Why the host split no pane.
+enum class SplitError : uint8_t
+{
+    UnknownTab = 0, ///< No tab of the host has that id.
+    Served,         ///< The tab's active pane is served by an extension, and a served tab stays whole.
+    SpawnFailed,    ///< The new pane's session could not be spawned.
+    Refused,        ///< The model refused the split (a zoomed tab, ...); the spawned session was reaped.
+};
+
+/// @param error The failure.
+/// @return A lower-case phrase for a log line.
+[[nodiscard]] constexpr std::string_view describe(SplitError error) noexcept
+{
+    switch (error)
+    {
+        case SplitError::UnknownTab: return "unknown tab";
+        case SplitError::Served: return "an extension serves the pane, which cannot be split";
+        case SplitError::SpawnFailed: return "the new pane's session could not be spawned";
+        case SplitError::Refused: return "the model refused the split";
+    }
+    return "unknown error";
+}
+
 /// @param error The failure.
 /// @return A lower-case phrase for a log line.
 [[nodiscard]] constexpr std::string_view describe(OperationError error) noexcept
@@ -162,6 +195,7 @@ enum class WorkspaceCloseError : uint8_t
     {
         case OperationError::UnknownSession: return "unknown session";
         case OperationError::UnknownOperation: return "unknown operation";
+        case OperationError::Served: return "an extension draws the session";
     }
     return "unknown error";
 }
@@ -240,9 +274,6 @@ using SessionSignal = std::variant<CommandBlockFinishedSignal,
 /// state mutex held: it must neither block nor read terminal state (the host posts it to the loop).
 using SessionSignalCallback = std::function<void(SessionSignal)>;
 
-/// Told how a requested window switch ended, once.
-using SwitchCompletion = std::function<void(proto::SwitchReply const&)>;
-
 /// How an attached connection ended, as the host takes it.
 enum class DetachKind : uint8_t
 {
@@ -256,6 +287,20 @@ enum class DetachKind : uint8_t
 ///
 /// Mostly one per attached client — but NOT only: the daemon itself subscribes a single
 /// LastSessionWatcher for `sessionClosed`, so the subscriber count is not a client count.
+/// Whether a daemon-scoped extension's question is sent to a connection that was already sent it.
+enum class ConsentOffer : uint8_t
+{
+    IfNotSent = 0, ///< Only to one not sent it yet: the question opened, or a client attached.
+    Again,         ///< To every one that can answer: `contour extension grant` asks again.
+};
+
+/// Whether an observer sent a daemon-scoped extension's question.
+enum class ConsentDelivery : uint8_t
+{
+    NotSent = 0, ///< It cannot ask a user, or already did.
+    Sent,        ///< It sent it to a window.
+};
+
 class SessionStreamEvents
 {
   public:
@@ -364,6 +409,38 @@ class SessionStreamEvents
                                             proto::PermissionRequest const& /*request*/)
     {
     }
+
+    /// A daemon-scoped extension waits for its user's grant: an observer that can ask a user in a window
+    /// sends @p request. A client attaching later is asked through
+    /// SessionHost::pendingDaemonExtensionRequests() instead.
+    /// @param request The question.
+    /// @param offer Whether one already sent to this observer is sent again (`contour extension grant`).
+    /// @return Sent if the observer sent it.
+    [[nodiscard]] virtual ConsentDelivery daemonExtensionRequested(
+        proto::ExtensionPermissionRequest const& /*request*/, ConsentOffer /*offer*/)
+    {
+        return ConsentDelivery::NotSent;
+    }
+
+    /// A daemon-scoped extension's question was answered: an observer that sent it closes it.
+    virtual void daemonExtensionSettled(proto::ExtensionPermissionSettled const& /*settled*/) {}
+
+    /// What the palette shows of the daemon-scoped extensions changed: an observer with a palette sends
+    /// @p presence, the whole set. A client attaching later is sent SessionHost::extensionPresence() instead.
+    virtual void extensionPresenceChanged(proto::ExtensionPresence const& /*presence*/) {}
+
+    /// A daemon-scoped extension revealed its served tab, which the daemon activated: the observer's window
+    /// raises itself and focuses @p session's pane (sends RevealPane, to a client with a palette).
+    virtual void revealPane(vtworkspace::SessionId /*session*/) {}
+
+    /// @return Whether the observer's client opens a web link on its own machine
+    /// (proto::Capability::UrlOpen):
+    ///         only then is it sent openUrl().
+    [[nodiscard]] virtual LinkOpening linkOpening() const noexcept { return LinkOpening::Unable; }
+
+    /// A daemon-scoped extension asked the observer's window to open @p url, just after its user typed or
+    /// clicked into the extension's tab there (sends OpenUrl, to a client that opens links).
+    virtual void openUrl(std::string_view /*url*/) {}
 };
 
 /// What a hosted session hands a desktop notification on as: its title, its body, and the occasion
@@ -386,6 +463,9 @@ struct HostedSessionExtensions
     /// what they follow is known only once they have loaded. Invoked on the extension's WORKER, holding no
     /// lock, and only on such a change: it must not block (the host marshals it onto the loop).
     std::function<void()> onForegroundFollowingChanged {};
+    /// What the session's `{DaemonExtension}` items read; null without daemon-scoped extensions. Outlives the
+    /// session.
+    vtbackend::IDaemonExtensionSummaries const* daemonSummaries = nullptr;
 };
 
 /// Why a hosted session could not be quiesced.
@@ -425,6 +505,40 @@ enum class TerminationReason : uint8_t
     Teardown,
 };
 
+/// Which extension draws a served session: a session that runs no program, whose device a daemon-scoped
+/// extension feeds. Disposable by design: a live upgrade closes it (SessionEnd::Upgrade), a keeper recovery
+/// drops it, and a workspace snapshot leaves its tab out; the extension opens it again.
+struct ServedBy
+{
+    std::string extension;    ///< The extension's name.
+    std::string scheme;       ///< What it serves the tab as, as the extension names it.
+    std::string moduleDigest; ///< The hex SHA-256 of the module that draws it; empty when unknown.
+    std::string title {}; ///< The extension's display title, which the window's chrome marks the tab with.
+
+    bool operator==(ServedBy const&) const = default;
+};
+
+/// A change to the pane tree that would take a pane out of its tab or put one into another: what a served
+/// tab, which stays whole, refuses (@see SessionHost::servedRestructuring).
+enum class Restructure : uint8_t
+{
+    Split,     ///< The source pane splits, so a new pane enters its tab.
+    MergeInto, ///< The source's whole tab is grafted into the target tab.
+    MoveOut,   ///< The source pane leaves its tab, for a tab well or a new workspace.
+    MoveInto,  ///< The source pane or tab enters the target tab.
+};
+
+/// A served spawn: no program, but the device ServedSessions::makeDevice() built, which the session adopts.
+/// The device stays shared with ServedSessions, which buffers what the session's terminal writes to it.
+struct ServedSpawn
+{
+    std::string extension;                        ///< @see ServedBy::extension
+    std::string scheme;                           ///< @see ServedBy::scheme
+    std::string moduleDigest;                     ///< @see ServedBy::moduleDigest
+    std::shared_ptr<vtpty::ChannelPty> device {}; ///< The device; null is refused.
+    std::string title {};                         ///< @see ServedBy::title
+};
+
 /// One hosted session: the terminal (owning its PTY) plus the pump thread
 /// feeding it, mirroring the GUI's TerminalSession::mainLoop.
 class HostedSession
@@ -452,6 +566,7 @@ class HostedSession
     /// @param profileName The host profile the session was spawned under; empty for none named.
     /// @param settingsOrigin Where @p settings came from.
     /// @param git Where the terminal's `{Git}` looks up its branch; none shows no branch.
+    /// @param servedBy The extension that draws the session; none for a session that runs a program.
     HostedSession(vtworkspace::SessionId id,
                   core::Environment const& env,
                   std::unique_ptr<vtpty::Pty> pty,
@@ -469,7 +584,8 @@ class HostedSession
                   HostedSessionExtensions extensions = {},
                   std::string profileName = {},
                   SettingsOrigin settingsOrigin = SettingsOrigin::Profile,
-                  std::optional<vtbackend::GitHeadServices> git = std::nullopt);
+                  std::optional<vtbackend::GitHeadServices> git = std::nullopt,
+                  std::optional<ServedBy> servedBy = std::nullopt);
 
     /// Closes the PTY, as terminate(TerminationReason::Teardown) does, and joins the pump thread.
     ~HostedSession();
@@ -552,6 +668,9 @@ class HostedSession
     /// @return Where the session's emulation settings came from.
     [[nodiscard]] SettingsOrigin settingsOrigin() const noexcept { return _settingsOrigin; }
 
+    /// @return The extension that draws the session; null for a session that runs a program.
+    [[nodiscard]] ServedBy const* servedBy() const noexcept { return _servedBy ? &*_servedBy : nullptr; }
+
     /// @return The emulation settings the session's terminal runs under, as a client states them: kept apart
     ///         from the terminal, so that reading them locks nothing (a structure capture runs while a pump
     ///         may hold the terminal). Loop thread.
@@ -594,6 +713,14 @@ class HostedSession
             return true;
         auto const guard = std::lock_guard { _terminal };
         return _terminal.indicatorStatusLineDependsOnHostState();
+    }
+
+    /// @return Whether the indicator row shows a daemon-scoped extension's summary: what a published one
+    ///         repaints. Takes the terminal lock.
+    [[nodiscard]] bool showsDaemonSummaries()
+    {
+        auto const guard = std::lock_guard { _terminal };
+        return _terminal.indicatorStatusLineShowsDaemonSummaries();
     }
 
     /// @return Whether the session's extensions follow its foreground program.
@@ -848,6 +975,7 @@ class HostedSession
     vtworkspace::SessionId _id;
     std::string _profileName;                   ///< @see profileName
     SettingsOrigin _settingsOrigin;             ///< @see settingsOrigin
+    std::optional<ServedBy> _servedBy;          ///< @see servedBy
     proto::WireSessionSettings _statedSettings; ///< @see statedSettings
     /// The session's status-line extensions; null without any. Declared before _terminal, which it outlives:
     /// ~Terminal revokes the sink their workers publish through before they are destroyed.
@@ -900,6 +1028,23 @@ struct PaneRuntime
     std::optional<std::filesystem::path> workingDirectory {};
     std::optional<std::string> foregroundProcess {}; ///< As the OS names the foreground program.
     std::optional<std::string> profile {};           ///< The profile the session was spawned under, if named.
+};
+
+/// Whether a spawn may start somewhere else than the directory it names.
+enum class StartDirectory : uint8_t
+{
+    /// A directory that is gone is dropped, and the shell starts in the profile's: a pane is worth more
+    /// than its directory.
+    Preferred = 0,
+    /// The spawn starts there or not at all: an agent's pane, whose program must never run in another
+    /// directory than the one it was given (a worktree it would otherwise write into the wrong repository).
+    Required,
+};
+
+/// Why a spawn's start directory was refused.
+enum class StartDirectoryError : uint8_t
+{
+    Gone, ///< A StartDirectory::Required directory does not exist, or names none.
 };
 
 /// What ONE session-creating request overrides about the session it spawns.
@@ -957,6 +1102,17 @@ struct SessionSpawnRequest
     /// the host, when the session is seeded (@see SessionHost::workingDirectoryOf); a pane whose directory
     /// is unknown, or no longer exists, leaves the profile's directory in force. Nullopt inherits nothing.
     std::optional<vtworkspace::SessionId> directoryFrom {};
+
+    /// Whether the spawn may fall back from the directory it names (@see SessionHost::settleStartDirectory).
+    StartDirectory startDirectory = StartDirectory::Preferred;
+
+    /// Whether the tab a creation makes becomes its workspace's active one (createTabIn()).
+    vtworkspace::TabActivation activation = vtworkspace::TabActivation::Activate;
+
+    /// Engaged for a served session: it runs no program, but adopts the device named here, and every field
+    /// above that shapes a program (its command, profile, directory, history and input) is ignored. Refused
+    /// while the host's ServedAdmission is Closed. Nullopt spawns a program.
+    std::optional<ServedSpawn> served {};
 };
 
 /// Starts @p request's shell in @p directory by a directory-only override: an empty program keeps the
@@ -1101,6 +1257,10 @@ struct SessionHostConfig
     /// wakes nothing of them (A2). Shared only so that a test can keep a handle on a fake: the host destroys
     /// its share after its sessions, and nobody else is to hold one past the host. @see IExtensionHosting
     std::shared_ptr<IExtensionHosting> extensions {};
+    /// Makes the daemon-scoped extensions that run beside the sessions; empty for none, which constructs
+    /// nothing of them. Called once, as the host is constructed; the host stops them before it drains its
+    /// loop as it goes. @see IDaemonWorldHosting
+    DaemonWorldFactory daemonWorld {};
     /// The host's profiles, in which every spawn resolves its shell (SessionSpawnRequest::profileName, or the
     /// default profile for none) and passes it to the PTY factory as a whole shell; null for none, which
     /// keeps the factory settings and the PTY factory's own shell for every session.
@@ -1139,6 +1299,24 @@ struct SessionHostConfig
     RecoveredSeeder seedRecovered {};
     /// Where the UUIDs of workspaces, tabs and panes come from. Tests pass a sequential one.
     std::shared_ptr<vtcontrol::UuidSource> uuids = vtcontrol::systemUuidSource();
+    /// Where the UUIDs of served tabs and of extensions' agent panes come from (@see ServedSessions,
+    /// OwnedPanes), minted on the extensions' lane: thread-safe. Null for @ref uuids.
+    std::shared_ptr<vtcontrol::UuidSource> servedIds {};
+    /// The registry of the agent panes daemon-scoped extensions opened (@see OwnedPanes); null for one in
+    /// memory, which no restart keeps.
+    std::shared_ptr<IOwnedPaneStore> ownedPaneStore {};
+    /// The sandbox policy @ref ptys spawns under (makeShellPtyFactory()'s `escape_sandbox`). A spawn through
+    /// @ref profilePtys runs under its own profile's instead.
+    SandboxEscape ptySandbox = SandboxEscape::Escapes;
+    /// Whether a program spawned under a sandbox policy can be started in a directory held open
+    /// (vtpty::Process::heldDirectorySpawn). Where an agent's spawn could not (a Flatpak whose shells run on
+    /// the host, Windows), an extension's pane-open is refused not-supported-yet. Empty: everywhere, for a
+    /// host whose devices start no program.
+    std::function<vtpty::HeldDirectorySpawn(SandboxEscape)> heldDirectorySpawn {};
+    /// Whether an agent pane's program is found where its spawn would look it up
+    /// (vtpty::Process::findsProgram), so that pane-open names a missing one rather than open a tab that
+    /// fails. Called on any thread. Empty: every program is, for a host whose devices start none.
+    std::function<bool(vtpty::Process::ExecInfo const&)> programFound {};
     /// How long after its connection dropped a window is taken to still show its workspace, so that an
     /// attach does not take it (@see SessionHost::shownForAttach). The default is proto::ReconnectGrace: the
     /// longest wait between two reconnect attempts of a client plus the time one may take to attach.
@@ -1199,7 +1377,12 @@ class HostGitLookups
 
 /// Owns every hosted session and the authoritative vtworkspace::SessionModel,
 /// fanning each completed model change out to subscribed observers.
-class SessionHost final: public vtworkspace::ModelEvents
+class SessionHost final:
+    public vtworkspace::ModelEvents,
+    public IDaemonExtensionControl,
+    private ServedTabHost,
+    private OwnedPaneHost,
+    private IServedAdmission
 {
   public:
     /// @param loop The event loop all model mutation is confined to.
@@ -1478,15 +1661,48 @@ class SessionHost final: public vtworkspace::ModelEvents
     ///         nullopt with none attached. @see raiseHolder
     [[nodiscard]] std::optional<ConnectionId> raiseHolderNow() const;
 
-    /// Splits @p tab's active pane, backing the new leaf with a fresh session.
+    /// Splits @p tab's active pane, backing the new leaf with a fresh session. Nothing changes when it fails.
     /// @param tab The tab whose active pane splits.
     /// @param orientation The split axis.
     /// @param ratio The first child's share.
     /// @param request What this creation overrides about the session it spawns.
-    void splitActivePane(vtworkspace::TabId tab,
-                         vtworkspace::SplitState orientation,
-                         double ratio = 0.5,
-                         SessionSpawnRequest const& request = {});
+    /// @return The new pane's session, or why there is none; SplitError::Served when the active pane is
+    ///         served (@see servedRestructuring).
+    [[nodiscard]] std::expected<vtworkspace::SessionId, SplitError> splitActivePane(
+        vtworkspace::TabId tab,
+        vtworkspace::SplitState orientation,
+        double ratio = 0.5,
+        SessionSpawnRequest const& request = {});
+
+    /// The one place a restructuring is judged against served tabs, which every front end -- the native
+    /// protocol, the control API, tmux control mode -- reaches through splitActivePane(), mergeTabIntoSplit()
+    /// and moveNode(). A whole served tab may still move to another workspace: it stays whole.
+    /// @param kind What would change.
+    /// @param source The pane that would split, leave its tab or enter another; for a tab, any of its panes.
+    /// @param targetTab The tab a MergeInto or MoveInto enters; ignored for the other kinds.
+    /// @return Nothing when allowed; the served extension's name when it would split a served pane, merge or
+    ///         move a foreign pane into a served tab, or move a served pane out of its tab.
+    [[nodiscard]] std::optional<std::string> servedRestructuring(
+        Restructure kind, vtworkspace::SessionId source, std::optional<vtworkspace::TabId> targetTab) const;
+
+    /// Grafts the tab a client's MergeTabIntoSplit names beside its target pane (@see applyTabMerge), unless
+    /// either is served.
+    /// @param request The client's request.
+    /// @return Success, or why nothing changed; TabMergeError::Served for a served tab or target.
+    [[nodiscard]] std::expected<void, TabMergeError> mergeTabIntoSplit(
+        proto::MergeTabIntoSplit const& request);
+
+    /// Moves @p source to @p target (@see applyMove), unless it would take a served pane out of its tab or
+    /// put a pane into a served tab. A whole tab moving to a tab well or a new workspace stays whole, served
+    /// or not; so does a served tab's one pane, which moves as its tab.
+    /// @param source What moves.
+    /// @param target Where it goes.
+    /// @param hooks Makes the workspace of a NewWorkspace target, and removes a workspace the move empties.
+    /// @return Where focus landed, or why nothing changed; NodeMoveError::Served naming the extension.
+    [[nodiscard]] std::expected<vtworkspace::MoveResult, NodeMoveFailure> moveNode(
+        vtworkspace::MoveSource const& source,
+        vtworkspace::MoveTarget const& target,
+        MoveWorkspaceHooks const& hooks);
 
     /// @return The terminal backing @p session, or nullptr if unknown.
     [[nodiscard]] vtbackend::Terminal* terminal(vtworkspace::SessionId session) noexcept;
@@ -1657,6 +1873,54 @@ class SessionHost final: public vtworkspace::ModelEvents
         return _foregroundPoll.has_value() && !_foregroundPoll->settled();
     }
 
+    /// Records a window's answer to a daemon-scoped extension's question, and tells every other connection
+    /// that was sent it that it is settled. The only way to IDaemonWorldHosting::answer(): a ticket is made
+    /// only by a NativeSession that sent the question to a client that can answer it. An answer to a question
+    /// no longer pending, or a dismissal (Pending), records nothing.
+    /// @param ticket What the connection was given as it sent the question.
+    /// @param answer Granted or Denied.
+    void answerDaemonExtension(ConsentTicket ticket, GrantState answer);
+
+    /// @return The daemon-scoped extensions waiting for their user's grant, as the wire carries them: what a
+    ///         client that can answer, attaching now, is to be asked. None without daemon-scoped extensions.
+    [[nodiscard]] std::vector<proto::ExtensionPermissionRequest> pendingDaemonExtensionRequests() const;
+
+    /// @return The daemon-scoped extensions and their palette rows, as the wire carries them: what a client
+    ///         with a palette, attaching now, is sent. Empty without daemon-scoped extensions.
+    [[nodiscard]] proto::ExtensionPresence extensionPresence() const;
+
+    /// Applies what invoking a daemon-scoped extension's palette row does, by where the extension stands
+    /// (invocationEffectOf()). An unknown extension, or an action it does not declare, is dropped and logged;
+    /// an empty @p action is the row that asks for a grant or restarts, and only valid in those states.
+    /// @param connection The connection the user invoked it from: the action's origin.
+    /// @param extension What the daemon's configuration calls the extension.
+    /// @param action The declared action's id; empty for the grant or restart row.
+    /// @return What it did; Ignore for an invocation dropped. For AskAgain the caller re-sends the pending
+    ///         question to @p connection, which alone can tell whether its client may be asked.
+    [[nodiscard]] InvocationEffect invokeExtensionAction(ConnectionId const& connection,
+                                                         std::string_view extension,
+                                                         std::string_view action);
+
+    /// @return The actions the user invoked, queued per daemon-scoped extension: what an extension's
+    ///         `actions-take` reads.
+    [[nodiscard]] IExtensionActions& extensionActions() noexcept { return _extensionActions; }
+
+    /// Forgets @p connection's action origin, at its detach.
+    /// @param connection The connection that detached.
+    void forgetActionOrigin(ConnectionId const& connection);
+
+    /// @return What the control API may do with the daemon-scoped extensions; null without any, so that every
+    ///         `extension.*` verb answers unsupported.
+    [[nodiscard]] IDaemonExtensionControl* daemonExtensionControl() noexcept
+    {
+        return _daemonWorld ? this : nullptr;
+    }
+
+    [[nodiscard]] std::vector<DaemonExtensionListing> list() const override;
+    [[nodiscard]] AskResult ask(std::string_view name) override;
+    void revoke(std::string_view name) override;
+    [[nodiscard]] std::optional<DaemonExtensionStatus> status(std::string_view name) const override;
+
     /// @return The permission requests no client has answered yet, oldest first: what a client attaching now
     ///         is to be asked. Valid until the host next changes them.
     [[nodiscard]] std::span<proto::PermissionRequest const> pendingPermissionRequests() const noexcept
@@ -1817,6 +2081,32 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param session The session to end.
     void closeSession(vtworkspace::SessionId session);
 
+    /// @param session A hosted session, or not.
+    /// @return The extension that draws @p session; null for one that runs a program, or is unknown.
+    [[nodiscard]] ServedBy const* servedBy(vtworkspace::SessionId session) const noexcept;
+
+    /// What a live upgrade does before it checks that the sessions can be captured: latches
+    /// ServedAdmission::Closed, so that no served spawn comes in its place, then ends every served session
+    /// with SessionEnd::Upgrade, as no new image could adopt its device. Loop thread.
+    void closeServedSessions();
+
+    /// Clears the latch closeServedSessions() set: the upgrade ended without an exec. The served sessions it
+    /// closed stay closed; their extensions open them again. Loop thread.
+    void admitServedSessions() noexcept;
+
+    /// @return Whether a served spawn is admitted now.
+    [[nodiscard]] ServedAdmission servedAdmission() const noexcept { return current(); }
+
+    /// @return The served tabs of this host, and their devices.
+    [[nodiscard]] ServedSessions& served() noexcept { return _served; }
+
+    /// @return The agent panes daemon-scoped extensions opened in this host.
+    [[nodiscard]] OwnedPanes& ownedPanes() noexcept { return _ownedPanes; }
+    /// Waits until the owned-pane registry saved so far reached its store, which is written off the loop.
+    void flushOwnedPanes() { _ownedPaneWriter.flush(); }
+    /// @copydoc ownedPanes()
+    [[nodiscard]] OwnedPanes const& ownedPanes() const noexcept { return _ownedPanes; }
+
     /// @param session A hosted session.
     /// @return What the pane is doing now; every field empty for an unknown session.
     [[nodiscard]] PaneRuntime paneRuntime(vtworkspace::SessionId session) const;
@@ -1910,9 +2200,14 @@ class SessionHost final: public vtworkspace::ModelEvents
         std::string name {};
     };
 
+    /// @param served A served spawn.
+    /// @return Whether it is admitted: the host's ServedAdmission is Open, and it names a device. Logs why
+    /// not.
+    [[nodiscard]] bool admitsServed(ServedSpawn const& served) const;
+
     /// @param incoming What this creation overrides about the session.
     /// @param ids The UUIDs the shell is told, and the pane's is bound to the session.
-    /// @return The minted id, or nullopt if the PTY factory failed.
+    /// @return The minted id, or nullopt if the PTY factory failed, or a served spawn was not admitted.
     [[nodiscard]] std::optional<vtworkspace::SessionId> seedSession(SessionSpawnRequest const& incoming,
                                                                     SpawnIds const& ids);
 
@@ -1923,12 +2218,15 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param settings Its terminal's settings, normalized already.
     /// @param profileName The profile it runs under; empty for none.
     /// @param origin Where @p settings came from.
+    /// @param servedBy The extension that draws it; none for a session that runs a program.
     /// @return The session.
-    [[nodiscard]] std::unique_ptr<HostedSession> makeHostedSession(vtworkspace::SessionId id,
-                                                                   std::unique_ptr<vtpty::Pty> device,
-                                                                   vtbackend::Settings settings,
-                                                                   std::string profileName,
-                                                                   SettingsOrigin origin);
+    [[nodiscard]] std::unique_ptr<HostedSession> makeHostedSession(
+        vtworkspace::SessionId id,
+        std::unique_ptr<vtpty::Pty> device,
+        vtbackend::Settings settings,
+        std::string profileName,
+        SettingsOrigin origin,
+        std::optional<ServedBy> servedBy = std::nullopt);
 
     /// Starts @p session's pump (unless the host pumps none), paints the indicator row its clients mirror,
     /// and registers it.
@@ -2009,12 +2307,19 @@ class SessionHost final: public vtworkspace::ModelEvents
     ///         the factory failed.
     [[nodiscard]] std::unique_ptr<vtpty::Pty> makePty(ResolvedSpawn const& spawn) const;
 
+    /// @return Whether makePty() spawns @p spawn through the profile PTY factory, under its profile's sandbox
+    ///         policy (else through the host's, under SessionHostConfig::ptySandbox).
+    [[nodiscard]] bool spawnsByProfile(ResolvedSpawn const& spawn) const noexcept;
+
     /// Settles the directory @p request's shell starts in, for every way a spawn names one: the directory
     /// of @ref SessionSpawnRequest::directoryFrom when the request names none, then a check that the
     /// directory exists. One that does not (a pane's directory deleted since, a stale path, a typo) is
-    /// logged and dropped, leaving the profile's directory in force and the program and arguments alone.
+    /// logged and dropped, leaving the profile's directory in force and the program and arguments alone --
+    /// unless the request's directory is StartDirectory::Required, which then refuses the spawn.
     /// @param request A request whose commandOverride is engaged.
-    void settleStartDirectory(SessionSpawnRequest& request) const;
+    /// @return Nothing once settled; StartDirectoryError::Gone for a Required directory that is not there.
+    [[nodiscard]] std::expected<void, StartDirectoryError> settleStartDirectory(
+        SessionSpawnRequest& request) const;
 
     /// @return The name a workspace made from @p request starts with: after the folder its first shell
     ///         @p seeded starts in (@see vtbackend::defaultWorkspaceName); empty when that is unknown.
@@ -2250,6 +2555,72 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return SizeChange::Applied when `_pageSize` moved, SizeChange::Unchanged otherwise.
     [[nodiscard]] SizeChange resolveAuthoritativeArea();
 
+    // ServedTabHost: what the served tabs reach of the host, on the loop thread.
+    [[nodiscard]] std::optional<vtworkspace::SessionId> createServedTab(vtworkspace::WorkspaceId workspace,
+                                                                        SessionSpawnRequest request) override;
+    void activate(vtworkspace::SessionId session) override;
+    void closeServed(vtworkspace::SessionId session, SessionEnd cause) override;
+    void askToSwitch(ConnectionId const& connection,
+                     vtworkspace::WorkspaceId leaving,
+                     proto::SwitchTargetWire target,
+                     SwitchCompletion done) override;
+    void revealTo(ConnectionId const& connection, vtworkspace::SessionId session) override;
+    void openUrlIn(ConnectionId const& connection, std::string const& url) override;
+    [[nodiscard]] std::vector<ConnectionId> showing(vtworkspace::WorkspaceId workspace) const override;
+    [[nodiscard]] std::optional<vtworkspace::WorkspaceId> workspaceOf(
+        vtworkspace::SessionId session) const override;
+    [[nodiscard]] std::string workspaceRef(vtworkspace::WorkspaceId workspace) const override;
+
+    // OwnedPaneHost: what the owned panes reach of the host, on the loop thread.
+    [[nodiscard]] std::optional<vtworkspace::SessionId> createOwnedTab(
+        OwnedPaneSpawn const& spawn, vtcontrol::Uuid pane, vtworkspace::WorkspaceId workspace) override;
+    void closeOwnedSession(vtworkspace::SessionId session) override;
+    void writeOwnedInput(vtworkspace::SessionId session, std::string_view bytes) override;
+    [[nodiscard]] vtpty::HeldDirectorySpawn heldDirectorySpawn() const override;
+    [[nodiscard]] std::optional<vtworkspace::WorkspaceId> firstWorkspace() const override;
+    [[nodiscard]] bool findsProgram(OwnedPaneSpawn const& spawn) const override;
+
+    // IServedAdmission: the upgrade latch, read from any thread.
+    [[nodiscard]] ServedAdmission current() const noexcept override;
+
+    /// Tells the owned panes which panes the host holds, once every restore path ran: posted to the loop by
+    /// the constructor, on each of its exits.
+    void postOwnedPaneReconciliation();
+
+    /// Tells the owned panes @p session's status, if it runs one of theirs. Loop thread.
+    void noteOwnedPaneStatus(vtworkspace::SessionId session);
+
+    /// @return @p session's status as an agent pane shows it (paneStatusOf()); nullopt for none.
+    [[nodiscard]] std::optional<PaneStatus> paneStatusOfSession(vtworkspace::SessionId session) const;
+
+    /// Publishes the workspace @p client selects to the served tabs' mirror.
+    void publishSelection(SessionStreamEvents const& client);
+
+    /// @return What raises a hint for a daemon-scoped extension from any thread: posted to the loop, dropped
+    ///         once the host or its daemon world is gone.
+    [[nodiscard]] ServedSessions::Raise hintRaiser() const;
+
+    /// @return What the served tabs post to the loop through: dropped once the host is gone.
+    [[nodiscard]] OwnerPost loopPost() const;
+
+    /// Makes the daemon-scoped extensions, their jobs run on the loop while the host lives.
+    /// @param factory What makes them; empty for none.
+    /// @return The extensions; null for none.
+    [[nodiscard]] std::shared_ptr<IDaemonWorldHosting> makeDaemonWorld(DaemonWorldFactory const& factory);
+
+    /// Sends every pending daemon-scoped extension's question to each connection that can answer it and was
+    /// not sent it yet.
+    void offerDaemonExtensionRequests();
+
+    /// Repaints the indicator row of every session that shows a daemon-scoped extension's summary, and tells
+    /// the attached clients: what a published summary, or a failed start, does once per loop turn.
+    void daemonSummariesChanged();
+
+    /// Sends the daemon-scoped extensions' palette rows to every client with a palette, and tells each
+    /// running extension that still holds actions to take them (one that faulted before it took them, and was
+    /// restarted): what a change of an extension's state or rows does once per loop turn.
+    void extensionPresenceChanged();
+
     /// The session hooks a new session's status-line extensions reach the host through, every one of which
     /// does nothing once the session is gone.
     /// @param session The session about to be spawned.
@@ -2363,6 +2734,11 @@ class SessionHost final: public vtworkspace::ModelEvents
     HostGitLookups _git;
     /// The host's profiles; null for none. @see SessionHostConfig::profiles
     std::shared_ptr<ProfileCatalog const> _profiles;
+    SandboxEscape _ptySandbox; ///< @see SessionHostConfig::ptySandbox
+    /// @see SessionHostConfig::heldDirectorySpawn
+    std::function<vtpty::HeldDirectorySpawn(SandboxEscape)> _heldDirectorySpawn;
+    /// @see SessionHostConfig::programFound
+    std::function<bool(vtpty::Process::ExecInfo const&)> _programFound;
     /// What each attached client reported it can display, keyed by its stream subscription so the
     /// entry lives exactly as long as the client does (@see unsubscribeStream). `_pageSize` is
     /// resolved from these, never assigned from one of them.
@@ -2488,6 +2864,30 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// The extensions every session runs; null for none. Declared before _sessions, so that it is destroyed
     /// after every session's extensions: its runtime joins the threads their runners lived on.
     std::shared_ptr<IExtensionHosting> _extensions;
+    /// The actions the user invoked, queued per daemon-scoped extension, and each connection's origin. Before
+    /// _served, which reads the origins, and _daemonWorld, which takes them; its hints reach the world
+    /// through the loop and the gate.
+    ExtensionActions _extensionActions;
+    /// Whether a served or owned spawn is admitted (@see closeServedSessions): written on the loop, read from
+    /// any thread (IServedAdmission).
+    std::atomic<ServedAdmission> _servedAdmission { ServedAdmission::Open };
+    /// Which workspace each attached window selects, and which was focused last. Before _served and
+    /// _ownedPanes, which read it.
+    ConnectionWorkspaces _connectionWorkspaces;
+    /// The served tabs and their devices. Before _daemonWorld, whose extensions serve them, and before
+    /// _sessions, which hold the devices it made.
+    ServedSessions _served;
+    /// The registry the owned panes are read from and written to. Before _ownedPanes.
+    std::shared_ptr<IOwnedPaneStore> _ownedPaneStore;
+    /// Writes _ownedPaneStore off the loop; flushed as it goes, after _ownedPanes.
+    AsyncOwnedPaneStore _ownedPaneWriter;
+    /// The agent panes daemon-scoped extensions opened. Built from the raw registry before the restore runs,
+    /// so Unreconciled until the constructor's posted reconciliation ran; before _daemonWorld, whose boot
+    /// extensions may list their panes at once.
+    OwnedPanes _ownedPanes;
+    /// The daemon-scoped extensions; null for none. Made by SessionHostConfig::daemonWorld in the
+    /// constructor, stopped by the destructor before it drains the loop. @see makeDaemonWorld
+    std::shared_ptr<IDaemonWorldHosting> _daemonWorld;
     std::unordered_map<uint64_t, std::unique_ptr<HostedSession>> _sessions;
     /// @see pumpEventsInFlight()
     std::atomic<std::size_t> _pumpEventsInFlight { 0 };

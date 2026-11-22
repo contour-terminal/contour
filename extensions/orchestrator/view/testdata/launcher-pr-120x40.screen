@@ -1,0 +1,40 @@
+ ✦ Agents                                                                                                    ⬢ 0/4 ▱▱▱▱ 
+╭─ Agents 0 ───────────────────────────────────╮ ╭─────────────────────────────────────────────────────────────────────╮
+│▍+ new agent                                  │ │ No agents yet. ⏎ or n starts one on a pull request, an issue, or    │
+│                                              │ │ anything you type.                                                  │
+│                                              │ │ Once agents run: ⏎ talks to the selected one, 1 2 3 answers one     │
+│                                              │ │ that asks, esc steps back.                                          │
+│                                              │ │ Everything else is in ^K.                                           │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                   ╭─ ✦ New agent ────────────────────────────────────────────────────────────────╮                   │
+│                   │ › #2375▏                                    pull requests · issues · a topic │                   │
+│                   │                                                                              │                   │
+│                   │ MY PULL REQUESTS                                                             │                   │
+│                   │ ▍#2375 Say why the stdio relay failed, and send a hello before half… ●       │                   │
+│                   │  ✎ topic “#2375”                                                  new branch │                   │
+│                   │ ──────────────────────────────────────────────────────────────────────────── │                   │
+│                   │ task ‹ fix CI ›   model ‹ sonnet ›   perms ‹ standard ›   note none          │                   │
+│                   │ #2375 · contour · checks running                                             │                   │
+│                   │ checkout  gh pr checkout 2375 --branch agent/pr-2375-…                       │                   │
+│                   │ worktree  /home/u/worktrees/contour/pr-2375-…                                │                   │
+│                   │ perms     standard · 19 allowed · 4 denied · edits need no approval          │                   │
+│                   │                                                                              │                   │
+│                   │ enter start · ↑↓ choose · tab settings · ctrl+p more · esc close             │                   │
+│                   ╰──────────────────────────────────────────────────────────────────────────────╯                   │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
+ ⏎ new agent · ^k all actions                                                                                           

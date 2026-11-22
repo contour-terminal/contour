@@ -137,6 +137,10 @@ class FakeLinkHost final: public contour::remote::IDaemonLinkHost
     [[nodiscard]] contour::remote::SwitchGrants& switchGrants() override { return grants; }
     /// Never fires: no question of these tests expires.
     [[nodiscard]] contour::remote::SwitchDeadline const& switchDeadline() override { return _deadline; }
+    [[nodiscard]] contour::platform::ExternalLauncher& externalLauncher() noexcept override
+    {
+        return launcher;
+    }
 
     /// @return The launch's link, then those this host started, in the order they were made.
     [[nodiscard]] std::vector<contour::remote::DaemonLink*> links() const
@@ -150,6 +154,7 @@ class FakeLinkHost final: public contour::remote::IDaemonLinkHost
     }
 
     contour::remote::SwitchGrants grants; ///< The answers that stand for the switches programs ask for.
+    contour::test::RecordingExternalLauncher launcher; ///< What the links a daemon asks to open go to.
     std::vector<std::unique_ptr<contour::test::ScopedController>> opened; ///< Every window opened, in order.
     std::vector<contour::remote::WindowAdoption> adoptions;               ///< What the binder said to each.
     /// The links started for windows of their own, in order.
@@ -1989,7 +1994,7 @@ TEST_CASE("DaemonLink: a window switched to another workspace and back shows the
     // The one tab split in two on the daemon.
     daemon.onDaemon([&] {
         auto* const tab = daemon.host->model().workspace(vtworkspace::WorkspaceId { ids[0] })->tabAt(0);
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+        std::ignore = daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return 0;
     });
     auto const displayed = [&] {
@@ -2203,7 +2208,7 @@ struct OneDaemonTwoWindows
     });
     vtworkspace::SessionId right = daemon.onDaemon([this] {
         auto* tab = daemon.host->model().workspace(vtworkspace::WorkspaceId { workspaces[0] })->tabAt(0);
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+        std::ignore = daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         auto const id = tab->activePane()->session();
         daemon.host->terminal(id)->writeToScreen("right-text");
         return id;

@@ -1,0 +1,20 @@
+ ✦ Agents                              ⬢ 1/4 ▰▱▱▱ 
+╭─ pr-2375 · fix CI · sonnet ────── ⠋ working 6m ╮
+│ Board  Transcript  Details                     │
+│ updated 4 min ago                              │
+│ Status: fix the CI of #2375                    │
+│                                                │
+│ Done                                           │
+│ • Reproduced the failing vtbackend_test case   │
+│ locally.                                       │
+│ • Found the cause: the grid reflow drops a     │
+│ wrapped line's last cell when the              │
+│ ── latest ──────────────────────────────────── │
+│ nothing yet                                    │
+│                                                │
+│                                                │
+│ ╭─ to pr-2375 ───────────────────────────────╮ │
+│ │ ▏                                          │ │
+│ ╰────────────────────────────────────────────╯ │
+╰────────────────────────────────────────────────╯
+ ⏎ send · alt⏎ line · esc keep draft              

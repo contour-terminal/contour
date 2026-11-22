@@ -42,9 +42,13 @@ class CommandRunner
     [[nodiscard]] virtual std::expected<CommandOutcome, std::error_code> run(
         std::span<std::string const> argv) = 0;
 
-    /// Runs @p argv and waits for it, but not longer than @p deadline: a command still running then is killed
-    /// and reaped, and the run fails with `std::errc::timed_out`. A runner that cannot bound a command runs
-    /// it to completion, as run() does.
+    /// Runs @p argv and waits for it, bounded by @p deadline: a command still running then is ended with its
+    /// whole process group, and the run fails with `std::errc::timed_out`. The native runner sends its group
+    /// SIGTERM at @p deadline, and SIGKILL as soon as the command has ended -- at once for one that ends on
+    /// SIGTERM -- or 2 s later for one that does not (ProcessRunnerTuning::terminateGrace); it answers once
+    /// the command is reaped. Before the deadline, a command whose leader exited while something it started
+    /// holds its output is given 1 s (orphanedOutputGrace). A runner that cannot bound a command runs it to
+    /// completion, as run() does.
     /// @param argv The program (looked up on PATH) followed by its arguments.
     /// @param deadline How long the command may take.
     /// @return As run(), or `std::errc::timed_out` for a command that outlived @p deadline.
@@ -56,8 +60,13 @@ class CommandRunner
     }
 };
 
-/// @return A runner that starts real processes: `posix_spawnp` with standard output captured through a
-///         pipe and standard error discarded. On Windows every run fails with `errc::not_supported`.
+/// @return A runner that starts real processes through a vtpty::ThreadedProcessRunner of its own, under this
+///         process's environment as it stands at each run and looked up on that environment's PATH: standard
+///         output captured, standard error drained and dropped, and a command that outlives runWithin()'s
+///         deadline terminated with its whole process group. A runner whose process runner could not be made
+///         fails every run with an error code that names why (and compares equal to
+///         `errc::resource_unavailable_try_again`). On Windows every run fails with
+///         `errc::not_supported`.
 [[nodiscard]] std::unique_ptr<CommandRunner> makeNativeCommandRunner();
 
 /// A native runner for a caller whose other threads may change the environment while it runs a command:

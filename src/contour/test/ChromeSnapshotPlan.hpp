@@ -139,6 +139,21 @@ enum class SnapshotScript : uint8_t
     SidebarWorkspaceColorPicker, //!< sidebar-workspace-tint with the colour picker open over billing's row.
     SidebarTreeCompact,          //!< sidebar-tree under `row_spacing: compact` (sidebar-tree is comfortable).
     SidebarTabColorPicker,       //!< sidebar-tab-tint with the tab colour picker open over build's row.
+    DaemonConsentHeld,  //!< A daemon extension's question just shown: Allow held, a root created if missing.
+    DaemonConsentArmed, //!< The same once the hold passed: Allow armed.
+    DaemonConsentLong,  //!< A question with long roots and a long module path, wrapping.
+    ServedTab,          //!< A served tab, active, beside a shell tab: its marker and its pane's strip.
+    ServedTabInactive,  //!< The same with the shell tab active: the served tab's marker at rest.
+    ServedTabMinimal,   //!< served-tab under Minimal: the strip keeps its row's height, the grid below it.
+};
+
+/// The daemon extension's question a script's window asks (ScriptAction::OpenDaemonConsent).
+enum class SnapshotDaemonConsent : uint8_t
+{
+    None = 0,  //!< None.
+    Held,      //!< The orchestrator's question, just shown.
+    Armed,     //!< The orchestrator's question, its hold over.
+    LongRoots, //!< A question whose roots and module path outgrow a line.
 };
 
 /// What the workspace sidebar of a script shows.
@@ -229,6 +244,7 @@ enum class ScriptAction : uint8_t
     HoverSidebarRow, //!< build's sidebar row given a long status, the pointer resting on it: its hover card.
     OpenWorkspaceColorPicker,  //!< The sidebar's colour picker over billing's row, as Custom… opens it.
     OpenSidebarTabColorPicker, //!< The sidebar's tab colour picker over build's row, as its Custom… opens it.
+    OpenDaemonConsent,         //!< The window's daemon asks the row's daemon extension question.
 };
 
 /// What a script's tabs carry beyond their titles.
@@ -238,6 +254,19 @@ enum class TabDecor : uint8_t
     EveryBadge, //!< Row 0 coloured, one row per badge kind after it (see MockMainController).
     LongTitle,  //!< Row 0's title is long enough to elide in any tab.
 };
+
+/// Whether one of a script's tabs is a served tab, drawn by a daemon-scoped extension.
+enum class ServedDecor : uint8_t
+{
+    None = 0, //!< Every tab runs a program.
+    FirstTab, //!< The first tab is the orchestrator's (ServedSampleMark): marked, and its pane's strip shown.
+};
+
+/// The mark the served tab of a ServedDecor::FirstTab script carries.
+inline constexpr auto ServedSampleExtension = std::string_view { "orchestrator" };
+inline constexpr auto ServedSampleTitle = std::string_view { "Agents" };
+inline constexpr auto ServedSampleDigest =
+    std::string_view { "3f9a0c1d2e4b5a6978e1c0ffee00112233445566778899aabbccddeeff001122" };
 
 /// Whether a script's panes wait for a password (the secure-input lock).
 enum class SecureDecor : uint8_t
@@ -554,6 +583,9 @@ struct SnapshotScriptRow
     config::SidebarWorkspaceColorStyle workspaceColorStyle = config::SidebarWorkspaceColorStyle::Tint;
     /// How much room a tab's or a pane's sidebar row takes (`sidebar.row_spacing`).
     config::SidebarRowSpacing rowSpacing = config::SidebarRowSpacing::Comfortable;
+    /// The daemon extension's question the window asks.
+    SnapshotDaemonConsent daemonConsent = SnapshotDaemonConsent::None;
+    ServedDecor served = ServedDecor::None; ///< Whether a tab is served.
 };
 
 /// The rows of the script table, in enumerator order.
@@ -2431,7 +2463,51 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::OpenSidebarTabColorPicker,
                         .sidebar = SnapshotSidebar::Tree,
                         .sidebarColor = SnapshotSidebarColor::Tabs },
+    SnapshotScriptRow { .script = SnapshotScript::DaemonConsentHeld,
+                        .name = "daemon-consent-held",
+                        .tabCount = 1,
+                        .action = ScriptAction::OpenDaemonConsent,
+                        .connection = HostConnection::LocalDaemon,
+                        .daemonConsent = SnapshotDaemonConsent::Held },
+    SnapshotScriptRow { .script = SnapshotScript::DaemonConsentArmed,
+                        .name = "daemon-consent-armed",
+                        .tabCount = 1,
+                        .action = ScriptAction::OpenDaemonConsent,
+                        .connection = HostConnection::LocalDaemon,
+                        .daemonConsent = SnapshotDaemonConsent::Armed },
+    SnapshotScriptRow { .script = SnapshotScript::DaemonConsentLong,
+                        .name = "daemon-consent-long",
+                        .tabCount = 1,
+                        .action = ScriptAction::OpenDaemonConsent,
+                        .connection = HostConnection::LocalDaemon,
+                        .daemonConsent = SnapshotDaemonConsent::LongRoots },
+    SnapshotScriptRow { .script = SnapshotScript::ServedTab,
+                        .name = "served-tab",
+                        .tabCount = 2,
+                        .connection = HostConnection::LocalDaemon,
+                        .activeTab = 0,
+                        .served = ServedDecor::FirstTab },
+    SnapshotScriptRow { .script = SnapshotScript::ServedTabInactive,
+                        .name = "served-tab-inactive",
+                        .tabCount = 2,
+                        .connection = HostConnection::LocalDaemon,
+                        .activeTab = 1,
+                        .served = ServedDecor::FirstTab },
+    SnapshotScriptRow { .script = SnapshotScript::ServedTabMinimal,
+                        .name = "served-tab-minimal",
+                        .tabCount = 2,
+                        .connection = HostConnection::LocalDaemon,
+                        .activeTab = 0,
+                        .density = config::ChromeDensity::Minimal,
+                        .served = ServedDecor::FirstTab },
 };
+
+static_assert(std::ranges::all_of(SnapshotScripts,
+                                  [](SnapshotScriptRow const& row) {
+                                      return (row.action == ScriptAction::OpenDaemonConsent)
+                                             == (row.daemonConsent != SnapshotDaemonConsent::None);
+                                  }),
+              "a script names a daemon extension question exactly when it opens the consent dialog");
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),
                                   [](std::size_t i) {

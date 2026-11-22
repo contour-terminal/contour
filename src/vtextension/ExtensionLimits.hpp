@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 
 namespace vtextension
 {
@@ -12,11 +13,16 @@ namespace vtextension
 /// vtbackend::MaxCommandRuntime.
 struct ExtensionLimits
 {
-    /// How long one render or update call may run before the watchdog terminates it.
+    /// How much CPU time one render or update call may spend before the watchdog terminates it.
     std::chrono::milliseconds callDeadline { 50 };
 
-    /// How long a WASI reactor's `_initialize`, and then the extension's load call, may each run.
+    /// How much CPU time a WASI reactor's `_initialize`, and then the extension's load call, may each spend.
     std::chrono::milliseconds loadDeadline { 500 };
+
+    /// How many times its deadline a call may last in real time. A deadline counts the CPU time the call's
+    /// thread spends, so that a guest is not charged for waiting for a CPU on a loaded machine; this bounds
+    /// the wait. 1 makes a deadline real time, as a call that must answer promptly needs.
+    std::uint32_t deadlineRealTimeFactor = 1;
 
     /// The cap on one instance's linear memory, fixed at instantiation.
     std::size_t memoryBytes = std::size_t { 32 } * 1024 * 1024;

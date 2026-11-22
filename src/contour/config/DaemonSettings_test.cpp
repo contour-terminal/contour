@@ -1,18 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/Config.hpp>
+#include <contour/config/ConfigReader.hpp>
+#include <contour/config/DaemonExtensionConfig.hpp>
 #include <contour/test/CoreFixtures.hpp>
+
+#include <yaml-cpp/yaml.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include <array>
 #include <chrono>
+#include <expected>
 #include <format>
+#include <ranges>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <vthost/SessionSettings.hpp>
 
+using contour::config::DaemonExtensionAutostart;
+using contour::config::DaemonExtensionProgram;
 using contour::config::DaemonMode;
+using contour::config::YamlToJsonError;
 using contour::test::loadConfigFromYaml;
 
 TEST_CASE("daemon section defaults", "[config][daemon]")
@@ -203,4 +214,179 @@ TEST_CASE("daemon.keeper.backoff_cap is never below backoff_start", "[config][da
     auto const& policy = config.daemon.value().keeper.restartPolicy;
     CHECK(policy.backoffStart == std::chrono::seconds { 40 });
     CHECK(policy.backoffCap == std::chrono::seconds { 40 });
+}
+
+namespace
+{
+
+/// The orchestrator's configuration, as the user writes it.
+constexpr auto OrchestratorYaml = R"(daemon:
+  extensions:
+    orchestrator:
+      autostart: true
+      config:
+        worktree_root: ~/worktrees
+        models: [opus, sonnet, haiku]
+        max_agents: 4
+        max_agents_per_repo: 2
+        poll_every: 2m
+        status_board_after: 15m
+        finished_retention: 30d
+        repos:
+          - path: ~/repo/contour
+            forge: github
+            remote: origin            # default
+            base: master              # optional; default: the forge's default branch
+            issues:
+              - { source: forge, query: "assignee:@me" }
+        tasks:                        # one row per task; a new task is a new row
+          - { id: fix_ci,         key: f, label: "fix CI",         applies_to: pr,    model: sonnet,
+              prompt: "/contour-workflows:fix-ci {url}" }
+          - { id: address_review, key: r, label: "address review", applies_to: pr,    model: opus,
+              prompt: "/contour-workflows:address-review {url}" }
+          - { id: issue,          key: w, label: "work on issue",  applies_to: issue, model: opus,
+              prompt: "/contour-workflows:work-issue {url}" }
+)";
+
+/// What the orchestrator is loaded with.
+constexpr auto OrchestratorJson =
+    R"({"worktree_root":"~/worktrees","models":["opus","sonnet","haiku"],"max_agents":4,"max_agents_per_repo":2,"poll_every":"2m","status_board_after":"15m","finished_retention":"30d","repos":[{"path":"~/repo/contour","forge":"github","remote":"origin","base":"master","issues":[{"source":"forge","query":"assignee:@me"}]}],"tasks":[{"id":"fix_ci","key":"f","label":"fix CI","applies_to":"pr","model":"sonnet","prompt":"/contour-workflows:fix-ci {url}"},{"id":"address_review","key":"r","label":"address review","applies_to":"pr","model":"opus","prompt":"/contour-workflows:address-review {url}"},{"id":"issue","key":"w","label":"work on issue","applies_to":"issue","model":"opus","prompt":"/contour-workflows:work-issue {url}"}]})";
+
+} // namespace
+
+TEST_CASE("daemon.extensions round-trips the orchestrator example", "[config][daemon]")
+{
+    auto const config = loadConfigFromYaml(OrchestratorYaml);
+    REQUIRE(config.daemon.value().extensions.size() == 1);
+    auto const& orchestrator = config.daemon.value().extensions.front();
+    CHECK(orchestrator.name == "orchestrator");
+    CHECK(orchestrator.path.empty());
+    CHECK(orchestrator.autostart == DaemonExtensionAutostart::AtDaemonStart);
+    CHECK(orchestrator.configJson == OrchestratorJson);
+
+    SECTION("and through the writer")
+    {
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+        auto const reread = loadConfigFromYaml(written);
+        CHECK(reread.daemon.value().extensions == config.daemon.value().extensions);
+    }
+}
+
+TEST_CASE("daemon.extensions: an entry's defaults", "[config][daemon]")
+{
+    auto const config =
+        loadConfigFromYaml("daemon:\n  extensions:\n    orchestrator:\n    other:\n      path: x.wasm\n");
+    REQUIRE(config.daemon.value().extensions.size() == 2);
+    auto const& orchestrator = config.daemon.value().extensions[0];
+    CHECK(orchestrator.autostart == DaemonExtensionAutostart::OnDemand);
+    CHECK(orchestrator.configJson == "{}");
+    CHECK(config.daemon.value().extensions[1].path.filename() == "x.wasm");
+    CHECK(config.daemon.value().extensions[1].path.is_absolute());
+}
+
+TEST_CASE("daemon.extensions: programs name the executables an extension runs", "[config][daemon]")
+{
+    auto const config = loadConfigFromYaml("daemon:\n"
+                                           "  extensions:\n"
+                                           "    orchestrator:\n"
+                                           "      programs:\n"
+                                           "        claude: /opt/claude/bin/claude\n"
+                                           "        gh: ~/bin/gh\n");
+    REQUIRE(config.daemon.value().extensions.size() == 1);
+    auto const& programs = config.daemon.value().extensions.front().programs;
+    REQUIRE(programs.size() == 2);
+    CHECK(programs[0] == DaemonExtensionProgram { .name = "claude", .path = "/opt/claude/bin/claude" });
+    CHECK(programs[1].name == "gh");
+    // `~/` is the home directory: absolute, and no longer spelled with a tilde.
+    CHECK(programs[1].path.is_absolute());
+    CHECK(programs[1].path.filename() == "gh");
+
+    SECTION("and through the writer")
+    {
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+        auto const reread = loadConfigFromYaml(written);
+        CHECK(reread.daemon.value().extensions == config.daemon.value().extensions);
+    }
+}
+
+TEST_CASE("daemon.extensions: a program that names no executable costs only itself", "[config][daemon]")
+{
+    auto const config = loadConfigFromYaml("daemon:\n"
+                                           "  extensions:\n"
+                                           "    orchestrator:\n"
+                                           "      autostart: true\n"
+                                           "      programs:\n"
+                                           "        bin/claude: /opt/claude\n" // a path, not a program name
+                                           "        relative: bin/claude\n" // found on the PATH it bypasses
+                                           "        empty: ''\n"
+                                           "        listed: [/a, /b]\n"
+                                           "        claude: /opt/claude\n"
+                                           "        claude: /opt/other\n"); // the first one stands
+    REQUIRE(config.daemon.value().extensions.size() == 1);
+    auto const& orchestrator = config.daemon.value().extensions.front();
+    CHECK(orchestrator.autostart == DaemonExtensionAutostart::AtDaemonStart);
+    CHECK(orchestrator.programs
+          == std::vector { DaemonExtensionProgram { .name = "claude", .path = "/opt/claude" } });
+
+    SECTION("a programs that is no map is ignored, the entry kept")
+    {
+        auto const list =
+            loadConfigFromYaml("daemon:\n  extensions:\n    orchestrator:\n      programs: [claude]\n");
+        REQUIRE(list.daemon.value().extensions.size() == 1);
+        CHECK(list.daemon.value().extensions.front().programs.empty());
+    }
+}
+
+TEST_CASE("daemon.extensions: a config that has no JSON spelling costs the entry", "[config][daemon]")
+{
+    auto const config = loadConfigFromYaml(
+        "daemon:\n  extensions:\n    bad:\n      config: { x: .inf }\n    good:\n      autostart: maybe\n");
+    REQUIRE(config.daemon.value().extensions.size() == 1);
+    CHECK(config.daemon.value().extensions[0].name == "good");
+    CHECK(config.daemon.value().extensions[0].autostart == DaemonExtensionAutostart::OnDemand);
+}
+
+TEST_CASE("yamlToJson", "[config][daemon]")
+{
+    struct Row
+    {
+        std::string_view yaml;
+        std::expected<std::string, YamlToJsonError> json;
+    };
+    for (auto const& row: std::array {
+             Row { .yaml = R"("4")", .json = R"("4")" },
+             Row { .yaml = "4", .json = "4" },
+             Row { .yaml = "-4", .json = "-4" },
+             Row { .yaml = "0x1f", .json = "31" },
+             Row { .yaml = "1.5", .json = "1.5" },
+             Row { .yaml = "-1.5", .json = "-1.5" },
+             Row { .yaml = "1e3", .json = "1000" },
+             Row { .yaml = ".5", .json = "0.5" },
+             Row { .yaml = "1e999", .json = std::unexpected(YamlToJsonError::NotRepresentable) },
+             Row { .yaml = "true", .json = "true" },
+             Row { .yaml = "'true'", .json = R"("true")" },
+             Row { .yaml = "~", .json = "null" },
+             Row { .yaml = "~/w", .json = R"("~/w")" },
+             Row { .yaml = "two words", .json = R"("two words")" },
+             Row { .yaml = R"("a\"b\\c\nd")", .json = R"("a\"b\\c\nd")" },
+             Row { .yaml = "[1, a, {b: c}]", .json = R"([1,"a",{"b":"c"}])" },
+             Row { .yaml = "-.inf", .json = std::unexpected(YamlToJsonError::NotRepresentable) },
+             Row { .yaml = "99999999999999999999",
+                   .json = std::unexpected(YamlToJsonError::NotRepresentable) },
+             Row { .yaml = "{a: 1, a: 2}", .json = std::unexpected(YamlToJsonError::NotRepresentable) },
+             Row { .yaml = "{[a]: 1}", .json = std::unexpected(YamlToJsonError::NotRepresentable) },
+         })
+    {
+        INFO(row.yaml);
+        CHECK(contour::config::yamlToJson(YAML::Load(std::string(row.yaml))) == row.json);
+    }
+
+    auto const nested = [](int depth) {
+        auto yaml = std::string { "1" };
+        for ([[maybe_unused]] auto const _: std::views::iota(0, depth))
+            yaml = std::format("{{a: {}}}", yaml);
+        return YAML::Load(yaml);
+    };
+    CHECK(contour::config::yamlToJson(nested(16)).has_value());
+    CHECK(contour::config::yamlToJson(nested(17)) == std::unexpected(YamlToJsonError::TooDeep));
 }

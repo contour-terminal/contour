@@ -1,0 +1,24 @@
+╭─ Agents 4 ───────────────────────────────────────────────────────────────────╮
+│ WORKING 4 of 4                                                               │
+│▍⠋ pr-1847 · fix CI                                                working 6m │
+│ ⠋ pr-2114 · fix CI                                                working 6m │
+│ ⠋ pr-2346 · fix CI                                                working 6m │
+│ ⠋ ╭─ ✦ New agent ────────────────────────────────────────────────────────╮6m │
+│   │ › #2375▏                            pull requests · issues · a topic │   │
+│ + │                                                                      │   │
+│   │ MY PULL REQUESTS                                                     │   │
+╰───│ ▍#2375 Say why the stdio relay failed, and send a hello bef… ●       │───╯
+╭─ p│  ✎ topic “#2375”                                          new branch │6m ╮
+│ re│ ──────────────────────────────────────────────────────────────────── │   │
+│   │ task ‹ fix CI ›   model ‹ sonnet ›   perms ‹ standard ›   note none  │   │
+│   │ #2375 · contour · checks running                                     │   │
+│   │ refused   max_agents agents are running: end one first               │   │
+│   │                                                                      │   │
+│   │ ↑↓ choose · tab settings · ctrl+p more · esc close                   │   │
+│   ╰──────────────────────────────────────────────────────────────────────╯   │
+│                                                                              │
+│ ╭──────────────────────────────────────────────────────────────────────────╮ │
+│ │ ⏎ to write to pr-1847                                                    │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ ⏎ message · t transcript · b board · e end · ^k all actions         ⬢ 4/4 ▰▰▰▰ 

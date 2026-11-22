@@ -27,6 +27,7 @@
 #include <core/platform/PathUtils.hpp>
 
 #include <libunicode/convert.h>
+#include <libunicode/utf8.h>
 
 #include <yaml-cpp/emitter.h>
 
@@ -1955,11 +1956,8 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("layouts", c.layouts);
         loadFromEntry("hosts", c.hosts);
         loadFromEntry("git_drawings", c.gitDrawings);
-        vtrasterizer::BoxDrawingRenderer::setGitDrawingsStyle(c.gitDrawings.value());
         loadFromEntry("box_arc_style", c.boxArcStyle);
-        vtrasterizer::BoxDrawingRenderer::setArcStyle(c.boxArcStyle.value());
         loadFromEntry("braille_style", c.brailleStyle);
-        vtrasterizer::BoxDrawingRenderer::setBrailleStyle(c.brailleStyle.value());
 
         // loadFromEntry("color_schemes", c.colorschemes); // NB: This is always loaded lazily
         loadFromEntry("input_mapping", c.inputMappings);
@@ -3306,6 +3304,8 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadGuarded(keeper, "restart_hung", where.keeper.restartHung);
         loadKeeperRestartPolicy(keeper, where.keeper.restartPolicy);
     }
+
+    loadFromEntry(child, "extensions", where.extensions);
 }
 
 void YAMLConfigReader::loadKeeperRestartPolicy(YAML::Node const& keeper,
@@ -3858,6 +3858,27 @@ namespace
     }
 } // namespace
 
+std::optional<std::filesystem::path> YAMLConfigReader::readExtensionModulePath(YAML::Node const& settings,
+                                                                               std::string_view name,
+                                                                               std::string_view keyPath) const
+{
+    // A path that is given must name a module: falling back to the bundled extension of the same name
+    // would run something else than the file asked for.
+    auto const path = settings["path"];
+    if (!path)
+        return std::filesystem::path {};
+    auto const text = path.IsScalar() ? path.as<std::string>() : std::string {};
+    auto resolved = text.empty() ? std::filesystem::path {} : resolvedPath(text);
+    if (resolved.empty())
+    {
+        errorLog()("Skipping extension '{}' of {}: its 'path' must be a file name.", name, keyPath);
+        return std::nullopt;
+    }
+    if (resolved.is_relative())
+        resolved = (declaringDirectory() / resolved).lexically_normal();
+    return resolved;
+}
+
 std::optional<ExtensionConfig> YAMLConfigReader::readExtension(std::string name,
                                                                YAML::Node const& settings,
                                                                std::string_view keyPath) const
@@ -3874,21 +3895,10 @@ std::optional<ExtensionConfig> YAMLConfigReader::readExtension(std::string name,
         return std::nullopt;
     }
 
-    // A path that is given must name a module: falling back to the bundled extension of the same name
-    // would run something else than the file asked for.
-    if (auto const path = settings["path"]; path)
-    {
-        auto const text = path.IsScalar() ? path.as<std::string>() : std::string {};
-        extension.path = text.empty() ? std::filesystem::path {} : resolvedPath(text);
-        if (extension.path.empty())
-        {
-            errorLog()(
-                "Skipping extension '{}' of {}: its 'path' must be a file name.", extension.name, keyPath);
-            return std::nullopt;
-        }
-        if (extension.path.is_relative())
-            extension.path = (declaringDirectory() / extension.path).lexically_normal();
-    }
+    if (auto path = readExtensionModulePath(settings, extension.name, keyPath))
+        extension.path = *std::move(path);
+    else
+        return std::nullopt;
 
     if (auto const values = settings["config"]; values)
         readExtensionConfigValues(values, extension, keyPath);
@@ -3906,6 +3916,155 @@ std::optional<ExtensionConfig> YAMLConfigReader::readExtension(std::string name,
                 keyPath);
     }
     return extension;
+}
+
+std::optional<DaemonExtensionConfig> YAMLConfigReader::readDaemonExtension(std::string name,
+                                                                           YAML::Node const& settings,
+                                                                           std::string_view keyPath) const
+{
+    auto extension = DaemonExtensionConfig {};
+    extension.name = std::move(name);
+    if (settings.IsNull()) // `orchestrator:` alone: the bundled extension, with the defaults.
+        return extension;
+    if (!settings.IsMap())
+    {
+        errorLog()("Skipping extension '{}' of {}: expected a map of path, autostart and config.",
+                   extension.name,
+                   keyPath);
+        return std::nullopt;
+    }
+
+    if (auto path = readExtensionModulePath(settings, extension.name, keyPath))
+        extension.path = *std::move(path);
+    else
+        return std::nullopt;
+
+    // The YAML boolean stops here: inside, it is DaemonExtensionAutostart.
+    if (auto const autostart = settings["autostart"]; autostart && !autostart.IsNull())
+    {
+        auto value = false;
+        if (autostart.IsScalar() && YAML::convert<bool>::decode(autostart, value))
+            extension.autostart =
+                value ? DaemonExtensionAutostart::AtDaemonStart : DaemonExtensionAutostart::OnDemand;
+        else
+            errorLog()("Unknown autostart '{}' of extension '{}' of {}; expected true or false. Starting it "
+                       "on demand.",
+                       YAML::Dump(autostart),
+                       extension.name,
+                       keyPath);
+    }
+
+    if (auto const config = settings["config"]; config && !config.IsNull())
+    {
+        if (!config.IsMap())
+        {
+            errorLog()("Skipping extension '{}' of {}: its 'config' must be a map.", extension.name, keyPath);
+            return std::nullopt;
+        }
+        auto json = yamlToJson(config);
+        if (!json)
+        {
+            errorLog()("Skipping extension '{}' of {}: its 'config' {}.",
+                       extension.name,
+                       keyPath,
+                       json.error() == YamlToJsonError::TooDeep
+                           ? "nests too deeply"
+                           : "holds a key that is no text, a key given twice, or a number JSON cannot spell");
+            return std::nullopt;
+        }
+        extension.configJson = *std::move(json);
+    }
+
+    if (auto const programs = settings["programs"]; programs && !programs.IsNull())
+        extension.programs = readDaemonExtensionPrograms(programs, extension.name, keyPath);
+    return extension;
+}
+
+std::vector<DaemonExtensionProgram> YAMLConfigReader::readDaemonExtensionPrograms(
+    YAML::Node const& programs, std::string_view name, std::string_view keyPath) const
+{
+    auto result = std::vector<DaemonExtensionProgram> {};
+    if (!programs.IsMap())
+    {
+        errorLog()("Ignoring the 'programs' of extension '{}' of {}: expected a map from a program's name to "
+                   "its executable.",
+                   name,
+                   keyPath);
+        return result;
+    }
+    for (auto const& item: programs)
+    {
+        auto program = item.first.IsScalar() ? item.first.as<std::string>() : std::string {};
+        // A name with a separator is a path already, which no PATH search would have found by that name.
+        if (program.empty() || program.find_first_of("/\\") != std::string::npos)
+        {
+            errorLog()("Skipping a program of extension '{}' of {}: its name must be a program name, without "
+                       "a path separator.",
+                       name,
+                       keyPath);
+            continue;
+        }
+        if (std::ranges::contains(result, program, &DaemonExtensionProgram::name))
+        {
+            errorLog()(
+                "Skipping program '{}' of extension '{}' of {}: it is given twice; the first one stands.",
+                program,
+                name,
+                keyPath);
+            continue;
+        }
+        auto const text = item.second.IsScalar() ? item.second.as<std::string>() : std::string {};
+        auto const path = text.empty() ? std::filesystem::path {} : resolvedPath(text);
+        // Absolute only: a relative one would be looked up on the very PATH this setting is there to bypass.
+        if (!path.is_absolute())
+        {
+            errorLog()(
+                "Skipping program '{}' of extension '{}' of {}: its executable must be an absolute path "
+                "or start with '~/'.",
+                program,
+                name,
+                keyPath);
+            continue;
+        }
+        result.push_back(
+            DaemonExtensionProgram { .name = std::move(program), .path = path.lexically_normal() });
+    }
+    return result;
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     std::vector<DaemonExtensionConfig>& where) const
+{
+    auto const child = node[entry];
+    if (!child)
+        return;
+    where.clear();
+    if (child.IsNull()) // `extensions:` with nothing under it: none.
+        return;
+    auto const keyPath = keyPathTo(node, entry);
+    if (!child.IsMap())
+    {
+        errorLog()("Ignoring {}: expected a map from an extension's name to its settings.", keyPath);
+        return;
+    }
+    for (auto const& item: child)
+    {
+        if (!item.first.IsScalar() || item.first.as<std::string>().empty())
+        {
+            errorLog()("Skipping an extension of {}: its name must be a non-empty text.", keyPath);
+            continue;
+        }
+        auto name = item.first.as<std::string>();
+        if (std::ranges::contains(where, name, &DaemonExtensionConfig::name))
+        {
+            errorLog()(
+                "Skipping extension '{}' of {}: it is declared twice; the first one stands.", name, keyPath);
+            continue;
+        }
+        if (auto extension = readDaemonExtension(std::move(name), item.second, keyPath))
+            where.push_back(*std::move(extension));
+    }
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
@@ -4656,9 +4815,9 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
 }
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     vtrasterizer::BoxDrawingRenderer::ArcStyle& where)
+                                     vtrasterizer::BoxDrawingStyle::ArcStyle& where)
 {
-    using ArcStyle = vtrasterizer::BoxDrawingRenderer::ArcStyle;
+    using ArcStyle = vtrasterizer::BoxDrawingStyle::ArcStyle;
     if (auto const child = node[entry])
     {
         auto const styleName = core::toLower(child.as<std::string>());
@@ -4678,11 +4837,11 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 }
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle& where)
+                                     vtrasterizer::BoxDrawingStyle::GitDrawingsStyle& where)
 {
     where = {};
-    using BranchStyle = vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle::BranchStyle;
-    using MergeCommitStyle = vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle::MergeCommitStyle;
+    using BranchStyle = vtrasterizer::BoxDrawingStyle::GitDrawingsStyle::BranchStyle;
+    using MergeCommitStyle = vtrasterizer::BoxDrawingStyle::GitDrawingsStyle::MergeCommitStyle;
 
     auto const parseBranchStyle = [&](std::string const& style) -> std::optional<BranchStyle> {
         auto const styleName = core::toLower(style);
@@ -4729,9 +4888,9 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 }
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     vtrasterizer::BoxDrawingRenderer::BrailleStyle& where)
+                                     vtrasterizer::BoxDrawingStyle::BrailleStyle& where)
 {
-    using BrailleStyle = vtrasterizer::BoxDrawingRenderer::BrailleStyle;
+    using BrailleStyle = vtrasterizer::BoxDrawingStyle::BrailleStyle;
     if (auto const child = node[entry])
     {
         auto const styleName = core::toLower(child.as<std::string>());
@@ -5507,6 +5666,17 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                     return actions::OpenWorkspace { value };
                 }
             return std::nullopt;
+        }
+
+        if (holds_alternative<actions::ExtensionAction>(action))
+        {
+            // Neither the extension nor its action has a default.
+            auto extension = node["extension"];
+            auto id = node["id"];
+            if (!extension || !extension.IsScalar() || !id || !id.IsScalar())
+                return std::nullopt;
+            return actions::ExtensionAction { .extension = extension.as<std::string>(),
+                                              .id = id.as<std::string>() };
         }
 
         if (holds_alternative<actions::MoveToTab>(action))

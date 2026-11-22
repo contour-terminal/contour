@@ -9,7 +9,7 @@ Reads a `git diff -U0` and prints, as JSON, one entry per translation unit that 
     [{"tu": "<abs .cpp>", "lines": {"<abs file>": [[start, end], ...]}}]
 
 * A changed first-party .cpp that is in DIR/compile_commands.json lints itself.
-* A changed .hpp/.h under src/ cannot be linted on its own, so it is attached to ONE includer TU:
+* A changed .hpp/.h under src/ or extensions/orchestrator/ cannot be linted on its own, so it is attached to ONE includer TU:
   the one with the fewest dependencies. Dependencies come from `ninja -C DIR -t deps` when the tree
   has been built, and from a scan of the first-party `#include` lines otherwise, so a tree that was
   only configured (the PR job builds nothing but generated headers) plans identically.
@@ -18,7 +18,7 @@ Reads a `git diff -U0` and prints, as JSON, one entry per translation unit that 
   passed over for the next includer. Ninja's record is ground truth and needs no check.
 * A changed header that no TU reaches is an error (exit 2): a change must never be skipped silently.
   The exception is a header whose path names another OS (PLATFORM_MARKERS): it is noted on stderr.
-* A changed file under src/ in a C-family language this planner does not handle (.mm, .c, ...) is noted.
+* A changed first-party file in a C-family language this planner does not handle (.mm, .c, ...) is noted.
 * Known limitation, shared with the full-tree tidy: lines inside an inactive `#if` region of the
   header itself are not analysed, so they cannot be reported.
 * A changed .cpp that is not in the compile database (another OS's file) is noted on stderr and skipped.
@@ -46,16 +46,20 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SOURCE_SUFFIXES = (".cpp", ".cc", ".cxx")
 HEADER_SUFFIXES = (".hpp", ".h")
 EXIT_UNPLANNABLE = 2
+# The first-party trees, as leading path components: Contour itself, and the agent orchestrator beside it.
+FIRST_PARTY_ROOTS = (("src",), ("extensions", "orchestrator"))
 MAX_VERIFIED_CANDIDATES = 12
 # C-family files this planner does not lint; a change to one is reported rather than ignored.
 UNHANDLED_CODE_SUFFIXES = (".mm", ".m", ".c", ".inl", ".ipp", ".tpp")
 # Path fragments that mark a file as belonging to another OS (derived from the files under src/ that
 # the Linux compile database leaves out: Cocoa*, CoreText*, DirectWrite*, Win32*, ConPty*, *_win32.*).
-# A header matching one and reached by no TU is not an error, because no Linux TU can include it.
+# A header matching one and reached by no TU is not an error, because no Linux host TU can include it.
 PLATFORM_MARKERS = (
     re.compile(r"Cocoa|CoreText|DirectWrite|Win32|ConPty", re.IGNORECASE),
     re.compile(r"_(win32|windows|macos|darwin)\b", re.IGNORECASE),
     re.compile(r"/(win32|windows|macos|darwin)/", re.IGNORECASE),
+    # The orchestrator guest's WASI glue and its generated bindings compile for WebAssembly only.
+    re.compile(r"/extensions/orchestrator/guest/(Wit[A-Za-z]*\.hpp$|bindings/)"),
 )
 HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 INCLUDE_RE = re.compile(r'^\s*#\s*include\s*([<"])([^>"]+)[>"]', re.MULTILINE)
@@ -120,8 +124,19 @@ def is_first_party(path: Path, root: Path) -> bool:
         relative = path.relative_to(root)
     except ValueError:
         return False
-    return relative.parts[:1] == ("src",) and not any(
+    return any(relative.parts[:len(prefix)] == prefix for prefix in FIRST_PARTY_ROOTS) and not any(
         part.endswith("_autogen") or part == "_deps" for part in relative.parts
+    )
+
+
+def is_first_party_include_dir(directory: Path, root: Path) -> bool:
+    """Whether an include directory can resolve first-party headers: one inside a first-party tree, or
+    one between it and the repository root -- the orchestrator's include root is extensions/, for its
+    <orchestrator/...> spelling. The repository root and anything above it are not."""
+    return is_first_party(directory, root) or (
+        directory != root
+        and directory.is_relative_to(root)
+        and any((root / Path(*prefix)).is_relative_to(directory) for prefix in FIRST_PARTY_ROOTS)
     )
 
 
@@ -156,7 +171,7 @@ class IncludeGraph:
     def __init__(self, root: Path, include_dirs: list[Path]) -> None:
         self._root = root
         resolved = dict.fromkeys(d.resolve() for d in include_dirs)  # ordered and deduplicated
-        self._dirs = [d for d in resolved if is_first_party(d, root)]
+        self._dirs = [d for d in resolved if is_first_party_include_dir(d, root)]
         self._edges: dict[Path, list[Path]] = {}
 
     def _resolve(self, includer: Path, kind: str, name: str) -> Path | None:
@@ -349,6 +364,8 @@ def self_test() -> int:
             "src/a/A.cpp": '#include <a/X.hpp>\n',
             "src/a/B.cpp": '#include "Y.hpp"\n#include <vector>\n',
             "src/a/OtherOs.cpp": "int x;\n",
+            "extensions/orchestrator/core/Z.hpp": "#pragma once\n",
+            "extensions/orchestrator/core/Z_test.cpp": "#include <orchestrator/core/Z.hpp>\n",
         }
         for name, content in files.items():
             (root / name).parent.mkdir(parents=True, exist_ok=True)
@@ -359,6 +376,10 @@ def self_test() -> int:
                "arguments": ["clang++", f"-I{root / 'src'}", "-isystem", "/usr/include", "-c",
                              str(root / "src" / "a" / f"{n}.cpp")]}
               for n in ("A", "B")]
+        db.append({"directory": str(build), "file": str(root / "extensions/orchestrator/core/Z_test.cpp"),
+                   "output": "extensions/orchestrator/CMakeFiles/o.dir/core/Z_test.cpp.o",
+                   "arguments": ["clang++", f"-I{root / 'extensions'}", "-c",
+                                 str(root / "extensions/orchestrator/core/Z_test.cpp")]})
         (build / "compile_commands.json").write_text(json.dumps(db))
 
         def diff(path: str, *hunks: str) -> str:
@@ -372,7 +393,7 @@ def self_test() -> int:
             return reached[tu.name] if tu.name in reached else graph_of(tu)
 
         def graph_of(tu: Path) -> set[Path]:
-            fixture_graph = IncludeGraph(root, [root / "src"])
+            fixture_graph = IncludeGraph(root, [root / "src", root / "extensions"])
             return {tu, *fixture_graph.closure(tu)}
 
         def run(diff_text: str, deps: str | None) -> tuple[list[dict] | None, list[str]]:
@@ -412,6 +433,16 @@ def self_test() -> int:
         # (c) a header nothing includes is an error, never a skip.
         result, notes = run(diff("src/a/Orphan.hpp", "@@ -0,0 +1 @@"), None)
         check("c/unplannable", result is None and any("Orphan.hpp" in n for n in notes))
+        # The orchestrator is first-party: its header resolves through extensions/ to its includer.
+        z = str(root / "extensions/orchestrator/core/Z.hpp")
+        result, _ = run(diff("extensions/orchestrator/core/Z.hpp", "@@ -1 +1 @@"), None)
+        check("k/orchestrator", result == [{"tu": str(root / "extensions/orchestrator/core/Z_test.cpp"),
+                                            "lines": {z: [[1, 1]]}}])
+        check("k/include-dirs", is_first_party_include_dir(Path("/r/extensions"), Path("/r"))
+              and is_first_party_include_dir(Path("/r/src/a"), Path("/r"))
+              and not is_first_party_include_dir(Path("/r"), Path("/r"))
+              and not is_first_party_include_dir(Path("/"), Path("/r"))
+              and not is_first_party_include_dir(Path("/r/vendor"), Path("/r")))
         # (d) deleted files and pure-deletion hunks contribute no lines.
         deleted = "--- a/src/a/Gone.hpp\n+++ /dev/null\n@@ -1,3 +0,0 @@\n"
         result, _ = run(deleted + diff("src/a/Orphan.hpp", "@@ -4,2 +3,0 @@"), None)

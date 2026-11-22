@@ -20,6 +20,8 @@ enum class NodeMoveError : uint8_t
     UnknownSide,        ///< An edge target's side this host does not know.
     StaleTab,           ///< The source tab no longer holds exactly the sessions the request named.
     Model,              ///< The model refused; NodeMoveFailure::model says why.
+    Served, ///< It would move a served pane out of its tab, or a pane into a served tab: an extension draws
+            ///< that tab, which stays whole (NodeMoveFailure::extension names it).
 };
 
 /// @param error The refusal.
@@ -33,6 +35,7 @@ enum class NodeMoveError : uint8_t
         case NodeMoveError::UnknownSide: return "unknown side";
         case NodeMoveError::StaleTab: return "the tab no longer holds the sessions the request named";
         case NodeMoveError::Model: return "the model refused the move";
+        case NodeMoveError::Served: return "an extension serves the tab, which cannot be restructured";
     }
     return "unknown error";
 }

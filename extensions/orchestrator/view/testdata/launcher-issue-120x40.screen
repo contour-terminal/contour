@@ -1,0 +1,40 @@
+ ✦ Agents                                                                                                    ⬢ 0/4 ▱▱▱▱ 
+╭─ Agents 0 ───────────────────────────────────╮ ╭─────────────────────────────────────────────────────────────────────╮
+│▍+ new agent                                  │ │ No agents yet. ⏎ or n starts one on a pull request, an issue, or    │
+│                                              │ │ anything you type.                                                  │
+│                                              │ │ Once agents run: ⏎ talks to the selected one, 1 2 3 answers one     │
+│                                              │ │ that asks, esc steps back.                                          │
+│                                              │ │ Everything else is in ^K.                                           │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                   ╭─ ✦ New agent ────────────────────────────────────────────────────────────────╮                   │
+│                   │ › #2356▏                                    pull requests · issues · a topic │                   │
+│                   │                                                                              │                   │
+│                   │ ISSUES WITHOUT A PR                                                          │                   │
+│                   │ ▍#2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key presses, t…     │                   │
+│                   │  ✎ topic “#2356”                                                  new branch │                   │
+│                   │ ──────────────────────────────────────────────────────────────────────────── │                   │
+│                   │ task ‹ work on issue ›   model ‹ opus ›   perms ‹ standard ›   note none     │                   │
+│                   │ #2356 · contour                                                              │                   │
+│                   │ checkout  new branch agent/issue-2356-…                                      │                   │
+│                   │ worktree  /home/u/worktrees/contour/issue-2356-…                             │                   │
+│                   │ perms     standard · 19 allowed · 4 denied · edits need no approval          │                   │
+│                   │                                                                              │                   │
+│                   │ enter start · ↑↓ choose · tab settings · ctrl+p more · esc close             │                   │
+│                   ╰──────────────────────────────────────────────────────────────────────────────╯                   │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
+╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
+ ⏎ new agent · ^k all actions                                                                                           

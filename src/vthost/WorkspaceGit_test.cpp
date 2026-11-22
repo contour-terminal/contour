@@ -495,7 +495,7 @@ TEST_CASE("switching the active pane queues a probe", "[vthost][git][host]")
 {
     auto h = FollowedHost {};
     auto const firstLeaf = h.tab->activePane()->id();
-    h.f.host.splitActivePane(h.tab->id(), vtworkspace::SplitState::Vertical);
+    std::ignore = h.f.host.splitActivePane(h.tab->id(), vtworkspace::SplitState::Vertical);
     REQUIRE(h.tab->activePane()->id() != firstLeaf);
     h.report(*h.tab, "/r/b"); // the new pane's shell
     h.f.probe.asked.clear();
@@ -679,7 +679,7 @@ TEST_CASE("a new shell's workspace is looked up where the shell starts and not w
             auto exec = vtpty::testing::execInfo("/bin/sh", { "-c", vthost::testing::CatScript });
             exec.workingDirectory = start;
             return std::make_unique<vtpty::Process>(
-                exec, vtpty::createPty(size, std::nullopt), /*escapeSandbox=*/false, placement);
+                exec, vtpty::createPty(size, std::nullopt), vtpty::SandboxEscape::Contained, placement);
         },
         vthost::SessionHostConfig {
             .workspaceGit = vthost::WorkspaceGitServices { .probe = probe, .executor = executor } }

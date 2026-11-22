@@ -17,6 +17,7 @@
 #include <libunicode/convert.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <concepts>
 #include <cstddef>
@@ -29,6 +30,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 
 using namespace std::string_view_literals;
 
@@ -72,29 +74,16 @@ namespace // helper functions
         core::unreachable();
     }
 
-    /// @p text, cut at its END to at most @p maxWidth columns with a trailing "…" when it is wider.
-    /// @param text The text, valid UTF-8.
-    /// @param maxWidth The widest the result may be, in columns.
-    /// @param policy How the status screen measures a grapheme cluster.
-    /// @return @p text itself, or its head and "…"; never cut inside a grapheme cluster.
-    [[nodiscard]] std::string elideEnd(std::string_view text, ColumnCount maxWidth, ClusterWidthPolicy policy)
-    {
-        if (columnsOnTheGrid(text, policy) <= maxWidth)
-            return std::string { text };
-
-        // The ellipsis is budgeted for, as elideMiddle() budgets for its own.
-        auto const budget = maxWidth - ColumnCount(1);
-        auto head = std::string {};
-        auto columns = ColumnCount(0);
-        for (auto const& cluster: graphemeClustersOf(text, policy))
-        {
-            columns += cluster.columns;
-            if (columns > budget)
-                break;
-            head += cluster.text;
-        }
-        return head + "…";
-    }
+    /// The vi mode an `{InputMode}` item names nothing in, by the InputReader of its terminal, besides the
+    /// one its own `Hide=` names. An extension's keys reach it in Insert mode as commands to its view, so
+    /// "INSERT" says nothing there; Normal and the Visual modes are the user's own, over the page, and named
+    /// as anywhere.
+    constexpr auto SilentInputModes = std::to_array<std::optional<ViMode>>({
+        std::nullopt,   // InputReader::Program
+        ViMode::Insert, // InputReader::Extension
+    });
+    static_assert(SilentInputModes.size() == std::to_underlying(InputReader::Extension) + 1U,
+                  "every InputReader has a row");
 
     /// Joins @p segments, eliding the MIDDLE when the result would exceed @p maxWidth columns.
     /// @param segments The parts, outermost first.
@@ -673,11 +662,11 @@ namespace
             });
         }
 
-        /// The mode's name, or nothing in the mode the item hides in.
+        /// The mode's name, or nothing in the mode the item hides in, or its terminal's reader makes silent.
         [[nodiscard]] std::string visit(StatusLineDefinitions::InputMode const& item) const
         {
             auto const mode = vt.inputHandler().mode();
-            if (item.hiddenIn == mode)
+            if (item.hiddenIn == mode || SilentInputModes[std::to_underlying(vt.inputReader())] == mode)
                 return {};
             return std::string(modeString(mode));
         }
@@ -760,6 +749,17 @@ namespace
             if (styling == StatusLineStyling::Disabled)
                 return withoutSgr(text);
             return text;
+        }
+
+        std::string visit(StatusLineDefinitions::DaemonExtension const& item)
+        {
+            // The daemon neutralized it already; sanitized here all the same, as a {UserVar} is, since the
+            // summaries are an interface: no escape of any implementation's reaches the status line's screen.
+            // Cut to its width as a {UserVar} is too.
+            return elideEnd(
+                sanitizeCommandLine(vt.statusLineDaemonExtensionText(item), SanitizePurpose::Display),
+                item.maxWidth,
+                vt.clusterWidthPolicy());
         }
 
         std::string visit(StatusLineDefinitions::UserVar const& item)

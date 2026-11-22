@@ -192,6 +192,10 @@ endif()
 # terminating works and that initializing the runtime leaves SIGSEGV and SIGUSR1 alone; otherwise WAMR
 # is built from source.
 #
+# The agent orchestrator's guest (CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST) is compiled with bulk-memory,
+# sign-extension and saturating float-to-int conversion, which a system WAMR may have been built without; with
+# it, no system WAMR is looked for, also in a build that runs no test that would notice.
+#
 # First-party code links contour::wamr, whichever WAMR it resolves to.
 
 # ContourThirdParties_WamrTerminates(<target> <result-variable>)
@@ -231,6 +235,8 @@ if(CONTOUR_EXTENSIONS)
     if(TARGET iwasm::vmlib)
         set(_wamr_target iwasm::vmlib)
         set(THIRDPARTY_BUILTIN_wamr "embedded")
+    elseif(CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST)
+        message(STATUS "Using the bundled WAMR: the orchestrator guest needs bulk-memory, sign-extension and saturating conversion")
     elseif(NOT CONTOUR_BUILD_STATIC)
         find_package(iwasm ${WAMR_MINIMAL_VERSION} QUIET)
         set(_wamr_candidate "")
@@ -258,7 +264,10 @@ if(CONTOUR_EXTENSIONS)
     endif()
 
     if(NOT _wamr_target)
-        if(NOT CONTOUR_USE_CPM)
+        if(NOT CONTOUR_USE_CPM AND CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST)
+            message(FATAL_ERROR "CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST builds WAMR from source, which needs "
+                "CONTOUR_USE_CPM=ON.")
+        elseif(NOT CONTOUR_USE_CPM)
             message(FATAL_ERROR "Could not find a WAMR >= ${WAMR_MINIMAL_VERSION} built with WAMR_BUILD_THREAD_MGR=1 "
                 "and without hardware bounds checks. "
                 "Install one, set CONTOUR_USE_CPM=ON, or configure with -DCONTOUR_EXTENSIONS=OFF.")

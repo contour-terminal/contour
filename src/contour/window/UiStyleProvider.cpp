@@ -209,6 +209,7 @@ namespace
             .trafficLight = QString::fromUtf8(tokens.trafficLightGlyph),
             .close = QString::fromUtf8(tokens.closeGlyph),
             .zoom = QString::fromUtf8(tokens.zoomGlyph),
+            .served = QString::fromUtf8(tokens.servedGlyph),
             .newTab = QString::fromUtf8(tokens.newTabGlyph),
             .menu = QString::fromUtf8(tokens.menuGlyph),
             .submenu = QString::fromUtf8(tokens.submenuGlyph),
@@ -392,6 +393,7 @@ UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     _paneEnds { this },
     _paneStates { this },
     _headerOccupants { this },
+    _paneSources { this },
     _secureInputs { this },
     _blocks { this },
     _dropZones { this },
@@ -1053,21 +1055,26 @@ QString UiStyleProvider::findBarShortcutText(QString const& name) const
 }
 
 QVariantMap UiStyleProvider::paneHeader(
-    int reveal, int pointer, int focus, int visiblePanes, qreal width, qreal height) const
+    int reveal, int pointer, int focus, int visiblePanes, qreal width, qreal height, int source) const
 {
     if (!inRange(reveal, HeaderRevealCount) || !inRange(pointer, PointerPresenceCount)
-        || !inRange(focus, PaneFocusCount))
+        || !inRange(focus, PaneFocusCount) || !inRange(source, PaneSourceCount))
         return {};
-    auto const header = resolvePaneHeader(PaneHeaderInputs { .density = _inputs.density,
-                                                             .reveal = static_cast<HeaderReveal>(reveal),
-                                                             .pointer = static_cast<PointerPresence>(pointer),
-                                                             .focus = static_cast<PaneFocus>(focus),
-                                                             .actionsReveal = _groups.layout.paneActions,
-                                                             .visiblePanes = visiblePanes,
-                                                             .width = width,
-                                                             .height = height,
-                                                             .headerHeight = _size.paneHeader(),
-                                                             .minimumContentHeight = _metrics.cellHeight });
+    auto const header = resolvePaneHeader(PaneHeaderInputs {
+        .density = _inputs.density,
+        .reveal = static_cast<HeaderReveal>(reveal),
+        .pointer = static_cast<PointerPresence>(pointer),
+        .focus = static_cast<PaneFocus>(focus),
+        .actionsReveal = _groups.layout.paneActions,
+        .visiblePanes = visiblePanes,
+        .width = width,
+        .height = height,
+        // A served pane's keeps the row's own height
+        // in every density.
+        .headerHeight =
+            static_cast<PaneSource>(source) == PaneSource::Served ? overlayPaneHeader() : _size.paneHeader(),
+        .minimumContentHeight = _metrics.cellHeight,
+        .source = static_cast<PaneSource>(source) });
     return { { QStringLiteral("content"), nameOf(paneHeaderContentName(header.content)) },
              { QStringLiteral("actions"), nameOf(headerActionsName(header.actions)) },
              { QStringLiteral("placement"), nameOf(headerPlacementName(header.placement)) },
@@ -1269,6 +1276,12 @@ qreal UiStyleProvider::paneHeaderHeight(qreal devicePixelRatio) const
 {
     return devicePixelRatio > 0 ? snappedChromePixels(_size.paneHeader(), devicePixelRatio)
                                 : _size.paneHeader();
+}
+
+qreal UiStyleProvider::servedPaneHeaderHeight(qreal devicePixelRatio) const
+{
+    return devicePixelRatio > 0 ? snappedChromePixels(overlayPaneHeader(), devicePixelRatio)
+                                : overlayPaneHeader();
 }
 
 qreal UiStyleProvider::hairline(qreal devicePixelRatio) const

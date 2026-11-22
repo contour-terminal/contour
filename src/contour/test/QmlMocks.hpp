@@ -86,6 +86,7 @@ class MockSession: public QObject
     Q_PROPERTY(int programStatus READ programStatus NOTIFY paneProgramStatusChanged)
     // Mirrors TerminalSession's lock: a window::SecureIndicator's value.
     Q_PROPERTY(int secureIndicator READ secureIndicator NOTIFY secureIndicatorChanged)
+    Q_PROPERTY(QString servedStrip READ servedStrip NOTIFY servedChanged)
     Q_PROPERTY(QString programStatusText READ programStatusText NOTIFY paneProgramStatusChanged)
     // }}}
     // {{{ The ended pane: what its footer reads, mirroring TerminalSession's properties and their signal.
@@ -324,6 +325,17 @@ class MockSession: public QObject
     {
         _secureIndicator = indicator;
         emit secureIndicatorChanged();
+    }
+
+    /// @return Who draws the pane, as TerminalSession::servedStrip() says; empty for a program's pane.
+    [[nodiscard]] QString const& servedStrip() const noexcept { return _servedStrip; }
+
+    /// A daemon-scoped extension draws the pane, as TerminalSession::setServedMark() tells.
+    /// @param strip The strip window::servedChromeOf decided; empty for a program's pane.
+    void setServedStrip(QString strip)
+    {
+        _servedStrip = std::move(strip);
+        emit servedChanged();
     }
     [[nodiscard]] QString const& programStatusText() const noexcept { return _programStatusText; }
 
@@ -610,6 +622,7 @@ class MockSession: public QObject
     void sizeIndicatorRequested();
     void linkTargetChanged();
     void secureIndicatorChanged();
+    void servedChanged();
     void overlayClearanceChanged();
     void blockActionsAnchorChanged();
     void focusedCommandBlockChanged();
@@ -668,6 +681,7 @@ class MockSession: public QObject
     QVariantMap _pendingPermission;
     int _programStatus = 0;   ///< window::TabBadgeKind::None.
     int _secureIndicator = 0; ///< window::SecureIndicator::None.
+    QString _servedStrip;     ///< Empty: a program's pane.
     QString _programStatusText;
     int _sessionEnd = 0; ///< session::EndReason::None.
     QString _endMessage;

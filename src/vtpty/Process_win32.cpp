@@ -117,11 +117,7 @@ namespace
 
 struct Process::Private
 {
-    string path;
-    vector<string> args;
-    fs::path cwd;
-    Environment env;
-    vector<string> removedEnvironment;
+    ExecInfo exec;
     std::unique_ptr<Pty> pty {};
     /// Held for the Process's lifetime only: a ConPTY child has no cgroup to leave.
     std::shared_ptr<ProcessPlacement> placement {};
@@ -159,26 +155,16 @@ void Process::Private::watchExit(Process& self)
     });
 }
 
-Process::Process(string const& path,
-                 vector<string> const& args,
-                 fs::path const& cwd,
-                 Environment const& env,
-                 vector<string> removedEnvironment,
-                 bool escapeSandbox,
+Process::Process(ExecInfo exe,
                  std::unique_ptr<Pty> pty,
+                 SandboxEscape sandbox,
                  std::shared_ptr<ProcessPlacement> placement,
                  HangupGrace hangupGrace):
-    _d(new Private { .path = path,
-                     .args = args,
-                     .cwd = cwd,
-                     .env = env,
-                     .removedEnvironment = std::move(removedEnvironment),
-                     .pty = std::move(pty),
-                     .placement = std::move(placement) },
+    _d(new Private { .exec = std::move(exe), .pty = std::move(pty), .placement = std::move(placement) },
        [](Private* p) { delete p; })
 {
     // No sandbox to escape, and no grace to give: closing the pseudoconsole ends the child outright.
-    core::ignoreUnused(escapeSandbox, hangupGrace);
+    core::ignoreUnused(sandbox, hangupGrace);
 }
 
 bool Process::isFlatpak()
@@ -191,11 +177,39 @@ ProgramHost Process::programHost(SandboxEscape escape)
     return programHostFor(SandboxState::Host, escape); // No sandbox to escape on Windows.
 }
 
+HeldDirectorySpawn Process::heldDirectorySpawn(SandboxEscape /*escape*/)
+{
+    return HeldDirectorySpawn::Unsupported; // No CreateProcess takes a directory by handle.
+}
+
+bool Process::findsProgram(ExecInfo const& exec)
+{
+    // The child's PATH as start() assembles it; a relative path names a file in this process's directory.
+    auto const inherited = inheritedEnvironment();
+    auto const environment =
+        buildWindowsEnvironment(std::vector<std::string_view> { inherited.begin(), inherited.end() },
+                                exec.env,
+                                exec.removedEnvironment);
+    auto const searchPath = std::string {
+        environmentValue(environment, "PATH", EnvironmentNames::CaseInsensitive).value_or(std::string_view {})
+    };
+    return namesProgram(exec.program,
+                        ProgramSearch { .path = searchPath,
+                                        .workingDirectory = {},
+                                        .fileSystem = core::platform::NativeFileSystem::instance() });
+}
+
 StartResult Process::start()
 {
     Require(static_cast<ConPty const*>(_d->pty.get()));
     if (_d->processInfo.hProcess != nullptr)
         return {}; // Adopted: running already, on a pseudoconsole that is open.
+
+    // No CreateProcess takes a directory by handle: a spawn told to start in one held open fails rather
+    // than start where its path names now.
+    if (_d->exec.directory)
+        return std::unexpected(StartFailure { .error = StartError::SpawnFailed,
+                                              .detail = "A directory held open cannot be entered here." });
 
     if (auto started = _d->pty->start(); !started)
         return started;
@@ -208,8 +222,8 @@ StartResult Process::start()
     auto const inherited = inheritedEnvironment();
     auto const environment =
         buildWindowsEnvironment(std::vector<std::string_view> { inherited.begin(), inherited.end() },
-                                _d->env,
-                                _d->removedEnvironment);
+                                _d->exec.env,
+                                _d->exec.removedEnvironment);
     auto environmentBlock = windowsEnvironmentBlock(environment);
     if (!environmentBlock)
         return std::unexpected(StartFailure { .error = StartError::SpawnFailed,
@@ -225,7 +239,7 @@ StartResult Process::start()
     auto const search = ProgramSearch { .path = searchPath,
                                         .workingDirectory = {},
                                         .fileSystem = core::platform::NativeFileSystem::instance() };
-    auto invocation = invocationToRun(_d->path, _d->args, programsIn(search));
+    auto invocation = invocationToRun(_d->exec.program, _d->exec.arguments, programsIn(search));
 
     // A bare name runs as found on the child's PATH, as POSIX's execvp() finds it once the child has its
     // environment: CreateProcess would search this process's own PATH, which a configured one is not on.
@@ -243,8 +257,9 @@ StartResult Process::start()
     // then the command itself -- so a directory the shell cannot be started in (the ERROR_DIRECTORY of
     // issue #1711) costs the user their inherited cwd rather than their new tab.
     auto const loginShellArgs = loginShell(false);
-    auto ladder = buildSpawnLadder(
-        cmd, core::pathToUtf8(_d->cwd), loginShellArgs.empty() ? std::string {} : loginShellArgs.front());
+    auto ladder = buildSpawnLadder(cmd,
+                                   core::pathToUtf8(_d->exec.workingDirectory),
+                                   loginShellArgs.empty() ? std::string {} : loginShellArgs.front());
 
     // Captured at each failure site: FormatMessageW/LocalFree (inside systemErrorMessage) and the
     // logging below both overwrite the thread's last-error, so reading it once after the loop would
@@ -322,7 +337,7 @@ std::expected<std::unique_ptr<Process>, AdoptError> Process::adopt(AdoptedChild 
                                              child.cwd,
                                              Environment {},
                                              std::vector<std::string> {},
-                                             /*escapeSandbox=*/false,
+                                             SandboxEscape::Contained,
                                              std::move(pty),
                                              std::make_shared<NoPlacement>(),
                                              child.hangupGrace);
@@ -343,9 +358,9 @@ std::optional<AdoptedChild> Process::handoverChild() const
     if (_d->processInfo.hProcess == nullptr)
         return nullopt;
     return AdoptedChild { .pid = static_cast<std::int64_t>(_d->processInfo.dwProcessId),
-                          .executable = _d->path,
-                          .args = _d->args,
-                          .cwd = _d->cwd,
+                          .executable = _d->exec.program,
+                          .args = _d->exec.arguments,
+                          .cwd = _d->exec.workingDirectory,
                           .hangupGrace = {},
                           .processHandle = CrossingHandle::of(_d->processInfo.hProcess) };
 }

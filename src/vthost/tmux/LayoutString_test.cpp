@@ -10,6 +10,7 @@
 #include <ranges>
 #include <string>
 
+#include <testing/ExactBuffer.hpp>
 #include <vthost/tmux/LayoutString.hpp>
 #include <vtworkspace/Pane.hpp>
 
@@ -188,6 +189,17 @@ TEST_CASE("a malformed JSON layout is rejected", "[vthost][layout]")
     };
     for (auto const* text: bad)
         CHECK_FALSE(parseLayout(text).has_value());
+}
+
+TEST_CASE("a JSON layout is read without a byte past its end", "[vthost][layout]")
+{
+    auto const whole = std::string_view { R"({"V":2,"L":{"t":"p","w":80,"h":50,"x":0,"y":0}})" };
+    for (auto const length: { whole.size(), whole.size() - 1, whole.size() - 3 })
+    {
+        CAPTURE(length);
+        auto const buffer = contour::testing::ExactBuffer { whole.substr(0, length) };
+        CHECK(parseLayout(buffer.view()).has_value() == (length == whole.size()));
+    }
 }
 
 TEST_CASE("a pathologically nested JSON layout is refused, not crashed", "[vthost][layout]")

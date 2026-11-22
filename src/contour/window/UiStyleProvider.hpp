@@ -94,6 +94,7 @@ struct ChromeGlyphs
     QString trafficLight; ///< Empty in a style that draws a traffic-light dot as a vector circle.
     QString close;
     QString zoom;
+    QString served; ///< Marks a tab a daemon-scoped extension draws (config::ServedTabGlyph).
     QString newTab;
     QString menu;
     QString submenu;
@@ -299,6 +300,7 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QString trafficLightGlyph READ trafficLightGlyph CONSTANT)
     Q_PROPERTY(QString closeGlyph READ closeGlyph CONSTANT)
     Q_PROPERTY(QString zoomGlyph READ zoomGlyph CONSTANT)
+    Q_PROPERTY(QString servedGlyph READ servedGlyph CONSTANT)
     Q_PROPERTY(QString newTabGlyph READ newTabGlyph CONSTANT)
     Q_PROPERTY(QString menuGlyph READ menuGlyph CONSTANT)
     Q_PROPERTY(QString submenuGlyph READ submenuGlyph CONSTANT)
@@ -351,6 +353,8 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QObject* paneStates READ paneStates CONSTANT)
     /// The QML names of what holds a pane header's trailing area (window::HeaderTrailingOccupant).
     Q_PROPERTY(QObject* headerOccupants READ headerOccupants CONSTANT)
+    /// The QML names of what draws a pane (window::PaneSource), for paneHeader()'s `source`.
+    Q_PROPERTY(QObject* paneSources READ paneSources CONSTANT)
     /// The QML names of secure input's values (window::SecureIndicator, window::SpotShown).
     Q_PROPERTY(QObject* secureInputs READ secureInputs CONSTANT)
     /// The QML names of the command blocks' values (sticky header hosts and tick styles).
@@ -468,6 +472,7 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QObject* paneEnds() noexcept { return &_paneEnds; }
     [[nodiscard]] QObject* paneStates() noexcept { return &_paneStates; }
     [[nodiscard]] QObject* headerOccupants() noexcept { return &_headerOccupants; }
+    [[nodiscard]] QObject* paneSources() noexcept { return &_paneSources; }
     [[nodiscard]] QObject* secureInputs() noexcept { return &_secureInputs; }
     [[nodiscard]] QObject* blocks() noexcept { return &_blocks; }
     [[nodiscard]] QString const& secureInputCellText() const noexcept { return _glyphs.secureInput; }
@@ -488,9 +493,10 @@ class UiStyleProvider: public QObject
     /// @param visiblePanes The panes visible in the tab.
     /// @param width        The pane's width in logical pixels.
     /// @param height       The pane's height in logical pixels.
+    /// @param source       A window::PaneSource: what draws the pane.
     /// @return `{ content, actions, placement, emphasis }` as their names.
-    [[nodiscard]] Q_INVOKABLE QVariantMap
-    paneHeader(int reveal, int pointer, int focus, int visiblePanes, qreal width, qreal height) const;
+    [[nodiscard]] Q_INVOKABLE QVariantMap paneHeader(
+        int reveal, int pointer, int focus, int visiblePanes, qreal width, qreal height, int source) const;
 
     /// Where a pane's sticky command header lives (window::stickyHeaderHostFor).
     ///
@@ -618,6 +624,13 @@ class UiStyleProvider: public QObject
     /// @param devicePixelRatio The window's device-pixel ratio.
     /// @return The header's height in logical pixels; the bare token for a ratio of 0 or less.
     [[nodiscard]] Q_INVOKABLE qreal paneHeaderHeight(qreal devicePixelRatio) const;
+
+    /// How high a served pane's header is drawn: the row's own header height (overlayPaneHeader()), which no
+    /// density takes away, floored to whole device pixels as paneHeaderHeight() is, so the grid below it
+    /// starts on the device grid.
+    /// @param devicePixelRatio The window's device-pixel ratio.
+    /// @return The header's height in logical pixels; the bare token for a ratio of 0 or less.
+    [[nodiscard]] Q_INVOKABLE qreal servedPaneHeaderHeight(qreal devicePixelRatio) const;
 
     /// One device pixel, in logical pixels: the pane card's border width.
     /// @param devicePixelRatio The window's device-pixel ratio.
@@ -1197,6 +1210,8 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QString const& trafficLightGlyph() const noexcept { return _glyphs.trafficLight; }
     [[nodiscard]] QString const& closeGlyph() const noexcept { return _glyphs.close; }
     [[nodiscard]] QString const& zoomGlyph() const noexcept { return _glyphs.zoom; }
+    /// @return The mark of a tab a daemon-scoped extension draws.
+    [[nodiscard]] QString const& servedGlyph() const noexcept { return _glyphs.served; }
     [[nodiscard]] QString const& newTabGlyph() const noexcept { return _glyphs.newTab; }
     [[nodiscard]] QString const& menuGlyph() const noexcept { return _glyphs.menu; }
     [[nodiscard]] QString const& submenuGlyph() const noexcept { return _glyphs.submenu; }
@@ -1324,6 +1339,7 @@ class UiStyleProvider: public QObject
     ChromePaneEndNames _paneEnds;
     ChromePaneStateNames _paneStates;
     ChromeHeaderOccupantNames _headerOccupants;
+    ChromePaneSourceNames _paneSources;
     ChromeSecureInputNames _secureInputs;
     ChromeBlockNames _blocks;
     ChromeDropZoneNames _dropZones;

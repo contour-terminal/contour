@@ -21,8 +21,9 @@ class QScreen;
 
 namespace contour::platform
 {
+class ExternalLauncher;
 class Notifier;
-}
+} // namespace contour::platform
 
 namespace contour::remote
 {
@@ -140,6 +141,10 @@ class IDaemonLinkHost
     ///         switches programs ask for (switchQuestionExpiry()), and the landing time those leave the
     ///         switch. The one the application's switcher is built with.
     [[nodiscard]] virtual SwitchDeadline const& switchDeadline() = 0;
+
+    /// @return What opens a link on this machine, as following a hyperlink does: a daemon extension's
+    ///         url-open goes through it (DaemonLink, OpenUrl).
+    [[nodiscard]] virtual platform::ExternalLauncher& externalLauncher() noexcept = 0;
 };
 
 } // namespace contour::remote

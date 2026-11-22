@@ -196,3 +196,32 @@ TEST_CASE("the workspace switch capability keeps its ident and name",
     REQUIRE(change != CapabilityTable.end());
     CHECK(change->name == "workspace-switch");
 }
+
+TEST_CASE("capability 34 is daemon-extension-consent", "[vthost][negotiation][consent]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::DaemonExtensionConsent) == 34);
+    auto const consent =
+        std::ranges::find(CapabilityTable, Capability::DaemonExtensionConsent, &CapabilityRow::capability);
+    REQUIRE(consent != CapabilityTable.end());
+    CHECK(consent->name == "daemon-extension-consent");
+}
+
+TEST_CASE("capability 35 is extension-presence", "[vthost][negotiation][presence]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::ExtensionPresence) == 35);
+    auto const presence =
+        std::ranges::find(CapabilityTable, Capability::ExtensionPresence, &CapabilityRow::capability);
+    REQUIRE(presence != CapabilityTable.end());
+    CHECK(presence->name == "extension-presence");
+    // No ident is named twice, the new one included.
+    for (auto const& row: CapabilityTable)
+        CHECK(std::ranges::count(CapabilityTable, row.capability, &CapabilityRow::capability) == 1);
+}
+
+TEST_CASE("capability 36 is url-open", "[vthost][negotiation][presence]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::UrlOpen) == 36);
+    auto const row = std::ranges::find(CapabilityTable, Capability::UrlOpen, &CapabilityRow::capability);
+    REQUIRE(row != CapabilityTable.end());
+    CHECK(row->name == "url-open");
+}

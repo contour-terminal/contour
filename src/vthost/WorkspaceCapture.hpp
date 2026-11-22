@@ -41,7 +41,10 @@ struct CaptureOptions
 /// @param host The host whose model is read.
 /// @param options What to keep.
 /// @param now When the snapshot is taken.
-/// @return The workspace; workspaces without a tab are left out, as there is nothing in them to restore.
+/// @return The workspace; served tabs are left out, as their extensions open them again; an extension's agent
+///         pane is pruned from its tab's split tree (its sibling takes the split's place, a tab left with no
+///         pane is left out), as a restore would bring it back as a shell; and so are workspaces without any
+///         other tab, as there is nothing in them to restore.
 [[nodiscard]] WorkspaceSnapshot captureWorkspace(SessionHost& host,
                                                  CaptureOptions const& options,
                                                  std::chrono::sys_seconds now);

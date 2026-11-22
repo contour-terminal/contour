@@ -53,7 +53,7 @@ struct LoadedModule
                                              std::vector<std::byte> bytes,
                                              ExtensionLimits const& limits = {})
 {
-    auto engine = Engine::create(backend, limits);
+    auto engine = Engine::create(backend, vtextension::World::StatusLine, limits);
     REQUIRE(engine.has_value());
     auto compiled = CompiledExtension::load(**engine, std::move(bytes));
     REQUIRE(compiled.has_value());
@@ -150,7 +150,10 @@ class CountingEngineProvider final: public IEngineProvider, public IRetirementSi
 {
   public:
     /// @param backend What engines are created from; must outlive the provider.
-    explicit CountingEngineProvider(wasm::IWasmBackend& backend): _provider { backend, ExtensionLimits {} } {}
+    explicit CountingEngineProvider(wasm::IWasmBackend& backend):
+        _provider { backend, vtextension::World::StatusLine, ExtensionLimits {} }
+    {
+    }
 
     [[nodiscard]] std::expected<std::shared_ptr<Engine>, ExtensionError> acquire() override
     {

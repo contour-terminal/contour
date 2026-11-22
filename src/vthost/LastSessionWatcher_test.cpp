@@ -16,6 +16,7 @@
 #include <chrono>
 #include <memory>
 #include <string>
+#include <tuple>
 
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/LastSessionWatcher.hpp>
@@ -80,7 +81,7 @@ TEST_CASE("a session exit with a sibling left keeps the daemon serving", "[vthos
     auto h = WatcherHarness {};
     auto* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
-    h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Horizontal, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Horizontal, 0.5);
     REQUIRE(h.host.sessionCount() == 2);
 
     h.host.handleSessionExit(tab->rootPane()->first()->session());
@@ -124,7 +125,7 @@ TEST_CASE("the shutdown is requested once across several exits", "[vthost][lifec
     auto h = WatcherHarness {};
     auto* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
-    h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
     REQUIRE(h.host.sessionCount() == 2);
 
     auto const first = tab->rootPane()->first()->session();
@@ -135,6 +136,25 @@ TEST_CASE("the shutdown is requested once across several exits", "[vthost][lifec
 
     REQUIRE(h.host.sessionCount() == 0);
     CHECK(h.shutdowns == 1); // only the zero-transition arms the decision
+}
+
+TEST_CASE("an upgrade's own close of the last session keeps the daemon", "[vthost][lifecycle]")
+{
+    // A live upgrade closes a served session itself; an upgrade rolled back after it serves on with none.
+    auto h = WatcherHarness {};
+    auto const session = h.createSession();
+
+    h.host.endSession(session, vthost::SessionEnd::Upgrade);
+    h.pump();
+    h.pump();
+
+    REQUIRE(h.host.sessionCount() == 0);
+    CHECK(h.shutdowns == 0);
+
+    // The next close of a last session is the user's again, and ends the daemon.
+    h.host.closeSession(h.createSession());
+    h.pump();
+    CHECK(h.shutdowns == 1);
 }
 
 #ifndef _WIN32

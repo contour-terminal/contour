@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <limits>
 #include <ranges>
+#include <tuple>
 #include <vector>
 
 #include <vtworkspace/PaneLayout.hpp>
@@ -69,6 +70,24 @@ TEST_CASE("PaneLayout: unsplit leaf passes the requirement through", "[vtworkspa
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     CHECK(contentSizeForLeaf(root, { .width = 640, .height = 480 }, Legacy, root)
           == LayoutSize { .width = 640, .height = 480 });
+}
+
+TEST_CASE("PaneLayout: a lone leaf whose header always shows counts it", "[vtworkspace][layout][served]")
+{
+    // A served pane: its header shows alone, at the row's own height, whatever the density took from splits.
+    auto const chrome =
+        SplitChrome { .sideBySideGap = 1, .stackedGap = 1, .leafHeader = 0, .alwaysHeader = 22 };
+    auto root = Pane { PaneId { 1 }, SessionId { 1 } };
+    CHECK(contentSizeForLeaf(root, { .width = 640, .height = 480 }, chrome, root, LeafHeader::Always)
+          == LayoutSize { .width = 640, .height = 502 });
+    CHECK(contentSizeForLeaf(root, { .width = 640, .height = 480 }, chrome, root, LeafHeader::InSplit)
+          == LayoutSize { .width = 640, .height = 480 });
+    // In a split it spends its own header, not the split's.
+    auto const [first, second] =
+        root.split(SplitState::Horizontal, PaneId { 2 }, PaneId { 3 }, SessionId { 2 }, 0.5);
+    std::ignore = second;
+    CHECK(contentSizeForLeaf(*first, { .width = 640, .height = 480 }, chrome, root, LeafHeader::Always)
+          == LayoutSize { .width = 640, .height = 1004 });
 }
 
 TEST_CASE("PaneLayout: side-by-side split solves the width axis only", "[vtworkspace][layout]")

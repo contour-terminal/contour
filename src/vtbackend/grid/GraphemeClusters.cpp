@@ -43,4 +43,24 @@ ColumnCount columnsOnTheGrid(std::string_view text, ClusterWidthPolicy policy)
     return columns;
 }
 
+std::string elideEnd(std::string_view text, ColumnCount maxWidth, ClusterWidthPolicy policy)
+{
+    if (columnsOnTheGrid(text, policy) <= maxWidth)
+        return std::string { text };
+
+    // The ellipsis is budgeted for, not added afterwards: appended to a head already at maxWidth, it would
+    // overflow by exactly its own column.
+    auto const budget = maxWidth - ColumnCount(1);
+    auto head = std::string {};
+    auto columns = ColumnCount(0);
+    for (auto const& cluster: graphemeClustersOf(text, policy))
+    {
+        columns += cluster.columns;
+        if (columns > budget)
+            break;
+        head += cluster.text;
+    }
+    return head + "…";
+}
+
 } // namespace vtbackend

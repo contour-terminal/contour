@@ -1,0 +1,24 @@
+ ✦ Agents                                                            ⬢ 1/4 ▰▱▱▱ 
+╭─ pr-2375 · fix CI · sonnet ──────────────────────────────────── ⠋ working 6m ╮
+│ Say why the stdio relay failed, and send a hello before half-closing in the… │
+│ Board  Transcript  Details                                                   │
+│ no session log for 123e4567-e89b-12d3-a456-426614174000 in                   │
+│ /home/u/worktrees/contour/pr-2375-20261113-150847 under                      │
+│ /home/u/.claude/projects                                                     │
+│                                                                              │
+│ To read it by hand, run:                                                     │
+│ contour agent transcript \                                                   │
+│ --session 123e4567-e89b-12d3-a456-426614174000 \                             │
+│ --cwd /home/u/worktrees/contour/pr-2375-20261113-150847                      │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│ ╭─ to pr-2375 ─────────────────────────────────────────────────────────────╮ │
+│ │ ▏                                                                        │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ ⏎ send · alt⏎ line · esc keep draft · ^k all actions · pgup pgdn scroll        

@@ -45,7 +45,7 @@ TEST_CASE("ExtensionWorkerPool.lanesArePinned", "[vtextension][threading]")
 {
     // A lane is prepared for the runtime an engine keeps up, as a runner's engine does while its jobs run.
     auto const backend = wasm::makeDefaultBackend();
-    auto const engine = Engine::create(*backend, ExtensionLimits {});
+    auto const engine = Engine::create(*backend, vtextension::World::StatusLine, ExtensionLimits {});
     REQUIRE(engine.has_value());
     auto pool = ExtensionWorkerPool(*backend, 2);
     auto const first = pool.assignLane();
@@ -153,7 +153,7 @@ TEST_CASE("ExtensionWorkerPool.reprepareForNewRuntime", "[vtextension][threading
     auto pool = ExtensionWorkerPool(*backend, 1);
     auto const lane = pool.assignLane();
 
-    auto first = Engine::create(*backend, ExtensionLimits {});
+    auto first = Engine::create(*backend, vtextension::World::StatusLine, ExtensionLimits {});
     REQUIRE(first.has_value());
     auto const firstGeneration = backend->runtimeGeneration();
     auto const before = reportFromLane(pool, lane, *backend);
@@ -161,7 +161,7 @@ TEST_CASE("ExtensionWorkerPool.reprepareForNewRuntime", "[vtextension][threading
     CHECK(before.ready);
 
     first->reset(); // The last engine: the runtime goes down.
-    auto second = Engine::create(*backend, ExtensionLimits {});
+    auto second = Engine::create(*backend, vtextension::World::StatusLine, ExtensionLimits {});
     REQUIRE(second.has_value());
     auto const secondGeneration = backend->runtimeGeneration();
     REQUIRE(secondGeneration != firstGeneration);

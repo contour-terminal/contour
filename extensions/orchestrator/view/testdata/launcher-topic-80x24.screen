@@ -1,0 +1,24 @@
+ ✦ Agents                                                            ⬢ 0/4 ▱▱▱▱ 
+╭─ Agents 0 ───────────────────────────────────────────────────────────────────╮
+│▍+ new agent                                                                  │
+│                                                                              │
+│   ╭─ ✦ New agent ────────────────────────────────────────────────────────╮   │
+│   │ › Investigate why the shell integration test hangs on CI▏            │   │
+│   │                                                                      │   │
+│   │ ▍✎ topic “Investigate why the shell integration test han… new branch │   │
+│   │ ──────────────────────────────────────────────────────────────────── │   │
+╰───│ repo ‹ contour ›   task ‹ topic ›   model ‹ opus ›   perms ‹ standa… │───╯
+╭───│ an agent on what you typed, on a new branch                          │───╮
+│ No│ checkout  new branch                                                 │   │
+│ yo│             agent/topic-investigate-why-the-shell-integration-te-…   │   │
+│ On│ worktree  /home/u/worktrees/contour/topic-investigate-why-the-shell- │   │
+│ es│             integration-te-…                                         │   │
+│ Ev│ perms     standard · 19 allowed · 4 denied · edits need no approval  │   │
+│   │                                                                      │   │
+│   │ enter start · ↑↓ choose · tab settings · ctrl+p more · esc close     │   │
+│   ╰──────────────────────────────────────────────────────────────────────╯   │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ ⏎ new agent · ^k all actions                                                   

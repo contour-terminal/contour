@@ -34,6 +34,7 @@
 #include <utility>
 #include <vector>
 
+#include <testing/ExactBuffer.hpp>
 #include <vtcontrol/Catalog.hpp>
 #include <vtcontrol/Json.hpp>
 #include <vtcontrol/Wit.hpp>
@@ -43,6 +44,7 @@
 #include <vthost/testing/CountingRandom.hpp>
 
 using namespace std::string_literals;
+using namespace std::string_view_literals;
 using contour::cli::ControlIo;
 using contour::cli::ExitStatus;
 using vthost::client::ControlClientError;
@@ -347,6 +349,7 @@ TEST_CASE("every ControlErrorCode and ControlFailure has an exit status", "[cont
         CodeRow { .code = ControlErrorCode::Forbidden, .status = ExitStatus::Failed },
         CodeRow { .code = ControlErrorCode::Failed, .status = ExitStatus::Failed },
         CodeRow { .code = ControlErrorCode::LimitReached, .status = ExitStatus::Failed },
+        CodeRow { .code = ControlErrorCode::NotPending, .status = ExitStatus::Failed },
     };
     // Every code the API names has a row: a code added without one fails here, not at a script's exit.
     CHECK(CodeRows.size() == vtcontrol::EnumTable<ControlErrorCode>::Rows.size());
@@ -1146,5 +1149,225 @@ TEST_CASE("--daemon picks the daemon and --name names what a creating verb makes
         INFO(run.err.str());
         CHECK(run.err.str().contains(
             core::pathToUtf8(vthost::muxSocketPath(vthost::daemonNameFromOption("work"), {}, run.env))));
+    }
+}
+
+TEST_CASE("a reply is decoded without a byte past its end", "[contour][cli][control]")
+{
+    struct Row
+    {
+        std::string_view reply;
+        std::string_view printed;
+    };
+    for (auto const& row: { Row { .reply = R"({"tab":"tab:1","pane":"pane:2"})", .printed = "pane:2\n" },
+                            Row { .reply = R"({"tab":"tab:1","pane":"pane:2")",
+                                  .printed = "{\"tab\":\"tab:1\",\"pane\":\"pane:2\"\n" } })
+    {
+        CAPTURE(row.reply);
+        auto out = std::ostringstream {};
+        verbNamed("split").printHuman(contour::testing::ExactBuffer { row.reply }.view(), out);
+        CHECK(out.str() == row.printed);
+    }
+}
+
+TEST_CASE("the extension verbs are rows of the extension group", "[contour][cli][control][consent]")
+{
+    for (auto const path:
+         { "extension.list"sv, "extension.grant"sv, "extension.revoke"sv, "extension.status"sv })
+    {
+        INFO(path);
+        CHECK(verbNamed(path).method == path);
+    }
+    auto const groups = contour::cli::controlVerbGroups();
+    CHECK(std::ranges::find(groups, "extension"sv, &contour::cli::ControlVerbGroup::name) != groups.end());
+    CHECK(*verbNamed("extension.grant").buildParams(parseFlags({ "extension", "grant", "orchestrator" }))
+          == R"({"name":"orchestrator"})");
+    CHECK(*verbNamed("extension.revoke").buildParams(parseFlags({ "extension", "revoke", "orchestrator" }))
+          == R"({"name":"orchestrator"})");
+    CHECK_FALSE(verbNamed("extension.grant").buildParams(parseFlags({ "extension", "grant" })));
+    CHECK(*verbNamed("extension.status").buildParams(parseFlags({ "extension", "status", "orchestrator" }))
+          == R"({"name":"orchestrator"})");
+}
+
+TEST_CASE("extension status exits and notes by state", "[contour][cli][control][summary]")
+{
+    // Only a running extension exits 0; every other state exits 1 with a note naming it.
+    struct Row
+    {
+        std::string_view state;
+        int exit;
+        std::string_view note;
+    };
+    auto const rows = std::array {
+        Row { .state = "running", .exit = 0, .note = "" },
+        Row { .state = "stopped", .exit = 1, .note = "orchestrator is not running\n" },
+        Row {
+            .state = "pending", .exit = 1, .note = "orchestrator waits for its grant in a Contour window\n" },
+        Row { .state = "denied", .exit = 1, .note = "orchestrator was denied its grant\n" },
+        Row { .state = "disabled",
+              .exit = 1,
+              .note =
+                  "orchestrator faulted too often, and is disabled; its last fault: extension trapped\n" },
+        Row { .state = "failed", .exit = 1, .note = "orchestrator failed: why\n" },
+        Row { .state = "sideways",
+              .exit = 1,
+              .note = "orchestrator is sideways\n" }, // a state it does not know
+    };
+    for (auto const& row: rows)
+    {
+        INFO(row.state);
+        auto run = Run {};
+        auto channel = ScriptedChannel { std::format(
+            R"({{"name":"orchestrator","state":"{}","summary":"","detail":"","problem":"why","lastFault":"extension trapped"}})",
+            row.state) };
+        CHECK(contour::cli::runControlVerb(verbNamed("extension.status"),
+                                           parseFlags({ "extension", "status", "orchestrator" }),
+                                           channel,
+                                           run.io())
+              == row.exit);
+        CHECK(run.err.str() == row.note);
+    }
+}
+
+TEST_CASE("extension status keeps a disabled extension's last fault to one bounded line",
+          "[contour][cli][control][summary]")
+{
+    struct Row
+    {
+        std::string lastFault;
+        std::string shown;
+    };
+    for (auto const& row: std::array {
+             Row { .lastFault = "", .shown = "unknown" },
+             Row { .lastFault = "first\\nsecond", .shown = "first\u2026" },
+             // 199 bytes, then a two-byte sequence the bound falls into: cut before it, never inside.
+             Row { .lastFault = std::string(199, 'a') + "\u00e9tail",
+                   .shown = std::string(199, 'a') + "\u2026" },
+         })
+    {
+        INFO(row.lastFault);
+        auto run = Run {};
+        auto channel = ScriptedChannel { std::format(
+            R"({{"name":"orchestrator","state":"disabled","summary":"","detail":"","problem":"","lastFault":"{}"}})",
+            row.lastFault) };
+        CHECK(contour::cli::runControlVerb(verbNamed("extension.status"),
+                                           parseFlags({ "extension", "status", "orchestrator" }),
+                                           channel,
+                                           run.io())
+              == 1);
+        CHECK(run.err.str()
+              == std::format("orchestrator faulted too often, and is disabled; its last fault: {}\n",
+                             row.shown));
+    }
+}
+
+TEST_CASE("extension status prints what the extension published, and says when it does not run",
+          "[contour][cli][control][summary]")
+{
+    auto const statusOf = [](std::string reply) {
+        auto run = Run {};
+        auto channel = ScriptedChannel { std::move(reply) };
+        auto const exit = contour::cli::runControlVerb(verbNamed("extension.status"),
+                                                       parseFlags({ "extension", "status", "orchestrator" }),
+                                                       channel,
+                                                       run.io());
+        REQUIRE(channel.calls.size() == 1);
+        CHECK(channel.calls[0].method == "extension.status");
+        return std::tuple { exit, run.out.str(), run.err.str() };
+    };
+
+    SECTION("a running one prints its summary, then its detail")
+    {
+        auto const [exit, out, err] =
+            statusOf(R"({"name":"orchestrator","state":"running","summary":"agents 1/4",)"
+                     R"("detail":"#2390 running\n#2391 blocked","problem":""})"s);
+        CHECK(exit == 0);
+        CHECK(out == "agents 1/4\n#2390 running\n#2391 blocked\n");
+        CHECK(err.empty());
+    }
+
+    SECTION("a stopped one is not running, and fails")
+    {
+        auto const [exit, out, err] =
+            statusOf(R"({"name":"orchestrator","state":"stopped","summary":"","detail":"","problem":""})"s);
+        CHECK(exit == 1);
+        CHECK(out.empty());
+        CHECK(err == "orchestrator is not running\n");
+    }
+
+    SECTION("a failed one says why, and fails")
+    {
+        auto const [exit, out, err] = statusOf(
+            R"({"name":"orchestrator","state":"failed","summary":"","detail":"",)"
+            R"j("problem":"daemon.extensions.orchestrator: its module does not load (world mismatch)"})j"s);
+        CHECK(exit == 1);
+        CHECK(out.empty());
+        CHECK(err
+              == "orchestrator failed: daemon.extensions.orchestrator: its module does not load (world "
+                 "mismatch)\n");
+    }
+}
+
+TEST_CASE("extension list prints each extension, a pending one's question indented",
+          "[contour][cli][control][consent]")
+{
+    auto run = Run {};
+    auto channel = ScriptedChannel {
+        R"({"extensions":[{"name":"orchestrator","state":"pending","grantDigest":"9a1b","question":)"
+        R"({"title":"“orchestrator” wants to run in the background","lines":[)"
+        R"({"text":"Module: orchestrator@/x.wasm","weight":0},{"text":"gh-auth (short, in repos): gh auth status","weight":1}]}},)"
+        R"({"name":"stats","state":"running","grantDigest":"77"}]})"s
+    };
+    CHECK(contour::cli::runControlVerb(
+              verbNamed("extension.list"), parseFlags({ "extension", "list" }), channel, run.io())
+          == 0);
+    CHECK(run.out.str()
+          == "orchestrator  pending\n"
+             "  “orchestrator” wants to run in the background\n"
+             "  Module: orchestrator@/x.wasm\n"
+             "  gh-auth (short, in repos): gh auth status\n"
+             "stats  running\n");
+}
+
+TEST_CASE("extension grant says where to confirm", "[contour][cli][control][consent]")
+{
+    SECTION("a window is attached")
+    {
+        auto run = Run {};
+        auto channel = ScriptedChannel { R"({"asked":true,"windows":1})"s };
+        CHECK(contour::cli::runControlVerb(verbNamed("extension.grant"),
+                                           parseFlags({ "extension", "grant", "orchestrator" }),
+                                           channel,
+                                           run.io())
+              == 0);
+        CHECK(run.out.str() == "confirm in a Contour window\n");
+        REQUIRE(channel.calls.size() == 1);
+        CHECK(channel.calls[0].method == "extension.grant");
+    }
+    SECTION("no window is attached")
+    {
+        auto run = Run {};
+        auto channel = ScriptedChannel { R"({"asked":true,"windows":0})"s };
+        CHECK(contour::cli::runControlVerb(verbNamed("extension.grant"),
+                                           parseFlags({ "extension", "grant", "orchestrator" }),
+                                           channel,
+                                           run.io())
+              == 0);
+        CHECK(run.out.str()
+              == "confirm in a Contour window\nno window is attached; open Contour to answer\n");
+    }
+    SECTION("nothing pending fails with the daemon's error")
+    {
+        auto run = Run {};
+        auto channel = ScriptedChannel { std::unexpected(
+            remoteError(vtcontrol::ControlErrorCode::NotPending,
+                        "daemon extension `orchestrator` waits for no answer")) };
+        CHECK(contour::cli::runControlVerb(verbNamed("extension.grant"),
+                                           parseFlags({ "extension", "grant", "orchestrator" }),
+                                           channel,
+                                           run.io())
+              != 0);
+        CHECK(run.err.str().contains("daemon extension `orchestrator` waits for no answer"));
+        CHECK(run.out.str().empty());
     }
 }

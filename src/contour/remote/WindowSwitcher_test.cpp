@@ -262,6 +262,10 @@ class FakeApp final: public contour::remote::IDaemonLinkHost, public contour::re
     {
         return questionDeadline;
     }
+    [[nodiscard]] contour::platform::ExternalLauncher& externalLauncher() noexcept override
+    {
+        return launcher;
+    }
 
     // ISwitchHost
     [[nodiscard]] std::vector<DaemonLink*> switchableLinks() override
@@ -297,6 +301,7 @@ class FakeApp final: public contour::remote::IDaemonLinkHost, public contour::re
     int endings = 0;                                                      ///< How often a link said it ended.
     int started = 0;                      ///< How many links a switch started.
     contour::remote::SwitchGrants grants; ///< The answers that stand for the switches programs ask for.
+    contour::test::RecordingExternalLauncher launcher; ///< What the links a daemon asks to open go to.
     /// Where the finishes of other workspaces would be raised; none is in these tests.
     SilentNotifier notifier;
     /// What every switch's time is read from; moves only when a test says so.

@@ -1,0 +1,7 @@
+# Environment for one declared command only.
+name = scoped
+version = 2
+root worktrees = config:worktree_root
+command git-status short @worktrees = git status --porcelain
+command-env-for git-status GIT_ATTR_SOURCE = 4b825dc642cb6eb9a060e54bf8d69288fbee4904
+command-env-for git-status LC_ALL = C

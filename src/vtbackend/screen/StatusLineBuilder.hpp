@@ -159,6 +159,14 @@ namespace StatusLineDefinitions
     };
     /// The latest frame of the status-line extension the configuration calls @ref name, as text and SGR.
     struct Extension: NamedItem {};
+    /// The one-line summary the daemon-scoped extension the daemon's configuration calls @ref name last
+    /// published of itself (`summary-set`), or why it failed; empty in a terminal no daemon hosts.
+    struct DaemonExtension: NamedItem
+    {
+        /// Widest the summary may draw, in columns; a longer one is cut at its end with `…`, so that a narrow
+        /// line keeps it shortened rather than dropping it.
+        ColumnCount maxWidth { 40 };
+    };
     /// The latest value a program set for the user variable @ref name (OSC 1337 ; SetUserVar); empty
     /// while it is unset.
     struct UserVar: NamedItem
@@ -334,6 +342,7 @@ namespace StatusLineDefinitions
         Clock,
         Command,
         Extension,
+        DaemonExtension,
         UserVar,
         HistoryLineCount,
         Hyperlink,
@@ -472,6 +481,9 @@ namespace StatusLineDefinitions
 
     template <> struct ItemTraits<Extension>
     { static constexpr std::string_view Name = "Extension", Label = "Extension", Sample = "(extension)"; static constexpr auto Priority = StatusLinePriority::Normal; };
+
+    template <> struct ItemTraits<DaemonExtension>
+    { static constexpr std::string_view Name = "DaemonExtension", Label = "Daemon extension", Sample = "\u2b22 agents 2/4"; static constexpr auto Priority = StatusLinePriority::Normal; };
 
     template <> struct ItemTraits<UserVar>
     { static constexpr std::string_view Name = "UserVar", Label = "User variable", Sample = "vim"; static constexpr auto Priority = StatusLinePriority::Normal; };

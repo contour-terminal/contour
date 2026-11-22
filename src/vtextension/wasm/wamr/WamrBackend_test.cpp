@@ -2,6 +2,7 @@
 //
 // The WAMR backend: the backend contract every runtime must meet, and what is WAMR's alone, the
 // process-wide runtime its backends share, driven through WAMR's C API directly.
+#include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
@@ -14,6 +15,7 @@
 
 #include <wasm_export.h>
 
+#include <vtextension/DaemonImports.hpp>
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/ExtensionLimits.hpp>
 #include <vtextension/testing/Harness.hpp>
@@ -213,4 +215,17 @@ TEST_CASE("Wamr.hostFunctionArities")
         REQUIRE_FALSE(runtime.has_value());
         CHECK(runtime.error() == ExtensionError::RuntimeUnavailable);
     }
+}
+
+TEST_CASE("DaemonImports: the table stays within WAMR's caps", "[daemon][wit]")
+{
+    namespace contract = vtextension::wasm::testing::contract;
+    using vtextension::DaemonImportRows;
+    STATIC_CHECK(DaemonImportRows.size() <= vtextension::wasm::wamr::MaxHostFunctions);
+    for (auto const& row: DaemonImportRows)
+    {
+        CAPTURE(row.name);
+        CHECK(row.parameterCount <= vtextension::wasm::wamr::MaxHostParameters);
+    }
+    CHECK(makeWamrBackend()->createRuntime(contract::Limits, vtextension::daemonHostFunctions()).has_value());
 }

@@ -2714,8 +2714,8 @@ TEST_CASE("SettingsController: the indicator placeholder catalog matches what pa
         CHECK(!entry.value("label").toString().isEmpty());
         CHECK(!entry.value("sample").toString().isEmpty());
 
-        // Text, Command and Extension need their payload attribute to be recognized at all; the rest stand
-        // alone.
+        // Text, Command and the named items need their payload attribute to be recognized at all; the rest
+        // stand alone.
         auto const templateText = [&type] {
             if (type == "Text")
                 return QString("{Text:text=x}");
@@ -2725,6 +2725,8 @@ TEST_CASE("SettingsController: the indicator placeholder catalog matches what pa
                 return QString("{Extension:git}");
             if (type == "UserVar")
                 return QString("{UserVar:foo}");
+            if (type == "DaemonExtension")
+                return QString("{DaemonExtension:orchestrator}");
             return QString("{%1}").arg(type);
         }();
         auto const items = fx.controller->parseIndicatorSegment(templateText);

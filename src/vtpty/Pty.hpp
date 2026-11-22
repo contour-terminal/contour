@@ -107,8 +107,9 @@ enum class ReadOrigin : std::uint8_t
 /// What the bytes a terminal writes to its device carry, as far as the terminal knows.
 enum class InputKind : std::uint8_t
 {
-    Other = 0, ///< Nothing the user typed: replies, focus and mouse reports.
-    Keyboard,  ///< The user's key events, paste or raw input sent by a user's action are among them.
+    Other = 0,   ///< Nothing the user did: replies, focus reports, mouse motion and wheel reports.
+    Keyboard,    ///< The user's key events, paste or raw input sent by a user's action are among them.
+    ButtonPress, ///< No key, but the report of a mouse button the user pressed is among them.
 };
 
 class Pty

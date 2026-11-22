@@ -116,8 +116,20 @@ Item {
         return root.bracketed ? Math.ceil(width / chromeStyle.cellWidth) * chromeStyle.cellWidth : width
     }
 
+    // The width a part of the row is laid out at: its left padding and its text's span, the measure the fit widths
+    // are made of, so the chip is never wider than it reserved. A Text's own width also counts the last glyph's
+    // overhang (a bold "s" or caret's ink past its advance), which no width summed from advances includes. The
+    // brackets keep their own widths: they are measured as one span, which their two glyphs never exceed.
+    function _partWidth(metrics, text, padding) {
+        metrics.font
+        return padding + root._span(metrics, text)
+    }
+
     // The state glyph's width on the Terminal row: the widest of them, so it does not move with the connection.
+    // Reads the font for the same reason _partWidth does: a binding re-evaluates on a font change only through
+    // a property it read, and one that leaves chromeStyle.cellWidth alone changes nothing else it reads.
     function _dotSpan() {
+        fontMetrics.font
         return Math.max(...root.chip.stateGlyphs.map(glyph => root._span(fontMetrics, glyph)))
     }
 
@@ -249,6 +261,8 @@ Item {
             textFormat: Text.PlainText
             text: root.chip ? root.chip.stateGlyph : ""
             font: chromeStyle.type.footnote
+            // The widest state glyph's, as measured: the chip does not move with the connection.
+            width: root.chip && root.bracketed ? root._dotSpan() : 0
             color: root.dotInk
         }
 
@@ -262,6 +276,7 @@ Item {
             textFormat: Text.PlainText
             text: root.daemonText
             font: chromeStyle.type.footnote
+            width: root._partWidth(fontMetrics, text, leftPadding)
             color: chromeStyle.paletteRevision < 0 ? "transparent" : root.colors.chipText
         }
 
@@ -275,6 +290,7 @@ Item {
             textFormat: Text.PlainText
             text: root.statusText
             font: chromeStyle.type.footnote
+            width: root._partWidth(fontMetrics, text, leftPadding)
             color: root.dotInk
         }
 
@@ -287,6 +303,7 @@ Item {
             textFormat: Text.PlainText
             text: chromeStyle.breadcrumbGlyph
             font: chromeStyle.type.footnote
+            width: root._partWidth(fontMetrics, text, leftPadding)
             color: chromeStyle.paletteRevision < 0 ? "transparent" : root.colors.chipText
         }
 
@@ -300,6 +317,7 @@ Item {
             textFormat: Text.PlainText
             text: root.workspaceText
             font: chromeStyle.type.footnoteStrong
+            width: root._partWidth(strongMetrics, text, leftPadding)
             color: chromeStyle.paletteRevision < 0 ? "transparent" : root.colors.chipTextStrong
         }
 
@@ -314,6 +332,7 @@ Item {
             textFormat: Text.PlainText
             text: chromeStyle.menuGlyph
             font: chromeStyle.type.footnoteStrong
+            width: root._partWidth(strongMetrics, text, leftPadding)
             color: chromeStyle.paletteRevision < 0 ? "transparent" : root.colors.chipTextStrong
         }
 

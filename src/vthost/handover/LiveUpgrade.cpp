@@ -28,6 +28,24 @@ namespace vthost::handover
 
 namespace
 {
+    /// Admits served sessions again as run() unwinds without an exec: armed right before they are closed,
+    /// and never disarmed, since an exec that succeeds does not return. Independent of UpgradeRollback,
+    /// which is built only after the capture check, the first refusal this must cover.
+    class ServedAdmissionGuard
+    {
+      public:
+        /// @param hooks Told admitServedSessions() as this goes.
+        explicit ServedAdmissionGuard(UpgradeHooks& hooks) noexcept: _hooks { hooks } {}
+        ServedAdmissionGuard(ServedAdmissionGuard const&) = delete;
+        ServedAdmissionGuard(ServedAdmissionGuard&&) = delete;
+        ServedAdmissionGuard& operator=(ServedAdmissionGuard const&) = delete;
+        ServedAdmissionGuard& operator=(ServedAdmissionGuard&&) = delete;
+        ~ServedAdmissionGuard() { _hooks.admitServedSessions(); }
+
+      private:
+        UpgradeHooks& _hooks;
+    };
+
     /// @return The refusal a capture's refusal is to the one who asked for the upgrade.
     [[nodiscard]] UpgradeRefusal refusalOf(HandoverError error) noexcept
     {
@@ -240,6 +258,10 @@ core::async::Task<std::expected<void, UpgradeError>> LiveUpgrade::run(UpgradeTar
             errorLog()("live upgrade refused: {}", describe(report.error()));
         co_return std::unexpected(report.error());
     }
+    // Served sessions cannot cross the exec: closed first, so that the check below never meets one, and none
+    // is opened again until this frame unwinds, the exec not having happened.
+    auto const admission = ServedAdmissionGuard { _hooks };
+    _hooks.closeServedSessions();
     if (auto const capturable = checkCapturable(_host); !capturable)
         co_return std::unexpected(refusalOf(capturable.error()));
 
@@ -259,6 +281,9 @@ core::async::Task<std::expected<void, UpgradeError>> LiveUpgrade::run(UpgradeTar
         daemonLog()("live upgrade refused: {}", describe(image.error()));
         co_return std::unexpected(image.error());
     }
+    // The exec runs no destructor: the owned-pane registry still queued for its writer reaches the disk now,
+    // or the next image reconciles without the panes it names and ends the runs of agents still running.
+    _host.flushOwnedPanes();
 
     // Only the encoded image and the handles it names go on: the decoded one, every session's terminal state
     // in it, is let go of here rather than kept through the wait for the target.

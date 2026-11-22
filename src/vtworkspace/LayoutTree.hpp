@@ -88,10 +88,12 @@ using PaneSeeder = std::function<bool(LayoutPane const& leaf)>;
 /// pane's backing session (it must make the model's allocator return the id it created). If a seed
 /// fails, realization stops: the first pane's failure yields no tab (nullptr); a later pane's failure
 /// leaves the tab with the panes realized so far — every one backed, none blank.
+/// @param activation Whether the new tab becomes @p workspace's active one.
 [[nodiscard]] Tab* realizeLayoutTab(SessionModel& model,
                                     WorkspaceId workspace,
                                     LayoutTab const& tab,
-                                    PaneSeeder const& seed);
+                                    PaneSeeder const& seed,
+                                    TabActivation activation = TabActivation::Activate);
 
 /// A leaf pane's resolved runtime data, as reported by a LeafResolver for serializing live panes.
 struct PaneLeafData

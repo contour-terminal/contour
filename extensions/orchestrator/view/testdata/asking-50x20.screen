@@ -1,0 +1,20 @@
+ ✦ Agents                ⬢ 4/4 ▰▰▰▰  ● 2 need you 
+╭─ Agents 7 ─────────────────────────────────────╮
+│ NEEDS YOU 2                                    │
+│▍? pr-2346 · fix CI                   asking 6m │
+│▍  Bash: ctest -R reflow --output-on-fa… ▰▰▰▱▱▱ │
+│ … issue-2253 · work on issue        waiting 6m │
+│   Waiting for Build pace                       │
+│ WORKING 1 of 4                                 │
+│ ⠋ pr-2375 · fix CI                  working 6m │
+│ TO REVIEW 1                                    │
+│ ✓ pr-2379 · fix CI · reported done        done │
+│ FINISHED 3                                     │
+│ · pr-2366 · fix CI · completed         removed │
+│ ⚑ issue-2356 · work on issue · ended by … kept │
+│ ✗ pr-2114 · fix CI · preparation faile… failed │
+│                                                │
+│ + new agent                                    │
+│                                                │
+╰────────────────────────────────────────────────╯
+ 1 2 3 answer · ⏎ see request · ^k all actions    

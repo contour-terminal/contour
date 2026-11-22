@@ -26,6 +26,8 @@
 #include <concepts>
 #include <cstddef>
 #include <format>
+#include <functional>
+#include <map>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -304,6 +306,8 @@ TEST_CASE("serializeStatusLineSegment.everyPlaceholderNameRoundTrips", "[statusl
                 return "{Extension:git}";
             else if constexpr (std::same_as<T, StatusLineDefinitions::UserVar>)
                 return "{UserVar:foo}";
+            else if constexpr (std::same_as<T, StatusLineDefinitions::DaemonExtension>)
+                return "{DaemonExtension:orchestrator}";
             else
                 return "{" + name + "}";
         }();
@@ -636,6 +640,108 @@ TEST_CASE("StatusLineBuilder.extension.parse", "[statusline][extensions]")
             auto const segment = parseStatusLineSegment(text);
             CHECK(serializeStatusLineSegment(segment) == text);
         }
+    }
+}
+
+namespace
+{
+/// Summaries a test sets by hand, as a daemon's daemon-scoped extensions publish them.
+class FakeDaemonSummaries final: public IDaemonExtensionSummaries
+{
+  public:
+    [[nodiscard]] std::string summaryOf(std::string_view name) const override
+    {
+        auto const found = summaries.find(name);
+        return found != summaries.end() ? found->second : std::string {};
+    }
+
+    std::map<std::string, std::string, std::less<>> summaries;
+};
+} // namespace
+
+TEST_CASE("StatusLineBuilder.daemonExtension", "[statusline][extensions][summary]")
+{
+    using StatusLineDefinitions::DaemonExtension;
+
+    SECTION("{DaemonExtension:orchestrator} parses and prints back")
+    {
+        auto const segment = parseStatusLineSegment("{DaemonExtension:orchestrator}"sv);
+        REQUIRE(segment.size() == 1);
+        REQUIRE(std::holds_alternative<DaemonExtension>(segment[0]));
+        CHECK(std::get<DaemonExtension>(segment[0]).name == "orchestrator");
+        CHECK_FALSE(std::get<DaemonExtension>(segment[0]).flags.any());
+        for (auto const text: { "{DaemonExtension:orchestrator}"sv,
+                                "{DaemonExtension:Name=orchestrator,Bold,Color=#FF0000,Left=[}"sv })
+        {
+            INFO(text);
+            CHECK(serializeStatusLineSegment(parseStatusLineSegment(text)) == text);
+        }
+    }
+
+    SECTION("it renders the provider's text")
+    {
+        auto provider = FakeDaemonSummaries {};
+        provider.summaries.emplace("orchestrator",
+                                   "\u2b22 agents 1/4 \u00b7 \u2717"
+                                   "2");
+        auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, provider };
+        auto const render = [&](std::string_view text) {
+            return serializeToVT(mc.terminal, parseStatusLineSegment(text), StatusLineStyling::Disabled);
+        };
+        CHECK(render("{DaemonExtension:orchestrator}")
+              == "\u2b22 agents 1/4 \u00b7 \u2717"
+                 "2");
+        CHECK(render("{DaemonExtension:other}").empty());
+
+        // An escape a provider let through never reaches the line as one.
+        provider.summaries.insert_or_assign("orchestrator", "a\x1b[1mb");
+        CHECK_FALSE(render("{DaemonExtension:orchestrator}").contains('\x1b'));
+    }
+
+    SECTION("MaxWidth is read, defaults to 40 and round-trips")
+    {
+        auto const segment = parseStatusLineSegment("{DaemonExtension:Name=orchestrator,MaxWidth=7}"sv);
+        REQUIRE(segment.size() == 1);
+        REQUIRE(std::holds_alternative<DaemonExtension>(segment[0]));
+        CHECK(std::get<DaemonExtension>(segment[0]).maxWidth == ColumnCount(7));
+        CHECK(serializeStatusLineSegment(segment) == "{DaemonExtension:Name=orchestrator,MaxWidth=7}"sv);
+        CHECK(
+            std::get<DaemonExtension>(parseStatusLineSegment("{DaemonExtension:orchestrator}"sv)[0]).maxWidth
+            == ColumnCount(40));
+    }
+
+    SECTION("a long summary is cut at its end to MaxWidth")
+    {
+        auto provider = FakeDaemonSummaries {};
+        provider.summaries.emplace("orchestrator", "0123456789");
+        auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, provider };
+        CHECK(serializeToVT(mc.terminal,
+                            parseStatusLineSegment("{DaemonExtension:Name=orchestrator,MaxWidth=5}"),
+                            StatusLineStyling::Disabled)
+              == "0123\u2026");
+    }
+
+    SECTION("a narrow line keeps the summary shortened instead of dropping it")
+    {
+        auto provider = FakeDaemonSummaries {};
+        provider.summaries.emplace("orchestrator", std::string(100, 'a'));
+        auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(50) }, provider };
+        mc.terminal.setStatusLineDefinition(
+            parseStatusLineDefinition("{VTType} {DaemonExtension:orchestrator}", "", ""));
+        mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+        mc.terminal.refreshRenderBuffer();
+        auto const row =
+            mc.terminal.indicatorStatusLineDisplay().grid().lineAt(LineOffset(0)).toUtf8Trimmed();
+        CHECK(row.contains(std::string(39, 'a') + "\u2026"));
+    }
+
+    SECTION("it renders nothing without a provider")
+    {
+        auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+        CHECK(serializeToVT(mc.terminal,
+                            parseStatusLineSegment("{DaemonExtension:orchestrator}"),
+                            StatusLineStyling::Disabled)
+                  .empty());
     }
 }
 
@@ -1489,6 +1595,25 @@ TEST_CASE("serializeToVT.inputModeHidesInItsMode", "[statusline][inputmode]")
 
     mc.terminal.inputHandler().setMode(ViMode::Normal);
     CHECK(serializeToVT(mc.terminal, segment, StatusLineStyling::Disabled) == "<NORMAL>");
+}
+
+TEST_CASE("serializeToVT.inputModeSaysNothingOfInsertToAnExtension", "[statusline][inputmode]")
+{
+    auto const segment = parseStatusLineSegment("{InputMode:Left=<,Right=>}"sv);
+    auto program = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    REQUIRE(program.terminal.inputReader() == InputReader::Program);
+    CHECK(serializeToVT(program.terminal, segment, StatusLineStyling::Disabled) == "<INSERT>");
+
+    // A served pane's keys are commands to its extension's view: Insert is no mode worth naming there.
+    auto settings = Settings {};
+    settings.pageSize = PageSize { LineCount(3), ColumnCount(20) };
+    settings.inputReader = InputReader::Extension;
+    auto served = MockTerm { std::move(settings) };
+    CHECK(serializeToVT(served.terminal, segment, StatusLineStyling::Disabled).empty());
+
+    // The modes the user enters over its page are named as in any pane.
+    served.terminal.inputHandler().setMode(ViMode::Normal);
+    CHECK(serializeToVT(served.terminal, segment, StatusLineStyling::Disabled) == "<NORMAL>");
 }
 
 TEST_CASE("statusLine.colors.modeChipReadsOnEveryScheme", "[statusline][inputmode][colors]")

@@ -17,11 +17,13 @@
 #include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/MockMainController.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
+#include <contour/test/QmlComponentsTestSupport.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/ServedChromeText.hpp>
 #include <contour/window/ShellIntegrationOffer.hpp>
 #include <contour/window/SidebarModel.hpp>
 #include <contour/window/TabBadge.hpp>
@@ -678,6 +680,85 @@ TEST_CASE("accessibility: a locked pane's header names the lock and says so",
     REQUIRE(lock != nullptr);
     CHECK(lock->property("role").toInt() == QAccessible::Indicator);
     CHECK(lock->property("name").toString() == QStringLiteral("Input hidden"));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: a served tab describes who draws it, and its marker is decorative",
+          "[contour][gui][qml][a11y][served]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+    contour::test::qmlSupport::MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    auto tab =
+        loadComponent(engine,
+                      QStringLiteral("qrc:/qt/qml/Contour/Ui/TabItem.qml"),
+                      QVariantMap { { "controller", QVariant::fromValue(&controller) },
+                                    { "window", QVariant::fromValue(static_cast<QObject*>(&controller)) },
+                                    { "tabIndex", 0 },
+                                    { "tabTitle", QStringLiteral("Agents") },
+                                    { "tabName", QString {} },
+                                    { "tabColor", QColor(Qt::transparent) },
+                                    { "tabActive", true },
+                                    { "tabPaneCount", 1 },
+                                    { "tabZoomed", false },
+                                    { "tabProgressState", 0 },
+                                    { "tabProgressPercentage", 0 },
+                                    { "servedBy", QStringLiteral("Served by Agents") } });
+    auto* attached = accessibleAttachedOf(tab.get());
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("name").toString() == QStringLiteral("Agents"));
+    CHECK(attached->property("description").toString() == QStringLiteral("Served by Agents"));
+
+    auto const markers = partsNamed(*tab, QStringLiteral("tabServedMarker"));
+    REQUIRE(markers.size() == 1);
+    auto* marker = accessibleAttachedOf(markers.front());
+    REQUIRE(marker != nullptr);
+    CHECK(marker->property("ignored").toBool());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: a served pane's strip is static text named by what it says",
+          "[contour][gui][qml][a11y][served]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    // As TerminalSession phrases it: translated, so the name assistive technology reads is the translation.
+    auto const strip =
+        contour::window::servedStripText(contour::window::servedChromeOf(contour::window::ServedMark {
+            .extension = "orchestrator", .title = "Agents", .moduleDigest = "3f9a0c1d2e4b5a69" }));
+    CHECK(strip == QStringLiteral("◈ Agents · orchestrator, module 3f9a0c1d2e4b · draws this tab"));
+    contour::test::MockSession session;
+    session.setServedStrip(strip);
+    contour::test::MockPaneProxy node { /*leaf*/ true };
+    node.setSession(&session);
+    auto const policy = QVariantMap { { "content", QStringLiteral("name") },
+                                      { "actions", QStringLiteral("hidden") },
+                                      { "placement", QStringLiteral("inline") },
+                                      { "emphasis", QStringLiteral("primary") } };
+    auto header =
+        loadComponent(engine,
+                      QStringLiteral("qrc:/qt/qml/Contour/Ui/PaneHeader.qml"),
+                      QVariantMap { { "session", QVariant::fromValue(static_cast<QObject*>(&session)) },
+                                    { "node", QVariant::fromValue(static_cast<QObject*>(&node)) },
+                                    { "policy", policy } });
+    auto const strips = partsNamed(*header, QStringLiteral("paneHeaderServedStrip"));
+    REQUIRE(strips.size() == 1);
+    CHECK(strips.front()->isVisible());
+    auto* attached = accessibleAttachedOf(strips.front());
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("role").toInt() == QAccessible::StaticText);
+    CHECK(attached->property("name").toString() == strip);
+    // The strip holds the name's slot: the name is not drawn beside it.
+    auto const names = partsNamed(*header, QStringLiteral("paneHeaderName"));
+    REQUIRE(names.size() == 1);
+    CHECK_FALSE(names.front()->isVisible());
+
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 

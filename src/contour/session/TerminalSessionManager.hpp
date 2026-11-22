@@ -26,6 +26,7 @@
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/PaneKey.hpp>
 #include <contour/window/SaveLayoutCheck.hpp>
+#include <contour/window/ServedChrome.hpp>
 #include <contour/window/ShellIntegrationOffer.hpp>
 #include <contour/window/SidebarDropPolicy.hpp>
 #include <contour/window/SwitcherRows.hpp>
@@ -603,6 +604,15 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// a refusal is shown to that window as a notice and logged, as is a window with no daemon.
     /// @param acting The session that triggered the action.
     void upgradeDaemon(TerminalSession const& acting);
+
+    /// Invokes a daemon extension's palette row on the daemon of the window hosting @p acting
+    /// (WindowBinding::invokeExtensionAction); a window with no daemon logs it and does nothing.
+    /// @param acting The session that triggered the action.
+    /// @param extension What the daemon's configuration calls the extension.
+    /// @param id The declared action's id; empty for the row that asks for a grant or restarts.
+    void invokeExtensionAction(TerminalSession const& acting,
+                               std::string const& extension,
+                               std::string const& id);
     /// @}
 
     /// Re-reads the master configuration from disk once (picking up any GUI side-file changes) into
@@ -738,11 +748,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param beforeLeafSeed Invoked (when set) with each leaf pane immediately before its backing
     ///                 session is created — the hook attach mode uses to bind the pane about to be born
     ///                 to a specific remote session (via vthost::client::WireLayout::leafSession).
+    /// @param activation Whether each tab realized becomes @p window's active one: a daemon's tab the
+    ///                 daemon did not activate is realized in the background (contour::remote).
     /// @return false if @p layout has no tabs (nothing to apply); true otherwise.
     bool applyLayoutToWindow(vtworkspace::WorkspaceId window,
                              config::Layout const& layout,
                              std::optional<vtbackend::PageSize> pageSize = std::nullopt,
-                             std::function<void(config::LayoutPane const&)> const& beforeLeafSeed = {});
+                             std::function<void(config::LayoutPane const&)> const& beforeLeafSeed = {},
+                             vtworkspace::TabActivation activation = vtworkspace::TabActivation::Activate);
 
     // Keyboard tab navigation/reordering. Every entry point takes the ACTING session (the one that
     // received the keybinding) and targets that session's hosting window, so a keybinding in any
@@ -883,6 +896,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param hostSession Its id there.
     [[nodiscard]] TerminalSession* sessionForHostId(window::HostIdentity const& host,
                                                     uint64_t hostSession) const;
+
+    /// The session a pane of @p binding's windows shows for the daemon session @p hostSession.
+    /// @param binding The link the windows are bound to.
+    /// @param hostSession The daemon's id of the session (@see hostSessionIdOf).
+    /// @return The session; null when no pane of those windows shows it (yet).
+    [[nodiscard]] TerminalSession* sessionShownBy(WindowBinding const& binding, uint64_t hostSession) const;
 
     /// The drag payload of the pane showing @p session.
     /// @return The payload; std::nullopt for a session no pane shows, or one the host has no id for yet.
@@ -1437,6 +1456,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param session The session whose echo changed.
     void noteInputEchoChanged(TerminalSession const& session);
 
+    /// Tells every pane of @p tab which daemon-scoped extension draws it, as the daemon's layout says, and
+    /// repaints the tab's marker (WindowController::Roles::ServedByRole and ServedStripRole) when that
+    /// changed. GUI thread.
+    /// @param tab A tab of this manager's model.
+    /// @param mark Who draws it; nullopt for a tab whose panes run programs.
+    void noteServedTab(vtworkspace::Tab const& tab, std::optional<window::ServedMark> const& mark);
+
     /// Moves the OS's secure input to what window::desiredSecureInput says for the configured mode, whether
     /// one of our windows has focus, and the focused session's echo. Called at every change of the three:
     /// focus (session or window), an echo change, a session's removal, a reload. GUI thread.
@@ -1663,6 +1689,11 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     [[nodiscard]] std::optional<SwitchTarget> daemonTargetOf(vtworkspace::WorkspaceId window) const;
 
     /// @param window A window of this manager.
+    /// @return The daemon extensions and their palette rows of @p window's daemon
+    ///         (WindowBinding::extensionPresence); empty for a window no binding serves.
+    [[nodiscard]] vthost::proto::ExtensionPresence extensionPresenceOf(vtworkspace::WorkspaceId window) const;
+
+    /// @param window A window of this manager.
     /// @return What the location chip calls @p window's daemon (window::locationDaemonName, from
     ///         daemonTargetOf() and hostLabelOf()); the host label for a window attached to a host that is
     ///         no daemon (a tmux attach); empty for a window whose sessions run in-process.
@@ -1705,6 +1736,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @return What @p window's drift badge shows: its own daemon's drift (WindowBinding::daemonDrift); null
     ///         for a local window.
     [[nodiscard]] window::DaemonDriftModel* daemonDriftOf(vtworkspace::WorkspaceId window) const noexcept;
+
+    /// @param window A window of this manager.
+    /// @return What @p window's consent dialog shows: its own daemon's extensions' questions
+    ///         (WindowBinding::daemonExtensionConsent); null for a local window.
+    [[nodiscard]] window::DaemonExtensionConsentModel* daemonExtensionConsentOf(
+        vtworkspace::WorkspaceId window) const noexcept;
 
     /// @param session A session of this manager.
     /// @return The remote host the window holding @p session is attached to; empty for a local window, and

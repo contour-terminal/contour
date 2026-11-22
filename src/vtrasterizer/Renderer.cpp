@@ -154,6 +154,7 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
                    text::FontLocator& fontLocator,
                    Decorator hyperlinkNormal,
                    Decorator hyperlinkHover,
+                   BoxDrawingStyle boxDrawingStyle,
                    GlyphScalingMethod textScalingMethod):
     _configuredAtlasHashtableSlotCount { atlasHashtableSlotCount },
     _configuredAtlasTileCount { atlasTileCount },
@@ -176,11 +177,17 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
     _publishedMetrics { _gridMetrics },
     _publishedFontDescriptions { _fontDescriptions },
     _publishedCellSize { _gridMetrics.cellSize },
+    _requestedBoxDrawingStyle { boxDrawingStyle },
     //.
     _backgroundRenderer { _gridMetrics, colorPalette.defaultBackground },
     _imageRenderer { _gridMetrics, cellSize() },
-    _textRenderer { _gridMetrics, *_textShaper,   _fontDescriptions,
-                    _fonts,       _imageRenderer, glyphScalerFor(textScalingMethod) },
+    _textRenderer { _gridMetrics,
+                    *_textShaper,
+                    _fontDescriptions,
+                    _fonts,
+                    _imageRenderer,
+                    boxDrawingStyle,
+                    glyphScalerFor(textScalingMethod) },
     _decorationRenderer { _gridMetrics, hyperlinkNormal, hyperlinkHover },
     _cursorRenderer { _gridMetrics, vtbackend::CursorShape::Block },
     _chipRenderer { _gridMetrics, _textRenderer, _fontDescriptions, _fonts }
@@ -424,6 +431,16 @@ void Renderer::setFontDPI(DPI dpi)
     pending.fontDescriptions = std::move(descriptions);
 }
 
+void Renderer::setBoxDrawingStyle(BoxDrawingStyle style)
+{
+    auto const l = std::scoped_lock { _reconfigMutex };
+    if (style == _requestedBoxDrawingStyle)
+        return;
+
+    _requestedBoxDrawingStyle = style;
+    ensurePendingLocked().boxDrawingStyle = style;
+}
+
 void Renderer::applyFontDescriptions(FontDescriptions fontDescriptions)
 {
     if (fontDescriptions == _fontDescriptions)
@@ -571,6 +588,13 @@ void Renderer::applyPendingReconfig()
         _reconfigPending.store(false, std::memory_order_relaxed);
     }
     auto const& pending = *pendingOpt;
+
+    // First, and so before anything below that may throw (growAtlasForPage()): the request is consumed
+    // already, and a style applied later would be lost with it. Nothing to flush: the style is part of
+    // every box-drawing tile's atlas key, so the tiles drawn under the previous style are simply never
+    // found again and age out of the atlas.
+    if (pending.boxDrawingStyle)
+        _textRenderer.setBoxDrawingStyle(*pending.boxDrawingStyle);
 
     // Apply a pending geometry change (page size, margin, render-surface pixel size).
     if (pending.geometry)

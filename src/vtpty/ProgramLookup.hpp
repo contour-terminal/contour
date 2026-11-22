@@ -62,6 +62,24 @@ inline constexpr char PathListSeparator =
 /// @return The PATH to search; empty where the environment has none and the platform has no default.
 [[nodiscard]] std::string execSearchPath(std::optional<std::string> environmentPath);
 
+/// Tells whether a candidate path names an executable file, as the spawn that runs it reaches files: a
+/// relative one relative to the directory the program runs in.
+using ExecutableTest = std::function<bool(std::string const&)>;
+
+/// Finds the program a spawn into a directory held open runs -- a directory a program the user did not write
+/// may write in, such as an agent's worktree -- so that nothing planted there runs in its stead. A name
+/// carrying a directory is what it says. A bare name is looked up on @p searchPath's absolute entries only:
+/// an empty entry (the working directory, as execvp() reads it) and a relative one would each name a file
+/// inside the held directory, and are skipped, as Go's os/exec skips them. The spawn then execs the path
+/// found and searches nothing itself.
+/// @param program The program as declared.
+/// @param searchPath The PATH it runs under (execSearchPath()), @ref PathListSeparator separated.
+/// @param isExecutable Whether a candidate names an executable file.
+/// @return The path to exec -- absolute for a bare name; std::nullopt where none is found.
+[[nodiscard]] std::optional<std::string> findHeldDirectoryProgram(std::string_view program,
+                                                                  std::string_view searchPath,
+                                                                  ExecutableTest const& isExecutable);
+
 /// Where a spawn looks for the program it runs.
 struct ProgramSearch
 {

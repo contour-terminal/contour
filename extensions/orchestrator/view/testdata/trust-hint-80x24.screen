@@ -1,0 +1,24 @@
+╭─ Agents 1 ───────────────────────────────────────────────────────────────────╮
+│ WORKING 1 of 4                                                               │
+│▍◌ pr-2375 · fix CI · may be waiting for a folder-trust… waiting? see its tab │
+│                                                                              │
+│ + new agent                                                                  │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ pr-2375 · fix CI · sonnet · board ────────────────── ◌ waiting? see its tab ╮
+│ updated 9 min ago                                                            │
+│ Fixing CI                                                                    │
+│ ☑ reproduced on master                                                       │
+│ ☑ wrote the regression test                                                  │
+│ ☐ fix the reflow                                                             │
+│ ☐ watch CI                                                                   │
+│                                                                              │
+│                                                                              │
+│ ╭──────────────────────────────────────────────────────────────────────────╮ │
+│ │ ⏎ to write to pr-2375                                                    │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ ⏎ message · r agent tab · e end · n new agent · ^k all actions      ⬢ 1/4 ▰▱▱▱ 

@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/ExtensionDeclarations.hpp>
 
+#include <core/Utf8Path.hpp>
+
 #include <algorithm>
 #include <array>
+#include <ranges>
+#include <utility>
+#include <vector>
 
 namespace contour::config
 {
@@ -14,6 +19,20 @@ namespace
     {
         Permission configured;
         vtextension::CommandPermission runtime;
+    };
+
+    /// One row of the configuration-to-runtime autostart table.
+    struct AutostartMapping
+    {
+        DaemonExtensionAutostart configured;
+        vtextension::ExtensionAutostart runtime;
+    };
+
+    constexpr auto AutostartMappings = std::array {
+        AutostartMapping { .configured = DaemonExtensionAutostart::OnDemand,
+                           .runtime = vtextension::ExtensionAutostart::OnDemand },
+        AutostartMapping { .configured = DaemonExtensionAutostart::AtDaemonStart,
+                           .runtime = vtextension::ExtensionAutostart::AtDaemonStart },
     };
 
     constexpr auto PermissionMappings = std::array {
@@ -54,6 +73,29 @@ vtextension::DeclaredExtensions declaredExtensionsOf(std::span<ExtensionConfig c
 vtextension::DeclaredExtensions declaredExtensionsOf(TerminalProfile const& profile)
 {
     return declaredExtensionsOf(profile.extensions.value(), profile.statusLine.value().extension);
+}
+
+vtextension::ExtensionAutostart toExtensionAutostart(DaemonExtensionAutostart autostart) noexcept
+{
+    auto const mapping = std::ranges::find(AutostartMappings, autostart, &AutostartMapping::configured);
+    // Unreachable for a valid value; on demand is the safe answer for anything else.
+    return mapping != AutostartMappings.end() ? mapping->runtime : vtextension::ExtensionAutostart::OnDemand;
+}
+
+vtextension::DaemonExtensionDeclaration daemonExtensionDeclarationOf(DaemonExtensionConfig const& extension,
+                                                                     std::filesystem::path storeDirectory)
+{
+    auto programs =
+        extension.programs | std::views::transform([](DaemonExtensionProgram const& program) {
+            return vtextension::ProgramPath { .name = program.name, .path = core::pathToUtf8(program.path) };
+        })
+        | std::ranges::to<std::vector>();
+    return vtextension::DaemonExtensionDeclaration { .name = extension.name,
+                                                     .modulePath = extension.path,
+                                                     .autostart = toExtensionAutostart(extension.autostart),
+                                                     .configJson = extension.configJson,
+                                                     .storeDirectory = std::move(storeDirectory),
+                                                     .programs = std::move(programs) };
 }
 
 } // namespace contour::config

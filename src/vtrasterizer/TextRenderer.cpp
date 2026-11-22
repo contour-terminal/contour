@@ -312,6 +312,7 @@ TextRenderer::TextRenderer(GridMetrics const& gridMetrics,
                            FontDescriptions& fontDescriptions,
                            FontKeys const& fontKeys,
                            TextRendererEvents& eventHandler,
+                           BoxDrawingStyle boxDrawingStyle,
                            GlyphScaler const& glyphScaler):
     Renderable { gridMetrics },
     _textClusterGrouper { *this },
@@ -322,7 +323,7 @@ TextRenderer::TextRenderer(GridMetrics const& gridMetrics,
                                                    crispy::LRUCapacity { TextShapingCacheSize },
                                                    "Text shaping cache") },
     _textShaper { &textShaper },
-    _boxDrawingRenderer { gridMetrics },
+    _boxDrawingRenderer { gridMetrics, boxDrawingStyle },
     _softFontRenderer { gridMetrics },
     _glyphScaler { &glyphScaler }
 {

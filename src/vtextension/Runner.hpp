@@ -73,7 +73,7 @@ class Surface;
 /// retiring on the lane allocates nothing; `next` lets a sink chain them without allocating either.
 struct RetiredExtension
 {
-    std::shared_ptr<CompiledExtension> compiled; ///< Released first: it holds the engine too.
+    std::shared_ptr<CompiledExtension const> compiled; ///< Released first: it holds the engine too.
     std::shared_ptr<Engine> engine;
     std::unique_ptr<RetiredExtension> next; ///< For the sink's own list.
 };

@@ -11,17 +11,21 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
 #include <expected>
 #include <filesystem>
 #include <functional>
+#include <latch>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -95,8 +99,21 @@ class FakeSpawner final: public vthost::DaemonSpawner
         return answer ? answer() : DaemonPresence::Absent;
     }
 
+    [[nodiscard]] std::expected<std::unique_ptr<vthost::DaemonSpawnLock>, vthost::SpawnLockError>
+    tryLockSpawn(fs::path const&) override
+    {
+        ++lockAttempts;
+        if (lockRefusal)
+            return std::unexpected(*lockRefusal);
+        return std::make_unique<vthost::DaemonSpawnLock>();
+    }
+
     /// What each probe answers; Absent when unset.
     std::function<DaemonPresence()> answer;
+
+    /// Why every spawn lock is refused, when set: Held as another client starting the daemon.
+    std::optional<vthost::SpawnLockError> lockRefusal;
+    std::size_t lockAttempts = 0;
 
     /// What every spawn fails with, when set.
     std::optional<std::string> spawnError;
@@ -563,9 +580,136 @@ TEST_CASE("ensureDaemon keeps the image leased until the daemon serves", "[vthos
                   unboundEndpoint(), binary, spawner, placement, {}, std::chrono::seconds { 5 })
               == EXIT_FAILURE);
         CHECK(leases.heldCount() == 0);
-        CHECK(spawner.probes == 1); // no readiness poll after a failed spawn
+        CHECK(spawner.probes == 2); // before the lock and under it; no readiness poll after a failed spawn
     }
 }
+
+namespace
+{
+/// A DaemonSpawner two clients share, each on a thread of its own: the spawn lock is the operating system's
+/// (on a file in @p directory), a spawn counts and makes the daemon serve. The first two probes -- one per
+/// client, before either locks -- meet, so both clients surely found no daemon.
+class RacingSpawner final: public vthost::DaemonSpawner
+{
+  public:
+    explicit RacingSpawner(fs::path lockFile): _lockFile { std::move(lockFile) } {}
+
+    [[nodiscard]] std::expected<void, std::string> spawn(std::span<std::string const>,
+                                                         vtpty::ProcessPlacement&) override
+    {
+        ++spawns;
+        serving = true;
+        return {};
+    }
+
+    [[nodiscard]] DaemonPresence probe(fs::path const&) override
+    {
+        if (firstProbes.fetch_add(1) < 2)
+            bothLooked.arrive_and_wait();
+        return serving ? DaemonPresence::Serving : DaemonPresence::Absent;
+    }
+
+    [[nodiscard]] std::expected<std::unique_ptr<vthost::DaemonSpawnLock>, vthost::SpawnLockError>
+    tryLockSpawn(fs::path const&) override
+    {
+        return vthost::tryLockDaemonSpawn(_lockFile);
+    }
+
+    std::atomic<int> spawns = 0;
+    std::atomic<bool> serving = false;
+    std::atomic<int> firstProbes = 0;
+    std::latch bothLooked { 2 };
+
+  private:
+    fs::path _lockFile;
+};
+} // namespace
+
+TEST_CASE("ensureDaemon: two clients starting at once start one daemon", "[vthost][daemon][spawn-lock]")
+{
+    auto const temp = core::testing::ScopedTempDir { "contour-spawn-lock" };
+    auto const socket = temp.path() / "s" / "control";
+    auto spawner = RacingSpawner { vthost::daemonSpawnLockPath(socket) };
+    auto const endpoint = vthost::AttachEndpoint { vthost::UnixEndpoint { .socketPath = socket } };
+    auto results = std::array<int, 2> { EXIT_FAILURE, EXIT_FAILURE };
+    {
+        auto clients = std::vector<std::jthread> {};
+        for (auto& result: results)
+            clients.emplace_back([&] {
+                auto binary = CountingBinarySource {};
+                auto placement = vtpty::NoPlacement {};
+                result = vthost::ensureDaemon(
+                    endpoint, binary, spawner, placement, {}, std::chrono::seconds { 5 });
+            });
+    }
+    CHECK(results == std::array { EXIT_SUCCESS, EXIT_SUCCESS });
+    CHECK(spawner.spawns == 1);
+}
+
+TEST_CASE("ensureDaemon: a client that finds the spawn lock held waits for the holder's daemon",
+          "[vthost][daemon][spawn-lock]")
+{
+    auto binary = CountingBinarySource {};
+    auto spawner = FakeSpawner {};
+    auto placement = vtpty::NoPlacement {};
+
+    SECTION("which comes to serve: nothing is started")
+    {
+        spawner.lockRefusal = vthost::SpawnLockError::Held;
+        spawner.answer = [&] {
+            return spawner.probes < 3 ? DaemonPresence::Absent : DaemonPresence::Serving;
+        };
+        CHECK(vthost::ensureDaemon(
+                  unboundEndpoint(), binary, spawner, placement, {}, std::chrono::seconds { 5 })
+              == EXIT_SUCCESS);
+        CHECK(spawner.spawned.empty());
+        CHECK(binary.calls == 0);
+    }
+    SECTION("which never comes: it gives up as its time runs out, starting none")
+    {
+        spawner.lockRefusal = vthost::SpawnLockError::Held;
+        CHECK(vthost::ensureDaemon(
+                  unboundEndpoint(), binary, spawner, placement, {}, std::chrono::seconds { 0 })
+              == EXIT_FAILURE);
+        CHECK(spawner.spawned.empty());
+    }
+    SECTION("a lock that cannot be taken at all does not stop the start")
+    {
+        spawner.lockRefusal = vthost::SpawnLockError::Io;
+        std::ignore = vthost::ensureDaemon(
+            unboundEndpoint(), binary, spawner, placement, {}, std::chrono::seconds { 0 });
+        CHECK(spawner.spawned.size() == 1);
+    }
+}
+
+#ifndef _WIN32
+TEST_CASE("the native spawn lock is one holder's at a time, in an owner-only directory",
+          "[vthost][daemon][spawn-lock]")
+{
+    auto const temp = core::testing::ScopedTempDir { "contour-spawn-lock" };
+    auto const lockFile = vthost::daemonSpawnLockPath(temp.path() / "s" / "control");
+    CHECK(lockFile.filename() == "control.spawn.lock");
+    {
+        auto const first = vthost::tryLockDaemonSpawn(lockFile);
+        REQUIRE(first.has_value());
+        CHECK((fs::status(lockFile.parent_path()).permissions() & fs::perms::all) == fs::perms::owner_all);
+        auto const second = vthost::tryLockDaemonSpawn(lockFile);
+        REQUIRE_FALSE(second.has_value());
+        CHECK(second.error() == vthost::SpawnLockError::Held);
+    }
+    // Released with its holder; the file stays, so the next client locks the same one.
+    CHECK(fs::exists(lockFile));
+    CHECK(vthost::tryLockDaemonSpawn(lockFile).has_value());
+
+    // A link planted as the lock file is not followed.
+    auto const planted = vthost::daemonSpawnLockPath(temp.path() / "s" / "other");
+    fs::create_symlink(temp.path() / "elsewhere", planted);
+    auto const refused = vthost::tryLockDaemonSpawn(planted);
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(refused.error() == vthost::SpawnLockError::Io);
+    CHECK_FALSE(fs::exists(temp.path() / "elsewhere"));
+}
+#endif
 
 TEST_CASE("this process names its own executable", "[vthost][relocate]")
 {
