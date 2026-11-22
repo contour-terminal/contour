@@ -237,6 +237,7 @@ install_deps_popos() {
         libqt5opengl5-dev
         libqt5x11extras5-dev
         libssh2-1-dev
+        libpng-dev
         libssl-dev
         zlib1g-dev
         libsystemd-dev
@@ -282,6 +283,7 @@ install_deps_ubuntu() {
         libfreetype6-dev
         libharfbuzz-dev
         libssh2-1-dev
+        libpng-dev
         libssl-dev
         zlib1g-dev
         libsystemd-dev
@@ -425,6 +427,7 @@ install_deps_FreeBSD() {
         ncurses \
         ninja \
         pkgconf \
+        png \
         qt6-5compat \
         qt6-base \
         qt6-declarative \
@@ -453,6 +456,7 @@ install_deps_OpenBSD() {
         libssh2 \
         ninja \
         pkgconf \
+        png \
         qt6-qt5compa \
         qt6 \
         qt6-qtdeclarative \
@@ -483,6 +487,7 @@ install_deps_arch() {
         ninja \
         openssl \
         zlib \
+        libpng \
         pkg-config \
         systemd-libs \
         libutempter \
@@ -534,6 +539,7 @@ install_deps_suse() {
         libxkbcommon-x11-devel
         libopenssl-devel
         zlib-devel
+        libpng16-devel
         libssh2-devel
         ncurses-devel
         systemd-devel
@@ -595,6 +601,7 @@ install_deps_fedora() {
         ninja-build
         openssl-devel
         zlib-devel
+        libpng-devel
         pkgconf
         rust-std-static-wasm32-wasip1
         systemd-devel
@@ -674,6 +681,7 @@ install_deps_darwin() {
         fontconfig \
         freetype \
         harfbuzz \
+        libpng \
         libssh2 \
         libtool \
         openssl \

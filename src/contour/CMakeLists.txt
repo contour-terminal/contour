@@ -2350,8 +2350,8 @@ if(WIN32)
         )
     else()
         # A GUI-less contour.exe links no Qt, so there is nothing to deploy, but it still imports the DLLs vcpkg's
-        # dynamic triplet builds its libraries as (yaml-cpp, OpenSSL, libssh2, zlib), staged beside it. Only the DLLs
-        # of bin/ are installed: no test suite, helper or developer tool is.
+        # dynamic triplet builds its libraries as (yaml-cpp, OpenSSL, libssh2, zlib, libpng), staged beside it.
+        # Only the DLLs of bin/ are installed: no test suite, helper or developer tool is.
         install(
             DIRECTORY "$<TARGET_FILE_DIR:contour>/"
             DESTINATION "bin"
@@ -2508,6 +2508,9 @@ else()
         if("${LSB_RELEASE_NUMBER}" STREQUAL "22.04")
             set(DEPENDS_EXTRA ", libyaml-cpp0.7")
         endif()
+        # libpng's runtime package took a t64 suffix in the 64-bit time_t transition: libpng16-16t64 from
+        # Ubuntu 24.04 and Debian 13 on, libpng16-16 before. The alternative names both, for every release.
+        set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libpng16-16t64 | libpng16-16")
 
         if(LINUX)
             set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libutempter0")

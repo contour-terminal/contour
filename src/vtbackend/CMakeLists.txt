@@ -106,7 +106,9 @@ set(vtbackend_HEADERS
     shell/MarkArbiter.hpp
     input/MatchModes.hpp
     graphics/MessageParser.hpp
+    graphics/PngDecoding.hpp
     testing/MockTerm.hpp
+    testing/PngSamples.hpp
     testing/StateHandover.hpp
     vt/ModifyKeys.hpp
     vt/PointerShape.hpp
@@ -231,6 +233,7 @@ set(vtbackend_SOURCES
     vt/SoftFont.cpp
     vt/SoftFontStore.cpp
     graphics/MessageParser.cpp
+    graphics/PngDecoding.cpp
     testing/MockTerm.cpp
     render/RenderBuffer.cpp
     screen/PreeditPlacement.cpp
@@ -324,8 +327,9 @@ target_link_libraries(vtbackend PUBLIC
     vtparser
     vtpty
 )
-# PRIVATE: only the inflater (graphics/KittyInflate.cpp) includes zlib.h; no header of ours exposes it.
-target_link_libraries(vtbackend PRIVATE ZLIB::ZLIB)
+# PRIVATE: only the inflater (graphics/KittyInflate.cpp) includes zlib.h, and only the PNG decoder
+# (graphics/PngDecoding.cpp) png.h; no header of ours exposes either.
+target_link_libraries(vtbackend PRIVATE PNG::PNG ZLIB::ZLIB)
 
 if(LIBTERMINAL_LOG_TRACE)
     target_compile_definitions(vtbackend PUBLIC LIBTERMINAL_LOG_TRACE=1)
@@ -422,6 +426,7 @@ if(LIBTERMINAL_TESTING)
         grid/Line_test.cpp
         shell/LivePromptMarks_test.cpp
         graphics/MessageParser_test.cpp
+        graphics/PngDecoding_test.cpp
         vt/ModifyKeys_test.cpp
         vt/VTType_test.cpp
         vt/RectangularAreaChecksum_test.cpp

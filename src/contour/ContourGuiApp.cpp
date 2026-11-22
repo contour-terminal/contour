@@ -516,7 +516,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::unique_ptr<remote::IWorkspaceLister> startupLister,
                              std::unique_ptr<vthost::IGitStatusProbe> workspaceGitProbe,
                              platform::ApplicationReadiness::State applicationAtStart):
-    ContourApp { env, display::decodeImage },
+    ContourApp { env, display::makeImageDecoder() },
     _startupTimeline { core::platform::defaultSteadyClock(), processStart },
     _exitEventLoop { exitEventLoop ? std::move(exitEventLoop)
                                    : std::function<void(int)> { exitQtEventLoop } },

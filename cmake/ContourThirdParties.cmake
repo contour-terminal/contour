@@ -474,6 +474,8 @@ set(CORE_CPP_WITH_SYSTEMD ${CONTOUR_WITH_SYSTEMD})
 find_package(OpenSSL REQUIRED)
 # vtbackend inflates kitty graphics `o=z` payloads.
 find_package(ZLIB REQUIRED)
+# vtbackend decodes PNG images (kitty `f=100`, GIP, iTerm2), in a build without Qt as well.
+find_package(PNG REQUIRED)
 file(STRINGS "${PROJECT_SOURCE_DIR}/vendor/core-cpp/MANIFEST" _core_cpp_ref REGEX "^# ref ")
 string(REPLACE "# ref " "" _core_cpp_ref "${_core_cpp_ref}")
 # EXCLUDE_FROM_ALL builds only the core-cpp targets contour links -- and would skip core-cpp's own

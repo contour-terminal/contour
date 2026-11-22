@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/core/TerminalContext.hpp>
+#include <vtbackend/graphics/PngDecoding.hpp>
 #include <vtbackend/screen/LocalTime.hpp>
 #include <vtbackend/screen/TerminalClocks.hpp>
 #include <vtbackend/shell/CommandBlock.hpp>
 #include <vtbackend/testing/InMemoryGitFileSystem.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
+#include <vtbackend/testing/PngSamples.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
 
 #include <vtpty/ChildProcess.hpp>
@@ -6152,4 +6154,39 @@ TEST_CASE("a hosted session decodes PNG images with the host's decoder", "[vthos
     CHECK(terminal->peekInput()
           == (given ? "\033_Gi=5;OK\033\\"sv : "\033_Gi=5;EINVAL:could not decode image\033\\"sv));
     CHECK(*decoder.calls == (given ? 1 : 0));
+}
+
+TEST_CASE("a hosted session of a build without Qt decodes PNG images with libpng", "[vthost][host][image]")
+{
+    // What `contour daemon` hosts its sessions with when it is built with CONTOUR_FRONTEND_GUI=OFF: no Qt,
+    // and still a PNG decoder, so a headless server shows the PNG a program sends as a desktop's daemon does.
+    auto const backend = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *backend };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                          .imageDecoder = vtbackend::PngDecoder {} } };
+
+    REQUIRE(host.createTab() != nullptr);
+    auto const session = host.model().workspace(host.workspaceId())->activeTab()->rootPane()->session();
+    auto* terminal = host.terminal(session);
+    REQUIRE(terminal != nullptr);
+    auto& mock = dynamic_cast<vtpty::MockPty&>(dynamic_cast<vthost::TappingPty&>(terminal->device()).inner());
+
+    using namespace std::string_view_literals;
+    auto const& png = vtbackend::test::png_samples::Rgb8Png;
+    mock.appendStdOutBuffer(std::format(
+        "_Ga=T,i=5,f=100;{}\\",
+        core::base64::encode(std::string_view { reinterpret_cast<char const*>(png.data()), png.size() })));
+    REQUIRE(terminal->processInputOnce());
+    CHECK(terminal->peekInput() == "_Gi=5;OK\\"sv);
+    auto const fragment =
+        terminal->primaryScreen().at(vtbackend::LineOffset(0), vtbackend::ColumnOffset(0)).imageFragment();
+    REQUIRE(fragment);
+    CHECK(fragment->rasterizedImage().image().size()
+          == vtbackend::ImageSize { vtbackend::Width(2), vtbackend::Height(2) });
 }

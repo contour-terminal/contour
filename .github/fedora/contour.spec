@@ -49,6 +49,7 @@ BuildRequires:  fontconfig-devel
 BuildRequires:  freetype-devel
 BuildRequires:  gcc-c++
 BuildRequires:  harfbuzz-devel
+BuildRequires:  libpng-devel
 BuildRequires:  libssh2-devel
 BuildRequires:  libutempter-devel
 BuildRequires:  ninja-build
@@ -72,6 +73,7 @@ Requires:       cairo
 Requires:       fontconfig
 Requires:       freetype
 Requires:       harfbuzz
+Requires:       libpng
 Requires:       libssh2
 Requires:       libutempter
 Requires:       systemd-libs

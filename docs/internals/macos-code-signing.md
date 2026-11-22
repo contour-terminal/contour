@@ -37,7 +37,7 @@ ctest --preset macos-package           # what CI runs, same configuration
 cpack --preset macos-package
 ```
 
-The first configure builds openssl, libssh2, yaml-cpp, freetype, harfbuzz and cairo from
+The first configure builds openssl, libssh2, yaml-cpp, libpng, freetype, harfbuzz and cairo from
 source — about 5 minutes, cached in `~/.cache/vcpkg/archives` afterwards. `install-deps.sh`
 provides the autotools those ports need on the build host.
 
@@ -266,8 +266,8 @@ macOS as its minimum — on a developer's up-to-date Mac that meant a `.dmg` req
 runner image. Nothing surfaced it: the app was correctly signed, correctly notarizable, and
 simply refused to start.
 
-So the six libraries Contour links — openssl, libssh2, yaml-cpp, freetype, harfbuzz, cairo
-— are built from source by vcpkg against `CMAKE_OSX_DEPLOYMENT_TARGET`. The whole mechanism
+So the seven libraries Contour links — openssl, libssh2, yaml-cpp, libpng, freetype, harfbuzz,
+cairo — are built from source by vcpkg against `CMAKE_OSX_DEPLOYMENT_TARGET`. The whole mechanism
 is one triplet file, [`cmake/vcpkg-triplets/arm64-osx-contour.cmake`](https://github.com/contour-terminal/contour/blob/master/cmake/vcpkg-triplets/arm64-osx-contour.cmake),
 whose `VCPKG_OSX_DEPLOYMENT_TARGET` is the single knob. This is not a new mechanism: the
 Windows job has always built its dependencies with vcpkg from the same `vcpkg.json`.

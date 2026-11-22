@@ -4,6 +4,8 @@
 
 #include <contour/display/ImageDecoding.hpp>
 
+#include <vtbackend/graphics/PngDecoding.hpp>
+
 #include <QtCore/QBuffer>
 #include <QtCore/QByteArray>
 #include <QtGui/QColor>
@@ -14,6 +16,7 @@
 #include <array>
 #include <cstdint>
 #include <span>
+#include <string_view>
 
 TEST_CASE("decodeImage turns a PNG into RGBA pixels and declines everything else", "[image]")
 {
@@ -65,4 +68,38 @@ TEST_CASE("decodeImage reads whatever file an application hands over as PNG", "[
     REQUIRE(pixels.has_value());
     CHECK(size == vtbackend::ImageSize { vtbackend::Width(2), vtbackend::Height(2) });
     CHECK((*pixels)[2] == 255);
+}
+
+TEST_CASE("makeImageDecoder decodes PNG with libpng and every other file with QImage", "[image]")
+{
+    auto const decoder = contour::display::makeImageDecoder();
+    auto const encode = [](char const* format) {
+        auto source = QImage { 3, 2, QImage::Format_RGBA8888 };
+        source.fill(QColor(0, 255, 0, 255));
+        auto file = QByteArray {};
+        auto buffer = QBuffer { &file };
+        buffer.open(QIODevice::WriteOnly);
+        REQUIRE(source.save(&buffer, format));
+        return file;
+    };
+
+    // A PNG goes to libpng, so a GUI build decodes it as a daemon built without Qt does; QImage still reads
+    // what an application hands over as PNG without being one.
+    for (auto const* const format: { "PNG", "BMP" })
+    {
+        INFO(format);
+        auto const file = encode(format);
+        auto const bytes = std::span<uint8_t const> { reinterpret_cast<uint8_t const*>(file.constData()),
+                                                      static_cast<size_t>(file.size()) };
+        CHECK(vtbackend::isPng(bytes) == (std::string_view { format } == "PNG"));
+
+        auto size = vtbackend::ImageSize {};
+        auto const pixels = decoder(vtbackend::ImageFormat::PNG, bytes, size);
+        REQUIRE(pixels.has_value());
+        CHECK(size == vtbackend::ImageSize { vtbackend::Width(3), vtbackend::Height(2) });
+        REQUIRE(pixels->size() == std::size_t { 3 } * 2 * 4);
+        CHECK((*pixels)[0] == 0);
+        CHECK((*pixels)[1] == 255);
+        CHECK((*pixels)[3] == 255);
+    }
 }

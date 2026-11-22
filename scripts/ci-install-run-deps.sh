@@ -9,6 +9,7 @@ sudo apt install -y \
     libfontconfig1 \
     libfreetype6 \
     libharfbuzz0b \
+    libpng16-16t64 \
     libssh-4 \
     libyaml-cpp0.8 \
     \

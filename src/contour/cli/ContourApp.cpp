@@ -589,6 +589,7 @@ ContourApp::ContourApp(core::Environment const& env, vtbackend::ImageDecoder ima
         Project { "Qt", "GPL", "https://www.qt.io/" },
         Project { "FreeType", "GPL, FreeType License", "https://freetype.org/" },
         Project { "HarfBuzz", "Old MIT", "https://harfbuzz.github.io/" },
+        Project { "libpng", "PNG Reference Library License v2", "http://www.libpng.org/pub/png/libpng.html" },
         // Project{"Catch2", "BSL-1.0", "https://github.com/catchorg/Catch2"},
         Project { "libunicode", "Apache-2.0", "https://github.com/contour-terminal/libunicode" },
         Project { "yaml-cpp", "MIT", "https://github.com/jbeder/yaml-cpp" },

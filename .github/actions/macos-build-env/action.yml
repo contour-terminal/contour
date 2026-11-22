@@ -54,8 +54,8 @@ runs:
         key: vcpkg-macos-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/vcpkg-triplets/arm64-osx-contour.cmake') }}
         restore-keys: vcpkg-macos-
     - name: "vcpkg: clone and bootstrap"
-      # The libraries Contour links (openssl, libssh2, yaml-cpp, freetype, harfbuzz,
-      # cairo) are built from source against CMAKE_OSX_DEPLOYMENT_TARGET rather than
+      # The libraries Contour links (openssl, libssh2, yaml-cpp, libpng, freetype,
+      # harfbuzz, cairo) are built from source against CMAKE_OSX_DEPLOYMENT_TARGET rather than
       # taken from Homebrew. Homebrew ships one prebuilt bottle per macOS release and
       # installs the one matching the runner, which made the .dmg's minimum macOS equal
       # to the runner image's -- an invisible compatibility cliff that moved whenever

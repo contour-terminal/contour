@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/display/ImageDecoding.hpp>
 
+#include <vtbackend/graphics/PngDecoding.hpp>
+
 #include <QtGui/QImage>
 
 #include <cstring>
@@ -36,6 +38,11 @@ std::optional<vtbackend::Image::Data> decodeImage(vtbackend::ImageFormat format,
         p += rowBytes;
     }
     return pixels;
+}
+
+vtbackend::ImageDecoder makeImageDecoder()
+{
+    return vtbackend::PngDecoder { vtbackend::PngDecodingLimits {}, decodeImage };
 }
 
 } // namespace contour::display

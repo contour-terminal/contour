@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtbackend/core/Image.hpp>
+#include <vtbackend/graphics/PngDecoding.hpp>
 
 #include <core/cli/App.hpp>
 
@@ -65,15 +66,16 @@ class ContourApp: public core::cli::App
 {
   public:
     /// @param env The process environment every part of the application reads through.
-    /// @param imageDecoder What a daemon this process serves decodes its sessions' PNG images with: the GUI
-    ///        build's (this library is Qt-free and has none of its own). None, and those images are refused.
-    explicit ContourApp(core::Environment const& env, vtbackend::ImageDecoder imageDecoder = {});
+    /// @param imageDecoder What every terminal this process makes decodes PNG images with. libpng by default,
+    ///        which is what a build without Qt uses; a GUI build passes display::makeImageDecoder(), which
+    ///        adds QImage for the image files that are not PNG.
+    explicit ContourApp(core::Environment const& env,
+                        vtbackend::ImageDecoder imageDecoder = vtbackend::PngDecoder {});
 
     [[nodiscard]] core::cli::Command parameterDefinition() const override;
 
     /// @return What this process decodes PNG images (kitty `f=100`, GIP) with: every terminal it makes, the
-    ///         sessions a window shows and those a daemon hosts alike, is given it at construction. Empty in
-    ///         a build without the GUI, where such images are refused.
+    ///         sessions a window shows and those a daemon hosts alike, is given it at construction.
     [[nodiscard]] vtbackend::ImageDecoder const& imageDecoder() const noexcept { return _imageDecoder; }
 
   protected:
