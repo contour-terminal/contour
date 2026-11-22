@@ -32,65 +32,120 @@ finished and its worktree is gone; and from either I start the next run on the s
 
 ## The dashboard
 
-The orchestrator draws its own tab (`view/`, drawn with core-cpp's headless terminal UI): your open pull
-requests with their checks and review, the issues no pull request of yours closes, your agents with their
-state and age, and the Finished list, each entry marked `●` until you open it. While a worktree is left
-that no run accounts for — on an `agent/…` branch or under `worktree_root` — a LEFTOVER WORKTREES section lists
-it with its branch, or `detached`: a run that ended without removing its worktree leaves one, as does a worktree
-made by hand under the root. One a run has just removed is not listed while the last listing predates the
-removal; the repository's worktrees are listed again at once. The orchestrator never removes one: Enter opens
-its details on the whole
-width, with the `git -C <checkout> worktree remove <path>` line to run by hand from anywhere, each path
-quoted for the shell (a path that would not show as it is, such as one holding a zero-width character, gets
-no line), and git refuses it while it holds changes.
-Problems — a failing `gh`,
-a list cut at its limit, a configuration that does not parse — sit above the lists, one line each, and
-the line at the bottom is the summary the status line shows.
+The orchestrator draws its own tab (`view/`, drawn with core-cpp's headless terminal UI). It is one screen to
+see, read and talk to agents: the **Fleet** on the left lists your runs, and the **Focus** on the right shows
+the one selected. Pull requests and issues are not listed here: you browse and start them from the launcher
+(`n`, below).
 
-MY PULL REQUESTS and ISSUES WITHOUT A PR list one group per repository, under a header such as `▾ pace · 100`.
-`z` folds the group of the selected item into its header (`▸`), which is then selected; `z` or Enter on a
-folded header unfolds it. The folds are kept across restarts. A filter (`/`) looks inside folded groups too.
+A top bar names the dashboard and carries the fleet gauge (`⬢ 3/4 ▰▰▰▱`, active runs of `max_agents`), a
+`● 2 need you` pill while a run waits for you, and `plugins missing · I installs` while a plugin the tasks
+need is missing. Problems — a failing `gh`, a list cut at its limit, a configuration that does not parse — sit
+below it, one line each. The bottom line is the action bar: the keys that act on the selection, or the result
+of the last action until the next key.
 
-Above the agents, in a tab 100 columns or wider, a timeline charts the last 24 hours, an hour a bar: how many
-agents were active, their output tokens (a run's spread evenly over the time it was active, its statistics
-being totals), and how many runs started, each line with what it adds up to. It is drawn from the runs' state
-histories and statistics, so it covers the runs the orchestrator still keeps (`finished_retention`); the file
-of finished runs (below) keeps them all.
+**The Fleet** groups the runs by what they need from you:
 
-The layout follows the tab's size:
-
-| Width | Layout |
+| Group | Holds |
 | --- | --- |
-| 100 columns or more | the list and the selected item's details side by side |
-| 60 to 99 | the list, the details below it; Tab swaps the details in for the list |
-| below 60 | the list alone; Tab swaps the details in for the list, Esc returns |
+| NEEDS YOU | an agent that asks (`?`, blocked at a prompt), waits for your answer (`…`, its turn ended without done), or stopped by an error (`✗`) |
+| WORKING | an agent at work, starting (`◌`, its tab open and no report yet), preparing or ending |
+| TO REVIEW | an agent that reported done (`✓`), its run still open |
+| FINISHED | every run kept and not dismissed: removed (`·`), kept (`⚑`) or failed (`✗`), folded to the newest five |
 
-Below 20 rows the key-hint line and the section headings go first. A list row is cut with `…` where it is
-too wide, never in the middle of a wide character. The details wrap by default, and so does the dispatch
-form; a command line or a path among the details is cut instead, never wrapped, so that what is shown is
-never broken where a space is. Every title is sanitised before it is drawn, so an escape sequence in a pull
-request's title is shown as text and does nothing.
+Within a group the run that has waited longest comes first, so `Home` selects the one that has waited longest
+for you; Finished lists the newest first. A run moves between groups as its state changes, and the selection
+stays on the run. In a tab 100 columns or wider a run's row takes two lines: its glyph, name, task, state and
+age, and below them, dimmed, what it is on — the reason its agent reported, its board's first open `☐`, what
+it needs from you, or how it ended — with a `▰▱` meter of its board's task boxes once its board was read. In a
+narrower tab a row is one line, but a Needs you row keeps its second line, so that its question shows without
+opening anything. While a worktree is left that no run accounts for, a LEFTOVER WORKTREES group lists it (see
+below). `+ new agent` is the last row; with no run it is the only one, and the Focus shows a primer. Every
+title is sanitised before it is drawn, so an escape sequence in a title is shown as text and does nothing.
 
-| Key | Does |
+**The Focus** shows the selected run in a box whose border names it (`pr-2375 · fix CI · sonnet`) and its
+state. Below are its item's title, its branch and its permission profile, then three tabs:
+
+- **Board** (`b`): its `STATUS.md`, rendered, read every five seconds while it runs.
+- **Transcript** (`t`): its Claude Code session log. While the agent runs, the last page is read again every
+  five seconds and the tab stays pinned to its end; scrolled up, it stops following and a `↓ live` chip shows,
+  and `End` returns to it. `←` `→` turn the pages.
+- **Details** (`d`): its task, model, state, statistics, branch, worktree, URL and permissions, and for a
+  finished run its failure in plain words and what kept its worktree.
+
+A run opens on the tab its state names — one that needs you on its Transcript, one at work or done on its
+Board, a finished one on its Details — and a tab you choose sticks for that run until its state changes, so a
+run that starts asking shows you its request. Under the tab, `latest` shows the last three transcript entries
+(and a message you sent, until the transcript does), except while the Transcript tab is open. At the bottom
+is the message box of a live run, a done run's `✓ reported done` box, or how a finished run ended.
+
+Every URL the dashboard draws — the run's pull request or issue in its Details, and those in its board and
+its transcript — is an OSC 8 hyperlink, which Contour (and any terminal with OSC 8) opens with Ctrl+click on
+the machine you sit at. `o` copies the run's link with OSC 52 until the frontend can open it on its own.
+
+**Places and keys.** The Fleet has the keys by default, and its letters are commands; the Focus gets them with
+`Enter` on a live run or `Tab` on any, and its border lights up. In the Focus of a live run the message box
+has the keys: every printable key types, digits too, so no letter is ever both a command and text.
+
+| Key | In the Fleet |
 | --- | --- |
 | `↑` `↓` `j` `k` `Home` `End` | move the selection |
-| `Enter` | on a pull request or an issue, open the launcher on it, or show its agent's tab if one runs; on an agent, show its tab; on a finished run, open its details (and mark it seen); on a leftover worktree, open its details on the whole width; on a folded group, unfold it |
-| `d` | open the launcher on the selected item; on a finished run, on its item or topic, for a new run |
+| `Enter` | on a live run, write to it in the Focus; on a finished run, open the launcher on its item or topic to run it again; on a kept one, check its worktree again; on a folded group, unfold it; on `+ new agent`, open the launcher |
+| `Tab` | give the Focus the keys |
+| `b` `t` `d` | show the Focus's Board, Transcript or Details tab |
+| `PgUp` `PgDn` | scroll the Focus's tab |
+| `←` `→` | turn the transcript's pages |
 | `n` | open the launcher: browse the pull requests and issues, or type a topic |
-| `I` | install the Claude Code plugins the agents lack; asks once first |
-| `m` | write a message to the selected agent (also on its board and transcript); `Enter` types it into the agent's tab, `Esc` drops it |
-| `b` | show the selected run's board (below) |
-| `t` | show the selected run's transcript (below) |
-| a task's `key` | open the launcher on the selected item, with that task chosen |
-| `Esc` | close the help, the details page or the filter |
-| `Tab` | swap the details in for the list, and back (below 100 columns) |
-| `/` | filter the rows by text; Enter keeps the filter, Esc drops it |
-| `z` | fold the selected item's repository group, or unfold a folded one |
-| `?` | show the keys |
-| `R` | read the lists again now |
-| `e` | end the selected agent's run |
+| `/` | filter the runs by text, Finished's folded ones too; Enter keeps the filter, Esc drops it |
+| `e` | end the selected run; asks once (`e again to end · esc keeps it`) |
+| `r` | show the selected agent's tab |
+| `o` | copy the run's pull request or issue link |
 | `x` | check a kept worktree again |
 | `Del` | drop a finished run from the list |
+| `z` | fold the selected run's group, or unfold a folded one |
+| `Esc` | close the help or drop the filter |
+| `?` | show the keys |
+| `R` | read the lists again now (a palette command from the next phase) |
+| `I` | install the Claude Code plugins the agents lack; asks once first (a palette command from the next phase) |
+
+| Key | In the Focus, with the message box |
+| --- | --- |
+| printable keys | type |
+| `Enter` | send; the keys return to the Fleet, the selection stays on the run |
+| `Alt+Enter` | add a line; a paste keeps its line feeds |
+| `PgUp` `PgDn` `End` | scroll the tab; `End` back to live |
+| `Esc` `Tab` | back to the Fleet, keeping the draft (drafts are kept per run, in memory) |
+
+In the Focus of a run without a message box — one finished, preparing or ending, or a leftover worktree — the
+Fleet's letters act, and `↑` `↓` scroll instead of moving. `Esc` or `Tab` goes back.
+
+The layout follows the tab's width:
+
+| Width | Fleet has the keys | Focus has the keys |
+| --- | --- | --- |
+| 100 columns or more | both, side by side | both, side by side (a leftover worktree's Focus takes the whole width) |
+| 60 to 99 | the Fleet, the Focus below it at 60 % of the height | the Focus alone |
+| below 60 | the Fleet alone | the Focus alone |
+
+In a small tab, so that the Focus's tab keeps at least eight rows, the furniture gives way in this order: the
+header's second line; `latest` while the Board tab is open; the top bar, whose gauge and pill move to the right
+end of the action bar; and the tab strip, whose active tab moves into the header (`· board`). A row is cut
+with `…` where it is too wide, never in the middle of a wide character. The details wrap; a command line or a
+path among them is cut instead, never wrapped, so that what is shown is never broken where a space is.
+
+The Fleet's groups fold with `z` into their heading, which is then selected; `z` or Enter on a folded heading
+unfolds it, and Finished unfolds beyond its newest five the same way. The folds are kept across restarts.
+
+A worktree no run accounts for — on an `agent/…` branch or under `worktree_root` — is listed under LEFTOVER
+WORKTREES with its branch, or `detached`: a run that ended without removing its worktree leaves one, as does a
+worktree made by hand under the root. One a run has just removed is not listed while the last listing predates
+the removal; the repository's worktrees are listed again at once. The orchestrator never removes one: its
+Details carry the `git -C <checkout> worktree remove <path>` line to run by hand from anywhere, each path
+quoted for the shell (a path that would not show as it is, such as one holding a zero-width character, gets no
+line), and git refuses it while it holds changes.
+
+The dashboard is drawn in the design's palette, 256-colour by default: muted and faint text, an accent for
+the place that has the keys, and a colour per state (asking, error, working, done), each paired with its own
+glyph so that nothing is told apart by hue alone. Ordinary text and the background stay your terminal's own.
 
 **The launcher.** `n` opens one popup to start any agent. With nothing typed it lists your pull requests
 whose checks fail or whose reviewer asked for changes, then your other pull requests, then the issues
@@ -108,15 +163,16 @@ launcher. A dispatch the engine would refuse, an item an agent already works on 
 instead of starting. While Claude Code's status hooks or a plugin are missing the launcher says so, and
 asks for a second `Enter`.
 
-A task's key may not be one of the dashboard's own: the configuration is refused with a line that names
-them. On the dashboard a task's key opens the launcher on the selected item with that task chosen.
+A task's `key` is still read, and may not be one of the dashboard's reserved keys (the configuration is
+refused with a line that names them), but it no longer acts on the dashboard: the items it applied to are
+the launcher's now.
 
 **Topics.** Not everything an agent should do has a pull request or an issue. A topic's task is a `tasks`
 entry with `applies_to: topic`, whose prompt takes `{topic}` for the text. Without one, a built-in `topic`
 task makes the text the whole prompt. The run's id, branch and worktree are named from a slug of the text,
 at most 40 characters of `[a-z0-9-]`, such as `agent/topic-investigate-the-flaky-test-…`. The text itself
 reaches only the prompt and the dashboard. It starts on a new branch from the repository's base, as an
-issue's run does. `d` on a finished topic run opens the launcher again on its text.
+issue's run does. `Enter` on a finished topic run opens the launcher again on its text.
 
 **The agents' skills.** A task's prompt such as `/contour-workflows:fix-ci {url}` names a skill, and
 the skill comes with a Claude Code plugin. If that plugin is missing, the agent answers "Unknown skill".
@@ -144,42 +200,32 @@ Code's settings files: the profile lives only in the agent's command line, which
 
 ## Boards and transcripts
 
-Both are screens of the dashboard's tab, not tabs of their own, and both are read-only.
+Both are tabs of the Focus, and both are read-only.
 
 **The board** is the agent's `STATUS.md` at its worktree's root, read with `file-read` from the `worktrees`
-root and shown with how long ago it was written, again every five seconds while it is shown. Every agent is
-asked to keep one: its system prompt (`--append-system-prompt`) carries `status_board`, by default an
+root and shown with how long ago it was written, again every five seconds while its run is selected. Every
+agent is asked to keep one: its system prompt (`--append-system-prompt`) carries `status_board`, by default an
 instruction to keep `STATUS.md` with the `contour-workflows:status-board` skill. A hook's request proved
 unreliable; a system prompt holds for the whole session. `status_board: off` asks for none. Once an agent
-has run for `status_board_after` the engine looks for the file, and the agent's row carries `▤` when one is
-there. A board is untrusted text: drawn inert, cut at 64 KiB, and refused when it leads outside the worktree.
-Ending a run removes an untracked `STATUS.md` (`git clean -f -- STATUS.md`) before the worktree is checked for
-work, so a board never keeps a worktree. `b` is offered on a finished run only while its worktree was kept,
-and such a board is read once, not every five seconds; a board shown when its worktree goes says that it was
-removed when the run ended, never that the prompt failed to ask for one.
+has run for `status_board_after` the engine looks for the file. A board is untrusted text: drawn inert, cut at
+64 KiB, and refused when it leads outside the worktree. Ending a run removes an untracked `STATUS.md` (`git
+clean -f -- STATUS.md`) before the worktree is checked for work, so a board never keeps a worktree. The Board
+tab is offered on a finished run only while its worktree was kept, and such a board is read once, not every
+five seconds.
 
 A board is Markdown, and it is drawn that way: headings in the accent, `•` for list items, `☐`/`☑` for task
 boxes, `│` for quotes, aligned tables, and dim code blocks. Inline markers are dropped, and a link shows only
-its text. The selected agent's details end with its board, read every five seconds while it stays selected;
-`b` shows the whole board on its own screen.
+its text; a bare URL is a hyperlink. Its task boxes are the run's `▰▱` meter in the Fleet, and its first open
+box the row's second line.
 
 **The transcript** is the run's Claude Code session log, a page of 30 entries at a time, read with the
-declared command `agent-transcript` (`contour agent transcript … --format 1 --json`). The host finds the log
-by the run's session id and binds it to the run's worktree, which need not exist any more, so a finished run
-keeps its transcript. The page's JSON is a contract (`contract/agent-transcript/`): a page in another format,
-or Contour's refusal of the one asked for, shows "format mismatch: update contour or the orchestrator", never
-a parse error. A read that fails shows the command to run by hand.
-
-| Key | Does, on a board | Does, on a transcript |
-| --- | --- | --- |
-| `↑` `↓` `j` `k` `PgUp` `PgDn` | scroll | scroll |
-| `Home` `End` | the top and the bottom | the first and the last page |
-| `←` `→` | | the previous and the next page |
-| `b` | read it again now | show the board |
-| `t` | show the transcript | |
-| `d` | the launcher on the run's item (or topic), for a new run | the same |
-| `Enter` | show the agent's tab | the same |
-| `Esc` | back to where it was opened from: the list or the transcript | back to where it was opened from: the list or the board |
+declared command `agent-transcript` (`contour agent transcript … --format 1 --json`): when the run is
+selected, at once when the log has grown a page, and every five seconds while the agent runs and the tab
+follows it — one read per run at a time. The host finds the log by the run's session id and binds it to the
+run's worktree, which need not exist any more, so a finished run keeps its transcript. The page's JSON is a
+contract (`contract/agent-transcript/`): a page in another format, or Contour's refusal of the one asked for,
+shows "format mismatch: update contour or the orchestrator", never a parse error. A read that fails shows the
+command to run by hand.
 
 Its screens are pinned by golden files in `view/testdata/`, one per scene and size; after a deliberate
 change, `ORCHESTRATOR_UPDATE_GOLDENS=1 orchestrator_test "[view]"` writes them again, to be checked by eye.
@@ -187,14 +233,16 @@ change, `ORCHESTRATOR_UPDATE_GOLDENS=1 orchestrator_test "[view]"` writes them a
 ## Messages
 
 On a machine you reach only through `contour client`, the dashboard is the only place you can talk to an
-agent. `m` opens a message line at the bottom of the tab, addressed to the selected agent, or to the one whose
-board or transcript is shown. Every key you press goes to the line. `Enter` sends it, `Esc` drops it, and a
-paste keeps its line feeds. The text goes through the host's `pane-send` (the manifest declares `pane-input`,
-and the consent dialog asks for it): it is typed into the agent's tab as one bracketed paste followed by
-Enter, so Claude Code receives it as one message. If the agent is waiting at a permission prompt, the message
-is what that prompt receives. The orchestrator types nothing else, ever, and reads no screen: `t` shows what
-the agent did. A message the host refuses, such as one holding a control character, or one sent after the
-agent's tab closed, stays unsent, and the summary line says why.
+agent. `Enter` on a live run gives its message box the keys: every key you press goes to the box, `Enter`
+sends, `Alt+Enter` adds a line, a paste keeps its line feeds, and `Esc` goes back to the Fleet keeping the
+draft. The text goes through the host's `pane-send` (the manifest declares `pane-input`, and the consent dialog
+asks for it): it is typed into the agent's tab as one bracketed paste followed by Enter, so Claude Code
+receives it as one message. If the agent is waiting at a permission prompt, the message is what that prompt
+receives. After a send the draft clears, `latest` shows it (`you · sent 14:31`) until the transcript does, the
+action bar says `sent to pr-2375`, and the keys return to the Fleet. The orchestrator types nothing else, ever,
+and reads no screen: the Transcript tab shows what the agent did. A message the host refuses, such as one
+holding a control character, or one sent after the agent's tab closed, comes back to the box with the keys,
+and the action bar says why.
 
 ## Statistics
 

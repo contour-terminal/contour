@@ -443,7 +443,7 @@ again in a later callback", which starts with a fresh budget, not "the store is 
   most 16 KiB, with no control character other than a line feed or a tab, so it cannot end the paste it is
   put in. Anything else, or any text without `pane-input`, is `bad-argument`. A pane closed or not yet
   created is `gone`, and another's is `not-owned`. The extension is to send only what its user wrote and
-  sent: the orchestrator's `m` line is the one caller.
+  sent: the orchestrator's message box is the one caller.
 
 A declared command runs only where its manifest binds it, and sees only what its manifest declares:
 
@@ -705,10 +705,10 @@ A `tasks` entry:
 Key              | Meaning
 -----------------|-----------------------------------------------------------------------------------------------
 `id`             | Required. The task's name, unique among the tasks.
-`key`            | Required. The dashboard key that starts it: one printable character, none of the dashboard's own (the configuration names those when it refuses one).
+`key`            | Required. One printable character, none of the dashboard's reserved keys (the configuration names those when it refuses one). It no longer starts the task: the launcher (`n`) does.
 `label`          | Required. What the dashboard calls it.
 `applies_to`     | Required. `pr` for a pull request, `issue` for an issue, `topic` for a topic you type in the dashboard (`n`). Without a `topic` task, a built-in one named `topic` uses the text as the whole prompt.
-`model`          | Required. The model it runs with, one of `models`; the dispatch form can change it.
+`model`          | Required. The model it runs with, one of `models`; the launcher can change it.
 `prompt`         | Required. What the agent is started with; `{url}` stands for the item's URL, and must be there. A `topic` task's prompt takes `{topic}` for the text instead; without it, the text goes on a line after the prompt.
 `permissions`    | The permission profile its runs start with, over `permissions` above; for example `trusted` for a task that pushes its fix. Default: the global one.
 `end_done_after` | Its runs' own `end_done_after`, over the global one: a task whose agents rarely ask anything, such as fixing CI, can end itself (`5m`) while the rest wait for you, and `0` keeps its runs waiting whatever the global one says. Default: the global one.
@@ -724,35 +724,42 @@ input_mapping:
 
 ### The dashboard
 
-The list shows pull requests, issues, agents and finished runs, each finished run marked `●` until you open
-it; the right half, or the lower half of a narrow tab, shows the selected item's details. `?` lists the keys,
-your tasks' among them.
+The dashboard is one screen: the **Fleet** on the left lists your runs, grouped by what they need from you
+(NEEDS YOU, WORKING, TO REVIEW, FINISHED), the run that has waited longest first; the **Focus** on the right
+shows the selected run, its Board, Transcript or Details tab, the latest of what it said, and the box to write
+to it. Pull requests and issues are browsed and started from the launcher (`n`). In a tab narrower than 100
+columns the Focus goes below the Fleet, or, narrower than 60, takes its place while it has the keys. `?` lists
+the keys.
 
-Key                     | Does
+Key                     | Does, in the Fleet
 ------------------------|---------------------------------------------------------------------------------------
 `↑` `↓` `j` `k` `Home` `End` | move the selection
-`Enter`                 | on a pull request or an issue, open the dispatch form, or show its agent's tab if one runs; on an agent, show its tab; on a finished run, open its details
-`d`                     | open the dispatch form on the selected item; on a finished run, on its item, for a new run
-a task's `key`          | open the dispatch form on that task
-`b`                     | show the selected run's board
-`t`                     | show the selected run's transcript
-`e`                     | end the selected agent's run
+`Enter`                 | on a live run, write to it in the Focus; on a finished run, open the launcher to run it again; on `+ new agent`, open the launcher
+`Tab`                   | give the Focus the keys
+`b` `t` `d`             | show the Focus's Board, Transcript or Details tab
+`PgUp` `PgDn`           | scroll the Focus's tab
+`n`                     | open the launcher
+`e`                     | end the selected run; asks once
+`r`                     | show the selected agent's tab
+`o`                     | copy the run's link (OSC 52)
 `x`                     | check a kept worktree again
 `Del`                   | drop a finished run from the list
-`/`                     | filter the rows by text
+`/`                     | filter the runs by text
+`z`                     | fold the selected run's group
 `R`                     | read the lists again now
-`Tab`                   | swap the details in for the list, in a narrow tab
-`Esc`                   | go back
+`Esc`                   | close the help or drop the filter
 
-The dispatch form shows the item, the task, the model, the prompt, the worktree and the agent's exact command
-line. `Enter` starts the agent; `Esc` cancels. Nothing starts without it.
+In the Focus of a live run the message box has the keys: every printable key types, `Enter` sends, `Alt+Enter`
+adds a line, `PgUp` `PgDn` `End` scroll, and `Esc` goes back keeping the draft. The launcher shows the item, the
+task, the model, the permission profile, the worktree and, with `Ctrl+P`, the agent's exact command line.
+`Enter` starts the agent; `Esc` closes it. Nothing starts without it.
 
 ### Boards
 
-An agent that keeps a `STATUS.md` at its worktree's root has a board. The selected agent's details end with it,
-rendered as Markdown, and `b` shows the whole file on the tab, with how long ago it was written (`updated 3 min ago`), and reads it again every five seconds while it is shown. Once an
-agent has run for `status_board_after` the orchestrator looks for the file, and the agent's row is marked `▤`
-when it finds one.
+An agent that keeps a `STATUS.md` at its worktree's root has a board. The Focus's Board tab (`b`) shows it,
+rendered as Markdown, with how long ago it was written (`updated 3 min ago`), and reads it again every five
+seconds while its run is selected; its task boxes are the run's `▰▱` meter in the Fleet. Once an agent has run
+for `status_board_after` the orchestrator looks for the file.
 
 Every agent is asked for one: its system prompt carries `status_board`, which by default has it keep
 `STATUS.md` with the `contour-workflows:status-board` skill. A system prompt holds for the whole session, as a
@@ -765,32 +772,19 @@ run ends, an untracked `STATUS.md` is removed before the worktree is checked for
 worktree. A finished run has a board only while its worktree was kept; it is read once, as its agent writes no
 more, and a board left open when the worktree goes says it was removed when the run ended.
 
-Key                     | Does, on a board
-------------------------|---------------------------------------------------------------------------------------
-`↑` `↓` `j` `k` `PgUp` `PgDn` `Home` `End` | scroll
-`b`                     | read it again now
-`t`                     | show the run's transcript
-`d`                     | open the dispatch form on the run's item, for a new run
-`Enter`                 | show the agent's tab
-`Esc`                   | back to where it was opened from: the list or the transcript
-
 ### Transcripts
 
-`t` shows the Claude Code transcript of a run, agent or finished, 30 entries a page: the prompts, the agent's
+The Focus's Transcript tab (`t`) shows the Claude Code transcript of a run, agent or finished, 30 entries a
+page: the prompts, the agent's
 replies, its tool calls and what they returned, each cut at 2 KiB and sanitised. It reads Claude Code's own
 session log, so it is there after the run has finished and its worktree is gone, for as long as Claude Code
 keeps the log. Each entry shows the time it was written in the local time of that moment, so an entry from
 before a daylight-saving change shows the clock as it was then; a time whose offset is not known is shown in
 UTC and says so.
 
-Key                     | Does, on a transcript
-------------------------|---------------------------------------------------------------------------------------
-`←` `→` `Home` `End`    | the previous, next, first and last page
-`↑` `↓` `j` `k` `PgUp` `PgDn` | scroll
-`b`                     | show the run's board
-`d`                     | open the dispatch form on the run's item, for a new run
-`Enter`                 | show the agent's tab
-`Esc`                   | back to where it was opened from: the list or the board
+While the agent runs, the tab follows it: its last page is read again every five seconds, and the tab stays
+pinned to its end until you scroll up (`PgUp`), when a `↓ live` chip shows; `End` returns. `←` `→` turn the
+pages.
 
 The orchestrator reads the pages through `contour agent transcript`, a command its manifest declares, so the
 grant dialog lists it; the daemon runs it as its own executable, so it works where no `contour` is on the
