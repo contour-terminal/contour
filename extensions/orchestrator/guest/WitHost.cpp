@@ -356,6 +356,19 @@ namespace
             return {};
         }
 
+        [[nodiscard]] std::expected<void, HostError> paneKey(std::string_view pane, PaneKey key) override
+        {
+            // PaneKey is the world's pane-key-name, case for case.
+            static_assert(std::to_underlying(PaneKey::Escape)
+                          == TERMINAL_EXTENSIONS_DAEMON_HOST_PANE_KEY_NAME_ESCAPE);
+            auto paneText = borrowed(pane);
+            auto error = HostErrorCode {};
+            if (!terminal_extensions_daemon_host_pane_key(
+                    &paneText, static_cast<terminal_extensions_daemon_host_pane_key_name_t>(key), &error))
+                return std::unexpected(hostErrorOf(error));
+            return {};
+        }
+
         [[nodiscard]] std::expected<std::vector<PaneInfo>, HostError> panes() override
         {
             auto listed = terminal_extensions_daemon_host_list_pane_info_t {};

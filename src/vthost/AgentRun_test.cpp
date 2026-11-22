@@ -765,6 +765,37 @@ TEST_CASE("e on a Done run ends it", "[daemon][e2e][agents]")
     CHECK_FALSE(d.world.hasWorktree(dispatched.run.worktree));
 }
 
+TEST_CASE("a digit answers an agent that asks, as a key pressed in its tab", "[daemon][e2e][agents]")
+{
+    auto d = AgentDaemon {};
+    auto desk = Desk { *d.live, d.world };
+    auto const dispatched = dispatch(desk, *d.live, d.world, "2375", "pr-2375-");
+    // A permission prompt, as the status hook reports it.
+    report(*d.live, dispatched.agent, "blocked:kind=permission");
+    REQUIRE(desk.until([&] { return reported(d.world, "pr-2375-", "asking"); }));
+    selectRun(desk, 0, dispatched.run.id);
+    auto const chips = desk.until([&] { return desk.page().contains("1 yes"); });
+    INFO("dashboard: " << desk.page());
+    REQUIRE(chips);
+
+    // `1` is pressed in the agent's tab alone: the fake agent echoes it after its greeting.
+    desk.type("1");
+    REQUIRE(desk.until([&] { return desk.page().contains("answered yes"); }));
+    REQUIRE(d.live->eventually([&] { return d.live->pageText(dispatched.agent).contains("ready1"); }));
+
+    // `3` presses Escape, which rejects the request: the run waits for the reason, the message box open.
+    report(*d.live, dispatched.agent, "working");
+    REQUIRE(desk.until([&] { return reported(d.world, "pr-2375-", "working"); }));
+    report(*d.live, dispatched.agent, "blocked:kind=permission");
+    REQUIRE(desk.until([&] { return reported(d.world, "pr-2375-", "asking"); }));
+    desk.type("3");
+    REQUIRE(desk.until([&] { return reported(d.world, "pr-2375-", "waiting"); }));
+    auto const box =
+        desk.until([&] { return desk.page().contains(std::format("to {}", runName(dispatched.run.id))); });
+    INFO("dashboard: " << desk.page());
+    CHECK(box);
+}
+
 TEST_CASE("a live upgrade mid-run keeps the agent pane", "[daemon][e2e][agents][upgrade]")
 {
     auto world = OrchestratorWorld { VTHOST_TEST_ORCHESTRATOR_WASM, VTHOST_TEST_ORCHESTRATOR_TESTDATA };

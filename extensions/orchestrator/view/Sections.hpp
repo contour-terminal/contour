@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <orchestrator/core/Engine.hpp>
+#include <orchestrator/core/QuickReplies.hpp>
 #include <orchestrator/view/Band.hpp>
 #include <orchestrator/view/Fleet.hpp>
 #include <orchestrator/view/Keys.hpp>
@@ -98,6 +99,8 @@ struct Row
     RowState rowState = RowState::None; ///< What it is, as far as the actions it offers go (actionsFor()).
     std::string title = {}; ///< The Focus header's second line begins with it: the item's title.
     std::vector<DetailLine> details = {}; ///< The Details tab's lines.
+    std::vector<QuickReply> replies = {}; ///< An asking run's chips: the configured quick replies; empty for
+                                          ///< any other row.
 
     /// @return Whether the row can be selected: it stands for a run, a worktree or `+ new agent`; a heading
     /// only while its group hides some of its runs.

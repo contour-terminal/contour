@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/view/Fleet.hpp>
@@ -88,6 +89,7 @@ enum class BottomBox : uint8_t
 {
     None = 0, ///< Nothing: a run that is preparing or ending, a worktree, no run.
     Message,  ///< The message box: `⏎ to write to …`, or a cursor while it has the keys.
+    Asking,   ///< An asking run's: its request and the reply chips, in the message box's place.
     Done,     ///< A done run's: `✓ reported done`, and its actions.
     Ended,    ///< A finished run's: how it ended, and its actions.
 };
@@ -129,12 +131,20 @@ struct FocusPanels
 /// @return The box at the bottom of the Focus for @p row.
 [[nodiscard]] BottomBox bottomBoxOf(Engine const& engine, Row const* row, Place place) noexcept;
 
+/// @param replies An asking run's replies.
+/// @param columns The cells the chips take.
+/// @return The chips, as many to a line as fit, a few cells apart; one empty line for none.
+[[nodiscard]] std::vector<std::vector<QuickReply const*>> chipLinesOf(std::span<QuickReply const> replies,
+                                                                      int columns);
+
 /// @param box A bottom box.
+/// @param row The selected row: an asking row's chips.
 /// @param draft The draft it shows, for the message box.
 /// @param columns The cells its text takes.
 /// @param height The Focus's rows: a message box grows with its draft, up to a third of them.
 /// @return The rows the box takes, its border included; 0 for none.
-[[nodiscard]] int bottomRowsOf(BottomBox box, std::string_view draft, int columns, int height);
+[[nodiscard]] int bottomRowsOf(
+    BottomBox box, Row const* row, std::string_view draft, int columns, int height);
 
 /// The Focus, in a rounded box whose border names the run (`pr-2375 · fix CI · sonnet`) and its state: the
 /// header's second line, the tab strip, the tab, `latest`, and the bottom box; or the primer while the Fleet
@@ -162,6 +172,7 @@ class Focus final: public core::tui::Component
     void renderDetails(core::tui::Canvas& canvas);
     void renderLatest(core::tui::Canvas& canvas, Run const& run);
     void renderBottom(core::tui::Canvas& canvas);
+    void renderAsking(core::tui::Canvas& canvas);
     /// @return The selected run's draft; empty: none.
     [[nodiscard]] std::string_view draftOf() const noexcept;
 

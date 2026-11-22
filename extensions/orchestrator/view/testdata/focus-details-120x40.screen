@@ -2,7 +2,7 @@
 ╭─ Agents 7 ───────────────────────────────────╮ ╭─ pr-2375 · fix CI · sonnet ─────────────────────────── ⠿ working 6m ╮
 │ NEEDS YOU 2                                  │ │ Say why the stdio relay failed, and send a hello before half-closi… │
 │ ? pr-2346 · fix CI                 asking 6m │ │ Board  Transcript  Details                                          │
-│   asks in its tab · r shows it               │ │ task      fix CI                                                    │
+│   Bash: ctest -R reflow --output-on-failure  │ │ task      fix CI                                                    │
 │ … issue-2253 · work on issue      waiting 6m │ │ model     sonnet                                                    │
 │   Waiting for Build pace                     │ │ state     running                                                   │
 │ WORKING 1 of 4                               │ │ branch    agent/pr-2375-20261113-150847                             │

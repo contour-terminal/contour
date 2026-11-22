@@ -13,6 +13,7 @@
 
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Model.hpp>
+#include <orchestrator/core/QuickReplies.hpp>
 #include <orchestrator/core/Reconcile.hpp>
 #include <orchestrator/core/Run.hpp>
 
@@ -274,6 +275,12 @@ class IGuestHost
     /// @return Nothing, or why it was not typed (`bad-argument` for text that is not sendable).
     [[nodiscard]] virtual std::expected<void, HostError> paneSend(std::string_view pane,
                                                                   std::string_view text) = 0;
+
+    /// Presses one key in a pane the guest opened: a quick reply's answer to its agent's menu.
+    /// @param pane The pane's id.
+    /// @param key The key, a digit or Escape: never text.
+    /// @return Nothing, or why it was not pressed.
+    [[nodiscard]] virtual std::expected<void, HostError> paneKey(std::string_view pane, PaneKey key) = 0;
 
     /// Reads a regular file inside a readable root.
     /// @param root The root's label.

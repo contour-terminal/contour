@@ -56,15 +56,16 @@ std::vector<PaletteEntry> paletteEntries(Row const* row, Engine const* engine)
             entries.push_back(
                 PaletteEntry { .command = action.command,
                                .key = rank == 0 ? keyNameOf(KeyCommand::Enter) : keyNameOf(action.command),
-                               .label = labelOf(action) });
+                               .label = actionLabel(row, action) });
     // The global commands that apply, then everything else, with the reason it does not.
     for (auto const& command: commandRows())
         if (command.scope == CommandScope::Global && !listed(command.command)
             && whyNot(row, command.command, engine).empty())
             entries.push_back(PaletteEntry {
                 .command = command.command, .key = keyNameOf(command.command), .label = command.label });
+    // A reply is listed only where it answers: nine dimmed digits would bury the rest.
     for (auto const& command: commandRows())
-        if (!listed(command.command))
+        if (!listed(command.command) && !replyDigitOf(command.command))
             entries.push_back(PaletteEntry { .command = command.command,
                                              .key = keyNameOf(command.command),
                                              .label = command.label,

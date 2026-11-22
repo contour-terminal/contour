@@ -419,7 +419,7 @@ namespace
 
     constexpr auto QuietContexts = std::array {
         QuietContext { .word = "starting"sv, .text = "waiting for the agent's first report"sv },
-        QuietContext { .word = "asking"sv, .text = "asks in its tab · r shows it"sv },
+        QuietContext { .word = "asking"sv, .text = "asks for a permission"sv },
         QuietContext { .word = "waiting"sv, .text = "waiting for your answer"sv },
         QuietContext { .word = "error"sv, .text = "stopped by an error · t shows why"sv },
         QuietContext { .word = "done"sv, .text = "reported done"sv },
@@ -494,6 +494,10 @@ namespace
                     ageText(static_cast<uint64_t>(lists.config->endDoneAfterFor(run.task).count()))),
                 .role = Role::Warning });
         std::ranges::move(runDetails(lists, run), std::back_inserter(details));
+        auto const rowState = rowStateOf(run);
+        auto replies = std::vector<QuickReply> {};
+        if (rowState == RowState::Asking && lists.config != nullptr)
+            std::ranges::copy(lists.config->quickReplies(), std::back_inserter(replies));
         return Row { .kind = RowKind::Agent,
                      .mark = std::string { look.mark },
                      .markRole = look.role,
@@ -509,9 +513,10 @@ namespace
                      .offers = std::move(offers),
                      .attention = fleetGroupOf(run),
                      .state = std::string { look.word },
-                     .rowState = rowStateOf(run),
+                     .rowState = rowState,
                      .title = itemTitleOf(*lists.engine, run),
-                     .details = std::move(details) };
+                     .details = std::move(details),
+                     .replies = std::move(replies) };
     }
 
     [[nodiscard]] Row finishedRow(Lists const& lists, Run const& run, Finished const& finished)

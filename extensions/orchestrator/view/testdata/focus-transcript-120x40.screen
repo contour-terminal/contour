@@ -2,7 +2,7 @@
 ╭─ Agents 7 ───────────────────────────────────╮ ╭─ pr-2375 · fix CI · sonnet ─────────────────────────── ⠿ working 6m ╮
 │ NEEDS YOU 2                                  │ │ Say why the stdio relay failed, and send a hello before half-closi… │
 │ ? pr-2346 · fix CI                 asking 6m │ │ Board  Transcript  Details                                          │
-│   asks in its tab · r shows it               │ │   This Bash command contains multiple operations. The following     │
+│   Bash: ctest -R reflow --output-on-failure  │ │   This Bash command contains multiple operations. The following     │
 │ … issue-2253 · work on issue      waiting 6m │ │   parts require approval: echo one, mkdir sub, ls -a ..             │
 │   Waiting for Build pace                     │ │                                                                     │
 │ WORKING 1 of 4                               │ │ tool Write · 18:36                                                  │

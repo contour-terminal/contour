@@ -2,7 +2,7 @@
 ╭─ Agents 7 ─────────────────────────────────────╮
 │ NEEDS YOU 2                                    │
 │▍? pr-2346 · fix CI                   asking 6m │
-│▍  asks in its tab · r shows it          ▰▰▰▱▱▱ │
+│▍  Bash: ctest -R reflow --output-on-fa… ▰▰▰▱▱▱ │
 │ … issue-2253 · work on issue        waiting 6m │
 ╭─ Last 24 hours · an hour a bar ────────────────╮
 │ agents active  ·······················█  peak… │
@@ -17,4 +17,4 @@
 │ + new agent                                    │
 │                                                │
 ╰────────────────────────────────────────────────╯
- ⏎ see request · r agent tab · ^k all actions     
+ 1 2 3 answer · ⏎ see request · ^k all actions    

@@ -4347,3 +4347,38 @@ TEST_CASE("the folds a previous instance stored are folded again", "[orchestrato
 }
 
 // }}}
+
+TEST_CASE(
+    "a run whose request was answered with a reply that awaits a message waits while its tab still asks",
+    "[orchestrator][engine]")
+{
+    auto harness = booted({});
+    harness.runToRunning(prDispatch());
+    auto asking = paneOf(PrId, "p1", ProgramLiveness::Alive, AgentStatus::Asking);
+    asking.message = "Bash: rm -rf build";
+    harness.list({ asking });
+    REQUIRE(harness.run(PrId)->lastStatus == AgentStatus::Asking);
+
+    // A run that does not ask is left as it is.
+    auto other = booted({});
+    other.runToRunning(prDispatch());
+    auto const before = other.run(PrId)->lastStatus;
+    static_cast<void>(other.feed(AwaitMessage { .run = std::string { PrId }, .monoMs = 0 }));
+    CHECK(other.run(PrId)->lastStatus == before);
+
+    static_cast<void>(harness.feed(AwaitMessage { .run = std::string { PrId }, .monoMs = 0 }));
+    CHECK(harness.run(PrId)->lastStatus == AgentStatus::Waiting);
+    CHECK(holds<Blocked>(harness.run(PrId)));
+    // Its request is no longer its reason.
+    CHECK(harness.engine().reportedMessageOf(*harness.run(PrId)).empty());
+
+    // Its tab still reports the request it answered: it stays waiting.
+    harness.list({ asking });
+    CHECK(harness.run(PrId)->lastStatus == AgentStatus::Waiting);
+
+    // Its agent moves on: the hold ends, and a later request asks again.
+    harness.list({ paneOf(PrId, "p1", ProgramLiveness::Alive, AgentStatus::Working) });
+    CHECK(harness.run(PrId)->lastStatus == AgentStatus::Working);
+    harness.list({ asking });
+    CHECK(harness.run(PrId)->lastStatus == AgentStatus::Asking);
+}

@@ -2,7 +2,7 @@
 ╭─ Agents 7 ───────────────────────────────────╮ ╭─ issue-2356 · work on issue · sonnet ─────────────────────── ⚑ kept ╮
 │ NEEDS YOU 2                                  │ │ Report the Qt macOS bug that drops Ctrl+Cmd+arrow key presses, the… │
 │ ? pr-2346 · fix CI                 asking 6m │ │ Board  Transcript  Details                                          │
-│   asks in its tab · r shows it               │ │ task      work on issue                                             │
+│   Bash: ctest -R reflow --output-on-failure  │ │ task      work on issue                                             │
 │ … issue-2253 · work on issue      waiting 6m │ │ model     sonnet                                                    │
 │   Waiting for Build pace                     │ │ state     ended by you, worktree kept, seen: .git file was changed; │
 │ WORKING 1 of 4                               │ │             nothing was run there                                   │

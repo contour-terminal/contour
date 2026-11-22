@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstddef>
 #include <format>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -175,7 +176,8 @@ constexpr auto WorkingBoard = R"(# Fixing CI
                     finishedRun(NewId, ChangeRequestRef { 2366 }, Fate::Removed, Seen::New, "fix_ci"),
                     kept,
                     failed },
-        .paneMessages = { { std::string { WaitingId }, "Waiting for Build pace" } },
+        .paneMessages = { { std::string { WaitingId }, "Waiting for Build pace" },
+                          { std::string { AskingId }, "Bash: ctest -R reflow --output-on-failure" } },
     };
 }
 
@@ -235,8 +237,10 @@ struct Scene
                 .sizes = { Wide, Medium, Narrow },
                 .select = RunningId },
         Scene { .name = "focus-details", .world = fleetWorld(), .keys = "d", .sizes = { Wide }, .select = RunningId },
-        // The run that asks opens on its transcript.
-        Scene { .name = "asking", .world = fleetWorld(), .sizes = { Wide } },
+        // The run that asks opens on its transcript, its request in the asking box; in the Narrow band its row's
+        // second line holds the request, and tab shows the box.
+        Scene { .name = "asking", .world = fleetWorld() },
+        Scene { .name = "asking-focus", .world = fleetWorld(), .keys = "\t", .sizes = { Medium, Narrow } },
         // The message box has the keys, and a draft.
         Scene { .name = "message-box",
                 .world = fleetWorld(),
@@ -638,6 +642,112 @@ TEST_CASE("drafts are kept per run", "[orchestrator][view][message]")
     CHECK(drafts.at(std::string { RunningId }) == "first");
     CHECK(drafts.at(std::string { DoneId }) == "second");
 }
+
+// {{{ quick replies
+
+namespace
+{
+constexpr auto AskingRun = "pr-2346-20261113-150500"sv;
+
+/// The fleet world drawn, the asking run selected and its reads answered.
+[[nodiscard]] std::unique_ptr<Fixture> askingFixture(Size size = Wide)
+{
+    auto fixture = std::make_unique<Fixture>(fleetWorld(), size);
+    static_cast<void>(fixture->dashboard.frame());
+    CHECK(fixture->dashboard.select(AskingRun).empty());
+    fixture->settle(sceneAnswers());
+    return fixture;
+}
+} // namespace
+
+TEST_CASE("a digit answers the run that asks: its chip fills and the box dims", "[orchestrator][view][reply]")
+{
+    auto fixture = askingFixture();
+    CHECK(fixture->dashboard.input("1")
+          == std::vector<UiAction> { QuickReplyAction { .run = std::string { AskingRun },
+                                                        .key = '1',
+                                                        .label = "yes",
+                                                        .press = PaneKey::Digit1,
+                                                        .then = AfterReply::Wait } });
+    REQUIRE(fixture->dashboard.interaction().answered.has_value());
+    CHECK(fixture->dashboard.interaction().answered->key == '1');
+    // The keys stay where they were: the agent was answered, nothing waits to be written.
+    CHECK(fixture->dashboard.interaction().place == Place::Fleet);
+    checkGolden("asking-answered-120x40", fixture->screen());
+    // A second digit while the first is in flight would reach the agent's prompt, not its menu.
+    CHECK(fixture->dashboard.input("2").empty());
+    CHECK(fixture->screen().contains("pr-2346 is answered · r opens its tab"));
+}
+
+TEST_CASE("3 rejects with Escape and opens the message box for the reason", "[orchestrator][view][reply]")
+{
+    auto fixture = askingFixture();
+    CHECK(fixture->dashboard.input("3")
+          == std::vector<UiAction> { QuickReplyAction { .run = std::string { AskingRun },
+                                                        .key = '3',
+                                                        .label = "no, and say why",
+                                                        .press = PaneKey::Escape,
+                                                        .then = AfterReply::Message } });
+    CHECK(fixture->dashboard.interaction().place == Place::Focus);
+    CHECK(fixture->screen().contains("answered no, and say why"));
+}
+
+TEST_CASE("a digit answers only while the selected run asks", "[orchestrator][view][reply]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    fixture.settle(sceneAnswers());
+    CHECK(fixture.dashboard.input("1").empty());
+    CHECK(fixture.screen().contains("select the request first"));
+    // In the message box a digit is text.
+    CHECK(fixture.dashboard.input("\r12").empty());
+    CHECK(fixture.dashboard.interaction().drafts.at(std::string { RunningId }) == "12");
+
+    // A digit no reply is on says so.
+    auto asking = askingFixture();
+    CHECK(asking->dashboard.input("7").empty());
+    CHECK(asking->screen().contains("no quick reply on 7"));
+}
+
+TEST_CASE("an agent still asking 10 s after its reply is pointed at its tab", "[orchestrator][view][reply]")
+{
+    auto fixture = askingFixture();
+    CHECK_FALSE(fixture->dashboard.input("1").empty());
+    static_cast<void>(fixture->dashboard.frame());
+    auto const due = fixture->dashboard.nextRepaintDue();
+    REQUIRE(due.has_value());
+    CHECK(*due <= fixture->clock.now() + std::chrono::milliseconds { StillAsksAfterMs });
+    fixture->clock.advance(std::chrono::milliseconds { StillAsksAfterMs });
+    CHECK(fixture->screen().contains("pr-2346 still asks · r opens its tab"));
+    // Its chips are live again.
+    CHECK_FALSE(fixture->dashboard.interaction().answered.has_value());
+}
+
+TEST_CASE("a reply the guest could not press empties its chip and says why", "[orchestrator][view][reply]")
+{
+    auto fixture = askingFixture();
+    CHECK_FALSE(fixture->dashboard.input("3").empty());
+    fixture->dashboard.replyOutdated(AskingRun);
+    CHECK_FALSE(fixture->dashboard.interaction().answered.has_value());
+    CHECK(fixture->dashboard.interaction().place == Place::Fleet);
+    CHECK(fixture->screen().contains("pr-2346 is no longer asking"));
+
+    CHECK_FALSE(fixture->dashboard.input("1").empty());
+    fixture->dashboard.replyRefused("the extension may not press keys in its tabs");
+    CHECK(fixture->screen().contains("reply not sent: the extension may not press keys in its tabs"));
+}
+
+TEST_CASE("the palette lists an asking run's replies by their labels", "[orchestrator][view][reply]")
+{
+    auto fixture = askingFixture();
+    CHECK(fixture->dashboard.input("\x0b").empty());
+    auto const screen = fixture->screen();
+    CHECK(screen.contains("yes, don't ask again"));
+    CHECK(screen.contains("no, and say why"));
+}
+
+// }}}
 
 TEST_CASE("o copies the link with OSC 52 in the next frame", "[orchestrator][view]")
 {

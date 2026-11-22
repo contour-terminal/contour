@@ -36,6 +36,14 @@ namespace
     constexpr auto OneLineBoxRows = 3;
     /// What ends the message box's draft while it has the keys.
     constexpr auto Caret = "▏"sv;
+    /// The cells between two reply chips.
+    constexpr auto ChipGap = 3;
+
+    /// @return The cells @p reply's chip takes: its digit, a space, its label.
+    [[nodiscard]] int chipColumnsOf(QuickReply const& reply)
+    {
+        return 2 + columnsOf(reply.label);
+    }
 
     /// One piece of furniture that gives way, and the rows it gives.
     struct GivingWay
@@ -77,7 +85,7 @@ namespace
     /// The primer the Focus shows while the Fleet is empty.
     constexpr auto Primer = std::array {
         "No agents yet. ⏎ or n starts one on a pull request, an issue, or anything you type."sv,
-        "Once agents run: ⏎ talks to the selected one, esc steps back."sv,
+        "Once agents run: ⏎ talks to the selected one, 1 2 3 answers one that asks, esc steps back."sv,
         "Everything else is in ^K."sv,
     };
 
@@ -213,6 +221,9 @@ BottomBox bottomBoxOf(Engine const& engine, Row const* row, Place place) noexcep
         return BottomBox::None;
     if (row->kind == RowKind::Finished)
         return BottomBox::Ended;
+    // An asking agent's menu takes keys, not messages: the asking box takes the message box's place.
+    if (row->rowState == RowState::Asking)
+        return BottomBox::Asking;
     if (!hasMessageBox(&engine, row))
         return BottomBox::None;
     // A done run's box names what follows; writing to it follows it up, in the message box.
@@ -221,13 +232,38 @@ BottomBox bottomBoxOf(Engine const& engine, Row const* row, Place place) noexcep
     return BottomBox::Message;
 }
 
-int bottomRowsOf(BottomBox box, std::string_view draft, int columns, int height)
+std::vector<std::vector<QuickReply const*>> chipLinesOf(std::span<QuickReply const> replies, int columns)
+{
+    auto lines = std::vector<std::vector<QuickReply const*>> { {} };
+    auto used = 0;
+    for (auto const& reply: replies)
+    {
+        auto const width = chipColumnsOf(reply);
+        if (!lines.back().empty() && used + ChipGap + width > columns)
+        {
+            lines.emplace_back();
+            used = 0;
+        }
+        used += (lines.back().empty() ? 0 : ChipGap) + width;
+        lines.back().push_back(&reply);
+    }
+    return lines;
+}
+
+int bottomRowsOf(BottomBox box, Row const* row, std::string_view draft, int columns, int height)
 {
     switch (box)
     {
         case BottomBox::None: return 0;
         case BottomBox::Done:
         case BottomBox::Ended: return OneLineBoxRows;
+        // Its border, the request, and the chips.
+        case BottomBox::Asking:
+            return 3
+                   + static_cast<int>(chipLinesOf(row != nullptr ? std::span { row->replies }
+                                                                 : std::span<QuickReply const> {},
+                                                  std::max(1, columns - 1))
+                                          .size());
         case BottomBox::Message: break;
     }
     // One line while empty; it grows with its draft, up to a third of the Focus.
@@ -291,7 +327,7 @@ void Focus::renderRun(Canvas& canvas, Run const* run)
     auto inside = insideFrame(canvas);
     auto const width = inside.width() - 2;
 
-    auto const bottomRows = bottomRowsOf(_frame.box, draftOf(), width, canvas.height());
+    auto const bottomRows = bottomRowsOf(_frame.box, &row, draftOf(), width, canvas.height());
     auto const given =
         _frame.givenWay
         | furnitureGivingWay(FocusRows {
@@ -367,6 +403,47 @@ void Focus::renderRun(Canvas& canvas, Run const* run)
                                            .width = std::max(0, inside.width() - 2),
                                            .height = bottomRows });
         renderBottom(box);
+    }
+}
+
+void Focus::renderAsking(Canvas& canvas)
+{
+    auto const& theme = canvas.theme();
+    auto const& row = *_frame.row;
+    auto const width = canvas.width() - 4;
+    // Answered: the chip it was answered with fills, and the box dims until the agent stops asking.
+    auto const& answered = _interaction.answered;
+    auto const answeredKey =
+        answered && answered->run == row.run ? std::optional { answered->key } : std::nullopt;
+    auto const tone = answeredKey ? Role::Dim : Role::Warning;
+    drawFrame(canvas, std::format("? {} asks", row.name), tone);
+    auto inside = insideFrame(canvas);
+    inside.putString(0, 1, cut(row.context, width), styleOf(theme, answeredKey ? Role::Dim : Role::Text));
+    if (row.replies.empty())
+    {
+        inside.putString(1, 1, cut("answer it in its tab · r opens it", width), styleOf(theme, Role::Dim));
+        return;
+    }
+    auto y = 1;
+    for (auto const& line: chipLinesOf(row.replies, std::max(1, width - 1)))
+    {
+        auto x = 1;
+        for (auto const* const reply: line)
+        {
+            auto key = styleOf(theme, tone);
+            key.bold = true;
+            auto label = styleOf(theme, answeredKey ? Role::Dim : Role::Text);
+            if (answeredKey == reply->key)
+            {
+                key = styleOf(theme, Role::Accent);
+                key.inverse = true;
+                label = key;
+            }
+            x += inside.putString(y, x, std::string(1, reply->key), key);
+            x += inside.putString(y, x, " ", label);
+            x += inside.putString(y, x, cut(reply->label, std::max(0, width - x)), label) + ChipGap;
+        }
+        ++y;
     }
 }
 
@@ -474,6 +551,7 @@ void Focus::renderBottom(Canvas& canvas)
             inside.putString(0, 1, cut(text, width), styleOf(theme, Role::Dim));
             return;
         }
+        case BottomBox::Asking: renderAsking(canvas); return;
         case BottomBox::Done: {
             drawFrame(canvas, {}, Role::Passing);
             insideFrame(canvas).putString(

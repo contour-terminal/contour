@@ -264,6 +264,14 @@ struct InstallPlugins
     uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
 };
 
+/// The user answered a run's agent that asks with a quick reply after which it waits for a message, such as
+/// `3 no, and say why`: the run is Waiting, and stays so while its tab still reports the request it answered.
+struct AwaitMessage
+{
+    std::string run;     ///< The run's id.
+    uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
+};
+
 /// What the engine is fed.
 using Input = std::variant<Wake,
                            ProcessFinished,
@@ -282,7 +290,8 @@ using Input = std::variant<Wake,
                            ReadTranscript,
                            ShowBoard,
                            HideBoard,
-                           TabClosed>;
+                           TabClosed,
+                           AwaitMessage>;
 
 // }}}
 // {{{ effects
@@ -665,6 +674,11 @@ class Engine
     void loadFolds(std::string_view json);
     /// Folds @p group, or unfolds it, and stores the folds.
     void toggleFold(std::string_view group, std::vector<Effect>& out);
+    /// Turns an asking run Waiting, for AwaitMessage.
+    void awaitMessage(std::string_view runId, std::vector<Effect>& out);
+    /// A listed pane of a run that waits for a message (AwaitMessage) still reporting its request reads as
+    /// waiting, its request no longer its reason; one that reports anything else ends the wait.
+    void holdAwaitedMessages();
     void endStep(std::vector<Effect>& out, uint64_t revision);
     [[nodiscard]] std::optional<uint64_t> nextWake() const;
     void rebuildProblems();
@@ -753,7 +767,10 @@ class Engine
     std::size_t _insideCount = 0; ///< The runs the engine works on: those of this configuration, and the ones
                                   ///< outside it the user ended.
     std::vector<RepoState> _repos;
-    std::vector<PaneFact> _panes; ///< As last listed.
+    std::vector<PaneFact>
+        _panes; ///< As last listed; AwaitMessage's runs as holdAwaitedMessages() reads them.
+    std::vector<std::string> _awaitingMessage; ///< The runs AwaitMessage turned Waiting, while their tabs
+                                               ///< still report the request answered.
     PaneListing _paneListing =
         PaneListing::Unknown; ///< How _panes was listed; Unknown until a listing was known.
     /// A status board some tabs show.

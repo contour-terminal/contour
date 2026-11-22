@@ -75,6 +75,15 @@ struct ActionRow
 [[nodiscard]] std::string_view labelOf(ActionRow const& action) noexcept;
 
 /// @param row The selected row; nullptr: none.
+/// @param action One of its state's actions.
+/// @return What the palette calls it for @p row: a quick reply by its configured label, else labelOf().
+[[nodiscard]] std::string_view actionLabel(Row const* row, ActionRow const& action) noexcept;
+
+/// @param row An asking row.
+/// @return The bar's chip for its replies, such as `1 2 3 answer`; empty when it has none.
+[[nodiscard]] std::string replyChip(Row const& row);
+
+/// @param row The selected row; nullptr: none.
 /// @return What `⏎` does on it: its state's primary action; std::nullopt where it has none.
 [[nodiscard]] std::optional<KeyCommand> primaryAction(Row const* row) noexcept;
 
@@ -93,8 +102,9 @@ struct ActionRow
 [[nodiscard]] std::string refusalNotice(Row const* row, KeyCommand command, Engine const* engine);
 
 /// @param row The selected row; nullptr: none.
-/// @return The actions that apply to it, as the bar hints them, in rank order: its primary action as
-///         `⏎ <label>`, then each other one that has a key as `<key> <label>`.
+/// @return The actions that apply to it, as the bar hints them, in rank order: an asking row's replies first
+///         as one chip (replyChip()), its primary action as `⏎ <label>`, then each other one that has a key
+///         as `<key> <label>`.
 [[nodiscard]] std::vector<std::string> actionHints(Row const* row);
 
 /// Whether the message box has the keys.

@@ -509,6 +509,7 @@ void Driver::apply(std::string_view tab, view::UiAction const& action)
                 stepReplies();
             },
             [&](view::SendMessageAction const& message) { sendMessage(tab, message); },
+            [&](view::QuickReplyAction const& reply) { sendReply(tab, reply); },
             [&](view::DispatchAction const& dispatch) {
                 // Stamped with the time it arrived: the run's names carry the wall time.
                 auto const clock = readClock();
@@ -577,6 +578,36 @@ void Driver::sendMessage(std::string_view tab, view::SendMessageAction const& me
     // Its own words for what only a message meets: text the host will not type.
     refuse(sent.error() == HostError::BadArgument ? std::string_view { "the host will not type this text" }
                                                   : plainFailure(nameOf(sent.error())));
+}
+
+void Driver::sendReply(std::string_view tab, view::QuickReplyAction const& reply)
+{
+    auto* const shown = dashboard(tab);
+    auto const runs = _engine->runs();
+    auto const found = std::ranges::find(runs, reply.run, &Run::id);
+    // A key pressed where no menu is up would be typed into the agent's prompt: only while it still asks.
+    if (found == runs.end() || !found->pane || found->lastStatus != AgentStatus::Asking)
+    {
+        if (shown != nullptr)
+            shown->replyOutdated(reply.run);
+        return;
+    }
+    auto const pressed = _host.paneKey(*found->pane, reply.press);
+    if (!pressed)
+    {
+        _host.log(LogLevel::Debug, std::format("pane-key {}: {}", *found->pane, nameOf(pressed.error())));
+        // Its own words for what only a key meets: a manifest without pane-input.
+        if (shown != nullptr)
+            shown->replyRefused(pressed.error() == HostError::BadArgument
+                                    ? std::string_view { "the extension may not press keys in its tabs" }
+                                    : plainFailure(nameOf(pressed.error())));
+        return;
+    }
+    if (reply.then == AfterReply::Message)
+    {
+        step(AwaitMessage { .run = reply.run, .monoMs = nowMs() });
+        stepReplies();
+    }
 }
 
 void Driver::followTabs()

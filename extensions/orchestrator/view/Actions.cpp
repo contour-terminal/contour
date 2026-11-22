@@ -41,6 +41,9 @@ namespace
         return {};
     }
 
+    /// Why a digit no quick reply is on does not answer.
+    constexpr auto NoReply = "no quick reply is on this key; quick_replies sets them"sv;
+
     // The row commands first, the global ones after: the palette lists them in this order.
     constexpr auto Commands = std::array {
         CommandRow { .command = KeyCommand::Open, .label = "open"sv },
@@ -81,6 +84,16 @@ namespace
         CommandRow { .command = KeyCommand::Timeline,
                      .label = "show the last 24 hours"sv,
                      .scope = CommandScope::Global },
+        // The replies: a row's chip names each by the configuration's label (actionLabel()).
+        CommandRow { .command = KeyCommand::Reply1, .label = "answer 1"sv, .unoffered = NoReply },
+        CommandRow { .command = KeyCommand::Reply2, .label = "answer 2"sv, .unoffered = NoReply },
+        CommandRow { .command = KeyCommand::Reply3, .label = "answer 3"sv, .unoffered = NoReply },
+        CommandRow { .command = KeyCommand::Reply4, .label = "answer 4"sv, .unoffered = NoReply },
+        CommandRow { .command = KeyCommand::Reply5, .label = "answer 5"sv, .unoffered = NoReply },
+        CommandRow { .command = KeyCommand::Reply6, .label = "answer 6"sv, .unoffered = NoReply },
+        CommandRow { .command = KeyCommand::Reply7, .label = "answer 7"sv, .unoffered = NoReply },
+        CommandRow { .command = KeyCommand::Reply8, .label = "answer 8"sv, .unoffered = NoReply },
+        CommandRow { .command = KeyCommand::Reply9, .label = "answer 9"sv, .unoffered = NoReply },
     };
 
     // }}}
@@ -90,7 +103,17 @@ namespace
     // which the palette lists, so that a key keeps working where it did. `⏎` on a live run always writes to
     // it: the label changes, the action does not.
     constexpr auto Actions = std::array {
+        // The bar hints an asking row's replies as one chip, `1 2 3 answer`, before ⏎ (actionHints()).
         ActionRow { .when = RowState::Asking, .command = KeyCommand::Open, .label = "see request"sv },
+        ActionRow { .when = RowState::Asking, .command = KeyCommand::Reply1, .hinted = Hinted::PaletteOnly },
+        ActionRow { .when = RowState::Asking, .command = KeyCommand::Reply2, .hinted = Hinted::PaletteOnly },
+        ActionRow { .when = RowState::Asking, .command = KeyCommand::Reply3, .hinted = Hinted::PaletteOnly },
+        ActionRow { .when = RowState::Asking, .command = KeyCommand::Reply4, .hinted = Hinted::PaletteOnly },
+        ActionRow { .when = RowState::Asking, .command = KeyCommand::Reply5, .hinted = Hinted::PaletteOnly },
+        ActionRow { .when = RowState::Asking, .command = KeyCommand::Reply6, .hinted = Hinted::PaletteOnly },
+        ActionRow { .when = RowState::Asking, .command = KeyCommand::Reply7, .hinted = Hinted::PaletteOnly },
+        ActionRow { .when = RowState::Asking, .command = KeyCommand::Reply8, .hinted = Hinted::PaletteOnly },
+        ActionRow { .when = RowState::Asking, .command = KeyCommand::Reply9, .hinted = Hinted::PaletteOnly },
         ActionRow { .when = RowState::Asking, .command = KeyCommand::Reveal },
         ActionRow { .when = RowState::Asking, .command = KeyCommand::EndRun },
         ActionRow {
@@ -265,6 +288,24 @@ std::string_view labelOf(ActionRow const& action) noexcept
     return action.label.empty() ? labelOf(action.command) : action.label;
 }
 
+std::string_view actionLabel(Row const* row, ActionRow const& action) noexcept
+{
+    if (auto const key = replyDigitOf(action.command); key && row != nullptr)
+        if (auto const* const reply = findQuickReply(row->replies, *key))
+            return reply->label;
+    return labelOf(action);
+}
+
+std::string replyChip(Row const& row)
+{
+    if (row.replies.empty())
+        return {};
+    auto keys = std::string {};
+    for (auto const& reply: row.replies)
+        keys += keys.empty() ? std::string(1, reply.key) : std::format(" {}", reply.key);
+    return std::format("{} answer", keys);
+}
+
 std::optional<KeyCommand> primaryAction(Row const* row) noexcept
 {
     auto const actions = actionsFor(stateOf(row));
@@ -289,6 +330,8 @@ std::string whyNot(Row const* row, KeyCommand command, Engine const* engine)
     }
     if (isRowCommand(command) && !std::ranges::contains(row->offers, command))
         return std::string { listed->unoffered };
+    if (auto const key = replyDigitOf(command); key && findQuickReply(row->replies, *key) == nullptr)
+        return std::string { listed->unoffered };
     return {};
 }
 
@@ -305,6 +348,10 @@ std::string refusalNotice(Row const* row, KeyCommand command, Engine const* engi
 std::vector<std::string> actionHints(Row const* row)
 {
     auto hints = std::vector<std::string> {};
+    // The digits are the answer: an asking row's replies come first, as one chip.
+    if (row != nullptr && row->rowState == RowState::Asking)
+        if (auto chip = replyChip(*row); !chip.empty())
+            hints.push_back(std::move(chip));
     for (auto const [rank, action]: std::views::enumerate(actionsFor(stateOf(row))))
     {
         // The primary action is `⏎`'s; any other is hinted only with a key of its own.

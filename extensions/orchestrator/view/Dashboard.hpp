@@ -109,6 +109,17 @@ class Dashboard
     /// @param why The host's reason, in the failure words.
     void messageRefused(std::string_view why);
 
+    /// A quick reply sent here was not pressed in its agent's tab: its chip empties, the asking box is live
+    /// again, the message box a reply that awaits a reason opened closes, and the action bar says why, until
+    /// the next key.
+    /// @param why The host's reason, in the failure words.
+    void replyRefused(std::string_view why);
+
+    /// A quick reply sent here was not pressed, as its agent no longer asks: as replyRefused(), the action
+    /// bar saying `<run> is no longer asking`.
+    /// @param run The run's id.
+    void replyOutdated(std::string_view run);
+
     /// @return The run the selected row stands for; empty when it stands for none, or nothing is selected.
     [[nodiscard]] std::string_view selectedRun() const noexcept;
 

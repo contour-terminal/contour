@@ -89,9 +89,10 @@ TEST_CASE("the palette lists the row's actions, then the global commands, then t
     CHECK(entries[0] == PaletteEntry { .command = KeyCommand::Open, .key = "⏎", .label = "message" });
     CHECK(entries[1]
           == PaletteEntry { .command = KeyCommand::TranscriptTab, .key = "t", .label = "transcript" });
-    // Every command once.
+    // Every command once; a quick reply only where it answers, which a working run does not.
     for (auto const& command: commandRows())
-        CHECK(std::ranges::count(entries, command.command, &PaletteEntry::command) == 1);
+        CHECK(std::ranges::count(entries, command.command, &PaletteEntry::command)
+              == (replyDigitOf(command.command) ? 0 : 1));
     // Applying ones before dimmed ones.
     auto const firstDimmed =
         std::ranges::find_if(entries, [](PaletteEntry const& e) { return !e.reason.empty(); });

@@ -242,6 +242,7 @@ std::vector<Effect> Engine::step(Input const& input)
             [&](ShowBoard const& request) { showBoard(request, out); },
             [&](HideBoard const& request) { hideBoard(request.tab); },
             [&](TabClosed const& closed) { closeTab(closed.tab); },
+            [&](AwaitMessage const& awaited) { awaitMessage(awaited.run, out); },
             [&](RefreshNow const&) {
                 if (!_config)
                     return;
@@ -432,6 +433,7 @@ void Engine::reconcileWith(std::span<PaneFact const> panes,
         return;
     _panes.assign(panes.begin(), panes.end());
     _paneListing = listing;
+    holdAwaitedMessages();
     auto const decisions =
         reconcile(std::span<Run const>(_runs).first(_insideCount), _panes, requestedMonoMs, listing);
     for (auto const& decision: decisions)
@@ -446,6 +448,29 @@ void Engine::reconcileWith(std::span<PaneFact const> panes,
                        [&](PaneWentAway const& away) { feed(away.run, PaneGone {}, out); },
                    },
                    decision);
+}
+
+void Engine::awaitMessage(std::string_view runId, std::vector<Effect>& out)
+{
+    auto const* const run = findRun(runId);
+    if (run == nullptr || run->lastStatus != AgentStatus::Asking)
+        return;
+    if (!std::ranges::contains(_awaitingMessage, runId))
+        _awaitingMessage.emplace_back(runId);
+    holdAwaitedMessages();
+    feed(runId, StatusReported { AgentStatus::Waiting }, out);
+}
+
+void Engine::holdAwaitedMessages()
+{
+    std::erase_if(_awaitingMessage, [&](std::string const& run) {
+        auto const pane = std::ranges::find(_panes, run, &PaneFact::tag);
+        if (pane == _panes.end() || pane->status != AgentStatus::Asking)
+            return true;
+        pane->status = AgentStatus::Waiting;
+        pane->message.clear();
+        return false;
+    });
 }
 
 void Engine::feed(std::string_view runId, RunInput const& input, std::vector<Effect>& out)

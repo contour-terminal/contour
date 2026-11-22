@@ -176,6 +176,9 @@ class Driver
     /// Types a message the user wrote on @p tab's message line into its run's agent tab; says on that
     /// dashboard why when it cannot.
     void sendMessage(std::string_view tab, view::SendMessageAction const& message);
+    /// Presses a quick reply's key in its run's agent tab, while the agent still asks; a reply that awaits a
+    /// reason then turns the run Waiting (AwaitMessage). A refusal is said on the dashboard's action bar.
+    void sendReply(std::string_view tab, view::QuickReplyAction const& reply);
     void takeActions();
     void followTabs();
     void readTabs();

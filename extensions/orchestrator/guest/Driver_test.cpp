@@ -157,7 +157,8 @@ class FakeGuestHost final: public IGuestHost
     std::vector<std::string> paneCloses;                   ///< Every paneClose().
     std::vector<std::pair<std::string, uint32_t>> paneReveals;  ///< Every paneReveal(): pane and origin.
     std::vector<std::pair<std::string, std::string>> paneSends; ///< Every paneSend(): pane and text.
-    std::expected<void, HostError> paneSendAnswer {};           ///< What paneSend() answers.
+    std::expected<void, HostError> paneSendAnswer {};           ///< What paneSend() and paneKey() answer.
+    std::vector<std::pair<std::string, PaneKey>> paneKeys;      ///< Every paneKey(): pane and key.
 
     std::vector<TabInfo> tabList;                                  ///< What tabs() lists.
     std::pair<uint32_t, uint32_t> openSize { OpenCols, OpenRows }; ///< The size tabOpen() opens at.
@@ -391,6 +392,12 @@ class FakeGuestHost final: public IGuestHost
                                                           std::string_view text) override
     {
         paneSends.emplace_back(std::string(pane), std::string(text));
+        return paneSendAnswer;
+    }
+
+    [[nodiscard]] std::expected<void, HostError> paneKey(std::string_view pane, PaneKey key) override
+    {
+        paneKeys.emplace_back(std::string(pane), key);
         return paneSendAnswer;
     }
 
@@ -1843,6 +1850,50 @@ TEST_CASE("a message is typed into its run's agent tab, and a refusal is said", 
     served.driver->apply("tab-1", view::SendMessageAction { .run = "no-such-run", .text = "x" });
     CHECK(served.host.paneSends.size() == 2);
     CHECK(served.dashboard().interaction().notice == "message not sent: its agent has no tab any more");
+}
+
+TEST_CASE("a quick reply presses its key in the asking agent's tab, and a refusal is said", "[guest][reply]")
+{
+    constexpr auto Run = "pr-2375-20261113-150847"sv;
+    auto served = Served {};
+    addAgent(served);
+    served.load();
+    served.invoke("open");
+    auto const reply = view::QuickReplyAction { .run = std::string { Run },
+                                                .key = '1',
+                                                .label = "yes",
+                                                .press = PaneKey::Digit1,
+                                                .then = AfterReply::Wait };
+
+    // Not asking: nothing is pressed, as a key where no menu is up would be typed into the agent's prompt.
+    served.driver->apply("tab-1", reply);
+    CHECK(served.host.paneKeys.empty());
+    CHECK(served.dashboard().interaction().notice == "pr-2375 is no longer asking");
+
+    served.host.paneListing->front().status = AgentStatus::Asking;
+    served.driver->update(Hint::Panes);
+    REQUIRE(served.driver->engine().runs().front().lastStatus == AgentStatus::Asking);
+    served.driver->apply("tab-1", reply);
+    CHECK(served.host.paneKeys == std::vector { std::pair { std::format("p-{}", Run), PaneKey::Digit1 } });
+    CHECK(served.driver->engine().runs().front().lastStatus == AgentStatus::Asking);
+
+    // A manifest without pane-input: the host refuses, in its own words.
+    served.host.paneSendAnswer = std::unexpected(HostError::BadArgument);
+    served.driver->apply("tab-1", reply);
+    CHECK(served.dashboard().interaction().notice
+          == "reply not sent: the extension may not press keys in its tabs");
+    served.host.paneSendAnswer = {};
+
+    // A reply that awaits a reason turns the run Waiting.
+    served.driver->apply("tab-1",
+                         view::QuickReplyAction { .run = std::string { Run },
+                                                  .key = '3',
+                                                  .label = "no, and say why",
+                                                  .press = PaneKey::Escape,
+                                                  .then = AfterReply::Message });
+    CHECK(served.host.paneKeys.back().second == PaneKey::Escape);
+    CHECK(served.observer.inputsOf<AwaitMessage>().size() == 1);
+    CHECK(served.driver->engine().runs().front().lastStatus == AgentStatus::Waiting);
 }
 
 TEST_CASE("a key split across two tab reads moves once", "[guest]")

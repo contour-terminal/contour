@@ -58,6 +58,15 @@ namespace
         KeyRow { .key = "right"sv, .command = KeyCommand::NextPage },
         KeyRow { .key = "^k"sv, .command = KeyCommand::Palette },
         KeyRow { .key = "?"sv, .command = KeyCommand::Palette },
+        KeyRow { .key = "1"sv, .command = KeyCommand::Reply1 },
+        KeyRow { .key = "2"sv, .command = KeyCommand::Reply2 },
+        KeyRow { .key = "3"sv, .command = KeyCommand::Reply3 },
+        KeyRow { .key = "4"sv, .command = KeyCommand::Reply4 },
+        KeyRow { .key = "5"sv, .command = KeyCommand::Reply5 },
+        KeyRow { .key = "6"sv, .command = KeyCommand::Reply6 },
+        KeyRow { .key = "7"sv, .command = KeyCommand::Reply7 },
+        KeyRow { .key = "8"sv, .command = KeyCommand::Reply8 },
+        KeyRow { .key = "9"sv, .command = KeyCommand::Reply9 },
     };
 
     /// The commands that act on the selected row only where it offers them (Row::offers).
@@ -290,6 +299,44 @@ namespace
         if (context.engine != nullptr)
             interaction.launcher = openLauncher(*context.engine, {}, {});
         return std::nullopt;
+    }
+
+    /// Answers the selected agent that asks with the quick reply on @p key. A digit answers only while the
+    /// selected run asks, its request then on screen in every band (the asking box, or its Needs you row's
+    /// second line); else, and for a key no reply is on, it only says why.
+    [[nodiscard]] std::optional<UiAction> answer(Interaction& interaction,
+                                                 KeyContext const& context,
+                                                 char key)
+    {
+        auto const* const row = context.selected;
+        if (row == nullptr || row->rowState != RowState::Asking)
+        {
+            interaction.notice = "select the request first";
+            return std::nullopt;
+        }
+        if (auto const& answered = interaction.answered; answered && answered->run == row->run)
+        {
+            interaction.notice = std::format("{} is answered · r opens its tab", row->name);
+            return std::nullopt;
+        }
+        auto const* const reply = findQuickReply(row->replies, key);
+        if (reply == nullptr)
+        {
+            interaction.notice = row->replies.empty()
+                                     ? std::format("answer {} in its tab · r opens it", row->name)
+                                     : std::format("no quick reply on {} · quick_replies sets them", key);
+            return std::nullopt;
+        }
+        interaction.answered = AnsweredRequest { .run = row->run, .key = key, .atMs = context.nowMonoMs };
+        interaction.notice = std::format("answered {}", reply->label);
+        // A reply that awaits a reason opens the message box for it: the next keys say why.
+        if (reply->then == AfterReply::Message)
+            interaction.place = Place::Focus;
+        return UiAction { QuickReplyAction { .run = row->run,
+                                             .key = key,
+                                             .label = reply->label,
+                                             .press = reply->press,
+                                             .then = reply->then } };
     }
 
     using Handler = std::optional<UiAction> (*)(Interaction&, KeyContext const&);
@@ -602,7 +649,8 @@ FocusTab activeTabOf(Interaction const& interaction, Row const* row) noexcept
 
 bool hasMessageBox(Engine const* engine, Row const* row) noexcept
 {
-    return row != nullptr && row->kind == RowKind::Agent && hasAgentTab(engine, row->run);
+    return row != nullptr && row->kind == RowKind::Agent && row->rowState != RowState::Asking
+           && hasAgentTab(engine, row->run);
 }
 
 void backToFleet(Interaction& interaction) noexcept
@@ -678,6 +726,9 @@ std::optional<UiAction> dispatch(KeyCommand command, Interaction& interaction, K
             return std::nullopt;
         command = *primary;
     }
+    // A digit says why it does not answer in its own words.
+    if (auto const key = replyDigitOf(command))
+        return answer(interaction, context, *key);
     // An action that does not apply to the selected row, or that the engine does not allow now, says why.
     if (auto notice = refusalNotice(context.selected, command, context.engine); !notice.empty())
     {
@@ -690,7 +741,8 @@ std::optional<UiAction> dispatch(KeyCommand command, Interaction& interaction, K
 
 bool isDispatched(KeyCommand command) noexcept
 {
-    return command == KeyCommand::Enter || std::ranges::contains(Handlers, command, &HandlerRow::command);
+    return command == KeyCommand::Enter || replyDigitOf(command).has_value()
+           || std::ranges::contains(Handlers, command, &HandlerRow::command);
 }
 
 namespace

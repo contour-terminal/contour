@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <orchestrator/core/Engine.hpp>
+#include <orchestrator/core/QuickReplies.hpp>
 #include <orchestrator/view/DispatchForm.hpp>
 #include <orchestrator/view/Fleet.hpp>
 #include <orchestrator/view/Launcher.hpp>
@@ -39,6 +40,17 @@ struct SendMessageAction
     std::string run;  ///< The run's id.
     std::string text; ///< Exactly what the user wrote.
     [[nodiscard]] bool operator==(SendMessageAction const&) const = default;
+};
+
+/// The user answered a run's agent that asks with a quick reply: its key pressed in the agent's tab.
+struct QuickReplyAction
+{
+    std::string run = {};               ///< The run's id.
+    char key = '1';                     ///< The dashboard's digit the reply is on.
+    std::string label = {};             ///< What its chip says, for the notices.
+    PaneKey press = PaneKey::Digit1;    ///< What it presses in the agent's tab.
+    AfterReply then = AfterReply::Wait; ///< What follows it.
+    [[nodiscard]] bool operator==(QuickReplyAction const&) const = default;
 };
 
 /// The user confirmed installing the Claude Code plugins the agents need and lack.
@@ -105,11 +117,12 @@ struct ReadTranscriptAction
 
 /// What the dashboard asks for: the guest steps each as the engine input of the same name (DispatchAction as
 /// Dispatch, ShowBoardAction and HideBoardAction as ShowBoard and HideBoard for the dashboard's tab,
-/// ReadTranscriptAction as ReadTranscript), but for RevealAgentAction, which it carries out itself with the
-/// host.
+/// ReadTranscriptAction as ReadTranscript), but for RevealAgentAction, SendMessageAction and
+/// QuickReplyAction, which it carries out itself with the host.
 using UiAction = std::variant<RefreshNowAction,
                               InstallPluginsAction,
                               SendMessageAction,
+                              QuickReplyAction,
                               EndRunAction,
                               RetryRemovalAction,
                               DismissAction,
@@ -154,7 +167,25 @@ enum class KeyCommand : uint8_t
     Open,           ///< To the Focus of the selected row: to write to its agent, or to read it.
     RunAgain,       ///< Open the launcher on the selected finished run's item, task and model.
     Timeline,       ///< Show the last 24 hours, an hour a bar; the palette's.
+    Reply1,         ///< Answer the selected agent that asks with the quick reply on `1`.
+    Reply2,         ///< … on `2`.
+    Reply3,         ///< … on `3`.
+    Reply4,         ///< … on `4`.
+    Reply5,         ///< … on `5`.
+    Reply6,         ///< … on `6`.
+    Reply7,         ///< … on `7`.
+    Reply8,         ///< … on `8`.
+    Reply9,         ///< … on `9`.
 };
+
+/// @param command A command.
+/// @return The digit of a quick-reply command (Reply1 to Reply9); std::nullopt for any other command.
+[[nodiscard]] constexpr std::optional<char> replyDigitOf(KeyCommand command) noexcept
+{
+    if (command < KeyCommand::Reply1 || command > KeyCommand::Reply9)
+        return std::nullopt;
+    return static_cast<char>('1' + (std::to_underlying(command) - std::to_underlying(KeyCommand::Reply1)));
+}
 
 /// Where the user is: which pane has the keys.
 enum class Place : uint8_t
@@ -239,6 +270,18 @@ struct SentMessage
     [[nodiscard]] bool operator==(SentMessage const&) const = default;
 };
 
+/// A quick reply sent, until its agent stops asking: its chip is filled and the asking box dimmed.
+struct AnsweredRequest
+{
+    std::string run = {}; ///< The run whose agent was answered.
+    char key = '1';       ///< The reply's digit.
+    uint64_t atMs = 0;    ///< When, in the engine's monotonic milliseconds.
+    [[nodiscard]] bool operator==(AnsweredRequest const&) const = default;
+};
+
+/// How long an answered agent may still ask before the action bar says so.
+inline constexpr uint64_t StillAsksAfterMs = 10'000;
+
 /// Where the user is on the dashboard: what is selected, open, filtered and written.
 struct Interaction
 {
@@ -259,6 +302,7 @@ struct Interaction
     uint32_t page = 0; ///< The transcript's 1-based page while Away on an earlier one; 0: its last.
     std::map<std::string, std::string, std::less<>> drafts = {}; ///< The message box's draft, per run.
     std::optional<SentMessage> sent = {}; ///< The last message sent, until it shows or is refused.
+    std::optional<AnsweredRequest> answered = {}; ///< The last quick reply, until its agent stops asking.
     std::string clipboard = {};           ///< Text the next frame copies with OSC 52; empty: none.
     std::string followGroup = {}; ///< A group whose heading the selection moves to once the rows are built
                                   ///< again, as folding from one of its runs asks; empty: none.
@@ -284,6 +328,7 @@ struct KeyContext
     std::size_t lines = 0;          ///< How many lines the Focus's tab has, as last drawn.
     std::size_t rows = 0;           ///< How many of them it showed at once.
     uint32_t pages = 0;             ///< How many pages the shown transcript has, as last read; 0: unknown.
+    uint64_t nowMonoMs = 0;         ///< Now, in the engine's monotonic milliseconds: when a reply is sent.
 };
 
 /// @param interaction Where the user is.
@@ -295,7 +340,8 @@ struct KeyContext
 
 /// @param engine The engine; nullptr: none.
 /// @param row The selected row; nullptr: none.
-/// @return Whether the row's run has a message box: it is active and its agent has a tab to type into.
+/// @return Whether the row's run has a message box: it is active, its agent has a tab to type into, and it
+///         does not ask (an asking agent's menu takes keys, not messages: it has the asking box instead).
 [[nodiscard]] bool hasMessageBox(Engine const* engine, Row const* row) noexcept;
 
 /// Applies one key's command: Enter as the selected row's primary action; a command that does not apply to

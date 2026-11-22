@@ -12,8 +12,8 @@
 │ No│ task ‹ fix CI ›   model ‹ sonnet ›   perms ‹ standard ›   note none  │   │
 │ yo│ #2375 · contour · checks running                                     │   │
 │ On│ checkout  gh pr checkout 2375 --branch agent/pr-2375-…               │   │
-│ Ev│ worktree  /home/u/worktrees/contour/pr-2375-…                        │   │
-│   │ perms     standard · 19 allowed · 4 denied · edits need no approval  │   │
+│ es│ worktree  /home/u/worktrees/contour/pr-2375-…                        │   │
+│ Ev│ perms     standard · 19 allowed · 4 denied · edits need no approval  │   │
 │   │                                                                      │   │
 │   │ enter start · ↑↓ choose · tab settings · ctrl+p more · esc close     │   │
 │   ╰──────────────────────────────────────────────────────────────────────╯   │

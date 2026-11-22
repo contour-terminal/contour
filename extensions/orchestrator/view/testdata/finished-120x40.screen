@@ -2,7 +2,7 @@
 ╭─ Agents 7 ───────────────────────────────────╮ ╭─ pr-2366 · fix CI · sonnet ────────────────────────────── · removed ╮
 │ NEEDS YOU 2                                  │ │ agent/pr-2366-20261113-140211                                       │
 │ ? pr-2346 · fix CI                 asking 6m │ │ Transcript  Details                                                 │
-│   asks in its tab · r shows it               │ │ task      fix CI                                                    │
+│   Bash: ctest -R reflow --output-on-failure  │ │ task      fix CI                                                    │
 │ … issue-2253 · work on issue      waiting 6m │ │ model     sonnet                                                    │
 │   Waiting for Build pace                     │ │ state     completed, worktree removed, seen                         │
 │ WORKING 1 of 4                               │ │ branch    agent/pr-2366-20261113-140211                             │
