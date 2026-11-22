@@ -384,13 +384,8 @@ namespace
     [[nodiscard]] Effects openPane(Run& run, StepContext const& context)
     {
         run.state = Preparing { PrepareStep::OpenPane };
-        auto const arguments = std::array {
-            Argument { .name = "model", .value = run.model },
-            Argument { .name = "session", .value = run.session },
-            Argument { .name = "prompt", .value = run.prompt },
-        };
         // Refused before any tab was asked for, so there is none to wait for.
-        if (auto const why = refusal(AgentPaneTemplate, arguments))
+        if (auto const why = refusal(agentPaneTemplateOf(run), agentPaneArguments(run)))
         {
             run.failure = RunFailure { .step = PrepareStep::OpenPane, .why = sanitized(*why) };
             return toVerify(run, endingFor(Ended::PreparationFailed), context);
@@ -963,6 +958,21 @@ namespace
     }
 } // namespace
 
+std::string_view agentPaneTemplateOf(Run const& run) noexcept
+{
+    return run.board.empty() ? AgentPlainPaneTemplate : AgentPaneTemplate;
+}
+
+std::vector<Argument> agentPaneArguments(Run const& run)
+{
+    auto arguments = std::vector<Argument> { { .name = "model", .value = run.model },
+                                             { .name = "session", .value = run.session },
+                                             { .name = "prompt", .value = run.prompt } };
+    if (!run.board.empty())
+        arguments.push_back({ .name = "board", .value = run.board });
+    return arguments;
+}
+
 bool isStorable(Run const& run) noexcept
 {
     struct Field
@@ -985,6 +995,9 @@ bool isStorable(Run const& run) noexcept
         Field { .shape = Shape::Path, .value = run.worktree },
     };
     if (!std::ranges::all_of(fields, [](Field const& field) { return fits(field.shape, field.value); }))
+        return false;
+    // No board is asked for when it is empty; one that is must be passable as the prompt is.
+    if (!run.board.empty() && !fits(Shape::Prompt, run.board))
         return false;
     if (run.pane && !fits(Shape::Name, *run.pane))
         return false;
@@ -1170,6 +1183,8 @@ std::string toJson(Run const& run)
     json.task = run.task;
     json.model = run.model;
     json.prompt = run.prompt;
+    if (!run.board.empty())
+        json.board = run.board;
     json.session = run.session;
     json.branch = run.branch;
     json.worktree = run.worktree;
@@ -1243,6 +1258,7 @@ std::optional<Run> runFromJson(std::string_view text)
         .task = std::move(json.task),
         .model = std::move(json.model),
         .prompt = std::move(json.prompt),
+        .board = std::move(json.board).value_or(std::string {}),
         .session = std::move(json.session),
         .branch = std::move(json.branch),
         .worktree = std::move(json.worktree),

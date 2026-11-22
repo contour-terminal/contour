@@ -9,8 +9,8 @@
 │ checkout  gh pr checkout 2375 --branch         │
 │             agent/pr-2375-…                    │
 │ worktree  /home/u/worktrees/contour/pr-2375-…  │
-│ command   claude --model sonnet --session-id   │
-│             00000001-0000-4000-8000-000000000… │
+│ board     STATUS.md, asked for in the agent's  │
+│             system prompt…                     │
 │                                                │
 │ 0 of 4 running                                 │
 │ Claude Code's status hooks are not installed:  │

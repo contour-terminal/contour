@@ -127,8 +127,11 @@ enum class SubstituteError : uint8_t
 /// @return Its declaration, or nullptr if no command has that name.
 [[nodiscard]] CommandDecl const* findCommand(std::string_view name) noexcept;
 
-/// The pane template an agent runs in.
+/// The pane template an agent runs in, its system prompt asking for a status board.
 inline constexpr std::string_view AgentPaneTemplate = "agent";
+
+/// The pane template an agent runs in when no board is asked for (`status_board: off`).
+inline constexpr std::string_view AgentPlainPaneTemplate = "agent-plain";
 
 /// The scheme of the tabs the extension serves: the manifest's `serve` line, and what the guest opens its tab
 /// as.

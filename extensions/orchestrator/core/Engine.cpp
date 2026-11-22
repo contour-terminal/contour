@@ -501,7 +501,7 @@ void Engine::apply(std::string_view runId, std::vector<RunEffect> effects, std::
                                                 .path = std::format("{}/.git", run->worktree) });
                 },
                 [&](OpenAgentPane const&) {
-                    auto const* const pane = findPaneTemplate(AgentPaneTemplate);
+                    auto const* const pane = findPaneTemplate(agentPaneTemplateOf(*run));
                     if (pane == nullptr)
                         return;
                     std::erase_if(_paneOpenings,

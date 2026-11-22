@@ -875,9 +875,24 @@ TEST_CASE("an issue branch never tracks the default branch", "[orchestrator][com
     CHECK(envValue(agent->environment, "GIT_CONFIG_VALUE_0") == "upstream");
     CHECK(envValue(agent->environment, "GIT_CONFIG_KEY_1") == "push.autoSetupRemote");
     CHECK(envValue(agent->environment, "GIT_CONFIG_VALUE_1") == "true");
-    // No permission flag and no --settings: exactly these words.
+    // No permission flag and no --settings: exactly these words, the board's instruction as the system
+    // prompt's addition.
+    CHECK(std::ranges::equal(agent->argv,
+                             std::array { "claude"sv,
+                                          "--model"sv,
+                                          "{model}"sv,
+                                          "--session-id"sv,
+                                          "{session}"sv,
+                                          "--append-system-prompt"sv,
+                                          "{board}"sv,
+                                          "{prompt}"sv }));
+    // `status_board: off` runs the same without it.
+    auto const* const plain = findPaneTemplate("agent-plain");
+    REQUIRE(plain != nullptr);
     CHECK(std::ranges::equal(
-        agent->argv,
+        plain->environment, agent->environment, {}, &EnvironmentVariable::name, &EnvironmentVariable::name));
+    CHECK(std::ranges::equal(
+        plain->argv,
         std::array { "claude"sv, "--model"sv, "{model}"sv, "--session-id"sv, "{session}"sv, "{prompt}"sv }));
 }
 
@@ -960,7 +975,9 @@ TEST_CASE("manifestLines spells the declared tables", "[orchestrator][commands][
 {
     static constexpr auto Expected = std::array {
         "command git-status short @worktrees = git status --porcelain --untracked-files=normal --ignore-submodules=none"sv,
-        "pane agent @worktrees = claude --model {model} --session-id {session} {prompt}"sv,
+        "pane agent @worktrees = claude --model {model} --session-id {session} --append-system-prompt {board} {prompt}"sv,
+        "pane agent-plain @worktrees = claude --model {model} --session-id {session} {prompt}"sv,
+        "arg board = text"sv,
         "command-env-for git-status GIT_ATTR_SOURCE = 4b825dc642cb6eb9a060e54bf8d69288fbee4904"sv,
         "command-env-for git-status GIT_OPTIONAL_LOCKS = 0"sv,
         "command git-head-reachable short @worktrees = git for-each-ref --count=1 --contains HEAD refs/heads refs/tags refs/remotes"sv,

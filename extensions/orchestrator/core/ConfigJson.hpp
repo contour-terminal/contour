@@ -57,6 +57,7 @@ struct JsonConfig
     std::optional<uint32_t> maxAgentsPerRepo;
     std::optional<JsonDuration> pollEvery;
     std::optional<JsonDuration> statusBoardAfter;
+    std::optional<std::string> statusBoard;
     std::optional<JsonDuration> endDoneAfter;
     std::optional<JsonDuration> finishedRetention;
     std::optional<std::vector<JsonRepo>> repos;

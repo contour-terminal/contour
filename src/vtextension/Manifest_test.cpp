@@ -662,11 +662,18 @@ TEST_CASE("Manifest v2: the orchestrator's manifest", "[vtextension][manifest][c
         status->environment,
         EnvironmentEntry { .name = "GIT_ATTR_SOURCE", .value = "4b825dc642cb6eb9a060e54bf8d69288fbee4904" }));
 
-    REQUIRE(manifest.panes.size() == 1);
+    // The agent's tab, and the same without the status board's instruction.
+    REQUIRE(manifest.panes.size() == 2);
+    for (auto const& pane: manifest.panes)
+    {
+        CHECK(pane.root == "worktrees");
+        CHECK(pane.argvTemplate.front() == "claude");
+        CHECK(pane.environment.size() == 5);
+    }
     CHECK(manifest.panes[0].name == "agent");
-    CHECK(manifest.panes[0].root == "worktrees");
-    CHECK(manifest.panes[0].argvTemplate.front() == "claude");
-    CHECK(manifest.panes[0].environment.size() == 5);
+    CHECK(std::ranges::contains(manifest.panes[0].argvTemplate, "{board}"));
+    CHECK(manifest.panes[1].name == "agent-plain");
+    CHECK_FALSE(std::ranges::contains(manifest.panes[1].argvTemplate, "{board}"));
 
     CHECK(manifest.servedScheme == "orchestrator");
     CHECK(manifest.actions.size() == 3);

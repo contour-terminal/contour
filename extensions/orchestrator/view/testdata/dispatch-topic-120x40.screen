@@ -9,24 +9,24 @@
 │                                                                      │ │                                             │
 │ ISSUES WITHOUT A PR                                                  │ │                                             │
 │ ▾ contour · 5                                                        │ │                                             │
-│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │                                             │
-│   #2338 Flaky on W╭─ Dispatch an agent ──────────────────────────────────────────────────────────╮                   │
-│   #2253 Switch `da│ repo      ‹ contour ›                                                        │                   │
-│   #2163 OSC 133: o│ topic     Investigate why the shell integration test hangs on CI▏            │                   │
-│   #2162 OSC 9;9 (C│ task      ‹ topic ›                                                          │                   │
-│                   │ model     ‹ opus ›                                                           │                   │
-│ AGENTS · 0 OF 4 RU│ prompt    Investigate why the shell integration test hangs on CI             │                   │
-│ no agents         │ checkout  new branch agent/topic-investigate-why-the-shell-integration-te-…  │                   │
-│                   │ worktree  /home/u/worktrees/contour/topic-investigate-why-the-shell-integrat │                   │
-│ FINISHED · 0 NEW  │             ion-te-…                                                         │                   │
+│   #2356 Report the╭─ Dispatch an agent ──────────────────────────────────────────────────────────╮                   │
+│   #2338 Flaky on W│ repo      ‹ contour ›                                                        │                   │
+│   #2253 Switch `da│ topic     Investigate why the shell integration test hangs on CI▏            │                   │
+│   #2163 OSC 133: o│ task      ‹ topic ›                                                          │                   │
+│   #2162 OSC 9;9 (C│ model     ‹ opus ›                                                           │                   │
+│                   │ prompt    Investigate why the shell integration test hangs on CI             │                   │
+│ AGENTS · 0 OF 4 RU│ checkout  new branch agent/topic-investigate-why-the-shell-integration-te-…  │                   │
+│ no agents         │ worktree  /home/u/worktrees/contour/topic-investigate-why-the-shell-integrat │                   │
+│                   │             ion-te-…                                                         │                   │
+│ FINISHED · 0 NEW  │ board     STATUS.md, asked for in the agent's system prompt                  │                   │
 │ nothing finished  │ command   claude --model opus --session-id                                   │                   │
-│                   │             00000001-0000-4000-8000-000000000000 'Investigate why the shell  │                   │
-│                   │             integration test hangs on CI'                                    │                   │
+│                   │             00000001-0000-4000-8000-000000000000 --append-system-prompt      │                   │
+│                   │             '{board}' 'Investigate why the shell integration test hangs on   │                   │
+│                   │             CI'                                                              │                   │
 │                   │                                                                              │                   │
 │                   │ 0 of 4 running                                                               │                   │
 │                   │ enter dispatch · tab next field · esc cancel                                 │                   │
 │                   ╰──────────────────────────────────────────────────────────────────────────────╯                   │
-│                                                                      │ │                                             │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │

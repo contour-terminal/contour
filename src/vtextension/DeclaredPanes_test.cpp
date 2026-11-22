@@ -109,7 +109,10 @@ struct Fixture
 
 [[nodiscard]] ConfigMap agentArguments()
 {
-    return { { "model", "opus" }, { "session", std::string { SessionId } }, { "prompt", "/x {url}" } };
+    return { { "model", "opus" },
+             { "session", std::string { SessionId } },
+             { "board", "Keep STATUS.md." },
+             { "prompt", "/x {url}" } };
 }
 
 using Environment = std::vector<std::pair<std::string, std::string>>;
@@ -133,8 +136,14 @@ TEST_CASE("pane-open spawns the template's argv", "[vtextension][panes]")
     auto const& spawn = f.host.spawns.front();
     // One word per value: the prompt's space and braces stay inside its word.
     CHECK(spawn.argv
-          == std::vector<std::string> {
-              "claude", "--model", "opus", "--session-id", std::string { SessionId }, "/x {url}" });
+          == std::vector<std::string> { "claude",
+                                        "--model",
+                                        "opus",
+                                        "--session-id",
+                                        std::string { SessionId },
+                                        "--append-system-prompt",
+                                        "Keep STATUS.md.",
+                                        "/x {url}" });
     REQUIRE(spawn.directory != nullptr);
     CHECK(spawn.directory->resolvedPath() == "/w/run-1");
     CHECK(spawn.cwd == "/w/run-1");
@@ -154,7 +163,7 @@ TEST_CASE("pane-open runs the executable the configuration names for the templat
 
     REQUIRE(f.host.spawns.size() == 1);
     auto const& argv = f.host.spawns.front().argv;
-    REQUIRE(argv.size() == 6);
+    REQUIRE(argv.size() == 8);
     CHECK(argv.front() == "/home/u/.local/bin/claude");
     // Only the program is replaced: an argument spelled like a configured program stays as it is.
     CHECK(argv[1] == "--model");

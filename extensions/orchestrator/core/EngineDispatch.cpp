@@ -76,13 +76,6 @@ std::size_t Engine::activeRuns() const noexcept
     return static_cast<std::size_t>(std::ranges::count_if(_runs, countsAsActive));
 }
 
-std::vector<Argument> agentPaneArguments(Run const& run)
-{
-    return { { .name = "model", .value = run.model },
-             { .name = "session", .value = run.session },
-             { .name = "prompt", .value = run.prompt } };
-}
-
 std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& request) const
 {
     if (!_config)
@@ -166,6 +159,7 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
                      .task = task->id,
                      .model = model,
                      .prompt = std::move(*prompt),
+                     .board = _config->boardInstruction(),
                      .session = request.session,
                      .branch = branchName(*id),
                      .worktree = worktreePath(_config->worktreeRoot(), repo->name, *id),
@@ -180,7 +174,7 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
                      .changedMonoMs = 0 };
     if (!isStorable(run))
         return std::unexpected { DispatchRefusal::BadPrompt };
-    auto const* const pane = findPaneTemplate(AgentPaneTemplate);
+    auto const* const pane = findPaneTemplate(agentPaneTemplateOf(run));
     if (pane == nullptr)
         return std::unexpected { DispatchRefusal::BadPrompt };
     auto argv = substitute(pane->argv, agentPaneArguments(run));

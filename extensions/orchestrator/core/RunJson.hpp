@@ -58,6 +58,7 @@ struct JsonRun
     std::string task;
     std::string model;
     std::string prompt;
+    std::optional<std::string> board; ///< Absent: no board asked for, as in a run stored before it existed.
     std::string session;
     std::string branch;
     std::string worktree;

@@ -664,6 +664,7 @@ Key                   | Meaning
 `max_agents_per_repo` | The most agents running at once in one repository. Default `2`.
 `poll_every`          | How often the forges are asked for the lists. Default `2m`, at least `30s`.
 `status_board_after`  | How long an agent runs before the orchestrator starts looking for its board, its `STATUS.md`. Default `15m`; `0` never looks, while `b` still shows a board.
+`status_board`        | What every agent's system prompt asks of it about its board (Claude Code's `--append-system-prompt`). Default: keep `STATUS.md` at the worktree's root with the `contour-workflows:status-board` skill, current at every state change, never committed. Your own words replace that; `off` asks for nothing.
 `end_done_after`      | How long an agent stays done before the orchestrator ends its run, as `e` would: its tab closes and its worktree is removed unless it holds work. The run is listed as completed. An agent that goes back to work, because you answered it, waits the whole time again. Done is a turn that ended with nothing in flight, which the dashboard shows as *waiting for you*: it also covers an agent that asked you a question in plain text, which this ends unanswered. An agent waiting on its own background work or a scheduled wake-up is not done, and shows what it waits for. A task can set its own (below). Default `0`: a done run waits for you.
 `finished_retention`  | How long a finished run stays in the Finished list. Default `30d`. Every finished run is also appended, for good, to `agent-runs.jsonl` in the daemon's state directory, with what its agent spent and did.
 `repos`               | Required. The repositories, one entry each (below).
@@ -742,12 +743,10 @@ long ago it was written (`updated 3 min ago`), and reads it again every five sec
 agent has run for `status_board_after` the orchestrator looks for the file, and the agent's row is marked `▤`
 when it finds one.
 
-The orchestrator does not ask an agent for a board; the task's prompt does:
-
-```yaml
-- { id: fix_ci, key: f, label: "fix CI", applies_to: pr, model: sonnet,
-    prompt: "/contour-workflows:fix-ci {url} -- keep a STATUS.md at the worktree's root: what you are doing and what is left" }
-```
+Every agent is asked for one: its system prompt carries `status_board`, which by default has it keep
+`STATUS.md` with the `contour-workflows:status-board` skill. A system prompt holds for the whole session, as a
+request in the first prompt or from a hook does not. With `status_board: off` the agent runs without it. A
+task's prompt can still ask for a board in its own words.
 
 A board is read-only and drawn inert: an escape sequence in it is shown as text, a board of more than 64 KiB
 is refused with a line saying so, and one that leads outside the worktree through a link is not read. When the

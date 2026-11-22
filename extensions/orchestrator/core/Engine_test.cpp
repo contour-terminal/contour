@@ -3931,6 +3931,44 @@ TEST_CASE("an unmeasured issue source's login check never runs", "[orchestrator]
     CHECK(harness.commandsIssued("acli-issues") == 0);
 }
 
+TEST_CASE("every agent's system prompt asks for its board, unless status_board is off",
+          "[orchestrator][engine][board]")
+{
+    auto const argumentOf = [](OpenPane const& pane, std::string_view name) {
+        auto const at = std::ranges::find(pane.arguments, name, &Argument::name);
+        return at != pane.arguments.end() ? std::optional { at->value } : std::nullopt;
+    };
+    auto const openedWith = [](Settings const& settings) {
+        auto harness = Harness { contextFor(settings) };
+        harness.boot();
+        harness.feed(prDispatch());
+        harness.finish("git-fetch", ok());
+        harness.finish("git-worktree-add", ok());
+        auto const opened = all<OpenPane>(harness.finish("gh-pr-checkout", ok()));
+        REQUIRE(opened.size() == 1);
+        return opened.front();
+    };
+
+    SECTION("by default, the default instruction in the agent template")
+    {
+        auto const pane = openedWith({});
+        CHECK(pane.paneTemplate == "agent");
+        CHECK(argumentOf(pane, "board") == std::string { DefaultBoardInstruction });
+    }
+    SECTION("its own words")
+    {
+        auto const pane = openedWith({ .limits = R"("status_board": "Keep NOTES.md current.",)" });
+        CHECK(pane.paneTemplate == "agent");
+        CHECK(argumentOf(pane, "board") == "Keep NOTES.md current.");
+    }
+    SECTION("off: the plain template, and no board argument")
+    {
+        auto const pane = openedWith({ .limits = R"("status_board": "off",)" });
+        CHECK(pane.paneTemplate == "agent-plain");
+        CHECK_FALSE(argumentOf(pane, "board").has_value());
+    }
+}
+
 TEST_CASE("a topic dispatches on a new branch named from its text, with the text as its prompt",
           "[orchestrator][engine][topic]")
 {

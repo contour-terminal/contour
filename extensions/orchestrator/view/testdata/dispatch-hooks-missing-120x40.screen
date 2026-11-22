@@ -8,26 +8,26 @@ Claude Code's status hooks are missing: blocked and permission states may not sh
 │ ✗ #2114 vtbackend: WIP -- DEC mode 44 and a partial margin-bell tri… │ │ url       https://github.com/contour-termin │
 │ ✗ #1847 Adds ability to set Contour as default terminal on Windows … │ │             al/contour/pull/2375            │
 │                                                                      │ │                                             │
-│ ISSUES WITHOUT A PR                                                  │ │                                             │
-│ ▾ contour · 5     ╭─ Dispatch an agent ──────────────────────────────────────────────────────────╮                   │
-│   #2356 Report the│ item      #2375 · Say why the stdio relay failed, and send a hello before h… │                   │
-│   #2338 Flaky on W│ task      ‹ fix CI › f                                                       │                   │
-│   #2253 Switch `da│ model     ‹ sonnet ›                                                         │                   │
-│   #2163 OSC 133: o│ note      optional; tab to type one                                          │                   │
-│   #2162 OSC 9;9 (C│ prompt    /contour-workflows:fix-ci                                          │                   │
-│                   │             https://github.com/contour-terminal/contour/pull/2375            │                   │
-│ AGENTS · 0 OF 4 RU│ checkout  gh pr checkout 2375 --branch agent/pr-2375-…                       │                   │
-│ no agents         │ worktree  /home/u/worktrees/contour/pr-2375-…                                │                   │
+│ ISSUES WITHOUT A P╭─ Dispatch an agent ──────────────────────────────────────────────────────────╮                   │
+│ ▾ contour · 5     │ item      #2375 · Say why the stdio relay failed, and send a hello before h… │                   │
+│   #2356 Report the│ task      ‹ fix CI › f                                                       │                   │
+│   #2338 Flaky on W│ model     ‹ sonnet ›                                                         │                   │
+│   #2253 Switch `da│ note      optional; tab to type one                                          │                   │
+│   #2163 OSC 133: o│ prompt    /contour-workflows:fix-ci                                          │                   │
+│   #2162 OSC 9;9 (C│             https://github.com/contour-terminal/contour/pull/2375            │                   │
+│                   │ checkout  gh pr checkout 2375 --branch agent/pr-2375-…                       │                   │
+│ AGENTS · 0 OF 4 RU│ worktree  /home/u/worktrees/contour/pr-2375-…                                │                   │
+│ no agents         │ board     STATUS.md, asked for in the agent's system prompt                  │                   │
 │                   │ command   claude --model sonnet --session-id                                 │                   │
-│ FINISHED · 0 NEW  │             00000001-0000-4000-8000-000000000000 '/contour-workflows:fix-ci  │                   │
-│ nothing finished  │             https://github.com/contour-terminal/contour/pull/2375'           │                   │
+│ FINISHED · 0 NEW  │             00000001-0000-4000-8000-000000000000 --append-system-prompt      │                   │
+│ nothing finished  │             '{board}' '/contour-workflows:fix-ci                             │                   │
+│                   │             https://github.com/contour-terminal/contour/pull/2375'           │                   │
 │                   │                                                                              │                   │
 │                   │ 0 of 4 running                                                               │                   │
 │                   │ Claude Code's status hooks are not installed: agents may not show as blocked │                   │
 │                   │   or waiting for permission (contour agent setup)                            │                   │
 │                   │ enter dispatch · tab next field · esc cancel                                 │                   │
 │                   ╰──────────────────────────────────────────────────────────────────────────────╯                   │
-│                                                                      │ │                                             │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │

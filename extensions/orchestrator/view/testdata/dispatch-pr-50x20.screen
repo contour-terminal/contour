@@ -9,11 +9,11 @@
 │ checkout  gh pr checkout 2375 --branch         │
 │             agent/pr-2375-…                    │
 │ worktree  /home/u/worktrees/contour/pr-2375-…  │
+│ board     STATUS.md, asked for in the agent's  │
+│             system prompt                      │
 │ command   claude --model sonnet --session-id   │
 │             00000001-0000-4000-8000-0000000000 │
-│             00 '/contour-workflows:fix-ci      │
-│             https://github.com/contour-termina │
-│             l/contour/pull/2375'               │
+│             00 --append-system-prompt…         │
 │                                                │
 │ 0 of 4 running                                 │
 │ enter dispatch · tab next field · esc cancel   │

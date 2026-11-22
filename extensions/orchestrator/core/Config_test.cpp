@@ -615,3 +615,27 @@ TEST_CASE("the built-in topic task takes another id when topic is taken", "[conf
     CHECK(config->tasks()[1].id == "builtin_topic");
     CHECK(config->tasks()[1].appliesTo == AppliesTo::Topic);
 }
+
+TEST_CASE("status_board: the default instruction, off, or its own words", "[config]")
+{
+    auto const defaulted = parse(Input {});
+    REQUIRE(defaulted.has_value());
+    CHECK(defaulted->boardInstruction() == DefaultBoardInstruction);
+
+    auto const off = parse(
+        Input { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "status_board": "off",)" });
+    REQUIRE(off.has_value());
+    CHECK(off->boardInstruction().empty());
+
+    auto const own = parse(Input { .find = R"("max_agents": 4,)",
+                                   .replace = R"("max_agents": 4, "status_board": "Keep NOTES.md.",)" });
+    REQUIRE(own.has_value());
+    CHECK(own->boardInstruction() == "Keep NOTES.md.");
+
+    // Its words reach the agent's command line, so they may not read as an option.
+    auto const dash = parse(
+        Input { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "status_board": "-x",)" });
+    REQUIRE_FALSE(dash.has_value());
+    CHECK(dash.error().key == "status_board");
+    CHECK(dash.error().problem == ConfigProblem::LeadingDash);
+}

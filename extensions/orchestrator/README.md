@@ -110,8 +110,10 @@ longer use it.
 Both are screens of the dashboard's tab, not tabs of their own, and both are read-only.
 
 **The board** is the agent's `STATUS.md` at its worktree's root, read with `file-read` from the `worktrees`
-root and shown with how long ago it was written, again every five seconds while it is shown. The extension
-does not ask an agent to write one (a hook's request proved unreliable); a task's prompt does. Once an agent
+root and shown with how long ago it was written, again every five seconds while it is shown. Every agent is
+asked to keep one: its system prompt (`--append-system-prompt`) carries `status_board`, by default an
+instruction to keep `STATUS.md` with the `contour-workflows:status-board` skill. A hook's request proved
+unreliable; a system prompt holds for the whole session. `status_board: off` asks for none. Once an agent
 has run for `status_board_after` the engine looks for the file, and the agent's row carries `▤` when one is
 there. A board is untrusted text: drawn inert, cut at 64 KiB, and refused when it leads outside the worktree.
 Ending a run removes an untracked `STATUS.md` (`git clean -f -- STATUS.md`) before the worktree is checked for

@@ -1644,7 +1644,8 @@ TEST_CASE("a value its kind refuses is never passed", "[orchestrator][run]")
         run.session = "not-a-uuid";
         // No tab was asked for, so there is none to wait for.
         CHECK(describe(orchestrator::advance(run, CommandOk {}, context)) == "persist, read-git-file");
-        CHECK(describe(run.failure) == "open-pane: agent refused the value of {session}");
+        // The run asks for no board, so its tab would be the plain one.
+        CHECK(describe(run.failure) == "open-pane: agent-plain refused the value of {session}");
     }
     SECTION("beginRun leaves a started run alone")
     {

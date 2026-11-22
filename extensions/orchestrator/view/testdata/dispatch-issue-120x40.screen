@@ -18,15 +18,15 @@
 │ AGENTS · 0 OF 4 RU│             https://github.com/contour-terminal/contour/issues/2356          │                   │
 │ no agents         │ checkout  new branch agent/issue-2356-…                                      │                   │
 │                   │ worktree  /home/u/worktrees/contour/issue-2356-…                             │                   │
-│ FINISHED · 0 NEW  │ command   claude --model opus --session-id                                   │                   │
-│ nothing finished  │             00000001-0000-4000-8000-000000000000                             │                   │
-│                   │             '/contour-workflows:work-issue                                   │                   │
+│ FINISHED · 0 NEW  │ board     STATUS.md, asked for in the agent's system prompt                  │                   │
+│ nothing finished  │ command   claude --model opus --session-id                                   │                   │
+│                   │             00000001-0000-4000-8000-000000000000 --append-system-prompt      │                   │
+│                   │             '{board}' '/contour-workflows:work-issue                         │                   │
 │                   │             https://github.com/contour-terminal/contour/issues/2356'         │                   │
 │                   │                                                                              │                   │
 │                   │ 0 of 4 running                                                               │                   │
 │                   │ enter dispatch · tab next field · esc cancel                                 │                   │
 │                   ╰──────────────────────────────────────────────────────────────────────────────╯                   │
-│                                                                      │ │                                             │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │

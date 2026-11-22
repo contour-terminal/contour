@@ -205,6 +205,8 @@ struct Run
     std::string task;                ///< The task's id.
     std::string model;               ///< The model the agent runs: a Name.
     std::string prompt;              ///< The agent's first prompt: a Text.
+    std::string board {};            ///< What its system prompt asks about its status board, a Text; empty:
+                                     ///< nothing (`status_board: off`), and the plain pane template.
     std::string session;             ///< The agent's session: a Uuid.
     std::string branch;              ///< `agent/<id>`: a Ref.
     std::string worktree;            ///< The worktree's directory: a Path.
@@ -223,6 +225,17 @@ struct Run
     std::vector<StateChange> history {}; ///< When its state changed, oldest first; at most MaxHistory.
     Ledger ledger = Ledger::Pending;     ///< Whether it was appended to the file of finished runs.
 };
+
+/// @param run A run.
+/// @return The pane template its agent runs in: AgentPaneTemplate, or AgentPlainPaneTemplate when no board is
+///         asked for.
+[[nodiscard]] std::string_view agentPaneTemplateOf(Run const& run) noexcept;
+
+/// The arguments the agent's pane template is opened with for @p run: the one place OpenPane's arguments,
+/// a preview's argv and the check before a tab is asked for come from.
+/// @param run A run.
+/// @return Its model, session and prompt, and its board's instruction when it has one, by placeholder.
+[[nodiscard]] std::vector<Argument> agentPaneArguments(Run const& run);
 
 /// A host call's result: the command exited 0.
 struct CommandOk

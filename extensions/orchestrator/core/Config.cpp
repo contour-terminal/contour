@@ -51,6 +51,8 @@ struct glz::meta<orchestrator::config::detail::JsonConfig>
                                               &T::pollEvery,
                                               "status_board_after",
                                               &T::statusBoardAfter,
+                                              "status_board",
+                                              &T::statusBoard,
                                               "end_done_after",
                                               &T::endDoneAfter,
                                               "finished_retention",
@@ -320,6 +322,7 @@ namespace
         Field { .key = "max_agents_per_repo", .type = JsonType::Count },
         Field { .key = "poll_every", .type = JsonType::Duration },
         Field { .key = "status_board_after", .type = JsonType::Duration },
+        Field { .key = "status_board", .type = JsonType::String },
         Field { .key = "end_done_after", .type = JsonType::Duration },
         Field { .key = "finished_retention", .type = JsonType::Duration },
         Field { .key = "repos", .type = JsonType::Objects, .object = ObjectKind::Repo },
@@ -482,6 +485,20 @@ namespace
         if (!argumentAccepts(ArgumentKind::Text, value))
             return ConfigProblem::NotText;
         return std::nullopt;
+    }
+
+    /// @return What `status_board` asks every agent's system prompt for: the default without one, nothing for
+    ///         `off`, else its own words, which must be Text.
+    [[nodiscard]] std::expected<std::string, ConfigError> boardInstructionOf(
+        std::optional<std::string> const& value)
+    {
+        if (!value)
+            return std::string { DefaultBoardInstruction };
+        if (*value == BoardOff)
+            return std::string {};
+        if (auto const problem = textProblem(*value))
+            return fail("status_board", *problem);
+        return *value;
     }
 
     /// @return What is wrong with @p value as a task key, if anything.
@@ -931,6 +948,8 @@ std::expected<Config, ConfigError> Config::parse(std::string_view json,
                 durationOf(
                     document.statusBoardAfter, "status_board_after", DefaultStatusBoardAfter, NoMinimum)))
             return e;
+        if (auto e = assign(values.boardInstruction, boardInstructionOf(document.statusBoard)))
+            return e;
         if (auto e =
                 assign(values.endDoneAfter,
                        durationOf(document.endDoneAfter, "end_done_after", DefaultEndDoneAfter, NoMinimum)))
@@ -956,6 +975,7 @@ Config::Config(Values values) noexcept:
     _maxAgentsPerRepo { values.maxAgentsPerRepo },
     _pollEvery { values.pollEvery },
     _statusBoardAfter { values.statusBoardAfter },
+    _boardInstruction { std::move(values.boardInstruction) },
     _endDoneAfter { values.endDoneAfter },
     _finishedRetention { values.finishedRetention },
     _repos { std::move(values.repos) },

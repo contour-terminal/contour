@@ -166,6 +166,19 @@ inline constexpr uint32_t DefaultMaxAgentsPerRepo = 2;
 inline constexpr auto DefaultPollEvery = std::chrono::milliseconds { std::chrono::minutes { 2 } };
 /// The shortest `poll_every` accepted.
 inline constexpr auto MinPollEvery = std::chrono::milliseconds { std::chrono::seconds { 30 } };
+/// What every agent's system prompt asks of it unless `status_board` says otherwise: the board the dashboard
+/// shows (Claude Code's `--append-system-prompt`, which holds for the whole session).
+inline constexpr std::string_view DefaultBoardInstruction =
+    "Keep a status board for this run with the contour-workflows:status-board skill: STATUS.md at the root "
+    "of "
+    "this worktree, current at every state change -- what you are doing, what is done, what is left, and "
+    "what "
+    "blocks you. Never commit it. The orchestrator that started you shows it to the user, who may not see "
+    "your terminal; publishing it anywhere else is optional.";
+
+/// What `status_board` spells to ask for no board: agents then run without the instruction.
+inline constexpr std::string_view BoardOff = "off";
+
 /// How long an agent runs before its status board is looked for, unless `status_board_after` says otherwise;
 /// 0 disables the board.
 inline constexpr auto DefaultStatusBoardAfter = std::chrono::milliseconds { std::chrono::minutes { 15 } };
@@ -202,6 +215,9 @@ class Config
     [[nodiscard]] std::chrono::milliseconds pollEvery() const noexcept { return _pollEvery; }
     /// @return How long an agent runs before its status board is looked for; 0: never.
     [[nodiscard]] std::chrono::milliseconds statusBoardAfter() const noexcept { return _statusBoardAfter; }
+    /// @return What every agent's system prompt asks of it about its board (`status_board`); empty: nothing,
+    ///         as `status_board: off` asks.
+    [[nodiscard]] std::string const& boardInstruction() const noexcept { return _boardInstruction; }
     /// @return How long an agent stays done before its run is ended; 0: never.
     [[nodiscard]] std::chrono::milliseconds endDoneAfter() const noexcept { return _endDoneAfter; }
 
@@ -239,6 +255,7 @@ class Config
         uint32_t maxAgentsPerRepo = DefaultMaxAgentsPerRepo;
         std::chrono::milliseconds pollEvery = DefaultPollEvery;
         std::chrono::milliseconds statusBoardAfter = DefaultStatusBoardAfter;
+        std::string boardInstruction = std::string { DefaultBoardInstruction };
         std::chrono::milliseconds endDoneAfter = DefaultEndDoneAfter;
         std::chrono::milliseconds finishedRetention = DefaultFinishedRetention;
         std::vector<Repo> repos = {};
@@ -254,6 +271,7 @@ class Config
     uint32_t _maxAgentsPerRepo;
     std::chrono::milliseconds _pollEvery;
     std::chrono::milliseconds _statusBoardAfter;
+    std::string _boardInstruction;
     std::chrono::milliseconds _endDoneAfter;
     std::chrono::milliseconds _finishedRetention;
     std::vector<Repo> _repos;

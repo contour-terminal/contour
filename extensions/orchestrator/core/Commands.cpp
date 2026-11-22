@@ -33,6 +33,7 @@ namespace
         ArgumentDecl { .name = "path", .kind = ArgumentKind::Path, .root = Root::Worktrees },
         ArgumentDecl { .name = "query", .kind = ArgumentKind::Text, .root = std::nullopt },
         ArgumentDecl { .name = "prompt", .kind = ArgumentKind::Text, .root = std::nullopt },
+        ArgumentDecl { .name = "board", .kind = ArgumentKind::Text, .root = std::nullopt },
         ArgumentDecl { .name = "page", .kind = ArgumentKind::Number, .root = std::nullopt },
         ArgumentDecl { .name = "format", .kind = ArgumentKind::Number, .root = std::nullopt },
         ArgumentDecl { .name = "record", .kind = ArgumentKind::Text, .root = std::nullopt },
@@ -416,8 +417,14 @@ namespace
     // }}}
     // {{{ panes
 
-    /// No permission flag and no `--settings`: the agent runs with the user's own Claude Code settings.
+    /// No permission flag and no `--settings`: the agent runs with the user's own Claude Code settings. The
+    /// system prompt asks for the status board the dashboard shows (`status_board`).
     constexpr auto AgentPaneArgv = std::array {
+        "claude"sv,  "--model"sv,  "{model}"sv, "--session-id"sv, "{session}"sv, "--append-system-prompt"sv,
+        "{board}"sv, "{prompt}"sv,
+    };
+    /// The same without the board's instruction: `status_board: off`.
+    constexpr auto AgentPlainPaneArgv = std::array {
         "claude"sv, "--model"sv, "{model}"sv, "--session-id"sv, "{session}"sv, "{prompt}"sv,
     };
 
@@ -425,6 +432,10 @@ namespace
         PaneDecl { .name = AgentPaneTemplate,
                    .root = Root::Worktrees,
                    .argv = AgentPaneArgv,
+                   .environment = AgentPaneEnvironment },
+        PaneDecl { .name = AgentPlainPaneTemplate,
+                   .root = Root::Worktrees,
+                   .argv = AgentPlainPaneArgv,
                    .environment = AgentPaneEnvironment },
     };
 

@@ -95,7 +95,13 @@ agent-setup-check (short, in worktrees): contour agent setup --dry-run --json
 agent-transcript (short, in worktrees): contour agent transcript --session {session} --cwd {path} --page {page} --format {format} --json
 agent-record (short, in worktrees): contour agent record --line {record} --format {format}
 agent-stats (short, in worktrees): contour agent stats --session {session} --cwd {path} --format {format} --json
-It may open tabs running: agent (in worktrees): claude --model {model} --session-id {session} {prompt}
+It may open tabs running: agent (in worktrees): claude --model {model} --session-id {session} --append-system-prompt {board} {prompt}
+  GIT_CONFIG_COUNT=2
+  GIT_CONFIG_KEY_0=push.default
+  GIT_CONFIG_VALUE_0=upstream
+  GIT_CONFIG_KEY_1=push.autoSetupRemote
+  GIT_CONFIG_VALUE_1=true
+It may open tabs running: agent-plain (in worktrees): claude --model {model} --session-id {session} {prompt}
   GIT_CONFIG_COUNT=2
   GIT_CONFIG_KEY_0=push.default
   GIT_CONFIG_VALUE_0=upstream

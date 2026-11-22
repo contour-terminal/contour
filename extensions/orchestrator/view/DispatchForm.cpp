@@ -63,6 +63,9 @@ namespace
     constexpr auto LeadingDashText = "a note may not start with -"sv;
     constexpr auto TopicLeadingDashText = "a topic may not start with -"sv;
 
+    /// How the command line shows the board's instruction: by its placeholder, the paragraph being long.
+    constexpr auto BoardPlaceholder = "{board}"sv;
+
     /// What a topic form says instead of a refusal while its topic is still empty.
     constexpr auto TypeATopicText = "type a topic"sv;
 
@@ -288,8 +291,19 @@ namespace
                           Role::Text,
                           LabelColumns,
                           width);
-            appendWrapped(
-                lines, "command"sv, shellQuoted(preview->agentArgv), Role::Dim, LabelColumns, width);
+            // The board's instruction is a paragraph: the command line names it by its placeholder, and a
+            // line of its own says what it asks for.
+            appendWrapped(lines,
+                          "board"sv,
+                          preview->run.board.empty() ? "none: status_board is off"sv
+                                                     : "STATUS.md, asked for in the agent's system prompt"sv,
+                          Role::Text,
+                          LabelColumns,
+                          width);
+            auto shown = preview->agentArgv;
+            if (!preview->run.board.empty())
+                std::ranges::replace(shown, preview->run.board, std::string { BoardPlaceholder });
+            appendWrapped(lines, "command"sv, shellQuoted(shown), Role::Dim, LabelColumns, width);
         }
         else if (isTopicForm(form) && form.note.empty())
             appendWrapped(lines, "refused"sv, TypeATopicText, Role::Dim, LabelColumns, width);

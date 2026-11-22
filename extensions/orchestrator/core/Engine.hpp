@@ -411,12 +411,6 @@ struct DispatchPreview
     std::size_t maxAgents = 0;          ///< `max_agents`.
 };
 
-/// The arguments the agent's pane template is opened with for @p run: the one place OpenPane's arguments
-/// and a preview's argv come from.
-/// @param run A run.
-/// @return Its model, session and prompt, by placeholder.
-[[nodiscard]] std::vector<Argument> agentPaneArguments(Run const& run);
-
 /// The tag of the host call a run awaits: its stepTag() and its attempt.
 /// @param run The run.
 /// @return Such as "<id>/status#3"; std::nullopt when it awaits no host call.
