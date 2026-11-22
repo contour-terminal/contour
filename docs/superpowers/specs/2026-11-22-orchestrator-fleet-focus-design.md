@@ -382,6 +382,86 @@ in the manifest, so the consent dialog shows it as it shows `board`.
 `OwnedPanes` and `SessionHost`, the same path `pane-send` took; then regenerate the bindings, the manifest contract
 and the consent text.
 
+## Visual design
+
+The canvas is at https://claude.ai/artifact/8uWbK1f3w9hhZxdcfBQ8ev, and these are the rules it sets. Every cell is
+drawable in a terminal: box drawing, block and braille glyphs, and truecolor with a 256-colour fallback.
+
+**Palette.** One `Theme` table. A light theme is the same table with other values.
+
+| Role | Truecolor [256] |
+| --- | --- |
+| ground | `#0D1016` [233] |
+| panel | `#131821` [234] |
+| selection | `#20293A` [236] |
+| line | `#2A3446` [237] |
+| muted text | `#8D97A8` [246] |
+| bright text | `#F3F6FA` [255] |
+| accent and focus | `#B4A2FF` [147] |
+| asking | `#F4B64E` [215] |
+| error | `#FF8A7A` [210] |
+| working | `#78B0FF` [111] |
+| done | `#66D9A8` [79] |
+| faint (rules and borders only) | `#5B6577` [242] |
+
+- Text colours pass 4.5:1 on the panel.
+- Every state colour is paired with its own glyph, so nothing is told apart by hue alone.
+
+**State glyphs.** `?` asking, `…` waiting, `✗` error, a braille spinner `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` for working, `✓` done, `·`
+finished, `⚑` kept. A `•` in the accent colour marks unseen news.
+
+**Top bar.** One line, above the panes:
+- the brand mark and host;
+- the fleet gauge, `⬢ 3/4` with `▰▱`;
+- a `● N need you` pill in the asking colour;
+- the clock.
+
+**Two-line agent rows (Wide).**
+- **Line 1:** glyph, run, task, then state and age on the right.
+- **Line 2:** what the agent is on, in muted text: its pending question, the board's current task (the first open
+  `☐`), or its error.
+- **Working rows** add a `▰▱` meter, counted from the board's task boxes.
+- **Selection:** the row's background, plus a `▍` bar in the accent colour.
+- **Medium:** rows fold to one line, with the context after the name.
+
+**Section headers.** Bold, in the group's colour, with a count chip; for example `NEEDS YOU 2`, `WORKING 2 of 4`.
+
+**Focus.**
+- **Header:** the run, task and model, with state and age on the right. A second line holds the title, the branch
+  and the permission profile.
+- **Tab strip:** the active tab is a filled chip with an accent underline beneath it.
+
+**Transcript.**
+- Entries carry a coloured left gutter: neutral for claude, the working colour for tools, the asking colour for
+  permissions.
+- A tool call is one summary line, and `⏎` expands an edit's diff.
+- An answered permission stays visible, with who answered and when.
+- A `↓ live` chip shows when you have scrolled away from the end.
+
+**Asking box.** An asking-coloured frame above the message box. It names the tool and command, and shows the reply
+chips.
+
+**State boxes.** A done run shows a done-coloured box with its actions (open PR, follow up, end) where the message
+box would be.
+
+**Details.** Aligned facts, including time and tokens. A PERMISSIONS block shows:
+- the profile and where it came from;
+- its rules grouped, with what the profile adds over its parent marked;
+- how many times the run still asked.
+
+**Work tab.**
+- Aligned CI and review glyph columns, and `⬢` on an item with a live agent.
+- The 24-hour timeline moves here from the dashboard.
+- An item's Focus shows checks, review and the agents that ran on it, with a `⏎ start an agent` box.
+
+**Popups (launcher, palette).**
+- An accent border on a dimmed dashboard.
+- Matched letters underlined in the accent colour.
+- In the palette, commands that do not apply are dimmed, with the reason.
+
+**New keys the canvas uses:** `o` (open the item or PR in the browser), `r` (reveal the agent's tab) and `Z` (fold
+every group). These go into the `KeyRow` table and the action table.
+
 ## Errors
 
 | Situation | What the user sees |
