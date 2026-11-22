@@ -57,10 +57,22 @@ namespace
         RunLook { .mark = "…"sv, .role = Role::Warning, .word = "waiting"sv }, // Idle
         RunLook { .mark = "⠿"sv, .role = Role::Working, .word = "working"sv }, // Working
         RunLook { .mark = "✓"sv, .role = Role::Passing, .word = "done"sv },    // Done
-        RunLook { .mark = "?"sv, .role = Role::Warning, .word = "asking"sv },  // Blocked
+        RunLook { .mark = "…"sv, .role = Role::Warning, .word = "waiting"sv }, // Waiting
         RunLook { .mark = "✗"sv, .role = Role::Failing, .word = "error"sv },   // Error
+        RunLook { .mark = "?"sv, .role = Role::Warning, .word = "asking"sv },  // Asking
     };
-    static_assert(ReportedLooks.size() == std::to_underlying(AgentStatus::Error) + 1U);
+    static_assert(ReportedLooks.size() == std::to_underlying(AgentStatus::Asking) + 1U);
+
+    /// The row state of an agent that reported, indexed by AgentStatus.
+    constexpr auto ReportedRowStates = std::array {
+        RowState::Waiting, // Idle
+        RowState::Working, // Working
+        RowState::Done,    // Done
+        RowState::Waiting, // Waiting
+        RowState::Errored, // Error
+        RowState::Asking,  // Asking
+    };
+    static_assert(ReportedRowStates.size() == ReportedLooks.size());
 
     constexpr auto StartingLook = RunLook { .mark = "◌"sv, .role = Role::Working, .word = "starting"sv };
     constexpr auto PreparingLook = RunLook { .mark = "◌"sv, .role = Role::Working, .word = "preparing"sv };
@@ -141,22 +153,14 @@ RowState rowStateOf(Run const& run) noexcept
                           [](Preparing const&) { return RowState::Starting; },
                           [](Ending const&) { return RowState::Ending; },
                           [](Done const&) { return RowState::Done; },
+                          // A blocked run whose report was lost waits for the user all the same.
                           [&](Blocked const&) {
-                              return run.lastStatus == AgentStatus::Error ? RowState::Errored
-                                                                          : RowState::Asking;
+                              return run.lastStatus ? ReportedRowStates[std::to_underlying(*run.lastStatus)]
+                                                    : RowState::Waiting;
                           },
                           [&](auto const&) {
-                              if (!run.lastStatus)
-                                  return RowState::Starting;
-                              switch (*run.lastStatus)
-                              {
-                                  case AgentStatus::Idle: return RowState::Waiting;
-                                  case AgentStatus::Error: return RowState::Errored;
-                                  case AgentStatus::Blocked: return RowState::Asking;
-                                  case AgentStatus::Done: return RowState::Done;
-                                  case AgentStatus::Working: break;
-                              }
-                              return RowState::Working;
+                              return run.lastStatus ? ReportedRowStates[std::to_underlying(*run.lastStatus)]
+                                                    : RowState::Starting;
                           },
                       },
                       run.state);

@@ -1152,7 +1152,7 @@ TEST_CASE("the Panes hint lists the panes", "[guest][panes]")
     observer.inputs.clear();
     host.paneListing = std::vector { PaneInfo { .pane = "p1",
                                                 .tag = "pr-1-20261113-150847",
-                                                .status = AgentStatus::Blocked,
+                                                .status = AgentStatus::Asking,
                                                 .message = {},
                                                 .program = ProgramLiveness::Alive } };
 
@@ -1164,7 +1164,7 @@ TEST_CASE("the Panes hint lists the panes", "[guest][panes]")
     CHECK(listed.front().panes
           == std::vector { PaneFact { .pane = "p1",
                                       .tag = "pr-1-20261113-150847",
-                                      .status = AgentStatus::Blocked,
+                                      .status = AgentStatus::Asking,
                                       .message = {},
                                       .program = ProgramLiveness::Alive } });
 }
@@ -1417,13 +1417,12 @@ TEST_CASE("show-blocked opens the tab on the first blocked agent", "[guest]")
     for (auto const& run: runs)
     {
         served.host.store.insert_or_assign(runKey(run.id), toJson(run));
-        listing.push_back(PaneInfo { .pane = *run.pane,
-                                     .tag = run.id,
-                                     .status = std::holds_alternative<Blocked>(run.state)
-                                                   ? AgentStatus::Blocked
-                                                   : AgentStatus::Working,
-                                     .message = {},
-                                     .program = ProgramLiveness::Alive });
+        listing.push_back(PaneInfo {
+            .pane = *run.pane,
+            .tag = run.id,
+            .status = std::holds_alternative<Blocked>(run.state) ? AgentStatus::Asking : AgentStatus::Working,
+            .message = {},
+            .program = ProgramLiveness::Alive });
     }
     served.host.paneListing = listing;
     served.load();
@@ -1449,13 +1448,12 @@ TEST_CASE("show-blocked selects the blocked run and reads its board instead", "[
                             view::test::storedRun(Blocked {}, BlockedId, ChangeRequestRef { 2379 }) })
     {
         served.host.store.insert_or_assign(runKey(run.id), toJson(run));
-        listing.push_back(PaneInfo { .pane = *run.pane,
-                                     .tag = run.id,
-                                     .status = std::holds_alternative<Blocked>(run.state)
-                                                   ? AgentStatus::Blocked
-                                                   : AgentStatus::Working,
-                                     .message = {},
-                                     .program = ProgramLiveness::Alive });
+        listing.push_back(PaneInfo {
+            .pane = *run.pane,
+            .tag = run.id,
+            .status = std::holds_alternative<Blocked>(run.state) ? AgentStatus::Asking : AgentStatus::Working,
+            .message = {},
+            .program = ProgramLiveness::Alive });
     }
     served.host.paneListing = listing;
     served.host.fileContent = FileContent { .bytes = "# hi", .modifiedUnixMs = 1 };

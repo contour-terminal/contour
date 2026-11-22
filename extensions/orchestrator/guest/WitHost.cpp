@@ -125,9 +125,19 @@ namespace
 
     [[nodiscard]] PaneInfo paneInfoOf(terminal_extensions_daemon_host_pane_info_t const& info)
     {
+        // The world's agent-status, indexed by its case: `blocked` is a wait asking cannot be told from.
+        constexpr auto AgentStatusOfCase = std::array {
+            AgentStatus::Idle,    // idle
+            AgentStatus::Working, // working
+            AgentStatus::Done,    // done
+            AgentStatus::Waiting, // blocked
+            AgentStatus::Error,   // error
+            AgentStatus::Asking,  // asking
+        };
+        static_assert(AgentStatusOfCase.size() == TERMINAL_EXTENSIONS_DAEMON_HOST_AGENT_STATUS_ASKING + 1U);
         auto status = std::optional<AgentStatus> {};
-        if (info.status.is_some && info.status.val <= TERMINAL_EXTENSIONS_DAEMON_HOST_AGENT_STATUS_ERROR)
-            status = static_cast<AgentStatus>(info.status.val);
+        if (info.status.is_some && info.status.val < AgentStatusOfCase.size())
+            status = AgentStatusOfCase.at(info.status.val);
         return PaneInfo { .pane = copied(info.pane),
                           .tag = copied(info.tag),
                           .status = status,

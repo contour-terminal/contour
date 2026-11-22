@@ -451,7 +451,7 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
           .effects = "persist" },
         { .from = "running, blocked reported",
           .state = Running {},
-          .input = StatusReported { AgentStatus::Blocked },
+          .input = StatusReported { AgentStatus::Asking },
           .to = "Blocked",
           .effects = "persist" },
         { .from = "running, error reported",
@@ -481,7 +481,7 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
           .input = StatusReported { AgentStatus::Working },
           .to = "Running",
           .effects = "persist",
-          .lastStatus = AgentStatus::Blocked },
+          .lastStatus = AgentStatus::Asking },
         { .from = "done, working reported",
           .state = Done {},
           .input = StatusReported { AgentStatus::Working },
@@ -565,7 +565,7 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
           .input = EndByUser {},
           .to = "Ending(close-pane, ended-by-you)",
           .effects = "persist, close-pane",
-          .lastStatus = AgentStatus::Blocked },
+          .lastStatus = AgentStatus::Asking },
         { .from = "done, ended by the user",
           .state = Done {},
           .input = EndByUser {},
@@ -1723,8 +1723,9 @@ TEST_CASE("stateFor", "[orchestrator][run]")
         Row { .status = AgentStatus::Idle, .state = "Running" },
         Row { .status = AgentStatus::Working, .state = "Running" },
         Row { .status = AgentStatus::Done, .state = "Done" },
-        Row { .status = AgentStatus::Blocked, .state = "Blocked" },
+        Row { .status = AgentStatus::Waiting, .state = "Blocked" },
         Row { .status = AgentStatus::Error, .state = "Blocked" },
+        Row { .status = AgentStatus::Asking, .state = "Blocked" },
     };
     for (auto const& row: Rows)
     {
@@ -1744,8 +1745,9 @@ TEST_CASE("agentStatusName", "[orchestrator][run]")
         Row { .status = AgentStatus::Idle, .name = "idle" },
         Row { .status = AgentStatus::Working, .name = "working" },
         Row { .status = AgentStatus::Done, .name = "done" },
-        Row { .status = AgentStatus::Blocked, .name = "blocked" },
+        Row { .status = AgentStatus::Waiting, .name = "waiting" },
         Row { .status = AgentStatus::Error, .name = "error" },
+        Row { .status = AgentStatus::Asking, .name = "asking" },
     };
     for (auto const& row: Rows)
     {
@@ -1969,7 +1971,7 @@ TEST_CASE("runFromJson reads what toJson writes", "[orchestrator][run]")
                     run.failure = RunFailure { .step = PrepareStep::Checkout, .why = "exit 1: \"no\"" };
                 if (variant & 2)
                 {
-                    run.lastStatus = AgentStatus::Blocked;
+                    run.lastStatus = AgentStatus::Asking;
                     run.pane = "pane-7";
                 }
                 run.runningSinceMs = 77;
@@ -1985,6 +1987,21 @@ TEST_CASE("runFromJson reads what toJson writes", "[orchestrator][run]")
                 CHECK_FALSE(json.contains("runningSinceMs"));
                 CHECK(orchestrator::toJson(*read) == json);
             }
+}
+
+TEST_CASE("a run stored before asking was told apart reads its blocked agent as waiting",
+          "[orchestrator][run]")
+{
+    auto run = makeRun(Item::Pr, Blocked {});
+    run.lastStatus = AgentStatus::Waiting;
+    auto json = orchestrator::toJson(run);
+    REQUIRE(json.contains(R"("lastStatus":"waiting")"));
+    json.replace(json.find(R"("waiting")"), std::string_view { R"("waiting")" }.size(), R"("blocked")");
+    auto const read = orchestrator::runFromJson(json);
+    REQUIRE(read.has_value());
+    CHECK(read->lastStatus == AgentStatus::Waiting);
+    // It is written in today's words.
+    CHECK(orchestrator::toJson(*read).contains(R"("lastStatus":"waiting")"));
 }
 
 TEST_CASE("runFromJson refuses what toJson never writes", "[orchestrator][run]")
@@ -2384,7 +2401,7 @@ TEST_CASE("a run's history records each state it enters, first kept", "[orchestr
         context.wallMs = NowMs + static_cast<uint64_t>(index) + 1;
         std::ignore =
             advance(run,
-                    StatusReported { .status = index % 2 == 0 ? AgentStatus::Blocked : AgentStatus::Working },
+                    StatusReported { .status = index % 2 == 0 ? AgentStatus::Asking : AgentStatus::Working },
                     context);
     }
     REQUIRE(run.history.size() == MaxHistory);

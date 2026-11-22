@@ -48,11 +48,13 @@ enum class EndStep : uint8_t
 /// What an agent last reported about itself.
 enum class AgentStatus : uint8_t
 {
-    Idle,    ///< Waiting for input it does not need.
+    Idle,    ///< Its turn ended without reporting done: it waits for input.
     Working, ///< Working.
     Done,    ///< Finished its task; it stays open until the user ends the run.
-    Blocked, ///< Waiting for the user.
+    Waiting, ///< Waiting for the user, for a reason other than a permission, or one it did not name: answered
+             ///< in its tab or with a message, never with a quick reply.
     Error,   ///< Stopped by an error.
+    Asking,  ///< Asking for a permission, in a menu a quick reply answers (`pane-key`).
 };
 
 /// How a run ended.

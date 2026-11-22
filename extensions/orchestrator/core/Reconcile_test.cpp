@@ -119,7 +119,7 @@ constexpr auto StrayPane = "p-stray"sv;
         case Status::Idle: return AgentStatus::Idle;
         case Status::Working: return AgentStatus::Working;
         case Status::Done: return AgentStatus::Done;
-        case Status::Blocked: return AgentStatus::Blocked;
+        case Status::Blocked: return AgentStatus::Asking;
         case Status::Error: return AgentStatus::Error;
     }
     return std::nullopt;
@@ -442,12 +442,12 @@ TEST_CASE("Reconcile.manyRuns", "[orchestrator][reconcile]")
                    .program = ProgramLiveness::Alive },
         PaneFact { .pane = "p-x",
                    .tag = "x-9",
-                   .status = AgentStatus::Blocked,
+                   .status = AgentStatus::Asking,
                    .message = {},
                    .program = ProgramLiveness::Alive },
         PaneFact { .pane = "p-a",
                    .tag = "a-1",
-                   .status = AgentStatus::Blocked,
+                   .status = AgentStatus::Asking,
                    .message = {},
                    .program = ProgramLiveness::Alive },
         PaneFact { .pane = "p-d",
@@ -460,7 +460,7 @@ TEST_CASE("Reconcile.manyRuns", "[orchestrator][reconcile]")
     // In run order; the pane tagged with no run and the finished run's pane are left alone.
     CHECK(decisions
           == std::vector<Decision> {
-              StatusChanged { .run = "a-1", .status = AgentStatus::Blocked },
+              StatusChanged { .run = "a-1", .status = AgentStatus::Asking },
               Adopt { .run = "b-2", .pane = "p-b" },
               PaneWentAway { .run = "c-3" },
           });
@@ -501,7 +501,7 @@ TEST_CASE("Reconcile.staleListing", "[orchestrator][reconcile]")
     for (auto const& row: StaleRows)
     {
         CAPTURE(row.name);
-        auto run = makeRun(std::string(RunIdText), stateOf(row.state), AgentStatus::Blocked);
+        auto run = makeRun(std::string(RunIdText), stateOf(row.state), AgentStatus::Asking);
         run.changedMonoMs = row.changedMs;
         auto const runs = std::vector { run };
         auto const panes = panesFor(row.listed, Status::Working);

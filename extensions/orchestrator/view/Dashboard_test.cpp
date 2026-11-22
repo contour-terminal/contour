@@ -149,7 +149,7 @@ constexpr auto WorkingBoard = R"(# Fixing CI
     constexpr auto AskingId = "pr-2346-20261113-150500"sv;
     constexpr auto WaitingId = "issue-2253-20261113-150600"sv;
     auto asking = storedRun(Blocked {}, AskingId, ChangeRequestRef { 2346 });
-    asking.lastStatus = AgentStatus::Blocked;
+    asking.lastStatus = AgentStatus::Asking;
     asking.history = { StateChange { .wallMs = DispatchWallMs - 120'000, .state = "blocked" } };
     auto waiting = storedRun(Running {}, WaitingId, IssueRef { 2253 }, "issue");
     waiting.lastStatus = AgentStatus::Idle;
@@ -455,7 +455,7 @@ TEST_CASE("the selection stays on its run when the run changes groups", "[orches
     static_cast<void>(
         fixture.engine.step(PanesListed { .panes = { PaneFact { .pane = std::format("p-{}", RunningId),
                                                                 .tag = std::string { RunningId },
-                                                                .status = AgentStatus::Blocked,
+                                                                .status = AgentStatus::Asking,
                                                                 .message = {},
                                                                 .program = ProgramLiveness::Alive } },
                                           .requestedMonoMs = StartMonoMs + 1'000,

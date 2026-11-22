@@ -91,9 +91,21 @@ namespace
 
     constexpr auto AgentStatusNames = std::array {
         Spelling { AgentStatus::Idle, "idle"sv },   Spelling { AgentStatus::Working, "working"sv },
-        Spelling { AgentStatus::Done, "done"sv },   Spelling { AgentStatus::Blocked, "blocked"sv },
-        Spelling { AgentStatus::Error, "error"sv },
+        Spelling { AgentStatus::Done, "done"sv },   Spelling { AgentStatus::Waiting, "waiting"sv },
+        Spelling { AgentStatus::Error, "error"sv }, Spelling { AgentStatus::Asking, "asking"sv },
     };
+
+    /// What a run stored before asking was told apart from waiting reported: `blocked`, read as waiting, as
+    /// the host could not tell then.
+    constexpr auto LegacyAgentStatusNames = std::array {
+        Spelling { AgentStatus::Waiting, "blocked"sv },
+    };
+
+    /// @return The status @p text spells, a legacy spelling included.
+    [[nodiscard]] std::optional<AgentStatus> agentStatusNamed(std::string_view text) noexcept
+    {
+        return parse(AgentStatusNames, text).or_else([&] { return parse(LegacyAgentStatusNames, text); });
+    }
 
     constexpr auto EndedNames = std::array {
         Spelling { Ended::Completed, "completed"sv },
@@ -867,7 +879,8 @@ RunState stateFor(AgentStatus status) noexcept
     {
         case AgentStatus::Idle:
         case AgentStatus::Working: return Running {};
-        case AgentStatus::Blocked:
+        case AgentStatus::Waiting:
+        case AgentStatus::Asking:
         case AgentStatus::Error: return Blocked {};
         case AgentStatus::Done: return Done {};
     }
@@ -1248,7 +1261,7 @@ std::optional<Run> runFromJson(std::string_view text)
 
     auto item = itemOf(json);
     auto state = stateOf(json);
-    auto const lastStatus = json.lastStatus ? parse(AgentStatusNames, *json.lastStatus) : std::nullopt;
+    auto const lastStatus = json.lastStatus ? agentStatusNamed(*json.lastStatus) : std::nullopt;
     auto const failureStep = json.failure ? parse(PrepareStepNames, json.failure->step) : std::nullopt;
     auto const forge = forgeNamed(json.forge);
     if (!item || !state || !forge || (json.lastStatus && !lastStatus) || (json.failure && !failureStep))

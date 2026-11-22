@@ -1001,7 +1001,7 @@ TEST_CASE("the same item active refuses; finished does not", "[orchestrator][eng
         else
             harness.runToRunning(prDispatch());
         if (row.stage == Stage::Blocked)
-            harness.list({ paneOf(PrId, "p1", ProgramLiveness::Alive, AgentStatus::Blocked) });
+            harness.list({ paneOf(PrId, "p1", ProgramLiveness::Alive, AgentStatus::Asking) });
         if (row.stage == Stage::Done)
             harness.list({ paneOf(PrId, "p1", ProgramLiveness::Alive, AgentStatus::Done) });
         if (row.stage == Stage::Finished)
@@ -1964,7 +1964,7 @@ TEST_CASE("no status board is read while blocked or done, nor with a threshold o
 {
     SECTION("blocked or done")
     {
-        for (auto const status: std::array { AgentStatus::Blocked, AgentStatus::Done })
+        for (auto const status: std::array { AgentStatus::Asking, AgentStatus::Done })
         {
             CAPTURE(status);
             auto harness = booted();
