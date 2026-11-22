@@ -238,9 +238,9 @@ Every action answers on the action bar, in the colour of its outcome, until the 
 | Quick reply `1 2 3` | no | the chip fills, `answered yes`; the asking box stays, dimmed, until the hook leaves asking. After 10 s still asking: `pr-2375 still asks · r opens its tab` |
 | `3` no, and say why | no | as above, then the message box opens for that run, empty, so the next keys are the reason |
 | End `e` | yes, once: `end pr-2375? e again to end · esc keeps it` (as today) | the run moves to Finished, `removed`, or `kept` with the reason |
-| Dismiss `del` (Finished only) | no: it changes no files | the row leaves the Finished group; `dismissed pr-2366` |
+| Dismiss `del` (Finished only) | no: it changes no files | the row leaves the Finished group; `dismissed pr-2366 · ^K show dismissed brings it back` |
 | Retry removal `x` | no: removal is never forced | `removed`, or the reason it is still kept |
-| Open PR `o` | no | `opened #2369` or why not (see "Errors") |
+| Open PR `o` | no | `opening #2369 on your machine`; before phase 6, `copied #2369's link · ctrl+click it to open` |
 
 ## The command palette (`^K`, `?`)
 
@@ -341,8 +341,8 @@ enum pane-key-name { digit-1, digit-2, digit-3, digit-4, digit-5, digit-6, digit
   `pane-input`. The consent line becomes "It may type text you write into those tabs, or press a number key you
   choose, when you send it from its own tab".
 - **Guest.** The guest presses a key only on the user's `1`, `2` or `3`, while the run is asking. The labels come
-  from a config table, `quick_replies:` (default yes, always, no, mapped to 1, 2, 3), so a changed Claude Code menu
-  is fixed in config.
+  from a config table, `quick_replies:`, so a changed Claude Code menu is fixed in config. The defaults follow
+  Claude Code's own wording, shortened: `1 yes`, `2 yes, don't ask again`, `3 no, and say why`.
 - **Live check before the host change.** In a real Claude Code pane, a raw `1` answers the prompt and a pasted `1`
   does not. If a paste does answer it, `pane-key` is dropped and `pane-send` gains a no-paste, no-Enter variant
   instead.
@@ -441,6 +441,33 @@ in the manifest, so the consent dialog shows it as it shows `board`.
   - the dashboard's own terminal tab title counts the runs that need you, `Orchestrator · 2!`, written as OSC 2
     through `tab-write`, so a user in another tab sees it.
 - Working rows show a core-cpp `Spinner` frame, advanced on the existing redraw tick (no extra timer).
+
+## Links: the terminal you are at opens them
+
+A URL is opened by the machine you are sitting at, not by the daemon's machine. When you attach to a remote
+daemon, those are different, and only your terminal knows where you are.
+
+- **Every link is a hyperlink.** The orchestrator draws every URL it shows as an OSC 8 hyperlink: the PR and
+  issue links, the URLs in boards and transcripts, and the checks. It uses core-cpp's `HyperlinkEmitter`, which
+  frames a buffer's hyperlink regions while its cells flush. Contour, and any terminal with OSC 8, underlines
+  them on hover and opens them with ctrl+click (Contour's `FollowHyperlink`, through its external launcher, on
+  the client's machine). This needs no host change, and it is in phase 1.
+- **`o` opens without the mouse.** A new daemon-world import asks the frontend whose key press it serves to
+  follow a link:
+
+  ```wit
+  /// Asks the frontend the user pressed a key in to open an https link, as FollowHyperlink does.
+  url-open: func(url: string, origin: origin) -> result<_, host-error>;
+  ```
+
+  - **Policy:** the host accepts `https://` URLs only, at most 2 KiB, and only with an origin from a key the user
+    pressed in the extension's own tab within the last 2 s (the rule `tab-reveal` already uses). The manifest
+    declares `url-open`, and the consent dialog says "It may ask your terminal to open https links you choose".
+  - **Routing:** the host sends the request to that frontend, over the native protocol as a new PDU. The frontend
+    opens it with its existing external launcher, the same path a ctrl+click takes. A frontend without a
+    launcher answers `not-supported`.
+  - **Before this lands,** or when it is refused, `o` copies the link with OSC 52 and says
+    `copied #2369's link · ctrl+click it to open`.
 
 ## Mouse (its own late phase)
 
@@ -602,7 +629,7 @@ line carries the link), since its query takes every letter.
 | The launcher's lists cannot be read | The browse area says why; topics still start. |
 | A quick reply that does not take effect | After 10 s still asking: "pr-2375 still asks · r opens its tab". |
 | A run's agent fails before its pane opens | The run is `Finished` with the failure words; `⏎ run again` reopens the launcher with the same choice. |
-| `o` where the host cannot open a URL | The link is copied with OSC 52 through `tab-write`: "copied #2369's link". |
+| `o` refused or unsupported by the frontend | The link is copied with OSC 52 through `tab-write`: "copied #2369's link · ctrl+click it to open". |
 | A tab lower than its furniture needs | The furniture gives way in the order under "Small terminals". |
 
 ## Testing
@@ -652,7 +679,18 @@ usable on its own.
 3. **The launcher.** It replaces the dispatch form, `d`, the task letter keys and `n`.
 4. **Quick replies.** The live check; the `Asking` split; `pane-key` end to end; `quick_replies`; the chips.
 5. **Attention.** Needs-you notices, unseen markers, spinners.
-6. **Mouse.**
+6. **Mouse and `url-open`.** Click, wheel and the hit map; `url-open` through WIT, vtextension, the native
+   protocol and the frontend's launcher.
+
+## Decisions taken
+
+- **Tabs:** `b` `t` `d`, not `[` `]`: a letter names what it shows.
+- **Kept runs:** stay a row state (`⚑`, `⏎` retries the removal) inside the Finished group, not a group of their
+  own.
+- **Dismiss:** does not ask, and has no undo key. It only hides the record, and the palette's "show dismissed runs"
+  lists hidden runs, where `⏎` brings one back.
+- **Quick-reply labels:** come from config, never from the screen. The defaults follow Claude Code's wording.
+- **Links:** OSC 8 everywhere from phase 1; `o` through `url-open` in phase 6, with an OSC 52 copy until then.
 
 ## Out of scope
 
