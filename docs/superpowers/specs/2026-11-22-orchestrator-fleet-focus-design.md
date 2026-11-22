@@ -672,13 +672,16 @@ Each phase builds clean, passes `orchestrator_test` (plus `vtextension_test`, `v
 usable on its own.
 
 0. **Default permissions.** The `settings` argument, the profiles, the per-task override, Details and consent.
-   This phase is independent of the layout, and it cuts the number of `Asking` states first. The launcher's
-   `perms` value lands with phase 3.
-1. **Fleet + Focus.** The two panes, the empty-Fleet primer and the small-terminal order. The Focus tabs replace the board and transcript screens,
-   with follow, tail and latest. The message box replaces the message line. Bands and goldens.
-2. **Actions and the palette.** `RowState`, the `ActionRow` table, the adaptive action bar, `⏎` as the primary
+   This phase is independent of the layout, and it cuts the number of `Asking` states first.
+1. **The launcher.** It replaces the dispatch form, `d` and `n`, and lands the launcher's `perms` value. It
+   comes before the layout, because the layout removes the item lists and `d`, which are the only way to
+   start an agent on an item until the launcher exists. The item lists stay on the dashboard until phase 2,
+   and the task keys stay as accelerators that open the launcher with their task chosen.
+2. **Fleet + Focus.** The two panes, the empty-Fleet primer and the small-terminal order. The Focus tabs
+   replace the board and transcript screens, with follow, tail and latest. The message box replaces the message
+   line. The item lists leave the dashboard. Bands and goldens.
+3. **Actions and the palette.** `RowState`, the `ActionRow` table, the adaptive action bar, `⏎` as the primary
    action, and the palette replacing the help.
-3. **The launcher.** It replaces the dispatch form, `d`, the task letter keys and `n`.
 4. **Quick replies.** The live check; the `Asking` split; `pane-key` end to end; `quick_replies`; the chips.
 5. **Attention.** Needs-you notices, unseen markers, spinners.
 6. **Mouse and `url-open`.** Click, wheel and the hit map; `url-open` through WIT, vtextension, the native
