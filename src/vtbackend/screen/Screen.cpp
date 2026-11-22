@@ -6156,6 +6156,17 @@ void Screen::processKittyGraphics(std::string_view body)
     }
     auto command = std::move(parsed.value());
 
+    auto const abandonChunkedTransmission = [this] {
+        _kittyChunkedCommand.reset();
+        _kittyChunkedPayload.clear();
+        _kittyChunkedPayload.shrink_to_fit();
+    };
+
+    // A delete is never a continuation chunk: it aborts a chunked transmission in progress and is carried
+    // out, as kitty's handle_delete_command() does.
+    if (_kittyChunkedCommand && command.action == Action::Delete)
+        abandonChunkedTransmission();
+
     // A chunked transmission carries its control data only in the FIRST chunk; the rest is payload
     // that has to be stitched onto it before anything can be decided.
     if (_kittyChunkedCommand)
@@ -6166,9 +6177,7 @@ void Screen::processKittyGraphics(std::string_view body)
         if (_kittyChunkedPayload.size() + command.payload.size() > MaxChunkedPayloadSize)
         {
             auto const abandoned = *_kittyChunkedCommand;
-            _kittyChunkedCommand.reset();
-            _kittyChunkedPayload.clear();
-            _kittyChunkedPayload.shrink_to_fit();
+            abandonChunkedTransmission();
             replyKittyGraphics(abandoned, "EINVAL:image transmission too large");
             return;
         }

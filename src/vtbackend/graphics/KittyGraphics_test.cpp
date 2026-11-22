@@ -237,6 +237,24 @@ TEST_CASE("KittyGraphics.upper_case_delete_frees_the_image_data", "[kitty]")
     CHECK(mock.terminal.peekInput().contains("ENOENT"));
 }
 
+TEST_CASE("KittyGraphics.a_delete_aborts_a_chunked_transmission", "[kitty]")
+{
+    // A delete arriving while a chunked transmission is in progress is no continuation chunk: kitty aborts
+    // the transmission and carries the delete out.
+    auto mock = KittyTerm { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=1,s=2,v=1;/wAAAP8A\033\\"sv);
+    REQUIRE(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment());
+
+    mock.writeToScreen("\033_Ga=t,f=24,i=2,s=2,v=1,m=1;/wAA\033\\"sv);
+    mock.writeToScreen("\033_Ga=d,d=a\033\\"sv);
+    CHECK_FALSE(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment());
+
+    // The aborted transmission stored nothing.
+    mock.terminal.flushInput();
+    mock.writeToScreen("\033[H\033_Ga=p,i=2\033\\"sv);
+    CHECK(mock.terminal.peekInput().contains("ENOENT"));
+}
+
 TEST_CASE("KittyGraphics.an_endless_chunk_stream_is_abandoned_not_accumulated", "[kitty]")
 {
     // Every byte a remote host writes ends up in the reassembly buffer, and a stream that never
