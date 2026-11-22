@@ -9,6 +9,7 @@
 #include <core/tui/Canvas.hpp>
 #include <core/tui/Component.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -104,6 +105,7 @@ struct FocusFrame
     Place place = Place::Fleet;                ///< Which pane has the keys.
     BottomBox box = BottomBox::None;           ///< The box at its bottom.
     Furniture givenWay = Furniture::None;      ///< The furniture the dashboard gave way: the top bar.
+    std::array<News, 3> tabNews = {};          ///< By FocusTab: whether the tab changed since it was shown.
 };
 
 /// What the Details tab learnt drawing itself, for the keys.

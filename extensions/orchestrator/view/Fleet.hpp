@@ -26,6 +26,13 @@ enum class FocusTab : uint8_t
     Details,    ///< Its details: where it works, what it spent, its permissions.
 };
 
+/// Whether something changed since the user last looked at it (SeenLedger).
+enum class News : uint8_t
+{
+    None = 0, ///< Nothing changed, or the user looks at it.
+    Unseen,   ///< It changed since: a `•` in the accent colour marks it.
+};
+
 /// The Fleet's groups, in the order they are listed.
 enum class FleetGroup : uint8_t
 {
@@ -72,7 +79,7 @@ inline constexpr std::size_t FinishedFoldedTo = 5;
 /// is told apart by hue alone.
 struct RunLook
 {
-    std::string_view mark = {}; ///< One cell: `?`, `…`, `✗`, `⠿`, `◌`, `✓`, `·` or `⚑`.
+    std::string_view mark = {}; ///< One cell: `?`, `…`, `✗`, `⠋` (a spinner's frame), `◌`, `✓`, `·` or `⚑`.
     Role role = Role::Text;     ///< How the mark and the word are drawn.
     std::string_view word = {}; ///< Such as `asking`, `working` or `kept`.
 };

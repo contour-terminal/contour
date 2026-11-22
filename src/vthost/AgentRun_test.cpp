@@ -796,6 +796,23 @@ TEST_CASE("a digit answers an agent that asks, as a key pressed in its tab", "[d
     CHECK(box);
 }
 
+TEST_CASE("an agent that starts to ask while another row is selected is named on the action bar",
+          "[daemon][e2e][agents]")
+{
+    auto d = AgentDaemon {};
+    auto desk = Desk { *d.live, d.world };
+    auto const dispatched = dispatch(desk, *d.live, d.world, "2375", "pr-2375-");
+    // The selection moves to `+ new agent`, the Fleet's last row.
+    desk.type("\x1b[F");
+    REQUIRE(desk.until([&] { return desk.page().contains("⏎ new agent"); }));
+    report(*d.live, dispatched.agent, "blocked:kind=permission");
+    REQUIRE(desk.until([&] { return reported(d.world, "pr-2375-", "asking"); }));
+    auto const named = desk.until([&] { return desk.page().contains("needs you · home"); });
+    INFO("dashboard: " << desk.page());
+    CHECK(named);
+    CHECK(desk.page().contains("● 1 need you"));
+}
+
 TEST_CASE("a live upgrade mid-run keeps the agent pane", "[daemon][e2e][agents][upgrade]")
 {
     auto world = OrchestratorWorld { VTHOST_TEST_ORCHESTRATOR_WASM, VTHOST_TEST_ORCHESTRATOR_TESTDATA };

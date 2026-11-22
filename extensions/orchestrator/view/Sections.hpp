@@ -94,11 +94,13 @@ struct Row
     Fold fold = Fold::Open; ///< A heading: whether its group hides some runs; a run: whether it is
                             ///< hidden, which it is not while a filter is typed.
     std::optional<FleetGroup> attention = {}; ///< The group a run is listed in; none for any other row.
-    std::string state = {}; ///< The word of its run's look (runLookOf()): a tab the user chose
-                            ///< sticks until it changes.
+    std::string state = {};             ///< The word of its run's look (runLookOf()): a tab the user chose
+                                        ///< sticks until it changes.
     RowState rowState = RowState::None; ///< What it is, as far as the actions it offers go (actionsFor()).
-    std::string title = {}; ///< The Focus header's second line begins with it: the item's title.
+    std::string title = {};             ///< The Focus header's second line begins with it: the item's title.
     std::vector<DetailLine> details = {}; ///< The Details tab's lines.
+    News news = News::None; ///< Whether its run changed since the user last looked at it; set by the
+                            ///< dashboard before each draw.
     std::vector<QuickReply> replies = {}; ///< An asking run's chips: the configured quick replies; empty for
                                           ///< any other row.
 

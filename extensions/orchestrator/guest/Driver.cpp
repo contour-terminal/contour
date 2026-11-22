@@ -464,8 +464,7 @@ void Driver::showBlocked(uint32_t origin)
     if (dashboard == _dashboards.end())
         return;
     auto const runs = _engine->runs();
-    auto const blocked =
-        std::ranges::find_if(runs, [](Run const& run) { return std::holds_alternative<Blocked>(run.state); });
+    auto const blocked = std::ranges::find_if(runs, needsUser);
     if (blocked == runs.end())
         return;
     // Selecting it leaves a board the tab showed, which the engine then stops reading.

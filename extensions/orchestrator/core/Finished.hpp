@@ -66,9 +66,16 @@ struct Counts
     uint32_t active = 0;      ///< The runs countsAsActive() accepts.
     uint32_t max = 0;         ///< The configured `max_agents`.
     uint32_t failingCi = 0;   ///< The user's change requests whose checks fail.
-    uint32_t blocked = 0;     ///< The runs whose agent waits for the user.
+    uint32_t needYou = 0;     ///< The runs that need the user (needsUser()).
     uint32_t newFinished = 0; ///< newFinishedCount().
 };
+
+/// @param run A run.
+/// @return Whether it needs the user: its agent asks, waits for input or stopped by an error (Blocked), or
+/// its
+///         turn ended without reporting done (Running, its agent last reporting Idle). The Fleet lists it in
+///         Needs you.
+[[nodiscard]] bool needsUser(Run const& run) noexcept;
 
 /// Counts the runs: the active ones by countsAsActive(), never by isUnfinished().
 /// @param runs The runs.
@@ -87,7 +94,8 @@ struct Summary
 /// The summary of the extension's work.
 /// @param counts The numbers to show.
 /// @param runs The runs to list.
-/// @return The short text, such as "⬢ agents 3/4 · ✗1 · ●1 blocked · ✓2 new" with its zero terms omitted, and
+/// @return The short text, such as "⬢ agents 3/4 · ✗1 · ●1 need you · ✓2 new" with its zero terms omitted,
+/// and
 ///         the detail: the short text and one sanitised line per run, cut at a line boundary with a last line
 ///         counting the runs left out.
 [[nodiscard]] Summary summarize(Counts counts, std::span<Run const> runs);

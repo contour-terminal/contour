@@ -55,7 +55,8 @@ namespace
     /// How an agent that reported looks, indexed by AgentStatus.
     constexpr auto ReportedLooks = std::array {
         RunLook { .mark = "…"sv, .role = Role::Warning, .word = "waiting"sv }, // Idle
-        RunLook { .mark = "⠿"sv, .role = Role::Working, .word = "working"sv }, // Working
+        RunLook {
+            .mark = "⠋"sv, .role = Role::Working, .word = "working"sv }, // Working: the spinner's first frame
         RunLook { .mark = "✓"sv, .role = Role::Passing, .word = "done"sv },    // Done
         RunLook { .mark = "…"sv, .role = Role::Warning, .word = "waiting"sv }, // Waiting
         RunLook { .mark = "✗"sv, .role = Role::Failing, .word = "error"sv },   // Error
@@ -110,16 +111,9 @@ FleetGroup fleetGroupOf(Run const& run) noexcept
 {
     if (finishedEntryOf(run) != nullptr)
         return FleetGroup::Finished;
-    return std::visit(Overloaded {
-                          [&](Running const&) {
-                              return run.lastStatus == AgentStatus::Idle ? FleetGroup::NeedsYou
-                                                                         : FleetGroup::Working;
-                          },
-                          [](Blocked const&) { return FleetGroup::NeedsYou; },
-                          [](Done const&) { return FleetGroup::ToReview; },
-                          [](auto const&) { return FleetGroup::Working; },
-                      },
-                      run.state);
+    if (needsUser(run))
+        return FleetGroup::NeedsYou;
+    return std::holds_alternative<Done>(run.state) ? FleetGroup::ToReview : FleetGroup::Working;
 }
 
 RunLook runLookOf(Run const& run) noexcept

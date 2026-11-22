@@ -368,7 +368,10 @@ void Focus::renderRun(Canvas& canvas, Run const* run)
             auto key = style;
             key.underline = true;
             x += inside.putString(y, x, label.label.substr(0, 1), key);
-            x += inside.putString(y, x, label.label.substr(1), style) + 2;
+            x += inside.putString(y, x, label.label.substr(1), style);
+            if (_frame.tabNews[std::to_underlying(label.tab)] == News::Unseen)
+                x += inside.putString(y, x, " •", styleOf(theme, Role::Accent));
+            x += 2;
         }
         liveChip = y++;
     }

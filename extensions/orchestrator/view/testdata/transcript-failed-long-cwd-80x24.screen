@@ -1,6 +1,6 @@
  ✦ Agents                                                            ⬢ 1/4 ▰▱▱▱ 
  pr-2375-20261113-150847: outside the current configuration (/home/u/worktrees… 
-╭─ pr-2375 · fix CI · sonnet ───────────────────── ⠿ outside the configuration ╮
+╭─ pr-2375 · fix CI · sonnet ───────────────────── ⠋ outside the configuration ╮
 │ Say why the stdio relay failed, and send a hello before half-closing in the… │
 │ Board  Transcript  Details                                                   │
 │ no session log                                                               │

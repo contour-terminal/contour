@@ -1,12 +1,12 @@
  ✦ Agents                                                                                      ⬢ 4/4 ▰▰▰▰  ● 2 need you 
-╭─ Agents 7 ───────────────────────────────────╮ ╭─ pr-2375 · fix CI · sonnet ─────────────────────────── ⠿ working 6m ╮
+╭─ Agents 7 ───────────────────────────────────╮ ╭─ pr-2375 · fix CI · sonnet ─────────────────────────── ⠋ working 6m ╮
 │ NEEDS YOU 2                                  │ │ Say why the stdio relay failed, and send a hello before half-closi… │
 │ ? pr-2346 · fix CI                 asking 6m │ │ Board  Transcript  Details                                          │
 │   Bash: ctest -R reflow --output-on-failure  │ │ updated 9 min ago                                                   │
 │ … issue-2253 · work on issue      waiting 6m │ │ Fixing CI                                                           │
 │   Waiting for Build pace                     │ │ ☑ reproduced on master                                              │
 │ WORKING 1 of 4                               │ │ ☑ wrote the regression test                                         │
-│▍⠿ pr-2375 · fix CI                working 6m │ │ ☐ fix the reflow                                                    │
+│▍⠋ pr-2375 · fix CI                working 6m │ │ ☐ fix the reflow                                                    │
 │▍  fix the reflow                      ▰▰▰▱▱▱ │ │ ☐ watch CI                                                          │
 │ TO REVIEW 1                                  │ │                                                                     │
 │ ✓ pr-2379 · fix CI                      done │ │                                                                     │

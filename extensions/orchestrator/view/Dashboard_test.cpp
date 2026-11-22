@@ -1271,3 +1271,135 @@ TEST_CASE("an orphan's row is read-only: its Focus shows its details", "[orchest
 }
 
 // }}}
+// {{{ attention
+
+namespace
+{
+
+constexpr auto OtherId = "pr-2380-20261113-151000"sv;
+
+/// Two agents at work: pr-2375, and pr-2380, which the attention tests select while watching the other.
+[[nodiscard]] World twoWorking()
+{
+    return World { .stored = { storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }),
+                               storedRun(Running {}, OtherId, ChangeRequestRef { 2380 }) } };
+}
+
+/// Lists both agents' tabs, pr-2375's agent reporting @p status, and tells the dashboard.
+void report(Fixture& fixture, AgentStatus status)
+{
+    auto const pane = [](std::string_view run, AgentStatus reported) {
+        return PaneFact { .pane = std::format("p-{}", run),
+                          .tag = std::string { run },
+                          .status = reported,
+                          .message = {},
+                          .program = ProgramLiveness::Alive };
+    };
+    fixture.clock.advance(std::chrono::seconds { 1 });
+    static_cast<void>(fixture.engine.step(
+        PanesListed { .panes = { pane(RunningId, status), pane(OtherId, AgentStatus::Working) },
+                      .requestedMonoMs = fixture.monoMs(),
+                      .listing = PaneListing::Tagged }));
+    fixture.dashboard.engineChanged();
+}
+
+/// @return A transcript page of @p count entries.
+[[nodiscard]] ProcessOutcome pageOfEntries(int count)
+{
+    auto entries = std::string {};
+    for (auto const index: std::views::iota(0, count))
+        entries +=
+            std::format(R"({}{{"kind":"assistant","time":"2026-11-19T18:00:00.000Z","text":"entry {}"}})",
+                        index == 0 ? "" : ",",
+                        index);
+    return printed(
+        std::format(R"({{"format":1,"session":"00000000-0000-4000-8000-000000000001",)"
+                    R"("writtenBy":"2.1.328","page":1,"pages":1,"notUnderstood":0,"entries":[{}]}})",
+                    entries));
+}
+
+} // namespace
+
+TEST_CASE("working rows turn a spinner on the redraws that happen anyway", "[orchestrator][view][attention]")
+{
+    auto fixture = Fixture { twoWorking() };
+    auto const first = fixture.screen();
+    CHECK(first.contains("⠋ pr-2375"));
+    auto const due = fixture.dashboard.nextRepaintDue();
+    // Time alone draws nothing: the spinner asks for no wake of its own.
+    fixture.clock.advance(std::chrono::milliseconds { 200 });
+    CHECK(fixture.dashboard.frame().empty());
+    CHECK(fixture.dashboard.nextRepaintDue() == due);
+    // A redraw turns it a frame, every working row alike.
+    CHECK(fixture.dashboard.input("j").empty());
+    auto const turned = fixture.screen();
+    CHECK(turned.contains("⠙ pr-2375"));
+    CHECK(turned.contains("⠙ pr-2380"));
+    // At most a frame per interval, however often it redraws.
+    CHECK(fixture.dashboard.input("k").empty());
+    CHECK(fixture.screen().contains("⠙ pr-2375"));
+}
+
+TEST_CASE("a run that enters Needs you is named on the action bar until selected",
+          "[orchestrator][view][attention]")
+{
+    auto fixture = Fixture { twoWorking() };
+    CHECK(fixture.dashboard.select(OtherId).empty());
+    CHECK(!fixture.screen().contains("needs you · home"));
+
+    // pr-2375 asks: its name on the action bar, and the pill counts it; the selection stays where it was.
+    report(fixture, AgentStatus::Asking);
+    auto const asked = fixture.screen();
+    CHECK(asked.contains("pr-2375 needs you · home"));
+    CHECK(asked.contains("● 1 need you"));
+    CHECK(fixture.dashboard.selectedRun() == OtherId);
+
+    // Selected, it is no longer named; asking to waiting is no entry, so it is not named again.
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    CHECK(!fixture.screen().contains("needs you · home"));
+    CHECK(fixture.dashboard.select(OtherId).empty());
+    report(fixture, AgentStatus::Waiting);
+    CHECK(!fixture.screen().contains("needs you · home"));
+
+    // Leaving Needs you takes the name off the bar too.
+    report(fixture, AgentStatus::Working);
+    CHECK(!fixture.screen().contains("needs you · home"));
+    report(fixture, AgentStatus::Error);
+    CHECK(fixture.screen().contains("pr-2375 needs you · home"));
+    report(fixture, AgentStatus::Working);
+    CHECK(!fixture.screen().contains("needs you · home"));
+}
+
+TEST_CASE("a run with news since the user looked carries a dot until selected",
+          "[orchestrator][view][attention]")
+{
+    auto fixture = Fixture { twoWorking() };
+    CHECK(fixture.dashboard.select(OtherId).empty());
+    CHECK(!fixture.screen().contains("•"));
+    report(fixture, AgentStatus::Asking);
+    CHECK(fixture.screen().contains("pr-2375 · fix CI •"));
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    CHECK(!fixture.screen().contains("pr-2375 · fix CI •"));
+    // Seen, it stays seen when the selection moves on.
+    CHECK(fixture.dashboard.select(OtherId).empty());
+    CHECK(!fixture.screen().contains("pr-2375 · fix CI •"));
+}
+
+TEST_CASE("a Focus tab whose content grew while another was shown carries a dot",
+          "[orchestrator][view][attention]")
+{
+    auto fixture = Fixture { twoWorking() };
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    // A working run opens on its Board; its transcript, first read, is seen as it is.
+    static_cast<void>(fixture.settle(Answers { .transcript = pageOfEntries(2) }));
+    CHECK(!fixture.screen().contains("Transcript •"));
+    // Read again five seconds on, it grew.
+    fixture.clock.advance(std::chrono::seconds { 5 });
+    REQUIRE(fixture.settle(Answers { .transcript = pageOfEntries(3) }).size() == 1);
+    CHECK(fixture.screen().contains("Transcript •"));
+    // Shown, it is seen.
+    CHECK(fixture.dashboard.input("t").empty());
+    CHECK(!fixture.screen().contains("Transcript •"));
+}
+
+// }}}

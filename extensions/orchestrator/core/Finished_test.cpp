@@ -157,9 +157,9 @@ struct ShortTextRow
 };
 
 constexpr auto ShortTextRows = std::array {
-    ShortTextRow { .counts = { 3, 4, 1, 1, 2 }, .expected = "⬢ agents 3/4 · ✗1 · ●1 blocked · ✓2 new" },
+    ShortTextRow { .counts = { 3, 4, 1, 1, 2 }, .expected = "⬢ agents 3/4 · ✗1 · ●1 need you · ✓2 new" },
     ShortTextRow { .counts = { 0, 4, 0, 0, 0 }, .expected = "⬢ agents 0/4" },
-    ShortTextRow { .counts = { 4, 4, 0, 2, 0 }, .expected = "⬢ agents 4/4 · ●2 blocked" },
+    ShortTextRow { .counts = { 4, 4, 0, 2, 0 }, .expected = "⬢ agents 4/4 · ●2 need you" },
     ShortTextRow { .counts = { 1, 4, 3, 0, 0 }, .expected = "⬢ agents 1/4 · ✗3" },
     ShortTextRow { .counts = { 0, 2, 0, 0, 7 }, .expected = "⬢ agents 0/2 · ✓7 new" },
 };
@@ -220,23 +220,23 @@ struct KindRow
     Kind kind;
     std::size_t newFinished; ///< What newFinishedCount() counts it as.
     uint32_t active;         ///< What countRuns() counts it as active.
-    uint32_t blocked;        ///< What countRuns() counts it as blocked.
+    uint32_t needYou;        ///< Whether countRuns() counts it as needing the user.
 };
 
 constexpr auto KindRows = std::array {
-    KindRow { .kind = Kind::Preparing, .newFinished = 0, .active = 1, .blocked = 0 },
-    KindRow { .kind = Kind::Running, .newFinished = 0, .active = 1, .blocked = 0 },
-    KindRow { .kind = Kind::Blocked, .newFinished = 0, .active = 1, .blocked = 1 },
-    KindRow { .kind = Kind::Done, .newFinished = 0, .active = 1, .blocked = 0 },
+    KindRow { .kind = Kind::Preparing, .newFinished = 0, .active = 1, .needYou = 0 },
+    KindRow { .kind = Kind::Running, .newFinished = 0, .active = 1, .needYou = 0 },
+    KindRow { .kind = Kind::Blocked, .newFinished = 0, .active = 1, .needYou = 1 },
+    KindRow { .kind = Kind::Done, .newFinished = 0, .active = 1, .needYou = 0 },
     // Ending is unfinished but not active: it takes no slot.
-    KindRow { .kind = Kind::Ending, .newFinished = 0, .active = 0, .blocked = 0 },
+    KindRow { .kind = Kind::Ending, .newFinished = 0, .active = 0, .needYou = 0 },
     // A kept run checked again keeps its mark: still new, or still seen.
-    KindRow { .kind = Kind::EndingResumedNew, .newFinished = 1, .active = 0, .blocked = 0 },
-    KindRow { .kind = Kind::EndingResumedOpened, .newFinished = 0, .active = 0, .blocked = 0 },
-    KindRow { .kind = Kind::RemovedNew, .newFinished = 1, .active = 0, .blocked = 0 },
-    KindRow { .kind = Kind::RemovedOpened, .newFinished = 0, .active = 0, .blocked = 0 },
-    KindRow { .kind = Kind::KeptNew, .newFinished = 1, .active = 0, .blocked = 0 },
-    KindRow { .kind = Kind::KeptOpened, .newFinished = 0, .active = 0, .blocked = 0 },
+    KindRow { .kind = Kind::EndingResumedNew, .newFinished = 1, .active = 0, .needYou = 0 },
+    KindRow { .kind = Kind::EndingResumedOpened, .newFinished = 0, .active = 0, .needYou = 0 },
+    KindRow { .kind = Kind::RemovedNew, .newFinished = 1, .active = 0, .needYou = 0 },
+    KindRow { .kind = Kind::RemovedOpened, .newFinished = 0, .active = 0, .needYou = 0 },
+    KindRow { .kind = Kind::KeptNew, .newFinished = 1, .active = 0, .needYou = 0 },
+    KindRow { .kind = Kind::KeptOpened, .newFinished = 0, .active = 0, .needYou = 0 },
 };
 
 struct LineRow
@@ -276,7 +276,7 @@ TEST_CASE("Finished list and summary", "[orchestrator][finished]")
             CAPTURE(row.counts.active,
                     row.counts.max,
                     row.counts.failingCi,
-                    row.counts.blocked,
+                    row.counts.needYou,
                     row.counts.newFinished);
             CHECK(orchestrator::summarize(row.counts, {}).shortText == row.expected);
         }
@@ -298,16 +298,25 @@ TEST_CASE("Finished list and summary", "[orchestrator][finished]")
     {
         for (auto const& row: KindRows)
         {
-            CAPTURE(row.kind, row.newFinished, row.active, row.blocked);
+            CAPTURE(row.kind, row.newFinished, row.active, row.needYou);
             auto const runs = std::array { makeRun(row.kind) };
             CHECK(orchestrator::newFinishedCount(runs) == row.newFinished);
             auto const counts = orchestrator::countRuns(runs, 4, 1);
             CHECK(counts.active == row.active);
-            CHECK(counts.blocked == row.blocked);
+            CHECK(counts.needYou == row.needYou);
             CHECK(counts.newFinished == row.newFinished);
             CHECK(counts.max == 4);
             CHECK(counts.failingCi == 1);
         }
+    }
+
+    SECTION("a running agent whose turn ended without reporting done needs the user")
+    {
+        auto run = makeRun(Kind::Running);
+        CHECK_FALSE(orchestrator::needsUser(run));
+        run.lastStatus = orchestrator::AgentStatus::Idle;
+        CHECK(orchestrator::needsUser(run));
+        CHECK(orchestrator::countRuns(std::array { run }, 4, 0).needYou == 1);
     }
 
     SECTION("newFinishedCount and countRuns, every state at once")
@@ -318,7 +327,7 @@ TEST_CASE("Finished list and summary", "[orchestrator][finished]")
         CHECK(orchestrator::newFinishedCount(runs) == 3);
         auto const counts = orchestrator::countRuns(runs, 4, 0);
         CHECK(counts.active == 4);
-        CHECK(counts.blocked == 1);
+        CHECK(counts.needYou == 1);
         CHECK(counts.newFinished == 3);
     }
 

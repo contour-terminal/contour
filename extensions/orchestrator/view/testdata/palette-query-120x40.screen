@@ -6,7 +6,7 @@
 │ … issue-2253 · work on issue      waiting 6m │ │ model     sonnet                                                    │
 │   Waiting for Build pace                     │ │ state     ended by you, worktree kept, seen: .git file was changed; │
 │ WORKING 1 of 4                               │ │             nothing was run there                                   │
-│ ⠿ pr-2375 · fix CI                working 6m │ │ branch    agent/issue-2356-20261113-151001                          │
+│ ⠋ pr-2375 · fix CI                working 6m │ │ branch    agent/issue-2356-20261113-151001                          │
 │ TO REVIEW 1                                  │ │ worktree  /home/u/worktrees/contour/issue-2356-20261113-151001      │
 │ ✓ pr-2379 · fix CI                      done │ │ url       https://github.com/contour-terminal/contour/issues/2356   │
 │   reported done                              │ │ kept      what kept its worktree:                                   │

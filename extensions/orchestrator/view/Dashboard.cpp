@@ -7,6 +7,7 @@
 #include <core/tui/HeadlessSurface.hpp>
 #include <core/tui/Responsive.hpp>
 #include <core/tui/Screen.hpp>
+#include <core/tui/Spinner.hpp>
 #include <core/tui/VtParser.hpp>
 #include <core/tui/layout/Style.hpp>
 
@@ -28,6 +29,7 @@
 #include <vector>
 
 #include <orchestrator/view/Actions.hpp>
+#include <orchestrator/view/Attention.hpp>
 #include <orchestrator/view/Band.hpp>
 #include <orchestrator/view/Fleet.hpp>
 #include <orchestrator/view/Focus.hpp>
@@ -72,6 +74,9 @@ namespace
 
     /// The cells the `▰▱` meters take.
     constexpr auto MeterCells = 6;
+
+    /// What follows the name of a run with news since the user last looked at it.
+    constexpr auto UnseenMark = " •"sv;
 
     /// @return The cells a popup is wide in @p band, in a tab @p columns wide: in the Wide band at most
     ///         @p maxColumns, in the Medium band most of the tab, in the Narrow band all of it.
@@ -242,6 +247,14 @@ struct Dashboard::State
     [[nodiscard]] Band band() const noexcept;
     /// @return How many runs need the user: what the top bar's pill counts.
     [[nodiscard]] std::size_t needYou() const noexcept;
+    /// Notes the runs that entered Needs you since the rows were last built: the newest is named on the
+    /// action bar. The first build only notes them: a run already waiting when the dashboard opens is not
+    /// named.
+    void noteNeeds();
+    /// Notes what the user looks at, before a draw: the selected run and its shown tab are seen; every other
+    /// run's row, and the selected run's other tabs, say whether they have news; a notice of a run that needs
+    /// the user ends once it is selected or no longer needs them. Working rows draw the spinner's frame.
+    void noteSeen();
 
     /// Whether the rows match the engine.
     enum class Rows : uint8_t
@@ -293,6 +306,12 @@ struct Dashboard::State
     std::unique_ptr<TimelineView> timelineView; ///< Draws the last 24 hours while Overlay::Timeline.
     FocusFrame focus;                           ///< What the Focus draws this frame.
     FocusPanels focusPanels;                    ///< What the Focus's tabs learnt drawing themselves.
+    core::tui::Spinner spinner; ///< Turns a frame per drawn frame (at most one per its interval): no timer.
+    SeenLedger seen;            ///< What the user saw of each run.
+    std::optional<std::vector<std::string>> needing; ///< The runs in Needs you as the rows were last built;
+                                                     ///< std::nullopt before the first build.
+    std::string newestNeed; ///< The run that entered Needs you last, named on the action bar until it is
+                            ///< selected or leaves it; empty: none.
     std::unique_ptr<core::tui::Responsive> root;
 };
 
@@ -529,7 +548,12 @@ namespace
                               line, column, cut(row.prefix, std::max(0, (end - column) / 4)), pick(Role::Dim))
                           + 1;
             auto const textEnd = status.empty() ? end : end - columnsOf(status) - 1;
-            column += canvas.putString(line, column, cut(row.text, textEnd - column), pick(Role::Text));
+            // A run with news since the user last looked at it carries a `•` after its name.
+            auto const newsColumns = row.news == News::Unseen ? columnsOf(UnseenMark) : 0;
+            column += canvas.putString(
+                line, column, cut(row.text, textEnd - column - newsColumns), pick(Role::Text));
+            if (newsColumns != 0)
+                column += canvas.putString(line, column, UnseenMark, pick(Role::Accent));
             // Folded to one line, the second line's words follow the name.
             if (lines == 1 && !row.context.empty() && textEnd - column > 4)
                 canvas.putString(line,
@@ -574,6 +598,16 @@ namespace
                 auto const gauge = gaugeOf(_state);
                 drawGauge(canvas, gauge, 0, end);
                 end -= columnsOf(gauge.fleet) + (gauge.pill.empty() ? 0 : columnsOf(gauge.pill) + 2) + 2;
+            }
+            // The run that entered Needs you last is named on the right, until it is selected.
+            if (!_state.newestNeed.empty())
+            {
+                auto const need = std::format("{} needs you · home", nameOf(_state.newestNeed));
+                if (auto const needColumns = columnsOf(need); needColumns < end / 2)
+                {
+                    canvas.putString(0, end - needColumns, need, styleOf(theme, Role::Warning));
+                    end -= needColumns + 2;
+                }
             }
             auto const columns = end - 1;
             auto const& interaction = _state.interaction;
@@ -629,6 +663,7 @@ Dashboard::State::State(Engine const& engine,
     launcherView { std::make_unique<LauncherView>(engine, interaction.launcher) },
     paletteView { std::make_unique<PaletteView>(interaction.palette) },
     timelineView { std::make_unique<TimelineView>(engine) },
+    spinner { core::tui::SpinnerType::Dots, clock },
     root { std::make_unique<core::tui::Responsive>(std::ranges::to<std::vector<core::tui::Breakpoint>>(
         std::views::iota(std::size_t { 0 }, BandBreakpoints.size())
         | std::views::transform([this](std::size_t index) {
@@ -701,6 +736,7 @@ void Dashboard::State::ensureRows()
     ++rowBuilds;
     visible.clear();
     refilter(Keep::Row);
+    noteNeeds();
     // An answered agent that stopped asking is settled: its chips go with its asking box.
     if (auto const& answered = interaction.answered;
         answered && std::ranges::none_of(rows, [&](Row const& row) {
@@ -789,6 +825,46 @@ std::size_t Dashboard::State::needYou() const noexcept
 {
     return static_cast<std::size_t>(std::ranges::count_if(
         engine.runs(), [](Run const& run) { return fleetGroupOf(run) == FleetGroup::NeedsYou; }));
+}
+
+void Dashboard::State::noteNeeds()
+{
+    auto now = needingRuns(rows);
+    if (needing)
+        if (auto const entries = needsYouEntries(*needing, now); !entries.empty())
+            newestNeed = entries.back();
+    needing = std::move(now);
+}
+
+void Dashboard::State::noteSeen()
+{
+    auto const* const selected = selectedRow();
+    auto const selectedId = selected != nullptr ? std::string_view { selected->run } : std::string_view {};
+    if (!newestNeed.empty()
+        && (newestNeed == selectedId || !std::ranges::binary_search(*needing, newestNeed)))
+        newestNeed.clear();
+    focus.tabNews = {};
+    auto const frame = std::string { spinner.currentFrame() };
+    auto const runs = engine.runs();
+    for (auto& row: rows)
+    {
+        if (row.rowState == RowState::Working)
+            row.mark = frame;
+        auto const run = std::ranges::find(runs, row.run, &Run::id);
+        if (row.run.empty() || run == runs.end())
+            continue;
+        auto const marks = runMarksOf(*run);
+        if (row.run != selectedId)
+        {
+            row.news = seen.newsOf(row.run, marks);
+            continue;
+        }
+        auto const tabs = tabMarksOf(engine, tab, row.run);
+        seen.look(row.run, marks, tabs, focus.tab);
+        row.news = News::None;
+        for (auto const shown: { FocusTab::Board, FocusTab::Transcript, FocusTab::Details })
+            focus.tabNews[std::to_underlying(shown)] = seen.tabNewsOf(row.run, tabs, shown);
+    }
 }
 
 Band Dashboard::State::band() const noexcept
@@ -1272,6 +1348,9 @@ std::string Dashboard::frame()
     state.remindStillAsking();
     state.refilter(State::Keep::Row);
     state.syncLayout();
+    // The spinner turns on the redraws that happen anyway: it asks for no wake of its own.
+    static_cast<void>(state.spinner.tick());
+    state.noteSeen();
     state.screen.draw();
     state.clampScroll();
     // A copy asked for goes out before the frame's cells.

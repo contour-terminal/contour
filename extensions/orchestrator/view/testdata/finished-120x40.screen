@@ -6,7 +6,7 @@
 │ … issue-2253 · work on issue      waiting 6m │ │ model     sonnet                                                    │
 │   Waiting for Build pace                     │ │ state     completed, worktree removed, seen                         │
 │ WORKING 1 of 4                               │ │ branch    agent/pr-2366-20261113-140211                             │
-│ ⠿ pr-2375 · fix CI                working 6m │ │ worktree  /home/u/worktrees/contour/pr-2366-20261113-140211         │
+│ ⠋ pr-2375 · fix CI                working 6m │ │ worktree  /home/u/worktrees/contour/pr-2366-20261113-140211         │
 │ TO REVIEW 1                                  │ │ url       https://github.com/contour-terminal/contour/pull/2366     │
 │ ✓ pr-2379 · fix CI                      done │ │                                                                     │
 │   reported done                              │ │                                                                     │

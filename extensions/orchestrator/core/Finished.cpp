@@ -37,7 +37,7 @@ namespace
 
     constexpr auto Terms = std::array {
         Term { .count = &Counts::failingCi, .symbol = "✗"sv, .noun = ""sv },
-        Term { .count = &Counts::blocked, .symbol = "●"sv, .noun = " blocked"sv },
+        Term { .count = &Counts::needYou, .symbol = "●"sv, .noun = " need you"sv },
         Term { .count = &Counts::newFinished, .symbol = "✓"sv, .noun = " new"sv },
     };
 
@@ -183,14 +183,19 @@ std::size_t newFinishedCount(std::span<Run const> runs) noexcept
     }));
 }
 
+bool needsUser(Run const& run) noexcept
+{
+    return std::holds_alternative<Blocked>(run.state)
+           || (std::holds_alternative<Running>(run.state) && run.lastStatus == AgentStatus::Idle);
+}
+
 Counts countRuns(std::span<Run const> runs, uint32_t maxAgents, uint32_t failingCi) noexcept
 {
     return Counts {
         .active = static_cast<uint32_t>(std::ranges::count_if(runs, countsAsActive)),
         .max = maxAgents,
         .failingCi = failingCi,
-        .blocked = static_cast<uint32_t>(std::ranges::count_if(
-            runs, [](Run const& run) { return std::holds_alternative<Blocked>(run.state); })),
+        .needYou = static_cast<uint32_t>(std::ranges::count_if(runs, needsUser)),
         .newFinished = static_cast<uint32_t>(newFinishedCount(runs)),
     };
 }

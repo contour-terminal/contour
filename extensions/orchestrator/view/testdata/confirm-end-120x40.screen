@@ -1,7 +1,7 @@
  ✦ Agents                                                                                                    ⬢ 2/4 ▰▰▱▱ 
-╭─ Agents 2 ───────────────────────────────────╮ ╭─ pr-2375 · fix CI · sonnet ─────────────────────────── ⠿ working 6m ╮
+╭─ Agents 2 ───────────────────────────────────╮ ╭─ pr-2375 · fix CI · sonnet ─────────────────────────── ⠋ working 6m ╮
 │ WORKING 1 of 4                               │ │ Say why the stdio relay failed, and send a hello before half-closi… │
-│▍⠿ pr-2375 · fix CI                working 6m │ │ Board  Transcript  Details                                          │
+│▍⠋ pr-2375 · fix CI                working 6m │ │ Board  Transcript  Details                                          │
 │▍  fix the reflow                      ▰▰▰▱▱▱ │ │ updated 9 min ago                                                   │
 │ TO REVIEW 1                                  │ │ Fixing CI                                                           │
 │ ✓ pr-2379 · fix CI                      done │ │ ☑ reproduced on master                                              │

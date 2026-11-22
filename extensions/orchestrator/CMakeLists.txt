@@ -124,6 +124,8 @@ target_include_directories(orchestrator_core PUBLIC
 add_library(orchestrator_view STATIC
     view/Actions.cpp
     view/Actions.hpp
+    view/Attention.cpp
+    view/Attention.hpp
     view/Band.hpp
     view/Dashboard.cpp
     view/Dashboard.hpp
@@ -202,6 +204,7 @@ if(ORCHESTRATOR_TESTING)
         core/Uuid_test.cpp
         guest/Driver_test.cpp
         view/Actions_test.cpp
+        view/Attention_test.cpp
         view/Dashboard_test.cpp
         view/DispatchForm_test.cpp
         view/Launcher_test.cpp
