@@ -108,6 +108,11 @@ TEST_CASE("paneActivityOf compares the foreground to the shell", "[chromekeys]")
     CHECK(paneActivityOf("/usr/bin/bash --login -i", std::string { "make" }) == PaneActivity::Running);
     CHECK(paneActivityOf("C:/Program Files/Git/bin/bash.exe", std::string { "bash.exe" })
           == PaneActivity::Idle);
+    // Windows names the image, `.exe` and all, in the case it has on disk.
+    CHECK(paneActivityOf("pwsh", std::string { "pwsh.exe" }) == PaneActivity::Idle);
+    CHECK(paneActivityOf("powershell.exe -NoLogo", std::string { "PowerShell.EXE" }) == PaneActivity::Idle);
+    CHECK(paneActivityOf("cmd", std::string { "PING.EXE" }) == PaneActivity::Running);
+    CHECK(paneActivityOf("pwsh", std::string { ".exe" }) == PaneActivity::Running);
 }
 
 TEST_CASE("closeConfirmationFor asks unless every pane is known to be idle", "[chromekeys]")

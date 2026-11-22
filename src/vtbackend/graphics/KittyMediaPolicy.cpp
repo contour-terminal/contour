@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/graphics/KittyMediaPolicy.hpp>
 
+#include <vtpty/ProgramName.hpp>
+
 #include <core/Utf8Path.hpp>
 
 #include <algorithm>
@@ -35,21 +37,12 @@ namespace
         "vagrant",   "wsl",      "wslhost",         "zellij",
     };
 
-    /// The suffix a Windows image name carries that the POSIX name of the same program does not.
-    constexpr auto ExecutableSuffix = std::string_view { ".exe" };
-
     /// @return @p c with an ASCII upper-case letter folded to lower case; any other code unit as it is.
     template <typename Char>
     [[nodiscard]] constexpr Char asciiFolded(Char c) noexcept
     {
         return c >= Char { 'A' } && c <= Char { 'Z' } ? static_cast<Char>(c - Char { 'A' } + Char { 'a' })
                                                       : c;
-    }
-
-    /// @return Whether @p lhs and @p rhs are equal, ASCII case ignored.
-    [[nodiscard]] constexpr bool equalFolded(std::string_view lhs, std::string_view rhs) noexcept
-    {
-        return std::ranges::equal(lhs, rhs, [](char a, char b) { return asciiFolded(a) == asciiFolded(b); });
     }
 
     /// @return Whether the path components @p lhs and @p rhs name the same entry under @p pathCase. Case
@@ -311,13 +304,9 @@ std::expected<RequestedPath, MediaRefusal> requestedPath(MediaPolicy const& poli
 
 bool isRemoteShellClient(std::string_view processName) noexcept
 {
-    auto const separator = processName.find_last_of("/\\");
-    auto name = separator == std::string_view::npos ? processName : processName.substr(separator + 1);
-    if (name.size() > ExecutableSuffix.size()
-        && equalFolded(name.substr(name.size() - ExecutableSuffix.size()), ExecutableSuffix))
-        name.remove_suffix(ExecutableSuffix.size());
-    return std::ranges::any_of(RemoteShellClients,
-                               [name](std::string_view client) { return equalFolded(client, name); });
+    return std::ranges::any_of(RemoteShellClients, [processName](std::string_view client) {
+        return vtpty::isSameProgram(processName, client);
+    });
 }
 
 DeletionAfterRead deletionAfterRead(MediaPolicy const& policy,

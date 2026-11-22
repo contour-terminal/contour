@@ -2,6 +2,7 @@
 #include <vtpty/CommandLine.hpp>
 #include <vtpty/ConPty.hpp>
 #include <vtpty/EnvironmentBlock.hpp>
+#include <vtpty/ForegroundProcess.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
 #include <vtpty/SpawnLadder.hpp>
@@ -15,6 +16,7 @@
 #include <core/WideString.hpp>
 #include <core/platform/NativeFileSystem.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cerrno>
@@ -28,12 +30,19 @@
 #include <mutex>
 #include <numeric>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
+// TlHelp32.h uses the types Windows.h declares and includes nothing itself, so it has to come after it,
+// against the alphabetical order.
+// clang-format off
 #include <Windows.h>
+#include <TlHelp32.h>
+// clang-format on
 #include <direct.h>
 
 using namespace std;
@@ -112,6 +121,66 @@ namespace
             startupInfoEx.lpAttributeList = nullptr;
         }
         return hr;
+    }
+
+    /// @return When the process @p pid was created, in FILETIME units; 0 when it cannot be opened (it ended,
+    ///         or it is protected), which foregroundProcessOf() does not follow.
+    [[nodiscard]] uint64_t creationTimeOf(DWORD pid) noexcept
+    {
+        auto const process = UniqueHandle { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) };
+        auto creation = FILETIME {};
+        auto exit = FILETIME {};
+        auto kernel = FILETIME {};
+        auto user = FILETIME {};
+        if (!process.valid() || GetProcessTimes(process.get(), &creation, &exit, &kernel, &user) == FALSE)
+            return 0;
+        return (static_cast<uint64_t>(creation.dwHighDateTime) << 32U) | creation.dwLowDateTime;
+    }
+
+    /// @return The processes of a fresh snapshot of the process table that descend from @p rootPid by their
+    ///         recorded parent ids, @p rootPid's own included, each with its creation time: only those are
+    ///         opened, not the whole table. Empty when no snapshot could be taken.
+    [[nodiscard]] std::vector<ProcessEntry> descendantsOf(DWORD rootPid)
+    {
+        auto const snapshot = UniqueHandle { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+        if (!snapshot.valid())
+            return {};
+        auto table = std::vector<PROCESSENTRY32W> {};
+        auto entry = PROCESSENTRY32W {};
+        entry.dwSize = sizeof(entry);
+        auto more = Process32FirstW(snapshot.get(), &entry);
+        while (more != FALSE)
+        {
+            table.push_back(entry);
+            more = Process32NextW(snapshot.get(), &entry);
+        }
+
+        // Breadth first by recorded parent id; a reused id may pull in a stranger, whom
+        // foregroundProcessOf() tells apart by its creation time.
+        auto descendants = std::vector<ProcessEntry> {};
+        auto const isListed = [&](DWORD pid) {
+            return std::ranges::contains(descendants, static_cast<uint32_t>(pid), &ProcessEntry::pid);
+        };
+        auto const add = [&](PROCESSENTRY32W const& process) {
+            descendants.push_back(ProcessEntry { .pid = process.th32ProcessID,
+                                                 .parentPid = process.th32ParentProcessID,
+                                                 .creationTime = creationTimeOf(process.th32ProcessID),
+                                                 .name = core::toUtf8(process.szExeFile) });
+        };
+        auto const root = std::ranges::find(table, rootPid, &PROCESSENTRY32W::th32ProcessID);
+        if (root == table.end())
+            return {};
+        add(*root);
+        for (auto const index: std::views::iota(size_t { 0 }, table.size()))
+        {
+            if (index >= descendants.size())
+                break;
+            auto const parent = descendants[index].pid;
+            for (auto const& process: table)
+                if (process.th32ParentProcessID == parent && !isListed(process.th32ProcessID))
+                    add(process);
+        }
+        return descendants;
     }
 } // anonymous namespace
 
@@ -515,8 +584,14 @@ string Process::workingDirectory() const
 
 std::optional<std::string> Process::foregroundProcessName() const
 {
-    // A console has no foreground process group to ask.
-    return std::nullopt;
+    // A console has no foreground process group to ask: the job leader below the shells stands in for it
+    // (foregroundProcessOf()).
+    // Asked by a poll and per kitty file medium, never per byte: one snapshot of the process table, and one
+    // open of each of the shell's descendants.
+    auto const pid = _d->processInfo.dwProcessId;
+    if (_d->processInfo.hProcess == nullptr || pid == 0)
+        return std::nullopt;
+    return foregroundProcessOf(descendantsOf(pid), static_cast<uint32_t>(pid));
 }
 
 } // namespace vtpty

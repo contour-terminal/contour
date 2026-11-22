@@ -23,6 +23,7 @@ set(vtpty_SOURCES
     CommandLine.cpp
     EnvironmentBlock.cpp
     ExecutablePath.cpp
+    ForegroundProcess.cpp
     MockPty.cpp
     MockViewPty.cpp
     OwnedFd.cpp
@@ -56,6 +57,7 @@ set(vtpty_HEADERS
     EnvironmentBlock.hpp
     ErrnoText.hpp
     ExecutablePath.hpp
+    ForegroundProcess.hpp
     ImageSize.hpp
     InputEcho.hpp
     MockPty.hpp
@@ -67,6 +69,7 @@ set(vtpty_HEADERS
     Process.hpp
     ProcessPlacement.hpp
     ProgramLookup.hpp
+    ProgramName.hpp
     Pty.hpp
     PtyAdoption.hpp
     SandboxInfo.hpp
@@ -179,6 +182,7 @@ if(VTPTY_TESTING)
         CrossingHandle_test.cpp
         EnvironmentBlock_test.cpp
         ErrnoText_test.cpp
+        ForegroundProcess_test.cpp
         ImageSize_test.cpp
         MockPty_test.cpp
         PlacementBreaker_test.cpp
