@@ -177,6 +177,11 @@ namespace
         return RefreshNow { .monoMs = monoMs };
     }
 
+    [[nodiscard]] Input inputOf(view::InstallPluginsAction const& /*install*/, uint64_t monoMs)
+    {
+        return InstallPlugins { .monoMs = monoMs };
+    }
+
     [[nodiscard]] Input inputOf(view::EndRunAction const& end, uint64_t monoMs)
     {
         return EndRun { .run = end.run, .monoMs = monoMs };

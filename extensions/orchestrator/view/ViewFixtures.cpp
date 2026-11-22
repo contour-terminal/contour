@@ -81,6 +81,8 @@ namespace
     {
         if (command.command == "agent-setup-check")
             return ok(readFixture(FixtureRoot::Testdata, world.hooks));
+        if (command.command == "claude-plugins")
+            return ok(readFixture(FixtureRoot::Testdata, world.plugins));
         if (command.command == "git-worktree-list")
             return ok(worktreeListing(world, command.cwd));
         if (command.command == "gh-default-branch")

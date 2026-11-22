@@ -1,0 +1,22 @@
+[
+  {
+    "id": "clangd-lsp@claude-plugins-official",
+    "version": "1.0.0",
+    "scope": "user",
+    "enabled": true,
+    "installPath": "/home/u/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0",
+    "installedAt": "2026-01-11T13:56:36.186Z",
+    "lastUpdated": "2026-01-11T13:56:36.186Z",
+    "projectEnabled": true
+  },
+  {
+    "id": "superpowers@superpowers-marketplace",
+    "version": "6.1.1",
+    "scope": "user",
+    "enabled": true,
+    "installPath": "/home/u/.claude/plugins/cache/superpowers-marketplace/superpowers/6.1.1",
+    "installedAt": "2026-07-08T17:18:47.153Z",
+    "lastUpdated": "2026-07-08T17:18:47.153Z",
+    "projectEnabled": true
+  }
+]

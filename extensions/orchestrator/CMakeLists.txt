@@ -77,6 +77,9 @@ add_library(orchestrator_core STATIC
     core/OperationState.cpp
     core/OperationState.hpp
     core/Overloaded.hpp
+    core/Plugins.cpp
+    core/Plugins.hpp
+    core/PluginsJson.hpp
     core/Prompt.cpp
     core/Prompt.hpp
     core/Provider.cpp
@@ -168,6 +171,7 @@ if(ORCHESTRATOR_TESTING)
         core/JsonPrefix_test.cpp
         core/Naming_test.cpp
         core/OperationState_test.cpp
+        core/Plugins_test.cpp
         core/Prompt_test.cpp
         core/Provider_test.cpp
         core/Reconcile_test.cpp

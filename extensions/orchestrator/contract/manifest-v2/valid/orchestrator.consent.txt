@@ -92,6 +92,9 @@ git-worktree-remove (long, in worktrees): git worktree remove {path}
   GIT_ATTR_SOURCE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
   GIT_OPTIONAL_LOCKS=0
 agent-setup-check (short, in worktrees): contour agent setup --dry-run --json
+claude-plugins (short, in worktrees): claude plugin list --json
+claude-marketplace-add (long, in worktrees): claude plugin marketplace add {source}
+claude-plugin-install (long, in worktrees): claude plugin install {plugin}
 agent-transcript (short, in worktrees): contour agent transcript --session {session} --cwd {path} --page {page} --format {format} --json
 agent-record (short, in worktrees): contour agent record --line {record} --format {format}
 agent-stats (short, in worktrees): contour agent stats --session {session} --cwd {path} --format {format} --json

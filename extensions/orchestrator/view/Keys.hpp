@@ -30,6 +30,12 @@ struct RefreshNowAction
     [[nodiscard]] bool operator==(RefreshNowAction const&) const = default;
 };
 
+/// The user confirmed installing the Claude Code plugins the agents need and lack.
+struct InstallPluginsAction
+{
+    [[nodiscard]] bool operator==(InstallPluginsAction const&) const = default;
+};
+
 /// End a run.
 struct EndRunAction
 {
@@ -98,6 +104,7 @@ struct ReadTranscriptAction
 /// ReadTranscriptAction as ReadTranscript), but for RevealAgentAction, which it carries out itself with the
 /// host.
 using UiAction = std::variant<RefreshNowAction,
+                              InstallPluginsAction,
                               EndRunAction,
                               RetryRemovalAction,
                               DismissAction,
@@ -141,6 +148,14 @@ enum class KeyCommand : uint8_t
     LastPage,       ///< Show the transcript's last page.
     Fold,           ///< Fold or unfold the group of the selected row, and select its header.
     NewTopic,       ///< Open the dispatch form on a new topic, in the selected row's repository or the first.
+    InstallPlugins, ///< Install the Claude Code plugins the agents need and lack; asks once first.
+};
+
+/// How far the user got installing the missing plugins (`I`): it asks once, as ending a run does.
+enum class InstallConfirm : uint8_t
+{
+    None = 0, ///< Not asked.
+    Asked,    ///< The summary line asked; the next `I` installs, any other key forgets it.
 };
 
 /// What the dashboard's tab shows.
@@ -231,6 +246,8 @@ struct Interaction
     Filtering filtering = Filtering::Off; ///< Whether typed text goes to the filter.
     std::string filter = {};              ///< Rows whose text does not hold it are left out; empty: none is.
     std::string pendingEnd = {}; ///< The run whose end waits for a second `e` (D14: asks once); empty: none.
+    InstallConfirm pendingInstall =
+        InstallConfirm::None;                   ///< Whether a second `I` installs the missing plugins.
     std::optional<DispatchFormState> form = {}; ///< The dispatch form, while it is open: it takes every key.
     std::string notice = {}; ///< A one-line notice on the summary line, until the next key; empty: none.
     Screen screen = Screen::Dashboard; ///< What the tab shows.

@@ -495,6 +495,8 @@ TEST_CASE("GIT_ATTR_SOURCE and core.attributesFile reach exactly the cleanup com
         std::pair { "page"sv, std::string("1") },
         std::pair { "format"sv, std::string("1") },
         std::pair { "record"sv, std::string(R"({"format":1})") },
+        std::pair { "plugin"sv, std::string("contour-workflows@contour-terminal") },
+        std::pair { "source"sv, std::string("contour-terminal/claude-marketplace") },
     };
 
     auto const manifest = orchestratorManifest();

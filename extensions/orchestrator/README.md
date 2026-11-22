@@ -77,6 +77,7 @@ request's title is shown as text and does nothing.
 | `Enter` | on a pull request or an issue, open the dispatch form on the first task that applies to it, or show its agent's tab if one runs; on an agent, show its tab; on a finished run, open its details (and mark it seen); on a leftover worktree, open its details on the whole width; on a folded group, unfold it |
 | `d` | open the dispatch form on the selected item; on a finished run, on its item, for a new run |
 | `n` | open the dispatch form on a new topic, in the selected item's repository |
+| `I` | install the Claude Code plugins the agents lack; asks once first |
 | `b` | show the selected run's board (below) |
 | `t` | show the selected run's transcript (below) |
 | a task's `key` | open the dispatch form on that task |
@@ -104,6 +105,15 @@ characters of `[a-z0-9-]`, such as `agent/topic-investigate-the-flaky-test-…`.
 the prompt and the dashboard. It starts on a new branch from the repository's base, as an issue's run does.
 `d` on a finished topic run opens the form again on its text. Since `n` is the dashboard's key, a task can no
 longer use it.
+
+**The agents' skills.** A task's prompt such as `/contour-workflows:fix-ci {url}` names a skill, and
+the skill comes with a Claude Code plugin. If that plugin is missing, the agent answers "Unknown skill".
+`plugins` lists the plugins the agents need (by default `contour-workflows@contour-terminal`). With the status
+hooks check done, the orchestrator asks the `claude` its panes run (`claude plugin list --json`) which
+plugins are installed and enabled. Each missing one is a problem line, and the dispatch form warns of it and
+asks for a second `Enter`. `I` asks once, then runs `claude plugin marketplace add` and `claude plugin
+install` into your own Claude Code and checks again. On a machine you reach only through `contour client`,
+this is how its agents get their skills. The orchestrator never edits Claude Code's settings files.
 
 ## Boards and transcripts
 

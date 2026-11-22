@@ -36,6 +36,13 @@ struct JsonRepo
     std::optional<std::vector<JsonIssueSource>> issues;
 };
 
+/// One `plugins` entry.
+struct JsonPluginRequirement
+{
+    std::optional<std::string> id;
+    std::optional<std::string> marketplace;
+};
+
 /// One `tasks` entry; `applies_to` is no member name, Config.cpp maps the key.
 struct JsonTask
 {
@@ -62,6 +69,7 @@ struct JsonConfig
     std::optional<JsonDuration> finishedRetention;
     std::optional<std::vector<JsonRepo>> repos;
     std::optional<std::vector<JsonTask>> tasks;
+    std::optional<std::vector<JsonPluginRequirement>> plugins;
 };
 
 } // namespace orchestrator::config::detail

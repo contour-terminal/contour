@@ -257,6 +257,12 @@ struct RefreshNow
     uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
 };
 
+/// The user confirmed installing the Claude Code plugins the agents need and lack.
+struct InstallPlugins
+{
+    uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
+};
+
 /// What the engine is fed.
 using Input = std::variant<Wake,
                            ProcessFinished,
@@ -271,6 +277,7 @@ using Input = std::variant<Wake,
                            MarkRunSeen,
                            ToggleFold,
                            RefreshNow,
+                           InstallPlugins,
                            ReadTranscript,
                            ShowBoard,
                            HideBoard,
@@ -493,6 +500,14 @@ class Engine
     [[nodiscard]] std::optional<CheckoutUnknown> unknownCheckout(Run const& run) const noexcept;
     /// @return Whether Claude Code's status hooks are installed.
     [[nodiscard]] HooksState hooks() const noexcept { return _hooks; }
+    /// @return The Claude Code plugins the agents need (`plugins`) and the `claude` the panes run lacks, as
+    ///         last checked; empty while not known, or when none is missing.
+    [[nodiscard]] std::span<PluginRequirement const> missingPlugins() const noexcept
+    {
+        return _missingPlugins;
+    }
+    /// @return Whether the missing plugins are being installed now (InstallPlugins).
+    [[nodiscard]] bool installingPlugins() const noexcept { return !_pluginSteps.empty(); }
     /// @return The summary last published, as its PublishSummary carried it; empty before the first.
     [[nodiscard]] Summary const& published() const noexcept { return _published; }
     /// @return The configured repositories' names, in the configured order; empty when unconfigured.
@@ -689,6 +704,11 @@ class Engine
     void onSourceAuthResult(std::string_view tag, ProcessOutcome const& outcome, std::vector<Effect>& out);
     void onListAnswered(std::vector<Effect>& out);
     void checkHooks(std::vector<Effect>& out);
+    void checkPlugins(std::vector<Effect>& out);
+    void onPluginsResult(ProcessOutcome const& outcome);
+    void installPlugins(std::vector<Effect>& out);
+    void onPluginStepResult(ProcessOutcome const& outcome, std::vector<Effect>& out);
+    void issuePluginStep(std::vector<Effect>& out);
     void recheckFinished(std::vector<Effect>& out);
     void resumeCheckoutWaits(std::vector<Effect>& out);
     void readBoards(std::vector<Effect>& out);
@@ -774,6 +794,15 @@ class Engine
     std::map<std::string, std::vector<std::string>, std::less<>> _pollProblems; ///< By poll tag.
     std::vector<std::string> _problems;
     HooksState _hooks = HooksState::Unknown;
+    std::vector<PluginRequirement> _missingPlugins; ///< As last checked; empty while unknown.
+    /// One command of installing the missing plugins: `claude plugin marketplace add`, then `install`.
+    struct PluginStep
+    {
+        std::string command;        ///< The declared command.
+        std::vector<Argument> args; ///< Its one argument.
+        std::string plugin;         ///< The plugin it is for, as the problem line names it.
+    };
+    std::deque<PluginStep> _pluginSteps; ///< The commands still to run, the first one running; empty: none.
     AuthState _auth = AuthState::Unknown;
     AuthCheck _authCheck = AuthCheck::Needed;
     PollResult _pollResult = PollResult::Clean;

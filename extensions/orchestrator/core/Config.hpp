@@ -14,6 +14,7 @@
 
 #include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Model.hpp>
+#include <orchestrator/core/Plugins.hpp>
 #include <orchestrator/core/Provider.hpp>
 
 namespace orchestrator
@@ -120,13 +121,14 @@ enum class ConfigProblem : uint8_t
     NotASite,               ///< Not an `https://` address with a host and no path.
     Unrecorded,             ///< A forge or issue source whose tool's output was never recorded
                             ///< (Verification::Unmeasured).
-    UnknownItemKind,        ///< An `applies_to` other than `pr` or `issue`.
+    UnknownItemKind,        ///< An `applies_to` other than `pr`, `issue` or `topic`.
     Zero,                   ///< A limit of 0.
     NotADuration,           ///< Not a duration such as `90s`, `2m`, `1h`, `30d` or `0`.
     TooShort,               ///< A duration below its minimum.
     NotOneKey,              ///< A task key that is not one printable character.
     ReservedKey,            ///< A task key the dashboard uses itself.
     MissingUrl,             ///< A prompt without `{url}`.
+    NotPluginId,            ///< A plugin that is not `<plugin>@<marketplace>`.
 };
 
 /// Why a configuration was refused.
@@ -218,6 +220,8 @@ class Config
     /// @return What every agent's system prompt asks of it about its board (`status_board`); empty: nothing,
     ///         as `status_board: off` asks.
     [[nodiscard]] std::string const& boardInstruction() const noexcept { return _boardInstruction; }
+    /// @return The Claude Code plugins the agents need (`plugins`); empty: none is checked for.
+    [[nodiscard]] std::span<PluginRequirement const> plugins() const noexcept { return _plugins; }
     /// @return How long an agent stays done before its run is ended; 0: never.
     [[nodiscard]] std::chrono::milliseconds endDoneAfter() const noexcept { return _endDoneAfter; }
 
@@ -256,6 +260,7 @@ class Config
         std::chrono::milliseconds pollEvery = DefaultPollEvery;
         std::chrono::milliseconds statusBoardAfter = DefaultStatusBoardAfter;
         std::string boardInstruction = std::string { DefaultBoardInstruction };
+        std::vector<PluginRequirement> plugins = defaultPluginRequirements();
         std::chrono::milliseconds endDoneAfter = DefaultEndDoneAfter;
         std::chrono::milliseconds finishedRetention = DefaultFinishedRetention;
         std::vector<Repo> repos = {};
@@ -276,6 +281,7 @@ class Config
     std::chrono::milliseconds _finishedRetention;
     std::vector<Repo> _repos;
     std::vector<TaskDef> _tasks;
+    std::vector<PluginRequirement> _plugins;
     SourceTables _sources;
 };
 

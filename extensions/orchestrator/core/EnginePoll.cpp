@@ -19,6 +19,7 @@
 #include <orchestrator/core/EngineDetail.hpp>
 #include <orchestrator/core/Finished.hpp>
 #include <orchestrator/core/IssueSources.hpp>
+#include <orchestrator/core/Plugins.hpp>
 #include <orchestrator/core/Provider.hpp>
 #include <orchestrator/core/Sanitize.hpp>
 
@@ -40,6 +41,11 @@ namespace
     constexpr auto AuthTag = "poll/auth"sv;
     constexpr auto HooksTag = "poll/hooks"sv;
     constexpr auto HooksCommand = "agent-setup-check"sv;
+    constexpr auto PluginsTag = "poll/plugins"sv;
+    constexpr auto PluginsCommand = "claude-plugins"sv;
+    constexpr auto PluginStepTag = "poll/plugin-step"sv;
+    constexpr auto MarketplaceAddCommand = "claude-marketplace-add"sv;
+    constexpr auto PluginInstallCommand = "claude-plugin-install"sv;
     constexpr auto WorktreeListCommand = "git-worktree-list"sv;
 
     /// What a repository's poll tag names after `poll/<repo>/`.
@@ -306,7 +312,7 @@ void Engine::issueSourceAuthChecks(std::vector<Effect>& out)
 
 bool Engine::isResumable(std::string_view tag) const noexcept
 {
-    if (isAuthTag(tag) || tag == HooksTag)
+    if (isAuthTag(tag) || tag == HooksTag || tag == PluginsTag)
         return true;
     // A list of a repository no longer configured is answered to nobody.
     auto const parsed = parsePollTag(tag);
@@ -451,6 +457,98 @@ void Engine::checkHooks(std::vector<Effect>& out)
     static_cast<void>(issuePoll(std::string(HooksTag), HooksCommand, {}, _config->worktreeRoot(), out));
 }
 
+void Engine::checkPlugins(std::vector<Effect>& out)
+{
+    if (_config->plugins().empty())
+    {
+        _missingPlugins.clear();
+        _pollProblems.erase(std::string(PluginsTag));
+        return;
+    }
+    if (isPending(PluginsTag))
+        return;
+    // In the worktree root, as the hooks check: it always exists, and `claude` reads no project there.
+    static_cast<void>(issuePoll(std::string(PluginsTag), PluginsCommand, {}, _config->worktreeRoot(), out));
+}
+
+void Engine::onPluginsResult(ProcessOutcome const& outcome)
+{
+    auto const judgement = judge(outcome);
+    auto& lines = _pollProblems[std::string(PluginsTag)];
+    lines.clear();
+    _missingPlugins.clear();
+    if (judgement.verdict != Verdict::Ok)
+    {
+        // A `claude` that is missing is said by the agents' own failure; this says which check it was.
+        lines.push_back(line(std::format("the Claude Code plugins check failed: {}", judgement.why)));
+        return;
+    }
+    auto const enabled = enabledPluginsOf(outcome.stdoutText);
+    if (!enabled)
+    {
+        lines.emplace_back("the Claude Code plugins check printed something unreadable");
+        return;
+    }
+    _missingPlugins = orchestrator::missingPlugins(_config->plugins(), *enabled);
+}
+
+void Engine::installPlugins(std::vector<Effect>& out)
+{
+    if (!_config || _missingPlugins.empty() || !_pluginSteps.empty())
+        return;
+    // A marketplace already known makes `marketplace add` fail; the install that follows still runs, and it
+    // is what is judged.
+    for (auto const& plugin: _missingPlugins)
+    {
+        if (!plugin.marketplace.empty())
+            _pluginSteps.push_back(
+                PluginStep { .command = std::string(MarketplaceAddCommand),
+                             .args = { Argument { .name = "source", .value = plugin.marketplace } },
+                             .plugin = plugin.id });
+        _pluginSteps.push_back(PluginStep { .command = std::string(PluginInstallCommand),
+                                            .args = { Argument { .name = "plugin", .value = plugin.id } },
+                                            .plugin = plugin.id });
+    }
+    _pollProblems.erase(std::string(PluginStepTag));
+    ++_revision;
+    issuePluginStep(out);
+}
+
+void Engine::issuePluginStep(std::vector<Effect>& out)
+{
+    if (_pluginSteps.empty())
+    {
+        // Every step ran: what is installed now is checked again.
+        checkPlugins(out);
+        return;
+    }
+    auto const& step = _pluginSteps.front();
+    if (issuePoll(std::string(PluginStepTag), step.command, step.args, _config->worktreeRoot(), out)
+        == Issued::No)
+        _pluginSteps.clear();
+}
+
+void Engine::onPluginStepResult(ProcessOutcome const& outcome, std::vector<Effect>& out)
+{
+    if (_pluginSteps.empty())
+        return;
+    auto const step = std::move(_pluginSteps.front());
+    _pluginSteps.pop_front();
+    auto const judgement = judge(outcome);
+    if (step.command == PluginInstallCommand && judgement.verdict != Verdict::Ok)
+        _pollProblems[std::string(PluginStepTag)].push_back(
+            line(std::format("installing {} failed: {}; run by hand: claude plugin install {}",
+                             step.plugin,
+                             judgement.why,
+                             step.plugin)));
+    if (!_config)
+    {
+        _pluginSteps.clear();
+        return;
+    }
+    issuePluginStep(out);
+}
+
 void Engine::onHooksResult(ProcessOutcome const& outcome)
 {
     auto const judgement = judge(outcome);
@@ -524,6 +622,19 @@ void Engine::onPollResult(std::string_view tag, ProcessOutcome const& outcome, s
     if (tag == HooksTag)
     {
         onHooksResult(outcome);
+        // The plugins are checked once the hooks are: one setup check at a time, so that neither takes a
+        // command slot from the lists or a run.
+        checkPlugins(out);
+        return;
+    }
+    if (tag == PluginsTag)
+    {
+        onPluginsResult(outcome);
+        return;
+    }
+    if (tag == PluginStepTag)
+    {
+        onPluginStepResult(outcome, out);
         return;
     }
     if (tag == AuthTag)

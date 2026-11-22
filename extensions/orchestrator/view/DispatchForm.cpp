@@ -76,6 +76,13 @@ namespace
     /// The cells the box and its padding take on either side.
     constexpr auto SideColumns = 2;
 
+    /// @return Whether the agents' setup lacks something a run needs: the status hooks, or a plugin. The form
+    ///         then says so, and asks for a second Enter.
+    [[nodiscard]] bool isSetupIncomplete(Engine const& engine) noexcept
+    {
+        return engine.hooks() == HooksState::Missing || !engine.missingPlugins().empty();
+    }
+
     /// The form's fields in the order Tab moves through them: an item's, and a topic's.
     constexpr auto FieldOrder = std::array { FormField::Task, FormField::Model, FormField::Note };
     constexpr auto TopicFieldOrder =
@@ -325,6 +332,15 @@ namespace
                            .start = 0 });
         if (engine.hooks() == HooksState::Missing)
             appendWrapped(lines, ""sv, HooksMissingWarning, Role::Warning, 0, width);
+        for (auto const& plugin: engine.missingPlugins())
+            appendWrapped(lines,
+                          ""sv,
+                          std::format("Claude Code lacks the plugin {}: a prompt naming its skills fails "
+                                      "(I on the dashboard installs it)",
+                                      plugin.id),
+                          Role::Warning,
+                          0,
+                          width);
         return FormBody { .lines = std::move(lines), .detailsBegin = detailsBegin, .detailsEnd = detailsEnd };
     }
 
@@ -404,7 +420,7 @@ std::optional<DispatchFormState> openDispatchForm(Engine const& engine,
         .note = {},
         .session = std::move(session),
         .focus = FormField::Task,
-        .hooks = engine.hooks() == HooksState::Missing ? HooksWarning::Shown : HooksWarning::None,
+        .hooks = isSetupIncomplete(engine) ? HooksWarning::Shown : HooksWarning::None,
     };
 }
 
@@ -433,7 +449,7 @@ std::optional<DispatchFormState> openTopicForm(Engine const& engine,
         .note = std::move(topic),
         .session = std::move(session),
         .focus = FormField::Note,
-        .hooks = engine.hooks() == HooksState::Missing ? HooksWarning::Shown : HooksWarning::None,
+        .hooks = isSetupIncomplete(engine) ? HooksWarning::Shown : HooksWarning::None,
     };
 }
 
@@ -542,7 +558,7 @@ std::optional<DispatchAction> applyFormKey(core::tui::KeyEvent const& key,
         case core::tui::KeyCode::Enter: {
             if (!enterActs(state, engine))
                 return std::nullopt;
-            if (engine.hooks() == HooksState::Missing)
+            if (isSetupIncomplete(engine))
             {
                 // The first Enter confirms the warning; only an Enter of a later input dispatches, so a paste
                 // or a held key cannot click through it.

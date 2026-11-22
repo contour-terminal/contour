@@ -639,3 +639,58 @@ TEST_CASE("status_board: the default instruction, off, or its own words", "[conf
     CHECK(dash.error().key == "status_board");
     CHECK(dash.error().problem == ConfigProblem::LeadingDash);
 }
+
+TEST_CASE("plugins: the default, none, or a list of its own", "[config]")
+{
+    auto const defaulted = parse(Input {});
+    REQUIRE(defaulted.has_value());
+    CHECK(std::ranges::equal(defaulted->plugins(), defaultPluginRequirements()));
+
+    auto const none =
+        parse(Input { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "plugins": [],)" });
+    REQUIRE(none.has_value());
+    CHECK(none->plugins().empty());
+
+    auto const own = parse(
+        Input { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "plugins": [ { "id": "x@y" },
+                                       { "id": "a@b", "marketplace": "o/r" } ],)" });
+    REQUIRE(own.has_value());
+    CHECK(std::ranges::equal(own->plugins(),
+                             std::array { PluginRequirement { .id = "x@y", .marketplace = "" },
+                                          PluginRequirement { .id = "a@b", .marketplace = "o/r" } }));
+
+    struct Row
+    {
+        std::string_view plugins;
+        std::string_view key;
+        ConfigProblem problem;
+    };
+    for (auto const& row: std::array {
+             Row { .plugins = R"([ { "marketplace": "o/r" } ])",
+                   .key = "plugins[0].id",
+                   .problem = ConfigProblem::Missing },
+             Row { .plugins = R"([ { "id": "no-marketplace" } ])",
+                   .key = "plugins[0].id",
+                   .problem = ConfigProblem::NotPluginId },
+             Row { .plugins = R"([ { "id": "a@b@c" } ])",
+                   .key = "plugins[0].id",
+                   .problem = ConfigProblem::NotPluginId },
+             Row { .plugins = R"([ { "id": "-a@b" } ])",
+                   .key = "plugins[0].id",
+                   .problem = ConfigProblem::LeadingDash },
+             Row { .plugins = R"([ { "id": "a@b" }, { "id": "a@b" } ])",
+                   .key = "plugins[1].id",
+                   .problem = ConfigProblem::Duplicate },
+             Row { .plugins = R"([ { "id": "a@b", "marketplace": "-x" } ])",
+                   .key = "plugins[0].marketplace",
+                   .problem = ConfigProblem::LeadingDash },
+         })
+    {
+        CAPTURE(row.plugins);
+        auto const replaced = std::format(R"("max_agents": 4, "plugins": {},)", row.plugins);
+        auto const config = parse(Input { .find = R"("max_agents": 4,)", .replace = replaced });
+        REQUIRE_FALSE(config.has_value());
+        CHECK(config.error().key == row.key);
+        CHECK(config.error().problem == row.problem);
+    }
+}

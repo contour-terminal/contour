@@ -34,6 +34,8 @@ namespace
         ArgumentDecl { .name = "query", .kind = ArgumentKind::Text, .root = std::nullopt },
         ArgumentDecl { .name = "prompt", .kind = ArgumentKind::Text, .root = std::nullopt },
         ArgumentDecl { .name = "board", .kind = ArgumentKind::Text, .root = std::nullopt },
+        ArgumentDecl { .name = "plugin", .kind = ArgumentKind::Text, .root = std::nullopt },
+        ArgumentDecl { .name = "source", .kind = ArgumentKind::Text, .root = std::nullopt },
         ArgumentDecl { .name = "page", .kind = ArgumentKind::Number, .root = std::nullopt },
         ArgumentDecl { .name = "format", .kind = ArgumentKind::Number, .root = std::nullopt },
         ArgumentDecl { .name = "record", .kind = ArgumentKind::Text, .root = std::nullopt },
@@ -224,6 +226,12 @@ namespace
     constexpr auto GitWorktreeRemoveArgv = std::array { "git"sv, "worktree"sv, "remove"sv, "{path}"sv };
     constexpr auto AgentSetupCheckArgv =
         std::array { "contour"sv, "agent"sv, "setup"sv, "--dry-run"sv, "--json"sv };
+    /// The `claude` the agents run, asked which plugins it has: the skills a task's prompt names come in one.
+    constexpr auto ClaudePluginsArgv = std::array { "claude"sv, "plugin"sv, "list"sv, "--json"sv };
+    /// Run only once the user confirmed it on the dashboard (`I`), each into the user's own Claude Code.
+    constexpr auto ClaudeMarketplaceAddArgv =
+        std::array { "claude"sv, "plugin"sv, "marketplace"sv, "add"sv, "{source}"sv };
+    constexpr auto ClaudePluginInstallArgv = std::array { "claude"sv, "plugin"sv, "install"sv, "{plugin}"sv };
     /// The run's worktree is passed as `--cwd`, not used as the working directory: it may be gone, and the
     /// verb only compares it with the directories the session's log names.
     constexpr auto AgentTranscriptArgv = std::array {
@@ -350,6 +358,27 @@ namespace
                       .root = Root::Worktrees,
                       .argv = AgentSetupCheckArgv,
                       .environment = {} },
+        // In the worktree root, as the hooks check.
+        CommandDecl { .name = "claude-plugins",
+                      .timeout = Timeout::Short,
+                      .root = Root::Worktrees,
+                      .argv = ClaudePluginsArgv,
+                      .environment = {} },
+        // Their exit status is all that is read: what they print is Claude Code's to word.
+        CommandDecl { .name = "claude-marketplace-add",
+                      .timeout = Timeout::Long,
+                      .root = Root::Worktrees,
+                      .argv = ClaudeMarketplaceAddArgv,
+                      .environment = {},
+                      .verification = Verification::Recorded,
+                      .output = OutputUse::ExitStatusOnly },
+        CommandDecl { .name = "claude-plugin-install",
+                      .timeout = Timeout::Long,
+                      .root = Root::Worktrees,
+                      .argv = ClaudePluginInstallArgv,
+                      .environment = {},
+                      .verification = Verification::Recorded,
+                      .output = OutputUse::ExitStatusOnly },
         // In the worktree root too: a Finished run's worktree is usually gone, its transcript is not.
         CommandDecl { .name = "agent-transcript",
                       .timeout = Timeout::Short,

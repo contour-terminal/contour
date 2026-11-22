@@ -372,3 +372,34 @@ TEST_CASE("topic form goldens", "[orchestrator][view][form][topic]")
         }
     }
 }
+
+TEST_CASE("a missing plugin is warned of and needs a second Enter", "[orchestrator][view][form][plugins]")
+{
+    auto fixture = DashboardFixture { World { .plugins = "claude/plugin-list-without.json" } };
+    fixture.dashboard.openForm("contour", ChangeRequestRef { 2375 }, "fix_ci");
+    REQUIRE(fixture.dashboard.form()->hooks == HooksWarning::Shown);
+    CHECK(fixture.screen().contains("lacks the plugin contour-workflows@contour-terminal"));
+
+    CHECK(fixture.dashboard.input("\r").empty());
+    CHECK(fixture.screen().contains("enter again to dispatch"));
+    CHECK(dispatchesIn(fixture.dashboard.input("\r")).size() == 1);
+}
+
+TEST_CASE("I asks once, then installs the missing plugins", "[orchestrator][view][plugins]")
+{
+    auto fixture = DashboardFixture { World { .plugins = "claude/plugin-list-without.json" } };
+    CHECK(fixture.screen().contains("lacks the plugin contour-workflows@contour-terminal · I installs it"));
+    CHECK(fixture.dashboard.input("I").empty());
+    CHECK(fixture.screen().contains("I again installs contour-workflows@contour-terminal"));
+    // Another key forgets the question.
+    CHECK(fixture.dashboard.input("j").empty());
+    CHECK(fixture.dashboard.input("I").empty());
+    CHECK(fixture.dashboard.input("I") == std::vector<UiAction> { InstallPluginsAction {} });
+
+    SECTION("with nothing missing, I says so")
+    {
+        auto installed = DashboardFixture { World {} };
+        CHECK(installed.dashboard.input("I").empty());
+        CHECK(installed.screen().contains("every plugin the tasks need is installed"));
+    }
+}

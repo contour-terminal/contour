@@ -340,8 +340,24 @@ class Harness
         // A submodule in the index keeps it too: git status would enter the submodule's own repository.
         if (command == "git-index-flags" && outcome.stdoutText.contains(" 160000 "))
             _tainted.insert(found->cwd);
-        return feed(ProcessFinished { .tag = found->tag, .outcome = std::move(outcome) });
+        auto effects = feed(ProcessFinished { .tag = found->tag, .outcome = std::move(outcome) });
+        // The plugins check follows the hooks check; a case about something else has it answered with the
+        // recorded list, as if the plugins were installed.
+        if (command == "agent-setup-check" && answersPluginsCheck == PluginsCheck::Answered
+            && pending("claude-plugins"))
+            effects =
+                finish("claude-plugins", ok(readFixture(FixtureRoot::Testdata, "claude/plugin-list.json")));
+        return effects;
     }
+
+    /// Whether finish() answers the plugins check that a hooks check's answer issues.
+    enum class PluginsCheck : uint8_t
+    {
+        Answered = 0, ///< Answered with the recorded list at once.
+        Left,         ///< Left pending, for the case to answer.
+    };
+    PluginsCheck answersPluginsCheck =
+        PluginsCheck::Answered; ///< For finish(): what the hooks check leads to.
 
     /// Answers the oldest unanswered read of a path ending in @p suffix.
     std::vector<Effect> read(std::string_view suffix, std::expected<std::string, FileReadError> content)
@@ -478,6 +494,8 @@ class Harness
     {
         if (command.command == "agent-setup-check")
             return ok(readFixture(FixtureRoot::Testdata, "contour/setup-hooks-present.json"));
+        if (command.command == "claude-plugins")
+            return ok(readFixture(FixtureRoot::Testdata, "claude/plugin-list.json"));
         if (command.command == "git-worktree-list")
             return ok(worktreeList(command.cwd));
         if (command.command == "gh-default-branch")
@@ -732,6 +750,7 @@ template <typename State>
 TEST_CASE("start checks the login and the hooks before any list", "[orchestrator][engine]")
 {
     auto harness = Harness { contextFor({}) };
+    harness.answersPluginsCheck = Harness::PluginsCheck::Left;
     auto const first = commandsIn(harness.last());
     CHECK(first == std::vector { "agent-setup-check"sv, "gh-auth"sv, "git-worktree-list"sv });
     CHECK(harness.pending("gh-auth")->cwd == ContourPath);
@@ -742,6 +761,11 @@ TEST_CASE("start checks the login and the hooks before any list", "[orchestrator
     harness.finish("agent-setup-check",
                    ok(readFixture(FixtureRoot::Testdata, "contour/setup-hooks-present.json")));
     CHECK(harness.engine().hooks() == HooksState::Present);
+    // The plugins are checked once the hooks are, where the hooks check ran.
+    CHECK(commandsIn(harness.last()) == std::vector { "claude-plugins"sv });
+    CHECK(harness.pending("claude-plugins")->cwd == WorktreeRoot);
+    harness.finish("claude-plugins", ok(readFixture(FixtureRoot::Testdata, "claude/plugin-list.json")));
+    CHECK(harness.engine().missingPlugins().empty());
     CHECK(commandsIn(harness.last()).empty());
 
     auto const lists = commandsIn(harness.finish("gh-auth", ok()));
@@ -3278,6 +3302,8 @@ namespace
 {
     if (command.command == "agent-setup-check")
         return ok(readFixture(FixtureRoot::Testdata, "contour/setup-hooks-present.json"));
+    if (command.command == "claude-plugins")
+        return ok(readFixture(FixtureRoot::Testdata, "claude/plugin-list.json"));
     if (command.command == "git-worktree-list")
         return ok(worktreeList(command.cwd));
     if (command.command == "gh-default-branch")
@@ -3929,6 +3955,70 @@ TEST_CASE("an unmeasured issue source's login check never runs", "[orchestrator]
     harness.boot();
     CHECK(harness.commandsIssued("acli-auth") == 0);
     CHECK(harness.commandsIssued("acli-issues") == 0);
+}
+
+TEST_CASE("a missing plugin is a problem, and installing it runs add, install and the check again",
+          "[orchestrator][engine][plugins]")
+{
+    auto harness = Harness { contextFor({}) };
+    harness.answersPluginsCheck = Harness::PluginsCheck::Left;
+    harness.finish("agent-setup-check",
+                   ok(readFixture(FixtureRoot::Testdata, "contour/setup-hooks-present.json")));
+    harness.finish("claude-plugins",
+                   ok(readFixture(FixtureRoot::Testdata, "claude/plugin-list-without.json")));
+    REQUIRE(harness.engine().missingPlugins().size() == 1);
+    CHECK(harness.engine().missingPlugins().front().id == "contour-workflows@contour-terminal");
+    CHECK(mentions(harness.engine().problems(), "lacks the plugin contour-workflows@contour-terminal"));
+
+    auto const added = all<RunCommand>(harness.feed(InstallPlugins {}));
+    REQUIRE(added.size() == 1);
+    CHECK(added.front().command == "claude-marketplace-add");
+    CHECK(added.front().cwd == WorktreeRoot);
+    REQUIRE(added.front().arguments.size() == 1);
+    CHECK(added.front().arguments.front().name == "source");
+    CHECK(added.front().arguments.front().value == "contour-terminal/claude-marketplace");
+    CHECK(harness.engine().installingPlugins());
+    // A second confirmation while it runs starts nothing more.
+    CHECK(all<RunCommand>(harness.feed(InstallPlugins {})).empty());
+
+    SECTION("installed: the check finds it, and the problem goes")
+    {
+        // A marketplace Claude Code knows already fails to be added again; the install still runs.
+        auto const installed =
+            all<RunCommand>(harness.finish("claude-marketplace-add", failed(1, "already added")));
+        REQUIRE(installed.size() == 1);
+        CHECK(installed.front().command == "claude-plugin-install");
+        REQUIRE(installed.front().arguments.size() == 1);
+        CHECK(installed.front().arguments.front().name == "plugin");
+        CHECK(installed.front().arguments.front().value == "contour-workflows@contour-terminal");
+        auto const checked = all<RunCommand>(harness.finish("claude-plugin-install", ok()));
+        REQUIRE(checked.size() == 1);
+        CHECK(checked.front().command == "claude-plugins");
+        CHECK_FALSE(harness.engine().installingPlugins());
+        harness.finish("claude-plugins", ok(readFixture(FixtureRoot::Testdata, "claude/plugin-list.json")));
+        CHECK(harness.engine().missingPlugins().empty());
+        CHECK_FALSE(mentions(harness.engine().problems(), "lacks the plugin"));
+    }
+    SECTION("a failed install says how to run it by hand")
+    {
+        harness.finish("claude-marketplace-add", ok());
+        harness.finish("claude-plugin-install", failed(1, "network unreachable"));
+        harness.finish("claude-plugins",
+                       ok(readFixture(FixtureRoot::Testdata, "claude/plugin-list-without.json")));
+        CHECK(mentions(harness.engine().problems(),
+                       "run by hand: claude plugin install contour-workflows@contour-terminal"));
+        CHECK(mentions(harness.engine().problems(), "lacks the plugin contour-workflows@contour-terminal"));
+    }
+}
+
+TEST_CASE("plugins: [] checks for none", "[orchestrator][engine][plugins]")
+{
+    auto harness = Harness { contextFor({ .limits = R"("plugins": [],)" }) };
+    harness.answersPluginsCheck = Harness::PluginsCheck::Left;
+    harness.finish("agent-setup-check",
+                   ok(readFixture(FixtureRoot::Testdata, "contour/setup-hooks-present.json")));
+    CHECK_FALSE(harness.pending("claude-plugins"));
+    CHECK(harness.engine().missingPlugins().empty());
 }
 
 TEST_CASE("every agent's system prompt asks for its board, unless status_board is off",

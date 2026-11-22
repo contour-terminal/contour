@@ -60,7 +60,9 @@ struct glz::meta<orchestrator::config::detail::JsonConfig>
                                               "repos",
                                               &T::repos,
                                               "tasks",
-                                              &T::tasks);
+                                              &T::tasks,
+                                              "plugins",
+                                              &T::plugins);
 };
 
 /// A task's keys: `applies_to` is no member name.
@@ -94,6 +96,7 @@ namespace
     using config::detail::JsonConfig;
     using config::detail::JsonDuration;
     using config::detail::JsonIssueSource;
+    using config::detail::JsonPluginRequirement;
     using config::detail::JsonRepo;
     using config::detail::JsonTask;
 
@@ -214,6 +217,8 @@ namespace
                       .text = "is one of the dashboard's own keys",
                       .listing = Listing::ReservedKeys },
         ProblemText { .problem = ConfigProblem::MissingUrl, .text = "must contain {url}" },
+        ProblemText { .problem = ConfigProblem::NotPluginId,
+                      .text = "must be <plugin>@<marketplace>, such as contour-workflows@contour-terminal" },
     };
 
     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ProblemTexts.size()),
@@ -221,7 +226,7 @@ namespace
                                           return static_cast<std::size_t>(ProblemTexts[i].problem) == i;
                                       }),
                   "ProblemTexts has one row per ConfigProblem, in its order");
-    static_assert(ProblemTexts.size() == static_cast<std::size_t>(ConfigProblem::MissingUrl) + 1,
+    static_assert(ProblemTexts.size() == static_cast<std::size_t>(ConfigProblem::NotPluginId) + 1,
                   "ProblemTexts covers every ConfigProblem");
 
     /// @return The values @p listing names, as the user writes them, of the rows @p sources holds.
@@ -305,6 +310,7 @@ namespace
         Repo,
         IssueSource,
         Task,
+        Plugin,
     };
 
     /// One key an object may have, and the type of its value.
@@ -327,6 +333,7 @@ namespace
         Field { .key = "finished_retention", .type = JsonType::Duration },
         Field { .key = "repos", .type = JsonType::Objects, .object = ObjectKind::Repo },
         Field { .key = "tasks", .type = JsonType::Objects, .object = ObjectKind::Task },
+        Field { .key = "plugins", .type = JsonType::Objects, .object = ObjectKind::Plugin },
     };
 
     constexpr auto RepoFields = std::array {
@@ -355,6 +362,11 @@ namespace
         Field { .key = "end_done_after", .type = JsonType::Duration },
     };
 
+    constexpr auto PluginFields = std::array {
+        Field { .key = "id", .type = JsonType::String },
+        Field { .key = "marketplace", .type = JsonType::String },
+    };
+
     [[nodiscard]] constexpr std::span<Field const> fieldsOf(ObjectKind kind) noexcept
     {
         switch (kind)
@@ -363,6 +375,7 @@ namespace
             case ObjectKind::Repo: return RepoFields;
             case ObjectKind::IssueSource: return IssueSourceFields;
             case ObjectKind::Task: return TaskFields;
+            case ObjectKind::Plugin: return PluginFields;
         }
         return {};
     }
@@ -383,6 +396,8 @@ namespace
     static_assert(matchesMirror<JsonIssueSource>(IssueSourceFields),
                   "IssueSourceFields and JsonIssueSource name the same keys");
     static_assert(matchesMirror<JsonTask>(TaskFields), "TaskFields and JsonTask name the same keys");
+    static_assert(matchesMirror<JsonPluginRequirement>(PluginFields),
+                  "PluginFields and JsonPluginRequirement name the same keys");
 
     /// Integers are read exactly, so that a count is never a rounded double.
     using Generic = glz::generic_u64;
@@ -850,6 +865,43 @@ namespace
         return tasks;
     }
 
+    /// @return Whether @p id is `<plugin>@<marketplace>`: one `@` with something on either side, and no
+    /// space.
+    [[nodiscard]] constexpr bool isPluginId(std::string_view id) noexcept
+    {
+        auto const at = id.find('@');
+        return at != std::string_view::npos && at > 0 && at + 1 < id.size()
+               && id.find('@', at + 1) == std::string_view::npos && !id.contains(' ');
+    }
+
+    [[nodiscard]] Checked<std::vector<PluginRequirement>> pluginsOf(
+        std::optional<std::vector<JsonPluginRequirement>> const& value)
+    {
+        if (!value)
+            return defaultPluginRequirements();
+        auto plugins = std::vector<PluginRequirement> {};
+        for (auto const [index, json]: std::views::enumerate(*value))
+        {
+            auto const key = [&](std::string_view field) {
+                return std::format("plugins[{}].{}", index, field);
+            };
+            if (!json.id)
+                return fail(key("id"), ConfigProblem::Missing);
+            if (auto const problem = textProblem(*json.id))
+                return fail(key("id"), *problem);
+            if (!isPluginId(*json.id))
+                return fail(key("id"), ConfigProblem::NotPluginId);
+            if (std::ranges::contains(plugins, *json.id, &PluginRequirement::id))
+                return fail(key("id"), ConfigProblem::Duplicate);
+            auto marketplace = json.marketplace.value_or(std::string {});
+            if (!marketplace.empty())
+                if (auto const problem = textProblem(marketplace))
+                    return fail(key("marketplace"), *problem);
+            plugins.push_back(PluginRequirement { .id = *json.id, .marketplace = std::move(marketplace) });
+        }
+        return plugins;
+    }
+
 } // namespace
 
 std::string describe(ConfigProblem problem, SourceTables const& sources)
@@ -961,7 +1013,9 @@ std::expected<Config, ConfigError> Config::parse(std::string_view json,
             return e;
         if (auto e = assign(values.repos, reposOf(document.repos, host, sources)))
             return e;
-        return assign(values.tasks, tasksOf(document.tasks, values.models));
+        if (auto e = assign(values.tasks, tasksOf(document.tasks, values.models)))
+            return e;
+        return assign(values.plugins, pluginsOf(document.plugins));
     }();
     if (problem)
         return std::unexpected(*problem);
@@ -980,6 +1034,7 @@ Config::Config(Values values) noexcept:
     _finishedRetention { values.finishedRetention },
     _repos { std::move(values.repos) },
     _tasks { std::move(values.tasks) },
+    _plugins { std::move(values.plugins) },
     _sources { values.sources }
 {
     // Every configuration can start an agent on a topic: without a task of its own, the topic's text is the

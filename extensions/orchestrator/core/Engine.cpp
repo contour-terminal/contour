@@ -247,8 +247,10 @@ std::vector<Effect> Engine::step(Input const& input)
                     return;
                 if (_pollOutstanding == 0)
                     startPoll(out);
+                // The plugins are checked again once the hooks are (onPollResult()).
                 checkHooks(out);
             },
+            [&](InstallPlugins const&) { installPlugins(out); },
         },
         input);
     // Work that fell due is done on any input, so that no wake is ever asked for in the past; the status
@@ -852,6 +854,9 @@ void Engine::rebuildProblems()
         problems.insert(problems.end(), lines.begin(), lines.end());
     if (_hooks == HooksState::Missing)
         problems.emplace_back(HooksMissingProblem);
+    for (auto const& plugin: _missingPlugins)
+        problems.push_back(displayText(
+            std::format("Claude Code lacks the plugin {} · I installs it", plugin.id), MaxSummaryLineChars));
     // Orphans are not problems: the dashboard lists them in a section of their own.
     if (problems != _problems)
     {

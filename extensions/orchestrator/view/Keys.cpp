@@ -48,6 +48,7 @@ namespace
         KeyRow { .key = "R"sv, .command = KeyCommand::Refresh, .hint = "R refresh"sv },
         KeyRow { .key = "e"sv, .command = KeyCommand::EndRun, .hint = "e end run"sv },
         KeyRow { .key = "n"sv, .command = KeyCommand::NewTopic, .hint = "n topic"sv },
+        KeyRow { .key = "I"sv, .command = KeyCommand::InstallPlugins, .hint = "I install plugins"sv },
         KeyRow { .key = "x"sv, .command = KeyCommand::RetryRemoval, .hint = "x retry removal"sv },
         KeyRow { .key = "del"sv, .command = KeyCommand::Dismiss, .hint = "del dismiss"sv },
         KeyRow {
@@ -536,6 +537,35 @@ namespace
                      .handler = [](Interaction&, KeyContext const&) -> std::optional<UiAction> {
                          return UiAction { RefreshNowAction {} };
                      } },
+        // `I` installs the plugins the agents lack into the user's own Claude Code; it asks once first.
+        CommandRow {
+            .command = KeyCommand::InstallPlugins,
+            .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
+                if (context.engine == nullptr)
+                    return std::nullopt;
+                auto const missing = context.engine->missingPlugins();
+                if (context.engine->installingPlugins())
+                {
+                    interaction.notice = "installing the plugins…";
+                    return std::nullopt;
+                }
+                if (missing.empty())
+                {
+                    interaction.notice = "every plugin the tasks need is installed";
+                    return std::nullopt;
+                }
+                if (interaction.pendingInstall != InstallConfirm::Asked)
+                {
+                    auto ids = std::string {};
+                    for (auto const& plugin: missing)
+                        ids += (ids.empty() ? "" : ", ") + plugin.id;
+                    interaction.pendingInstall = InstallConfirm::Asked;
+                    interaction.notice = std::format("I again installs {} with claude plugin install", ids);
+                    return std::nullopt;
+                }
+                interaction.pendingInstall = InstallConfirm::None;
+                return UiAction { InstallPluginsAction {} };
+            } },
         // D14: ending a run asks once. The first `e` names the run on the summary line; a second on it ends
         // it.
         CommandRow {
@@ -760,6 +790,11 @@ std::optional<UiAction> applyKey(core::tui::KeyEvent const& key,
     if (!interaction.pendingEnd.empty() && command != KeyCommand::EndRun)
     {
         interaction.pendingEnd.clear();
+        return std::nullopt;
+    }
+    if (interaction.pendingInstall == InstallConfirm::Asked && command != KeyCommand::InstallPlugins)
+    {
+        interaction.pendingInstall = InstallConfirm::None;
         return std::nullopt;
     }
     return command ? dispatch(*command, interaction, taskContext) : std::nullopt;
