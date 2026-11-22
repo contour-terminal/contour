@@ -696,9 +696,9 @@ Key              | Meaning
 `id`             | Required. The task's name, unique among the tasks.
 `key`            | Required. The dashboard key that starts it: one printable character, none of the dashboard's own (the configuration names those when it refuses one).
 `label`          | Required. What the dashboard calls it.
-`applies_to`     | Required. `pr` for a pull request, `issue` for an issue.
+`applies_to`     | Required. `pr` for a pull request, `issue` for an issue, `topic` for a topic you type in the dashboard (`n`). Without a `topic` task, a built-in one named `topic` uses the text as the whole prompt.
 `model`          | Required. The model it runs with, one of `models`; the dispatch form can change it.
-`prompt`         | Required. What the agent is started with; `{url}` stands for the item's URL, and must be there.
+`prompt`         | Required. What the agent is started with; `{url}` stands for the item's URL, and must be there. A `topic` task's prompt takes `{topic}` for the text instead; without it, the text goes on a line after the prompt.
 `end_done_after` | Its runs' own `end_done_after`, over the global one: a task whose agents rarely ask anything, such as fixing CI, can end itself (`5m`) while the rest wait for you, and `0` keeps its runs waiting whatever the global one says. Default: the global one.
 
 An action of the extension opens the dashboard from a key binding, and its summary is a status-line segment;

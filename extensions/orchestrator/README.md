@@ -76,6 +76,7 @@ request's title is shown as text and does nothing.
 | `↑` `↓` `j` `k` `Home` `End` | move the selection |
 | `Enter` | on a pull request or an issue, open the dispatch form on the first task that applies to it, or show its agent's tab if one runs; on an agent, show its tab; on a finished run, open its details (and mark it seen); on a leftover worktree, open its details on the whole width; on a folded group, unfold it |
 | `d` | open the dispatch form on the selected item; on a finished run, on its item, for a new run |
+| `n` | open the dispatch form on a new topic, in the selected item's repository |
 | `b` | show the selected run's board (below) |
 | `t` | show the selected run's transcript (below) |
 | a task's `key` | open the dispatch form on that task |
@@ -94,6 +95,15 @@ between them and the note), the prompt, the checkout, the worktree and the agent
 then how many agents run. `Enter` dispatches; `Esc` cancels. A task's key may not be one of the
 dashboard's own: the configuration is refused with a line that names them. While Claude Code's status
 hooks are missing the form says so, and asks for a second `Enter`.
+
+**Topics.** Not everything an agent should do has a pull request or an issue. `n` opens the form on a topic:
+the repository (`←` `→`), the text you type, the task and the model. The task is a `tasks` entry with
+`applies_to: topic`, whose prompt takes `{topic}` for the text. Without one, a built-in `topic` task makes
+the text the whole prompt. The run's id, branch and worktree are named from a slug of the text, at most 40
+characters of `[a-z0-9-]`, such as `agent/topic-investigate-the-flaky-test-…`. The text itself reaches only
+the prompt and the dashboard. It starts on a new branch from the repository's base, as an issue's run does.
+`d` on a finished topic run opens the form again on its text. Since `n` is the dashboard's key, a task can no
+longer use it.
 
 ## Boards and transcripts
 
@@ -123,7 +133,7 @@ a parse error. A read that fails shows the command to run by hand.
 | `←` `→` | | the previous and the next page |
 | `b` | read it again now | show the board |
 | `t` | show the transcript | |
-| `d` | the dispatch form on the run's item, for a new run | the same |
+| `d` | the dispatch form on the run's item (or topic), for a new run | the same |
 | `Enter` | show the agent's tab | the same |
 | `Esc` | back to where it was opened from: the list or the transcript | back to where it was opened from: the list or the board |
 

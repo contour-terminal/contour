@@ -59,8 +59,12 @@ namespace
     /// The form's other keys, in the order the hint line shows them after Enter's.
     constexpr auto OtherHints = std::array { "tab next field"sv, "esc cancel"sv };
 
-    /// Why a note is refused: the agent would read it as an option.
+    /// Why a note, or a topic, is refused: the agent would read it as an option.
     constexpr auto LeadingDashText = "a note may not start with -"sv;
+    constexpr auto TopicLeadingDashText = "a topic may not start with -"sv;
+
+    /// What a topic form says instead of a refusal while its topic is still empty.
+    constexpr auto TypeATopicText = "type a topic"sv;
 
     /// The cells a line's label takes, its padding included.
     constexpr auto LabelColumns = 10;
@@ -69,8 +73,24 @@ namespace
     /// The cells the box and its padding take on either side.
     constexpr auto SideColumns = 2;
 
-    /// The form's fields in the order Tab moves through them.
+    /// The form's fields in the order Tab moves through them: an item's, and a topic's.
     constexpr auto FieldOrder = std::array { FormField::Task, FormField::Model, FormField::Note };
+    constexpr auto TopicFieldOrder =
+        std::array { FormField::Repo, FormField::Note, FormField::Task, FormField::Model };
+
+    /// @return Whether @p form is a topic's.
+    [[nodiscard]] bool isTopicForm(DispatchFormState const& form) noexcept
+    {
+        return std::holds_alternative<TopicRef>(form.item);
+    }
+
+    /// @return The order Tab moves through @p form's fields.
+    [[nodiscard]] std::span<FormField const> fieldOrderOf(DispatchFormState const& form) noexcept
+    {
+        if (isTopicForm(form))
+            return TopicFieldOrder;
+        return FieldOrder;
+    }
 
     // }}}
     // {{{ the item
@@ -216,9 +236,34 @@ namespace
         auto const tasks = config != nullptr ? config->tasks() : std::span<TaskDef const> {};
         auto const models = config != nullptr ? config->models() : std::span<std::string const> {};
 
-        lines.push_back(
-            FormLine { .label = "item"sv,
-                       .text = cut(std::format("{} · {}", itemLabel(form.item), form.title), columns) });
+        if (isTopicForm(form))
+            lines.push_back(FormLine { .label = "repo"sv,
+                                       .text = cut(choice(form.repo), columns),
+                                       .role = fieldRole(form, FormField::Repo) });
+        else
+            lines.push_back(
+                FormLine { .label = "item"sv,
+                           .text = cut(std::format("{} · {}", itemLabel(form.item), form.title), columns) });
+        // A topic's text comes before the task: it is what the form is opened for.
+        auto const textLine = [&] {
+            auto const label = isTopicForm(form) ? "topic"sv : "note"sv;
+            auto const noteRole = startsWithDash(form) ? Role::Failing : Role::Text;
+            if (form.note.empty() && form.focus != FormField::Note)
+                lines.push_back(FormLine { .label = label,
+                                           .text = isTopicForm(form)
+                                                       ? std::string { TypeATopicText }
+                                                       : std::string { "optional; tab to type one" },
+                                           .role = isTopicForm(form) ? Role::Warning : Role::Dim });
+            else
+                appendWrapped(lines,
+                              label,
+                              form.focus == FormField::Note ? std::format("{}▏", form.note) : form.note,
+                              fieldRole(form, FormField::Note, noteRole),
+                              LabelColumns,
+                              width);
+        };
+        if (isTopicForm(form))
+            textLine();
         lines.push_back(FormLine {
             .label = "task"sv,
             .text = cut(form.task < tasks.size() ? taskChoice(tasks[form.task]) : choice("?"), columns),
@@ -228,17 +273,8 @@ namespace
             .text = cut(choice(form.model < models.size() ? std::string_view { models[form.model] } : "?"sv),
                         columns),
             .role = fieldRole(form, FormField::Model) });
-        auto const noteRole = startsWithDash(form) ? Role::Failing : Role::Text;
-        if (form.note.empty() && form.focus != FormField::Note)
-            lines.push_back(
-                FormLine { .label = "note"sv, .text = "optional; tab to type one", .role = Role::Dim });
-        else
-            appendWrapped(lines,
-                          "note"sv,
-                          form.focus == FormField::Note ? std::format("{}▏", form.note) : form.note,
-                          fieldRole(form, FormField::Note, noteRole),
-                          LabelColumns,
-                          width);
+        if (!isTopicForm(form))
+            textLine();
 
         auto const detailsBegin = lines.size();
         auto const preview = previewOf(form, engine);
@@ -255,6 +291,8 @@ namespace
             appendWrapped(
                 lines, "command"sv, shellQuoted(preview->agentArgv), Role::Dim, LabelColumns, width);
         }
+        else if (isTopicForm(form) && form.note.empty())
+            appendWrapped(lines, "refused"sv, TypeATopicText, Role::Dim, LabelColumns, width);
         else
             appendWrapped(
                 lines, "refused"sv, refusalText(preview.error()), Role::Failing, LabelColumns, width);
@@ -263,7 +301,9 @@ namespace
         lines.emplace_back();
         if (startsWithDash(form))
             lines.push_back(
-                FormLine { .text = std::string { LeadingDashText }, .role = Role::Failing, .start = 0 });
+                FormLine { .text = std::string { isTopicForm(form) ? TopicLeadingDashText : LeadingDashText },
+                           .role = Role::Failing,
+                           .start = 0 });
         if (config != nullptr)
             lines.push_back(
                 FormLine { .text = std::format("{} of {} running", engine.activeRuns(), config->maxAgents()),
@@ -354,6 +394,35 @@ std::optional<DispatchFormState> openDispatchForm(Engine const& engine,
     };
 }
 
+std::optional<DispatchFormState> openTopicForm(Engine const& engine,
+                                               std::string_view repo,
+                                               std::string topic,
+                                               std::string session)
+{
+    auto const* const config = engine.config();
+    if (config == nullptr || config->repos().empty())
+        return std::nullopt;
+    auto const* const known = config->findRepo(repo);
+    auto const* const task = config->firstTaskFor(AppliesTo::Topic);
+    auto const tasks = config->tasks();
+    auto const models = config->models();
+    auto const model = task != nullptr ? std::ranges::find(models, task->model) : models.end();
+    return DispatchFormState {
+        .repo = known != nullptr ? known->name : config->repos().front().name,
+        .item = TopicRef {},
+        .url = {},
+        .title = {},
+        .task = task != nullptr ? static_cast<std::size_t>(task - tasks.data()) : 0,
+        .model = model != models.end()
+                     ? static_cast<std::size_t>(std::ranges::distance(models.begin(), model))
+                     : 0,
+        .note = std::move(topic),
+        .session = std::move(session),
+        .focus = FormField::Note,
+        .hooks = engine.hooks() == HooksState::Missing ? HooksWarning::Shown : HooksWarning::None,
+    };
+}
+
 DispatchAction actionOf(DispatchFormState const& form, Engine const& engine, std::string_view nearTab)
 {
     auto const* const config = engine.config();
@@ -363,9 +432,11 @@ DispatchAction actionOf(DispatchFormState const& form, Engine const& engine, std
         .repo = form.repo,
         .item = form.item,
         .url = form.url,
+        .topic = isTopicForm(form) ? form.note : std::string {},
         .task = form.task < tasks.size() ? tasks[form.task].id : std::string {},
         .model = form.model < models.size() ? models[form.model] : std::string {},
-        .note = form.note.empty() ? std::nullopt : std::optional { form.note },
+        // A topic form's text is its topic, not a note.
+        .note = form.note.empty() || isTopicForm(form) ? std::nullopt : std::optional { form.note },
         .session = form.session,
         .nearTab = std::string { nearTab },
     };
@@ -378,6 +449,7 @@ std::expected<DispatchPreview, DispatchRefusal> previewOf(DispatchFormState cons
     return engine.preview(Dispatch { .repo = std::move(action.repo),
                                      .item = std::move(action.item),
                                      .url = std::move(action.url),
+                                     .topic = std::move(action.topic),
                                      .task = std::move(action.task),
                                      .model = std::move(action.model),
                                      .note = std::move(action.note),
@@ -398,9 +470,10 @@ std::optional<DispatchAction> applyFormKey(core::tui::KeyEvent const& key,
     auto const* const config = engine.config();
     auto& state = *form;
     auto const move = [&](int step) {
-        auto const at = std::ranges::find(FieldOrder, state.focus);
-        auto const index = static_cast<std::size_t>(std::ranges::distance(FieldOrder.begin(), at));
-        state.focus = FieldOrder[cycled(index, FieldOrder.size(), step, [](std::size_t) { return true; })];
+        auto const order = fieldOrderOf(state);
+        auto const at = std::ranges::find(order, state.focus);
+        auto const index = static_cast<std::size_t>(std::ranges::distance(order.begin(), at));
+        state.focus = order[cycled(index, order.size(), step, [](std::size_t) { return true; })];
     };
     auto const change = [&](int step) {
         if (config == nullptr)
@@ -419,6 +492,14 @@ std::optional<DispatchAction> applyFormKey(core::tui::KeyEvent const& key,
         else if (state.focus == FormField::Model)
             state.model =
                 cycled(state.model, config->models().size(), step, [](std::size_t) { return true; });
+        else if (state.focus == FormField::Repo)
+        {
+            auto const repos = config->repos();
+            auto const at = std::ranges::find(repos, state.repo, &Repo::name);
+            auto const index = static_cast<std::size_t>(std::ranges::distance(repos.begin(), at));
+            if (index < repos.size())
+                state.repo = repos[cycled(index, repos.size(), step, [](std::size_t) { return true; })].name;
+        }
     };
 
     // A key with Alt is how an Esc reads when the next key follows it in the same read: the user pressed Esc,

@@ -47,6 +47,7 @@ namespace
         KeyRow { .key = "z"sv, .command = KeyCommand::Fold, .hint = "z fold"sv },
         KeyRow { .key = "R"sv, .command = KeyCommand::Refresh, .hint = "R refresh"sv },
         KeyRow { .key = "e"sv, .command = KeyCommand::EndRun, .hint = "e end run"sv },
+        KeyRow { .key = "n"sv, .command = KeyCommand::NewTopic, .hint = "n topic"sv },
         KeyRow { .key = "x"sv, .command = KeyCommand::RetryRemoval, .hint = "x retry removal"sv },
         KeyRow { .key = "del"sv, .command = KeyCommand::Dismiss, .hint = "del dismiss"sv },
         KeyRow {
@@ -223,7 +224,7 @@ namespace
         auto const runs = context.engine->runs();
         auto const run = std::ranges::find(runs, runId, &Run::id);
         if (run != runs.end())
-            openFormFor(interaction, *context.engine, run->repo, run->item, run->task);
+            openFormFor(interaction, *context.engine, run->repo, run->item, run->task, run->topic);
     }
 
     /// @return How many pages the shown transcript has, as its last page read says; 0 while none was read.
@@ -511,6 +512,26 @@ namespace
                 interaction.followGroup = row->group;
                 return UiAction { ToggleFoldAction { .group = row->group } };
             } },
+        // `n` starts an agent on a topic the user types, in the repository the selection is in.
+        CommandRow {
+            .command = KeyCommand::NewTopic,
+            .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
+                if (interaction.screen != Screen::Dashboard || context.engine == nullptr)
+                    return std::nullopt;
+                auto repo = std::string_view {};
+                if (auto const* const row = context.selected; row != nullptr)
+                {
+                    repo = row->repo;
+                    auto const runs = context.engine->runs();
+                    if (auto const run = std::ranges::find(runs, row->run, &Run::id);
+                        repo.empty() && run != runs.end())
+                        repo = run->repo;
+                }
+                interaction.form = openTopicForm(*context.engine, repo, {}, {});
+                if (!interaction.form)
+                    interaction.notice = "no repository is configured";
+                return std::nullopt;
+            } },
         CommandRow { .command = KeyCommand::Refresh,
                      .handler = [](Interaction&, KeyContext const&) -> std::optional<UiAction> {
                          return UiAction { RefreshNowAction {} };
@@ -625,11 +646,22 @@ void openFormFor(Interaction& interaction,
                  Engine const& engine,
                  std::string_view repo,
                  ItemRef const& item,
-                 std::string_view task)
+                 std::string_view task,
+                 std::string_view topic)
 {
     auto const* const config = engine.config();
     if (config == nullptr)
         return;
+    if (std::holds_alternative<TopicRef>(item))
+    {
+        // A topic is listed nowhere: the form opens on its text, in its repository.
+        interaction.form = openTopicForm(engine, repo, std::string { topic }, {});
+        if (interaction.form)
+            interaction.overlay = Overlay::None;
+        else
+            interaction.notice = "no repository is configured";
+        return;
+    }
     auto const tasks = config->tasks();
     auto const kind = appliesToOf(item);
     auto const* chosen = config->firstTaskFor(kind);

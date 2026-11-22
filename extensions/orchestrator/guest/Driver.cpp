@@ -513,6 +513,7 @@ void Driver::apply(std::string_view tab, view::UiAction const& action)
                 step(Dispatch { .repo = dispatch.repo,
                                 .item = dispatch.item,
                                 .url = dispatch.url,
+                                .topic = dispatch.topic,
                                 .task = dispatch.task,
                                 .model = dispatch.model,
                                 .note = dispatch.note,

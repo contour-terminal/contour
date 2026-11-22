@@ -309,3 +309,66 @@ TEST_CASE("the form offers Enter only while Enter dispatches", "[orchestrator][v
     refused.dashboard.openForm("contour", ChangeRequestRef { 2375 }, "fix_ci");
     CHECK_FALSE(refused.screen().contains("enter dispatch"));
 }
+
+TEST_CASE("n opens a topic form, and Enter dispatches the topic typed", "[orchestrator][view][form][topic]")
+{
+    auto fixture = DashboardFixture { World {} };
+    CHECK(fixture.dashboard.input("n").empty());
+    REQUIRE(fixture.dashboard.form().has_value());
+    auto const& form = *fixture.dashboard.form();
+    CHECK(std::holds_alternative<TopicRef>(form.item));
+    CHECK(form.focus == FormField::Note);
+    CHECK(form.repo == "contour");
+    CHECK(fixture.screen().contains("type a topic"));
+
+    // Enter does nothing while the topic is empty, and the form stays open.
+    CHECK(fixture.dashboard.input("\r").empty());
+    REQUIRE(fixture.dashboard.form().has_value());
+
+    // A topic typed: `n` and `d` are text here, not keys.
+    CHECK(fixture.dashboard.input("Investigate the flaky d-n test").empty());
+    CHECK(fixture.screen().contains("agent/topic-investigate-the-flaky-d-n-test-…"));
+    auto const dispatched = dispatchesIn(fixture.dashboard.input("\r"));
+    REQUIRE(dispatched.size() == 1);
+    CHECK(std::holds_alternative<TopicRef>(dispatched.front().item));
+    CHECK(dispatched.front().topic == "Investigate the flaky d-n test");
+    CHECK_FALSE(dispatched.front().note.has_value());
+    CHECK(dispatched.front().url.empty());
+    CHECK(dispatched.front().task == "topic");
+    CHECK(dispatched.front().repo == "contour");
+}
+
+TEST_CASE("a topic starting with - is refused in the form", "[orchestrator][view][form][topic]")
+{
+    auto fixture = DashboardFixture { World {} };
+    CHECK(fixture.dashboard.input("n-rf").empty());
+    CHECK(fixture.screen().contains("a topic may not start with -"));
+    CHECK(fixture.dashboard.input("\r").empty());
+    CHECK(fixture.dashboard.form().has_value());
+}
+
+TEST_CASE("a finished topic run's form opens on its text", "[orchestrator][view][form][topic]")
+{
+    auto fixture = DashboardFixture { World {} };
+    auto interaction = Interaction {};
+    openFormFor(interaction, fixture.engine, "contour", TopicRef { .slug = "fix-it" }, "topic", "Fix it");
+    REQUIRE(interaction.form.has_value());
+    CHECK(interaction.form->note == "Fix it");
+    CHECK(interaction.form->repo == "contour");
+    CHECK(std::holds_alternative<TopicRef>(interaction.form->item));
+}
+
+TEST_CASE("topic form goldens", "[orchestrator][view][form][topic]")
+{
+    for (auto const size: { Wide, Medium })
+    {
+        auto const name = std::format("dispatch-topic-{}x{}", size.width, size.height);
+        SECTION(name)
+        {
+            auto fixture = DashboardFixture { World {}, size };
+            CHECK(fixture.dashboard.input("nInvestigate why the shell integration test hangs on CI").empty());
+            REQUIRE(fixture.dashboard.form().has_value());
+            checkGolden(name, fixture.screen());
+        }
+    }
+}

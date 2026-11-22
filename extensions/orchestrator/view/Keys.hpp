@@ -140,6 +140,7 @@ enum class KeyCommand : uint8_t
     FirstPage,      ///< Show the transcript's first page.
     LastPage,       ///< Show the transcript's last page.
     Fold,           ///< Fold or unfold the group of the selected row, and select its header.
+    NewTopic,       ///< Open the dispatch form on a new topic, in the selected row's repository or the first.
 };
 
 /// What the dashboard's tab shows.
@@ -278,13 +279,15 @@ void leaveSubject(Interaction& interaction) noexcept;
 ///        for the caller, which holds the source of them, to mint.
 /// @param engine The engine: its configuration and its lists.
 /// @param repo The repository's configured name.
-/// @param item The item.
+/// @param item The item; a TopicRef opens the topic form on @p topic.
 /// @param task The id of the task the form starts on, such as the run's.
+/// @param topic A topic's text, such as the run's; empty for any other item.
 void openFormFor(Interaction& interaction,
                  Engine const& engine,
                  std::string_view repo,
                  ItemRef const& item,
-                 std::string_view task);
+                 std::string_view task,
+                 std::string_view topic);
 
 /// @param engine The engine; nullptr: none.
 /// @param run A run's id.

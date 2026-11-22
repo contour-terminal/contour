@@ -22,8 +22,9 @@ namespace orchestrator::view
 struct DispatchAction
 {
     std::string repo = {};                ///< The repository's configured name.
-    ItemRef item = {};                    ///< The item to work on.
-    std::string url = {};                 ///< The item's web page.
+    ItemRef item = {};                    ///< The item to work on; a topic's slug is the engine's to make.
+    std::string url = {};                 ///< The item's web page; empty for a topic.
+    std::string topic = {};               ///< A topic's text; empty for any other item.
     std::string task = {};                ///< The task's id.
     std::string model = {};               ///< The model.
     std::optional<std::string> note = {}; ///< The user's note; absent when none was typed.
@@ -37,7 +38,8 @@ enum class FormField : uint8_t
 {
     Task = 0, ///< ←/→ cycle the tasks that apply to the item.
     Model,    ///< ←/→ cycle the configured models.
-    Note,     ///< Typed text extends the note; Backspace shortens it.
+    Note,     ///< Typed text extends the note, or a topic form's topic; Backspace shortens it.
+    Repo,     ///< A topic form's: ←/→ cycle the configured repositories.
 };
 
 /// How far the user got past the warning that Claude Code's status hooks are missing.
@@ -57,7 +59,7 @@ struct DispatchFormState
     std::string title = {};   ///< The item's title, as last listed, sanitised.
     std::size_t task = 0;     ///< The task: an index into Config::tasks(), one that applies to the item.
     std::size_t model = 0;    ///< The model: an index into Config::models().
-    std::string note = {};    ///< What the user typed; empty: no note.
+    std::string note = {};    ///< What the user typed: the note, or a topic form's topic; empty: none.
     std::string session = {}; ///< The agent's session UUID, minted as the form opens.
     FormField focus = FormField::Task;       ///< Where ←/→ and typed text go.
     HooksWarning hooks = HooksWarning::None; ///< How far the user got past the missing-hooks warning.
@@ -86,6 +88,18 @@ inline constexpr std::string_view HooksMissingWarning =
                                                                 ItemRef const& item,
                                                                 std::string_view task,
                                                                 std::string session);
+
+/// Opens a form on a topic, focused on its text: the dashboard's `n`, and `d` on a finished topic run.
+/// @param engine The engine: its configuration and whether the hooks are installed.
+/// @param repo The repository's configured name; one the configuration lacks starts on its first.
+/// @param topic The topic's text to start with; empty for a new one.
+/// @param session The agent's session UUID.
+/// @return The form, on the first task that applies to topics and its model; std::nullopt when the engine is
+///         not configured or configures no repository.
+[[nodiscard]] std::optional<DispatchFormState> openTopicForm(Engine const& engine,
+                                                             std::string_view repo,
+                                                             std::string topic,
+                                                             std::string session);
 
 /// @param form An open form.
 /// @param engine The engine it was opened with.

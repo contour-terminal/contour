@@ -1,0 +1,24 @@
+╭─ Agents ─────────────────────────────────────────────────────────────────────╮
+│ MY PULL REQUESTS                                                             │
+│ ▾ contour · 5                                                                │
+│ ● ╭─ Dispatch an agent ──────────────────────────────────────────────────╮n… │
+│ ✓ │ repo      ‹ contour ›                                                │   │
+│ ✓ │ topic     Investigate why the shell integration test hangs on CI▏    │a… │
+│ ✗ │ task      ‹ topic ›                                                  │d… │
+│ ✗ │ model     ‹ opus ›                                                   │a… │
+│   │ prompt    Investigate why the shell integration test hangs on CI     │   │
+│ IS│ checkout  new branch                                                 │   │
+│ ▾ │             agent/topic-investigate-why-the-shell-integration-te-…   │   │
+│   │ worktree  /home/u/worktrees/contour/topic-investigate-why-the-shell- │n… │
+│   │             integration-te-…                                         │e… │
+╰───│ command   claude --model opus --session-id                           │───╯
+╭─ D│             00000001-0000-4000-8000-000000000000 'Investigate why    │───╮
+│ Sa│             the shell integration test hangs on CI'                  │e… │
+│   │                                                                      │   │
+│ br│ 0 of 4 running                                                       │   │
+│ ch│ enter dispatch · tab next field · esc cancel                         │   │
+│ ur╰──────────────────────────────────────────────────────────────────────╯   │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ ↑↓ move · enter open · d dispatch · ? help · b board · t transcript · / filter 
+ ⬢ agents 0/4 · ✗2                                                              

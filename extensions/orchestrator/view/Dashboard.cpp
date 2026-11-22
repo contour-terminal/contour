@@ -982,7 +982,7 @@ std::vector<UiAction> Dashboard::select(std::string_view run)
 void Dashboard::openForm(std::string_view repo, ItemRef const& item, std::string_view task)
 {
     auto& state = *_state;
-    openFormFor(state.interaction, state.engine, repo, item, task);
+    openFormFor(state.interaction, state.engine, repo, item, task, {});
     if (state.interaction.form && state.interaction.form->session.empty())
         state.interaction.form->session = formatUuidV4(state.ids.next());
     state.repaint = State::Repaint::Needed;
