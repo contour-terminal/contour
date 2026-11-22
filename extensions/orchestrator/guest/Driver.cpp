@@ -39,14 +39,14 @@ namespace
     };
 
     /// The names of DispatchRefusal, by value, for the log.
-    constexpr auto DispatchRefusalNames = std::array<std::string_view, 10> {
+    constexpr auto DispatchRefusalNames = std::array<std::string_view, 9> {
         "not-configured", "agent-limit",     "repo-limit",   "unknown-repo", "unknown-task",
-        "unknown-model",  "already-running", "base-unknown", "bad-prompt",   "unknown-profile",
+        "unknown-model",  "already-running", "base-unknown", "bad-prompt",
     };
 
     static_assert(HostErrorNames.size() == HostErrorCount);
     static_assert(FileErrorNames.size() == FileErrorCount);
-    static_assert(DispatchRefusalNames.size() == std::to_underlying(DispatchRefusal::UnknownProfile) + 1U);
+    static_assert(DispatchRefusalNames.size() == std::to_underlying(DispatchRefusal::BadPrompt) + 1U);
 
     /// What a FileError tells the engine; every error a `.git` file read can meet that is not one of these is
     /// FileReadError::Unreadable.

@@ -3541,6 +3541,13 @@ namespace
     return found != command.arguments.end() ? std::string_view { found->value } : std::string_view {};
 }
 
+/// @return The value @p pane is opened with for @p name; none when it is not passed.
+[[nodiscard]] std::optional<std::string> paneArgument(OpenPane const& pane, std::string_view name)
+{
+    auto const found = std::ranges::find(pane.arguments, name, &Argument::name);
+    return found != pane.arguments.end() ? std::optional { found->value } : std::nullopt;
+}
+
 [[nodiscard]] std::string basicPage()
 {
     return readFixture(FixtureRoot::Contract, "agent-transcript/format-1/basic-page-1.json");
@@ -4025,10 +4032,6 @@ TEST_CASE("plugins: [] checks for none", "[orchestrator][engine][plugins]")
 TEST_CASE("every agent's system prompt asks for its board, unless status_board is off",
           "[orchestrator][engine][board]")
 {
-    auto const argumentOf = [](OpenPane const& pane, std::string_view name) {
-        auto const at = std::ranges::find(pane.arguments, name, &Argument::name);
-        return at != pane.arguments.end() ? std::optional { at->value } : std::nullopt;
-    };
     auto const openedWith = [](Settings const& settings) {
         auto harness = Harness { contextFor(settings) };
         harness.boot();
@@ -4044,40 +4047,29 @@ TEST_CASE("every agent's system prompt asks for its board, unless status_board i
     {
         auto const pane = openedWith({});
         CHECK(pane.paneTemplate == "agent");
-        CHECK(argumentOf(pane, "board") == std::string { DefaultBoardInstruction });
+        CHECK(paneArgument(pane, "board") == std::string { DefaultBoardInstruction });
     }
     SECTION("its own words")
     {
         auto const pane = openedWith({ .limits = R"("status_board": "Keep NOTES.md current.",)" });
         CHECK(pane.paneTemplate == "agent");
-        CHECK(argumentOf(pane, "board") == "Keep NOTES.md current.");
+        CHECK(paneArgument(pane, "board") == "Keep NOTES.md current.");
     }
     SECTION("off: the plain template, and no board argument")
     {
         auto const pane = openedWith({ .limits = R"("status_board": "off",)" });
         CHECK(pane.paneTemplate == "agent-plain");
-        CHECK_FALSE(argumentOf(pane, "board").has_value());
+        CHECK_FALSE(paneArgument(pane, "board").has_value());
     }
 }
 
 TEST_CASE("every agent starts with its permission profile as --settings",
           "[orchestrator][engine][permissions]")
 {
-    auto const argumentOf = [](OpenPane const& pane, std::string_view name) {
-        auto const at = std::ranges::find(pane.arguments, name, &Argument::name);
-        return at != pane.arguments.end() ? std::optional { at->value } : std::nullopt;
-    };
-    auto const builtin = [](std::string_view name) {
-        auto const profiles = resolveProfiles({});
-        REQUIRE(profiles.has_value());
-        auto const profile = std::ranges::find(*profiles, name, &PermissionProfile::name);
-        REQUIRE(profile != profiles->end());
-        return *profile;
-    };
-    auto const openedWith = [](Settings const& settings, Dispatch dispatch) {
+    auto const openedWith = [](Settings const& settings) {
         auto harness = Harness { contextFor(settings) };
         harness.boot();
-        harness.feed(std::move(dispatch));
+        harness.feed(prDispatch());
         harness.finish("git-fetch", ok());
         harness.finish("git-worktree-add", ok());
         auto const opened = all<OpenPane>(harness.finish("gh-pr-checkout", ok()));
@@ -4088,36 +4080,25 @@ TEST_CASE("every agent starts with its permission profile as --settings",
 
     SECTION("by default, standard")
     {
-        auto const [pane, run] = openedWith({}, prDispatch());
+        auto const profiles = resolveProfiles({});
+        REQUIRE(profiles.has_value());
+        auto const [pane, run] = openedWith({});
         CHECK(run.permissions == "standard");
-        CHECK(run.settings == settingsJsonOf(builtin("standard")));
-        CHECK(argumentOf(pane, "settings") == run.settings);
+        CHECK(run.settings == settingsJsonOf(*findProfile(*profiles, "standard")));
+        CHECK(paneArgument(pane, "settings") == run.settings);
     }
     SECTION("the default the configuration names")
     {
-        auto const [pane, run] = openedWith({ .limits = R"("permissions": "ask",)" }, prDispatch());
+        auto const [pane, run] = openedWith({ .limits = R"("permissions": "ask",)" });
         CHECK(run.permissions == "ask");
-        CHECK(argumentOf(pane, "settings")
+        CHECK(paneArgument(pane, "settings")
               == R"({"permissions":{"defaultMode":"default","allow":[],"deny":[]}})");
     }
-    SECTION("the dispatch's own, over the default")
+    SECTION("the task's own, over the default")
     {
-        auto dispatch = prDispatch();
-        dispatch.permissions = "trusted";
-        auto const [pane, run] = openedWith({}, std::move(dispatch));
+        auto const [pane, run] = openedWith({ .fixCiKeys = R"("permissions": "trusted",)" });
         CHECK(run.permissions == "trusted");
-        CHECK(argumentOf(pane, "settings")->contains("Bash(git push:*)"));
-    }
-    SECTION("an unknown profile is refused")
-    {
-        auto harness = Harness { contextFor({}) };
-        harness.boot();
-        auto dispatch = prDispatch();
-        dispatch.permissions = "nope";
-        auto const refused = all<DispatchRefused>(harness.feed(std::move(dispatch)));
-        REQUIRE(refused.size() == 1);
-        CHECK(refused.front().reason == DispatchRefusal::UnknownProfile);
-        CHECK(harness.engine().runs().empty());
+        CHECK(paneArgument(pane, "settings")->contains("Bash(git push:*)"));
     }
 }
 

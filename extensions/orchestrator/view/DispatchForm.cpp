@@ -48,9 +48,8 @@ namespace
         "an agent already works on this item"sv,                                    // AlreadyRunning
         "the base branch is not known yet: it is read with the next refresh (R)"sv, // BaseUnknown
         "the prompt or the note cannot be passed to the agent"sv,                   // BadPrompt
-        "the permission profile is no longer configured"sv,                         // UnknownProfile
     };
-    static_assert(RefusalTexts.size() == std::to_underlying(DispatchRefusal::UnknownProfile) + 1U,
+    static_assert(RefusalTexts.size() == std::to_underlying(DispatchRefusal::BadPrompt) + 1U,
                   "RefusalTexts has one row per DispatchRefusal");
 
     /// What Enter does, indexed by HooksWarning: once the warning is confirmed, it asks for a second Enter.
@@ -65,10 +64,24 @@ namespace
     constexpr auto LeadingDashText = "a note may not start with -"sv;
     constexpr auto TopicLeadingDashText = "a topic may not start with -"sv;
 
-    /// How the command line shows the board's instruction: by its placeholder, the paragraph being long.
-    constexpr auto BoardPlaceholder = "{board}"sv;
-    /// How the command line shows the run's settings: by their placeholder, the document being long.
-    constexpr auto SettingsPlaceholder = "{settings}"sv;
+    /// The arguments the command line shows by their placeholder, being long: lines of their own say what
+    /// they hold.
+    constexpr auto ShownByPlaceholder = std::array { "board"sv, "settings"sv };
+
+    /// @return The agent's command line for @p run as the form shows it: the template substituted, with the
+    ///         arguments ShownByPlaceholder names left as their placeholders.
+    [[nodiscard]] std::optional<std::vector<std::string>> commandShown(Run const& run)
+    {
+        auto const* const pane = findPaneTemplate(agentPaneTemplateOf(run));
+        if (pane == nullptr)
+            return std::nullopt;
+        auto arguments = agentPaneArguments(run);
+        for (auto& argument: arguments)
+            if (std::ranges::contains(ShownByPlaceholder, argument.name))
+                argument.value = std::format("{{{}}}", argument.name);
+        auto shown = substitute(pane->argv, arguments);
+        return shown ? std::optional { std::move(*shown) } : std::nullopt;
+    }
 
     /// What a topic form says instead of a refusal while its topic is still empty.
     constexpr auto TypeATopicText = "type a topic"sv;
@@ -319,11 +332,8 @@ namespace
                           Role::Text,
                           LabelColumns,
                           width);
-            auto shown = preview->agentArgv;
-            if (!preview->run.board.empty())
-                std::ranges::replace(shown, preview->run.board, std::string { BoardPlaceholder });
-            std::ranges::replace(shown, preview->run.settings, std::string { SettingsPlaceholder });
-            appendWrapped(lines, "command"sv, shellQuoted(shown), Role::Dim, LabelColumns, width);
+            if (auto const shown = commandShown(preview->run))
+                appendWrapped(lines, "command"sv, shellQuoted(*shown), Role::Dim, LabelColumns, width);
         }
         else if (isTopicForm(form) && form.note.empty())
             appendWrapped(lines, "refused"sv, TypeATopicText, Role::Dim, LabelColumns, width);

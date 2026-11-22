@@ -3,18 +3,18 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <expected>
 #include <format>
-#include <map>
 #include <optional>
 #include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 
 #include <glaze/glaze.hpp>
+#include <orchestrator/core/ArgumentKinds.hpp>
 #include <orchestrator/core/Json.hpp>
 #include <orchestrator/core/PermissionsJson.hpp>
 
@@ -68,16 +68,35 @@ namespace
         "Bash(gh pr edit:*)"sv,
     };
 
-    [[nodiscard]] std::vector<std::string> rulesOf(std::span<std::string_view const> rules)
+    constexpr auto BuiltinProfiles = std::array {
+        BuiltinProfile { .name = DefaultProfileName,
+                         .extends = {},
+                         .mode = PermissionMode::AcceptEdits,
+                         .allow = StandardAllow,
+                         .deny = StandardDeny },
+        BuiltinProfile { .name = "trusted",
+                         .extends = DefaultProfileName,
+                         .mode = std::nullopt,
+                         .allow = TrustedAllow,
+                         .deny = {} },
+        BuiltinProfile {
+            .name = "ask", .extends = {}, .mode = PermissionMode::Default, .allow = {}, .deny = {} },
+    };
+
+    [[nodiscard]] std::vector<std::string> stringsOf(std::span<std::string_view const> rules)
     {
         return rules | std::views::transform([](std::string_view rule) { return std::string { rule }; })
                | std::ranges::to<std::vector>();
     }
 
-    [[nodiscard]] bool isToolCharacter(char c) noexcept
+    [[nodiscard]] ProfileDef definitionOf(BuiltinProfile const& row)
     {
-        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'
-               || c == '-';
+        return ProfileDef { .name = std::string { row.name },
+                            .extends = row.extends.empty() ? std::nullopt
+                                                           : std::optional { std::string { row.extends } },
+                            .mode = row.mode,
+                            .allow = stringsOf(row.allow),
+                            .deny = stringsOf(row.deny) };
     }
 
     [[nodiscard]] bool isControl(char c) noexcept
@@ -93,54 +112,53 @@ namespace
                 rules.push_back(rule);
     }
 
-    /// Resolves profiles by name, remembering each once resolved.
-    class Resolver
+    /// Resolves @p profile among @p profiles, walking its `extends`; a walk longer than there are profiles
+    /// went round a cycle.
+    [[nodiscard]] std::expected<PermissionProfile, ProfileError> resolveOne(
+        std::span<ProfileDef const> profiles, ProfileDef const& profile, std::size_t depth = 0)
     {
-      public:
-        explicit Resolver(std::span<PermissionProfile const> profiles) noexcept: _profiles { profiles } {}
-
-        /// @return The profile of @p name resolved, or why not.
-        [[nodiscard]] std::expected<PermissionProfile, ProfileProblem> resolve(std::string const& name)
+        if (depth > profiles.size())
+            return std::unexpected(ProfileError::ProfileCycle);
+        auto resolved = PermissionProfile { .name = profile.name };
+        if (profile.extends)
         {
-            if (auto const done = _resolved.find(name); done != _resolved.end())
-                return done->second;
-            auto const* const profile = find(name);
-            if (std::ranges::contains(_chain, name) || profile == nullptr)
-                return std::unexpected(
-                    ProfileProblem { .profile = name, .error = ProfileError::ProfileCycle });
-            _chain.push_back(name);
-            auto resolved = PermissionProfile { .name = name };
-            if (profile->extends)
-            {
-                if (find(*profile->extends) == nullptr)
-                    return std::unexpected(
-                        ProfileProblem { .profile = name, .error = ProfileError::UnknownProfile });
-                auto parent = resolve(*profile->extends);
-                if (!parent)
-                    return std::unexpected(ProfileProblem { .profile = name, .error = parent.error().error });
-                resolved.mode = parent->mode;
-                resolved.allow = std::move(parent->allow);
-                resolved.deny = std::move(parent->deny);
-            }
-            resolved.mode = profile->mode.value_or(resolved.mode.value_or(PermissionMode::Default));
-            appendMissing(resolved.allow, profile->allow);
-            appendMissing(resolved.deny, profile->deny);
-            _chain.pop_back();
-            _resolved.emplace(name, resolved);
-            return resolved;
+            auto const parent = std::ranges::find(profiles, *profile.extends, &ProfileDef::name);
+            if (parent == profiles.end())
+                return std::unexpected(ProfileError::UnknownProfile);
+            auto inherited = resolveOne(profiles, *parent, depth + 1);
+            if (!inherited)
+                return inherited;
+            resolved.mode = inherited->mode;
+            resolved.allow = std::move(inherited->allow);
+            resolved.deny = std::move(inherited->deny);
         }
+        resolved.mode = profile.mode.value_or(resolved.mode);
+        appendMissing(resolved.allow, profile.allow);
+        appendMissing(resolved.deny, profile.deny);
+        return resolved;
+    }
 
-      private:
-        [[nodiscard]] PermissionProfile const* find(std::string_view name) const noexcept
-        {
-            auto const profile = std::ranges::find(_profiles, name, &PermissionProfile::name);
-            return profile != _profiles.end() ? &*profile : nullptr;
-        }
-
-        std::span<PermissionProfile const> _profiles;
-        std::vector<std::string> _chain;
-        std::map<std::string, PermissionProfile, std::less<>> _resolved;
+    /// What a run's stored settings let its agent do.
+    struct SettingsSummary
+    {
+        PermissionModeName const& mode;
+        std::size_t allowed;
+        std::size_t denied;
     };
+
+    [[nodiscard]] std::optional<SettingsSummary> summaryOfSettings(std::string_view settingsJson)
+    {
+        auto const settings = json::readDocument<ReadOptions, JsonSettings>(settingsJson);
+        if (!settings)
+            return std::nullopt;
+        auto const row = std::ranges::find(
+            PermissionModeNames, settings->permissions.defaultMode, &PermissionModeName::word);
+        if (row == PermissionModeNames.end())
+            return std::nullopt;
+        return SettingsSummary { .mode = *row,
+                                 .allowed = settings->permissions.allow.size(),
+                                 .denied = settings->permissions.deny.size() };
+    }
 } // namespace
 
 std::optional<PermissionMode> permissionModeOf(std::string_view word) noexcept
@@ -149,34 +167,27 @@ std::optional<PermissionMode> permissionModeOf(std::string_view word) noexcept
     return row != PermissionModeNames.end() ? std::optional { row->mode } : std::nullopt;
 }
 
-std::string_view nameOf(PermissionMode mode) noexcept
+std::span<BuiltinProfile const> builtinProfiles() noexcept
 {
-    auto const row = std::ranges::find(PermissionModeNames, mode, &PermissionModeName::mode);
-    return row != PermissionModeNames.end() ? row->word : std::string_view {};
+    return BuiltinProfiles;
 }
 
-std::vector<PermissionProfile> builtinProfiles()
+PermissionProfile const* findProfile(std::span<PermissionProfile const> profiles,
+                                     std::string_view name) noexcept
 {
-    return {
-        PermissionProfile { .name = std::string { DefaultProfileName },
-                            .mode = PermissionMode::AcceptEdits,
-                            .allow = rulesOf(StandardAllow),
-                            .deny = rulesOf(StandardDeny) },
-        PermissionProfile { .name = "trusted",
-                            .extends = std::string { DefaultProfileName },
-                            .allow = rulesOf(TrustedAllow) },
-        PermissionProfile { .name = "ask", .mode = PermissionMode::Default },
-    };
+    auto const profile = std::ranges::find(profiles, name, &PermissionProfile::name);
+    return profile != profiles.end() ? &*profile : nullptr;
 }
 
 bool isPermissionRule(std::string_view rule) noexcept
 {
     auto const open = rule.find('(');
     auto const tool = rule.substr(0, open);
-    auto const isLetter = [](char c) {
-        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+    auto const isToolCharacter = [](char c) {
+        return detail::isAlphanumeric(c) || c == '_' || c == '-';
     };
-    if (tool.empty() || !isLetter(tool.front()) || !std::ranges::all_of(tool, isToolCharacter))
+    if (tool.empty() || !detail::isAlphanumeric(tool.front()) || detail::isDigit(tool.front())
+        || !std::ranges::all_of(tool, isToolCharacter))
         return false;
     if (open == std::string_view::npos)
         return true;
@@ -188,75 +199,52 @@ bool isPermissionRule(std::string_view rule) noexcept
 }
 
 std::expected<std::vector<PermissionProfile>, ProfileProblem> resolveProfiles(
-    std::span<PermissionProfile const> configured)
+    std::span<ProfileDef const> configured)
 {
-    auto profiles = builtinProfiles();
+    auto profiles = BuiltinProfiles | std::views::transform(definitionOf) | std::ranges::to<std::vector>();
     for (auto const& profile: configured)
     {
-        if (auto const builtin = std::ranges::find(profiles, profile.name, &PermissionProfile::name);
+        if (auto const builtin = std::ranges::find(profiles, profile.name, &ProfileDef::name);
             builtin != profiles.end())
             *builtin = profile;
         else
             profiles.push_back(profile);
     }
-    auto resolver = Resolver { profiles };
     auto resolved = std::vector<PermissionProfile> {};
     resolved.reserve(profiles.size());
     for (auto const& profile: profiles)
     {
-        auto one = resolver.resolve(profile.name);
+        auto one = resolveOne(profiles, profile);
         if (!one)
-            return std::unexpected(std::move(one.error()));
+            return std::unexpected(ProfileProblem { .profile = profile.name, .error = one.error() });
         resolved.push_back(std::move(*one));
     }
     return resolved;
 }
 
-std::string settingsJsonOf(PermissionProfile const& resolved)
+std::string settingsJsonOf(PermissionProfile const& profile)
 {
-    auto const settings =
-        JsonSettings { .permissions = { .defaultMode = std::string { nameOf(
-                                            resolved.mode.value_or(PermissionMode::Default)) },
-                                        .allow = resolved.allow,
-                                        .deny = resolved.deny } };
+    auto const row = std::ranges::find(PermissionModeNames, profile.mode, &PermissionModeName::mode);
+    auto const settings = JsonSettings { .permissions = { .defaultMode = std::string { row->word },
+                                                          .allow = profile.allow,
+                                                          .deny = profile.deny } };
     auto text = std::string {};
     if (glz::write_json(settings, text))
-        return "{}";
+        return std::string { EmptySettingsJson };
     return text;
 }
 
 std::string permissionsText(std::string_view profile, std::string_view settingsJson)
 {
-    // What each mode leaves to the agent, as the line says it.
-    constexpr auto ModeTexts = std::array {
-        "Claude Code asks for the rest"sv, // Default
-        "edits need no approval"sv,        // AcceptEdits
-        "it plans and changes nothing"sv,  // Plan
-    };
-    static_assert(ModeTexts.size() == PermissionModeNames.size(), "ModeTexts has one row per PermissionMode");
     if (profile.empty())
         return {};
     auto const summary = summaryOfSettings(settingsJson);
     if (!summary)
         return std::string { profile };
-    auto const modeText = ModeTexts[std::to_underlying(summary->mode)];
     if (summary->allowed == 0 && summary->denied == 0)
-        return std::format("{} · {}", profile, modeText);
+        return std::format("{} · {}", profile, summary->mode.effect);
     return std::format(
-        "{} · {} allowed · {} denied · {}", profile, summary->allowed, summary->denied, modeText);
-}
-
-std::optional<SettingsSummary> summaryOfSettings(std::string_view settingsJson)
-{
-    auto const settings = json::readDocument<ReadOptions, JsonSettings>(settingsJson);
-    if (!settings)
-        return std::nullopt;
-    auto const mode = permissionModeOf(settings->permissions.defaultMode);
-    if (!mode)
-        return std::nullopt;
-    return SettingsSummary { .mode = *mode,
-                             .allowed = settings->permissions.allow.size(),
-                             .denied = settings->permissions.deny.size() };
+        "{} · {} allowed · {} denied · {}", profile, summary->allowed, summary->denied, summary->mode.effect);
 }
 
 } // namespace orchestrator

@@ -17,8 +17,8 @@ namespace
 [[nodiscard]] PermissionProfile const& named(std::vector<PermissionProfile> const& profiles,
                                              std::string_view name)
 {
-    auto const profile = std::ranges::find(profiles, name, &PermissionProfile::name);
-    REQUIRE(profile != profiles.end());
+    auto const* const profile = findProfile(profiles, name);
+    REQUIRE(profile != nullptr);
     return *profile;
 }
 } // namespace
@@ -40,6 +40,7 @@ TEST_CASE("Permissions: what a rule may look like", "[orchestrator][permissions]
         { .rule = "Bash()", .accepted = false },
         { .rule = "Bash(a(b))", .accepted = false },
         { .rule = "1Bash", .accepted = false },
+        { .rule = "_Bash", .accepted = false },
         { .rule = "Bash(x", .accepted = false },
         { .rule = "Bash x", .accepted = false },
         { .rule = "Bash(a\nb)", .accepted = false },
@@ -64,21 +65,18 @@ TEST_CASE("Permissions: modes are spelt as Claude Code spells them", "[orchestra
     CHECK(permissionModeOf("plan") == PermissionMode::Plan);
     CHECK_FALSE(permissionModeOf(RefusedPermissionMode).has_value());
     CHECK_FALSE(permissionModeOf("AcceptEdits").has_value());
-    for (auto const& row: PermissionModeNames)
-        CHECK(nameOf(row.mode) == row.word);
 }
 
 TEST_CASE("Permissions: the built-in profiles resolve", "[orchestrator][permissions]")
 {
     auto const profiles = resolveProfiles({});
     REQUIRE(profiles.has_value());
-    REQUIRE(profiles->size() == 3);
+    REQUIRE(profiles->size() == builtinProfiles().size());
 
     auto const& standard = named(*profiles, DefaultProfileName);
     CHECK(standard.mode == PermissionMode::AcceptEdits);
     CHECK(standard.allow.size() == 19);
     CHECK(standard.deny.size() == 4);
-    CHECK_FALSE(standard.extends.has_value());
 
     auto const& trusted = named(*profiles, "trusted");
     CHECK(trusted.mode == PermissionMode::AcceptEdits);
@@ -86,7 +84,6 @@ TEST_CASE("Permissions: the built-in profiles resolve", "[orchestrator][permissi
     CHECK(std::ranges::equal(trusted.allow | std::views::take(standard.allow.size()), standard.allow));
     CHECK(trusted.allow.back() == "Bash(gh pr edit:*)");
     CHECK(trusted.deny == standard.deny);
-    CHECK_FALSE(trusted.extends.has_value());
 
     auto const& ask = named(*profiles, "ask");
     CHECK(ask.mode == PermissionMode::Default);
@@ -97,14 +94,14 @@ TEST_CASE("Permissions: the built-in profiles resolve", "[orchestrator][permissi
 TEST_CASE("Permissions: a configured profile replaces a built-in one, and others build on it",
           "[orchestrator][permissions]")
 {
-    auto const configured = std::vector<PermissionProfile> {
-        PermissionProfile { .name = "standard", .mode = PermissionMode::Plan, .allow = { "Read" } },
-        PermissionProfile {
-            .name = "careful", .extends = "trusted", .deny = { "Bash(git commit:*)", "Read" } },
+    auto const configured = std::vector<ProfileDef> {
+        ProfileDef { .name = "standard", .mode = PermissionMode::Plan, .allow = { "Read" } },
+        ProfileDef { .name = "careful", .extends = "trusted", .deny = { "Bash(git commit:*)", "Read" } },
+        ProfileDef { .name = "plain", .allow = { "Read" } },
     };
     auto const profiles = resolveProfiles(configured);
     REQUIRE(profiles.has_value());
-    REQUIRE(profiles->size() == 4);
+    REQUIRE(profiles->size() == 5);
     CHECK(named(*profiles, "trusted").allow
           == std::vector<std::string> {
               "Read", "Bash(git push:*)", "Bash(gh pr create:*)", "Bash(gh pr edit:*)" });
@@ -114,29 +111,31 @@ TEST_CASE("Permissions: a configured profile replaces a built-in one, and others
     CHECK(careful.mode == PermissionMode::Plan);
     CHECK(careful.deny == std::vector<std::string> { "Bash(git commit:*)", "Read" });
     CHECK(careful.allow.size() == 4);
+
+    // Without a parent or a mode of its own, a profile asks for what it does not allow.
+    CHECK(named(*profiles, "plain").mode == PermissionMode::Default);
 }
 
 TEST_CASE("Permissions: an unknown or circular extends is refused", "[orchestrator][permissions]")
 {
-    auto const cycle = std::vector<PermissionProfile> {
-        PermissionProfile { .name = "a", .extends = "b" },
-        PermissionProfile { .name = "b", .extends = "a" },
+    auto const cycle = std::vector<ProfileDef> {
+        ProfileDef { .name = "a", .extends = "b" },
+        ProfileDef { .name = "b", .extends = "a" },
     };
     CHECK(resolveProfiles(cycle).error()
           == ProfileProblem { .profile = "a", .error = ProfileError::ProfileCycle });
 
-    auto const self = std::vector<PermissionProfile> { PermissionProfile { .name = "s", .extends = "s" } };
+    auto const self = std::vector<ProfileDef> { ProfileDef { .name = "s", .extends = "s" } };
     CHECK(resolveProfiles(self).error()
           == ProfileProblem { .profile = "s", .error = ProfileError::ProfileCycle });
 
-    auto const unknown =
-        std::vector<PermissionProfile> { PermissionProfile { .name = "x", .extends = "nope" } };
+    auto const unknown = std::vector<ProfileDef> { ProfileDef { .name = "x", .extends = "nope" } };
     CHECK(resolveProfiles(unknown).error()
           == ProfileProblem { .profile = "x", .error = ProfileError::UnknownProfile });
 
     // A built-in profile replaced so that it builds on one built on it.
     auto const builtinCycle =
-        std::vector<PermissionProfile> { PermissionProfile { .name = "standard", .extends = "trusted" } };
+        std::vector<ProfileDef> { ProfileDef { .name = "standard", .extends = "trusted" } };
     CHECK(resolveProfiles(builtinCycle).error()
           == ProfileProblem { .profile = "standard", .error = ProfileError::ProfileCycle });
 }
@@ -146,20 +145,10 @@ TEST_CASE("Permissions: the settings Claude Code takes", "[orchestrator][permiss
     auto const profiles = resolveProfiles({});
     REQUIRE(profiles.has_value());
     CHECK(settingsJsonOf(named(*profiles, "ask"))
-          == R"({"permissions":{"defaultMode":"default","allow":[],"deny":[]}})");
-
-    auto const& standard = named(*profiles, DefaultProfileName);
-    auto const json = settingsJsonOf(standard);
-    CHECK(json.starts_with(
-        R"js({"permissions":{"defaultMode":"acceptEdits","allow":["Bash(git status:*)",)js"));
-    CHECK(summaryOfSettings(json)
-          == SettingsSummary { .mode = PermissionMode::AcceptEdits, .allowed = 19, .denied = 4 });
-
-    CHECK_FALSE(summaryOfSettings("").has_value());
-    CHECK_FALSE(summaryOfSettings("{}").has_value());
-    CHECK_FALSE(
-        summaryOfSettings(R"({"permissions":{"defaultMode":"bypassPermissions","allow":[],"deny":[]}})")
-            .has_value());
+          == R"js({"permissions":{"defaultMode":"default","allow":[],"deny":[]}})js");
+    CHECK(settingsJsonOf(named(*profiles, DefaultProfileName))
+              .starts_with(
+                  R"js({"permissions":{"defaultMode":"acceptEdits","allow":["Bash(git status:*)",)js"));
 }
 
 TEST_CASE("Permissions: what the form and the details say about a profile", "[orchestrator][permissions]")
@@ -175,6 +164,9 @@ TEST_CASE("Permissions: what the form and the details say about a profile", "[or
                         settingsJsonOf(PermissionProfile { .name = "planner", .mode = PermissionMode::Plan }))
         == "planner · it plans and changes nothing");
     // A run stored before profiles existed says nothing; one whose settings cannot be read, its name.
-    CHECK(permissionsText("", "{}").empty());
-    CHECK(permissionsText("standard", "{}") == "standard");
+    CHECK(permissionsText("", EmptySettingsJson).empty());
+    CHECK(permissionsText("standard", EmptySettingsJson) == "standard");
+    CHECK(permissionsText("x",
+                          R"js({"permissions":{"defaultMode":"bypassPermissions","allow":[],"deny":[]}})js")
+          == "x");
 }

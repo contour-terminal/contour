@@ -743,12 +743,6 @@ TEST_CASE("permissions: what is refused, and where", "[config]")
                 R"js({}"Bash({}-{:03}:*)")js", index == 0 ? "" : ",", std::string(128, 'x'), index);
         return std::format(R"("permission_profiles": [ {{ "name": "big", "allow": [ {} ] }} ],)", rules);
     }();
-    auto const tooMany = [] {
-        auto rules = std::string {};
-        for (auto const index: std::views::iota(0, 65))
-            rules += std::format(R"({}"Read")", index == 0 ? "" : ",");
-        return std::format(R"("permission_profiles": [ {{ "name": "big", "allow": [ {} ] }} ],)", rules);
-    }();
     for (auto const& row: std::array {
              Row { .replace = R"("permissions": "nope",)",
                    .key = "permissions",
@@ -780,9 +774,6 @@ TEST_CASE("permissions: what is refused, and where", "[config]")
                    .problem = ConfigProblem::ProfileCycle },
              Row { .replace = manyRules,
                    .key = "permission_profiles[0]",
-                   .problem = ConfigProblem::SettingsTooLarge },
-             Row { .replace = tooMany,
-                   .key = "permission_profiles[0].allow",
                    .problem = ConfigProblem::SettingsTooLarge },
          })
     {

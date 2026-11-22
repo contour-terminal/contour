@@ -152,6 +152,8 @@ namespace
         IssueSources, ///< The issueSources() that are Recorded.
         ItemKinds,    ///< AppliesToSpellings.
         ReservedKeys, ///< The dashboardKeys() that type a character.
+        PermissionModes, ///< PermissionModeNames.
+        BuiltinProfiles, ///< builtinProfiles().
     };
 
     /// What each problem means; one row per ConfigProblem, in its order.
@@ -227,12 +229,13 @@ namespace
         ProblemText { .problem = ConfigProblem::NotPluginId,
                       .text = "must be <plugin>@<marketplace>, such as contour-workflows@contour-terminal" },
         ProblemText { .problem = ConfigProblem::UnknownProfile,
-                      .text =
-                          "names no permission profile; the built-in ones are standard, trusted and ask" },
+                      .text = "names no permission profile; the built-in ones are",
+                      .listing = Listing::BuiltinProfiles },
         ProblemText { .problem = ConfigProblem::ProfileCycle,
                       .text = "makes a permission profile extend itself" },
         ProblemText { .problem = ConfigProblem::NotPermissionMode,
-                      .text = "must be one of: default, acceptEdits, plan" },
+                      .text = "must be one of",
+                      .listing = Listing::PermissionModes },
         ProblemText { .problem = ConfigProblem::BypassRefused,
                       .text = "is refused: bypassPermissions would let an agent do anything without asking" },
         ProblemText { .problem = ConfigProblem::NotPermissionRule,
@@ -276,6 +279,14 @@ namespace
                 for (auto const& row: dashboardKeys())
                     if (row.character != '\0')
                         values.push_back(row.name);
+                break;
+            case Listing::PermissionModes:
+                for (auto const& row: PermissionModeNames)
+                    values.push_back(row.word);
+                break;
+            case Listing::BuiltinProfiles:
+                for (auto const& row: builtinProfiles())
+                    values.push_back(row.name);
                 break;
         }
         return values;
@@ -950,14 +961,12 @@ namespace
         return plugins;
     }
 
-    /// @return The rules of a profile's @p list, each checked, at `<prefix>.<field>[i]`.
-    [[nodiscard]] Checked<std::vector<std::string>> rulesOf(
+    /// @return The rules of a profile's @p list, each checked, reported at `<key>[i]`.
+    [[nodiscard]] Checked<std::vector<std::string>> checkedRules(
         std::optional<std::vector<std::string>> const& list, std::string const& key)
     {
         if (!list)
             return std::vector<std::string> {};
-        if (list->size() > MaxPermissionRules)
-            return fail(key, ConfigProblem::SettingsTooLarge);
         for (auto const [index, rule]: std::views::enumerate(*list))
         {
             auto const at = std::format("{}[{}]", key, index);
@@ -970,9 +979,9 @@ namespace
     }
 
     /// Validates the profile at @p index against those before it.
-    [[nodiscard]] Checked<PermissionProfile> profileOf(JsonPermissionProfile const& json,
-                                                       std::size_t index,
-                                                       std::span<PermissionProfile const> earlier)
+    [[nodiscard]] Checked<ProfileDef> profileOf(JsonPermissionProfile const& json,
+                                                std::size_t index,
+                                                std::span<ProfileDef const> earlier)
     {
         auto const key = [index](std::string_view field) {
             return std::format("permission_profiles[{}].{}", index, field);
@@ -980,9 +989,9 @@ namespace
         auto const name = checked(json.name, key("name"), nameProblem);
         if (!name)
             return std::unexpected(name.error());
-        if (std::ranges::contains(earlier, *name, &PermissionProfile::name))
+        if (std::ranges::contains(earlier, *name, &ProfileDef::name))
             return fail(key("name"), ConfigProblem::Duplicate);
-        auto profile = PermissionProfile { .name = *name };
+        auto profile = ProfileDef { .name = *name };
         if (json.extends)
         {
             auto const parent = checked(json.extends, key("extends"), nameProblem);
@@ -998,10 +1007,10 @@ namespace
             if (!profile.mode)
                 return fail(key("mode"), ConfigProblem::NotPermissionMode);
         }
-        auto allow = rulesOf(json.allow, key("allow"));
+        auto allow = checkedRules(json.allow, key("allow"));
         if (!allow)
             return std::unexpected(allow.error());
-        auto deny = rulesOf(json.deny, key("deny"));
+        auto deny = checkedRules(json.deny, key("deny"));
         if (!deny)
             return std::unexpected(deny.error());
         profile.allow = std::move(*allow);
@@ -1022,7 +1031,7 @@ namespace
         std::optional<std::vector<JsonPermissionProfile>> const& configured,
         std::span<TaskDef const> tasks)
     {
-        auto profiles = std::vector<PermissionProfile> {};
+        auto profiles = std::vector<ProfileDef> {};
         for (auto const [index, json]: std::views::enumerate(
                  configured ? std::span { *configured } : std::span<JsonPermissionProfile const> {}))
         {
@@ -1034,7 +1043,7 @@ namespace
         // Where a problem lies: the configured profile's `extends`, or the list as a whole for a built-in
         // one.
         auto const keyOf = [&](std::string_view name, std::string_view field) {
-            auto const at = std::ranges::find(profiles, name, &PermissionProfile::name);
+            auto const at = std::ranges::find(profiles, name, &ProfileDef::name);
             return at == profiles.end()
                        ? std::string { "permission_profiles" }
                        : std::format("permission_profiles[{}]{}", std::distance(profiles.begin(), at), field);
@@ -1052,7 +1061,7 @@ namespace
                 return fail(keyOf(profile.name, ""), ConfigProblem::SettingsTooLarge);
 
         auto const exists = [&](std::string_view name) {
-            return std::ranges::contains(*resolved, name, &PermissionProfile::name);
+            return findProfile(*resolved, name) != nullptr;
         };
         auto defaultProfile = std::string { DefaultProfileName };
         if (defaultName)
@@ -1234,8 +1243,7 @@ Config::Config(Values values) noexcept:
 
 PermissionProfile const* Config::findProfile(std::string_view name) const noexcept
 {
-    auto const profile = std::ranges::find(_profiles, name, &PermissionProfile::name);
-    return profile != _profiles.end() ? &*profile : nullptr;
+    return orchestrator::findProfile(_profiles, name);
 }
 
 PermissionProfile const& Config::defaultProfile() const noexcept

@@ -13,6 +13,7 @@
 
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Model.hpp>
+#include <orchestrator/core/Permissions.hpp>
 #include <orchestrator/core/Provider.hpp>
 #include <orchestrator/core/Stats.hpp>
 
@@ -193,24 +194,25 @@ struct RunTimes
 /// One agent run, from dispatch to the Finished list.
 struct Run
 {
-    std::string id;                  ///< runId(): a Name.
-    std::string repo;                ///< The repository's configured name.
-    std::string repoPath;            ///< The repository's directory.
-    Forge forge = Forge::GitHub;     ///< The repository's forge: its provider row prepares the worktree.
-    std::string remote;              ///< The remote to fetch from: a Name.
-    std::string base;                ///< The base branch; the worktree starts at `<remote>/<base>`.
-    ItemRef item;                    ///< What the run works on.
-    std::string url;                 ///< The item's web page; empty for a topic.
-    std::string topic {};            ///< A TopicRef's text, sanitised to one line; empty for any other item.
-    std::string task;                ///< The task's id.
-    std::string model;               ///< The model the agent runs: a Name.
-    std::string prompt;              ///< The agent's first prompt: a Text.
-    std::string board {};            ///< What its system prompt asks about its status board, a Text; empty:
-                                     ///< nothing (`status_board: off`), and the plain pane template.
-    std::string permissions {};      ///< The permission profile it started with, a Name; empty: stored before
-                                     ///< profiles existed.
-    std::string settings {};         ///< What its agent's `--settings` carries (settingsJsonOf()), a Text;
-                                     ///< empty: `{}`, Claude Code's own settings alone.
+    std::string id;              ///< runId(): a Name.
+    std::string repo;            ///< The repository's configured name.
+    std::string repoPath;        ///< The repository's directory.
+    Forge forge = Forge::GitHub; ///< The repository's forge: its provider row prepares the worktree.
+    std::string remote;          ///< The remote to fetch from: a Name.
+    std::string base;            ///< The base branch; the worktree starts at `<remote>/<base>`.
+    ItemRef item;                ///< What the run works on.
+    std::string url;             ///< The item's web page; empty for a topic.
+    std::string topic {};        ///< A TopicRef's text, sanitised to one line; empty for any other item.
+    std::string task;            ///< The task's id.
+    std::string model;           ///< The model the agent runs: a Name.
+    std::string prompt;          ///< The agent's first prompt: a Text.
+    std::string board {};        ///< What its system prompt asks about its status board, a Text; empty:
+                                 ///< nothing (`status_board: off`), and the plain pane template.
+    std::string permissions {};  ///< The permission profile it started with, a Name; empty: stored before
+                                 ///< profiles existed.
+    /// What its agent's `--settings` carries (settingsJsonOf()), a Text; EmptySettingsJson for a run stored
+    /// before profiles existed.
+    std::string settings { EmptySettingsJson };
     std::string session;             ///< The agent's session: a Uuid.
     std::string branch;              ///< `agent/<id>`: a Ref.
     std::string worktree;            ///< The worktree's directory: a Path.

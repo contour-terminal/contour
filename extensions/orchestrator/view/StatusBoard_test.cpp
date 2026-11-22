@@ -505,7 +505,7 @@ TEST_CASE("the selected agent's details show its board, rendered", "[orchestrato
     auto const profiles = resolveProfiles({});
     REQUIRE(profiles.has_value());
     world.stored.front().permissions = std::string { DefaultProfileName };
-    world.stored.front().settings = settingsJsonOf(profiles->front());
+    world.stored.front().settings = settingsJsonOf(*findProfile(*profiles, DefaultProfileName));
     auto fixture = DashboardFixture { std::move(world), Wide };
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.select(RunningId).empty());
