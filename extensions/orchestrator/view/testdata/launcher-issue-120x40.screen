@@ -8,24 +8,22 @@
 │ ✗ #1847 Adds ability to set Contour as default terminal on Windows … │ │             al/contour/pull/2375            │
 │                                                                      │ │                                             │
 │ ISSUES WITHOUT A PR                                                  │ │                                             │
-│ ▾ contour · 5     ╭─ Dispatch an agent ──────────────────────────────────────────────────────────╮                   │
-│   #2356 Report the│ item      #2356 · Report the Qt macOS bug that drops Ctrl+Cmd+arrow key pre… │                   │
-│   #2338 Flaky on W│ task      ‹ work on issue › w                                                │                   │
-│   #2253 Switch `da│ model     ‹ opus ›                                                           │                   │
-│   #2163 OSC 133: o│ note      optional; tab to type one                                          │                   │
-│   #2162 OSC 9;9 (C│ prompt    /contour-workflows:work-issue                                      │                   │
-│                   │             https://github.com/contour-terminal/contour/issues/2356          │                   │
-│ AGENTS · 0 OF 4 RU│ checkout  new branch agent/issue-2356-…                                      │                   │
-│ no agents         │ worktree  /home/u/worktrees/contour/issue-2356-…                             │                   │
-│                   │ board     STATUS.md, asked for in the agent's system prompt                  │                   │
-│ FINISHED · 0 NEW  │ perms     standard · 19 allowed · 4 denied · edits need no approval          │                   │
-│ nothing finished  │ command   claude --model opus --session-id                                   │                   │
-│                   │             00000001-0000-4000-8000-000000000000 --settings '{settings}'     │                   │
-│                   │             --append-system-prompt '{board}' '/contour-workflows:work-issue  │                   │
-│                   │             https://github.com/contour-terminal/contour/issues/2356'         │                   │
+│ ▾ contour · 5                                                        │ │                                             │
+│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │                                             │
+│   #2338 Flaky on W╭─ ✦ New agent ────────────────────────────────────────────────────────────────╮                   │
+│   #2253 Switch `da│ › #2356▏                                    pull requests · issues · a topic │                   │
+│   #2163 OSC 133: o│                                                                              │                   │
+│   #2162 OSC 9;9 (C│ ISSUES WITHOUT A PR                                                          │                   │
+│                   │ ▍#2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key presse…         │                   │
+│ AGENTS · 0 OF 4 RU│  ✎ topic “#2356”                                                  new branch │                   │
+│ no agents         │ ──────────────────────────────────────────────────────────────────────────── │                   │
+│                   │ task ‹ work on issue ›   model ‹ opus ›   perms ‹ standard ›   note none     │                   │
+│ FINISHED · 0 NEW  │ #2356 · contour                                                              │                   │
+│ nothing finished  │ checkout  new branch agent/issue-2356-…                                      │                   │
+│                   │ worktree  /home/u/worktrees/contour/issue-2356-…                             │                   │
+│                   │ perms     standard · 19 allowed · 4 denied · edits need no approval          │                   │
 │                   │                                                                              │                   │
-│                   │ 0 of 4 running                                                               │                   │
-│                   │ enter dispatch · tab next field · esc cancel                                 │                   │
+│                   │ enter start · ↑↓ choose · tab settings · ctrl+p more · esc close             │                   │
 │                   ╰──────────────────────────────────────────────────────────────────────────────╯                   │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
@@ -35,6 +33,8 @@
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
 ╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
- ↑↓ move · enter open · d dispatch · ? help · b board · t transcript · / filter · z fold · R refresh · e end run        
+ ↑↓ move · enter open · d new run · ? help · b board · t transcript · / filter · z fold · R refresh · e end run         
  ⬢ agents 0/4 · ✗2                                                                                                      

@@ -4,6 +4,8 @@
 // or on a topic typed into it.
 #pragma once
 
+#include <core/tui/Canvas.hpp>
+#include <core/tui/Component.hpp>
 #include <core/tui/InputEvent.hpp>
 
 #include <cstddef>
@@ -106,6 +108,12 @@ struct LauncherState
                                                           std::optional<std::string_view> model,
                                                           std::string session);
 
+/// Types a paste into the launcher's query, as one line: a paste is text, never keys.
+/// @param launcher The open launcher; nothing happens when none is.
+/// @param engine The engine it was opened with.
+/// @param text What was pasted, already folded to one line (pastedText()).
+void pasteIntoLauncher(std::optional<LauncherState>& launcher, Engine const& engine, std::string_view text);
+
 /// Applies one key to an open launcher. Esc closes it, and so does a key with Alt (an Esc and the key after
 /// it, read together); Ctrl+P shows more or less of what a dispatch runs; any other Ctrl chord does nothing.
 /// Printable keys and Backspace edit the query; ↑/↓ move the highlight; Tab moves through the settings and
@@ -122,5 +130,37 @@ struct LauncherState
                                                              Engine const& engine,
                                                              HooksWarning hooksAtInput,
                                                              std::string_view nearTab);
+
+/// The launcher, drawn in a rounded box titled `✦ New agent`: the query, the candidates in their groups with
+/// their checks, review and agent columns, the settings, what the dispatch runs, the setup's warnings and the
+/// keys. Shown as an overlay over the dashboard, at the size the dashboard places it at.
+class LauncherView final: public core::tui::Component
+{
+  public:
+    /// @param engine The engine it lists and previews against.
+    /// @param launcher The dashboard's launcher; nullopt while none is open, when nothing is drawn.
+    LauncherView(Engine const& engine, std::optional<LauncherState> const& launcher):
+        _engine { engine }, _launcher { launcher }
+    {
+    }
+    void render(core::tui::Canvas& canvas) override;
+    /// @return The size place() gave it.
+    [[nodiscard]] core::tui::Size preferredSize() const override { return _size; }
+    /// Sizes it for a tab: the tab's geometry is the window's to decide, so it is set again as the tab or the
+    /// launcher changes rather than fixed at construction.
+    /// @param size The cells it takes.
+    void place(core::tui::Size size) noexcept { _size = size; }
+    /// @param width The cells it is drawn in.
+    /// @return The rows it needs at that width, its box included, with up to MaxLauncherListRows of the list.
+    [[nodiscard]] int heightAt(int width) const;
+
+  private:
+    Engine const& _engine;
+    std::optional<LauncherState> const& _launcher;
+    core::tui::Size _size {};
+};
+
+/// The most rows of candidates, their group headings included, the launcher shows at once.
+inline constexpr int MaxLauncherListRows = 14;
 
 } // namespace orchestrator::view

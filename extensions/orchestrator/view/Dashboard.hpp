@@ -18,6 +18,7 @@
 #include <orchestrator/core/Uuid.hpp>
 #include <orchestrator/view/DispatchForm.hpp>
 #include <orchestrator/view/Keys.hpp>
+#include <orchestrator/view/Launcher.hpp>
 
 namespace orchestrator::view
 {
@@ -85,18 +86,18 @@ class Dashboard
     /// @return What the engine is asked: HideBoardAction when a board was left; else nothing.
     [[nodiscard]] std::vector<UiAction> select(std::string_view run);
 
-    /// Opens the dispatch form on an item the engine lists, its session id taken from the dashboard's source:
-    /// what `d` does on a finished run, a board or a transcript, through the same openFormFor(). The form
+    /// Opens the launcher on an item the engine lists, its session id taken from the dashboard's source: what
+    /// `d` does on a finished run, a board or a transcript, through the same openFormFor(). The launcher
     /// previews and refuses as every dispatch does; nothing starts before it is confirmed. When the engine
-    /// does not list the item, or no task applies to it, no form opens and the summary line says why.
+    /// does not list the item, no launcher opens and the summary line says why.
     /// @param repo The repository's configured name.
     /// @param item The item.
-    /// @param task The id of the task the form starts on, such as a run's; when it no longer applies to the
-    ///        item, the first task that does.
-    void openForm(std::string_view repo, ItemRef const& item, std::string_view task);
+    /// @param task The id of the task it starts on, such as a run's; when it no longer applies to the item,
+    ///        the first task that does.
+    void openLauncherOn(std::string_view repo, ItemRef const& item, std::string_view task);
 
-    /// @return The dispatch form while it is open.
-    [[nodiscard]] std::optional<DispatchFormState> const& form() const noexcept;
+    /// @return The launcher while it is open.
+    [[nodiscard]] std::optional<LauncherState> const& launcher() const noexcept;
 
     /// The engine refused a dispatch confirmed here: the summary line says why, until the next key.
     /// @param refusal Why.

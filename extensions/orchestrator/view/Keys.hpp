@@ -16,6 +16,7 @@
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/view/Band.hpp>
 #include <orchestrator/view/DispatchForm.hpp>
+#include <orchestrator/view/Launcher.hpp>
 
 namespace orchestrator::view
 {
@@ -144,9 +145,9 @@ enum class KeyCommand : uint8_t
     EndRun,       ///< End the selected run.
     RetryRemoval, ///< Check the selected kept worktree again.
     Dismiss,      ///< Drop the selected finished run.
-    Dispatch,     ///< Open the dispatch form on the selected item, on the first task that applies to it; on a
+    Dispatch,     ///< Open the launcher on the selected item, on the first task that applies to it; on a
                   ///< finished run, a board or a transcript, on the run's item and task.
-    Task,         ///< Open the dispatch form on the selected item, on the task whose key was typed.
+    Task,         ///< Open the launcher on the selected item, on the task whose key was typed.
     Board,        ///< Show the selected run's status board; on the board, read it again now.
     Transcript,   ///< Show the transcript of the selected run, or of the board's run, from its first page.
     ScrollPageUp, ///< Scroll a board or a transcript up by a screen.
@@ -156,7 +157,7 @@ enum class KeyCommand : uint8_t
     FirstPage,      ///< Show the transcript's first page.
     LastPage,       ///< Show the transcript's last page.
     Fold,           ///< Fold or unfold the group of the selected row, and select its header.
-    NewTopic,       ///< Open the dispatch form on a new topic, in the selected row's repository or the first.
+    NewTopic,       ///< Open the launcher, empty: to browse the items, or to type a topic.
     InstallPlugins, ///< Install the Claude Code plugins the agents need and lack; asks once first.
     Message,        ///< Open the message line to the selected run's agent, or to the board's or transcript's.
 };
@@ -267,7 +268,7 @@ struct Interaction
     InstallConfirm pendingInstall =
         InstallConfirm::None;                   ///< Whether a second `I` installs the missing plugins.
     std::optional<MessageDraft> message = {};   ///< The message line, while it is open: it takes every key.
-    std::optional<DispatchFormState> form = {}; ///< The dispatch form, while it is open: it takes every key.
+    std::optional<LauncherState> launcher = {}; ///< The launcher, while it is open: it takes every key.
     std::string notice = {}; ///< A one-line notice on the summary line, until the next key; empty: none.
     Screen screen = Screen::Dashboard; ///< What the tab shows.
     std::string subject = {};          ///< The run a board or a transcript is of; empty on the dashboard.
@@ -352,11 +353,12 @@ void dropLastCodepoint(std::string& text) noexcept;
 /// @return It as one line: line ends and tabs folded to a space each, every other control character dropped.
 [[nodiscard]] std::string pastedText(std::string_view text);
 
-/// Applies a paste: into the dispatch form's note while it has the focus, into the filter while it is typed;
+/// Applies a paste: into the launcher's query while it is open, into the filter while it is typed;
 /// dropped anywhere else. A paste is text, never keys: nothing in it confirms, moves or acts.
-/// @param interaction Where the user is; its note or filter extended.
+/// @param interaction Where the user is; its query or filter extended.
+/// @param engine The engine the launcher lists from.
 /// @param text What was pasted.
-void pasteInto(Interaction& interaction, std::string_view text);
+void pasteInto(Interaction& interaction, Engine const& engine, std::string_view text);
 
 /// Whether a key went to the filter.
 enum class FilterInput : uint8_t

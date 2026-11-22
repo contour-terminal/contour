@@ -55,12 +55,12 @@ namespace
     /// How far an agent's age moves before the rows are built again for it.
     constexpr auto AgeTickMs = uint64_t { 1000 };
 
-    /// The widest the dispatch form is in the Wide band.
+    /// The widest the launcher is in the Wide band.
     constexpr auto FormMaxColumns = 80;
-    /// How much of the tab's width the dispatch form takes in the Medium band, in percent.
+    /// How much of the tab's width the launcher takes in the Medium band, in percent.
     constexpr auto FormMediumPercent = 90;
 
-    /// @return The cells the dispatch form is wide in @p band, in a tab @p columns wide: in the Wide band a
+    /// @return The cells the launcher is wide in @p band, in a tab @p columns wide: in the Wide band a
     /// popup
     ///         of at most FormMaxColumns, in the Medium band most of the tab, in the Narrow band all of it.
     [[nodiscard]] int formWidthIn(Band band, int columns) noexcept
@@ -155,7 +155,7 @@ struct Dashboard::State
     void ensureRows();
     /// Applies the filter and the layout's furniture to the rows, and keeps the selection among them.
     void refilter();
-    /// Applies keys the parser decoded: to the dispatch form while it is open, else by the key table.
+    /// Applies keys the parser decoded: to the launcher while it is open, else by the key table.
     /// @param events The keys.
     /// @param hooksAtInput The form's HooksWarning as the input that holds them began.
     /// @return What the engine is asked, in order.
@@ -168,7 +168,9 @@ struct Dashboard::State
     [[nodiscard]] std::vector<UiAction> resolveOverdueEscape();
     /// Shows the panels of the current pane and hides the others; places the help and the form.
     void syncLayout();
-    /// Shows the form where the band puts it, or hides it.
+    /// Gives a launcher just opened its agent's session id, from the dashboard's source.
+    void mintSession();
+    /// Shows the launcher where the band puts it, or hides it.
     void syncForm();
     /// Keeps a board's or a transcript's scroll within what it holds, once the last draw knows its end: the
     /// keys scroll past an end not yet wrapped, and a draw shows such a scroll from the end.
@@ -228,7 +230,7 @@ struct Dashboard::State
     ProblemLines* problems = nullptr;                      ///< The current layout's problem lines.
     Repaint repaint = Repaint::Needed;
     std::unique_ptr<HelpOverlay> help;
-    std::unique_ptr<DispatchFormView> formView; ///< Draws interaction.form.
+    std::unique_ptr<LauncherView> launcherView; ///< Draws interaction.launcher.
     BoardPanelState boardPanel;                 ///< What the board panel learnt drawing itself.
     TranscriptPanelState transcriptPanel;       ///< What the transcript panel learnt drawing itself.
     std::unique_ptr<core::tui::Responsive> root;
@@ -607,7 +609,7 @@ Dashboard::State::State(Engine const& engine,
     screen { surface, core::tui::ScreenConfig {}, clock },
     size { size },
     help { std::make_unique<HelpOverlay>(engine) },
-    formView { std::make_unique<DispatchFormView>(engine, interaction.form) },
+    launcherView { std::make_unique<LauncherView>(engine, interaction.launcher) },
     root { std::make_unique<core::tui::Responsive>(std::ranges::to<std::vector<core::tui::Breakpoint>>(
         std::views::iota(std::size_t { 0 }, BandBreakpoints.size())
         | std::views::transform([this](std::size_t index) {
@@ -624,8 +626,8 @@ Dashboard::State::~State()
 {
     if (screen.isOverlayVisible(*help))
         screen.hideOverlay(*help);
-    if (screen.isOverlayVisible(*formView))
-        screen.hideOverlay(*formView);
+    if (screen.isOverlayVisible(*launcherView))
+        screen.hideOverlay(*launcherView);
     screen.root().removeChild(*root);
 }
 
@@ -777,23 +779,23 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
     auto const before = interaction;
     for (auto const& event: events)
     {
-        // A form opened by a key of this input confirms nothing an earlier form of it, or of an earlier
-        // input, did: the confirmation belongs to the form it was given in.
-        if (!interaction.form)
+        // A launcher opened by a key of this input confirms nothing an earlier one of it, or of an earlier
+        // input, did: the confirmation belongs to the launcher it was given in.
+        if (!interaction.launcher)
             hooksAtInput = HooksWarning::None;
         if (auto const* const paste = std::get_if<core::tui::PasteEvent>(&event))
         {
             interaction.notice.clear();
-            pasteInto(interaction, paste->text);
+            pasteInto(interaction, engine, paste->text);
             continue;
         }
         auto const* const key = std::get_if<core::tui::KeyEvent>(&event);
         if (key == nullptr)
             continue;
         interaction.notice.clear();
-        if (interaction.form)
+        if (interaction.launcher)
         {
-            if (auto dispatched = applyFormKey(*key, interaction.form, engine, hooksAtInput, tab))
+            if (auto dispatched = applyLauncherKey(*key, interaction.launcher, engine, hooksAtInput, tab))
                 actions.emplace_back(std::move(*dispatched));
             continue;
         }
@@ -807,9 +809,8 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
         }
         if (action)
             actions.push_back(std::move(*action));
-        // A form a key opened gets its agent's session id now.
-        if (interaction.form && interaction.form->session.empty())
-            interaction.form->session = formatUuidV4(ids.next());
+        // A launcher a key opened gets its agent's session id now.
+        mintSession();
         refilter();
     }
     if (interaction != before)
@@ -848,7 +849,8 @@ std::vector<UiAction> Dashboard::State::resolveOverdueEscape()
 
 HooksWarning Dashboard::State::formHooks() const noexcept
 {
-    return interaction.form ? interaction.form->hooks : HooksWarning::None;
+    return interaction.launcher && interaction.launcher->form ? interaction.launcher->form->hooks
+                                                              : HooksWarning::None;
 }
 
 void Dashboard::State::syncLayout()
@@ -866,7 +868,7 @@ void Dashboard::State::syncLayout()
     if (problems != nullptr)
         problems->refresh();
     syncForm();
-    if (interaction.overlay == Overlay::Help && !interaction.form)
+    if (interaction.overlay == Overlay::Help && !interaction.launcher)
     {
         auto const wanted = help->preferredSize();
         screen.showOverlay(*help,
@@ -886,24 +888,34 @@ void Dashboard::State::clampScroll() noexcept
         interaction.scroll = std::min(interaction.scroll, lines > rows ? lines - rows : 0);
 }
 
+void Dashboard::State::mintSession()
+{
+    if (!interaction.launcher || !interaction.launcher->session.empty())
+        return;
+    interaction.launcher->session = formatUuidV4(ids.next());
+    if (interaction.launcher->form)
+        interaction.launcher->form->session = interaction.launcher->session;
+}
+
 void Dashboard::State::syncForm()
 {
-    if (!interaction.form)
+    if (!interaction.launcher)
     {
-        if (screen.isOverlayVisible(*formView))
-            screen.hideOverlay(*formView);
+        if (screen.isOverlayVisible(*launcherView))
+            screen.hideOverlay(*launcherView);
         return;
     }
     // Centred; the Narrow band gives it the whole tab.
     auto const band = BandBreakpoints[breakpointFor(size)].band;
     auto const width = formWidthIn(band, size.width);
-    auto const height = band == Band::Narrow ? size.height : std::min(formView->heightAt(width), size.height);
-    formView->place(Size { .width = width, .height = height });
+    auto const height =
+        band == Band::Narrow ? size.height : std::min(launcherView->heightAt(width), size.height);
+    launcherView->place(Size { .width = width, .height = height });
     auto const at = core::tui::Point { .x = (size.width - width) / 2, .y = (size.height - height) / 2 };
-    if (screen.isOverlayVisible(*formView))
-        screen.positionOverlay(*formView, at);
+    if (screen.isOverlayVisible(*launcherView))
+        screen.positionOverlay(*launcherView, at);
     else
-        screen.showOverlay(*formView, at);
+        screen.showOverlay(*launcherView, at);
 }
 
 // }}}
@@ -1018,18 +1030,17 @@ std::vector<UiAction> Dashboard::select(std::string_view run)
     return actions;
 }
 
-void Dashboard::openForm(std::string_view repo, ItemRef const& item, std::string_view task)
+void Dashboard::openLauncherOn(std::string_view repo, ItemRef const& item, std::string_view task)
 {
     auto& state = *_state;
     openFormFor(state.interaction, state.engine, repo, item, task, {});
-    if (state.interaction.form && state.interaction.form->session.empty())
-        state.interaction.form->session = formatUuidV4(state.ids.next());
+    state.mintSession();
     state.repaint = State::Repaint::Needed;
 }
 
-std::optional<DispatchFormState> const& Dashboard::form() const noexcept
+std::optional<LauncherState> const& Dashboard::launcher() const noexcept
 {
-    return _state->interaction.form;
+    return _state->interaction.launcher;
 }
 
 void Dashboard::messageRefused(std::string_view why)

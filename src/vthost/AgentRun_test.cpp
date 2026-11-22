@@ -405,18 +405,19 @@ void checkAgentStart(vthost::testing::AgentReport const& report, StoredRun const
     CHECK(report.holds("GIT_CONFIG_VALUE_2=true"));
 }
 
-/// Selects the row @p downs below the first, and opens the dispatch form on it.
-/// @return The dashboard's screen once the form shows.
+/// Selects the row @p downs below the first, and opens the launcher on it, showing the command line (Ctrl+P).
+/// @return The dashboard's screen once the launcher shows it.
 [[nodiscard]] std::string openForm(Desk& desk, std::size_t downs)
 {
     desk.type(Home);
     for ([[maybe_unused]] auto const _: std::views::iota(std::size_t { 0 }, downs))
         desk.type(Down);
     desk.type(Enter);
+    desk.type("\x10");
     auto page = std::string {};
     auto const shown = desk.until([&] {
         page = desk.page();
-        return page.contains("enter dispatch");
+        return page.contains("enter start") && page.contains("command");
     });
     INFO("dashboard: " << page);
     REQUIRE(shown);
@@ -1026,7 +1027,7 @@ TEST_CASE("d on a finished run dispatches the same item again", "[daemon][e2e][a
     auto page = std::string {};
     auto const opened = desk.until([&] {
         page = desk.page();
-        return page.contains("enter dispatch");
+        return page.contains("enter start");
     });
     INFO("dashboard: " << page);
     REQUIRE(opened);

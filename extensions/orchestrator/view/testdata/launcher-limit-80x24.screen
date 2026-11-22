@@ -1,0 +1,24 @@
+╭─ Agents ─────────────────────────────────────────────────────────────────────╮
+│ MY PULL REQUESTS                                                             │
+│ ▾ contour · 5                                                                │
+│ ● #2375 Say why the stdio relay failed, and send a hello before half-closin… │
+│ ✓ #2369 examples: add donut-animation, a full-screen animat… ○ agent working │
+│ ✓ ╭─ ✦ New agent ────────────────────────────────────────────────────────╮ng │
+│ ✗ │ › #2375▏                            pull requests · issues · a topic │ng │
+│ ✗ │                                                                      │ng │
+│   │ MY PULL REQUESTS                                                     │   │
+│ IS│ ▍#2375 Say why the stdio relay failed, and send a hello bef… ●       │   │
+│ ▾ │  ✎ topic “#2375”                                          new branch │   │
+│   │ ──────────────────────────────────────────────────────────────────── │n… │
+│   │ task ‹ fix CI ›   model ‹ sonnet ›   perms ‹ standard ›   note none  │e… │
+╰───│ #2375 · contour · checks running                                     │───╯
+╭─ D│ refused   max_agents agents are running: end one first               │───╮
+│ Sa│                                                                      │e… │
+│   │ ↑↓ choose · tab settings · ctrl+p more · esc close                   │   │
+│ br╰──────────────────────────────────────────────────────────────────────╯   │
+│ checks    running                                                            │
+│ url       https://github.com/contour-terminal/contour/pull/2375              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ ↑↓ move · enter open · d new run · ? help · b board · t transcript · / filter  
+ ⬢ agents 4/4 · ✗2                                                              

@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/core/Model.hpp>
@@ -78,6 +79,30 @@ inline constexpr std::string_view HooksMissingWarning =
 /// @return What the user reads: one line, saying what to do where there is something to do.
 [[nodiscard]] std::string_view refusalText(DispatchRefusal refusal) noexcept;
 
+/// @param run A run as a preview makes it.
+/// @return The agent's command line for @p run as a preview shows it: the template substituted, with the long
+///         arguments (the board's instruction, the settings) left as their placeholders.
+[[nodiscard]] std::optional<std::vector<std::string>> commandShown(Run const& run);
+
+/// @param engine The engine.
+/// @return Whether the agents' setup lacks something a run needs: the status hooks, or a plugin. A dispatch
+/// then
+///         asks for a second Enter.
+[[nodiscard]] bool isSetupIncomplete(Engine const& engine) noexcept;
+
+/// @param text Text that names a previewed run's id, such as its worktree.
+/// @param run The previewed run.
+/// @return @p text with the run's stamp, known only once the dispatch is confirmed, shown as `…`.
+[[nodiscard]] std::string withoutStamp(std::string_view text, Run const& run);
+
+/// @param run A previewed run.
+/// @return How the dispatch checks the item out into the run's worktree.
+[[nodiscard]] std::string checkoutText(Run const& run);
+
+/// @param engine The engine.
+/// @return What the agents' setup lacks, one line each: the status hooks, and each missing plugin.
+[[nodiscard]] std::vector<std::string> setupWarnings(Engine const& engine);
+
 /// Opens a form on an item the engine lists.
 /// @param engine The engine: its configuration, its lists and whether the hooks are installed.
 /// @param repo The repository's configured name.
@@ -135,37 +160,5 @@ inline constexpr std::string_view HooksMissingWarning =
                                                          Engine const& engine,
                                                          HooksWarning hooksAtInput,
                                                          std::string_view nearTab);
-
-/// The form, drawn in a rounded box titled `Dispatch an agent`: what it dispatches, what that runs, and the
-/// keys. Shown as an overlay over the dashboard, at the size the dashboard places it at.
-class DispatchFormView final: public core::tui::Component
-{
-  public:
-    /// @param engine The engine the form previews against.
-    /// @param form The dashboard's form; nullopt while none is open, when nothing is drawn.
-    DispatchFormView(Engine const& engine, std::optional<DispatchFormState> const& form):
-        _engine { engine }, _form { form }
-    {
-    }
-
-    void render(core::tui::Canvas& canvas) override;
-
-    /// @return The size place() gave it.
-    [[nodiscard]] core::tui::Size preferredSize() const override { return _size; }
-
-    /// Sizes the form for a tab: its geometry is the tab's, which the window decides, so it is set again as
-    /// the tab or the form changes rather than fixed at construction.
-    /// @param size The cells it takes.
-    void place(core::tui::Size size) noexcept { _size = size; }
-
-    /// @param width The cells the form is drawn in.
-    /// @return The rows it needs at that width to show everything, its box included.
-    [[nodiscard]] int heightAt(int width) const;
-
-  private:
-    Engine const& _engine;
-    std::optional<DispatchFormState> const& _form;
-    core::tui::Size _size {};
-};
 
 } // namespace orchestrator::view

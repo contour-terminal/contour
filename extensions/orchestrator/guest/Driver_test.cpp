@@ -1559,9 +1559,9 @@ TEST_CASE("a confirmed form dispatches with a fresh session", "[guest][driver][f
     served.invoke("open");
     auto* const dashboard = served.driver->dashboard("tab-1");
     REQUIRE(dashboard != nullptr);
-    dashboard->openForm("contour", ChangeRequestRef { 2375 }, "fix_ci");
-    REQUIRE(dashboard->form().has_value());
-    auto const session = dashboard->form()->session;
+    dashboard->openLauncherOn("contour", ChangeRequestRef { 2375 }, "fix_ci");
+    REQUIRE(dashboard->launcher().has_value());
+    auto const session = dashboard->launcher()->form->session;
     CHECK(session == "00000001-0000-4000-8000-000000000000");
     served.host.clock.wallMs += 5'000;
 
@@ -1573,7 +1573,7 @@ TEST_CASE("a confirmed form dispatches with a fresh session", "[guest][driver][f
     CHECK(dispatched.front().nearTab == std::optional<std::string> { "tab-1" });
     CHECK(dispatched.front().wallMs == served.host.clock.wallMs);
     CHECK(dispatched.front().task == "fix_ci");
-    CHECK_FALSE(served.dashboard().form().has_value());
+    CHECK_FALSE(served.dashboard().launcher().has_value());
     // The run starts: its fetch is the first command it asks for.
     CHECK(served.host.startsOf("git-fetch") == 1);
 }

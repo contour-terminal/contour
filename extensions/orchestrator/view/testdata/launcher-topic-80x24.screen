@@ -1,0 +1,24 @@
+╭─ Agents ─────────────────────────────────────────────────────────────────────╮
+│ MY PULL REQUESTS                                                             │
+│ ▾ contour · 5                                                                │
+│ ● #2375 Say why the stdio relay failed, and send a hello before half-closin… │
+│ ✓ ╭─ ✦ New agent ────────────────────────────────────────────────────────╮   │
+│ ✓ │ › Investigate why the shell integration test hangs on CI▏            │a… │
+│ ✗ │                                                                      │d… │
+│ ✗ │ ▍✎ topic “Investigate why the shell integration test…     new branch │a… │
+│   │ ──────────────────────────────────────────────────────────────────── │   │
+│ IS│ repo ‹ contour ›   task ‹ topic ›   model ‹ opus ›   perms ‹ standa… │   │
+│ ▾ │ an agent on what you typed, on a new branch                          │   │
+│   │ checkout  new branch                                                 │n… │
+│   │             agent/topic-investigate-why-the-shell-integration-te-…   │e… │
+╰───│ worktree  /home/u/worktrees/contour/topic-investigate-why-the-shell- │───╯
+╭─ D│             integration-te-…                                         │───╮
+│ Sa│ perms     standard · 19 allowed · 4 denied · edits need no approval  │e… │
+│   │                                                                      │   │
+│ br│ enter start · ↑↓ choose · tab settings · ctrl+p more · esc close     │   │
+│ ch╰──────────────────────────────────────────────────────────────────────╯   │
+│ url       https://github.com/contour-terminal/contour/pull/2375              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ ↑↓ move · enter open · d new run · ? help · b board · t transcript · / filter  
+ ⬢ agents 0/4 · ✗2                                                              

@@ -1,3 +1,4 @@
+Claude Code's status hooks are missing: blocked and permission states may not show; run `contour agent setup`           
 ╭─ Agents ─────────────────────────────────────────────────────────────╮ ╭─ Details ───────────────────────────────────╮
 │ MY PULL REQUESTS                                                     │ │ Say why the stdio relay failed, and send a… │
 │ ▾ contour · 5                                                        │ │                                             │
@@ -8,24 +9,22 @@
 │ ✗ #1847 Adds ability to set Contour as default terminal on Windows … │ │             al/contour/pull/2375            │
 │                                                                      │ │                                             │
 │ ISSUES WITHOUT A PR                                                  │ │                                             │
-│ ▾ contour · 5     ╭─ Dispatch an agent ──────────────────────────────────────────────────────────╮                   │
-│   #2356 Report the│ item      #2375 · Say why the stdio relay failed, and send a hello before h… │                   │
-│   #2338 Flaky on W│ task      ‹ fix CI › f                                                       │                   │
-│   #2253 Switch `da│ model     ‹ sonnet ›                                                         │                   │
-│   #2163 OSC 133: o│ note      optional; tab to type one                                          │                   │
-│   #2162 OSC 9;9 (C│ prompt    /contour-workflows:fix-ci                                          │                   │
-│                   │             https://github.com/contour-terminal/contour/pull/2375            │                   │
-│ AGENTS · 0 OF 4 RU│ checkout  gh pr checkout 2375 --branch agent/pr-2375-…                       │                   │
-│ no agents         │ worktree  /home/u/worktrees/contour/pr-2375-…                                │                   │
-│                   │ board     STATUS.md, asked for in the agent's system prompt                  │                   │
-│ FINISHED · 0 NEW  │ perms     standard · 19 allowed · 4 denied · edits need no approval          │                   │
-│ nothing finished  │ command   claude --model sonnet --session-id                                 │                   │
-│                   │             00000001-0000-4000-8000-000000000000 --settings '{settings}'     │                   │
-│                   │             --append-system-prompt '{board}' '/contour-workflows:fix-ci      │                   │
-│                   │             https://github.com/contour-terminal/contour/pull/2375'           │                   │
+│ ▾ contour · 5     ╭─ ✦ New agent ────────────────────────────────────────────────────────────────╮                   │
+│   #2356 Report the│ › #2375▏                                    pull requests · issues · a topic │                   │
+│   #2338 Flaky on W│                                                                              │                   │
+│   #2253 Switch `da│ MY PULL REQUESTS                                                             │                   │
+│   #2163 OSC 133: o│ ▍#2375 Say why the stdio relay failed, and send a hello before half… ●       │                   │
+│   #2162 OSC 9;9 (C│  ✎ topic “#2375”                                                  new branch │                   │
+│                   │ ──────────────────────────────────────────────────────────────────────────── │                   │
+│ AGENTS · 0 OF 4 RU│ task ‹ fix CI ›   model ‹ sonnet ›   perms ‹ standard ›   note none          │                   │
+│ no agents         │ #2375 · contour · checks running                                             │                   │
+│                   │ checkout  gh pr checkout 2375 --branch agent/pr-2375-…                       │                   │
+│ FINISHED · 0 NEW  │ worktree  /home/u/worktrees/contour/pr-2375-…                                │                   │
+│ nothing finished  │ perms     standard · 19 allowed · 4 denied · edits need no approval          │                   │
+│                   │ Claude Code's status hooks are not installed: agents may not show as blocked │                   │
+│                   │ or waiting for permission (contour agent setup)                              │                   │
 │                   │                                                                              │                   │
-│                   │ 0 of 4 running                                                               │                   │
-│                   │ enter dispatch · tab next field · esc cancel                                 │                   │
+│                   │ enter confirms the warning · ↑↓ choose · tab settings · ctrl+p more · esc c… │                   │
 │                   ╰──────────────────────────────────────────────────────────────────────────────╯                   │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
@@ -35,6 +34,7 @@
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
+│                                                                      │ │                                             │
 ╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
- ↑↓ move · enter open · d dispatch · ? help · b board · t transcript · / filter · z fold · R refresh · e end run        
+ ↑↓ move · enter open · d new run · ? help · b board · t transcript · / filter · z fold · R refresh · e end run         
  ⬢ agents 0/4 · ✗2                                                                                                      

@@ -210,6 +210,11 @@ TEST_CASE("the launcher opens on an item, and its settings change with Tab and t
     CHECK(launcher->form->focus == FormField::Permissions);
     CHECK_FALSE(press(launcher, engine, KeyCode::Right)); // trusted
     CHECK_FALSE(press(launcher, engine, KeyCode::Tab));
+    CHECK(launcher->form->focus == FormField::Note);
+    type(launcher, engine, "small");
+    CHECK(launcher->form->note == "small");
+    CHECK(launcher->query == "#2375");
+    CHECK_FALSE(press(launcher, engine, KeyCode::Tab));
     CHECK(launcher->focus == LauncherFocus::List);
 
     auto const action = press(launcher, engine, KeyCode::Enter);
@@ -217,6 +222,7 @@ TEST_CASE("the launcher opens on an item, and its settings change with Tab and t
     CHECK(action->task == "fix_ci");
     CHECK(action->model == "opus");
     CHECK(action->permissions == "trusted");
+    CHECK(action->note == std::optional<std::string> { "small" });
 
     // A task and a model to start with, as a task's key and a finished run's `d` ask.
     auto const chosen = openLauncherOn(

@@ -8,24 +8,22 @@
 │ ✗ #1847 Adds ability to set Contour as default terminal on Windows … │ │             al/contour/pull/2375            │
 │                                                                      │ │                                             │
 │ ISSUES WITHOUT A PR                                                  │ │                                             │
-│ ▾ contour · 5     ╭─ Dispatch an agent ──────────────────────────────────────────────────────────╮                   │
-│   #2356 Report the│ repo      ‹ contour ›                                                        │                   │
-│   #2338 Flaky on W│ topic     Investigate why the shell integration test hangs on CI▏            │                   │
-│   #2253 Switch `da│ task      ‹ topic ›                                                          │                   │
-│   #2163 OSC 133: o│ model     ‹ opus ›                                                           │                   │
-│   #2162 OSC 9;9 (C│ prompt    Investigate why the shell integration test hangs on CI             │                   │
-│                   │ checkout  new branch agent/topic-investigate-why-the-shell-integration-te-…  │                   │
-│ AGENTS · 0 OF 4 RU│ worktree  /home/u/worktrees/contour/topic-investigate-why-the-shell-integrat │                   │
-│ no agents         │             ion-te-…                                                         │                   │
-│                   │ board     STATUS.md, asked for in the agent's system prompt                  │                   │
-│ FINISHED · 0 NEW  │ perms     standard · 19 allowed · 4 denied · edits need no approval          │                   │
-│ nothing finished  │ command   claude --model opus --session-id                                   │                   │
-│                   │             00000001-0000-4000-8000-000000000000 --settings '{settings}'     │                   │
-│                   │             --append-system-prompt '{board}' 'Investigate why the shell      │                   │
-│                   │             integration test hangs on CI'                                    │                   │
+│ ▾ contour · 5                                                        │ │                                             │
+│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │                                             │
+│   #2338 Flaky on W╭─ ✦ New agent ────────────────────────────────────────────────────────────────╮                   │
+│   #2253 Switch `da│ › #2375▏                                    pull requests · issues · a topic │                   │
+│   #2163 OSC 133: o│                                                                              │                   │
+│   #2162 OSC 9;9 (C│ MY PULL REQUESTS                                                             │                   │
+│                   │ ▍#2375 Say why the stdio relay failed, and send a hello before half… ●       │                   │
+│ AGENTS · 0 OF 4 RU│  ✎ topic “#2375”                                                  new branch │                   │
+│ no agents         │ ──────────────────────────────────────────────────────────────────────────── │                   │
+│                   │ task ‹ fix CI ›   model ‹ sonnet ›   perms ‹ standard ›   note none          │                   │
+│ FINISHED · 0 NEW  │ #2375 · contour · checks running                                             │                   │
+│ nothing finished  │ checkout  gh pr checkout 2375 --branch agent/pr-2375-…                       │                   │
+│                   │ worktree  /home/u/worktrees/contour/pr-2375-…                                │                   │
+│                   │ perms     standard · 19 allowed · 4 denied · edits need no approval          │                   │
 │                   │                                                                              │                   │
-│                   │ 0 of 4 running                                                               │                   │
-│                   │ enter dispatch · tab next field · esc cancel                                 │                   │
+│                   │ enter start · ↑↓ choose · tab settings · ctrl+p more · esc close             │                   │
 │                   ╰──────────────────────────────────────────────────────────────────────────────╯                   │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
@@ -35,6 +33,8 @@
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
 ╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
- ↑↓ move · enter open · d dispatch · ? help · b board · t transcript · / filter · z fold · R refresh · e end run        
+ ↑↓ move · enter open · d new run · ? help · b board · t transcript · / filter · z fold · R refresh · e end run         
  ⬢ agents 0/4 · ✗2                                                                                                      

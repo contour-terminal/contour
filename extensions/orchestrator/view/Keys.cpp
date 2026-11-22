@@ -39,7 +39,7 @@ namespace
         KeyRow { .key = "home"sv, .command = KeyCommand::Home, .hint = ""sv },
         KeyRow { .key = "end"sv, .command = KeyCommand::End, .hint = ""sv },
         KeyRow { .key = "enter"sv, .command = KeyCommand::Enter, .hint = "enter open"sv },
-        KeyRow { .key = "d"sv, .command = KeyCommand::Dispatch, .hint = "d dispatch"sv },
+        KeyRow { .key = "d"sv, .command = KeyCommand::Dispatch, .hint = "d new run"sv },
         KeyRow { .key = "?"sv, .command = KeyCommand::Help, .hint = "? help"sv },
         KeyRow { .key = "b"sv, .command = KeyCommand::Board, .hint = "b board"sv },
         KeyRow { .key = "t"sv, .command = KeyCommand::Transcript, .hint = "t transcript"sv },
@@ -47,7 +47,7 @@ namespace
         KeyRow { .key = "z"sv, .command = KeyCommand::Fold, .hint = "z fold"sv },
         KeyRow { .key = "R"sv, .command = KeyCommand::Refresh, .hint = "R refresh"sv },
         KeyRow { .key = "e"sv, .command = KeyCommand::EndRun, .hint = "e end run"sv },
-        KeyRow { .key = "n"sv, .command = KeyCommand::NewTopic, .hint = "n topic"sv },
+        KeyRow { .key = "n"sv, .command = KeyCommand::NewTopic, .hint = "n new agent"sv },
         KeyRow { .key = "I"sv, .command = KeyCommand::InstallPlugins, .hint = "I install plugins"sv },
         KeyRow { .key = "m"sv, .command = KeyCommand::Message, .hint = "m message"sv },
         KeyRow { .key = "x"sv, .command = KeyCommand::RetryRemoval, .hint = "x retry removal"sv },
@@ -178,7 +178,7 @@ namespace
         return UiAction { Action { .run = context.selected->run } };
     }
 
-    /// Opens the dispatch form on the selected item, on @p task; or says why it cannot.
+    /// Opens the launcher on the selected item, on @p task; or says why it cannot.
     void openFormOn(Interaction& interaction, KeyContext const& context, TaskDef const* task)
     {
         auto const* const row = context.selected;
@@ -189,10 +189,16 @@ namespace
             interaction.notice = "no task applies to this item";
             return;
         }
-        // Its session id is minted by the dashboard, which holds the source of them.
-        interaction.form = openDispatchForm(*context.engine, row->repo, *row->item, task->id, {});
-        if (!interaction.form)
+        if (task->appliesTo != appliesToOf(*row->item))
+        {
             interaction.notice = std::format("{} does not apply to this item", task->label);
+            return;
+        }
+        // Its session id is minted by the dashboard, which holds the source of them.
+        interaction.launcher =
+            openLauncherOn(*context.engine, row->repo, *row->item, task->id, std::nullopt, {});
+        if (!interaction.launcher)
+            interaction.notice = std::format("{} is not listed any more", itemLabel(*row->item));
     }
 
     /// @return The first task that applies to the selected item, as Enter and `d` offer it; nullptr when
@@ -223,7 +229,7 @@ namespace
         return context.rows > 1 ? context.rows - 1 : 1;
     }
 
-    /// Opens the dispatch form on a run's item and task (openFormFor()); does nothing for a run the engine
+    /// Opens the launcher on a run's item and task (openFormFor()); does nothing for a run the engine
     /// no longer knows.
     void openFormOnRun(Interaction& interaction, KeyContext const& context, std::string_view runId)
     {
@@ -535,8 +541,8 @@ namespace
                         repo.empty() && run != runs.end())
                         repo = run->repo;
                 }
-                interaction.form = openTopicForm(*context.engine, repo, {}, {});
-                if (!interaction.form)
+                interaction.launcher = openLauncher(*context.engine, {}, {});
+                if (!interaction.launcher)
                     interaction.notice = "no repository is configured";
                 return std::nullopt;
             } },
@@ -657,7 +663,7 @@ std::string pastedText(std::string_view text)
     return line;
 }
 
-void pasteInto(Interaction& interaction, std::string_view text)
+void pasteInto(Interaction& interaction, Engine const& engine, std::string_view text)
 {
     if (interaction.message)
     {
@@ -677,10 +683,9 @@ void pasteInto(Interaction& interaction, std::string_view text)
         }
         return;
     }
-    if (interaction.form)
+    if (interaction.launcher)
     {
-        if (interaction.form->focus == FormField::Note)
-            interaction.form->note += pastedText(text);
+        pasteIntoLauncher(interaction.launcher, engine, pastedText(text));
         return;
     }
     if (interaction.filtering == Filtering::Typing)
@@ -727,9 +732,9 @@ void openFormFor(Interaction& interaction,
         return;
     if (std::holds_alternative<TopicRef>(item))
     {
-        // A topic is listed nowhere: the form opens on its text, in its repository.
-        interaction.form = openTopicForm(engine, repo, std::string { topic }, {});
-        if (interaction.form)
+        // A topic is listed nowhere: the launcher opens on its text, which its topic row then holds.
+        interaction.launcher = openLauncher(engine, std::string { topic }, {});
+        if (interaction.launcher)
             interaction.overlay = Overlay::None;
         else
             interaction.notice = "no repository is configured";
@@ -747,8 +752,8 @@ void openFormFor(Interaction& interaction,
         interaction.notice = "no task applies to this item";
         return;
     }
-    interaction.form = openDispatchForm(engine, repo, item, chosen->id, {});
-    if (interaction.form)
+    interaction.launcher = openLauncherOn(engine, repo, item, chosen->id, std::nullopt, {});
+    if (interaction.launcher)
         interaction.overlay = Overlay::None;
     else
         interaction.notice = std::format("{} is not listed any more", itemLabel(item));

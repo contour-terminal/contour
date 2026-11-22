@@ -53,53 +53,9 @@ namespace
     static_assert(RefusalTexts.size() == std::to_underlying(DispatchRefusal::UnknownProfile) + 1U,
                   "RefusalTexts has one row per DispatchRefusal");
 
-    /// What Enter does, indexed by HooksWarning: once the warning is confirmed, it asks for a second Enter.
-    constexpr auto EnterHints =
-        std::array { "enter dispatch"sv, "enter dispatch"sv, "enter again to dispatch"sv };
-    static_assert(EnterHints.size() == std::to_underlying(HooksWarning::Confirmed) + 1U);
-
-    /// The form's other keys, in the order the hint line shows them after Enter's.
-    constexpr auto OtherHints = std::array { "tab next field"sv, "esc cancel"sv };
-
-    /// Why a note, or a topic, is refused: the agent would read it as an option.
-    constexpr auto LeadingDashText = "a note may not start with -"sv;
-    constexpr auto TopicLeadingDashText = "a topic may not start with -"sv;
-
     /// The arguments the command line shows by their placeholder, being long: lines of their own say what
     /// they hold.
     constexpr auto ShownByPlaceholder = std::array { "board"sv, "settings"sv };
-
-    /// @return The agent's command line for @p run as the form shows it: the template substituted, with the
-    ///         arguments ShownByPlaceholder names left as their placeholders.
-    [[nodiscard]] std::optional<std::vector<std::string>> commandShown(Run const& run)
-    {
-        auto const* const pane = findPaneTemplate(agentPaneTemplateOf(run));
-        if (pane == nullptr)
-            return std::nullopt;
-        auto arguments = agentPaneArguments(run);
-        for (auto& argument: arguments)
-            if (std::ranges::contains(ShownByPlaceholder, argument.name))
-                argument.value = std::format("{{{}}}", argument.name);
-        auto shown = substitute(pane->argv, arguments);
-        return shown ? std::optional { std::move(*shown) } : std::nullopt;
-    }
-
-    /// What a topic form says instead of a refusal while its topic is still empty.
-    constexpr auto TypeATopicText = "type a topic"sv;
-
-    /// The cells a line's label takes, its padding included.
-    constexpr auto LabelColumns = 10;
-    /// How far a value's continuation lines are indented past its first.
-    constexpr auto ContinuationIndent = 2;
-    /// The cells the box and its padding take on either side.
-    constexpr auto SideColumns = 2;
-
-    /// @return Whether the agents' setup lacks something a run needs: the status hooks, or a plugin. The form
-    ///         then says so, and asks for a second Enter.
-    [[nodiscard]] bool isSetupIncomplete(Engine const& engine) noexcept
-    {
-        return engine.hooks() == HooksState::Missing || !engine.missingPlugins().empty();
-    }
 
     /// @return The index into Config::profiles() of the profile @p taskId's runs start with.
     [[nodiscard]] std::size_t profileIndexFor(Config const& config, std::string_view taskId) noexcept
@@ -181,237 +137,11 @@ namespace
         return form.note.starts_with('-');
     }
 
-    // }}}
-    // {{{ the lines
-
-    /// One drawn line of the form.
-    struct FormLine
-    {
-        std::string_view label = {}; ///< Its label on a value's first line; empty otherwise.
-        std::string text = {};       ///< Sanitised and fitted to its cells.
-        Role role = Role::Text;      ///< How it is drawn.
-        int start = LabelColumns;    ///< The cells it starts past the box's padding: 0 for a line that is
-                                     ///< no field's value.
-    };
-
-    /// Appends a value, word-wrapped to the cells it has, continuation lines indented.
-    /// @param start Where its first line starts past the box's padding: LabelColumns for a field's value, 0
-    /// for
-    ///        a line of its own.
-    /// @param width The cells the box's padding leaves.
-    void appendWrapped(std::vector<FormLine>& lines,
-                       std::string_view label,
-                       std::string_view value,
-                       Role role,
-                       int start,
-                       int width)
-    {
-        auto wrapped = wrap(value, width - start, width - start - ContinuationIndent);
-        if (wrapped.empty())
-            wrapped.emplace_back();
-        for (auto const index: std::views::iota(std::size_t { 0 }, wrapped.size()))
-            lines.push_back(FormLine { .label = index == 0 ? label : ""sv,
-                                       .text = std::move(wrapped[index]),
-                                       .role = role,
-                                       .start = index == 0 ? start : start + ContinuationIndent });
-    }
-
-    /// @return @p text with the run's stamp, which is known only once the form is confirmed, shown as `…`.
-    [[nodiscard]] std::string withoutStamp(std::string_view text, Run const& run)
-    {
-        auto const slug = itemSlug(run.item);
-        auto const at = text.find(run.id);
-        if (!slug || at == std::string_view::npos)
-            return std::string { text };
-        return std::format("{}{}-…{}", text.substr(0, at), *slug, text.substr(at + run.id.size()));
-    }
-
-    /// @return How the form checks the item out into the run's worktree.
-    [[nodiscard]] std::string checkoutText(Run const& run)
-    {
-        auto const branch = withoutStamp(run.branch, run);
-        if (auto const* const request = std::get_if<ChangeRequestRef>(&run.item))
-            return std::format("gh pr checkout {} --branch {}", request->number, branch);
-        return std::format("new branch {}", branch);
-    }
-
-    /// @return A field's value between the arrows that say ←/→ change it.
-    [[nodiscard]] std::string choice(std::string_view value)
-    {
-        return std::format("‹ {} ›", value);
-    }
-
-    /// @return The task field: its label between the arrows, then the key that opens the form on it.
-    [[nodiscard]] std::string taskChoice(TaskDef const& task)
-    {
-        return std::format("{} {}", choice(task.label), task.key);
-    }
-
-    /// @return The role a field's value is drawn in: the selection's while it has the focus.
-    [[nodiscard]] Role fieldRole(DispatchFormState const& form,
-                                 FormField field,
-                                 Role otherwise = Role::Text) noexcept
-    {
-        return form.focus == field ? Role::Selection : otherwise;
-    }
-
-    /// The form's lines above its hint line.
-    struct FormBody
-    {
-        std::vector<FormLine> lines;  ///< Every line, in order.
-        std::size_t detailsBegin = 0; ///< The first line of what the dispatch runs: the part cut first.
-        std::size_t detailsEnd = 0;   ///< One past its last.
-    };
-
-    /// @return The form's lines above its hint line, in @p width cells.
-    [[nodiscard]] FormBody bodyLines(DispatchFormState const& form, Engine const& engine, int width)
-    {
-        auto const columns = width - LabelColumns;
-        auto lines = std::vector<FormLine> {};
-        auto const* const config = engine.config();
-        auto const tasks = config != nullptr ? config->tasks() : std::span<TaskDef const> {};
-        auto const models = config != nullptr ? config->models() : std::span<std::string const> {};
-
-        if (isTopicForm(form))
-            lines.push_back(FormLine { .label = "repo"sv,
-                                       .text = cut(choice(form.repo), columns),
-                                       .role = fieldRole(form, FormField::Repo) });
-        else
-            lines.push_back(
-                FormLine { .label = "item"sv,
-                           .text = cut(std::format("{} · {}", itemLabel(form.item), form.title), columns) });
-        // A topic's text comes before the task: it is what the form is opened for.
-        auto const textLine = [&] {
-            auto const label = isTopicForm(form) ? "topic"sv : "note"sv;
-            auto const noteRole = startsWithDash(form) ? Role::Failing : Role::Text;
-            if (form.note.empty() && form.focus != FormField::Note)
-                lines.push_back(FormLine { .label = label,
-                                           .text = isTopicForm(form)
-                                                       ? std::string { TypeATopicText }
-                                                       : std::string { "optional; tab to type one" },
-                                           .role = isTopicForm(form) ? Role::Warning : Role::Dim });
-            else
-                appendWrapped(lines,
-                              label,
-                              form.focus == FormField::Note ? std::format("{}▏", form.note) : form.note,
-                              fieldRole(form, FormField::Note, noteRole),
-                              LabelColumns,
-                              width);
-        };
-        if (isTopicForm(form))
-            textLine();
-        lines.push_back(FormLine {
-            .label = "task"sv,
-            .text = cut(form.task < tasks.size() ? taskChoice(tasks[form.task]) : choice("?"), columns),
-            .role = fieldRole(form, FormField::Task) });
-        lines.push_back(FormLine {
-            .label = "model"sv,
-            .text = cut(choice(form.model < models.size() ? std::string_view { models[form.model] } : "?"sv),
-                        columns),
-            .role = fieldRole(form, FormField::Model) });
-        if (!isTopicForm(form))
-            textLine();
-
-        auto const detailsBegin = lines.size();
-        auto const preview = previewOf(form, engine);
-        if (preview)
-        {
-            appendWrapped(lines, "prompt"sv, preview->run.prompt, Role::Text, LabelColumns, width);
-            appendWrapped(lines, "checkout"sv, checkoutText(preview->run), Role::Text, LabelColumns, width);
-            appendWrapped(lines,
-                          "worktree"sv,
-                          withoutStamp(preview->run.worktree, preview->run),
-                          Role::Text,
-                          LabelColumns,
-                          width);
-            // The board's instruction is a paragraph: the command line names it by its placeholder, and a
-            // line of its own says what it asks for.
-            appendWrapped(lines,
-                          "board"sv,
-                          preview->run.board.empty() ? "none: status_board is off"sv
-                                                     : "STATUS.md, asked for in the agent's system prompt"sv,
-                          Role::Text,
-                          LabelColumns,
-                          width);
-            // So are the permissions: a JSON document, named by its placeholder, and summed up on its own
-            // line.
-            appendWrapped(lines,
-                          "perms"sv,
-                          permissionsText(preview->run.permissions, preview->run.settings),
-                          Role::Text,
-                          LabelColumns,
-                          width);
-            if (auto const shown = commandShown(preview->run))
-                appendWrapped(lines, "command"sv, shellQuoted(*shown), Role::Dim, LabelColumns, width);
-        }
-        else if (isTopicForm(form) && form.note.empty())
-            appendWrapped(lines, "refused"sv, TypeATopicText, Role::Dim, LabelColumns, width);
-        else
-            appendWrapped(
-                lines, "refused"sv, refusalText(preview.error()), Role::Failing, LabelColumns, width);
-
-        auto const detailsEnd = lines.size();
-        lines.emplace_back();
-        if (startsWithDash(form))
-            lines.push_back(
-                FormLine { .text = std::string { isTopicForm(form) ? TopicLeadingDashText : LeadingDashText },
-                           .role = Role::Failing,
-                           .start = 0 });
-        if (config != nullptr)
-            lines.push_back(
-                FormLine { .text = std::format("{} of {} running", engine.activeRuns(), config->maxAgents()),
-                           .role = Role::Dim,
-                           .start = 0 });
-        if (engine.hooks() == HooksState::Missing)
-            appendWrapped(lines, ""sv, HooksMissingWarning, Role::Warning, 0, width);
-        for (auto const& plugin: engine.missingPlugins())
-            appendWrapped(lines,
-                          ""sv,
-                          std::format("Claude Code lacks the plugin {}: a prompt naming its skills fails "
-                                      "(I on the dashboard installs it)",
-                                      plugin.id),
-                          Role::Warning,
-                          0,
-                          width);
-        return FormBody { .lines = std::move(lines), .detailsBegin = detailsBegin, .detailsEnd = detailsEnd };
-    }
-
-    /// @return The lines of @p body that fit @p room rows: what the dispatch runs is cut first, from its end,
-    ///         so that the fields, the limits and a warning stay; a cut part's last line ends in `…`.
-    [[nodiscard]] std::vector<FormLine> fitted(FormBody body, std::size_t room)
-    {
-        auto& lines = body.lines;
-        if (lines.size() <= room)
-            return std::move(lines);
-        auto const details = body.detailsEnd - body.detailsBegin;
-        auto const dropped = std::min(lines.size() - room, details > 0 ? details - 1 : 0);
-        if (dropped > 0)
-        {
-            auto const keptEnd = body.detailsEnd - dropped;
-            lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(keptEnd),
-                        lines.begin() + static_cast<std::ptrdiff_t>(body.detailsEnd));
-            lines[keptEnd - 1].text += "…";
-        }
-        lines.resize(std::min(lines.size(), room));
-        return std::move(lines);
-    }
-
     /// @return Whether Enter does something now: not while the note starts with `-` or the engine would
     /// refuse.
     [[nodiscard]] bool enterActs(DispatchFormState const& form, Engine const& engine)
     {
         return !startsWithDash(form) && previewOf(form, engine).has_value();
-    }
-
-    /// @return The hint line in @p columns cells: what Enter does, while it does something, then the form's
-    ///         other keys.
-    [[nodiscard]] std::string hintLine(DispatchFormState const& form, Engine const& engine, int columns)
-    {
-        auto hints = std::vector<std::string_view> {};
-        if (enterActs(form, engine))
-            hints.push_back(EnterHints[std::to_underlying(form.hooks)]);
-        hints.insert(hints.end(), OtherHints.begin(), OtherHints.end());
-        return joinHints(hints, columns);
     }
 
     // }}}
@@ -625,38 +355,55 @@ std::optional<DispatchAction> applyFormKey(core::tui::KeyEvent const& key,
     return std::nullopt;
 }
 
-void DispatchFormView::render(core::tui::Canvas& canvas)
+std::optional<std::vector<std::string>> commandShown(Run const& run)
 {
-    if (!_form)
-        return;
-    auto const& theme = canvas.theme();
-    canvas.clear(styleOf(theme, Role::Text));
-    drawFrame(canvas, "Dispatch an agent");
-    auto inside = insideFrame(canvas);
-    auto const width = inside.width() - SideColumns;
-    // The hint line stays on the last row; the body is cut to fit above it.
-    auto const room = static_cast<std::size_t>(std::max(0, inside.height() - 1));
-    auto const lines = fitted(bodyLines(*_form, _engine, width), room);
-    for (auto const index: std::views::iota(std::size_t { 0 }, lines.size()))
-    {
-        auto const& line = lines[index];
-        auto const y = static_cast<int>(index);
-        auto const text = cut(line.text, width - line.start);
-        auto const x = 1 + line.start;
-        inside.putString(y, 1, line.label, styleOf(theme, Role::Dim));
-        inside.putString(y, x, text, styleOf(theme, line.role));
-    }
-    if (inside.height() > 0)
-        inside.putString(inside.height() - 1, 1, hintLine(*_form, _engine, width), styleOf(theme, Role::Dim));
+    auto const* const pane = findPaneTemplate(agentPaneTemplateOf(run));
+    if (pane == nullptr)
+        return std::nullopt;
+    auto arguments = agentPaneArguments(run);
+    for (auto& argument: arguments)
+        if (std::ranges::contains(ShownByPlaceholder, argument.name))
+            argument.value = std::format("{{{}}}", argument.name);
+    auto shown = substitute(pane->argv, arguments);
+    return shown ? std::optional { std::move(*shown) } : std::nullopt;
 }
 
-int DispatchFormView::heightAt(int width) const
+/// @return Whether the agents' setup lacks something a run needs: the status hooks, or a plugin. The form
+///         then says so, and asks for a second Enter.
+bool isSetupIncomplete(Engine const& engine) noexcept
 {
-    if (!_form)
-        return 0;
-    auto const inner = width - 2 - SideColumns;
-    // The box's two rows and the hint line.
-    return static_cast<int>(bodyLines(*_form, _engine, inner).lines.size()) + 3;
+    return engine.hooks() == HooksState::Missing || !engine.missingPlugins().empty();
+}
+
+/// @return @p text with the run's stamp, which is known only once the form is confirmed, shown as `…`.
+std::string withoutStamp(std::string_view text, Run const& run)
+{
+    auto const slug = itemSlug(run.item);
+    auto const at = text.find(run.id);
+    if (!slug || at == std::string_view::npos)
+        return std::string { text };
+    return std::format("{}{}-…{}", text.substr(0, at), *slug, text.substr(at + run.id.size()));
+}
+
+/// @return How the form checks the item out into the run's worktree.
+std::string checkoutText(Run const& run)
+{
+    auto const branch = withoutStamp(run.branch, run);
+    if (auto const* const request = std::get_if<ChangeRequestRef>(&run.item))
+        return std::format("gh pr checkout {} --branch {}", request->number, branch);
+    return std::format("new branch {}", branch);
+}
+
+std::vector<std::string> setupWarnings(Engine const& engine)
+{
+    auto warnings = std::vector<std::string> {};
+    if (engine.hooks() == HooksState::Missing)
+        warnings.emplace_back(HooksMissingWarning);
+    for (auto const& plugin: engine.missingPlugins())
+        warnings.push_back(std::format("Claude Code lacks the plugin {}: a prompt naming its skills fails (I "
+                                       "on the dashboard installs it)",
+                                       plugin.id));
+    return warnings;
 }
 
 } // namespace orchestrator::view

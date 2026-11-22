@@ -74,14 +74,14 @@ request's title is shown as text and does nothing.
 | Key | Does |
 | --- | --- |
 | `↑` `↓` `j` `k` `Home` `End` | move the selection |
-| `Enter` | on a pull request or an issue, open the dispatch form on the first task that applies to it, or show its agent's tab if one runs; on an agent, show its tab; on a finished run, open its details (and mark it seen); on a leftover worktree, open its details on the whole width; on a folded group, unfold it |
-| `d` | open the dispatch form on the selected item; on a finished run, on its item, for a new run |
-| `n` | open the dispatch form on a new topic, in the selected item's repository |
+| `Enter` | on a pull request or an issue, open the launcher on it, or show its agent's tab if one runs; on an agent, show its tab; on a finished run, open its details (and mark it seen); on a leftover worktree, open its details on the whole width; on a folded group, unfold it |
+| `d` | open the launcher on the selected item; on a finished run, on its item or topic, for a new run |
+| `n` | open the launcher: browse the pull requests and issues, or type a topic |
 | `I` | install the Claude Code plugins the agents lack; asks once first |
 | `m` | write a message to the selected agent (also on its board and transcript); `Enter` types it into the agent's tab, `Esc` drops it |
 | `b` | show the selected run's board (below) |
 | `t` | show the selected run's transcript (below) |
-| a task's `key` | open the dispatch form on that task |
+| a task's `key` | open the launcher on the selected item, with that task chosen |
 | `Esc` | close the help, the details page or the filter |
 | `Tab` | swap the details in for the list, and back (below 100 columns) |
 | `/` | filter the rows by text; Enter keeps the filter, Esc drops it |
@@ -92,26 +92,37 @@ request's title is shown as text and does nothing.
 | `x` | check a kept worktree again |
 | `Del` | drop a finished run from the list |
 
-The dispatch form shows the item, the task and the model (`←` `→` change the one selected, `Tab` moves
-between them and the note), the prompt, the checkout, the worktree and the agent's exact command line,
-then how many agents run. `Enter` dispatches; `Esc` cancels. A task's key may not be one of the
-dashboard's own: the configuration is refused with a line that names them. While Claude Code's status
-hooks are missing the form says so, and asks for a second `Enter`.
+**The launcher.** `n` opens one popup to start any agent. With nothing typed it lists your pull requests
+whose checks fail or whose reviewer asked for changes, then your other pull requests, then the issues
+without one, each with its checks, review and whether an agent works on it (`⬢`). Typing filters them by
+number and title, across every repository. While anything is typed, a row starts a **topic** on exactly
+that text; a query that names an item exactly (`2375`, `#2375`, its URL or a Jira key) puts that item
+first. `↑` `↓` choose a row and `Enter` starts the agent.
 
-**Topics.** Not everything an agent should do has a pull request or an issue. `n` opens the form on a topic:
-the repository (`←` `→`), the text you type, the task and the model. The task is a `tasks` entry with
-`applies_to: topic`, whose prompt takes `{topic}` for the text. Without one, a built-in `topic` task makes
-the text the whole prompt. The run's id, branch and worktree are named from a slug of the text, at most 40
-characters of `[a-z0-9-]`, such as `agent/topic-investigate-the-flaky-test-…`. The text itself reaches only
-the prompt and the dashboard. It starts on a new branch from the repository's base, as an issue's run does.
-`d` on a finished topic run opens the form again on its text. Since `n` is the dashboard's key, a task can no
-longer use it.
+Below the list are the settings for the chosen row: a topic's repository, the task (one that applies to
+the item), the model, the permission profile, and an item's optional note, which is added to the prompt.
+`Tab` moves into them and through them, `←` `→` change one, and typing into the note fills it. Each
+follows the chosen row, so the defaults are the task's own. The checkout and the worktree are shown
+below them; `Ctrl+P` also shows the prompt and the agent's exact command line. `Esc` closes the
+launcher. A dispatch the engine would refuse, an item an agent already works on for instance, says why
+instead of starting. While Claude Code's status hooks or a plugin are missing the launcher says so, and
+asks for a second `Enter`.
+
+A task's key may not be one of the dashboard's own: the configuration is refused with a line that names
+them. On the dashboard a task's key opens the launcher on the selected item with that task chosen.
+
+**Topics.** Not everything an agent should do has a pull request or an issue. A topic's task is a `tasks`
+entry with `applies_to: topic`, whose prompt takes `{topic}` for the text. Without one, a built-in `topic`
+task makes the text the whole prompt. The run's id, branch and worktree are named from a slug of the text,
+at most 40 characters of `[a-z0-9-]`, such as `agent/topic-investigate-the-flaky-test-…`. The text itself
+reaches only the prompt and the dashboard. It starts on a new branch from the repository's base, as an
+issue's run does. `d` on a finished topic run opens the launcher again on its text.
 
 **The agents' skills.** A task's prompt such as `/contour-workflows:fix-ci {url}` names a skill, and
 the skill comes with a Claude Code plugin. If that plugin is missing, the agent answers "Unknown skill".
 `plugins` lists the plugins the agents need (by default `contour-workflows@contour-terminal`). With the status
 hooks check done, the orchestrator asks the `claude` its panes run (`claude plugin list --json`) which
-plugins are installed and enabled. Each missing one is a problem line, and the dispatch form warns of it and
+plugins are installed and enabled. Each missing one is a problem line, and the launcher warns of it and
 asks for a second `Enter`. `I` asks once, then runs `claude plugin marketplace add` and `claude plugin
 install` into your own Claude Code and checks again. On a machine you reach only through `contour client`,
 this is how its agents get their skills. The orchestrator never edits Claude Code's settings files.
@@ -166,7 +177,7 @@ a parse error. A read that fails shows the command to run by hand.
 | `←` `→` | | the previous and the next page |
 | `b` | read it again now | show the board |
 | `t` | show the transcript | |
-| `d` | the dispatch form on the run's item (or topic), for a new run | the same |
+| `d` | the launcher on the run's item (or topic), for a new run | the same |
 | `Enter` | show the agent's tab | the same |
 | `Esc` | back to where it was opened from: the list or the transcript | back to where it was opened from: the list or the board |
 

@@ -657,7 +657,9 @@ constexpr auto FixCi =
 /// @return The id of the task the open form is on.
 [[nodiscard]] std::string formTask(DashboardFixture const& fixture)
 {
-    auto const& form = fixture.dashboard.form();
+    auto const& launcher = fixture.dashboard.launcher();
+    REQUIRE(launcher.has_value());
+    auto const& form = launcher->form;
     REQUIRE(form.has_value());
     auto const* const config = fixture.engine.config();
     REQUIRE(config != nullptr);
@@ -692,14 +694,14 @@ TEST_CASE("Enter's default task follows the tasks rows", "[orchestrator][view]")
         auto fixture = DashboardFixture { withTasks(std::format("{}, {}", WorkIssue, AddressReview)) };
         CHECK(fixture.dashboard.input("\r").empty());
         CHECK(formTask(fixture) == "address_review");
-        CHECK_FALSE(fixture.dashboard.form()->session.empty());
-        CHECK(fixture.screen().contains("Dispatch an agent"));
+        CHECK_FALSE(fixture.dashboard.launcher()->form->session.empty());
+        CHECK(fixture.screen().contains("New agent"));
     }
     SECTION("with no task for a pull request, Enter on one opens nothing and says so")
     {
         auto fixture = DashboardFixture { withTasks(WorkIssue) };
         CHECK(fixture.dashboard.input("\r").empty());
-        CHECK_FALSE(fixture.dashboard.form().has_value());
+        CHECK_FALSE(fixture.dashboard.launcher().has_value());
         CHECK(fixture.screen().contains("no task applies"));
         CHECK(fixture.ids.taken == 0);
     }
@@ -718,7 +720,7 @@ TEST_CASE("task keys open the form on that task", "[orchestrator][view]")
     CHECK(formTask(fixture) == "address_review");
     CHECK(fixture.dashboard.input("\x1b").empty());
     fixture.escapeTimesOut();
-    REQUIRE_FALSE(fixture.dashboard.form().has_value());
+    REQUIRE_FALSE(fixture.dashboard.launcher().has_value());
 
     CHECK(fixture.dashboard.input("f").empty());
     CHECK(formTask(fixture) == "fix_ci");
@@ -726,7 +728,7 @@ TEST_CASE("task keys open the form on that task", "[orchestrator][view]")
     // A task for issues does not apply to a pull request: the key says so and opens nothing.
     auto other = DashboardFixture { withTasks(std::format("{}, {}", FixCi, WorkIssue)) };
     CHECK(other.dashboard.input("w").empty());
-    CHECK_FALSE(other.dashboard.form().has_value());
+    CHECK_FALSE(other.dashboard.launcher().has_value());
     CHECK(other.screen().contains("work on issue does not apply to this item"));
 }
 
@@ -737,7 +739,7 @@ TEST_CASE("Enter on an item with an active run reveals its agent", "[orchestrato
     // The first row is #2375, whose agent runs.
     auto const actions = fixture.dashboard.input("\r");
     CHECK(actions == std::vector<UiAction> { RevealAgentAction { .run = std::string { RunningId } } });
-    CHECK_FALSE(fixture.dashboard.form().has_value());
+    CHECK_FALSE(fixture.dashboard.launcher().has_value());
 
     // And on the agent's own row.
     CHECK(fixture.dashboard.input("\x1b[F\r")
