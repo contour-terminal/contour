@@ -31,6 +31,7 @@
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Naming.hpp>
 #include <orchestrator/core/Overloaded.hpp>
+#include <orchestrator/core/Permissions.hpp>
 #include <orchestrator/core/Reconcile.hpp>
 #include <orchestrator/core/Run.hpp>
 #include <orchestrator/core/Sanitize.hpp>
@@ -647,6 +648,9 @@ namespace
                                                    .value = clean(taskLabel(lists.config, run)) },
                                       DetailLine { .label = "model", .value = clean(run.model) },
                                       DetailLine { .label = "state", .value = clean(runStateText(run)) } };
+        // What its agent may do without asking, as it was started: read from the run, not the configuration.
+        if (auto const perms = permissionsText(run.permissions, run.settings); !perms.empty())
+            details.push_back(DetailLine { .label = "perms", .value = clean(perms) });
         // What the agent spent and did comes before where it worked: it is what a finished run is opened for.
         std::ranges::move(statsDetails(run), std::back_inserter(details));
         details.push_back(DetailLine { .label = "branch", .value = clean(run.branch) });

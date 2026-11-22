@@ -116,6 +116,21 @@ asks for a second `Enter`. `I` asks once, then runs `claude plugin marketplace a
 install` into your own Claude Code and checks again. On a machine you reach only through `contour client`,
 this is how its agents get their skills. The orchestrator never edits Claude Code's settings files.
 
+## Permissions
+
+Every agent starts with a permission profile, which the orchestrator passes to Claude Code as `--settings`, so
+routine work does not wait for someone who may be on another machine. The default, `standard`, lets an agent
+edit its worktree, build, test, use local `git` and read the forge without asking; pushing, opening a pull
+request and anything not listed still ask, and such a run shows as asking. It denies `sudo`, `rm -rf`, a forced
+push and `git reset --hard`. `trusted` adds pushing and opening a pull request, for a task that publishes its
+own fix (`permissions: trusted` on the task). `permissions: ask` gives every decision back to Claude Code.
+`permission_profiles` adds profiles or replaces the built-in ones; `bypassPermissions` is refused, so a full
+bypass is never one line of configuration away.
+
+A run keeps the profile it started with, and its details name it (`perms  standard · 19 allowed · 4 denied`).
+A changed configuration applies to the next run, not to a running one. The orchestrator never writes Claude
+Code's settings files: the profile lives only in the agent's command line, which the consent dialog shows.
+
 ## Boards and transcripts
 
 Both are screens of the dashboard's tab, not tabs of their own, and both are read-only.

@@ -161,3 +161,20 @@ TEST_CASE("Permissions: the settings Claude Code takes", "[orchestrator][permiss
         summaryOfSettings(R"({"permissions":{"defaultMode":"bypassPermissions","allow":[],"deny":[]}})")
             .has_value());
 }
+
+TEST_CASE("Permissions: what the form and the details say about a profile", "[orchestrator][permissions]")
+{
+    auto const profiles = resolveProfiles({});
+    REQUIRE(profiles.has_value());
+    CHECK(permissionsText("standard", settingsJsonOf(named(*profiles, "standard")))
+          == "standard · 19 allowed · 4 denied · edits need no approval");
+    CHECK(permissionsText("ask", settingsJsonOf(named(*profiles, "ask")))
+          == "ask · Claude Code asks for the rest");
+    CHECK(
+        permissionsText("planner",
+                        settingsJsonOf(PermissionProfile { .name = "planner", .mode = PermissionMode::Plan }))
+        == "planner · it plans and changes nothing");
+    // A run stored before profiles existed says nothing; one whose settings cannot be read, its name.
+    CHECK(permissionsText("", "{}").empty());
+    CHECK(permissionsText("standard", "{}") == "standard");
+}

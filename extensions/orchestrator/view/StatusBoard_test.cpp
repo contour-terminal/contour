@@ -19,6 +19,7 @@
 
 #include <orchestrator/core/Board.hpp>
 #include <orchestrator/core/Engine.hpp>
+#include <orchestrator/core/Permissions.hpp>
 #include <orchestrator/view/Dashboard.hpp>
 #include <orchestrator/view/Sections.hpp>
 #include <orchestrator/view/StatusBoard.hpp>
@@ -499,7 +500,13 @@ TEST_CASE("esc on a board returns to the details, which show it", "[orchestrator
 
 TEST_CASE("the selected agent's details show its board, rendered", "[orchestrator][view][board]")
 {
-    auto fixture = DashboardFixture { boardWorld(), Wide };
+    // Started with the default profile, which its details name on a line of their own.
+    auto world = boardWorld();
+    auto const profiles = resolveProfiles({});
+    REQUIRE(profiles.has_value());
+    world.stored.front().permissions = std::string { DefaultProfileName };
+    world.stored.front().settings = settingsJsonOf(profiles->front());
+    auto fixture = DashboardFixture { std::move(world), Wide };
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.select(RunningId).empty());
     auto const actions = fixture.dashboard.dueActions();
@@ -510,6 +517,7 @@ TEST_CASE("the selected agent's details show its board, rendered", "[orchestrato
     CHECK(screen.contains("Fixing CI"));
     CHECK(screen.contains("☑ reproduced"));
     CHECK(screen.contains("☐ fix the reflow"));
+    CHECK(screen.contains("perms     standard · 19 allowed · 4 denied"));
     checkGolden("details-board-120x40", screen);
     // Asked for once: nothing more is due while the selection stays.
     CHECK(fixture.dashboard.dueActions().empty());
