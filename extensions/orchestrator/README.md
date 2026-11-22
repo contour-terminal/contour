@@ -38,10 +38,10 @@ the one selected. Pull requests and issues are not listed here: you browse and s
 (`n`, below).
 
 A top bar names the dashboard and carries the fleet gauge (`⬢ 3/4 ▰▰▰▱`, active runs of `max_agents`), a
-`● 2 need you` pill while a run waits for you, and `plugins missing · I installs` while a plugin the tasks
+`● 2 need you` pill while a run waits for you, and `plugins missing · ^K install` while a plugin the tasks
 need is missing. Problems — a failing `gh`, a list cut at its limit, a configuration that does not parse — sit
-below it, one line each. The bottom line is the action bar: the keys that act on the selection, or the result
-of the last action until the next key.
+below it, one line each. The bottom line is the action bar: what you can do with the selected row, or the
+result of the last action until the next key (see "Actions and the palette" below).
 
 **The Fleet** groups the runs by what they need from you:
 
@@ -89,23 +89,24 @@ has the keys: every printable key types, digits too, so no letter is ever both a
 | Key | In the Fleet |
 | --- | --- |
 | `↑` `↓` `j` `k` `Home` `End` | move the selection |
-| `Enter` | on a live run, write to it in the Focus; on a finished run, open the launcher on its item or topic to run it again; on a kept one, check its worktree again; on a folded group, unfold it; on `+ new agent`, open the launcher |
+| `Enter` | the selected row's primary action, which the action bar lists first (below) |
 | `Tab` | give the Focus the keys |
 | `b` `t` `d` | show the Focus's Board, Transcript or Details tab |
 | `PgUp` `PgDn` | scroll the Focus's tab |
 | `←` `→` | turn the transcript's pages |
 | `n` | open the launcher: browse the pull requests and issues, or type a topic |
 | `/` | filter the runs by text, Finished's folded ones too; Enter keeps the filter, Esc drops it |
+| `Ctrl+K` `?` | open the command palette: every action, and the commands that have no key |
 | `e` | end the selected run; asks once (`e again to end · esc keeps it`) |
 | `r` | show the selected agent's tab |
 | `o` | copy the run's pull request or issue link |
 | `x` | check a kept worktree again |
 | `Del` | drop a finished run from the list |
 | `z` | fold the selected run's group, or unfold a folded one |
-| `Esc` | close the help or drop the filter |
-| `?` | show the keys |
-| `R` | read the lists again now (a palette command from the next phase) |
-| `I` | install the Claude Code plugins the agents lack; asks once first (a palette command from the next phase) |
+| `Esc` | drop the filter |
+
+A run key acts only where it applies to the selected row; elsewhere the action bar says why (`del dismiss ·
+not while it is working`) and nothing happens.
 
 | Key | In the Focus, with the message box |
 | --- | --- |
@@ -114,9 +115,39 @@ has the keys: every printable key types, digits too, so no letter is ever both a
 | `Alt+Enter` | add a line; a paste keeps its line feeds |
 | `PgUp` `PgDn` `End` | scroll the tab; `End` back to live |
 | `Esc` `Tab` | back to the Fleet, keeping the draft (drafts are kept per run, in memory) |
+| `Ctrl+K` | open the command palette |
 
 In the Focus of a run without a message box — one finished, preparing or ending, or a leftover worktree — the
 Fleet's letters act, and `↑` `↓` scroll instead of moving. `Esc` or `Tab` goes back.
+
+**Actions and the palette.** What the dashboard offers follows the selected row. Each row's state has its
+actions in rank order; the first is what `Enter` does, and the action bar lists them while they fit, then
+`n new agent` and `^k all actions`:
+
+| Selected | Action bar |
+| --- | --- |
+| a run that asks | `⏎ see request` · `r agent tab` · `e end` |
+| a run that waits, or stopped by an error | `⏎ reply` · `t transcript` · `b board` (or `d details`) · `e end` |
+| a run starting or at work | `⏎ message` · `t transcript` · `b board` · `e end` (starting: `r agent tab`) |
+| a run that reported done | `⏎ follow up` · `o copy link` · `t transcript` · `e end` |
+| a finished run | `⏎ run again` (the launcher, on its item or topic, task and model) · `t transcript` · `del dismiss` |
+| a kept run | `⏎ retry removal` · `d details` · `del dismiss` |
+| a folded group's heading | `⏎ unfold` |
+| `+ new agent` | `⏎ new agent` |
+
+`Enter` on a live run always writes to it; only the label changes. An action a row does not offer — `o` on a
+topic, `b` once the worktree is gone — is not listed. A done or finished run's box at the bottom of the Focus
+lists the same actions. In the Focus the bar adds `esc back`; while the message box has the keys it reads `⏎
+send · alt⏎ line · esc keep draft`.
+
+`Ctrl+K` or `?` opens the command palette over the dashboard. It lists the selected row's actions first, then
+the commands for the whole dashboard — new agent, filter the agents, refresh the lists, install the missing
+plugins, show the last 24 hours — then every other action, dimmed, with the reason it does not apply now
+(`end · no run selected`). Each shows its key, or `palette only`. Typing filters it fuzzily (`l24` finds "show
+the last 24 hours"), the matched letters underlined; `↑` `↓` choose; `Enter` runs the command exactly as its
+key would; `Esc` closes it and keeps what you typed for the next time. Refreshing the lists and installing the
+plugins have no key: they are the palette's. "Show the last 24 hours" opens a popup that charts, an hour a bar,
+the agents active, the tokens they wrote and the runs started and ended; `Esc` closes it.
 
 The layout follows the tab's width:
 
@@ -179,8 +210,8 @@ the skill comes with a Claude Code plugin. If that plugin is missing, the agent 
 `plugins` lists the plugins the agents need (by default `contour-workflows@contour-terminal`). With the status
 hooks check done, the orchestrator asks the `claude` its panes run (`claude plugin list --json`) which
 plugins are installed and enabled. Each missing one is a problem line, and the launcher warns of it and
-asks for a second `Enter`. `I` asks once, then runs `claude plugin marketplace add` and `claude plugin
-install` into your own Claude Code and checks again. On a machine you reach only through `contour client`,
+asks for a second `Enter`. The palette's "install the missing plugins" (`Ctrl+K`, then `install`) runs
+`claude plugin marketplace add` and `claude plugin install` into your own Claude Code and checks again. On a machine you reach only through `contour client`,
 this is how its agents get their skills. The orchestrator never edits Claude Code's settings files.
 
 ## Permissions

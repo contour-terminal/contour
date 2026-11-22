@@ -672,7 +672,7 @@ Key                   | Meaning
 `poll_every`          | How often the forges are asked for the lists. Default `2m`, at least `30s`.
 `status_board_after`  | How long an agent runs before the orchestrator starts looking for its board, its `STATUS.md`. Default `15m`; `0` never looks, while `b` still shows a board.
 `status_board`        | What every agent's system prompt asks of it about its board (Claude Code's `--append-system-prompt`). Default: keep `STATUS.md` at the worktree's root with the `contour-workflows:status-board` skill, current at every state change, never committed. Your own words replace that; `off` asks for nothing.
-`plugins`             | The Claude Code plugins the tasks' prompts need, each `{ id: <plugin>@<marketplace>, marketplace: <source> }`. Default: `contour-workflows@contour-terminal` from `contour-terminal/claude-marketplace`. The orchestrator asks `claude plugin list --json` whether each one is installed and enabled, and lists the missing ones as problems; `I` installs them after you confirm. `[]` checks for none.
+`plugins`             | The Claude Code plugins the tasks' prompts need, each `{ id: <plugin>@<marketplace>, marketplace: <source> }`. Default: `contour-workflows@contour-terminal` from `contour-terminal/claude-marketplace`. The orchestrator asks `claude plugin list --json` whether each one is installed and enabled, and lists the missing ones as problems; the dashboard palette's "install the missing plugins" installs them. `[]` checks for none.
 `permissions`         | The permission profile an agent starts with when its task names none, passed to Claude Code as `--settings`. Default `standard`: edits inside the worktree, `cmake`, `ctest`, local `git` (status, diff, log, show, add, commit, switch, rebase, fetch), read-only `gh` and the `contour-workflows` skills need no approval; `sudo`, `rm -rf`, `git push --force` and `git reset --hard` are denied; anything else, pushing and opening a pull request included, still asks. `trusted` is `standard` plus `git push`, `gh pr create` and `gh pr edit`. `ask` leaves every decision to Claude Code's own prompts. Your Claude Code settings still apply beneath the profile.
 `permission_profiles` | Profiles of your own, or replacements for the built-in ones, each `{ name, extends, mode, allow, deny }`. `extends` names the profile it builds on: it takes that profile's mode unless it sets its own, and that profile's rules followed by its own. `mode` is `default`, `acceptEdits` or `plan`; `bypassPermissions` is refused. A rule is a tool, or a tool and its specifier, as Claude Code writes them (`Read`, `Bash(git push:*)`). A profile that extends itself, or one too large for a `--settings` argument, is refused.
 `end_done_after`      | How long an agent stays done before the orchestrator ends its run, as `e` would: its tab closes and its worktree is removed unless it holds work. The run is listed as completed. An agent that goes back to work, because you answered it, waits the whole time again. Done is a turn that ended with nothing in flight, which the dashboard shows as *waiting for you*: it also covers an agent that asked you a question in plain text, which this ends unanswered. An agent waiting on its own background work or a scheduled wake-up is not done, and shows what it waits for. A task can set its own (below). Default `0`: a done run waits for you.
@@ -728,13 +728,14 @@ The dashboard is one screen: the **Fleet** on the left lists your runs, grouped 
 (NEEDS YOU, WORKING, TO REVIEW, FINISHED), the run that has waited longest first; the **Focus** on the right
 shows the selected run, its Board, Transcript or Details tab, the latest of what it said, and the box to write
 to it. Pull requests and issues are browsed and started from the launcher (`n`). In a tab narrower than 100
-columns the Focus goes below the Fleet, or, narrower than 60, takes its place while it has the keys. `?` lists
-the keys.
+columns the Focus goes below the Fleet, or, narrower than 60, takes its place while it has the keys. The action
+bar lists what applies to the selected row, `Enter`'s action first; `Ctrl+K` or `?` opens the command palette,
+which lists every action, those that do not apply dimmed with the reason.
 
 Key                     | Does, in the Fleet
 ------------------------|---------------------------------------------------------------------------------------
 `↑` `↓` `j` `k` `Home` `End` | move the selection
-`Enter`                 | on a live run, write to it in the Focus; on a finished run, open the launcher to run it again; on `+ new agent`, open the launcher
+`Enter`                 | the selected row's primary action: write to a live run in the Focus; run a finished one again (the launcher); retry a kept one's removal; unfold a group; on `+ new agent`, open the launcher
 `Tab`                   | give the Focus the keys
 `b` `t` `d`             | show the Focus's Board, Transcript or Details tab
 `PgUp` `PgDn`           | scroll the Focus's tab
@@ -746,8 +747,8 @@ Key                     | Does, in the Fleet
 `Del`                   | drop a finished run from the list
 `/`                     | filter the runs by text
 `z`                     | fold the selected run's group
-`R`                     | read the lists again now
-`Esc`                   | close the help or drop the filter
+`Ctrl+K` `?`             | the command palette: every action, and those without a key (refresh the lists, install the missing plugins, the last 24 hours)
+`Esc`                   | drop the filter
 
 In the Focus of a live run the message box has the keys: every printable key types, `Enter` sends, `Alt+Enter`
 adds a line, `PgUp` `PgDn` `End` scroll, and `Esc` goes back keeping the draft. The launcher shows the item, the
