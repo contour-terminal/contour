@@ -6,6 +6,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <ranges>
 #include <vector>
 
 using namespace vtbackend;
@@ -33,6 +34,19 @@ TEST_CASE("KittyPlaceholders.diacriticOrdinal", "[kitty][placeholder]")
     CHECK(diacriticOrdinal(U'\U0001D244') == 297);
     CHECK(diacriticOrdinal(U'a') == 0);
     CHECK(diacriticOrdinal(PlaceholderCodepoint) == 0);
+}
+
+TEST_CASE("KittyPlaceholders.diacriticOf", "[kitty][placeholder]")
+{
+    CHECK(diacriticOf(1) == U'̅');
+    CHECK(diacriticOf(297) == U'\U0001D244');
+    CHECK(diacriticOf(0) == U'\0');
+    CHECK(diacriticOf(DiacriticCount + 1) == U'\0');
+    // The inverse of diacriticOrdinal() over the whole table.
+    auto mismatches = 0;
+    for (auto const ordinal: std::views::iota(uint32_t { 1 }, uint32_t { DiacriticCount } + 1))
+        mismatches += diacriticOrdinal(diacriticOf(ordinal)) == ordinal ? 0 : 1;
+    CHECK(mismatches == 0);
 }
 
 TEST_CASE("KittyPlaceholders.placeholderIdOf", "[kitty][placeholder]")

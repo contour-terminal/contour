@@ -97,6 +97,13 @@ namespace
     }
 } // namespace
 
+char32_t diacriticOf(uint32_t ordinal) noexcept
+{
+    if (ordinal == 0 || ordinal > Diacritics.size())
+        return U'\0';
+    return Diacritics[ordinal - 1];
+}
+
 uint32_t diacriticOrdinal(char32_t codepoint) noexcept
 {
     auto const found = std::ranges::lower_bound(Diacritics, codepoint);
