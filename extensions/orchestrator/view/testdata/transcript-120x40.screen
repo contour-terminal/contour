@@ -36,5 +36,5 @@
 │   plus a newline) and ran `mkdir sub && cd sub && ls -a ..` as a separate command.                                   │
 │ written by Claude Code 2.1.328                                                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- ←→ page · ↑↓ scroll · b board · d new run · enter agent tab · esc back                                                 
+ ←→ page · ↑↓ scroll · b board · d new run · enter agent tab · esc back · m message                                     
  ⬢ agents 1/4 · ✗2                                                                                                      

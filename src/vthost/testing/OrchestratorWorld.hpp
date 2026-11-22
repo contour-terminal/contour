@@ -260,6 +260,13 @@ class StallingPanes final: public IOwnedPanes
         return _host.reveal(extension, pane, origin);
     }
 
+    [[nodiscard]] std::expected<void, OwnedPaneError> write(std::string_view extension,
+                                                            std::string_view pane,
+                                                            std::string_view bytes) override
+    {
+        return _host.write(extension, pane, bytes);
+    }
+
   private:
     /// Keeps the calling thread busy until it has spent @p cpu of CPU time; where its clock cannot be read,
     /// sleeps that long in real time.

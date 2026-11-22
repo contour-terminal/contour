@@ -66,6 +66,9 @@ class OwnedPaneHost
     /// Ends @p session, as its pane's close asked.
     virtual void closeOwnedSession(vtworkspace::SessionId session) = 0;
 
+    /// Writes @p bytes to @p session's program, as its pane's `pane-send` asked.
+    virtual void writeOwnedInput(vtworkspace::SessionId session, std::string_view bytes) = 0;
+
     /// @return Whether an agent's spawn can start its program in a directory held open: decided as the spawn
     ///         decides its sandbox policy, so that no policy reaches a spawn that would fail on it.
     [[nodiscard]] virtual vtpty::HeldDirectorySpawn heldDirectorySpawn() const = 0;
@@ -139,6 +142,9 @@ class OwnedPanes final: public IOwnedPanes
     [[nodiscard]] std::expected<void, OwnedPaneError> reveal(std::string_view extension,
                                                              std::string_view pane,
                                                              Origin origin) override;
+    [[nodiscard]] std::expected<void, OwnedPaneError> write(std::string_view extension,
+                                                            std::string_view pane,
+                                                            std::string_view bytes) override;
 
     /// Checks the registry against the panes the host holds once it restored them. Loop thread, once.
     /// @param hosted Every pane the host holds.

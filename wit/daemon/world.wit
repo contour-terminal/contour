@@ -315,6 +315,11 @@ interface host {
     pane-reveal: func(pane: string, origin: origin) -> result<_, host-error>;
     /// Reads a regular file inside a root declared readable.
     file-read: func(root: string, path: string) -> result<file-content, file-error>;
+    /// Types text the user wrote into a pane the extension owns, its manifest declaring `pane-input`: as one
+    /// bracketed paste, then Enter, so that a multi-line text is one message. Text that is not UTF-8, that
+    /// holds a control character other than a line feed or a tab, or that is longer than 16 KiB is
+    /// `bad-argument`, and so is any text without `pane-input`.
+    pane-send: func(pane: string, text: string) -> result<_, host-error>;
 }
 
 /// An extension that runs in a terminal's daemon.

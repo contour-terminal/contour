@@ -103,6 +103,13 @@ struct PaneTemplate
     std::vector<EnvironmentEntry> environment; ///< Its fixed environment (`pane-env`), in declaration order.
 };
 
+/// Whether an extension may type into its own agent panes (`pane-input`).
+enum class PaneInput : uint8_t
+{
+    Refused = 0, ///< Nothing may be typed into them: the default.
+    Typed,       ///< `pane-send` types text the user wrote into them.
+};
+
 /// A palette row (`action <id> = title`).
 struct ActionDecl
 {
@@ -148,6 +155,9 @@ struct Manifest
 
     /// The programs the extension may put in a tab.
     std::vector<PaneTemplate> panes {};
+
+    /// Whether `pane-send` may type text the user wrote into those tabs (`pane-input`).
+    PaneInput paneInput = PaneInput::Refused;
 
     /// The scheme of the tabs the extension serves (`serve <scheme>`), if any.
     std::optional<std::string> servedScheme {};

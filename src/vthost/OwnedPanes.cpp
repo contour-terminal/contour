@@ -186,6 +186,31 @@ std::expected<void, OwnedPaneError> OwnedPanes::close(std::string_view extension
     return {};
 }
 
+std::expected<void, OwnedPaneError> OwnedPanes::write(std::string_view extension,
+                                                      std::string_view pane,
+                                                      std::string_view bytes)
+{
+    auto const id = vtcontrol::parseUuid(pane);
+    auto session = vtworkspace::SessionId {};
+    {
+        auto const lock = std::lock_guard { _mutex };
+        auto const found = std::ranges::find_if(_entries, [&](Entry const& entry) {
+            return id && entry.pane == *id && entry.extension == extension;
+        });
+        if (found == _entries.end())
+            return std::unexpected(OwnedPaneError::NotOwned);
+        // Typed only into a session that exists: a pane still pending has nothing to read it yet.
+        if (found->state != OwnedPaneState::Open)
+            return std::unexpected(OwnedPaneError::Gone);
+        if (!found->session)
+            return std::unexpected(OwnedPaneError::NotReconciled);
+        session = *found->session;
+    }
+    _services.post(
+        [this, session, bytes = std::string { bytes }] { _services.host.writeOwnedInput(session, bytes); });
+    return {};
+}
+
 std::expected<std::vector<OwnedPaneInfo>, OwnedPaneError> OwnedPanes::list(std::string_view extension) const
 {
     auto const lock = std::lock_guard { _mutex };

@@ -230,6 +230,19 @@ struct DaemonInstance::HostCalls
         return answer(instance, arguments, instance._services.paneReveal(*pane, arguments[2]));
     }
 
+    /// `pane-send: func(pane: string, text: string) -> result<_, host-error>`.
+    static abi::Result<void> paneSend(DaemonInstance& instance, std::span<uint32_t const> arguments)
+    {
+        auto reader = abi::FlatReader(arguments);
+        auto const pane = lift<std::string>(instance, reader);
+        if (!pane)
+            return std::unexpected(pane.error());
+        auto const text = lift<std::string>(instance, reader);
+        if (!text)
+            return std::unexpected(text.error());
+        return answer(instance, arguments, instance._services.paneSend(*pane, *text));
+    }
+
     /// `tab-open: func(scheme: string, origin: origin) -> result<string, host-error>`.
     static abi::Result<void> tabOpen(DaemonInstance& instance, std::span<uint32_t const> arguments)
     {
@@ -356,6 +369,7 @@ struct DaemonInstance::HostCalls
         &summarySet,  // summary-set
         &paneReveal,  // pane-reveal
         &fileRead,    // file-read
+        &paneSend,    // pane-send
     };
 
     /// Every handler that answers `not-supported-yet`: none, as this host serves every import; one it did not

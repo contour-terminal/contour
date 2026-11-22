@@ -173,6 +173,9 @@ class Driver
     /// @return The tab opened or revealed; std::nullopt when the host refused.
     std::optional<std::string> openTab(uint32_t origin);
     void revealAgent(std::string_view tab, std::string_view run);
+    /// Types a message the user wrote on @p tab's message line into its run's agent tab; says on that
+    /// dashboard why when it cannot.
+    void sendMessage(std::string_view tab, view::SendMessageAction const& message);
     void takeActions();
     void followTabs();
     void readTabs();

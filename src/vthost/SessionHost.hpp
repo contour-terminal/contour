@@ -2505,6 +2505,7 @@ class SessionHost final:
     [[nodiscard]] std::optional<vtworkspace::SessionId> createOwnedTab(
         OwnedPaneSpawn const& spawn, vtcontrol::Uuid pane, vtworkspace::WorkspaceId workspace) override;
     void closeOwnedSession(vtworkspace::SessionId session) override;
+    void writeOwnedInput(vtworkspace::SessionId session, std::string_view bytes) override;
     [[nodiscard]] vtpty::HeldDirectorySpawn heldDirectorySpawn() const override;
     [[nodiscard]] std::optional<vtworkspace::WorkspaceId> firstWorkspace() const override;
     [[nodiscard]] bool findsProgram(OwnedPaneSpawn const& spawn) const override;

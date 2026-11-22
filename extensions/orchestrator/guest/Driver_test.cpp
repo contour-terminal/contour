@@ -155,7 +155,9 @@ class FakeGuestHost final: public IGuestHost
     std::vector<std::string> paneOpens;                    ///< The tag of every paneOpen().
     std::vector<std::optional<std::string>> paneOpenNears; ///< The near of every paneOpen().
     std::vector<std::string> paneCloses;                   ///< Every paneClose().
-    std::vector<std::pair<std::string, uint32_t>> paneReveals; ///< Every paneReveal(): pane and origin.
+    std::vector<std::pair<std::string, uint32_t>> paneReveals;  ///< Every paneReveal(): pane and origin.
+    std::vector<std::pair<std::string, std::string>> paneSends; ///< Every paneSend(): pane and text.
+    std::expected<void, HostError> paneSendAnswer {};           ///< What paneSend() answers.
 
     std::vector<TabInfo> tabList;                                  ///< What tabs() lists.
     std::pair<uint32_t, uint32_t> openSize { OpenCols, OpenRows }; ///< The size tabOpen() opens at.
@@ -383,6 +385,13 @@ class FakeGuestHost final: public IGuestHost
     {
         paneReveals.emplace_back(std::string(pane), origin);
         return {};
+    }
+
+    [[nodiscard]] std::expected<void, HostError> paneSend(std::string_view pane,
+                                                          std::string_view text) override
+    {
+        paneSends.emplace_back(std::string(pane), std::string(text));
+        return paneSendAnswer;
     }
 
     [[nodiscard]] std::expected<FileContent, FileError> fileRead(std::string_view /*root*/,
@@ -1811,6 +1820,29 @@ TEST_CASE("ReadTranscriptAction reaches the engine", "[guest][transcript]")
     auto const* const view = served.driver->engine().transcript("tab-1", Run);
     REQUIRE(view != nullptr);
     CHECK(view->page == 2);
+}
+
+TEST_CASE("a message is typed into its run's agent tab, and a refusal is said", "[guest][message]")
+{
+    constexpr auto Run = "pr-2375-20261113-150847"sv;
+    auto served = Served {};
+    addAgent(served);
+    served.load();
+    served.invoke("open");
+
+    served.driver->apply("tab-1",
+                         view::SendMessageAction { .run = std::string { Run }, .text = "rebase first" });
+    REQUIRE(served.host.paneSends.size() == 1);
+    CHECK(served.host.paneSends.front().first == std::format("p-{}", Run));
+    CHECK(served.host.paneSends.front().second == "rebase first");
+
+    served.host.paneSendAnswer = std::unexpected(HostError::BadArgument);
+    served.driver->apply("tab-1", view::SendMessageAction { .run = std::string { Run }, .text = "x" });
+    CHECK(served.dashboard().interaction().notice == "message not sent: the host will not type this text");
+
+    served.driver->apply("tab-1", view::SendMessageAction { .run = "no-such-run", .text = "x" });
+    CHECK(served.host.paneSends.size() == 2);
+    CHECK(served.dashboard().interaction().notice == "message not sent: its agent has no tab any more");
 }
 
 TEST_CASE("a key split across two tab reads moves once", "[guest]")

@@ -506,6 +506,11 @@ extern bool terminal_extensions_daemon_host_summary_set(daemon_string_t *short_,
 extern bool terminal_extensions_daemon_host_pane_reveal(daemon_string_t *pane, terminal_extensions_daemon_host_origin_t origin, terminal_extensions_daemon_host_host_error_t *err);
 // Reads a regular file inside a root declared readable.
 extern bool terminal_extensions_daemon_host_file_read(daemon_string_t *root, daemon_string_t *path, terminal_extensions_daemon_host_file_content_t *ret, terminal_extensions_daemon_host_file_error_t *err);
+// Types text the user wrote into a pane the extension owns, its manifest declaring `pane-input`: as one
+// bracketed paste, then Enter, so that a multi-line text is one message. Text that is not UTF-8, that
+// holds a control character other than a line feed or a tab, or that is longer than 16 KiB is
+// `bad-argument`, and so is any text without `pane-input`.
+extern bool terminal_extensions_daemon_host_pane_send(daemon_string_t *pane, daemon_string_t *text, terminal_extensions_daemon_host_host_error_t *err);
 
 // Exported Functions from `daemon`
 void exports_daemon_load(daemon_string_t *config_json, daemon_host_info_t *info);

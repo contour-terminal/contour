@@ -649,3 +649,47 @@ TEST_CASE("an agent row with a board shows the cue", "[orchestrator][view][board
 }
 
 // }}}
+
+TEST_CASE("m writes to the selected agent; Enter sends it, Esc drops it", "[orchestrator][view][message]")
+{
+    auto fixture = DashboardFixture { boardWorld(), Wide };
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    CHECK(fixture.dashboard.input("m").empty());
+    REQUIRE(fixture.dashboard.interaction().message.has_value());
+    // Every key is the line's while it is open: `d`, `e` and `q` are text.
+    CHECK(fixture.dashboard.input("rebase, then dequeue").empty());
+    CHECK(fixture.screen().contains(std::format("to {}: rebase, then dequeue▏", RunningId)));
+    CHECK(fixture.dashboard.input("\r")
+          == std::vector<UiAction> {
+              SendMessageAction { .run = std::string { RunningId }, .text = "rebase, then dequeue" } });
+    CHECK_FALSE(fixture.dashboard.interaction().message.has_value());
+
+    SECTION("a paste keeps its line feeds")
+    {
+        CHECK(fixture.dashboard.input("m\x1b[200~one\r\ntwo\x1b[201~").empty());
+        CHECK(fixture.dashboard.interaction().message->text == "one\ntwo");
+    }
+    SECTION("Esc drops it, and Enter on an empty line sends nothing")
+    {
+        CHECK(fixture.dashboard.input("m\r").empty());
+        CHECK(fixture.dashboard.input("x").empty());
+        CHECK(fixture.dashboard.input("\x1b").empty());
+        fixture.escapeTimesOut();
+        CHECK_FALSE(fixture.dashboard.interaction().message.has_value());
+    }
+    SECTION("a finished run has no agent tab to write to")
+    {
+        CHECK(fixture.dashboard.select(FinishedId).empty());
+        CHECK(fixture.dashboard.input("m").empty());
+        CHECK_FALSE(fixture.dashboard.interaction().message.has_value());
+        CHECK(fixture.screen().contains("its agent has no tab to send to"));
+    }
+    SECTION("from its board too")
+    {
+        CHECK(fixture.dashboard.input("b").size() == 1);
+        CHECK(fixture.dashboard.input("mok\r")
+              == std::vector<UiAction> {
+                  SendMessageAction { .run = std::string { RunningId }, .text = "ok" } });
+    }
+}

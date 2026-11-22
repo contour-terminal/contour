@@ -482,6 +482,18 @@ class IOwnedPanes
     [[nodiscard]] virtual std::expected<void, OwnedPaneError> close(std::string_view extension,
                                                                     std::string_view pane) = 0;
 
+    /// Writes bytes to one of the extension's open panes, as its program reads input: what `pane-send` made
+    /// of the text the user wrote (the policy checked it).
+    /// @param extension Whose pane it is.
+    /// @param pane The pane's id.
+    /// @param bytes What to write.
+    /// @return Nothing; NotOwned for an id that is not one of its panes, Gone for one closed or never
+    /// created,
+    ///         NotReconciled before the host restored its sessions.
+    [[nodiscard]] virtual std::expected<void, OwnedPaneError> write(std::string_view extension,
+                                                                    std::string_view pane,
+                                                                    std::string_view bytes) = 0;
+
     /// @param extension Whose panes.
     /// @return Its panes, pending ones included, in the order they were opened; NotReconciled until the host
     ///         restored its sessions.

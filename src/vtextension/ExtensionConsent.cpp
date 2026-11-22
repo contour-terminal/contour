@@ -203,6 +203,9 @@ ConsentQuestion daemonConsentQuestion(DaemonConsentRequest const& request)
              ConsentWeight::CanRunCommands);
         environment(pane.environment);
     }
+    if (manifest.paneInput == PaneInput::Typed)
+        line("It may type text you write into those tabs, when you send it from its own tab",
+             ConsentWeight::CanRunCommands);
     for (auto const& root: manifest.readableRoots)
         line(std::format("It may read files in: {}", neutralizedForDisplay(root)), ConsentWeight::Observes);
     if (manifest.servedScheme)

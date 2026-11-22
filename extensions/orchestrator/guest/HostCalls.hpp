@@ -268,6 +268,13 @@ class IGuestHost
     [[nodiscard]] virtual std::expected<void, HostError> paneReveal(std::string_view pane,
                                                                     uint32_t origin) = 0;
 
+    /// Types text the user wrote into a pane the guest opened, as one bracketed paste and then Enter.
+    /// @param pane The pane's id.
+    /// @param text Exactly what the user wrote on the dashboard's message line.
+    /// @return Nothing, or why it was not typed (`bad-argument` for text that is not sendable).
+    [[nodiscard]] virtual std::expected<void, HostError> paneSend(std::string_view pane,
+                                                                  std::string_view text) = 0;
+
     /// Reads a regular file inside a readable root.
     /// @param root The root's label.
     /// @param path The file, relative to the root.

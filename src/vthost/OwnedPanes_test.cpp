@@ -620,6 +620,26 @@ TEST_CASE("an extension cannot close or list a pane it did not open", "[vthost][
     CHECK(b.host.hostedSession(b.shell) != nullptr);
 }
 
+TEST_CASE("pane-send's bytes reach the agent's device, and only an open pane of its own", "[vthost][panes]")
+{
+    auto b = PanesBench {};
+    auto const pane = b.openNow(b.spawn());
+    REQUIRE(b.devices.size() == 2);
+    auto* const device = b.devices.back();
+
+    constexpr auto Bytes = std::string_view { "\x1b[200~hello\x1b[201~\r" };
+    REQUIRE(b.panes().write(Orchestrator, pane, Bytes).has_value());
+    REQUIRE(b.eventually([&] { return device->stdinSnapshot().contains(Bytes); }));
+
+    CHECK(b.panes().write(Other, pane, Bytes)
+          == std::expected<void, OwnedPaneError> { std::unexpect, OwnedPaneError::NotOwned });
+    CHECK(b.panes().write(Orchestrator, "not-a-uuid", Bytes)
+          == std::expected<void, OwnedPaneError> { std::unexpect, OwnedPaneError::NotOwned });
+    REQUIRE(b.panes().close(Orchestrator, pane).has_value());
+    CHECK(b.panes().write(Orchestrator, pane, Bytes)
+          == std::expected<void, OwnedPaneError> { std::unexpect, OwnedPaneError::Gone });
+}
+
 // {{{ pane-reveal
 
 TEST_CASE("pane-reveal in the origin's workspace activates", "[vthost][panes]")

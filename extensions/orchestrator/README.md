@@ -27,8 +27,8 @@ finished and its worktree is gone; and from either I start the next run on the s
   the agent's skills and memory, and the forge's branch protection decide that — including whether an
   agent may push to a protected branch.
 - **Anti-goals (a failure even if it works):** an agent's work lost by cleanup; the extension typing
-  into a pane, reading a screen, or choosing Claude's settings; untrusted PR or issue text reaching a
-  prompt, a branch name or a path.
+  anything into a pane that you did not write and send, reading a screen, or choosing Claude's settings;
+  untrusted PR or issue text reaching a prompt, a branch name or a path.
 
 ## The dashboard
 
@@ -78,6 +78,7 @@ request's title is shown as text and does nothing.
 | `d` | open the dispatch form on the selected item; on a finished run, on its item, for a new run |
 | `n` | open the dispatch form on a new topic, in the selected item's repository |
 | `I` | install the Claude Code plugins the agents lack; asks once first |
+| `m` | write a message to the selected agent (also on its board and transcript); `Enter` types it into the agent's tab, `Esc` drops it |
 | `b` | show the selected run's board (below) |
 | `t` | show the selected run's transcript (below) |
 | a task's `key` | open the dispatch form on that task |
@@ -156,6 +157,18 @@ a parse error. A read that fails shows the command to run by hand.
 
 Its screens are pinned by golden files in `view/testdata/`, one per scene and size; after a deliberate
 change, `ORCHESTRATOR_UPDATE_GOLDENS=1 orchestrator_test "[view]"` writes them again, to be checked by eye.
+
+## Messages
+
+On a machine you reach only through `contour client`, the dashboard is the only place you can talk to an
+agent. `m` opens a message line at the bottom of the tab, addressed to the selected agent, or to the one whose
+board or transcript is shown. Every key you press goes to the line. `Enter` sends it, `Esc` drops it, and a
+paste keeps its line feeds. The text goes through the host's `pane-send` (the manifest declares `pane-input`,
+and the consent dialog asks for it): it is typed into the agent's tab as one bracketed paste followed by
+Enter, so Claude Code receives it as one message. If the agent is waiting at a permission prompt, the message
+is what that prompt receives. The orchestrator types nothing else, ever, and reads no screen: `t` shows what
+the agent did. A message the host refuses, such as one holding a control character, or one sent after the
+agent's tab closed, stays unsent, and the summary line says why.
 
 ## Statistics
 

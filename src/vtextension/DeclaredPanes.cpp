@@ -230,4 +230,31 @@ std::expected<void, PaneError> DeclaredPanes::reveal(std::string_view pane, Orig
     return _host.reveal(pane, origin);
 }
 
+bool isSendableText(std::string_view text) noexcept
+{
+    if (text.empty() || text.size() > MaxPaneSendBytes)
+        return false;
+    while (!text.empty())
+    {
+        auto const decoded = decodeUtf8(text);
+        if (!decoded)
+            return false;
+        auto const [codePoint, length] = *decoded;
+        auto const isControl = codePoint < 0x20 || (codePoint >= 0x7F && codePoint <= 0x9F);
+        if (isControl && codePoint != U'\n' && codePoint != U'\t')
+            return false;
+        text.remove_prefix(length);
+    }
+    return true;
+}
+
+std::expected<void, PaneError> DeclaredPanes::send(std::string_view pane, std::string_view text)
+{
+    if (_config.manifest.paneInput != PaneInput::Typed)
+        return std::unexpected(PaneError::InputNotDeclared);
+    if (!isSendableText(text))
+        return std::unexpected(PaneError::TextRefused);
+    return _host.write(pane, std::format("{}{}{}{}", PasteStart, text, PasteEnd, SendKey));
+}
+
 } // namespace vtextension

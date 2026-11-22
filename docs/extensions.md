@@ -365,6 +365,7 @@ command's environment is judged as the command gets it, `command-env-for` laid o
 | `command-env-for <command> <KEY> = value` | `command-env-for git-status LC_ALL = C` | Environment for one command, applied after `command-env`. |
 | `pane <name> @<root> = argv…` | `pane agent @worktrees = claude --model {model}` | A program the extension may open in a tab. |
 | `pane-env <pane> <KEY> = value` | `pane-env agent GIT_CONFIG_COUNT = 1` | Environment for one pane. |
+| `pane-input` | `pane-input` | `pane-send` may type text the user wrote into the extension's panes. The consent dialog says so. |
 | `inbox <name> = text` | `inbox note = A reviewer left a comment.` | Reserved: refused until a version of the manifest supports it. |
 | `serve <scheme>` | `serve orchestrator` | The extension serves `<scheme>://` tabs. |
 | `action <id> = title` | `action open = Open Agents` | A row in the command palette; its title follows the `title` line's rules. |
@@ -436,7 +437,13 @@ again in a later callback", which starts with a fresh budget, not "the store is 
   background -- created, but no window raised, nothing activated, no focus taken. Past that, an origin it was never handed (0, or
   another extension's), one stale or consumed, or one whose window has gone raises no window, activates no
   tab, and answers `gone`: a reveal needs a user action behind it, just now. A pane it closed answers `gone` until its session ended, `not-owned` after;
-- `file-read`: regular files inside a root declared readable, of at most 64 KiB.
+- `file-read`: regular files inside a root declared readable, of at most 64 KiB;
+- `pane-send`: types text into one of its open panes, its manifest declaring `pane-input`, as one bracketed
+  paste followed by Enter, so a multi-line text arrives as one message. The text must be non-empty UTF-8 of at
+  most 16 KiB, with no control character other than a line feed or a tab, so it cannot end the paste it is
+  put in. Anything else, or any text without `pane-input`, is `bad-argument`. A pane closed or not yet
+  created is `gone`, and another's is `not-owned`. The extension is to send only what its user wrote and
+  sent: the orchestrator's `m` line is the one caller.
 
 A declared command runs only where its manifest binds it, and sees only what its manifest declares:
 

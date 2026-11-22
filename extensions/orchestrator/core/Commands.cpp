@@ -668,6 +668,8 @@ std::vector<std::string> manifestLines()
     for (auto const& decl: PaneTable)
         for (auto const& variable: decl.environment)
             lines.push_back(concat({ "pane-env ", decl.name, " ", variable.name, " = ", variable.value }));
+    // The `m` line types what the user wrote into an agent's tab: nothing else is ever typed there.
+    lines.emplace_back("pane-input");
     lines.push_back(concat({ "serve ", ServedScheme }));
     for (auto const& decl: ActionTable)
         lines.push_back(concat({ "action ", decl.id, " = ", decl.title }));

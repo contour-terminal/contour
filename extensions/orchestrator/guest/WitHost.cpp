@@ -335,6 +335,17 @@ namespace
             return {};
         }
 
+        [[nodiscard]] std::expected<void, HostError> paneSend(std::string_view pane,
+                                                              std::string_view text) override
+        {
+            auto paneText = borrowed(pane);
+            auto sentText = borrowed(text);
+            auto error = HostErrorCode {};
+            if (!terminal_extensions_daemon_host_pane_send(&paneText, &sentText, &error))
+                return std::unexpected(hostErrorOf(error));
+            return {};
+        }
+
         [[nodiscard]] std::expected<std::vector<PaneInfo>, HostError> panes() override
         {
             auto listed = terminal_extensions_daemon_host_list_pane_info_t {};

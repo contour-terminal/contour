@@ -505,7 +505,14 @@ namespace
             // here.
             canvas.hideCursor();
             auto const& pending = _state.interaction.pendingEnd;
-            if (auto const& notice = _state.interaction.notice; !notice.empty())
+            if (auto const& message = _state.interaction.message)
+                canvas.putString(
+                    0,
+                    1,
+                    cut(std::format("to {}: {}▏ · enter sends · esc drops", message->run, message->text),
+                        canvas.width() - 2),
+                    styleOf(canvas.theme(), Role::Accent));
+            else if (auto const& notice = _state.interaction.notice; !notice.empty())
                 canvas.putString(
                     0, 1, cut(notice, canvas.width() - 2), styleOf(canvas.theme(), Role::Failing));
             else if (!pending.empty())
@@ -1023,6 +1030,12 @@ void Dashboard::openForm(std::string_view repo, ItemRef const& item, std::string
 std::optional<DispatchFormState> const& Dashboard::form() const noexcept
 {
     return _state->interaction.form;
+}
+
+void Dashboard::messageRefused(std::string_view why)
+{
+    _state->interaction.notice = std::format("message not sent: {}", why);
+    _state->repaint = State::Repaint::Needed;
 }
 
 void Dashboard::dispatchRefused(DispatchRefusal refusal)

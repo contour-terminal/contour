@@ -63,13 +63,21 @@ class FakePaneService final: public IPaneService
         return revealAnswer;
     }
 
-    std::vector<PaneOpenCall> opens;                     ///< Every open(), in order.
-    std::vector<std::string> closes;                     ///< Every close(), in order.
-    std::vector<std::pair<std::string, Origin>> reveals; ///< Every reveal(), in order.
+    [[nodiscard]] std::expected<void, PaneError> send(std::string_view pane, std::string_view text) override
+    {
+        sends.emplace_back(std::string { pane }, std::string { text });
+        return sendAnswer;
+    }
+
+    std::vector<PaneOpenCall> opens;                        ///< Every open(), in order.
+    std::vector<std::string> closes;                        ///< Every close(), in order.
+    std::vector<std::pair<std::string, Origin>> reveals;    ///< Every reveal(), in order.
+    std::vector<std::pair<std::string, std::string>> sends; ///< Every send(), in order.
     std::expected<std::string, PaneError> openAnswer { std::unexpect, PaneError::NotSupportedYet };
     std::expected<void, PaneError> closeAnswer { std::unexpect, PaneError::NotSupportedYet };
     std::expected<std::vector<PaneInfo>, PaneError> listAnswer { std::unexpect, PaneError::NotSupportedYet };
     std::expected<void, PaneError> revealAnswer { std::unexpect, PaneError::NotSupportedYet };
+    std::expected<void, PaneError> sendAnswer { std::unexpect, PaneError::NotSupportedYet };
 };
 
 } // namespace vtextension::testing

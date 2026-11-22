@@ -457,6 +457,16 @@ class DaemonExtensionRunner::Core final: public IDaemonHostServices, public std:
         });
     }
 
+    [[nodiscard]] std::expected<void, HostError> paneSend(std::string_view pane,
+                                                          std::string_view text) override
+    {
+        return servedUnlessClosed([&] {
+            return _services.panes.send(pane, text).transform_error([](PaneError error) {
+                return hostErrorOf(error);
+            });
+        });
+    }
+
     // A closed runner -- revoked, or going -- reaches no tab: what its guest still asks mid-callback, after
     // the host closed its tabs, would otherwise open one again.
     [[nodiscard]] std::expected<std::string, HostError> tabOpen(std::string_view scheme,

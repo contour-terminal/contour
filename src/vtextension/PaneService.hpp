@@ -44,7 +44,12 @@ enum class PaneError : uint8_t
     NotReconciled,    ///< The host has not restored its sessions yet: the list would be wrong; retry later.
     Gone,             ///< The pane was closed: its tab is going, or never came.
     NotSupportedYet,  ///< The host does not serve this yet: a capability, never a fault.
+    InputNotDeclared, ///< The manifest has no `pane-input`: nothing may be typed into its panes.
+    TextRefused, ///< The text is not UTF-8, holds a control character other than LF or TAB, or is too long.
 };
+
+/// The longest text `pane-send` types, in bytes.
+inline constexpr std::size_t MaxPaneSendBytes = std::size_t { 16 } * 1024;
 
 /// What the host is asked to open: everything checked.
 struct PaneSpawn
@@ -100,6 +105,14 @@ class IPaneService
     /// @param origin The connection the invoked action came from.
     /// @return Nothing; or why it was not revealed.
     [[nodiscard]] virtual std::expected<void, PaneError> reveal(std::string_view pane, Origin origin) = 0;
+
+    /// `pane-send`: types text the user wrote into a pane the extension opened, its manifest declaring
+    /// `pane-input`, as one bracketed paste and then Enter.
+    /// @param pane Its id.
+    /// @param text What the user wrote: UTF-8, no control character but LF and TAB, at most MaxPaneSendBytes.
+    /// @return Nothing; or why it was not typed.
+    [[nodiscard]] virtual std::expected<void, PaneError> send(std::string_view pane,
+                                                              std::string_view text) = 0;
 };
 
 /// The host side a checked spawn is forwarded to: what owns the panes, bound to one extension.
@@ -126,6 +139,13 @@ class IPaneHost
 
     /// @copydoc IPaneService::reveal
     [[nodiscard]] virtual std::expected<void, PaneError> reveal(std::string_view pane, Origin origin) = 0;
+
+    /// Writes bytes the policy made of checked text to a pane the extension opened.
+    /// @param pane Its id.
+    /// @param bytes What its program reads: the bracketed paste and the Enter after it.
+    /// @return Nothing; or why the host did not write them.
+    [[nodiscard]] virtual std::expected<void, PaneError> write(std::string_view pane,
+                                                               std::string_view bytes) = 0;
 };
 
 /// The service of a host that opens no panes: every call answers `not-supported-yet`, which a guest treats as
@@ -158,6 +178,12 @@ class UnservedPanes final: public IPaneService
     {
         return std::unexpected(PaneError::NotSupportedYet);
     }
+
+    [[nodiscard]] std::expected<void, PaneError> send(std::string_view /*pane*/,
+                                                      std::string_view /*text*/) override
+    {
+        return std::unexpected(PaneError::NotSupportedYet);
+    }
 };
 
 /// One row of the table that turns a PaneError into what the guest sees.
@@ -186,9 +212,11 @@ inline constexpr auto PaneErrorToHostError = std::array {
     PaneErrorRow { .error = PaneError::NotReconciled, .hostError = HostError::Limit },
     PaneErrorRow { .error = PaneError::Gone, .hostError = HostError::Gone },
     PaneErrorRow { .error = PaneError::NotSupportedYet, .hostError = HostError::NotSupportedYet },
+    PaneErrorRow { .error = PaneError::InputNotDeclared, .hostError = HostError::BadArgument },
+    PaneErrorRow { .error = PaneError::TextRefused, .hostError = HostError::BadArgument },
 };
 
-static_assert(PaneErrorToHostError.size() == std::to_underlying(PaneError::NotSupportedYet) + 1U,
+static_assert(PaneErrorToHostError.size() == std::to_underlying(PaneError::TextRefused) + 1U,
               "every PaneError has a row");
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, PaneErrorToHostError.size()),
                                   [](std::size_t index) {

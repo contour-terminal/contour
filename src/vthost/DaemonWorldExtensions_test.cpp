@@ -111,7 +111,16 @@ class RecordingOwnedPanes final: public vthost::IOwnedPanes
         return revealAnswer;
     }
 
+    [[nodiscard]] std::expected<void, vthost::OwnedPaneError> write(std::string_view extension,
+                                                                    std::string_view pane,
+                                                                    std::string_view bytes) override
+    {
+        writes.push_back(std::format("{} {} {}", extension, pane, bytes));
+        return {};
+    }
+
     std::vector<vthost::OwnedPaneSpawn> opens;
+    std::vector<std::string> writes;
     std::vector<std::string> closes;
     std::vector<std::string> reveals;
     std::expected<void, vthost::OwnedPaneError> revealAnswer {};

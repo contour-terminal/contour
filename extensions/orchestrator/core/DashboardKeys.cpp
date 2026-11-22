@@ -24,6 +24,7 @@ namespace
         DashboardKey { .name = "z"sv, .character = 'z' },
         DashboardKey { .name = "n"sv, .character = 'n' },
         DashboardKey { .name = "I"sv, .character = 'I' },
+        DashboardKey { .name = "m"sv, .character = 'm' },
         DashboardKey { .name = "/"sv, .character = '/' },
         DashboardKey { .name = "?"sv, .character = '?' },
         DashboardKey { .name = "j"sv, .character = 'j' },

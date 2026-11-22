@@ -102,6 +102,10 @@ class Dashboard
     /// @param refusal Why.
     void dispatchRefused(DispatchRefusal refusal);
 
+    /// A message sent here was not typed into its agent's tab: the summary line says why, until the next key.
+    /// @param why The host's reason, in the failure words.
+    void messageRefused(std::string_view why);
+
     /// @return The run the selected row stands for; empty when it stands for none, or nothing is selected.
     [[nodiscard]] std::string_view selectedRun() const noexcept;
 

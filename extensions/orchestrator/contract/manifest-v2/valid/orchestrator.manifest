@@ -126,6 +126,7 @@ pane-env agent-plain GIT_CONFIG_KEY_0 = push.default
 pane-env agent-plain GIT_CONFIG_VALUE_0 = upstream
 pane-env agent-plain GIT_CONFIG_KEY_1 = push.autoSetupRemote
 pane-env agent-plain GIT_CONFIG_VALUE_1 = true
+pane-input
 serve orchestrator
 action open = Open Agents
 action refresh = Agents: Refresh now

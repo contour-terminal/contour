@@ -58,8 +58,15 @@ class RecordingPaneHost final: public IPaneHost
         return {};
     }
 
-    std::vector<PaneSpawn> spawns;   ///< Every open(), in order.
-    std::vector<std::string> closes; ///< Every close(), in order.
+    [[nodiscard]] std::expected<void, PaneError> write(std::string_view pane, std::string_view bytes) override
+    {
+        writes.emplace_back(pane, bytes);
+        return {};
+    }
+
+    std::vector<std::pair<std::string, std::string>> writes; ///< Every write(), in order.
+    std::vector<PaneSpawn> spawns;                           ///< Every open(), in order.
+    std::vector<std::string> closes;                         ///< Every close(), in order.
 };
 
 /// One DeclaredPanes over fakes, with `/w` as `worktrees` and `/r` as `repos`, and the worktree `/w/run-1`.
@@ -340,4 +347,51 @@ TEST_CASE("every pane error reaches the guest as its host-error", "[vtextension]
                               Row { PaneError::NotReconciled, HostError::Limit },
                               Row { PaneError::NotSupportedYet, HostError::NotSupportedYet });
     CHECK(hostErrorOf(row.error) == row.hostError);
+}
+
+TEST_CASE("pane-send types checked text as one bracketed paste and Enter", "[vtextension][panes]")
+{
+    auto f = Fixture {};
+    REQUIRE(f.manifest.paneInput == PaneInput::Typed);
+    REQUIRE(f.panes->send("pane-1", "Run ctest again,\n\tthen push.").has_value());
+    REQUIRE(f.host.writes.size() == 1);
+    CHECK(f.host.writes.front().first == "pane-1");
+    CHECK(f.host.writes.front().second == "\x1b[200~Run ctest again,\n\tthen push.\x1b[201~\r");
+}
+
+TEST_CASE("pane-send refuses text that could end its paste, and any text without pane-input",
+          "[vtextension][panes]")
+{
+    auto f = Fixture {};
+    for (auto const& text: { std::string {},                // nothing to send
+                             std::string { "a\x1b[201~b" }, // an escape ends the paste
+                             std::string { "a\rb" },        // a carriage return is Enter
+                             std::string { "a\xc2\x85"
+                                           "b" },     // U+0085, a C1 control
+                             std::string { "a\xff" }, // not UTF-8
+                             std::string(MaxPaneSendBytes + 1, 'x') })
+    {
+        CAPTURE(text.size());
+        CHECK(f.panes->send("pane-1", text) == std::unexpected(PaneError::TextRefused));
+    }
+    CHECK(f.host.writes.empty());
+    CHECK(f.panes->send("pane-1", std::string(MaxPaneSendBytes, 'x')).has_value());
+
+    // A manifest without pane-input types nothing.
+    auto manifest = orchestratorManifest();
+    manifest.paneInput = PaneInput::Refused;
+    auto directories = FakeDirectoryOpener {};
+    for (auto const* path: { "/w", "/r" })
+        directories.add(path);
+    auto host = RecordingPaneHost {};
+    auto panes =
+        DeclaredPanes::create(DeclaredPanesConfig { .manifest = manifest,
+                                                    .roots = { { .label = "worktrees", .paths = { "/w" } },
+                                                               { .label = "repos", .paths = { "/r" } } },
+                                                    .inheritedEnvironment = {} },
+                              directories,
+                              host);
+    REQUIRE(panes.has_value());
+    CHECK((*panes)->send("pane-1", "hello") == std::unexpected(PaneError::InputNotDeclared));
+    CHECK(host.writes.empty());
 }

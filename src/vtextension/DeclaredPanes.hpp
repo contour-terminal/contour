@@ -30,6 +30,18 @@ namespace vtextension
 /// The longest title a pane may have, in code points: its tab's fixed name.
 inline constexpr std::size_t MaxPaneTitleLength = 64;
 
+/// What `pane-send` wraps the user's text in: a bracketed paste, so that its line feeds stay inside one
+/// message, then the Enter that sends it.
+inline constexpr std::string_view PasteStart = "\x1b[200~";
+inline constexpr std::string_view PasteEnd = "\x1b[201~";
+inline constexpr std::string_view SendKey = "\r";
+
+/// @param text What the user wrote.
+/// @return Whether `pane-send` types it: non-empty UTF-8 of at most MaxPaneSendBytes, without a control code
+///         point (C0, DEL or C1) other than a line feed or a tab, so that it cannot end the paste it is put
+///         in.
+[[nodiscard]] bool isSendableText(std::string_view text) noexcept;
+
 /// The longest tag a pane may have, in bytes: `[A-Za-z0-9][A-Za-z0-9._-]*`.
 inline constexpr std::size_t MaxPaneTagBytes = 128;
 
@@ -113,6 +125,7 @@ class DeclaredPanes final: public IPaneService
     [[nodiscard]] std::expected<void, PaneError> close(std::string_view pane) override;
     [[nodiscard]] std::expected<std::vector<PaneInfo>, PaneError> list() override;
     [[nodiscard]] std::expected<void, PaneError> reveal(std::string_view pane, Origin origin) override;
+    [[nodiscard]] std::expected<void, PaneError> send(std::string_view pane, std::string_view text) override;
 
   private:
     DeclaredPanesConfig _config;

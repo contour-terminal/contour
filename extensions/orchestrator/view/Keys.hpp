@@ -30,6 +30,14 @@ struct RefreshNowAction
     [[nodiscard]] bool operator==(RefreshNowAction const&) const = default;
 };
 
+/// The user sent a message to a run's agent from the message line (`m`): typed into its tab.
+struct SendMessageAction
+{
+    std::string run;  ///< The run's id.
+    std::string text; ///< Exactly what the user wrote.
+    [[nodiscard]] bool operator==(SendMessageAction const&) const = default;
+};
+
 /// The user confirmed installing the Claude Code plugins the agents need and lack.
 struct InstallPluginsAction
 {
@@ -105,6 +113,7 @@ struct ReadTranscriptAction
 /// host.
 using UiAction = std::variant<RefreshNowAction,
                               InstallPluginsAction,
+                              SendMessageAction,
                               EndRunAction,
                               RetryRemovalAction,
                               DismissAction,
@@ -149,6 +158,15 @@ enum class KeyCommand : uint8_t
     Fold,           ///< Fold or unfold the group of the selected row, and select its header.
     NewTopic,       ///< Open the dispatch form on a new topic, in the selected row's repository or the first.
     InstallPlugins, ///< Install the Claude Code plugins the agents need and lack; asks once first.
+    Message,        ///< Open the message line to the selected run's agent, or to the board's or transcript's.
+};
+
+/// A message being written to a run's agent (`m`): it takes every key until Enter sends it or Esc drops it.
+struct MessageDraft
+{
+    std::string run;  ///< The run whose agent it goes to.
+    std::string text; ///< What was written so far; line feeds come from a paste.
+    [[nodiscard]] bool operator==(MessageDraft const&) const = default;
 };
 
 /// How far the user got installing the missing plugins (`I`): it asks once, as ending a run does.
@@ -248,6 +266,7 @@ struct Interaction
     std::string pendingEnd = {}; ///< The run whose end waits for a second `e` (D14: asks once); empty: none.
     InstallConfirm pendingInstall =
         InstallConfirm::None;                   ///< Whether a second `I` installs the missing plugins.
+    std::optional<MessageDraft> message = {};   ///< The message line, while it is open: it takes every key.
     std::optional<DispatchFormState> form = {}; ///< The dispatch form, while it is open: it takes every key.
     std::string notice = {}; ///< A one-line notice on the summary line, until the next key; empty: none.
     Screen screen = Screen::Dashboard; ///< What the tab shows.

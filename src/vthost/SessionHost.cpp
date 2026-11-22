@@ -3080,6 +3080,11 @@ void SessionHost::closeOwnedSession(SessionId session)
     endSession(session, SessionEnd::Requested);
 }
 
+void SessionHost::writeOwnedInput(SessionId session, std::string_view bytes)
+{
+    writeInput(session, bytes);
+}
+
 std::optional<WorkspaceId> SessionHost::firstWorkspace() const
 {
     auto const* const first = _model.workspaceAt(0);

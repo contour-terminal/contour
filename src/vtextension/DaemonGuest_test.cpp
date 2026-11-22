@@ -518,6 +518,12 @@ class MeasuredServices final: public IDaemonHostServices
         return std::unexpected(HostError::NotSupportedYet);
     }
 
+    [[nodiscard]] std::expected<void, HostError> paneSend(std::string_view /*pane*/,
+                                                          std::string_view /*text*/) override
+    {
+        return std::unexpected(HostError::NotSupportedYet);
+    }
+
     /// A status board is read when one is served, written a minute before now; any other read answers as an
     /// unserved import would.
     [[nodiscard]] std::expected<FileContent, FileError> fileRead(std::string_view /*root*/,

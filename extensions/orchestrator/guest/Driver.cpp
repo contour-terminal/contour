@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <orchestrator/core/Commands.hpp>
+#include <orchestrator/core/FailureWords.hpp>
 #include <orchestrator/core/Overloaded.hpp>
 #include <orchestrator/view/Theme.hpp>
 
@@ -512,6 +513,7 @@ void Driver::apply(std::string_view tab, view::UiAction const& action)
                 step(HideBoard { .tab = std::string { tab }, .monoMs = nowMs() });
                 stepReplies();
             },
+            [&](view::SendMessageAction const& message) { sendMessage(tab, message); },
             [&](view::DispatchAction const& dispatch) {
                 // Stamped with the time it arrived: the run's names carry the wall time.
                 auto const clock = readClock();
@@ -557,6 +559,28 @@ void Driver::revealAgent(std::string_view tab, std::string_view run)
         _host.log(expected ? LogLevel::Debug : LogLevel::Warn,
                   std::format("pane-reveal {}: {}", *found->pane, nameOf(revealed.error())));
     }
+}
+
+void Driver::sendMessage(std::string_view tab, view::SendMessageAction const& message)
+{
+    auto const refuse = [&](std::string_view why) {
+        if (auto* const shown = dashboard(tab))
+            shown->messageRefused(why);
+    };
+    auto const runs = _engine->runs();
+    auto const found = std::ranges::find(runs, message.run, &Run::id);
+    if (found == runs.end() || !found->pane)
+    {
+        refuse("its agent has no tab any more");
+        return;
+    }
+    auto const sent = _host.paneSend(*found->pane, message.text);
+    if (sent)
+        return;
+    _host.log(LogLevel::Debug, std::format("pane-send {}: {}", *found->pane, nameOf(sent.error())));
+    // Its own words for what only a message meets: text the host will not type.
+    refuse(sent.error() == HostError::BadArgument ? std::string_view { "the host will not type this text" }
+                                                  : plainFailure(nameOf(sent.error())));
 }
 
 void Driver::followTabs()

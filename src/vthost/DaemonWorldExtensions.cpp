@@ -223,6 +223,12 @@ namespace
             return _panes.reveal(_extension, pane, origin).transform_error(paneErrorOf);
         }
 
+        [[nodiscard]] std::expected<void, vtextension::PaneError> write(std::string_view pane,
+                                                                        std::string_view bytes) override
+        {
+            return _panes.write(_extension, pane, bytes).transform_error(paneErrorOf);
+        }
+
       private:
         std::string _extension;
         IOwnedPanes& _panes;

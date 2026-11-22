@@ -135,6 +135,13 @@ class IDaemonHostServices
     /// @return Nothing; or why it was not revealed.
     [[nodiscard]] virtual std::expected<void, HostError> paneReveal(std::string_view pane, Origin origin) = 0;
 
+    /// `pane-send`: types text the user wrote into a pane the extension opened (IPaneService).
+    /// @param pane The pane's id.
+    /// @param text What the user wrote.
+    /// @return Nothing; or why it was not typed.
+    [[nodiscard]] virtual std::expected<void, HostError> paneSend(std::string_view pane,
+                                                                  std::string_view text) = 0;
+
     /// `tab-open`: opens the extension's served tab where the origin's window is (IServedTabService).
     /// @param scheme What the tab is served as.
     /// @param origin The connection the invoked action came from.

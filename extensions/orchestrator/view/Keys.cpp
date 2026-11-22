@@ -49,6 +49,7 @@ namespace
         KeyRow { .key = "e"sv, .command = KeyCommand::EndRun, .hint = "e end run"sv },
         KeyRow { .key = "n"sv, .command = KeyCommand::NewTopic, .hint = "n topic"sv },
         KeyRow { .key = "I"sv, .command = KeyCommand::InstallPlugins, .hint = "I install plugins"sv },
+        KeyRow { .key = "m"sv, .command = KeyCommand::Message, .hint = "m message"sv },
         KeyRow { .key = "x"sv, .command = KeyCommand::RetryRemoval, .hint = "x retry removal"sv },
         KeyRow { .key = "del"sv, .command = KeyCommand::Dismiss, .hint = "del dismiss"sv },
         KeyRow {
@@ -76,6 +77,8 @@ namespace
             .key = "d"sv, .command = KeyCommand::Dispatch, .hint = "d new run"sv, .on = ScreenSet::Board },
         KeyRow { .key = "b"sv, .command = KeyCommand::Board, .hint = "b reload"sv, .on = ScreenSet::Board },
         KeyRow { .key = "esc"sv, .command = KeyCommand::Back, .hint = "esc back"sv, .on = ScreenSet::Board },
+        KeyRow {
+            .key = "m"sv, .command = KeyCommand::Message, .hint = "m message"sv, .on = ScreenSet::Board },
         // The transcript: read-only, a page at a time, so its keys page, scroll, switch to the board and
         // leave.
         KeyRow { .key = "left"sv,
@@ -110,6 +113,10 @@ namespace
                  .on = ScreenSet::Transcript },
         KeyRow {
             .key = "esc"sv, .command = KeyCommand::Back, .hint = "esc back"sv, .on = ScreenSet::Transcript },
+        KeyRow { .key = "m"sv,
+                 .command = KeyCommand::Message,
+                 .hint = "m message"sv,
+                 .on = ScreenSet::Transcript },
     };
 
     /// The name of a key that is not a character.
@@ -537,6 +544,24 @@ namespace
                      .handler = [](Interaction&, KeyContext const&) -> std::optional<UiAction> {
                          return UiAction { RefreshNowAction {} };
                      } },
+        // `m` writes to the selected run's agent; Enter on the line types it into the agent's tab.
+        CommandRow {
+            .command = KeyCommand::Message,
+            .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
+                // On a board or a transcript, its run; on the dashboard, the selected row's.
+                auto run = interaction.subject;
+                if (interaction.screen == Screen::Dashboard)
+                    run = context.selected != nullptr ? context.selected->run : std::string {};
+                if (run.empty())
+                    return std::nullopt;
+                if (!hasAgentTab(context.engine, run))
+                {
+                    interaction.notice = "its agent has no tab to send to";
+                    return std::nullopt;
+                }
+                interaction.message = MessageDraft { .run = run, .text = {} };
+                return std::nullopt;
+            } },
         // `I` installs the plugins the agents lack into the user's own Claude Code; it asks once first.
         CommandRow {
             .command = KeyCommand::InstallPlugins,
@@ -634,6 +659,24 @@ std::string pastedText(std::string_view text)
 
 void pasteInto(Interaction& interaction, std::string_view text)
 {
+    if (interaction.message)
+    {
+        // A message keeps its line feeds: the agent receives it as one paste. A CR LF is one line end, and
+        // every other control character but a tab is dropped, as the host would refuse it.
+        auto previous = '\0';
+        for (auto const c: text)
+        {
+            auto const isLineEnd = c == '\r' || c == '\n';
+            if (c == '\n' && previous == '\r')
+                continue;
+            previous = c;
+            if (isLineEnd)
+                interaction.message->text += '\n';
+            else if (c == '\t' || (static_cast<unsigned char>(c) >= 0x20 && c != '\x7f'))
+                interaction.message->text += c;
+        }
+        return;
+    }
     if (interaction.form)
     {
         if (interaction.form->focus == FormField::Note)
@@ -740,6 +783,48 @@ bool isDispatched(KeyCommand command) noexcept
     return std::ranges::contains(Commands, command, &CommandRow::command);
 }
 
+namespace
+{
+    /// Types @p key into the open message line.
+    /// @return Nothing when no line is open, so that the key table decides; else what the key asks: the
+    ///         message to send, or nothing.
+    [[nodiscard]] std::optional<std::optional<UiAction>> typeIntoMessage(core::tui::KeyEvent const& key,
+                                                                         Interaction& interaction)
+    {
+        if (!interaction.message)
+            return std::nullopt;
+        auto& draft = *interaction.message;
+        // A key with Alt is how an Esc reads when the next key follows it in the same read: the line is
+        // dropped.
+        if (core::tui::hasModifier(key.modifiers, core::tui::Modifier::Alt)
+            || key.key == core::tui::KeyCode::Escape)
+        {
+            interaction.message.reset();
+            return std::optional<UiAction> {};
+        }
+        switch (key.key)
+        {
+            case core::tui::KeyCode::Enter: {
+                if (draft.text.empty())
+                    return std::optional<UiAction> {};
+                auto action = UiAction { SendMessageAction { .run = std::move(draft.run),
+                                                             .text = std::move(draft.text) } };
+                interaction.message.reset();
+                return std::optional { std::move(action) };
+            }
+            case core::tui::KeyCode::Backspace:
+                dropLastCodepoint(draft.text);
+                return std::optional<UiAction> {};
+            default: break;
+        }
+        if (auto const printable = printableOf(key);
+            printable && !core::tui::hasModifier(key.modifiers, core::tui::Modifier::Ctrl))
+            appendUtf8(draft.text, *printable);
+        // Every other key is the line's too: none acts on the dashboard while it is open.
+        return std::optional<UiAction> {};
+    }
+} // namespace
+
 FilterInput typeIntoFilter(core::tui::KeyEvent const& key, Interaction& interaction)
 {
     if (interaction.filtering != Filtering::Typing)
@@ -767,6 +852,8 @@ std::optional<UiAction> applyKey(core::tui::KeyEvent const& key,
                                  Interaction& interaction,
                                  KeyContext const& context)
 {
+    if (auto typed = typeIntoMessage(key, interaction))
+        return std::move(*typed);
     if (typeIntoFilter(key, interaction) == FilterInput::Taken)
         return std::nullopt;
     auto command = commandFor(key, interaction.screen);

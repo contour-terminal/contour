@@ -593,6 +593,17 @@ namespace
         return refuse(ManifestFault::UnsupportedLine);
     }
 
+    /// `pane-input`: no words. It lets `pane-send` type into the panes, so it means nothing without one.
+    [[nodiscard]] LineResult allowPaneInput(ParseState& state, Line const& line)
+    {
+        if (!line.head.empty())
+            return refuse(ManifestFault::UnknownLine);
+        if (state.manifest.paneInput == PaneInput::Typed)
+            return refuse(ManifestFault::Repeated);
+        state.manifest.paneInput = PaneInput::Typed;
+        return {};
+    }
+
     [[nodiscard]] LineResult setServedScheme(ParseState& state, Line const& line)
     {
         if (line.head.size() != 1)
@@ -667,6 +678,8 @@ namespace
             .keyword = "pane-env", .since = 2, .value = LineValue::Text, .handler = &addPaneEnvironment },
         LineKind { .keyword = "inbox", .since = 2, .value = LineValue::Text, .handler = &refuseReserved },
         LineKind { .keyword = "serve", .since = 2, .value = LineValue::None, .handler = &setServedScheme },
+        LineKind {
+            .keyword = "pane-input", .since = 2, .value = LineValue::None, .handler = &allowPaneInput },
         LineKind { .keyword = "action", .since = 2, .value = LineValue::Text, .handler = &addAction },
         LineKind { .keyword = "title", .since = 2, .value = LineValue::Text, .handler = &setTitle },
     };

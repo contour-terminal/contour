@@ -608,9 +608,13 @@ TEST_CASE("dispatching a PR opens its agent tab beside the dashboard", "[daemon]
     REQUIRE(spawned.size() == 1);
     auto const& exec = spawned.front();
     CHECK(exec.program == "claude");
-    CHECK(exec.arguments
+    // The system prompt's addition asks for the status board the dashboard shows.
+    REQUIRE(exec.arguments.size() == 7);
+    CHECK(std::vector(exec.arguments.begin(), exec.arguments.begin() + 5)
           == std::vector<std::string> {
-              "--model", "sonnet", "--session-id", run.session, std::string(FixCiPrompt) });
+              "--model", "sonnet", "--session-id", run.session, "--append-system-prompt" });
+    CHECK(exec.arguments[5].contains("STATUS.md"));
+    CHECK(exec.arguments[6] == FixCiPrompt);
     CHECK(dispatched.formPage.contains("claude --model sonnet"));
     CHECK(exec.workingDirectory == run.worktree);
     REQUIRE(exec.directory != nullptr);
@@ -660,13 +664,13 @@ TEST_CASE("dispatching an issue uses a new branch", "[daemon][e2e][agents]")
         runCommands(d.world), [](auto const& argv) { return beginsWith(argv, { "gh", "pr", "checkout" }); }));
     auto const spawned = d.world.spawnedAgents();
     REQUIRE(spawned.size() == 1);
-    CHECK(spawned.front().arguments
+    auto const& arguments = spawned.front().arguments;
+    REQUIRE(arguments.size() == 7);
+    CHECK(std::vector(arguments.begin(), arguments.begin() + 5)
           == std::vector<std::string> {
-              "--model",
-              "opus",
-              "--session-id",
-              run.session,
-              "/contour-workflows:work-issue https://github.com/contour-terminal/contour/issues/2356" });
+              "--model", "opus", "--session-id", run.session, "--append-system-prompt" });
+    CHECK(arguments[6]
+          == "/contour-workflows:work-issue https://github.com/contour-terminal/contour/issues/2356");
 }
 
 TEST_CASE("the agent's tab closing removes the worktree", "[daemon][e2e][agents]")
@@ -949,7 +953,7 @@ TEST_CASE("a board that appears later is picked up while shown", "[daemon][e2e][
 
     selectRun(desk, 0, dispatched.run.id);
     desk.type("b");
-    REQUIRE(desk.until([&] { return desk.page().contains("No STATUS.md to show yet."); }));
+    REQUIRE(desk.until([&] { return desk.page().contains("No STATUS.md to show yet"); }));
 
     // Written while the board is shown: the next read, within its period, shows it.
     writeBoard(d.world, dispatched.run.worktree, AgentBoard, std::chrono::seconds { 0 });
