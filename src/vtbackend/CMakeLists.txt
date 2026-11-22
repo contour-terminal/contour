@@ -78,6 +78,7 @@ set(vtbackend_HEADERS
     vt/ClipboardSelection.hpp
     vt/KittyClipboard.hpp
     graphics/KittyAnimation.hpp
+    graphics/KittyBoundedRead.hpp
     graphics/KittyGraphics.hpp
     graphics/KittyInflate.hpp
     graphics/KittyMediaDefaults.hpp
@@ -455,7 +456,7 @@ if(LIBTERMINAL_TESTING)
         graphics/KittyInflate_test.cpp
         graphics/KittyMediaDefaults_test.cpp
         graphics/KittyMediaPolicy_test.cpp
-        graphics/KittyMediumSource_test.cpp
+        graphics/KittyMediumSource_posix_test.cpp
         graphics/KittyPlaceholders_test.cpp
         vt/TextSizing_test.cpp
         screen/ScreenTestFixtures.cpp

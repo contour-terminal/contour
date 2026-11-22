@@ -25,8 +25,16 @@ enum class FileTransmission : uint8_t
     Enabled = 1,  ///< `t=f` and `t=t` are read, within the rest of the policy.
 };
 
+/// How a platform's filesystems compare path components.
+enum class PathCase : uint8_t
+{
+    Sensitive = 0,   ///< Byte for byte (Linux, macOS as the policy judges it).
+    Insensitive = 1, ///< ASCII letters case-folded (Windows). A component differing only in the case of a
+                     ///< non-ASCII letter does not match, so such a spelling is refused rather than admitted.
+};
+
 /// What a terminal may read on behalf of a kitty graphics command. Supplied at construction by the
-/// composition root, which owns the platform's answers (the temp roots, the user id).
+/// composition root, which owns the platform's answers (the temp roots, how paths compare).
 struct MediaPolicy
 {
     /// Whether file media are read at all.
@@ -39,10 +47,10 @@ struct MediaPolicy
     std::vector<std::filesystem::path> temporaryFileOnlyRoots;
     /// Canonical further roots `t=f` may read below (default `~/.claude/plugins/data`). Never deleted from.
     std::vector<std::filesystem::path> allowedRoots;
-    /// The user a readable file must be owned by: the reading process's own.
-    uint32_t userId = 0;
     /// The largest file read, in bytes.
     size_t sizeLimit = 0;
+    /// How path components compare against the roots: the platform's own rule.
+    PathCase pathCase = PathCase::Sensitive;
 };
 
 /// Why a file medium was refused. Every refusal reaches the application as the same MediaRefusalReply;
@@ -78,13 +86,28 @@ enum class FileKind : uint8_t
     Regular = 1, ///< A regular file.
 };
 
+/// Who owns an opened file, as the medium source decides it from the identity it was constructed with.
+enum class FileOwner : uint8_t
+{
+    Other = 0,  ///< Anyone but the reader: refused.
+    Reader = 1, ///< The user the terminal reads as.
+};
+
 /// The attributes of an opened file (its `fstat`), as the policy judges them.
 struct OpenedFile
 {
     FileKind kind = FileKind::Other;
-    uint32_t ownerId = 0;
+    FileOwner owner = FileOwner::Other;
     uint64_t linkCount = 0;
     uint64_t size = 0;
+};
+
+/// A requested path the policy accepted as spelled, and where a reader walks it from.
+struct RequestedPath
+{
+    std::filesystem::path path;                   ///< Lexically normal, absolute.
+    std::filesystem::path root;                   ///< Its enclosingRoot().
+    std::vector<std::filesystem::path> belowRoot; ///< Its components below @c root; never empty.
 };
 
 /// Whether a file is deleted once it was read.
@@ -110,6 +133,17 @@ enum class DeletionAfterRead : uint8_t
 [[nodiscard]] std::expected<void, MediaRefusal> checkRequest(MediaPolicy const& policy,
                                                              Medium medium,
                                                              std::string_view path) noexcept;
+
+/// The prelude every reader runs before it touches the filesystem: checkRequest(), a path that is empty or
+/// holds a NUL refused, the UTF-8 @p path decoded (never through a narrow code page), made lexically normal,
+/// judged by checkPath() as spelled, and its enclosingRoot() found.
+/// @param policy The terminal's media policy.
+/// @param medium The command's `t=`.
+/// @param path The path as the application sent it, UTF-8.
+/// @return What to walk; the refusal otherwise.
+[[nodiscard]] std::expected<RequestedPath, MediaRefusal> requestedPath(MediaPolicy const& policy,
+                                                                       Medium medium,
+                                                                       std::string_view path);
 
 /// Judges a path against the policy (checkMedium() first). Asked twice by a reader: of the requested path in
 /// its lexically normal form before anything resolves it -- so that no lookup leaves the roots, an automount
@@ -154,7 +188,9 @@ enum class DeletionAfterRead : uint8_t
 /// Whether a foreground process is a remote-shell client (`ssh`, `mosh-client`, `telnet`, ...): while one is,
 /// the bytes come from another host, whatever the terminal's contexts say, and no local file is read for
 /// them.
-/// @param processName The process name as the PTY reports it; only its last path component counts.
+/// @param processName The process name as the PTY reports it; only its last path component counts (either
+///                    separator), compared without a trailing `.exe` and ignoring ASCII case, as Windows
+///                    names `ssh.exe` or `SSH.EXE` what POSIX names `ssh`.
 /// @return Whether it names a remote-shell client.
 [[nodiscard]] bool isRemoteShellClient(std::string_view processName) noexcept;
 

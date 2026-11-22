@@ -8,7 +8,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
-#ifdef VTBACKEND_KITTY_FILE_MEDIA
+// The Windows source has its own suite (KittyMediumSource_win32_test.cpp).
+#if defined(VTBACKEND_KITTY_FILE_MEDIA) && !defined(_WIN32)
 
     #include <sys/stat.h>
 
@@ -68,8 +69,14 @@ class TestDirectory
                          .temporaryRoots = { root.path() },
                          .temporaryFileOnlyRoots = {},
                          .allowedRoots = {},
-                         .userId = static_cast<uint32_t>(::getuid()),
-                         .sizeLimit = 16 };
+                         .sizeLimit = 16,
+                         .pathCase = PathCase::Sensitive };
+}
+
+/// @return The source of a test, reading as this process's own user.
+[[nodiscard]] PosixMediumSource sourceOf(MediumReadInterleavings interleavings = {})
+{
+    return PosixMediumSource { static_cast<uint32_t>(::getuid()), std::move(interleavings) };
 }
 
 [[nodiscard]] std::vector<uint8_t> bytesOf(std::string_view text)
@@ -89,7 +96,7 @@ TEST_CASE("KittyMediumSource.posix.reads_a_regular_file", "[kitty][media]")
 {
     auto const root = TestDirectory {};
     auto const file = root.write("tty-graphics-protocol-a.rgba", "RGBA");
-    auto const source = PosixMediumSource {};
+    auto const source = sourceOf();
 
     SECTION("t=f keeps it")
     {
@@ -120,7 +127,7 @@ TEST_CASE("KittyMediumSource.posix.reads_a_regular_file", "[kitty][media]")
 TEST_CASE("KittyMediumSource.posix.refusals", "[kitty][media]")
 {
     auto const root = TestDirectory {};
-    auto const source = PosixMediumSource {};
+    auto const source = sourceOf();
     auto const policy = policyFor(root);
 
     SECTION("disabled touches nothing")
@@ -200,11 +207,10 @@ TEST_CASE("KittyMediumSource.posix.swaps_after_the_path_check", "[kitty][media]"
     SECTION("the file swapped for a symbolic link (O_NOFOLLOW)")
     {
         auto const file = root.write("tty-graphics-protocol-a", "RGBA");
-        auto const source =
-            PosixMediumSource { { .pathAccepted = [&](std::filesystem::path const& canonical) {
-                std::filesystem::remove(canonical);
-                std::filesystem::create_symlink(secret, canonical);
-            } } };
+        auto const source = sourceOf({ .pathAccepted = [&](std::filesystem::path const& canonical) {
+            std::filesystem::remove(canonical);
+            std::filesystem::create_symlink(secret, canonical);
+        } });
         checkRefused(source.read(file.native(), Medium::TemporaryFile, policy), MediaRefusal::SymbolicLink);
         CHECK(std::filesystem::exists(secret));
     }
@@ -212,10 +218,10 @@ TEST_CASE("KittyMediumSource.posix.swaps_after_the_path_check", "[kitty][media]"
     SECTION("a directory above it swapped for a symbolic link")
     {
         auto const file = root.write("dir/tty-graphics-protocol-a", "RGBA");
-        auto const source = PosixMediumSource { { .pathAccepted = [&](std::filesystem::path const&) {
+        auto const source = sourceOf({ .pathAccepted = [&](std::filesystem::path const&) {
             std::filesystem::rename(root.path() / "dir", root.path() / "moved");
             std::filesystem::create_directory_symlink(secret.parent_path(), root.path() / "dir");
-        } } };
+        } });
         checkRefused(source.read(file.native(), Medium::TemporaryFile, policy), MediaRefusal::SymbolicLink);
         CHECK(std::filesystem::exists(secret));
     }
@@ -226,7 +232,7 @@ TEST_CASE("KittyMediumSource.posix.a_link_below_the_root_is_never_followed", "[k
     // Following it would look its target up -- an automount, a network filesystem -- under the terminal lock.
     // Refused as a link, whatever it points at, existing or not: its target is never resolved.
     auto const root = TestDirectory {};
-    auto const source = PosixMediumSource {};
+    auto const source = sourceOf();
     auto const target = GENERATE(std::filesystem::path { "/net/example.invalid/tty-graphics-protocol-a" },
                                  std::filesystem::path { "/nonexistent-contour-media-test/dir" });
     INFO(target);
@@ -257,10 +263,10 @@ TEST_CASE("KittyMediumSource.posix.a_swap_before_the_unlink_deletes_nothing_outs
     auto const outside = TestDirectory {};
     auto const file = root.write("dir/tty-graphics-protocol-a", "RGBA");
     auto const moved = outside.path() / "dir";
-    auto const source = PosixMediumSource { { .beforeUnlink = [&](std::filesystem::path const&) {
+    auto const source = sourceOf({ .beforeDelete = [&](std::filesystem::path const&) {
         std::filesystem::rename(root.path() / "dir", moved);
         std::filesystem::create_directory_symlink(moved, root.path() / "dir");
-    } } };
+    } });
 
     auto const bytes = source.read(file.native(), Medium::TemporaryFile, policyFor(root));
     REQUIRE(bytes.has_value());
@@ -272,7 +278,7 @@ TEST_CASE("KittyMediumSource.posix.nothing_outside_the_roots_is_resolved", "[kit
     // Checked as requested before anything resolves it: a lookup there could reach an automount or a network
     // filesystem, stalling the terminal or beaconing to whoever named it.
     auto const root = TestDirectory {};
-    auto const source = PosixMediumSource {};
+    auto const source = sourceOf();
     auto const policy = policyFor(root);
 
     auto const path = GENERATE("/net/example.invalid/tty-graphics-protocol-a"s,
@@ -296,7 +302,7 @@ TEST_CASE("KittyMediumSource.posix.a_root_spelled_through_a_link", "[kitty][medi
     std::filesystem::create_directory_symlink(root.path(), spelling);
     auto const file = root.write("tty-graphics-protocol-a", "RGBA");
     auto const requested = (spelling / "tty-graphics-protocol-a").native();
-    auto const source = PosixMediumSource {};
+    auto const source = sourceOf();
     auto policy = policyFor(root);
 
     SECTION("read through the spelling, the canonical root beside it")
@@ -330,9 +336,8 @@ TEST_CASE("KittyMediumSource.posix.a_root_relinked_into_a_system_tree_opens_noth
     auto const spelling = elsewhere.path() / "spelled-root";
     std::filesystem::create_directory_symlink("/dev", spelling);
     auto opened = std::vector<std::filesystem::path> {};
-    auto const source = PosixMediumSource { { .opening = [&](std::filesystem::path const& path) {
-        opened.push_back(path);
-    } } };
+    auto const source =
+        sourceOf({ .opening = [&](std::filesystem::path const& path) { opened.push_back(path); } });
     auto policy = policyFor(elsewhere);
     policy.temporaryRoots = { spelling };
 

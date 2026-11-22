@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/graphics/KittyBoundedRead.hpp>
 #include <vtbackend/graphics/KittyMediumSource.hpp>
 
 #include <sys/stat.h>
@@ -10,6 +11,7 @@
 #include <format>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -69,45 +71,29 @@ namespace
 #endif
     }
 
-    /// @return What the policy judges of @p status.
-    [[nodiscard]] OpenedFile openedFileOf(struct stat const& status) noexcept
+    /// @return What the policy judges of @p status, its owner compared with the reader @p readerId.
+    [[nodiscard]] OpenedFile openedFileOf(struct stat const& status, uint32_t readerId) noexcept
     {
         return OpenedFile { .kind = S_ISREG(status.st_mode) ? FileKind::Regular : FileKind::Other,
-                            .ownerId = static_cast<uint32_t>(status.st_uid),
+                            .owner = static_cast<uint32_t>(status.st_uid) == readerId ? FileOwner::Reader
+                                                                                      : FileOwner::Other,
                             .linkCount = static_cast<uint64_t>(status.st_nlink),
                             .size = static_cast<uint64_t>(status.st_size) };
     }
 
-    /// Reads @p fd to its end, refusing a file that grew past @p limit since it was measured.
-    [[nodiscard]] std::expected<std::vector<uint8_t>, MediaRefusal> readBounded(int fd,
-                                                                                uint64_t expectedSize,
-                                                                                size_t limit)
+    /// Reads what fits into @p into from @p fd, as readBounded() asks.
+    [[nodiscard]] std::expected<size_t, MediaRefusal> readSome(int fd, std::span<uint8_t> into)
     {
-        auto bytes = std::vector<uint8_t>(static_cast<size_t>(expectedSize));
-        auto filled = size_t { 0 };
         while (true)
         {
-            // One byte of room beyond the limit tells a file that grew past it from one that ends there.
-            if (filled == bytes.size())
-            {
-                if (bytes.size() > limit)
-                    return std::unexpected(MediaRefusal::TooLarge);
-                bytes.resize(std::min(bytes.size() + 4096, limit + 1));
-            }
-            auto const count = ::read(fd, bytes.data() + filled, bytes.size() - filled);
+            auto const count = ::read(fd, into.data(), into.size());
             if (count < 0 && errno == EINTR)
                 continue;
             // A regular file never answers EAGAIN; whatever does is not read on the terminal's thread.
             if (count < 0)
                 return std::unexpected(MediaRefusal::Unreadable);
-            if (count == 0)
-                break;
-            filled += static_cast<size_t>(count);
+            return static_cast<size_t>(count);
         }
-        if (filled > limit)
-            return std::unexpected(MediaRefusal::TooLarge);
-        bytes.resize(filled);
-        return bytes;
     }
 
     /// Opens @p name below the directory @p directory without following a link, refusing one: the link itself
@@ -134,29 +120,23 @@ namespace
         std::filesystem::path path; ///< The root's real path and the components walked.
     };
 
-    /// Opens @p path one component at a time down from @p root, following no link below the root: a link's
-    /// target is never looked up, so no component reaches an automount or a network filesystem, nor leaves
-    /// the root. The root itself is configuration, and its own links (macOS `/tmp`) are followed.
+    /// Opens @p requested one component at a time down from its root, following no link below the root: a
+    /// link's target is never looked up, so no component reaches an automount or a network filesystem, nor
+    /// leaves the root. The root itself is configuration, and its own links (macOS `/tmp`) are followed.
     [[nodiscard]] std::expected<Walked, MediaRefusal> walkBeneath(
-        std::filesystem::path const& root,
-        std::filesystem::path const& path,
+        RequestedPath const& requested,
         MediaPolicy const& policy,
         Medium medium,
         MediumReadInterleavings const& interleavings)
     {
-        auto directory = FileDescriptor { ::open(root.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC) };
+        auto directory =
+            FileDescriptor { ::open(requested.root.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC) };
         if (directory.get() < 0)
             return std::unexpected(MediaRefusal::Unreadable);
         auto walked = descriptorPath(directory.get());
         if (!walked)
             return std::unexpected(MediaRefusal::Unreadable);
-
-        auto components = std::vector<std::filesystem::path> {};
-        for (auto const& component: path.lexically_relative(root))
-            if (!component.empty())
-                components.push_back(component);
-        if (components.empty())
-            return std::unexpected(MediaRefusal::NotRegularFile);
+        auto const& components = requested.belowRoot;
 
         // No link below the root is followed, so the real path is known once the root is open: judged before
         // anything below the root is opened -- a root's spelling re-pointed into /dev must open no device.
@@ -206,27 +186,16 @@ std::expected<std::vector<uint8_t>, MediaRefusal> PosixMediumSource::read(std::s
                                                                           Medium medium,
                                                                           MediaPolicy const& policy) const
 {
-    // Refused before the filesystem is touched at all.
-    if (auto const accepted = checkRequest(policy, medium, path); !accepted)
-        return std::unexpected(accepted.error());
-    if (path.empty() || path.contains('\0'))
-        return std::unexpected(MediaRefusal::Unreadable);
-
-    // Judged as requested before anything is looked up: a lookup outside the roots could reach an automount
-    // or a network filesystem -- a stall under the terminal lock, and a beacon to whoever named it. A
-    // relative path is refused too, as it would resolve against the terminal's own working directory.
-    auto const requested = std::filesystem::path { path }.lexically_normal();
-    if (auto const accepted = checkPath(policy, requested, medium); !accepted)
-        return std::unexpected(accepted.error());
-    auto const root = enclosingRoot(policy, requested, medium);
-    if (!root)
-        return std::unexpected(MediaRefusal::OutsideRoots);
+    // Judged as requested, before the filesystem is touched at all.
+    auto const requested = requestedPath(policy, medium, path);
+    if (!requested)
+        return std::unexpected(requested.error());
 
     if (_interleavings.pathAccepted)
-        _interleavings.pathAccepted(requested);
+        _interleavings.pathAccepted(requested->path);
 
     // Down from the root, following no link: nothing below it is resolved beyond what the path names.
-    auto walked = walkBeneath(*root, requested, policy, medium, _interleavings);
+    auto walked = walkBeneath(*requested, policy, medium, _interleavings);
     if (!walked)
         return std::unexpected(walked.error());
     auto const& canonical = walked->path;
@@ -239,17 +208,19 @@ std::expected<std::vector<uint8_t>, MediaRefusal> PosixMediumSource::read(std::s
     struct stat status {};
     if (::fstat(fd.get(), &status) != 0)
         return std::unexpected(MediaRefusal::Unreadable);
-    if (auto const accepted = checkOpenedFile(policy, openedFileOf(status)); !accepted)
+    if (auto const accepted = checkOpenedFile(policy, openedFileOf(status, _readerId)); !accepted)
         return std::unexpected(accepted.error());
 
-    auto bytes = readBounded(fd.get(), static_cast<uint64_t>(status.st_size), policy.sizeLimit);
+    auto bytes = readBounded(static_cast<uint64_t>(status.st_size),
+                             policy.sizeLimit,
+                             [&fd](std::span<uint8_t> into) { return readSome(fd.get(), into); });
     if (!bytes)
         return bytes;
 
     if (deletionAfterRead(policy, canonical, medium) == DeletionAfterRead::Delete)
     {
-        if (_interleavings.beforeUnlink)
-            _interleavings.beforeUnlink(canonical);
+        if (_interleavings.beforeDelete)
+            _interleavings.beforeDelete(canonical);
         unlinkIfSame(walked->directory.get(), canonical, status);
     }
     return bytes;

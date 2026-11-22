@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/graphics/KittyMediaPolicy.hpp>
 
+#include <core/Utf8Path.hpp>
+
 #include <algorithm>
 #include <array>
 #include <optional>
@@ -20,15 +22,54 @@ namespace
     constexpr auto TemporaryFileSystemTreeExemptions = std::array<std::string_view, 1> { "/dev/shm" };
 
     /// The programs that, in the foreground of a PTY, relay output written somewhere other than this
-    /// machine's own filesystem: another host's (ssh and its kin), any pane's of a multiplexer (whose panes
-    /// may run ssh), or a container's or a VM's. Listed by the name a PTY reports (Linux `comm`, at most 15
-    /// characters), last path component only. A denylist, so a relay not named here passes as local; the
-    /// kitty graphics page says so.
-    constexpr auto RemoteShellClients = std::array<std::string_view, 24> {
-        "autossh", "dbclient", "distrobox-enter", "docker",    "et",     "incus",   "kitten",  "kubectl",
-        "lxc",     "mosh",     "mosh-client",     "multipass", "podman", "rlogin",  "rsh",     "screen",
-        "slogin",  "ssh",      "sshpass",         "telnet",    "tmux",   "toolbox", "vagrant", "zellij",
+    /// machine's own filesystem: another host's (ssh and its kin, PuTTY's `plink`), any pane's of a
+    /// multiplexer (whose panes may run ssh), or a container's or a VM's (`wsl` and the `wslhost` it runs
+    /// through, Hyper-V's `hvc`). Listed by the name a PTY reports (Linux `comm`, at most 15 characters),
+    /// last path component only, in lower case and without `.exe`: isRemoteShellClient() compares a Windows
+    /// image name so. A denylist, so a relay not named here passes as local; the kitty graphics page says so.
+    constexpr auto RemoteShellClients = std::array<std::string_view, 28> {
+        "autossh",   "dbclient", "distrobox-enter", "docker", "et",   "hvc",
+        "incus",     "kitten",   "kubectl",         "lxc",    "mosh", "mosh-client",
+        "multipass", "plink",    "podman",          "rlogin", "rsh",  "screen",
+        "slogin",    "ssh",      "sshpass",         "telnet", "tmux", "toolbox",
+        "vagrant",   "wsl",      "wslhost",         "zellij",
     };
+
+    /// The suffix a Windows image name carries that the POSIX name of the same program does not.
+    constexpr auto ExecutableSuffix = std::string_view { ".exe" };
+
+    /// @return @p c with an ASCII upper-case letter folded to lower case; any other code unit as it is.
+    template <typename Char>
+    [[nodiscard]] constexpr Char asciiFolded(Char c) noexcept
+    {
+        return c >= Char { 'A' } && c <= Char { 'Z' } ? static_cast<Char>(c - Char { 'A' } + Char { 'a' })
+                                                      : c;
+    }
+
+    /// @return Whether @p lhs and @p rhs are equal, ASCII case ignored.
+    [[nodiscard]] constexpr bool equalFolded(std::string_view lhs, std::string_view rhs) noexcept
+    {
+        return std::ranges::equal(lhs, rhs, [](char a, char b) { return asciiFolded(a) == asciiFolded(b); });
+    }
+
+    /// @return Whether the path components @p lhs and @p rhs name the same entry under @p pathCase. Case
+    ///         insensitive, the two separators are alike too, as they are on Windows.
+    [[nodiscard]] bool sameComponent(std::filesystem::path const& lhs,
+                                     std::filesystem::path const& rhs,
+                                     PathCase pathCase)
+    {
+        switch (pathCase)
+        {
+            case PathCase::Sensitive: return lhs == rhs;
+            case PathCase::Insensitive: break;
+        }
+        using NativeChar = std::filesystem::path::value_type;
+        auto const folded = [](NativeChar c) {
+            return c == NativeChar { '/' } ? NativeChar { '\\' } : asciiFolded(c);
+        };
+        return std::ranges::equal(
+            lhs.native(), rhs.native(), [&](NativeChar a, NativeChar b) { return folded(a) == folded(b); });
+    }
 
     /// The marker a `t=t` file's path must carry to be deleted, kitty's rule against deleting files not meant
     /// for it: looked for anywhere in the full path, as the protocol has it.
@@ -54,17 +95,21 @@ namespace
         return components;
     }
 
-    /// @return The components of @p path below @p root, compared component by component (so `/tmpx` is not
-    ///         below `/tmp`), or nullopt when @p path is not strictly below @p root.
+    /// @return The components of @p path below @p root, compared component by component under @p pathCase
+    ///         (so `/tmpx` is not below `/tmp`), or nullopt when @p path is not strictly below @p root.
     [[nodiscard]] std::optional<std::vector<std::filesystem::path>> componentsBelow(
-        std::filesystem::path const& root, std::filesystem::path const& path)
+        std::filesystem::path const& root, std::filesystem::path const& path, PathCase pathCase)
     {
         if (!root.is_absolute())
             return std::nullopt;
         auto const rootComponents = componentsOf(root);
         auto pathComponents = componentsOf(path);
+        auto const same = [pathCase](std::filesystem::path const& lhs, std::filesystem::path const& rhs) {
+            return sameComponent(lhs, rhs, pathCase);
+        };
         if (pathComponents.size() <= rootComponents.size()
-            || !std::ranges::equal(rootComponents, pathComponents | std::views::take(rootComponents.size())))
+            || !std::ranges::equal(
+                rootComponents, pathComponents | std::views::take(rootComponents.size()), same))
             return std::nullopt;
         pathComponents.erase(pathComponents.begin(),
                              pathComponents.begin() + static_cast<std::ptrdiff_t>(rootComponents.size()));
@@ -115,12 +160,13 @@ namespace
     }
 
     [[nodiscard]] Placement placementIn(std::span<std::filesystem::path const> roots,
-                                        std::filesystem::path const& path)
+                                        std::filesystem::path const& path,
+                                        PathCase pathCase)
     {
         auto placement = Placement::Outside;
         for (auto const& root: roots)
         {
-            auto const below = componentsBelow(root, path);
+            auto const below = componentsBelow(root, path, pathCase);
             if (!below)
                 continue;
             if (std::ranges::none_of(*below, isHidden))
@@ -128,6 +174,37 @@ namespace
             placement = Placement::Hidden;
         }
         return placement;
+    }
+
+    /// The root a reader walks from, and what lies below it.
+    struct Enclosing
+    {
+        std::filesystem::path root;
+        std::vector<std::filesystem::path> belowRoot;
+    };
+
+    /// @return The deepest root eligible for @p medium that @p path lies below with no hidden component in
+    ///         between, and the components below it; nullopt when there is none.
+    [[nodiscard]] std::optional<Enclosing> enclosingOf(MediaPolicy const& policy,
+                                                       std::filesystem::path const& path,
+                                                       Medium medium)
+    {
+        auto const& furtherRoots = furtherRootsFor(policy, medium);
+        auto best = std::optional<Enclosing> {};
+        auto bestDepth = size_t { 0 };
+        for (auto const& roots: { std::span { policy.temporaryRoots }, std::span { furtherRoots } })
+            for (auto const& root: roots)
+            {
+                auto below = componentsBelow(root, path, policy.pathCase);
+                if (!below || std::ranges::any_of(*below, isHidden))
+                    continue;
+                if (auto const depth = componentsOf(root).size(); !best || depth > bestDepth)
+                {
+                    best = Enclosing { .root = root, .belowRoot = std::move(*below) };
+                    bestDepth = depth;
+                }
+            }
+        return best;
     }
 } // namespace
 
@@ -166,9 +243,10 @@ std::expected<void, MediaRefusal> checkPath(MediaPolicy const& policy,
         if (isSystemPath(realPath, medium))
             return std::unexpected(MediaRefusal::SystemPath);
 
-        auto placement = placementIn(policy.temporaryRoots, realPath);
+        auto placement = placementIn(policy.temporaryRoots, realPath, policy.pathCase);
         if (placement != Placement::Inside)
-            placement = std::max(placement, placementIn(furtherRootsFor(policy, medium), realPath));
+            placement =
+                std::max(placement, placementIn(furtherRootsFor(policy, medium), realPath, policy.pathCase));
         switch (placement)
         {
             case Placement::Outside: return std::unexpected(MediaRefusal::OutsideRoots);
@@ -183,7 +261,7 @@ std::expected<void, MediaRefusal> checkOpenedFile(MediaPolicy const& policy, Ope
 {
     if (file.kind != FileKind::Regular)
         return std::unexpected(MediaRefusal::NotRegularFile);
-    if (file.ownerId != policy.userId)
+    if (file.owner != FileOwner::Reader)
         return std::unexpected(MediaRefusal::WrongOwner);
     // A hard link into an allowed root must not reach a file outside it, `~/.ssh/id_rsa` say.
     if (file.linkCount != 1)
@@ -197,29 +275,49 @@ std::optional<std::filesystem::path> enclosingRoot(MediaPolicy const& policy,
                                                    std::filesystem::path const& path,
                                                    Medium medium)
 {
-    auto const& furtherRoots = furtherRootsFor(policy, medium);
-    auto best = std::optional<std::filesystem::path> {};
-    auto bestDepth = size_t { 0 };
-    for (auto const& roots: { std::span { policy.temporaryRoots }, std::span { furtherRoots } })
-        for (auto const& root: roots)
-        {
-            auto const below = componentsBelow(root, path);
-            if (!below || std::ranges::any_of(*below, isHidden))
-                continue;
-            if (auto const depth = componentsOf(root).size(); !best || depth > bestDepth)
-            {
-                best = root;
-                bestDepth = depth;
-            }
-        }
-    return best;
+    return enclosingOf(policy, path, medium).transform([](Enclosing enclosing) {
+        return std::move(enclosing.root);
+    });
+}
+
+std::expected<RequestedPath, MediaRefusal> requestedPath(MediaPolicy const& policy,
+                                                         Medium medium,
+                                                         std::string_view path)
+{
+    // Refused before the filesystem is touched at all.
+    if (auto const accepted = checkRequest(policy, medium, path); !accepted)
+        return std::unexpected(accepted.error());
+    if (path.empty() || path.contains('\0'))
+        return std::unexpected(MediaRefusal::Unreadable);
+    // As UTF-8 on every platform: a narrow path constructor reads Windows' ANSI code page, which names
+    // another file than the application did.
+    auto const decoded = core::pathFromUtf8(path);
+    if (!decoded)
+        return std::unexpected(MediaRefusal::Unreadable);
+
+    // Judged as requested before anything is looked up: a lookup outside the roots could reach an automount
+    // or a network filesystem -- a stall under the terminal lock, and a beacon to whoever named it. A
+    // relative path is refused too, as it would resolve against the terminal's own working directory.
+    auto requested = decoded->lexically_normal();
+    if (auto const accepted = checkPath(policy, requested, medium); !accepted)
+        return std::unexpected(accepted.error());
+    auto enclosing = enclosingOf(policy, requested, medium);
+    if (!enclosing)
+        return std::unexpected(MediaRefusal::OutsideRoots);
+    return RequestedPath { .path = std::move(requested),
+                           .root = std::move(enclosing->root),
+                           .belowRoot = std::move(enclosing->belowRoot) };
 }
 
 bool isRemoteShellClient(std::string_view processName) noexcept
 {
-    auto const separator = processName.rfind('/');
-    auto const name = separator == std::string_view::npos ? processName : processName.substr(separator + 1);
-    return std::ranges::contains(RemoteShellClients, name);
+    auto const separator = processName.find_last_of("/\\");
+    auto name = separator == std::string_view::npos ? processName : processName.substr(separator + 1);
+    if (name.size() > ExecutableSuffix.size()
+        && equalFolded(name.substr(name.size() - ExecutableSuffix.size()), ExecutableSuffix))
+        name.remove_suffix(ExecutableSuffix.size());
+    return std::ranges::any_of(RemoteShellClients,
+                               [name](std::string_view client) { return equalFolded(client, name); });
 }
 
 DeletionAfterRead deletionAfterRead(MediaPolicy const& policy,

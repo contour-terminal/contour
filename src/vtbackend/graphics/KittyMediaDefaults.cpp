@@ -94,8 +94,7 @@ std::vector<std::filesystem::path> platformTemporaryFileOnlyRoots()
 
 MediaPolicy mediaPolicy(core::Environment const& env,
                         MediaSettings const& settings,
-                        std::filesystem::path const& homeDirectory,
-                        uint32_t userId)
+                        std::filesystem::path const& homeDirectory)
 {
 #ifdef VTBACKEND_KITTY_FILE_MEDIA
     auto const transmission = settings.transmission;
@@ -115,23 +114,23 @@ MediaPolicy mediaPolicy(core::Environment const& env,
                          .temporaryFileOnlyRoots =
                              withoutOverBroad(platformTemporaryFileOnlyRoots(), canonicalHome),
                          .allowedRoots = withoutOverBroad(std::move(allowedRoots), canonicalHome),
-                         .userId = userId,
-                         .sizeLimit = MaxChunkedPayloadSize };
+                         .sizeLimit = MaxChunkedPayloadSize,
+                         .pathCase = platformPathCase() };
 }
 
-uint32_t currentUserId() noexcept
+PathCase platformPathCase() noexcept
 {
 #ifdef _WIN32
-    return 0;
+    return PathCase::Insensitive;
 #else
-    return static_cast<uint32_t>(::getuid());
+    return PathCase::Sensitive;
 #endif
 }
 
 std::unique_ptr<KittyMediumSource const> makePlatformMediumSource()
 {
 #ifdef VTBACKEND_KITTY_FILE_MEDIA
-    return std::make_unique<PosixMediumSource>();
+    return std::make_unique<PosixMediumSource>(static_cast<uint32_t>(::getuid()));
 #else
     return std::make_unique<RefusingMediumSource>();
 #endif

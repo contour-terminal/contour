@@ -47,18 +47,17 @@ struct MediaSettings
 /// @param env The parsing process's environment, for platformTemporaryRoots().
 /// @param settings What the configuration says.
 /// @param homeDirectory The user's home directory, which no root may open; ignored when not absolute.
-/// @param userId The reading user, who must own every file read.
-/// @return The policy.
+/// @return The policy, its paths compared as the platform's filesystems do (platformPathCase()).
 [[nodiscard]] MediaPolicy mediaPolicy(core::Environment const& env,
                                       MediaSettings const& settings,
-                                      std::filesystem::path const& homeDirectory,
-                                      uint32_t userId);
+                                      std::filesystem::path const& homeDirectory);
 
-/// @return The id of the user this process runs as: the owner every file read must have. 0 on Windows.
-[[nodiscard]] uint32_t currentUserId() noexcept;
+/// @return How the platform's filesystems compare path components: Insensitive on Windows, Sensitive
+///         elsewhere (macOS's case-insensitive default volumes included: a root is judged as spelled).
+[[nodiscard]] PathCase platformPathCase() noexcept;
 
-/// @return The platform's medium source: PosixMediumSource on Linux and macOS, RefusingMediumSource on
-///         Windows.
+/// @return The platform's medium source, reading as the user this process runs as (who must own every file
+///         read): PosixMediumSource on Linux and macOS, RefusingMediumSource on Windows.
 [[nodiscard]] std::unique_ptr<KittyMediumSource const> makePlatformMediumSource();
 
 } // namespace vtbackend::kitty_graphics

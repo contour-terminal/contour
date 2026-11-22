@@ -37,8 +37,8 @@ class KittyMediumSource
         std::string_view path, Medium medium, MediaPolicy const& policy) const = 0;
 };
 
-/// The source of a host that reads no files: every file medium is refused. The only one on Windows, where
-/// the owner, hidden-file and reparse-point rules are not defined yet.
+/// The source of a host that reads no files: every file medium is refused. The only one where
+/// VTBACKEND_KITTY_FILE_MEDIA is not defined: on Windows, and the BSDs.
 class RefusingMediumSource final: public KittyMediumSource
 {
   public:
@@ -49,8 +49,7 @@ class RefusingMediumSource final: public KittyMediumSource
     }
 };
 
-#ifndef _WIN32
-/// The points between the steps of a PosixMediumSource read where a test acts, to prove that a file swapped
+/// The points between the steps of a platform source's read where a test acts, to prove that a file swapped
 /// there is refused or left alone rather than read or deleted. Production passes none.
 struct MediumReadInterleavings
 {
@@ -58,9 +57,11 @@ struct MediumReadInterleavings
     std::function<void(std::filesystem::path const&)> pathAccepted {};
     /// Called with each component's real path below the root just before it is opened.
     std::function<void(std::filesystem::path const&)> opening {};
-    /// Called with the canonical path after the read, just before a `t=t` file is unlinked.
-    std::function<void(std::filesystem::path const&)> beforeUnlink {};
+    /// Called with the canonical path after the read, just before a `t=t` file is deleted.
+    std::function<void(std::filesystem::path const&)> beforeDelete {};
 };
+
+#ifndef _WIN32
 
 /// The POSIX (Linux, macOS) source. In this order, refusing at the first step that fails:
 /// - checkPath() on the requested path, lexically normal, before anything is looked up;
@@ -69,7 +70,8 @@ struct MediumReadInterleavings
 /// - walk down one component at a time with `openat(O_NOFOLLOW)`, refusing any link below the root without
 ///   looking its target up (the file itself opened `O_RDONLY|O_NONBLOCK`, so a FIFO does not block);
 /// - the opened descriptor's own path must be the real path judged;
-/// - `fstat`, checkOpenedFile(), a read bounded by the size limit;
+/// - `fstat`, the owner compared with the reader's user id, checkOpenedFile(), a read bounded by the size
+///   limit;
 /// - deletionAfterRead(), then `unlinkat` in the walked directory, only if it is still where it was and the
 ///   name still names the file read.
 /// Nothing outside the roots is resolved, and nothing is opened before the path policy accepted it: opening a
@@ -77,9 +79,10 @@ struct MediumReadInterleavings
 class PosixMediumSource final: public KittyMediumSource
 {
   public:
+    /// @param readerId The user id the terminal reads as (`getuid()`): every file read must be its.
     /// @param interleavings What runs between the steps; none in production.
-    explicit PosixMediumSource(MediumReadInterleavings interleavings = {}):
-        _interleavings { std::move(interleavings) }
+    explicit PosixMediumSource(uint32_t readerId, MediumReadInterleavings interleavings = {}):
+        _readerId { readerId }, _interleavings { std::move(interleavings) }
     {
     }
 
@@ -87,6 +90,7 @@ class PosixMediumSource final: public KittyMediumSource
         std::string_view path, Medium medium, MediaPolicy const& policy) const override;
 
   private:
+    uint32_t _readerId;
     MediumReadInterleavings _interleavings;
 };
 #endif

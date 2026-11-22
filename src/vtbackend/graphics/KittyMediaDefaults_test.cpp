@@ -57,7 +57,7 @@ TEST_CASE("KittyMediaDefaults.platformTemporaryRoots_ignores_a_relative_TMPDIR",
 TEST_CASE("KittyMediaDefaults.mediaPolicy", "[kitty][media]")
 {
     auto const env = core::testing::FakeEnvironment { { { "TMPDIR", "/x" } } };
-    auto const policy = mediaPolicy(env, claudeDefaults("/home/nobody-here"), "/home/nobody-here", 1234);
+    auto const policy = mediaPolicy(env, claudeDefaults("/home/nobody-here"), "/home/nobody-here");
 #ifdef VTBACKEND_KITTY_FILE_MEDIA
     CHECK(policy.transmission == FileTransmission::Enabled);
 #else
@@ -73,7 +73,7 @@ TEST_CASE("KittyMediaDefaults.mediaPolicy", "[kitty][media]")
         CHECK((root == spelled || root == std::filesystem::weakly_canonical(spelled)));
     CHECK(policy.temporaryRoots == platformTemporaryRoots(env));
     CHECK(policy.temporaryFileOnlyRoots == platformTemporaryFileOnlyRoots());
-    CHECK(policy.userId == 1234);
+    CHECK(policy.pathCase == platformPathCase());
     CHECK(policy.sizeLimit == MaxChunkedPayloadSize);
 #endif
 }
@@ -82,7 +82,7 @@ TEST_CASE("KittyMediaDefaults.mediaPolicy_without_a_home", "[kitty][media]")
 {
     // The configuration resolves `~/.claude/plugins/data` against no home to a relative path: no root.
     auto const env = core::testing::FakeEnvironment {};
-    CHECK(mediaPolicy(env, claudeDefaults(""), "", 1234).allowedRoots.empty());
+    CHECK(mediaPolicy(env, claudeDefaults(""), "").allowedRoots.empty());
 }
 
 TEST_CASE("KittyMediaDefaults.mediaPolicy_follows_the_settings", "[kitty][media]")
@@ -92,14 +92,14 @@ TEST_CASE("KittyMediaDefaults.mediaPolicy_follows_the_settings", "[kitty][media]
     {
         auto const settings =
             MediaSettings { .transmission = FileTransmission::Disabled, .allowList = { "/srv/pictures" } };
-        CHECK(mediaPolicy(env, settings, "/home/nobody-here", 1).transmission == FileTransmission::Disabled);
+        CHECK(mediaPolicy(env, settings, "/home/nobody-here").transmission == FileTransmission::Disabled);
     }
 #ifndef _WIN32
     SECTION("an allow-list of its own, a relative entry dropped")
     {
         auto const settings = MediaSettings { .transmission = FileTransmission::Enabled,
                                               .allowList = { "/srv/pictures", "relative/dir" } };
-        auto const policy = mediaPolicy(env, settings, "/home/nobody-here", 1);
+        auto const policy = mediaPolicy(env, settings, "/home/nobody-here");
         CHECK(policy.transmission == FileTransmission::Enabled);
         CHECK(policy.allowedRoots == std::vector<std::filesystem::path> { "/srv/pictures" });
     }
@@ -107,7 +107,7 @@ TEST_CASE("KittyMediaDefaults.mediaPolicy_follows_the_settings", "[kitty][media]
     {
         auto const settings = MediaSettings { .transmission = FileTransmission::Enabled,
                                               .allowList = { "/home/nobody-here", "/home" } };
-        CHECK(mediaPolicy(env, settings, "/home/nobody-here", 1).allowedRoots.empty());
+        CHECK(mediaPolicy(env, settings, "/home/nobody-here").allowedRoots.empty());
     }
 #endif
 }
@@ -138,34 +138,34 @@ TEST_CASE("KittyMediaDefaults.mediaPolicy_drops_roots_that_open_the_home_directo
     SECTION("TMPDIR=/")
     {
         auto const env = core::testing::FakeEnvironment { { { "TMPDIR", "/" } } };
-        CHECK_FALSE(holdsUnder(mediaPolicy(env, claudeDefaults(home), home, 1).temporaryRoots, "/"));
+        CHECK_FALSE(holdsUnder(mediaPolicy(env, claudeDefaults(home), home).temporaryRoots, "/"));
     }
 
     SECTION("TMPDIR=$HOME")
     {
         auto const env = core::testing::FakeEnvironment { { { "TMPDIR", home.string() } } };
-        CHECK_FALSE(holdsUnder(mediaPolicy(env, claudeDefaults(home), home, 1).temporaryRoots, home));
+        CHECK_FALSE(holdsUnder(mediaPolicy(env, claudeDefaults(home), home).temporaryRoots, home));
     }
 
     SECTION("TMPDIR above $HOME")
     {
         auto const env = core::testing::FakeEnvironment { { { "TMPDIR", home.parent_path().string() } } };
         CHECK_FALSE(
-            holdsUnder(mediaPolicy(env, claudeDefaults(home), home, 1).temporaryRoots, home.parent_path()));
+            holdsUnder(mediaPolicy(env, claudeDefaults(home), home).temporaryRoots, home.parent_path()));
     }
 
     SECTION("plugins/data linked to $HOME")
     {
         std::filesystem::create_directories(home / ".claude/plugins");
         std::filesystem::create_directory_symlink(home, home / ".claude/plugins/data");
-        CHECK(mediaPolicy(core::testing::FakeEnvironment {}, claudeDefaults(home), home, 1)
-                  .allowedRoots.empty());
+        CHECK(
+            mediaPolicy(core::testing::FakeEnvironment {}, claudeDefaults(home), home).allowedRoots.empty());
     }
 
     SECTION("a real plugins/data stays")
     {
         std::filesystem::create_directories(home / ".claude/plugins/data");
-        CHECK(mediaPolicy(core::testing::FakeEnvironment {}, claudeDefaults(home), home, 1).allowedRoots
+        CHECK(mediaPolicy(core::testing::FakeEnvironment {}, claudeDefaults(home), home).allowedRoots
               == std::vector<std::filesystem::path> { home / ".claude/plugins/data" });
     }
 }

@@ -48,8 +48,8 @@ class FakeMediumSource final: public KittyMediumSource
                          .temporaryRoots = { "/tmp" },
                          .temporaryFileOnlyRoots = {},
                          .allowedRoots = {},
-                         .userId = 0,
-                         .sizeLimit = 1024 };
+                         .sizeLimit = 1024,
+                         .pathCase = PathCase::Sensitive };
 }
 
 /// A terminal that reads kitty file media from @p source.
