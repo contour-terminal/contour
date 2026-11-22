@@ -363,12 +363,14 @@ pane agent-plain @worktrees = claude --model {model} --session-id {session} --se
 The engine builds the JSON from a **profile**: `{"permissions":{"defaultMode":…,"allow":[…],"deny":[…]}}`. It never
 writes Claude Code's settings files.
 
-**Profiles** are a data table. The built-in profiles below can be overridden or extended under `permissions:`:
+**Profiles** are a data table. The built-in ones are written out as YAML below for reading. Configuration picks
+the default with `permissions: <name>`, and adds profiles or replaces a built-in one through
+`permission_profiles`, a list of `{ name, extends, mode, allow, deny }`. It is a list, not a map, because the
+configuration's schema walk reads lists of objects:
 
 ```yaml
-permissions:
-  default: standard          # the profile a task without its own uses
-  profiles:
+# built in: the profiles every configuration has
+profiles:
     standard:
       mode: acceptEdits      # edits inside the worktree need no approval
       allow:
@@ -417,7 +419,7 @@ tasks:
   change. To widen one run, answer `2 always` when it asks; to change the profile, end it and `run again`, which
   opens the launcher with the run's choice and lets you pick another `perms`. Details says this beside the profile:
   `standard · fixed at start · run again to change`.
-- **Off:** `permissions: { default: ask }` restores Claude Code's own prompts.
+- **Off:** `permissions: ask` restores Claude Code's own prompts.
 - **Refused in config:** `bypassPermissions` mode, and a rule naming no tool. A full bypass is never one config line
   away. A profile may only allow and deny named rules.
 
