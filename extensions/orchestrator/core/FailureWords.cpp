@@ -22,8 +22,11 @@ namespace
                        .plain = "a program is missing or the request was refused"sv },
         FailureWords { .code = "limit"sv, .plain = "busy — try again"sv },
         FailureWords { .code = "too-many"sv, .plain = "too many agent panes — close one first"sv },
-        FailureWords { .code = "program-missing"sv,
-                       .plain = "claude isn't installed or isn't on the daemon's PATH"sv },
+        FailureWords {
+            .code = "program-missing"sv,
+            .plain = "claude isn't installed or isn't on the daemon's PATH"sv,
+            .detail =
+                "name its executable under the extension's programs in daemon.extensions, such as claude: ~/.local/bin/claude"sv },
         FailureWords { .code = "not-a-directory"sv, .plain = "the worktree path isn't a directory"sv },
         FailureWords { .code = "gone"sv, .plain = "it's gone"sv },
         FailureWords {

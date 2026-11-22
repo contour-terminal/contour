@@ -267,7 +267,8 @@ std::expected<std::unique_ptr<DaemonExtensionRuntime::Extension>, DeclarationPro
                                   .inheritedEnvironment = config.inheritedEnvironment,
                                   .hostId = extension->hostId,
                                   .grantDigest = extension->grantDigest,
-                                  .selfPrograms = config.selfPrograms };
+                                  .selfPrograms = config.selfPrograms,
+                                  .programs = programTableOf(declaration.programs, config.selfPrograms) };
     auto const& declared = extension->processesConfig.manifest;
     auto const owner = ServedTabOwner { .extension = extension->name,
                                         .title = displayTitleOf(declared),
@@ -309,7 +310,8 @@ std::expected<void, RootError> DaemonExtensionRuntime::makePanes(Extension& exte
     auto panes = DeclaredPanes::create(
         DeclaredPanesConfig { .manifest = extension.processesConfig.manifest,
                               .roots = extension.roots,
-                              .inheritedEnvironment = extension.processesConfig.inheritedEnvironment },
+                              .inheritedEnvironment = extension.processesConfig.inheritedEnvironment,
+                              .programs = extension.processesConfig.programs },
         _services.directories,
         *extension.paneHost);
     if (!panes)

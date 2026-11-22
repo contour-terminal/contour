@@ -628,6 +628,8 @@ daemon:
     extensions:
         orchestrator:
             autostart: true
+            programs:
+                claude: ~/.local/bin/claude
             config:
                 worktree_root: ~/worktrees
                 models: [opus, sonnet, haiku]
@@ -649,6 +651,7 @@ Key         | Meaning
 ------------|------------------------------------------------------------------------------------------------
 `path`      | The module to load; without it, the bundled orchestrator.
 `autostart` | `true`: start it as the daemon starts. Otherwise it starts when something asks for it, such as its command-palette row.
+`programs`  | A map from a program its commands and agent panes run, such as `claude` or `gh`, to the executable to run for it: an absolute path, or one starting with `~/`. Without an entry a program is looked up on the daemon's `PATH`, and a daemon started by systemd or launchd often has one without the user's own bin directories (`~/.local/bin`, a version manager's shims): the orchestrator then reports that `claude` is not installed.
 `config`    | The orchestrator's configuration, below. One that does not parse is shown on its tab, one line naming the key, and nothing is read or started until it is fixed.
 
 Its `config`:

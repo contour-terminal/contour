@@ -65,7 +65,8 @@ class RecordingPaneHost final: public IPaneHost
 /// One DeclaredPanes over fakes, with `/w` as `worktrees` and `/r` as `repos`, and the worktree `/w/run-1`.
 struct Fixture
 {
-    explicit Fixture(std::vector<std::string> inherited = { "PATH=/usr/bin" })
+    explicit Fixture(std::vector<std::string> inherited = { "PATH=/usr/bin" },
+                     std::vector<ProgramPath> programs = {})
     {
         for (auto const* path: { "/w", "/w/run-1", "/r", "/r/repo" })
             directories.add(path);
@@ -73,7 +74,8 @@ struct Fixture
             DeclaredPanesConfig { .manifest = manifest,
                                   .roots = { { .label = "worktrees", .paths = { "/w" } },
                                              { .label = "repos", .paths = { "/r" } } },
-                                  .inheritedEnvironment = std::move(inherited) },
+                                  .inheritedEnvironment = std::move(inherited),
+                                  .programs = std::move(programs) },
             directories,
             host);
         REQUIRE(created.has_value());
@@ -139,6 +141,23 @@ TEST_CASE("pane-open spawns the template's argv", "[vtextension][panes]")
     CHECK(spawn.title == "run-1");
     CHECK(spawn.tag == "run-1");
     CHECK(spawn.nearTab == "tab-7");
+}
+
+TEST_CASE("pane-open runs the executable the configuration names for the template's program",
+          "[vtextension][panes]")
+{
+    // A daemon started by systemd has a PATH without ~/.local/bin, where Claude Code's installer puts claude.
+    auto f = Fixture { { "PATH=/usr/bin" },
+                       { ProgramPath { .name = "claude", .path = "/home/u/.local/bin/claude" },
+                         ProgramPath { .name = "gh", .path = "/opt/gh" } } };
+    REQUIRE(f.open(agentArguments()).has_value());
+
+    REQUIRE(f.host.spawns.size() == 1);
+    auto const& argv = f.host.spawns.front().argv;
+    REQUIRE(argv.size() == 6);
+    CHECK(argv.front() == "/home/u/.local/bin/claude");
+    // Only the program is replaced: an argument spelled like a configured program stays as it is.
+    CHECK(argv[1] == "--model");
 }
 
 TEST_CASE("pane-open refuses", "[vtextension][panes]")

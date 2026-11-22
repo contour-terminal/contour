@@ -3974,7 +3974,62 @@ std::optional<DaemonExtensionConfig> YAMLConfigReader::readDaemonExtension(std::
         }
         extension.configJson = *std::move(json);
     }
+
+    if (auto const programs = settings["programs"]; programs && !programs.IsNull())
+        extension.programs = readDaemonExtensionPrograms(programs, extension.name, keyPath);
     return extension;
+}
+
+std::vector<DaemonExtensionProgram> YAMLConfigReader::readDaemonExtensionPrograms(
+    YAML::Node const& programs, std::string_view name, std::string_view keyPath) const
+{
+    auto result = std::vector<DaemonExtensionProgram> {};
+    if (!programs.IsMap())
+    {
+        errorLog()("Ignoring the 'programs' of extension '{}' of {}: expected a map from a program's name to "
+                   "its executable.",
+                   name,
+                   keyPath);
+        return result;
+    }
+    for (auto const& item: programs)
+    {
+        auto program = item.first.IsScalar() ? item.first.as<std::string>() : std::string {};
+        // A name with a separator is a path already, which no PATH search would have found by that name.
+        if (program.empty() || program.find_first_of("/\\") != std::string::npos)
+        {
+            errorLog()("Skipping a program of extension '{}' of {}: its name must be a program name, without "
+                       "a path separator.",
+                       name,
+                       keyPath);
+            continue;
+        }
+        if (std::ranges::contains(result, program, &DaemonExtensionProgram::name))
+        {
+            errorLog()(
+                "Skipping program '{}' of extension '{}' of {}: it is given twice; the first one stands.",
+                program,
+                name,
+                keyPath);
+            continue;
+        }
+        auto const text = item.second.IsScalar() ? item.second.as<std::string>() : std::string {};
+        auto const path = text.empty() ? std::filesystem::path {} : resolvedPath(text);
+        // Absolute only: a relative one would be looked up on the very PATH this setting is there to bypass.
+        if (!path.is_absolute())
+        {
+            errorLog()(
+                "Skipping program '{}' of extension '{}' of {}: its executable must be an absolute path "
+                "or start with '~/'.",
+                program,
+                name,
+                keyPath);
+            continue;
+        }
+        result.push_back(
+            DaemonExtensionProgram { .name = std::move(program), .path = path.lexically_normal() });
+    }
+    return result;
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,

@@ -66,6 +66,8 @@ TEST_CASE("ExtensionDeclarations: a daemon extension, as the daemon world takes 
         .path = "/ext/orchestrator.wasm",
         .autostart = contour::config::DaemonExtensionAutostart::AtDaemonStart,
         .configJson = R"({"max_agents":4})",
+        .programs = { contour::config::DaemonExtensionProgram { .name = "claude",
+                                                                .path = "/opt/claude/bin/claude" } },
     };
     auto const declaration = contour::config::daemonExtensionDeclarationOf(configured, "/state/store");
     CHECK(declaration.name == "orchestrator");
@@ -73,6 +75,8 @@ TEST_CASE("ExtensionDeclarations: a daemon extension, as the daemon world takes 
     CHECK(declaration.autostart == vtextension::ExtensionAutostart::AtDaemonStart);
     CHECK(declaration.configJson == R"({"max_agents":4})");
     CHECK(declaration.storeDirectory == "/state/store");
+    CHECK(declaration.programs
+          == std::vector { vtextension::ProgramPath { .name = "claude", .path = "/opt/claude/bin/claude" } });
     CHECK(contour::config::toExtensionAutostart(contour::config::DaemonExtensionAutostart::OnDemand)
           == vtextension::ExtensionAutostart::OnDemand);
 }

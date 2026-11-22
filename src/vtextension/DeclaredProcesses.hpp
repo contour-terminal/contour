@@ -22,6 +22,7 @@
 #include <vtextension/Manifest.hpp>
 #include <vtextension/ProcessService.hpp>
 #include <vtextension/RootResolution.hpp>
+#include <vtextension/SelfPrograms.hpp>
 
 namespace vtextension
 {
@@ -54,8 +55,11 @@ struct DeclaredProcessesConfig
     std::string grantDigest;                       ///< The digest the grant must be recorded for.
     ProcessTimeouts timeouts {};                   ///< How long each timeout class may run.
     ProcessLimits limits {};                       ///< How much the processes may hold.
-    std::vector<SelfProgram>
-        selfPrograms = {}; ///< The programs a command runs as the daemon's own executable.
+    /// The programs that are the daemon's own executable, as the extension's `load` is told of them; a
+    /// command runs them through @ref programs, which holds them too.
+    std::vector<SelfProgram> selfPrograms = {};
+    /// The programs a command runs from a given executable (programTableOf()), not from its PATH.
+    std::vector<ProgramPath> programs = {};
 };
 
 /// What a DeclaredProcesses reaches the world through; each must outlive it.
@@ -75,8 +79,9 @@ struct DeclaredProcessesServices
 /// and no other name is passed; each value is of its declared kind (a `path:<root>` value also resolves
 /// inside its root, and the resolved path is what the command is given); the limits; a missing root declared
 /// `create` is created; the working directory is opened and belongs to the command's root. A substituted
-/// value stays one argv word, and no shell is involved. A command whose program is one of the configuration's
-/// self programs runs the daemon's own executable (resolveSelfProgram()), not what its PATH finds.
+/// value stays one argv word, and no shell is involved. A command whose program is in the configuration's
+/// program table runs the executable it names (resolveProgram()) -- the user's choice, or the daemon's own
+/// executable for a self program -- not what its PATH finds.
 class DeclaredProcesses final: public IProcessService
 {
     /// Lets only create() construct one, through std::make_unique.

@@ -8,6 +8,7 @@
 #include <expected>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace YAML
 {
@@ -16,6 +17,17 @@ class Node;
 
 namespace contour::config
 {
+
+/// One entry of `daemon.extensions.<name>.programs`: a program the extension's commands and panes run from a
+/// given executable rather than from the daemon's PATH, which a service manager often leaves without the
+/// user's own bin directories.
+struct DaemonExtensionProgram
+{
+    std::string name;           ///< The program as the extension's argv names it, such as `claude`: no `/`.
+    std::filesystem::path path; ///< The executable: absolute, `~` and variables expanded.
+
+    bool operator==(DaemonExtensionProgram const&) const = default;
+};
 
 /// One entry of `daemon.extensions`: a WebAssembly extension the daemon runs with no window attached.
 ///
@@ -27,6 +39,7 @@ struct DaemonExtensionConfig
     std::filesystem::path path; ///< The module on disk; empty names a bundled extension, found by @ref name.
     DaemonExtensionAutostart autostart = DaemonExtensionAutostart::OnDemand; ///< When it starts.
     std::string configJson = "{}"; ///< Its `config` subtree, as JSON: what the extension is loaded with.
+    std::vector<DaemonExtensionProgram> programs {}; ///< Its `programs`, in the configuration's order.
 
     bool operator==(DaemonExtensionConfig const&) const = default;
 };

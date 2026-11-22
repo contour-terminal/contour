@@ -22,6 +22,7 @@
 #include <vtextension/Manifest.hpp>
 #include <vtextension/PaneService.hpp>
 #include <vtextension/RootResolution.hpp>
+#include <vtextension/SelfPrograms.hpp>
 
 namespace vtextension
 {
@@ -70,6 +71,9 @@ struct DeclaredPanesConfig
     Manifest const& manifest;                      ///< The extension's manifest; outlives the service.
     std::vector<ResolvedRoot> roots;               ///< Its roots, resolved; distinct.
     std::vector<std::string> inheritedEnvironment; ///< The daemon's environment, as `NAME=value`.
+    /// The programs run from a given executable (programTableOf()): a template whose program is one runs that
+    /// executable, not what the pane's PATH finds.
+    std::vector<ProgramPath> programs = {};
 };
 
 /// One extension's agent panes. open() checks, in this order: the template is declared; the title and the

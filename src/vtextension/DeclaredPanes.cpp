@@ -196,6 +196,8 @@ std::expected<std::string, PaneError> DeclaredPanes::open(std::string_view paneT
     if (!argv)
         return std::unexpected(PaneError::ArgumentRejected);
 
+    resolveProgram(*argv, _config.programs);
+
     auto directory = openInRoot(_directories, _config.roots, declared->root, cwd);
     if (!directory)
         return std::unexpected(CwdErrorOfRefusal.at(std::to_underlying(cwdRefusalOf(directory.error()))));

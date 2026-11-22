@@ -327,7 +327,7 @@ std::expected<ProcessHandle, ProcessError> DeclaredProcesses::start(std::string_
         return std::unexpected(cwdErrorOf(made.error()));
     }
 
-    resolveSelfProgram(*argv, _config.selfPrograms);
+    resolveProgram(*argv, _config.programs);
     auto spec = vtpty::ProcessSpec {
         .argv = std::move(*argv),
         .workingDirectory = std::move(*directory),

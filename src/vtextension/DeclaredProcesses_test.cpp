@@ -260,13 +260,14 @@ TEST_CASE("DeclaredProcesses: every refusal", "[daemon][processes]")
     }
 }
 
-TEST_CASE("DeclaredProcesses: contour runs as the daemon's own executable", "[daemon][processes]")
+namespace
 {
-    // A launchd agent's, an AppImage's or a .dmg's PATH holds no `contour`.
-    constexpr auto Executable = "/Applications/Contour.app/Contents/MacOS/contour"sv;
-    auto config = configWith(defaultRoots());
+/// Starts `agent-transcript`, whose program is `contour`, and `gh-auth`, whose program is `gh`, under
+/// @p config with every root present and the grant recorded.
+/// @return The argv of each, in that order.
+[[nodiscard]] std::vector<std::vector<std::string>> argvsOfContourAndGh(DeclaredProcessesConfig config)
+{
     config.inheritedEnvironment = { "PATH=/usr/bin:/bin" };
-    config.selfPrograms = selfProgramsOf(std::filesystem::path { Executable });
     auto runner = FakeProcessRunner {};
     auto directories = FakeDirectoryOpener {};
     for (auto const* path: { "/w", "/w/contour", "/w/contour/pr-1", "/r/contour" })
@@ -290,14 +291,44 @@ TEST_CASE("DeclaredProcesses: contour runs as the daemon's own executable", "[da
                 .has_value());
     REQUIRE((*processes)->start("gh-auth", {}, "/r/contour", "t").has_value());
 
-    REQUIRE(runner.started().size() == 2);
-    auto const& transcript = runner.started()[0].spec.argv;
+    auto argvs = std::vector<std::vector<std::string>> {};
+    for (auto const& started: runner.started())
+        argvs.push_back(started.spec.argv);
+    return argvs;
+}
+} // namespace
+
+TEST_CASE("DeclaredProcesses: contour runs as the daemon's own executable", "[daemon][processes]")
+{
+    // A launchd agent's, an AppImage's or a .dmg's PATH holds no `contour`.
+    constexpr auto Executable = "/Applications/Contour.app/Contents/MacOS/contour"sv;
+    auto config = configWith(defaultRoots());
+    config.programs = programTableOf({}, selfProgramsOf(std::filesystem::path { Executable }));
+    auto const argvs = argvsOfContourAndGh(std::move(config));
+
+    REQUIRE(argvs.size() == 2);
+    auto const& transcript = argvs[0];
     REQUIRE(transcript.size() > 3);
     CHECK(transcript[0] == Executable);
     CHECK(transcript[1] == "agent");
     CHECK(transcript[2] == "transcript");
     // Another program is still found on the command's PATH.
-    CHECK(runner.started()[1].spec.argv.front() == "gh");
+    CHECK(argvs[1].front() == "gh");
+}
+
+TEST_CASE("DeclaredProcesses: a configured program runs its executable, before a self program",
+          "[daemon][processes]")
+{
+    auto const configured = std::array { ProgramPath { .name = "gh", .path = "/home/u/.local/bin/gh" },
+                                         ProgramPath { .name = "contour", .path = "/home/u/src/contour" } };
+    auto config = configWith(defaultRoots());
+    config.programs = programTableOf(configured, selfProgramsOf("/opt/contour/bin/contour"));
+    auto const argvs = argvsOfContourAndGh(std::move(config));
+
+    REQUIRE(argvs.size() == 2);
+    // The user's choice wins over the daemon's own executable.
+    CHECK(argvs[0].front() == "/home/u/src/contour");
+    CHECK(argvs[1].front() == "/home/u/.local/bin/gh");
 }
 
 #ifndef _WIN32
@@ -320,7 +351,7 @@ TEST_CASE("DeclaredProcesses: a PATH without contour still runs the transcript c
     auto config = configWith({ { .label = "worktrees", .paths = { worktrees.string() } },
                                { .label = "repos", .paths = { (worktrees / "repo").string() } } });
     config.inheritedEnvironment = { std::format("PATH={}", emptyPath.string()) };
-    config.selfPrograms = selfProgramsOf("/bin/echo");
+    config.programs = programTableOf({}, selfProgramsOf("/bin/echo"));
     auto processes =
         DeclaredProcesses::create(std::move(config),
                                   DeclaredProcessesServices { .runner = **runner,

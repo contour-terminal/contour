@@ -513,6 +513,16 @@ struct YAMLConfigReader
                                                                            YAML::Node const& settings,
                                                                            std::string_view keyPath) const;
 
+    /// Reads the `programs` map of an entry of `daemon.extensions:`. An entry whose name holds a path separator,
+    /// or whose executable is no absolute path, is skipped with the reason reported.
+    /// @param programs The map.
+    /// @param name The extension's key, for the diagnostics.
+    /// @param keyPath Where the extension is declared, for the diagnostics.
+    /// @return The programs that stand, in the map's order.
+    [[nodiscard]] std::vector<DaemonExtensionProgram> readDaemonExtensionPrograms(YAML::Node const& programs,
+                                                                                 std::string_view name,
+                                                                                 std::string_view keyPath) const;
+
     /// Reads the module `path` of an entry of `extensions:` or `daemon.extensions:`, relative to the directory of
     /// the file that declares it.
     /// @param settings The entry's map.
@@ -970,6 +980,12 @@ struct Writer
                     std::format("            path: {}\n", SingleQuoted { core::pathToUtf8(extension.path) });
             result += std::format("            autostart: {}\n",
                                   extension.autostart == DaemonExtensionAutostart::AtDaemonStart);
+            if (!extension.programs.empty())
+                result += "            programs:\n";
+            for (auto const& program: extension.programs)
+                result += std::format("                {}: {}\n",
+                                      SingleQuoted { program.name },
+                                      SingleQuoted { core::pathToUtf8(program.path) });
             result += std::format("            config: {}\n", extension.configJson);
         }
         return result;

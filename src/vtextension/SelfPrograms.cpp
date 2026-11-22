@@ -17,11 +17,20 @@ std::vector<SelfProgram> selfProgramsOf(std::filesystem::path const& executable)
     return programs;
 }
 
-void resolveSelfProgram(std::vector<std::string>& argv, std::span<SelfProgram const> programs)
+std::vector<ProgramPath> programTableOf(std::span<ProgramPath const> configured,
+                                        std::span<SelfProgram const> self)
+{
+    auto table = std::vector<ProgramPath>(configured.begin(), configured.end());
+    for (auto const& program: self)
+        table.push_back(ProgramPath { .name = program.name, .path = program.path });
+    return table;
+}
+
+void resolveProgram(std::vector<std::string>& argv, std::span<ProgramPath const> programs)
 {
     if (argv.empty())
         return;
-    if (auto const program = std::ranges::find(programs, argv.front(), &SelfProgram::name);
+    if (auto const program = std::ranges::find(programs, argv.front(), &ProgramPath::name);
         program != programs.end())
         argv.front() = program->path;
 }

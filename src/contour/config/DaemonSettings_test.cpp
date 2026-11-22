@@ -21,6 +21,7 @@
 #include <vthost/SessionSettings.hpp>
 
 using contour::config::DaemonExtensionAutostart;
+using contour::config::DaemonExtensionProgram;
 using contour::config::DaemonMode;
 using contour::config::YamlToJsonError;
 using contour::test::loadConfigFromYaml;
@@ -281,6 +282,59 @@ TEST_CASE("daemon.extensions: an entry's defaults", "[config][daemon]")
     CHECK(orchestrator.configJson == "{}");
     CHECK(config.daemon.value().extensions[1].path.filename() == "x.wasm");
     CHECK(config.daemon.value().extensions[1].path.is_absolute());
+}
+
+TEST_CASE("daemon.extensions: programs name the executables an extension runs", "[config][daemon]")
+{
+    auto const config = loadConfigFromYaml("daemon:\n"
+                                           "  extensions:\n"
+                                           "    orchestrator:\n"
+                                           "      programs:\n"
+                                           "        claude: /opt/claude/bin/claude\n"
+                                           "        gh: ~/bin/gh\n");
+    REQUIRE(config.daemon.value().extensions.size() == 1);
+    auto const& programs = config.daemon.value().extensions.front().programs;
+    REQUIRE(programs.size() == 2);
+    CHECK(programs[0] == DaemonExtensionProgram { .name = "claude", .path = "/opt/claude/bin/claude" });
+    CHECK(programs[1].name == "gh");
+    // `~/` is the home directory: absolute, and no longer spelled with a tilde.
+    CHECK(programs[1].path.is_absolute());
+    CHECK(programs[1].path.filename() == "gh");
+
+    SECTION("and through the writer")
+    {
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+        auto const reread = loadConfigFromYaml(written);
+        CHECK(reread.daemon.value().extensions == config.daemon.value().extensions);
+    }
+}
+
+TEST_CASE("daemon.extensions: a program that names no executable costs only itself", "[config][daemon]")
+{
+    auto const config = loadConfigFromYaml("daemon:\n"
+                                           "  extensions:\n"
+                                           "    orchestrator:\n"
+                                           "      autostart: true\n"
+                                           "      programs:\n"
+                                           "        bin/claude: /opt/claude\n" // a path, not a program name
+                                           "        relative: bin/claude\n" // found on the PATH it bypasses
+                                           "        empty: ''\n"
+                                           "        listed: [/a, /b]\n"
+                                           "        claude: /opt/claude\n"
+                                           "        claude: /opt/other\n"); // the first one stands
+    REQUIRE(config.daemon.value().extensions.size() == 1);
+    auto const& orchestrator = config.daemon.value().extensions.front();
+    CHECK(orchestrator.autostart == DaemonExtensionAutostart::AtDaemonStart);
+    CHECK(orchestrator.programs
+          == std::vector { DaemonExtensionProgram { .name = "claude", .path = "/opt/claude" } });
+
+    SECTION("a programs that is no map is ignored, the entry kept")
+    {
+        auto const list =
+            loadConfigFromYaml("daemon:\n  extensions:\n    orchestrator:\n      programs: [claude]\n");
+        REQUIRE(list.daemon.value().extensions.size() == 1);
+        CHECK(list.daemon.value().extensions.front().programs.empty());
+    }
 }
 
 TEST_CASE("daemon.extensions: a config that has no JSON spelling costs the entry", "[config][daemon]")

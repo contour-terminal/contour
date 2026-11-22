@@ -36,6 +36,7 @@
 #include <vtextension/IHostServices.hpp>
 #include <vtextension/PaneService.hpp>
 #include <vtextension/RootResolution.hpp>
+#include <vtextension/SelfPrograms.hpp>
 #include <vtextension/ServedTabService.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 
@@ -93,6 +94,9 @@ struct DaemonExtensionDeclaration
     ExtensionAutostart autostart = ExtensionAutostart::OnDemand; ///< When it is started.
     std::string configJson = "{}";        ///< Its `config` subtree, as JSON: what `load` is given.
     std::filesystem::path storeDirectory; ///< Its durable store's directory; empty when none can be named.
+    /// The programs its commands and pane templates run from a given executable (`programs`), not from the
+    /// daemon's PATH.
+    std::vector<ProgramPath> programs = {};
 };
 
 /// Why one declaration does not run.
