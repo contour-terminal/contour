@@ -199,10 +199,10 @@ inline constexpr auto HintSeparator = std::string_view { " · " };
 [[nodiscard]] std::string cut(std::string_view text, int columns);
 
 /// cut() for text sanitised already, such as a board's line (displayLines()): its runs of spaces are kept.
-/// @param text Sanitised UTF-8: no control character.
+/// @param sanitised Sanitised UTF-8: no control character.
 /// @param columns The most cells the result may take.
-/// @return @p text, or its longest prefix of whole grapheme clusters that leaves a cell for a `…`.
-[[nodiscard]] std::string cutSanitised(std::string_view text, int columns);
+/// @return @p sanitised, or its longest prefix of whole grapheme clusters that leaves a cell for a `…`.
+[[nodiscard]] std::string cutSanitised(std::string_view sanitised, int columns);
 
 /// Text safe to draw, word-wrapped. Lines break at spaces; a word wider than a line is broken between
 /// grapheme clusters, never inside a wide character.
