@@ -524,10 +524,7 @@ namespace
                         Rect { .x = 0, .y = y + shift, .width = inside.width(), .height = heightOf(row) },
                         Hit { .kind = HitKind::Row,
                               .value = selectableCount(_state.rows, std::span { rows }.first(at)) });
-                drawRow(inside,
-                        y + shift,
-                        _state.rows[rows[at]],
-                        at == selected ? Selection::Selected : Selection::Unselected);
+                drawRow(inside, y + shift, row, at == selected ? Selection::Selected : Selection::Unselected);
                 y += heights[at];
             }
         }
