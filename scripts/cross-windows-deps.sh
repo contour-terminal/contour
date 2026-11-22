@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Fetches the C libraries a Linux -> Windows cross build links against (OpenSSL, libssh2, zlib, FreeType,
-# HarfBuzz, cairo and what they pull in) as Fedora's prebuilt mingw64 packages, and lays them out as a
-# prefix the clang-cl toolchain (cmake/toolchains/windows-clangcl-cross.cmake) finds them in.
+# Fetches the C libraries a Linux -> Windows cross build links against (OpenSSL, libssh2, zlib, libpng,
+# FreeType, HarfBuzz, cairo and what they pull in) as Fedora's prebuilt mingw64 packages, and lays them out
+# as a prefix the clang-cl toolchain (cmake/toolchains/windows-clangcl-cross.cmake) finds them in.
 #
 # Usage: scripts/cross-windows-deps.sh [PREFIX]   (default: out/windows-cross-deps)
 #
@@ -17,7 +17,7 @@
 # @see docs/internals/windows-cross-build.md
 set -euo pipefail
 
-readonly PACKAGES=(mingw64-openssl mingw64-libssh2 mingw64-zlib mingw64-freetype mingw64-harfbuzz mingw64-cairo)
+readonly PACKAGES=(mingw64-openssl mingw64-libssh2 mingw64-zlib mingw64-libpng mingw64-freetype mingw64-harfbuzz mingw64-cairo)
 
 prefix="$(realpath -m "${1:-out/windows-cross-deps}")"
 work="$(mktemp -d)"
@@ -48,7 +48,8 @@ sed -i 's/^#define HAVE_UNISTD_H 1$//' "$prefix/include/zconf.h"
 # pkg-config files name the prefix they were built for, some of them in more places than prefix=.
 sed -i "s|/usr/x86_64-w64-mingw32/sys-root/mingw|$prefix|g" "$prefix"/lib/pkgconfig/*.pc
 
-# On MSVC, CMake looks for foo.lib (FindZLIB, FindFreetype, harfbuzz's config) or libfoo.lib (FindOpenSSL).
+# On MSVC, CMake looks for foo.lib (FindZLIB, FindFreetype, harfbuzz's config) or libfoo.lib (FindOpenSSL);
+# FindPNG takes either.
 for import in "$prefix"/lib/lib*.dll.a; do
     name="$(basename "$import" .dll.a)"
     cp "$import" "$prefix/lib/$name.lib"

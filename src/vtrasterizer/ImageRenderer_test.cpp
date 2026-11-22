@@ -424,6 +424,48 @@ TEST_CASE("ImageRenderer.composites the gap on the image's own side of the text"
     }
 }
 
+TEST_CASE("ImageRenderer.leaves a kitty placeholder's gap to the cell background", "[image][renderer]")
+{
+    // kitty shows the cell's own background around an image fitted into placeholder cells, so a
+    // placeholder-origin image paints no gap: the cell background, drawn by the background pass, shows
+    // through. A cursor-placed image keeps painting its placement-time gap colour.
+    auto constexpr GapColor = RGBAColor { 0xFF, 0x00, 0x00, 0xFF };
+    auto constexpr Span = GridSize { .lines = LineCount(1), .columns = ColumnCount(2) };
+    auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
+
+    for (auto const origin: { ImageOrigin::Cursor, ImageOrigin::Placeholder })
+    {
+        INFO("origin " << static_cast<int>(origin));
+        auto renderTarget = MockRenderTarget {};
+        auto imageRenderer = ImageRenderer { testGridMetrics, CellSize };
+        imageRenderer.setRenderTarget(renderTarget, directMappingAllocator);
+
+        // A 10x10 image across two 10x20 cells: the first cell is half gap, the second all gap.
+        auto data = Image::Data(std::size_t { 100 } * 4, 0x7F);
+        auto image = std::make_shared<Image>(
+            ImageId(1), ImageFormat::RGBA, std::move(data), ImageSize { Width(10), Height(10) }, [](auto) {});
+        auto const raster = std::make_shared<RasterizedImage>(std::move(image),
+                                                              ImageAlignment::TopStart,
+                                                              ImageResize::NoResize,
+                                                              GapColor,
+                                                              Span,
+                                                              CellSize,
+                                                              ImageLayer::Replace,
+                                                              PixelCoordinate {},
+                                                              ImageSize {},
+                                                              KittyPlacementId {},
+                                                              origin);
+        renderRow(imageRenderer, raster, 2);
+
+        auto& backend = renderTarget.getMockImageBackend();
+        CHECK(backend.quadCommands.size() == 1); // the image itself is drawn either way
+        if (origin == ImageOrigin::Placeholder)
+            CHECK(backend.gapCommands.empty());
+        else
+            CHECK(backend.gapCommands.size() == 2);
+    }
+}
+
 TEST_CASE("ImageRenderer.paints no gap for an image that covers its cells", "[image][renderer]")
 {
     // The common case by far, and it must cost nothing: every cell of an image drawn at its natural

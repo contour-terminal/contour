@@ -5,7 +5,6 @@ src/contour/qml/ConfirmDialog.qml 13
 src/contour/qml/PopupSurface.qml 1
 src/contour/qml/TabColorFlyout.qml 1
 src/contour/qml/TabItem.qml 2
-src/contour/qml/TerminalPane.qml 1
 src/contour/qml/WindowControls.qml 5
 src/contour/styles/ContourTui/Button.qml 1
 src/contour/styles/ContourTui/ComboBox.qml 2

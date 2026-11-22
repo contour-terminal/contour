@@ -401,7 +401,8 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                                  std::unique_ptr<platform::Notifier> notifier,
                                  SessionRole role,
                                  SessionHosting hosting,
-                                 input::KeyboardPlatformFactory keyboardPlatforms):
+                                 input::KeyboardPlatformFactory keyboardPlatforms,
+                                 MediaAccess mediaAccess):
     _manager { manager },
     _id { createSessionId() },
     _startTime { app.terminalClocks().steady.now() },
@@ -445,7 +446,12 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                 vtbackend::randomSemanticBlockTokens(),
                 app.linkDetectionServices(),
                 terminalExtensionServices(),
-                app.gitHeadServices() },
+                app.gitHeadServices(),
+                mediaAccess == MediaAccess::LocalFiles ? std::optional { app.kittyMediumServices() }
+                                                       : std::nullopt,
+                // At construction, before the child starts: a display attaching later is too late for a
+                // program that sends a picture at once, and assigning it then raced the parser thread.
+                app.imageDecoder() },
     _exitWatcherThread { std::make_unique<ExitWatcherThread>(*this) },
     // _config is declared before _desktopNotifier, so reading it here is well-defined. The delay is
     // fixed for the notifier's life: it decides how a backend that cannot observe a close behaves,

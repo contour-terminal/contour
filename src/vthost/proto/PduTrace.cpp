@@ -327,24 +327,26 @@ namespace
                        auto const& value = std::get<Delta>(pdu);
                        // Counts and the ACTIVE ID only -- never a record's fields. @see the
                        // SessionState row above.
-                       return std::format("session={} gen={} seq={} snapshot={}/{} lines={} links={} "
-                                          "imagecells={} statuslines={} progress={}/{} contexts={} "
-                                          "activecontext={} blocks={} retired={}",
-                                          value.session,
-                                          value.generation,
-                                          value.seqno,
-                                          value.snapshot,
-                                          value.snapshotPart,
-                                          value.lines.size(),
-                                          value.hyperlinks.size(),
-                                          value.imageCells.size(),
-                                          value.statusLines.size(),
-                                          value.progressChanged != 0 ? value.progressState : 0,
-                                          value.progressChanged != 0 ? value.progressPercentage : 0,
-                                          value.contexts.size(),
-                                          value.contextChanged != 0 ? value.activeContext : 0,
-                                          value.commandBlocks.size(),
-                                          value.retiredCommandBlocks.size());
+                       return std::format(
+                           "session={} gen={} seq={} snapshot={}/{} lines={} links={} "
+                           "imagecells={} placements={} statuslines={} progress={}/{} contexts={} "
+                           "activecontext={} blocks={} retired={}",
+                           value.session,
+                           value.generation,
+                           value.seqno,
+                           value.snapshot,
+                           value.snapshotPart,
+                           value.lines.size(),
+                           value.hyperlinks.size(),
+                           value.imageCells.size(),
+                           value.imagePlacements.size(),
+                           value.statusLines.size(),
+                           value.progressChanged != 0 ? value.progressState : 0,
+                           value.progressChanged != 0 ? value.progressPercentage : 0,
+                           value.contexts.size(),
+                           value.contextChanged != 0 ? value.activeContext : 0,
+                           value.commandBlocks.size(),
+                           value.retiredCommandBlocks.size());
                    } },
         TraceRow { PduType::SessionBell,
                    "SessionBell",

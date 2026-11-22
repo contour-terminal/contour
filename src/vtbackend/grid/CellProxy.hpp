@@ -314,7 +314,7 @@ class BasicCellProxy
         degradeToMixedIfNeeded();
     }
 
-    void setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, CellLocation offset)
+    void setImageFragment(std::shared_ptr<RasterizedImage const> rasterizedImage, CellLocation offset)
         requires(!IsConst)
     {
         markDirty();

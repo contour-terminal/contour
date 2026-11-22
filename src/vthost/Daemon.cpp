@@ -13,6 +13,7 @@
 #include <vthost/Daemon.hpp>
 
 #include <vtbackend/core/TerminalContext.hpp>
+#include <vtbackend/graphics/KittyMediaDefaults.hpp>
 #include <vtbackend/screen/GitHead.hpp>
 
 #include <vtpty/DetachedProcess.hpp>
@@ -1621,7 +1622,15 @@ namespace
             return std::nullopt;
         return std::pair { std::string { host }, static_cast<std::uint16_t>(port) };
     }
+
 } // namespace
+
+vtbackend::kitty_graphics::MediaPolicy kittyMediaPolicyOf(core::Environment const& env,
+                                                          DaemonConfig const& config)
+{
+    return vtbackend::kitty_graphics::mediaPolicy(
+        env, config.kittyMedia, config.homeDirectory, vtbackend::kitty_graphics::currentUserId());
+}
 
 std::optional<std::pair<std::string, std::uint16_t>> parseHostPort(std::string_view spec)
 {
@@ -1724,6 +1733,8 @@ int runDaemon(DaemonConfig const& config,
 
     // Behind a keeper, every shell is the keeper's child, spawned through it; otherwise this daemon's own.
     auto const shellDevices = daemonKeeper.shellDevices(config.placement);
+    // What every hosted session's kitty graphics read files with. Declared before the host, which borrows it.
+    auto const kittyMediumSource = vtbackend::kitty_graphics::makePlatformMediumSource();
     auto host = SessionHost {
         loop,
         makeShellPtyFactory(config.shell, config.escapeSandbox, config.socketPath, shellDevices),
@@ -1736,6 +1747,11 @@ int runDaemon(DaemonConfig const& config,
             .startupLayout = config.startupLayout,
             .identity = thisHostIdentity(),
             .workspaceGit = WorkspaceGitServices { .probe = *gitProbe, .executor = gitExecutor },
+            .kittyMedia =
+                vtbackend::kitty_graphics::KittyMediumServices {
+                    .source = *kittyMediumSource,
+                    .policy = kittyMediaPolicyOf(core::defaultEnvironment(), config) },
+            .imageDecoder = config.imageDecoder,
             .extensions = config.extensions ? config.extensions() : nullptr,
             .profiles = config.profiles,
             .profilePtys = config.profiles

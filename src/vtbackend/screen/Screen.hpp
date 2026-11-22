@@ -330,17 +330,128 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void processKittyGraphics(std::string_view body);
 
     /// Answers a kitty graphics command, unless it asked to be left alone (`q=`).
-    void replyKittyGraphics(kitty_graphics::Command const& command, std::string_view status);
+    /// @param keys Extra keys to put before the status, each with a leading comma; only on success.
+    void replyKittyGraphics(kitty_graphics::Command const& command,
+                            std::string_view status,
+                            std::string_view keys = {});
 
-    /// Whether showKittyFrame() found a placement to show the frame in.
+    /// Whether a kitty image ended up shown on the page: showKittyFrame() found a placement to show the frame
+    /// in, or resolveKittyPlaceholderLine() attached a fragment there.
     enum class Placed : uint8_t
     {
-        No,  ///< No fragment of the previous frame is on the page.
-        Yes, ///< At least one fragment was replaced.
+        No,  ///< Nothing on the page shows it.
+        Yes, ///< At least one fragment on the page was replaced or attached.
     };
+
+    /// Handles a kitty `a=t`/`a=T` once its chunks are stitched: stores the image and, for `a=T`, places it.
+    void transmitKittyImage(kitty_graphics::Command command);
+
+    /// An image a kitty transmission carries, decoded and checked, not yet stored.
+    struct PreparedKittyImage
+    {
+        ImageFormat format;
+        ImageSize size;
+        Image::Data pixels;
+    };
+
+    /// Validates, reads, inflates and decodes what a kitty `a=t`/`a=T`/`a=q` transmits, storing nothing.
+    /// @return The image, or the wire status to answer with.
+    [[nodiscard]] std::expected<PreparedKittyImage, std::string_view> prepareKittyImage(
+        kitty_graphics::Command const& command) const;
+
+    /// The bytes a kitty command's payload stands for: its base64 decoded for `t=d`; for a file medium the
+    /// named file's content, read through Terminal::kittyMediaForCurrentBatch().
+    /// @return The bytes, or kitty_graphics::MediaRefusalReply for any file medium refused.
+    [[nodiscard]] std::expected<Image::Data, std::string_view> kittyPayloadBytes(
+        kitty_graphics::Command const& command) const;
+
+    /// Handles a kitty `a=p`: places a stored image at the cursor, or makes a virtual placement of it.
+    void putKittyImage(kitty_graphics::Command const& command);
 
     /// Places @p image at the cursor, sized per the command's `c=`/`r=` or derived from its pixels.
     void renderKittyImage(kitty_graphics::Command const& command, std::shared_ptr<Image const> const& image);
+
+    /// Makes a virtual placement (`U=1`) of @p image: fits it into the command's span, aspect-preserved
+    /// and centred, as kitty does. Writes no cell and leaves the cursor. Replaces the image's virtual
+    /// placement of the same placement id.
+    /// @return The reason it was refused, as the reply's status.
+    [[nodiscard]] std::expected<void, std::string_view> createKittyVirtualPlacement(
+        kitty_graphics::Command const& command, std::shared_ptr<Image const> const& image);
+
+    /// Validates a virtual placement (`U=1`) @p command asks for, before anything it would replace is
+    /// touched.
+    /// @return The wire status to refuse it with, or nullopt when it can be made.
+    [[nodiscard]] static std::optional<std::string_view> validateKittyVirtualPlacement(
+        kitty_graphics::Command const& command) noexcept;
+
+    /// Resolves one line's kitty Unicode placeholder cells: attaches each resolved cell's fragment of its
+    /// virtual placement, drops the placeholder fragments no longer resolved, and clears the line's
+    /// LineFlag::ImagePlaceholders when it holds no placeholder any more.
+    /// @param line A page line, or a history line at a negative offset.
+    /// @return Placed::Yes when it attached a fragment to a cell of the page.
+    [[nodiscard]] Placed resolveKittyPlaceholderLine(LineOffset line);
+
+    /// Notes a kitty Unicode placeholder cell written to @p line, for resolveKittyPlaceholders().
+    void notePlaceholderCell(LineOffset line) noexcept;
+
+    /// Notes @p line for resolveKittyPlaceholders() when it holds kitty Unicode placeholder cells: a cell
+    /// without a column diacritic continues its left neighbour, so cells shifted, erased or overwritten
+    /// within the row change what the cells after them show, and the fragments the shifted cells carried
+    /// along.
+    void notePlaceholderRowChanged(LineOffset line) noexcept;
+
+    /// Makes the next resolveKittyPlaceholders() walk the history as well as the page.
+    void rescanKittyPlaceholdersEverywhere() noexcept;
+
+    /// Whether eraseKittyVirtualPlacement() found a placement to erase.
+    enum class Erased : uint8_t
+    {
+        No,  ///< The image had no virtual placement of that id.
+        Yes, ///< It had one, and it is gone.
+    };
+
+    /// Removes @p imageId's virtual placement @p placementId, if it has one. Its cells are left to the
+    /// rescan a caller asks for: a cell without a placement id may now show the image's next one.
+    /// @return Whether it had one.
+    [[nodiscard]] Erased eraseKittyVirtualPlacement(uint32_t imageId, KittyPlacementId placementId);
+
+    /// Erases @p imageId's virtual placement @p placementId, if it has one, and rescans the placeholder
+    /// cells, which may now show the image's next virtual placement or nothing.
+    void dropKittyVirtualPlacement(uint32_t imageId, KittyPlacementId placementId);
+
+    /// How far a kitty `a=d` reaches: the case of its `d=` target.
+    enum class KittyDeleteReach : uint8_t
+    {
+        Placements = 0,        ///< Lower case: the placements go, the image data stays.
+        PlacementsAndData = 1, ///< Upper case: the image data goes too, once no placement of it is left.
+    };
+
+    /// Deletes placements of the stored images among @p imageIds, the virtual ones included.
+    /// @param imageIds The images; ids no stored image holds are skipped.
+    /// @param placementId Only this placement of each; zero for all of them.
+    /// @param reach Whether the image data goes too.
+    void deleteKittyImages(std::span<uint32_t const> imageIds,
+                           KittyPlacementId placementId,
+                           KittyDeleteReach reach);
+
+    /// Forgets the kitty image @p imageId: its data, its animation and the numbers naming it.
+    void freeKittyImage(uint32_t imageId);
+
+    /// Drops every image number's ids that no stored image holds any more.
+    void forgetFreedKittyImageNumbers();
+
+    /// @return The id of the newest image transmitted under kitty image number @p imageNumber (`I=`), or 0.
+    [[nodiscard]] uint32_t kittyImageIdOfNumber(uint32_t imageNumber) const noexcept;
+
+    /// For a command that addresses a stored image (`a=p`, `a=f`, `a=a`, `a=c`): the image a number (`I=`)
+    /// names is the newest transmitted under it, as kitty's img_by_client_number() finds it.
+    /// @param command The command as parsed.
+    /// @return @p command, with the id of the image its number names when it gave one.
+    [[nodiscard]] kitty_graphics::Command resolvedKittyImageNumber(
+        kitty_graphics::Command command) const noexcept;
+
+    /// @return The smallest kitty image id no stored image holds, for a transmission by number.
+    [[nodiscard]] uint32_t freeKittyImageId() const;
 
     /// Moves the cursor past a placed image as ImageCursorPolicy::AdvancePastImage describes.
     /// @param topLeft the image's top-left cell, where the cursor was when it was placed.
@@ -409,6 +520,11 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// @return The image ids with at least one fragment on the page, already showing its swap or not.
     std::unordered_set<uint32_t> showKittyFrames(KittyFrameSwaps const& swaps);
 
+    /// @return A raster of @p next made exactly as @p previous was: geometry, alignment, gap colour, layer,
+    ///         placement id and origin.
+    [[nodiscard]] static std::shared_ptr<RasterizedImage> rasterizeKittyFrame(
+        RasterizedImage const& previous, std::shared_ptr<Image const> next);
+
     /// Shows @p next in every placement of @p imageId, whichever of its frames the cells hold: one page walk.
     /// @param imageId The kitty image.
     /// @param next The frame to show.
@@ -436,7 +552,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     /// Clears the on-screen fragments of @p imageId, whichever of its frames the cells hold. Walks
     /// the page only.
-    void removeKittyPlacementsOf(uint32_t imageId);
+    void removeKittyPlacementsOf(std::span<uint32_t const> imageIds);
 
     /// Clears the fragments of the one placement of @p imageId made with @p placementId, page and
     /// scrollback alike, whichever of the image's frames the cells hold.
@@ -460,11 +576,13 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     [[nodiscard]] std::expected<void, std::string_view> deleteKittyGraphics(
         kitty_graphics::Command const& command);
 
-    /// Removes every image fragment on the page, leaving the text sharing those cells untouched.
+    /// Removes every image fragment placed at the cursor on the page, leaving the text sharing those cells
+    /// and the pictures of placeholder cells untouched.
     ///
     /// Fragments do not record which protocol placed them, so this clears Sixel images too, as it
     /// always has.
-    void removeAllKittyPlacements();
+    /// @return the kitty images at least one of the removed fragments showed.
+    std::unordered_set<uint32_t> removeAllKittyPlacements();
 
     /// How much of the grid a walk for image fragments covers.
     enum class KittyScan : uint8_t
@@ -1274,6 +1392,34 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
         return it != _kittyImages.end() ? it->second : nullptr;
     }
 
+    /// A kitty virtual placement (`U=1`): an image fitted into a span of cells that no cell holds until
+    /// Unicode placeholder cells name it. The raster is built once, when the placement is made, and
+    /// every placeholder cell's fragment shares it.
+    struct KittyVirtualPlacement
+    {
+        KittyPlacementId placementId;                  ///< `p=`; zero for none.
+        std::shared_ptr<RasterizedImage const> raster; ///< The image fitted into the placement's span.
+    };
+
+    /// Resolves the kitty Unicode placeholder cells written since the last call into image cells, if any
+    /// were: every page line flagged LineFlag::ImagePlaceholders, and the flagged history lines too after a
+    /// change that can resolve cells printed long ago (a placement made, an image re-transmitted, a resize).
+    /// Called once per parse batch, so that a placeholder whose diacritics arrive in a later read is
+    /// resolved from what the line holds once they have.
+    void resolveKittyPlaceholders();
+
+    /// @return How many lines the last resolveKittyPlaceholders() that ran walked: the page plus the rows
+    ///         scrolled into the history since the first placeholder of the batch, or the whole history
+    ///         after a change that can resolve cells printed long ago. Observable so the bound is testable.
+    [[nodiscard]] size_t kittyPlaceholderLinesWalked() const noexcept { return _kittyPlaceholderLinesWalked; }
+
+    /// Looks up a virtual placement the way a placeholder cell names it.
+    /// @param imageId The kitty image id.
+    /// @param placementId The placement id; zero means the image's first virtual placement.
+    /// @return The placement, or null when the image has none of that id. Valid until the next kitty command.
+    [[nodiscard]] KittyVirtualPlacement const* findKittyVirtualPlacement(uint32_t imageId,
+                                                                         KittyPlacementId placementId) const;
+
     /// @return the image of 1-based frame @p number of @p imageId, or nullptr if there is none.
     ///         Unlike kittyAnimationFor(), this creates no animation, so a command may consult it
     ///         before it has decided to succeed.
@@ -1715,7 +1861,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// blockRowChanges(); one that takes a vi mark off it is reported to the user-mark index; one that
     /// changes the shell marks a row carries drops the cached fold ranges.
     /// @param line The row to erase.
-    /// @param flags The flags it is left with.
+    /// @param flags The flags it is left with, less the DerivedLineFlags, which describe the cells erased.
     /// @param attributes The rendition its blank cells take.
     /// @return The erased row, for a caller that goes on to write it.
     Line& eraseRowInPlace(LineOffset line, LineFlags flags, GraphicsAttributes attributes) noexcept;
@@ -1959,6 +2105,34 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     std::unordered_map<uint32_t, std::shared_ptr<Image const>> _kittyImages {};
 
     std::unordered_map<uint32_t, KittyAnimation> _kittyAnimations {};
+
+    /// Which lines the next resolveKittyPlaceholders() walks.
+    enum class PlaceholderScan : uint8_t
+    {
+        Idle = 0,       ///< No placeholder was written, nor anything changed that could resolve one.
+        Pending = 1,    ///< Placeholder cells were written: the flagged page lines.
+        Everywhere = 2, ///< A placement or an image changed, or the page was resized: history too.
+    };
+
+    /// Not captured: a restored screen resolves nothing until a cell is written; its fragments came along.
+    PlaceholderScan _kittyPlaceholders = PlaceholderScan::Idle;
+
+    /// linesScrolledIntoHistory() when placeholder cells were first written since the last resolve: a
+    /// Pending resolve also walks the rows scrolled into the history since then, which the same batch may
+    /// have pushed a picture's top rows into.
+    uint64_t _kittyPlaceholderScrollMark = 0;
+
+    /// See kittyPlaceholderLinesWalked().
+    size_t _kittyPlaceholderLinesWalked = 0;
+
+    /// Virtual placements (`U=1`) by image id, in the order they were made: the front one is what a
+    /// placeholder cell without a placement id shows.
+    std::unordered_map<uint32_t, std::vector<KittyVirtualPlacement>> _kittyVirtualPlacements {};
+
+    /// Kitty image numbers (`I=`) to the ids of the images still stored under each, in transmission order:
+    /// the back one is what the number names, and freeing it makes the number name the one before.
+    std::unordered_map<uint32_t, std::vector<uint32_t>> _kittyImageNumbers {};
+
     /// Not captured: a cost counter tests read, which counts this process's walks only.
     uint64_t _kittyFragmentWalks = 0; ///< @see kittyFragmentWalks()
 

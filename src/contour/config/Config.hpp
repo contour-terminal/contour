@@ -31,6 +31,7 @@
 #include <vtbackend/core/LinkDecoration.hpp>
 #include <vtbackend/core/Primitives.hpp> // CursorDisplay
 #include <vtbackend/core/TerminalContext.hpp>
+#include <vtbackend/graphics/KittyMediaDefaults.hpp>
 #include <vtbackend/input/InputBinding.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
 #include <vtbackend/input/MatchModes.hpp>
@@ -818,7 +819,19 @@ struct ImagesConfig
     bool sixelScrolling { true };
     int maxImageColorRegisters { 4096 };
     bool goodImageProtocol { false };
+    /// `kitty_file_transmission`: whether kitty graphics may read files (`t=f`, `t=t`) for a local session.
+    /// A `bool` at the YAML boundary only; kittyMediaSettings() converts it to vtbackend's FileTransmission.
+    bool kittyFileTransmission { true };
+    /// `kitty_file_allow_list`: further directories `t=f` may read below, as written (`~` unresolved).
+    std::vector<std::string> kittyFileAllowList { "~/.claude/plugins/data" };
 };
+
+/// The kitty file media settings @p images states, converted at the configuration boundary.
+/// @param images The configuration's `images` section.
+/// @param homeDirectory What a leading `~` in an allow-list entry stands for.
+/// @return The settings, each allow-list entry home-resolved; an entry that is not valid UTF-8 is dropped.
+[[nodiscard]] vtbackend::kitty_graphics::MediaSettings kittyMediaSettings(
+    ImagesConfig const& images, std::filesystem::path const& homeDirectory);
 
 /// The most rows `daemon.restore.scrollback_lines` keeps per pane.
 inline constexpr std::size_t MaxRestoreScrollbackLines = 100'000;

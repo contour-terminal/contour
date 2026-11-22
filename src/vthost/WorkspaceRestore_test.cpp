@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/MockPty.hpp>
 
+#include <core/Base64.hpp>
 #include <core/Environment.hpp>
 #include <core/log/LogSink.hpp>
 #include <core/net/EventLoop.hpp>
@@ -212,6 +213,30 @@ TEST_CASE("each restored pane starts in its directory with its profile", "[vthos
     CHECK(h.recorded.overrides[0]->program == "/bin/zsh");
     auto const session = host->model().workspace(host->workspaceId())->tabAt(0)->activePane()->session();
     CHECK(host->paneRuntime(session).profile == "work");
+}
+
+TEST_CASE("a restored pane decodes PNG images with the host's decoder", "[vthost][snapshot][restore]")
+{
+    // A restored pane is spawned anew, and gets what every new session gets: here, the image decoder.
+    auto h = RestoreHarness {};
+    auto decoded = std::make_shared<int>(0);
+    auto const host = h.makeHost(SessionHostConfig {
+        .imageDecoder = [decoded](vtbackend::ImageFormat,
+                                  std::span<uint8_t const>,
+                                  vtbackend::ImageSize& size) -> std::optional<vtbackend::Image::Data> {
+            ++*decoded;
+            size = vtbackend::ImageSize { vtbackend::Width(1), vtbackend::Height(1) };
+            return vtbackend::Image::Data { 255, 255, 255, 255 };
+        },
+        .restore = WorkspaceRestore { .snapshot = workspaceOf({ PaneSnapshot {} }) } });
+    REQUIRE(host->sessionCount() == 1);
+
+    auto& terminal = terminalOf(*host, 0);
+    pump(terminal,
+         std::format("\033_Ga=t,i=5,f=100;{}\033\\",
+                     core::base64::encode(std::string_view { "\x89PNG\r\n\x1a\n" })));
+    CHECK(terminal.peekInput() == "\033_Gi=5;OK\033\\");
+    CHECK(*decoded == 1);
 }
 
 TEST_CASE("a directory that is gone opens the pane in the default directory", "[vthost][snapshot][restore]")

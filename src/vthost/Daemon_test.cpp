@@ -1866,3 +1866,26 @@ TEST_CASE("a daemon given nothing to upgrade with offers no live upgrade and ref
     CHECK(framesOf<vthost::proto::DaemonUpgrading>(received).empty());
 }
 #endif
+
+#ifndef _WIN32
+TEST_CASE("Daemon.kittyMediaPolicyOf judges the allow-list against the home ~ was resolved with",
+          "[vthost][daemon][media]")
+{
+    // A daemon started without $HOME still resolves `~` (from the passwd entry); the entry that names the
+    // whole home must be dropped against that same home, not against an empty $HOME that drops nothing.
+    auto const env = core::testing::FakeEnvironment {};
+    auto config = vthost::DaemonConfig {};
+    config.homeDirectory = "/home/nobody-here";
+    config.kittyMedia = vtbackend::kitty_graphics::MediaSettings {
+        .transmission = vtbackend::kitty_graphics::FileTransmission::Enabled,
+        .allowList = { "/home/nobody-here", "/home/nobody-here/pictures" },
+    };
+
+    auto const policy = vthost::kittyMediaPolicyOf(env, config);
+
+    CHECK(std::ranges::find(policy.allowedRoots, std::filesystem::path { "/home/nobody-here" })
+          == policy.allowedRoots.end());
+    CHECK(std::ranges::find(policy.allowedRoots, std::filesystem::path { "/home/nobody-here/pictures" })
+          != policy.allowedRoots.end());
+}
+#endif

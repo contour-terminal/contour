@@ -237,6 +237,7 @@ install_deps_popos() {
         libqt5opengl5-dev
         libqt5x11extras5-dev
         libssh2-1-dev
+        libpng-dev
         libssl-dev
         zlib1g-dev
         libsystemd-dev
@@ -282,6 +283,7 @@ install_deps_ubuntu() {
         libfreetype6-dev
         libharfbuzz-dev
         libssh2-1-dev
+        libpng-dev
         libssl-dev
         zlib1g-dev
         libsystemd-dev
@@ -300,7 +302,6 @@ install_deps_ubuntu() {
         packages="$packages
             libgl1-mesa-dev
             libglvnd-dev
-            libqt6core5compat6-dev
             libqt6opengl6-dev
             qml6-module-qt-labs-platform
             qml6-module-qtqml-workerscript
@@ -309,7 +310,6 @@ install_deps_ubuntu() {
             qml6-module-qtmultimedia
             qml6-module-qtquick-templates
             qml6-module-qtquick-window
-            qml6-module-qt5compat-graphicaleffects
             qt6-base-dev
             qt6-base-dev-tools
             qt6-base-private-dev
@@ -366,6 +366,12 @@ install_deps_ubuntu() {
     # libqt6svg6, which qt6-svg-dev pulls in, and have no qt6-svg-plugins to install.
     if apt-cache show qt6-svg-plugins >/dev/null 2>&1; then
         packages="$packages qt6-svg-plugins"
+    fi
+
+    # The background blur is Qt Quick's MultiEffect (QtQuick.Effects, Qt 6.5+). Older releases (Ubuntu
+    # 24.04's Qt 6.4) have no package for it; a build there takes its Qt from install-qt-action instead.
+    if apt-cache show qml6-module-qtquick-effects >/dev/null 2>&1; then
+        packages="$packages qml6-module-qtquick-effects"
     fi
 
     fetch_and_unpack_gsl
@@ -425,7 +431,7 @@ install_deps_FreeBSD() {
         ncurses \
         ninja \
         pkgconf \
-        qt6-5compat \
+        png \
         qt6-base \
         qt6-declarative \
         qt6-multimedia \
@@ -453,6 +459,7 @@ install_deps_OpenBSD() {
         libssh2 \
         ninja \
         pkgconf \
+        png \
         qt6-qt5compa \
         qt6 \
         qt6-qtdeclarative \
@@ -483,6 +490,7 @@ install_deps_arch() {
         ninja \
         openssl \
         zlib \
+        libpng \
         pkg-config \
         systemd-libs \
         libutempter \
@@ -491,7 +499,6 @@ install_deps_arch() {
 
     if test x$QTVER = x6; then
         packages="$packages \
-            qt6-5compat \
             qt6-base \
             qt6-declarative \
             qt6-multimedia \
@@ -534,6 +541,7 @@ install_deps_suse() {
         libxkbcommon-x11-devel
         libopenssl-devel
         zlib-devel
+        libpng16-devel
         libssh2-devel
         ncurses-devel
         systemd-devel
@@ -551,8 +559,6 @@ install_deps_suse() {
             qt6-multimedia-imports
             qt6-opengl-devel
             qt6-qml-devel
-            qt6-qt5compat-devel
-            qt6-qt5compat-imports
             qt6-quick-devel
             qt6-quick-devel
             qt6-quickcontrols2-devel
@@ -595,6 +601,7 @@ install_deps_fedora() {
         ninja-build
         openssl-devel
         zlib-devel
+        libpng-devel
         pkgconf
         rust-std-static-wasm32-wasip1
         systemd-devel
@@ -609,7 +616,6 @@ install_deps_fedora() {
 
     if test x$QTVER = x6; then
         packages="$packages
-            qt6-qt5compat-devel
             qt6-qtbase-devel
             qt6-qtbase-private-devel
             qt6-qtbase-gui
@@ -674,6 +680,7 @@ install_deps_darwin() {
         fontconfig \
         freetype \
         harfbuzz \
+        libpng \
         libssh2 \
         libtool \
         openssl \

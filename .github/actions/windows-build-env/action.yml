@@ -35,13 +35,13 @@ runs:
         # notice that the detected Qt is older than the version Contour is tested against. Raise
         # this to "6.11.*" once aqtinstall learns the new layout.
         version: "6.10.*"
-        modules: qtmultimedia qt5compat qtshadertools qtspeech
+        modules: qtmultimedia qtshadertools qtspeech
     - name: Install Qt -- retry past a bad mirror
       if: steps.install_qt.outcome == 'failure'
       uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
       with:
         version: "6.10.*"
-        modules: qtmultimedia qt5compat qtshadertools qtspeech
+        modules: qtmultimedia qtshadertools qtspeech
     - name: "Setup NuGet for vcpkg caching"
       shell: bash
       env:

@@ -577,8 +577,9 @@ namespace
 } // namespace
 // }}}
 
-ContourApp::ContourApp(core::Environment const& env):
-    App(env, "contour", "Contour Terminal Emulator", CONTOUR_VERSION_STRING, "Apache-2.0")
+ContourApp::ContourApp(core::Environment const& env, vtbackend::ImageDecoder imageDecoder):
+    App(env, "contour", "Contour Terminal Emulator", CONTOUR_VERSION_STRING, "Apache-2.0"),
+    _imageDecoder { std::move(imageDecoder) }
 {
     using Project = core::cli::about::Project;
     core::cli::about::registerProjects(
@@ -588,6 +589,7 @@ ContourApp::ContourApp(core::Environment const& env):
         Project { "Qt", "GPL", "https://www.qt.io/" },
         Project { "FreeType", "GPL, FreeType License", "https://freetype.org/" },
         Project { "HarfBuzz", "Old MIT", "https://harfbuzz.github.io/" },
+        Project { "libpng", "PNG Reference Library License v2", "http://www.libpng.org/pub/png/libpng.html" },
         // Project{"Catch2", "BSL-1.0", "https://github.com/catchorg/Catch2"},
         Project { "libunicode", "Apache-2.0", "https://github.com/contour-terminal/libunicode" },
         Project { "yaml-cpp", "MIT", "https://github.com/jbeder/yaml-cpp" },
@@ -1512,6 +1514,11 @@ int ContourApp::serveDaemon(DaemonVerbOptions const& options,
 
     auto config = vthost::DaemonConfig {};
     config.instance = daemonInstanceOf(handover);
+    // The daemon's own say on kitty file media, `~` being its user's home: files are read where it runs. The
+    // policy judges the allow-list against the same home `~` resolved to, so it is looked up once.
+    config.homeDirectory = vtpty::Process::homeDirectory();
+    config.kittyMedia = contour::config::kittyMediaSettings(hostConfig->images.value(), config.homeDirectory);
+    config.imageDecoder = _imageDecoder;
     // Behind a keeper, the socket the keeper resolved and holds the lock beside.
     config.socketPath = keeper ? keeper->launch.socketPath()
                                : DaemonLaunch::resolve(options, daemonSettings.socket).socketPath();

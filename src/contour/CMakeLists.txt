@@ -322,6 +322,7 @@ if(CONTOUR_FRONTEND_GUI)
         config/LayoutStore.hpp
         session/PaneProxy.hpp
         session/ScreenshotFile.hpp
+        session/MediaAccess.hpp
         session/SessionFactory.hpp
         session/FactoryBinding.hpp
         session/WindowBinding.hpp
@@ -1047,8 +1048,10 @@ if(CONTOUR_FRONTEND_GUI)
             test/SidebarFakes.hpp
             platform/SpeechSynthesizer_test.cpp
             display/ContentScale_test.cpp
+            display/ImageDecoding_test.cpp
             display/InGridVisualsRendering_test.cpp
             session/ExitCode_test.cpp
+            session/MediaAccess_test.cpp
             session/WindowSwitching_test.cpp
             session/ShellIntegrationCard_test.cpp
             session/WindowSwitchingActions_test.cpp
@@ -2349,8 +2352,8 @@ if(WIN32)
         )
     else()
         # A GUI-less contour.exe links no Qt, so there is nothing to deploy, but it still imports the DLLs vcpkg's
-        # dynamic triplet builds its libraries as (yaml-cpp, OpenSSL, libssh2, zlib), staged beside it. Only the DLLs
-        # of bin/ are installed: no test suite, helper or developer tool is.
+        # dynamic triplet builds its libraries as (yaml-cpp, OpenSSL, libssh2, zlib, libpng), staged beside it.
+        # Only the DLLs of bin/ are installed: no test suite, helper or developer tool is.
         install(
             DIRECTORY "$<TARGET_FILE_DIR:contour>/"
             DESTINATION "bin"
@@ -2507,6 +2510,9 @@ else()
         if("${LSB_RELEASE_NUMBER}" STREQUAL "22.04")
             set(DEPENDS_EXTRA ", libyaml-cpp0.7")
         endif()
+        # libpng's runtime package took a t64 suffix in the 64-bit time_t transition: libpng16-16t64 from
+        # Ubuntu 24.04 and Debian 13 on, libpng16-16 before. The alternative names both, for every release.
+        set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libpng16-16t64 | libpng16-16")
 
         if(LINUX)
             set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libutempter0")
@@ -2533,7 +2539,7 @@ else()
         if(CONTOUR_FRONTEND_GUI)
             # Qt SVG's image plugin draws the header bar's bundled icons: in qt6-svg-plugins since Debian's
             # 6.7.2-5, in libqt6svg6 before it (Ubuntu 24.04).
-            set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt6core6, libqt6multimedia6, libqt6opengl6, libqt6openglwidgets6, libqt6widgets6, libssh2-1, qml6-module-qt-labs-platform, qml6-module-qt5compat-graphicaleffects, qml6-module-qtmultimedia, qml6-module-qtqml-workerscript, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtquick-templates, qml6-module-qtquick-window, qt6-qpa-plugins, qt6-svg-plugins | libqt6svg6 (<< 6.7.2-5)")
+            set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt6core6, libqt6multimedia6, libqt6opengl6, libqt6openglwidgets6, libqt6widgets6, libssh2-1, qml6-module-qt-labs-platform, qml6-module-qtmultimedia, qml6-module-qtqml-workerscript, qml6-module-qtquick-controls, qml6-module-qtquick-effects, qml6-module-qtquick-layouts, qml6-module-qtquick-templates, qml6-module-qtquick-window, qt6-qpa-plugins, qt6-svg-plugins | libqt6svg6 (<< 6.7.2-5)")
             set(CPACK_DEBIAN_PACKAGE_DEPENDS "libfreetype6, libharfbuzz0b, libxkbcommon0, libxkbcommon-x11-0${DEPENDS_EXTRA}")
             set(CPACK_DEBIAN_PACKAGE_SECTION "x11")
             set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "xdg-open")

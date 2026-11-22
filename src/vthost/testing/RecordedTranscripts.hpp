@@ -54,6 +54,21 @@ namespace v4
     constexpr auto Input = recorded("\x0e\x03\x03\x01\x03\x6c\x73\x0d");
 } // namespace v4
 
+/// Protocol version 5: image cells carry their placement's identity and geometry. The same attach as v4's,
+/// recorded from the build that introduced it.
+namespace v5
+{
+    constexpr auto ClientHello = recorded("\x4e\x01\x01\x04\x00\x00\x00\x1f\x05\x05\x01\x01\x00\x01\xd0\x0f"
+                                          "\x00\x01\x01\x00\x01\x00\x00\x01\x04\x20\x2e\x2f\x5c\x01\xea\x0f"
+                                          "\x00\x00\x00\x05\x00\x00\x00\x00");
+    constexpr auto ServerHello = recorded("\x60\x01\x02\x04\x00\x00\x00\x29\x05\x05\x05\x01\x01\x10\x35\x66"
+                                          "\x31\x64\x32\x63\x33\x62\x34\x61\x35\x39\x36\x38\x37\x37\x0d\x72"
+                                          "\x65\x63\x6f\x72\x64\x65\x64\x2d\x68\x6f\x73\x74\x00\x00\x00\x00"
+                                          "\x00");
+    constexpr auto ResizeRequest = recorded("\x08\x02\x04\x64\x1e");
+    constexpr auto Input = recorded("\x0e\x03\x03\x01\x03\x6c\x73\x0d");
+} // namespace v5
+
 /// Every recorded transcript, oldest version first.
 constexpr std::array RecordedTranscripts {
     RecordedTranscript { .version = 4,
@@ -61,6 +76,11 @@ constexpr std::array RecordedTranscripts {
                          .serverHello = v4::ServerHello,
                          .resizeRequest = v4::ResizeRequest,
                          .input = v4::Input },
+    RecordedTranscript { .version = 5,
+                         .clientHello = v5::ClientHello,
+                         .serverHello = v5::ServerHello,
+                         .resizeRequest = v5::ResizeRequest,
+                         .input = v5::Input },
 };
 
 } // namespace vthost::testing

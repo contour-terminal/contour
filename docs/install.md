@@ -54,7 +54,7 @@ Contour is packaged for most systems; pick yours below, or take a build from the
 
     ??? note "Building the AppImage yourself"
         To build it yourself, on the oldest distribution you want it to run on, install the build dependencies
-        (`scripts/install-deps.sh`), Qt 6.11 with the `qtmultimedia`, `qt5compat`, `qtshadertools` and `qtspeech`
+        (`scripts/install-deps.sh`), Qt 6.11 with the `qtmultimedia`, `qtshadertools` and `qtspeech`
         modules (for instance through [aqtinstall](https://github.com/miurahr/aqtinstall)), a C++23 compiler and
         `scripts/install-rust-wasm.sh`, then:
 

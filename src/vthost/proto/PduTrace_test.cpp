@@ -190,7 +190,7 @@ TEST_CASE("the hellos trace their ranges and capabilities", "[vthost][proto][neg
           == "versions=4-6 caps=1,4711 token=yes settings=no role=attach area=none "
              "intent=default workspace=0 profile=\"\"");
     CHECK(summarize(DecodedPdu { ClientHello {} })
-          == "versions=4-4 caps=none token=no settings=no role=attach area=none intent=default "
+          == "versions=5-5 caps=none token=no settings=no role=attach area=none intent=default "
              "workspace=0 profile=\"\"");
     CHECK(summarize(DecodedPdu { ClientHello { .attachIntent = { .kind = AttachIntentKind::NewWorkspace },
                                                .profileName = "main" } })
@@ -204,7 +204,7 @@ TEST_CASE("the hellos trace their ranges and capabilities", "[vthost][proto][neg
     CHECK(summarize(DecodedPdu { ClientHello { .role = ConnectionRole::Control } }).contains("role=control"));
     CHECK(summarize(DecodedPdu { ServerHello {
               .agreedVersion = 4, .capabilities = { .idents = { 1 } }, .machineId = "m", .hostname = "h" } })
-          == "layout=negotiating agreed=4 versions=4-4 caps=1 release=unknown selected=0 "
+          == "layout=negotiating agreed=4 versions=5-5 caps=1 release=unknown selected=0 "
              "instance=0000000000000000 restored=0/0");
     CHECK(summarize(DecodedPdu { ServerHello { .agreedVersion = 4, .selectedWorkspace = 3 } })
               .contains("selected=3"));

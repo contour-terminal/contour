@@ -79,13 +79,13 @@ jobs:
       uses: jurplel/install-qt-action@v4
       with:
         version: "6.11.1"
-        modules: qtmultimedia qt5compat qtshadertools qtspeech
+        modules: qtmultimedia qtshadertools qtspeech
     - name: "Install Qt (GuiPrivate-capable) -- retry past a bad mirror"
       if: steps.install_qt.outcome == 'failure'
       uses: jurplel/install-qt-action@v4
       with:
         version: "6.11.1"
-        modules: qtmultimedia qt5compat qtshadertools qtspeech
+        modules: qtmultimedia qtshadertools qtspeech
     - name: Install clang
       run: |
         wget https://apt.llvm.org/llvm.sh

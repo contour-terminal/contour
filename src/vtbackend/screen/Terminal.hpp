@@ -17,6 +17,7 @@
 #include <vtbackend/core/StateDecodeError.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/core/WorkingDirectory.hpp>
+#include <vtbackend/graphics/KittyMediumSource.hpp>
 #include <vtbackend/grid/Grid.hpp>
 #include <vtbackend/input/ClickCounter.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
@@ -188,6 +189,13 @@ enum class ReplicaRole : uint8_t
     SameMachine = 1,  ///< A daemon's terminal replicated on the daemon's machine: judged as its own.
     OtherMachine = 2, ///< A daemon's terminal replicated on another machine: no directory its application
                       ///< reports is one here, so every locality is ContextLocality::Foreign.
+};
+
+/// Where the bytes being parsed came from: what a kitty file medium may be read for.
+enum class ByteOrigin : uint8_t
+{
+    Injected = 0, ///< Written by the host (Terminal::writeToScreen, a status line, a local echo).
+    Pty = 1,      ///< Read from the PTY: written by the process the terminal runs.
 };
 
 /// The answer to an application's request for the host-writable status line (DECSSDT 2).
@@ -1061,6 +1069,11 @@ class Terminal: public IStatusLinePublishTarget
     ///                        ThreadPoolExecutor that was stopped runs what is submitted to it inline, so a
     ///                        lookup asked for at shutdown may run on the render thread, under the terminal
     ///                        lock, as a link probe may.
+    /// @param kittyMedia      What kitty file media (`t=f`, `t=t`) are read with, and under which policy;
+    ///                        absent, every file medium is refused. Given only by a composition root whose
+    ///                        bytes come from a local process. Its source is borrowed: it must outlive the
+    ///                        terminal.
+    /// @param imageDecoder    What PNG transmissions are decoded with; absent, they are refused.
     Terminal(Events& eventListener,
              core::Environment const& env,
              core::platform::FileSystem const& fileSystem,
@@ -1071,7 +1084,9 @@ class Terminal: public IStatusLinePublishTarget
              SemanticBlockTokenSource sessionTokens,
              std::optional<LinkDetectionServices> linkServices = std::nullopt,
              std::optional<StatusLineExtensionServices> extensionServices = std::nullopt,
-             std::optional<GitHeadServices> gitServices = std::nullopt);
+             std::optional<GitHeadServices> gitServices = std::nullopt,
+             std::optional<kitty_graphics::KittyMediumServices> kittyMedia = std::nullopt,
+             ImageDecoder imageDecoder = {});
 
     /// Revokes the extensions' publish sink first, waiting for a delivery in flight, so that none reaches a
     /// terminal whose members are being destroyed.
@@ -1982,8 +1997,18 @@ class Terminal: public IStatusLinePublishTarget
     [[nodiscard]] std::string peekInput() const;
     // }}}
 
-    /// Writes a given VT-sequence to screen.
+    /// Writes a given VT-sequence to screen. Parsed as ByteOrigin::Injected: no kitty file medium is read
+    /// for these bytes.
     void writeToScreen(std::string_view vtStream);
+
+    /// What a kitty file medium in the bytes being parsed may be read with: the services given at
+    /// construction, but only while the batch came from the PTY (ByteOrigin::Pty), on a terminal that is no
+    /// replica (ReplicaRole::None), and while the active context is not ContextLocality::Foreign (`ssh`
+    /// typed into a local pane: the path names a file over there), nor while the PTY's foreground process is
+    /// a remote-shell client (kitty_graphics::isRemoteShellClient(), the same without shell integration) or
+    /// cannot be named at all. Requires the state lock (_ownStateLock) to be held.
+    /// @return The services, or nullptr when every file medium is refused.
+    [[nodiscard]] kitty_graphics::KittyMediumServices const* kittyMediaForCurrentBatch() const;
 
     /// Echoes @p bytes onto our own screen, as SRM (reset) asks for.
     ///
@@ -2757,6 +2782,12 @@ class Terminal: public IStatusLinePublishTarget
     {
         _replicaIdentity = std::move(identity);
         _replicaRole.store(role, std::memory_order_release);
+    }
+
+    /// @return What this terminal replicates; ReplicaRole::None for one fed by its own PTY.
+    [[nodiscard]] ReplicaRole replicaRole() const noexcept
+    {
+        return _replicaRole.load(std::memory_order_acquire);
     }
 
     /// The host name the authority of a `file://` URL this terminal's application wrote -- an OSC 8 link's
@@ -4330,18 +4361,8 @@ class Terminal: public IStatusLinePublishTarget
     ImagePool& imagePool() noexcept { return _imagePool; }
     ImagePool const& imagePool() const noexcept { return _imagePool; }
 
-    /// Callback for decoding encoded images (e.g. PNG) to RGBA pixel data.
-    ///
-    /// @param format   The source image format.
-    /// @param data     The raw encoded image data.
-    /// @param size     [in/out] For PNG: the size is extracted during decoding.
-    ///                 For RGB/RGBA: the size is already known.
-    /// @returns Decoded RGBA pixel data, or std::nullopt on failure.
-    using ImageDecoderCallback = std::function<std::optional<Image::Data>(
-        ImageFormat format, std::span<uint8_t const> data, ImageSize& size)>;
-
-    void setImageDecoder(ImageDecoderCallback decoder) noexcept { _imageDecoder = std::move(decoder); }
-    ImageDecoderCallback const& imageDecoder() const noexcept { return _imageDecoder; }
+    /// @return What PNG transmissions are decoded with, fixed at construction; empty refuses them.
+    [[nodiscard]] ImageDecoder const& imageDecoder() const noexcept { return _imageDecoder; }
 
     /// Takes the frontend's answer to the application's request for the host-writable status line.
     ///
@@ -4571,6 +4592,12 @@ class Terminal: public IStatusLinePublishTarget
     /// @param parse Parses the batch's bytes; called with _stateMutex held.
     template <typename Mutex, typename Parse>
     void runParseBatch(std::unique_lock<Mutex> lock, Parse const& parse);
+
+    /// Resolves the kitty Unicode placeholder cells written since the last call, on every screen that can
+    /// receive them: the pages and both status lines. Run once the parsed bytes took effect -- at the end of
+    /// a parse batch, and after a trace mode executed what it queued. Requires the state lock (_ownStateLock)
+    /// to be held.
+    void resolveKittyPlaceholders();
 
     /// Offers a key to hint mode and the Vi input handler, under _stateMutex: their commands write the grid's
     /// line flags, the fold set, the user-mark index, the viewport and the selection, which the parser thread
@@ -5038,6 +5065,14 @@ class Terminal: public IStatusLinePublishTarget
     /// What passive link detection runs on; nullopt detects nothing. Fixed at construction.
     /// Not captured: wiring; injected at construction.
     std::optional<LinkDetectionServices> _linkServices;
+
+    /// What kitty file media are read with; nullopt refuses them all. Fixed at construction.
+    /// Not captured: wiring; injected at construction.
+    std::optional<kitty_graphics::KittyMediumServices> _kittyMedia;
+
+    /// Where the bytes being parsed came from: ByteOrigin::Pty only for the length of a PTY batch.
+    /// Not captured: transient, it never outlives a parse.
+    ByteOrigin _byteOrigin = ByteOrigin::Injected;
 
     /// The terminal as _linkDetector reads it.
     /// Not captured: wiring; reads the live terminal.
@@ -5808,8 +5843,8 @@ class Terminal: public IStatusLinePublishTarget
     /// terminal's own default. A pop landing there restores the former and signals a reset only for
     /// the latter. @see popPointerShape.
     bool _pointerShapeBaseSetByApplication = false;
-    /// Not captured: wiring.
-    ImageDecoderCallback _imageDecoder;
+    /// Not captured: wiring. @see vtbackend::ImageDecoder.
+    ImageDecoder _imageDecoder;
 
     TabStops _tabs;
 

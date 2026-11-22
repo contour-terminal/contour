@@ -477,10 +477,20 @@ shared_ptr<RasterizedImage> rasterize(shared_ptr<Image const> image,
                                       RGBAColor defaultColor,
                                       GridSize cellSpan,
                                       ImageSize cellSize,
-                                      ImageLayer layer)
+                                      ImageLayer layer,
+                                      ImageOrigin origin)
 {
-    return make_shared<RasterizedImage>(
-        std::move(image), alignmentPolicy, resizePolicy, defaultColor, cellSpan, cellSize, layer);
+    return make_shared<RasterizedImage>(std::move(image),
+                                        alignmentPolicy,
+                                        resizePolicy,
+                                        defaultColor,
+                                        cellSpan,
+                                        cellSize,
+                                        layer,
+                                        PixelCoordinate {},
+                                        ImageSize {},
+                                        KittyPlacementId {},
+                                        origin);
 }
 
 void ImagePool::link(string const& name, shared_ptr<Image const> imageRef)

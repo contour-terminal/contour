@@ -45,7 +45,7 @@ it, configure with `-DCONTOUR_FRONTEND_GUI=OFF` for the Qt-free targets and the 
 - **wine** (64-bit) to run what was built, and for the GUI to build at all: deploying Qt runs the Qt tree's
   `windeployqt.exe` under it. Without wine only `-DCONTOUR_FRONTEND_GUI=OFF` builds.
 - **The C library dependencies**: `scripts/cross-windows-deps.sh` downloads Fedora's prebuilt `mingw64-*`
-  packages of OpenSSL, libssh2, zlib, FreeType, HarfBuzz and cairo (and what they depend on) and lays them
+  packages of OpenSSL, libssh2, zlib, libpng, FreeType, HarfBuzz and cairo (and what they depend on) and lays them
   out in `out/windows-cross-deps`, where the presets look:
   ```sh
   scripts/cross-windows-deps.sh

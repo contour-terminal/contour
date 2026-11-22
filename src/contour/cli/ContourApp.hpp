@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/Image.hpp>
+#include <vtbackend/graphics/PngDecoding.hpp>
+
 #include <core/cli/App.hpp>
 
 #include <cstdint>
@@ -63,9 +66,17 @@ class ContourApp: public core::cli::App
 {
   public:
     /// @param env The process environment every part of the application reads through.
-    explicit ContourApp(core::Environment const& env);
+    /// @param imageDecoder What every terminal this process makes decodes PNG images with. libpng by default,
+    ///        which is what a build without Qt uses; a GUI build passes display::makeImageDecoder(), which
+    ///        adds QImage for the image files that are not PNG.
+    explicit ContourApp(core::Environment const& env,
+                        vtbackend::ImageDecoder imageDecoder = vtbackend::PngDecoder {});
 
     [[nodiscard]] core::cli::Command parameterDefinition() const override;
+
+    /// @return What this process decodes PNG images (kitty `f=100`, GIP) with: every terminal it makes, the
+    ///         sessions a window shows and those a daemon hosts alike, is given it at construction.
+    [[nodiscard]] vtbackend::ImageDecoder const& imageDecoder() const noexcept { return _imageDecoder; }
 
   protected:
     /// Finds the first of @p options that the command line gave.
@@ -182,6 +193,8 @@ class ContourApp: public core::cli::App
     /// The daemon's log destination (installDaemonLogging()): categories hold a reference into it, so it
     /// lives as long as the app.
     std::unique_ptr<core::log::ScopedOutput> _daemonLogOutput;
+    /// @see ContourApp::ContourApp
+    vtbackend::ImageDecoder _imageDecoder;
 };
 
 } // namespace contour::cli

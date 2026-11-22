@@ -84,6 +84,13 @@ enum class AnimationState : uint8_t
     Loop = 3,              ///< `s=3`: play, returning to the first frame after the last.
 };
 
+/// Where a placement shows its image (`U=`).
+enum class PlacementKind : uint8_t
+{
+    Cursor = 0,  ///< At the cursor, in the cells the placement covers.
+    Virtual = 1, ///< `U=1`: nowhere by itself; Unicode placeholder cells name the cells that show it.
+};
+
 /// One decoded kitty graphics command.
 ///
 /// Field names follow the protocol's own vocabulary rather than the single letters it puts on the
@@ -126,6 +133,18 @@ struct Command
     /// Stacking order against the text (`z=`). Negative means behind it.
     int32_t zIndex = 0;
 
+    /// Whether the placement is put at the cursor or is a virtual one for Unicode placeholders (`U=`).
+    PlacementKind placementKind = PlacementKind::Cursor;
+
+    /// The image a relative placement is placed relative to (`P=`); 0 when none. Relative placements are not
+    /// implemented: it is read only so that a virtual placement naming a parent can be refused, as kitty
+    /// does.
+    uint32_t parentImageId = 0;
+
+    /// The action a feature query (`a=q,e=`) asks about, as its wire letter; 0 when this is no feature
+    /// query.
+    char queryFeature = 0;
+
     /// Whether the cursor should move to just past the image (`C=`; 1 means do NOT move it).
     bool doNotMoveCursor = false;
 
@@ -136,9 +155,9 @@ struct Command
     bool quietOnSuccess = false;
     bool quietAlways = false;
 
-    /// What a Delete action targets (`d=`), e.g. 'a' for all, 'i' by id, 'n' by number.
-    /// An upper-case letter additionally frees the stored image data, not just the placement.
-    char deleteTarget = 'a';
+    /// What a Delete action targets (`d=`), e.g. 'a' for all, 'i' by id, 'n' by number; 0 when absent, which
+    /// means 'a'. An upper-case letter additionally frees the stored image data, not just the placement.
+    char deleteTarget = 0;
 
     /// Animation only (`a=f`, `a=a`, `a=c`), where the protocol reuses three keys that mean cell
     /// geometry everywhere else. They are decoded into their own fields rather than read back out of
@@ -221,6 +240,16 @@ enum class Error : uint8_t
 /// @param apcPayload the APC body WITHOUT its leading 'G', i.e. `<control data>[;<payload>]`.
 /// @return the decoded command, or the reason it could not be decoded.
 [[nodiscard]] std::expected<Command, Error> parseCommand(std::string_view apcPayload);
+
+/// Answers a feature query (`a=q,e=<action>`): the keys of @p command that Contour supports for the action
+/// it asks about, as kitty's reply spells them.
+///
+/// Every key that has a non-default value and is supported for that action is echoed with its value, led by
+/// `e=` itself to say the action is supported. A key Contour does not support, or supports only partly, is
+/// left out: a missing key tells the client "not supported", which is the safe answer to get wrong.
+/// @param command The feature query.
+/// @return The keys, each with a leading comma (e.g. ",e=T,U=1"), or empty when the action is unknown.
+[[nodiscard]] std::string supportedFeatureKeys(Command const& command);
 
 /// @return the number of bytes one pixel occupies in @p format, or 0 when that is not a fixed number.
 [[nodiscard]] constexpr unsigned bytesPerPixel(Format format) noexcept

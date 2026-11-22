@@ -220,7 +220,11 @@ void ImageRenderer::renderImage(crispy::Point pos, vtbackend::ImageFragment cons
     // opaquely, in the background colour that was current when the image was placed. The CPU path this
     // replaced got that for free: it built a CELL-SIZED tile and wrote the gap colour into every pixel
     // outside the image, so the upload covered the whole cell either way.
-    fillGap(pos, placement, rasterizedImage.defaultColor(), aboveText);
+    //
+    // A kitty placeholder image is the exception: kitty shows the cell's own background around the fitted
+    // image, and the background pass has already drawn it, so there is nothing to paint.
+    if (rasterizedImage.origin() != vtbackend::ImageOrigin::Placeholder)
+        fillGap(pos, placement, rasterizedImage.defaultColor(), aboveText);
 
     if (!placement.hasImage)
         return; // the cell lies wholly in the alignment gap: the fill above is all of it

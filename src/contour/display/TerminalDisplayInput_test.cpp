@@ -82,7 +82,9 @@ TEST_CASE("an Option key acting as Alt turns the input method off for its keystr
                                /*nativeVirtualKey=*/0x0e,
                                /*nativeModifiers=*/0x80000 | optionBits,
                                QStringLiteral("\u00e9"));
-        event.ignore();
+        // As Qt delivers them: a ShortcutOverride arrives ignored, for an item to claim; a key press arrives
+        // accepted, for an item to decline -- a debug Qt asserts that before QQuickItem handles one.
+        event.setAccepted(type != QEvent::ShortcutOverride);
         QCoreApplication::sendEvent(h.display.get(), &event);
         return event.isAccepted();
     };

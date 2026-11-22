@@ -23,7 +23,10 @@ using namespace vtbackend::test;
 
 namespace
 {
-constexpr auto RailGutter = GutterSettings { .exitStatus = true, .blockColumnForm = BlockColumnForm::Rail };
+[[nodiscard]] GutterSettings railGutter()
+{
+    return GutterSettings { .exitStatus = true, .blockColumnForm = BlockColumnForm::Rail };
+}
 
 /// A MockTerm that counts the redraws it is asked for.
 struct RedrawCountingTerm final: MockTerm<>
@@ -48,7 +51,7 @@ struct FocusRecordingTerm final: MockTerm<>
 /// Three finished commands, `one` (success), `two` (failure) and `three` (success), then a live prompt.
 void runThreeBlocks(MockTerm<>& mc)
 {
-    mc.terminal.settings().gutter = RailGutter;
+    mc.terminal.settings().gutter = railGutter();
     runCommand(mc, "one", { "a" }, 0);
     runCommand(mc, "two", { "b" }, 1);
     runCommand(mc, "three", { "c" }, 0);
@@ -184,7 +187,7 @@ TEST_CASE("Terminal.blockfocus.retiringTheFocusedBlockClearsTheFocus", "[blockfo
 TEST_CASE("Terminal.blockfocus.focusScrollsAnOffscreenHeadIntoView", "[blockfocus]")
 {
     auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(100) };
-    mc.terminal.settings().gutter = RailGutter;
+    mc.terminal.settings().gutter = railGutter();
     runCommand(mc, "old", { "a", "b" }, 0);
     printLines(mc, "filler", 30);
     mc.writeToScreen(PromptStart);
@@ -202,7 +205,7 @@ TEST_CASE("Terminal.blockfocus.focusScrollsAnOffscreenHeadIntoView", "[blockfocu
 TEST_CASE("Terminal.blockfocus.aBlockAtItsPromptIsNeverFocused", "[blockfocus]")
 {
     auto mc = MockTerm { PageSize { LineCount(20), ColumnCount(20) } };
-    mc.terminal.settings().gutter = RailGutter;
+    mc.terminal.settings().gutter = railGutter();
     mc.writeToScreen(PromptStart);
     CHECK_FALSE(mc.terminal.focusCommandBlock(BlockStep::Previous).has_value());
     CHECK_FALSE(mc.terminal.focusCommandBlock(BlockStep::Next).has_value());
@@ -213,7 +216,7 @@ TEST_CASE("Terminal.blockfocus.aNestedShellWithoutIntegrationStaysOneRunningBloc
 {
     // `ssh` starts (;C) and the remote shell, which marks nothing, prints prompts and output for 50 rows.
     auto mc = MockTerm { PageSize { LineCount(60), ColumnCount(40) } };
-    mc.terminal.settings().gutter = RailGutter;
+    mc.terminal.settings().gutter = railGutter();
     startCommand(mc, "ssh host");
     for (auto const row: std::views::iota(0, 25))
         mc.writeToScreen(std::format("remote$ ls {}\r\nfile {}\r\n", row, row));

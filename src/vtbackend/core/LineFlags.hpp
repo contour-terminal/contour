@@ -36,7 +36,9 @@
     /* ended at is Line::promptEndOffset(). */                                                    \
     _(PromptEnd, 8, ShellMark)                                                                    \
     /* The user's own bookmark (vi `mm`): a navigation target, never a command-block boundary. */ \
-    _(UserMark, 9, UserMark)
+    _(UserMark, 9, UserMark)                                                                      \
+    /* The row holds kitty Unicode placeholder cells (U+10EEEE) to resolve into image cells. */   \
+    _(ImagePlaceholders, 10, Derived)
 
 namespace vtbackend
 {
@@ -71,6 +73,7 @@ enum class LineFlagRole : uint8_t
     Rendition,    ///< How the physical row is drawn: DECDWL/DECDHL, which a whole-row ED resets.
     ShellMark, ///< A mark the shell emits (OSC 133, SETMARK, OSC 3008 standing in): command-block structure.
     UserMark,  ///< A mark the user sets (vi `mm`): somewhere to come back to, never structure.
+    Derived,   ///< Recomputed from the line's cells; never structure. Travels with the cells it describes.
 };
 
 /// Every `LineFlag` with its role, in declaration order.
@@ -98,6 +101,10 @@ constexpr inline auto ShellMarkLineFlags = lineFlagsOf(LineFlagRole::ShellMark);
 /// The marks a command block's head is found by: where its prompt starts (OSC 133;A) and, for a block an
 /// OSC 133;C began, where its output starts.
 constexpr inline auto BlockHeadLineFlags = LineFlags { LineFlag::Marked, LineFlag::OutputStart };
+
+/// The flags recomputed from a line's cells: whichever row a cell moves to, the flag follows it, and a
+/// spurious one costs only a rescan that clears it.
+constexpr inline auto DerivedLineFlags = lineFlagsOf(LineFlagRole::Derived);
 
 /// The line size renditions (DECDWL, DECDHL): what DECSWL and an ED that erases the row whole reset.
 constexpr inline auto LineRenditionFlags = lineFlagsOf(LineFlagRole::Rendition);
