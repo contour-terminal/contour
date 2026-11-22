@@ -544,7 +544,7 @@ RenderLine RenderBufferBuilder::createRenderLine(TrivialLineBuffer const& lineBu
     auto const pos = CellLocation { .line = lineOffset, .column = ColumnOffset(0) };
     auto const gridPosition = gridPositionOf(pos);
     auto renderLine = RenderLine {};
-    renderLine.lineOffset = lineOffset;
+    renderLine.lineOffset = _baseLine + lineOffset;
     renderLine.usedColumns = lineBuffer.usedColumns;
     renderLine.displayWidth = _terminal->pageSize().columns;
     renderLine.text = std::u32string(textOverride);
