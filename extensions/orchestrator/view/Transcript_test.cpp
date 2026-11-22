@@ -801,7 +801,10 @@ TEST_CASE("esc returns to where the transcript was opened from", "[orchestrator]
     CHECK(fixture.dashboard.interaction().screen == Screen::Board);
     checkGolden("transcript-back-to-board-80x24", fixture.screen());
     CHECK(fixture.dashboard.input("\x1b").empty());
-    CHECK(fixture.escapeTimesOut() == std::vector<UiAction> { HideBoardAction {} });
+    // Back on the dashboard, the selected agent's details ask for its board again.
+    CHECK(fixture.escapeTimesOut()
+          == std::vector<UiAction> { HideBoardAction {},
+                                     ShowBoardAction { .run = std::string { RunningId } } });
     CHECK(fixture.dashboard.interaction().screen == Screen::Dashboard);
 
     // A board opened from a transcript goes back to it, its page kept and not read again.
@@ -813,7 +816,9 @@ TEST_CASE("esc returns to where the transcript was opened from", "[orchestrator]
     CHECK(fixture.dashboard.interaction().screen == Screen::Transcript);
     CHECK(fixture.screen().contains("written by Claude Code"));
     CHECK(fixture.dashboard.input("\x1b").empty());
-    CHECK(fixture.escapeTimesOut().empty());
+    // The dashboard's details ask for the selected agent's board, which no screen reads now.
+    CHECK(fixture.escapeTimesOut()
+          == std::vector<UiAction> { ShowBoardAction { .run = std::string { RunningId } } });
     CHECK(fixture.dashboard.interaction().screen == Screen::Dashboard);
 }
 

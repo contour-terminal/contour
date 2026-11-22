@@ -124,6 +124,8 @@ add_library(orchestrator_view STATIC
     view/LazyLines.hpp
     view/Sections.cpp
     view/Sections.hpp
+    view/BoardMarkdown.cpp
+    view/BoardMarkdown.hpp
     view/StatusBoard.cpp
     view/StatusBoard.hpp
     view/Theme.cpp
@@ -182,6 +184,7 @@ if(ORCHESTRATOR_TESTING)
         view/DispatchForm_test.cpp
         view/Keys_test.cpp
         view/Sections_test.cpp
+        view/BoardMarkdown_test.cpp
         view/StatusBoard_test.cpp
         view/Transcript_test.cpp
         view/ViewFixtures.cpp

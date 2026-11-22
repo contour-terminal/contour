@@ -1,29 +1,28 @@
 ╭─ STATUS.md · pr-2375-20261113-150847 ────────────────────────────────────────────────────────────────────────────────╮
 │ updated 4 min ago                                                                                                    │
-│ # Status: fix the CI of #2375                                                                                        │
+│ Status: fix the CI of #2375                                                                                          │
 │                                                                                                                      │
-│ ## Done                                                                                                              │
-│ - Reproduced the failing `vtbackend_test` case locally.                                                              │
-│ - Found the cause: the grid reflow drops a wrapped line's last cell when the                                         │
+│ Done                                                                                                                 │
+│ • Reproduced the failing vtbackend_test case locally.                                                                │
+│ • Found the cause: the grid reflow drops a wrapped line's last cell when the                                         │
 │   page is exactly as wide as the line.                                                                               │
-│     - Wrote a regression test that fails before the fix.                                                             │
-│     - Fixed `Grid::reflow` to keep the cell.                                                                         │
+│     • Wrote a regression test that fails before the fix.                                                             │
+│     • Fixed Grid::reflow to keep the cell.                                                                           │
 │                                                                                                                      │
-│ ## In progress                                                                                                       │
-│ - Running the whole suite under ASan; it takes a while on this machine, so expect this line to stay for a few        │
+│ In progress                                                                                                          │
+│ • Running the whole suite under ASan; it takes a while on this machine, so expect this line to stay for a few        │
 │ minutes before it moves.                                                                                             │
 │                                                                                                                      │
-│ ## Next                                                                                                              │
+│ Next                                                                                                                 │
 │ 1. Push the branch.                                                                                                  │
 │ 2. Watch CI.                                                                                                         │
 │ 3. Ask for a review.                                                                                                 │
 │                                                                                                                      │
-│ ## Notes                                                                                                             │
-│ | check | state |                                                                                                    │
-│ |------------------|---------|                                                                                       │
-│ | ubuntu clang | passing |                                                                                           │
-│ | ubuntu gcc | running |                                                                                             │
-│ | windows | queued |                                                                                                 │
+│ Notes                                                                                                                │
+│ check        │ state                                                                                                 │
+│ ubuntu clang │ passing                                                                                               │
+│ ubuntu gcc   │ running                                                                                               │
+│ windows      │ queued                                                                                                │
 │                                                                                                                      │
 │ Nothing blocks me right now.                                                                                         │
 │                                                                                                                      │
@@ -33,6 +32,7 @@
 │ Line 28                                                                                                              │
 │ Line 29                                                                                                              │
 │ Line 30                                                                                                              │
+│                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

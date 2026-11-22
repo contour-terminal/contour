@@ -1619,12 +1619,18 @@ TEST_CASE("an agent's age is redrawn by the wake it asks for", "[guest]")
     served.load();
     served.invoke("open");
     served.host.writes.clear();
-    REQUIRE_FALSE(served.host.wakes.empty());
-    auto const asked = served.host.wakes.back();
-    CHECK(asked <= 1'000);
-
-    served.host.clock.monoMs += asked;
-    served.driver->update(Hint::Wake);
+    // The wakes it asks for come within a second; the selected agent's board, which its details show, may ask
+    // for one before its age changes. Following them redraws the age.
+    for ([[maybe_unused]] auto const wake: std::views::iota(0, 3))
+    {
+        REQUIRE_FALSE(served.host.wakes.empty());
+        auto const asked = served.host.wakes.back();
+        CHECK(asked <= 1'000);
+        served.host.clock.monoMs += asked;
+        served.driver->update(Hint::Wake);
+        if (!served.host.writtenTo("tab-1").empty())
+            break;
+    }
 
     CHECK(served.host.writtenTo("tab-1").starts_with(SynchronizedOutput));
 }
@@ -1777,7 +1783,8 @@ TEST_CASE("b and a held ESC show and hide a board through the engine", "[guest][
     auto const hidden = served.observer.inputsOf<HideBoard>();
     REQUIRE(hidden.size() == 1);
     CHECK(hidden.front().tab == "tab-1");
-    CHECK(served.driver->engine().board(Run) == nullptr);
+    // Back on the dashboard the agent is still selected, and its details read the board on.
+    CHECK(served.driver->engine().board(Run) != nullptr);
     CHECK(served.dashboard().interaction().screen == view::Screen::Dashboard);
 }
 

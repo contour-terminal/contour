@@ -738,8 +738,8 @@ line. `Enter` starts the agent; `Esc` cancels. Nothing starts without it.
 
 ### Boards
 
-An agent that keeps a `STATUS.md` at its worktree's root has a board: `b` shows that file on the tab, with how
-long ago it was written (`updated 3 min ago`), and reads it again every five seconds while it is shown. Once an
+An agent that keeps a `STATUS.md` at its worktree's root has a board. The selected agent's details end with it,
+rendered as Markdown, and `b` shows the whole file on the tab, with how long ago it was written (`updated 3 min ago`), and reads it again every five seconds while it is shown. Once an
 agent has run for `status_board_after` the orchestrator looks for the file, and the agent's row is marked `▤`
 when it finds one.
 

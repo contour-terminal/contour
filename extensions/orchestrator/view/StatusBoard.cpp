@@ -70,10 +70,10 @@ namespace
     /// The first row that matches a board says it.
     constexpr auto BoardStateRows = std::array {
         BoardStateRow { .state = BoardState::Unread, .error = std::nullopt, .text = "reading STATUS.md…"sv },
-        BoardStateRow { .state = BoardState::Absent,
-                        .error = std::nullopt,
-                        .text =
-                            "No STATUS.md to show yet. Agents write one when their prompt asks for it."sv },
+        BoardStateRow {
+            .state = BoardState::Absent,
+            .error = std::nullopt,
+            .text = "No STATUS.md to show yet: the agent is asked to keep one, and has not written it."sv },
         BoardStateRow {
             .state = BoardState::Gone, .error = std::nullopt, .text = "The board went with its worktree."sv },
         BoardStateRow { .state = BoardState::Unavailable,
@@ -150,17 +150,15 @@ StatusBoardPanel::StatusBoardPanel(Engine const& engine,
     _interaction { interaction },
     _clock { clock },
     _state { state },
-    _wrapped { MaxBoardLines, std::string { "…" } }
+    _wrapped { MaxBoardLines, BoardLine { .text = "…", .role = Role::Dim } }
 {
 }
 
-std::span<std::string const> StatusBoardPanel::linesFor(std::string_view bytes,
-                                                        int columns,
-                                                        std::size_t count)
+std::span<BoardLine const> StatusBoardPanel::linesFor(std::string_view bytes, int columns, std::size_t count)
 {
     if (bytes != _wrappedBytes)
     {
-        _logical = displayLines(bytes, MaxBoardLines, MaxBoardLineChars);
+        _logical = renderBoardMarkdown(displayLines(bytes, MaxBoardLines, MaxBoardLineChars));
         _wrappedBytes = bytes;
         _wrappedColumns = -1;
     }
@@ -169,7 +167,16 @@ std::span<std::string const> StatusBoardPanel::linesFor(std::string_view bytes,
         _wrapped.reset(columns > 0 ? _logical.size() : 0);
         _wrappedColumns = columns;
     }
-    return _wrapped.through(count, [&](std::size_t line) { return wrapIndented(_logical[line], columns); });
+    return _wrapped.through(count, [&](std::size_t line) {
+        auto const& logical = _logical[line];
+        if (logical.fit == BoardFit::Cut)
+            return std::vector { BoardLine {
+                .text = cutSanitised(logical.text, columns), .role = logical.role, .fit = logical.fit } };
+        return wrapIndented(logical.text, columns) | std::views::transform([&](std::string& piece) {
+                   return BoardLine { .text = std::move(piece), .role = logical.role, .fit = logical.fit };
+               })
+               | std::ranges::to<std::vector>();
+    });
 }
 
 void StatusBoardPanel::render(core::tui::Canvas& canvas)
@@ -219,8 +226,8 @@ void StatusBoardPanel::render(core::tui::Canvas& canvas)
         return;
     }
     auto line = 1;
-    for (auto const& text: lines | std::views::drop(top) | std::views::take(rows))
-        inside.putString(line++, 1, text, styleOf(theme, Role::Text));
+    for (auto const& shown: lines | std::views::drop(top) | std::views::take(rows))
+        inside.putString(line++, 1, shown.text, styleOf(theme, shown.role));
 }
 
 } // namespace orchestrator::view

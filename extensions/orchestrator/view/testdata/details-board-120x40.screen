@@ -1,0 +1,40 @@
+╭─ Agents ─────────────────────────────────────────────────────────────╮ ╭─ Details ───────────────────────────────────╮
+│ MY PULL REQUESTS                                                     │ │ pr-2375 · fix CI · sonnet                   │
+│ no open pull requests                                                │ │                                             │
+│                                                                      │ │ task      fix CI                            │
+│ ISSUES WITHOUT A PR                                                  │ │ model     sonnet                            │
+│ ▾ contour · 5                                                        │ │ state     running                           │
+│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │ branch    agent/pr-2375-20261113-150847     │
+│   #2338 Flaky on Windows: SessionHost.extension.controlVerb require… │ │ worktree  /home/u/worktrees/contour/pr-2375 │
+│   #2253 Switch `daemon` Same `client`                                │ │             -20261113-150847                │
+│   #2163 OSC 133: optional nonce to reject forged command lines and … │ │ url       https://github.com/contour-termin │
+│   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead o… │ │             al/contour/pull/2375            │
+│                                                                      │ │                                             │
+│ TIMELINE · LAST 24 HOURS, AN HOUR A BAR                              │ │ board     STATUS.md · b shows it whole      │
+│ agents active  ·······················█               peak 1 · now 1 │ │           Fixing CI                         │
+│ tokens out     ························                     0 in 24h │ │           ☑ reproduced                      │
+│ runs started   ·······················█          2 started · 1 ended │ │           ☐ fix the reflow                  │
+│                                                                      │ │                                             │
+│ AGENTS · 1 OF 4 RUNNING                                              │ │                                             │
+│ ○ pr-2375 · fix CI · sonnet                             ▤ working 6m │ │                                             │
+│                                                                      │ │                                             │
+│ FINISHED · 0 NEW                                                     │ │                                             │
+│   pr-2366 · fix CI · completed                               removed │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
+ ↑↓ move · enter open · d dispatch · ? help · b board · t transcript · / filter · z fold · R refresh · e end run        
+ ⬢ agents 1/4                                                                                                           

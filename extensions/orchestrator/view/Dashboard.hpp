@@ -123,7 +123,8 @@ class Dashboard
     /// What the dashboard asks of the engine with no key typed; the guest calls it before frame(), so that it
     /// reaches the engine first. An ESC whose deadline passed (see pendingEscapeDeadline()) is the Escape key
     /// (Esc on a board hides it); and the transcript shown is asked for again when the engine keeps no page
-    /// of it for this tab, so that the screen never waits for a page nobody reads.
+    /// of it for this tab, so that the screen never waits for a page nobody reads. The board of the agent the
+    /// dashboard selects is asked for, its details showing it, and the one selected before is no longer read.
     /// @return What the engine is asked, in order; empty when nothing is due.
     [[nodiscard]] std::vector<UiAction> dueActions();
 

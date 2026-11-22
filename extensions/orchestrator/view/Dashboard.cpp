@@ -179,6 +179,10 @@ struct Dashboard::State
     [[nodiscard]] uint64_t nowMonoMs() const noexcept;
     /// @return The selected row among the visible ones; nullptr when there is none.
     [[nodiscard]] Row const* selectedRow() const noexcept;
+    /// Asks the engine to read the board of the run the dashboard selects, which its details show, and to
+    /// stop reading the one it showed before: appended to @p actions. A board or a transcript screen asks for
+    /// its own; the details ask again once the dashboard is back.
+    void syncDetailsBoard(std::vector<UiAction>& actions);
     /// @return The band the tab's size chooses.
     [[nodiscard]] Band band() const noexcept;
 
@@ -198,9 +202,10 @@ struct Dashboard::State
 
     Engine const& engine;
     core::IClock const& clock;
-    IUuidSource& ids;       ///< Where the session ids of the agents it dispatches come from.
-    std::string tab;        ///< The tab it is served in.
-    std::string frameBytes; ///< What the surface was handed since the last frame.
+    std::string detailsBoard {}; ///< The run whose board the details asked the engine for; empty: none.
+    IUuidSource& ids;            ///< Where the session ids of the agents it dispatches come from.
+    std::string tab;             ///< The tab it is served in.
+    std::string frameBytes;      ///< What the surface was handed since the last frame.
     core::tui::HeadlessSurface surface;
     core::tui::Screen screen;
     core::tui::VtParser parser;
@@ -789,7 +794,10 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
         auto action = applyKey(*key, interaction, keyContext());
         // A board the key left, for the dashboard or a transcript, is no longer read.
         if (wasOnBoard && interaction.screen != Screen::Board)
+        {
             actions.emplace_back(HideBoardAction {});
+            detailsBoard.clear();
+        }
         if (action)
             actions.push_back(std::move(*action));
         // A form a key opened gets its agent's session id now.
@@ -800,6 +808,26 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
     if (interaction != before)
         repaint = Repaint::Needed;
     return actions;
+}
+
+void Dashboard::State::syncDetailsBoard(std::vector<UiAction>& actions)
+{
+    // A board or a transcript screen asks for what it shows; the one it replaced is the engine's to forget.
+    if (interaction.screen != Screen::Dashboard)
+    {
+        detailsBoard.clear();
+        return;
+    }
+    auto const* const row = selectedRow();
+    auto wanted =
+        row != nullptr && std::ranges::contains(row->offers, KeyCommand::Board) ? row->run : std::string {};
+    if (wanted == detailsBoard)
+        return;
+    if (!wanted.empty())
+        actions.emplace_back(ShowBoardAction { .run = wanted });
+    else
+        actions.emplace_back(HideBoardAction {});
+    detailsBoard = std::move(wanted);
 }
 
 std::vector<UiAction> Dashboard::State::resolveOverdueEscape()
@@ -974,9 +1002,13 @@ std::vector<UiAction> Dashboard::select(std::string_view run)
     // longer read.
     auto const wasOnBoard = state.interaction.screen == Screen::Board;
     leaveSubject(state.interaction);
-    if (!wasOnBoard)
-        return {};
-    return { UiAction { HideBoardAction {} } };
+    auto actions = std::vector<UiAction> {};
+    if (wasOnBoard)
+    {
+        actions.emplace_back(HideBoardAction {});
+        state.detailsBoard.clear();
+    }
+    return actions;
 }
 
 void Dashboard::openForm(std::string_view repo, ItemRef const& item, std::string_view task)
@@ -1018,6 +1050,10 @@ std::vector<UiAction> Dashboard::dueActions()
             view == nullptr || view->page != interaction.page)
             actions.emplace_back(
                 ReadTranscriptAction { .run = interaction.subject, .page = interaction.page });
+    // The selected agent's details show its board: the engine reads it for this tab while it is selected. The
+    // rows as they stand say which agent that is; building them here would take a row change that fell due
+    // from the frame that draws it.
+    state.syncDetailsBoard(actions);
     return actions;
 }
 

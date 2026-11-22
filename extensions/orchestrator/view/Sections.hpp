@@ -60,6 +60,8 @@ enum class DetailFit : uint8_t
     Whole, ///< On one line and whole, or not at all: a command line, which a cut would shorten and a break
            ///< would split inside an argument a copy then carries. One that does not fit says
            ///< WidenToSeeText in its place.
+    Aligned, ///< On one line, cut with a `…`, its runs of spaces kept: a board's table row or code, sanitised
+             ///< already (displayLines()), whose alignment a second sanitising would collapse.
 };
 
 /// One line of a row's details: a label and its value.
@@ -195,6 +197,12 @@ inline constexpr auto HintSeparator = std::string_view { " · " };
 /// @return The text sanitised (see displayText()), and when it is wider than @p columns, its longest prefix
 ///         of whole grapheme clusters that leaves a cell for the `…` that follows it.
 [[nodiscard]] std::string cut(std::string_view text, int columns);
+
+/// cut() for text sanitised already, such as a board's line (displayLines()): its runs of spaces are kept.
+/// @param text Sanitised UTF-8: no control character.
+/// @param columns The most cells the result may take.
+/// @return @p text, or its longest prefix of whole grapheme clusters that leaves a cell for a `…`.
+[[nodiscard]] std::string cutSanitised(std::string_view text, int columns);
 
 /// Text safe to draw, word-wrapped. Lines break at spaces; a word wider than a line is broken between
 /// grapheme clusters, never inside a wide character.

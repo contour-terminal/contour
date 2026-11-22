@@ -319,11 +319,11 @@ TEST_CASE("a board's wrapped lines keep their indentation", "[orchestrator][view
     auto const twelve = drawnBoard("  - one two three four", Size { .width = 16, .height = 10 });
     REQUIRE(twelve.size() >= 3);
     CHECK(std::vector(twelve.begin(), twelve.begin() + 3)
-          == std::vector<std::string> { "  - one two", "  three four", "" });
+          == std::vector<std::string> { "  • one two", "  three four", "" });
     auto const twenty = drawnBoard("\t- x\n\nend", Size { .width = 24, .height = 10 });
     REQUIRE(twenty.size() >= 3);
     CHECK(std::vector(twenty.begin(), twenty.begin() + 3)
-          == std::vector<std::string> { "    - x", "", "end" });
+          == std::vector<std::string> { "    • x", "", "end" });
 }
 
 // }}}
@@ -436,8 +436,11 @@ TEST_CASE("a board under a refused configuration says so", "[orchestrator][view]
     checkGolden("board-unconfigured-80x24", fixture.screen());
     CHECK(fixture.dashboard.interaction().screen == Screen::Board);
 
+    // Back on the dashboard, the selected agent's details ask for its board again.
     CHECK(fixture.dashboard.input("\x1b").empty());
-    CHECK(fixture.escapeTimesOut() == std::vector<UiAction> { HideBoardAction {} });
+    CHECK(fixture.escapeTimesOut()
+          == std::vector<UiAction> { HideBoardAction {},
+                                     ShowBoardAction { .run = std::string { RunningId } } });
     CHECK(fixture.dashboard.interaction().screen == Screen::Dashboard);
 }
 
@@ -464,7 +467,9 @@ TEST_CASE("b on an agent row opens its board", "[orchestrator][view][board]")
     CHECK(fixture.dashboard.interaction().subject == RunningId);
     auto const screen = fixture.screen();
     CHECK(screen.contains(std::format("STATUS.md · {}", RunningId)));
-    CHECK(screen.contains("# hi"));
+    // Its Markdown is rendered: the heading without its marker.
+    CHECK(screen.contains("│ hi"));
+    CHECK_FALSE(screen.contains("# hi"));
     CHECK(screen.contains("b reload"));
 
     // `b` on the board reads it again now.
@@ -472,7 +477,7 @@ TEST_CASE("b on an agent row opens its board", "[orchestrator][view][board]")
           == std::vector<UiAction> { ShowBoardAction { .run = std::string { RunningId } } });
 }
 
-TEST_CASE("esc on a board returns and hides it", "[orchestrator][view][board]")
+TEST_CASE("esc on a board returns to the details, which show it", "[orchestrator][view][board]")
 {
     auto fixture = DashboardFixture { boardWorld(), Medium };
     openBoard(fixture, RunningId, "# hi"s);
@@ -480,13 +485,38 @@ TEST_CASE("esc on a board returns and hides it", "[orchestrator][view][board]")
 
     CHECK(fixture.dashboard.input("\x1b").empty());
     auto const actions = fixture.escapeTimesOut();
-    CHECK(actions == std::vector<UiAction> { HideBoardAction {} });
+    // The screen's board is hidden, and the selected agent's details ask for it again.
+    CHECK(actions
+          == std::vector<UiAction> { HideBoardAction {},
+                                     ShowBoardAction { .run = std::string { RunningId } } });
     CHECK(fixture.dashboard.interaction().screen == Screen::Dashboard);
     CHECK(fixture.dashboard.interaction().subject.empty());
     for (auto const& action: actions)
-        carryOut(fixture, action, std::nullopt);
-    CHECK(fixture.engine.board(RunningId) == nullptr);
+        carryOut(fixture, action, "# hi"s);
+    CHECK(fixture.engine.board(RunningId) != nullptr);
     CHECK_FALSE(fixture.screen().contains("STATUS.md ·"));
+}
+
+TEST_CASE("the selected agent's details show its board, rendered", "[orchestrator][view][board]")
+{
+    auto fixture = DashboardFixture { boardWorld(), Wide };
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    auto const actions = fixture.dashboard.dueActions();
+    REQUIRE(actions == std::vector<UiAction> { ShowBoardAction { .run = std::string { RunningId } } });
+    carryOut(fixture, actions.front(), "# Fixing CI\n- [x] reproduced\n- [ ] fix the reflow"s);
+    auto const screen = fixture.screen();
+    CHECK(screen.contains("STATUS.md · b shows it whole"));
+    CHECK(screen.contains("Fixing CI"));
+    CHECK(screen.contains("☑ reproduced"));
+    CHECK(screen.contains("☐ fix the reflow"));
+    checkGolden("details-board-120x40", screen);
+    // Asked for once: nothing more is due while the selection stays.
+    CHECK(fixture.dashboard.dueActions().empty());
+
+    // A row with no board leaves it unread.
+    CHECK(fixture.dashboard.select(FinishedId).empty());
+    CHECK(fixture.dashboard.dueActions() == std::vector<UiAction> { HideBoardAction {} });
 }
 
 TEST_CASE("b is inert on an orphan row", "[orchestrator][view][board]")

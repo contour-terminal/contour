@@ -36,6 +36,8 @@
 #include <orchestrator/core/Sanitize.hpp>
 #include <orchestrator/core/Timeline.hpp>
 #include <orchestrator/core/Utf8.hpp>
+#include <orchestrator/view/BoardMarkdown.hpp>
+#include <orchestrator/view/StatusBoard.hpp>
 
 using namespace std::string_view_literals;
 
@@ -657,6 +659,33 @@ namespace
         return details;
     }
 
+    /// The most lines of a board an agent's details show: the `b` screen shows it whole.
+    constexpr auto MaxBoardDetailLines = std::size_t { 60 };
+
+    /// The run's board, rendered, as the last lines of its details: what its agent says it is doing, read for
+    /// the tab while the run is selected (Dashboard). Nothing while it was not read or holds nothing.
+    [[nodiscard]] std::vector<DetailLine> boardDetails(Lists const& lists, Run const& run)
+    {
+        auto const* const board = lists.engine->board(run.id);
+        if (board == nullptr || board->state != BoardState::Read)
+            return {};
+        auto const lines = renderBoardMarkdown(displayLines(board->bytes, MaxBoardLines, MaxBoardLineChars));
+        if (lines.empty())
+            return {};
+        auto details = std::vector<DetailLine> { DetailLine {} };
+        details.push_back(
+            DetailLine { .label = "board", .value = "STATUS.md · b shows it whole", .role = Role::Dim });
+        for (auto const& line: lines | std::views::take(MaxBoardDetailLines))
+            details.push_back(
+                DetailLine { .label = "",
+                             .value = line.text,
+                             .role = line.role,
+                             .fit = line.fit == BoardFit::Cut ? DetailFit::Aligned : DetailFit::Wrap });
+        if (lines.size() > MaxBoardDetailLines)
+            details.push_back(DetailLine { .label = "", .value = "…", .role = Role::Dim });
+        return details;
+    }
+
     [[nodiscard]] Row agentRow(Lists const& lists, Run const& run)
     {
         auto const scope = lists.engine->scopeOf(run);
@@ -721,6 +750,7 @@ namespace
                     ageText(static_cast<uint64_t>(lists.config->endDoneAfterFor(run.task).count()))),
                 .role = Role::Warning });
         std::ranges::move(runDetails(lists, run), std::back_inserter(details));
+        std::ranges::move(boardDetails(lists, run), std::back_inserter(details));
         // A run whose STATUS.md was found says so: `b` shows it.
         if (lists.engine->hasBoard(run.id))
             status = std::format("{} {}", BoardCue, status);
@@ -1126,6 +1156,7 @@ std::vector<std::string> fitted(std::string_view text, DetailFit fit, int firstC
     {
         case DetailFit::Wrap: return wrap(text, firstColumns, nextColumns);
         case DetailFit::Cut: return { cut(text, firstColumns) };
+        case DetailFit::Aligned: return { cutSanitised(text, firstColumns) };
         case DetailFit::Whole:
             if (firstColumns <= 0)
                 return {};
@@ -1219,11 +1250,15 @@ std::string joinHints(std::span<std::string_view const> hints, int columns)
 
 std::string cut(std::string_view text, int columns)
 {
-    auto sanitised = displayText(text, MaxCutChars);
+    return cutSanitised(displayText(text, MaxCutChars), columns);
+}
+
+std::string cutSanitised(std::string_view sanitised, int columns)
+{
     if (columns <= 0)
         return {};
     if (columnsOf(sanitised) <= columns)
-        return sanitised;
+        return std::string { sanitised };
     auto result = std::string {};
     auto used = 0;
     for (auto const& cluster: unicode::utf8_grapheme_segmenter(sanitised))

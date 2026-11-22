@@ -121,6 +121,11 @@ work, so a board never keeps a worktree. `b` is offered on a finished run only w
 and such a board is read once, not every five seconds; a board shown when its worktree goes says that it was
 removed when the run ended, never that the prompt failed to ask for one.
 
+A board is Markdown, and it is drawn that way: headings in the accent, `•` for list items, `☐`/`☑` for task
+boxes, `│` for quotes, aligned tables, and dim code blocks. Inline markers are dropped, and a link shows only
+its text. The selected agent's details end with its board, read every five seconds while it stays selected;
+`b` shows the whole board on its own screen.
+
 **The transcript** is the run's Claude Code session log, a page of 30 entries at a time, read with the
 declared command `agent-transcript` (`contour agent transcript … --format 1 --json`). The host finds the log
 by the run's session id and binds it to the run's worktree, which need not exist any more, so a finished run
