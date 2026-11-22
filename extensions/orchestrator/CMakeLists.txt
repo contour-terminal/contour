@@ -126,6 +126,8 @@ add_library(orchestrator_view STATIC
     view/Actions.hpp
     view/Attention.cpp
     view/Attention.hpp
+    view/HitMap.cpp
+    view/HitMap.hpp
     view/Band.hpp
     view/Dashboard.cpp
     view/Dashboard.hpp
@@ -205,6 +207,7 @@ if(ORCHESTRATOR_TESTING)
         guest/Driver_test.cpp
         view/Actions_test.cpp
         view/Attention_test.cpp
+        view/HitMap_test.cpp
         view/Dashboard_test.cpp
         view/DispatchForm_test.cpp
         view/Launcher_test.cpp

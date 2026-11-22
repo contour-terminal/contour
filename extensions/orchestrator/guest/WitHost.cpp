@@ -369,6 +369,15 @@ namespace
             return {};
         }
 
+        [[nodiscard]] std::expected<void, HostError> urlOpen(std::string_view url, uint32_t origin) override
+        {
+            auto urlText = borrowed(url);
+            auto error = HostErrorCode {};
+            if (!terminal_extensions_daemon_host_url_open(&urlText, origin, &error))
+                return std::unexpected(hostErrorOf(error));
+            return {};
+        }
+
         [[nodiscard]] std::expected<std::vector<PaneInfo>, HostError> panes() override
         {
             auto listed = terminal_extensions_daemon_host_list_pane_info_t {};

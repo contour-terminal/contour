@@ -179,6 +179,8 @@ class Driver
     /// Presses a quick reply's key in its run's agent tab, while the agent still asks; a reply that awaits a
     /// reason then turns the run Waiting (AwaitMessage). A refusal is said on the dashboard's action bar.
     void sendReply(std::string_view tab, view::QuickReplyAction const& reply);
+    /// Asks the frontend the user is at to open a link (`url-open`); the dashboard says how it went.
+    void openUrl(std::string_view tab, view::OpenUrlAction const& open);
     void takeActions();
     void followTabs();
     void readTabs();

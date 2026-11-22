@@ -87,6 +87,14 @@ struct RevealAgentAction
     [[nodiscard]] bool operator==(RevealAgentAction const&) const = default;
 };
 
+/// Open a web link on the machine the user sits at, through the frontend they typed or clicked in.
+struct OpenUrlAction
+{
+    std::string url = {};   ///< The link.
+    std::string label = {}; ///< What the action bar calls it, such as `#2369`.
+    [[nodiscard]] bool operator==(OpenUrlAction const&) const = default;
+};
+
 /// Show a run's status board in the dashboard's tab: it is read now, and again while the tab shows it.
 struct ShowBoardAction
 {
@@ -117,8 +125,8 @@ struct ReadTranscriptAction
 
 /// What the dashboard asks for: the guest steps each as the engine input of the same name (DispatchAction as
 /// Dispatch, ShowBoardAction and HideBoardAction as ShowBoard and HideBoard for the dashboard's tab,
-/// ReadTranscriptAction as ReadTranscript), but for RevealAgentAction, SendMessageAction and
-/// QuickReplyAction, which it carries out itself with the host.
+/// ReadTranscriptAction as ReadTranscript), but for RevealAgentAction, SendMessageAction, QuickReplyAction
+/// and OpenUrlAction, which it carries out itself with the host.
 using UiAction = std::variant<RefreshNowAction,
                               InstallPluginsAction,
                               SendMessageAction,
@@ -127,6 +135,7 @@ using UiAction = std::variant<RefreshNowAction,
                               RetryRemovalAction,
                               DismissAction,
                               RevealAgentAction,
+                              OpenUrlAction,
                               DispatchAction,
                               ShowBoardAction,
                               HideBoardAction,
@@ -163,7 +172,7 @@ enum class KeyCommand : uint8_t
     NewAgent,       ///< Open the launcher, empty: to browse the items, or to type a topic.
     InstallPlugins, ///< Install the Claude Code plugins the agents need and lack; the palette's.
     Reveal,         ///< Bring the selected run's agent tab in front.
-    OpenLink,       ///< Copy the selected run's link with OSC 52, until the frontend can open it (phase 6).
+    OpenLink,       ///< Open the selected run's link on the machine the user sits at (`url-open`).
     Open,           ///< To the Focus of the selected row: to write to its agent, or to read it.
     RunAgain,       ///< Open the launcher on the selected finished run's item, task and model.
     Timeline,       ///< Show the last 24 hours, an hour a bar; the palette's.
@@ -303,7 +312,6 @@ struct Interaction
     std::map<std::string, std::string, std::less<>> drafts = {}; ///< The message box's draft, per run.
     std::optional<SentMessage> sent = {}; ///< The last message sent, until it shows or is refused.
     std::optional<AnsweredRequest> answered = {}; ///< The last quick reply, until its agent stops asking.
-    std::string clipboard = {};           ///< Text the next frame copies with OSC 52; empty: none.
     std::string followGroup = {}; ///< A group whose heading the selection moves to once the rows are built
                                   ///< again, as folding from one of its runs asks; empty: none.
     [[nodiscard]] bool operator==(Interaction const&) const = default;
@@ -358,6 +366,20 @@ struct KeyContext
 /// Shows the Fleet with the keys: the Focus's scroll, follow and page start over for the row selected next.
 /// @param interaction Where the user is.
 void backToFleet(Interaction& interaction) noexcept;
+
+/// Selects a row, as a click on it does: the Fleet gets the keys, and the Focus starts over for a row that
+/// was not selected; an end waiting for its confirmation is dropped.
+/// @param interaction Where the user is.
+/// @param context How many rows can be selected.
+/// @param index The row's position among them; kept within them.
+void selectRow(Interaction& interaction, KeyContext const& context, std::size_t index) noexcept;
+
+/// Scrolls the Focus's tab by @p lines, as the wheel does: the transcript stops following the agent when
+/// scrolled away from its end, and follows it again once back.
+/// @param interaction Where the user is.
+/// @param context The Focus tab shown, and its extent as last drawn.
+/// @param lines How far: negative is up.
+void scrollFocus(Interaction& interaction, KeyContext const& context, std::ptrdiff_t lines) noexcept;
 
 /// Opens the launcher on an item, as Enter does on a finished run (run again): on @p task while it
 /// still applies to the item, else on the first task that does. The launcher previews and refuses as every

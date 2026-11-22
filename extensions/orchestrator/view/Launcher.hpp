@@ -19,6 +19,7 @@
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/view/DispatchForm.hpp>
+#include <orchestrator/view/HitMap.hpp>
 
 namespace orchestrator::view
 {
@@ -141,6 +142,12 @@ void pasteIntoLauncher(std::optional<LauncherState>& launcher, Engine const& eng
                                                              HooksWarning hooksAtInput,
                                                              std::string_view nearTab);
 
+/// Highlights a candidate, as a click on it does: its settings are built afresh and the keys go to the list.
+/// @param state The open launcher.
+/// @param engine The engine it was opened with.
+/// @param index The candidate's position in candidatesOf(engine, state.query); kept within them.
+void highlightCandidate(LauncherState& state, Engine const& engine, std::size_t index);
+
 /// The launcher, drawn in a rounded box titled `✦ New agent`: the query, the candidates in their groups with
 /// their checks, review and agent columns, the settings, what the dispatch runs, the setup's warnings and the
 /// keys. Shown as an overlay over the dashboard, at the size the dashboard places it at.
@@ -149,8 +156,9 @@ class LauncherView final: public core::tui::Component
   public:
     /// @param engine The engine it lists and previews against.
     /// @param launcher The dashboard's launcher; nullopt while none is open, when nothing is drawn.
-    LauncherView(Engine const& engine, std::optional<LauncherState> const& launcher):
-        _engine { engine }, _launcher { launcher }
+    /// @param hits Where it records what a click on it lands on.
+    LauncherView(Engine const& engine, std::optional<LauncherState> const& launcher, HitMap& hits):
+        _engine { engine }, _launcher { launcher }, _hits { hits }
     {
     }
     void render(core::tui::Canvas& canvas) override;
@@ -167,6 +175,7 @@ class LauncherView final: public core::tui::Component
   private:
     Engine const& _engine;
     std::optional<LauncherState> const& _launcher;
+    HitMap& _hits;
     core::tui::Size _size {};
 };
 

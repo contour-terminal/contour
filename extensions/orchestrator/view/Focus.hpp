@@ -20,6 +20,7 @@
 
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/view/Fleet.hpp>
+#include <orchestrator/view/HitMap.hpp>
 #include <orchestrator/view/Keys.hpp>
 #include <orchestrator/view/Sections.hpp>
 #include <orchestrator/view/StatusBoard.hpp>
@@ -160,12 +161,14 @@ class Focus final: public core::tui::Component
     /// @param tab The id of the dashboard's tab, whose transcript page the engine keeps.
     /// @param clock What a board's age moves on with.
     /// @param panels What its tabs learnt drawing themselves.
+    /// @param hits Where it records what a click on its tabs, chips and message box lands on.
     Focus(Engine const& engine CORE_LIFETIMEBOUND,
           Interaction const& interaction CORE_LIFETIMEBOUND,
           FocusFrame const& frame CORE_LIFETIMEBOUND,
           std::string const& tab CORE_LIFETIMEBOUND,
           core::IClock const& clock CORE_LIFETIMEBOUND,
-          FocusPanels& panels CORE_LIFETIMEBOUND);
+          FocusPanels& panels CORE_LIFETIMEBOUND,
+          HitMap& hits CORE_LIFETIMEBOUND);
 
     void render(core::tui::Canvas& canvas) override;
 
@@ -173,8 +176,10 @@ class Focus final: public core::tui::Component
     void renderRun(core::tui::Canvas& canvas, Run const* run);
     void renderDetails(core::tui::Canvas& canvas);
     void renderLatest(core::tui::Canvas& canvas, Run const& run);
-    void renderBottom(core::tui::Canvas& canvas);
-    void renderAsking(core::tui::Canvas& canvas);
+    void renderBottom(core::tui::Canvas& canvas, HitRecorder const& hits);
+    void renderAsking(core::tui::Canvas& canvas, HitRecorder const& hits);
+    /// @return A recorder in the coordinates of its own canvas, while it renders.
+    [[nodiscard]] HitRecorder recorder() const;
     /// @return The selected run's draft; empty: none.
     [[nodiscard]] std::string_view draftOf() const noexcept;
 
@@ -183,6 +188,7 @@ class Focus final: public core::tui::Component
     FocusFrame const& _frame;
     std::string const& _tab;
     FocusPanels& _panels;
+    HitMap& _hits;
     StatusBoardPanel _board;
     TranscriptPanel _transcript;
 };

@@ -302,6 +302,13 @@ class IGuestHost
     /// @return Nothing, or why it was not revealed.
     [[nodiscard]] virtual std::expected<void, HostError> tabReveal(std::string_view tab, uint32_t origin) = 0;
 
+    /// Asks the frontend the user is at to open a web link: the window of the origin's action, or the one a
+    /// key or click into one of the guest's tabs came from within the last 2 s.
+    /// @param url An http or https link.
+    /// @param origin The connection the action that opened the dashboard came from; 0 for none.
+    /// @return Nothing once it is on its way, or why it was not sent.
+    [[nodiscard]] virtual std::expected<void, HostError> urlOpen(std::string_view url, uint32_t origin) = 0;
+
     /// @return The tabs the guest serves.
     [[nodiscard]] virtual std::expected<std::vector<TabInfo>, HostError> tabs() = 0;
 

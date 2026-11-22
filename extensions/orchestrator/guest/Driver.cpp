@@ -509,6 +509,7 @@ void Driver::apply(std::string_view tab, view::UiAction const& action)
             },
             [&](view::SendMessageAction const& message) { sendMessage(tab, message); },
             [&](view::QuickReplyAction const& reply) { sendReply(tab, reply); },
+            [&](view::OpenUrlAction const& open) { openUrl(tab, open); },
             [&](view::DispatchAction const& dispatch) {
                 // Stamped with the time it arrived: the run's names carry the wall time.
                 auto const clock = readClock();
@@ -607,6 +608,42 @@ void Driver::sendReply(std::string_view tab, view::QuickReplyAction const& reply
         step(AwaitMessage { .run = reply.run, .monoMs = nowMs() });
         stepReplies();
     }
+}
+
+namespace
+{
+    /// What the action bar says when the host did not send a link, by its refusal; empty: the plain failure.
+    struct UrlRefusalWords
+    {
+        HostError error;
+        std::string_view words;
+    };
+
+    constexpr auto UrlRefusals = std::array {
+        UrlRefusalWords { .error = HostError::NotGranted, .words = "the extension may not open links" },
+        UrlRefusalWords { .error = HostError::BadArgument, .words = "not an http or https link" },
+        UrlRefusalWords { .error = HostError::NotSupportedYet, .words = "this terminal cannot open links" },
+        UrlRefusalWords { .error = HostError::Gone, .words = "no window of yours asked just now" },
+    };
+} // namespace
+
+void Driver::openUrl(std::string_view tab, view::OpenUrlAction const& open)
+{
+    auto* const shown = dashboard(tab);
+    // 0 when no action opened this dashboard since the guest loaded: the host then sends it to the window
+    // the key or click that asked came from.
+    auto const origin = _origins.find(tab);
+    auto const sent = _host.urlOpen(open.url, origin != _origins.end() ? origin->second : 0);
+    if (shown == nullptr)
+        return;
+    if (sent)
+    {
+        shown->urlOpened(open.label);
+        return;
+    }
+    _host.log(LogLevel::Debug, std::format("url-open: {}", nameOf(sent.error())));
+    auto const words = std::ranges::find(UrlRefusals, sent.error(), &UrlRefusalWords::error);
+    shown->urlRefused(words != UrlRefusals.end() ? words->words : plainFailure(nameOf(sent.error())));
 }
 
 void Driver::followTabs()

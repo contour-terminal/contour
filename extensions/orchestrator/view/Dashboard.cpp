@@ -2,9 +2,9 @@
 #include <orchestrator/view/Dashboard.hpp>
 
 #include <core/tui/Canvas.hpp>
-#include <core/tui/ClipboardProtocol.hpp>
 #include <core/tui/Component.hpp>
 #include <core/tui/HeadlessSurface.hpp>
+#include <core/tui/HyperlinkEmitter.hpp>
 #include <core/tui/Responsive.hpp>
 #include <core/tui/Screen.hpp>
 #include <core/tui/Spinner.hpp>
@@ -33,6 +33,7 @@
 #include <orchestrator/view/Band.hpp>
 #include <orchestrator/view/Fleet.hpp>
 #include <orchestrator/view/Focus.hpp>
+#include <orchestrator/view/HitMap.hpp>
 #include <orchestrator/view/Palette.hpp>
 #include <orchestrator/view/Sections.hpp>
 #include <orchestrator/view/StatusBoard.hpp>
@@ -144,6 +145,26 @@ namespace
         return row != nullptr && row->kind == RowKind::Orphan ? FocusWidth::Whole : FocusWidth::Shared;
     }
 
+    /// How long after a press of the left button a second one on the same cell is a double click.
+    constexpr auto DoubleClickMs = uint64_t { 400 };
+    /// How many lines one step of the wheel scrolls the Focus's tab.
+    constexpr auto WheelLines = std::ptrdiff_t { 3 };
+
+    /// Whether a press of the left button is the second of a double click.
+    enum class Clicks : uint8_t
+    {
+        Single = 0, ///< One press.
+        Double,     ///< The second press on the same cell, within DoubleClickMs.
+    };
+
+    /// The last press of the left button.
+    struct LastClick
+    {
+        int x = 0;         ///< Its column, 0-based.
+        int y = 0;         ///< Its line, 0-based.
+        uint64_t atMs = 0; ///< When, in the engine's monotonic milliseconds.
+    };
+
     /// @return The identity of @p row across a rebuild: its run, its worktree, its group, or its kind.
     [[nodiscard]] std::string keyOf(Row const& row)
     {
@@ -199,6 +220,21 @@ struct Dashboard::State
     /// @return What the engine is asked, in order.
     [[nodiscard]] std::vector<UiAction> applyKeys(std::vector<core::tui::InputEvent> const& events,
                                                   HooksWarning hooksAtInput);
+    /// Applies a mouse event to what the last frame drew under the pointer (MouseRows): a press of the left
+    /// button clicks, the wheel scrolls; a popup takes them alone, and a click beside it closes it.
+    /// @param mouse The event.
+    /// @param actions What the engine is asked, appended to.
+    void applyMouse(core::tui::MouseEvent const& mouse, std::vector<UiAction>& actions);
+    /// Applies one key as if typed, as a click that stands for it does.
+    /// @param key The key.
+    /// @param actions What the engine is asked, appended to.
+    void press(core::tui::KeyCode key, std::vector<UiAction>& actions);
+    /// Runs a command as its key would, as a click on a tab or a chip does.
+    /// @param command The command.
+    /// @param actions What the engine is asked, appended to.
+    void run(KeyCommand command, std::vector<UiAction>& actions);
+    /// @return Whether a popup is open: the launcher, the palette or the timeline.
+    [[nodiscard]] bool popupOpen() const noexcept;
     /// @return The form's HooksWarning now: what the next input begins with.
     [[nodiscard]] HooksWarning launcherHooks() const noexcept;
     /// Resolves a held ESC that waited past EscapeTimeout into the Escape key.
@@ -278,7 +314,6 @@ struct Dashboard::State
     IUuidSource& ids;               ///< Where the session ids of the agents it dispatches come from.
     std::string tab;                ///< The tab it is served in.
     std::string frameBytes;         ///< What the surface was handed since the last frame.
-    std::string clipboardBytes;     ///< An OSC 52 copy the next frame carries.
     core::tui::HeadlessSurface surface;
     core::tui::Screen screen;
     core::tui::VtParser parser;
@@ -301,6 +336,8 @@ struct Dashboard::State
     std::vector<std::pair<PanelRole, Component*>> toggled; ///< Its panels shown by place.
     ProblemLines* problems = nullptr;                      ///< The current layout's problem lines.
     Repaint repaint = Repaint::Needed;
+    HitMap hits;                                ///< What the last frame drew where, for the mouse.
+    std::optional<LastClick> lastClick;         ///< The last press of the left button, for a double click.
     std::unique_ptr<LauncherView> launcherView; ///< Draws interaction.launcher.
     std::unique_ptr<PaletteView> paletteView;   ///< Draws interaction.palette.
     std::unique_ptr<TimelineView> timelineView; ///< Draws the last 24 hours while Overlay::Timeline.
@@ -440,6 +477,8 @@ namespace
                 title += std::format(
                     " · /{}{}", interaction.filter, interaction.filtering == Filtering::Typing ? "▏" : "");
             drawFrame(canvas, title, interaction.place == Place::Fleet ? Role::Focus : Role::Border);
+            auto const hits = HitRecorder { _state.hits, { .x = screenBounds().x, .y = screenBounds().y } };
+            hits.add(canvas.area(), Hit { .kind = HitKind::FleetPane });
             auto inside = insideFrame(canvas);
             auto const& rows = _state.visible;
             auto const height = std::max(0, inside.height());
@@ -479,6 +518,12 @@ namespace
                 if (y >= height)
                     break;
                 auto const shift = apart && at + 1 == rows.size() ? 1 : 0;
+                auto const& row = _state.rows[rows[at]];
+                if (row.isSelectable())
+                    hits.shifted(1, 1).add(
+                        Rect { .x = 0, .y = y + shift, .width = inside.width(), .height = heightOf(row) },
+                        Hit { .kind = HitKind::Row,
+                              .value = selectableCount(_state.rows, std::span { rows }.first(at)) });
                 drawRow(inside,
                         y + shift,
                         _state.rows[rows[at]],
@@ -660,9 +705,9 @@ Dashboard::State::State(Engine const& engine,
     surface { size, [this](std::string_view bytes) { frameBytes.append(bytes); } },
     screen { surface, core::tui::ScreenConfig {}, clock },
     size { size },
-    launcherView { std::make_unique<LauncherView>(engine, interaction.launcher) },
-    paletteView { std::make_unique<PaletteView>(interaction.palette) },
-    timelineView { std::make_unique<TimelineView>(engine) },
+    launcherView { std::make_unique<LauncherView>(engine, interaction.launcher, hits) },
+    paletteView { std::make_unique<PaletteView>(interaction.palette, hits) },
+    timelineView { std::make_unique<TimelineView>(engine, hits) },
     spinner { core::tui::SpinnerType::Dots, clock },
     root { std::make_unique<core::tui::Responsive>(std::ranges::to<std::vector<core::tui::Breakpoint>>(
         std::views::iota(std::size_t { 0 }, BandBreakpoints.size())
@@ -707,7 +752,7 @@ std::unique_ptr<Component> Dashboard::State::buildLayout(std::size_t breakpoint)
            body->add(std::make_unique<FleetPanel>(*this, band),
                      layout::Style { .grow = FleetShare, .basis = 0 }));
     toggle(PanelRole::Focus,
-           body->add(std::make_unique<Focus>(engine, interaction, focus, tab, clock, focusPanels),
+           body->add(std::make_unique<Focus>(engine, interaction, focus, tab, clock, focusPanels, hits),
                      layout::Style { .grow = FocusShare, .basis = 0 }));
     column->add(std::move(body), layout::Style { .grow = 1, .basis = 0 });
     column->add(std::make_unique<ActionBar>(*this), layout::Style { .shrink = 0 });
@@ -905,6 +950,11 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
             pasteInto(interaction, keyContext(), paste->text);
             continue;
         }
+        if (auto const* const mouse = std::get_if<core::tui::MouseEvent>(&event))
+        {
+            applyMouse(*mouse, actions);
+            continue;
+        }
         auto const* const key = std::get_if<core::tui::KeyEvent>(&event);
         if (key == nullptr)
             continue;
@@ -922,19 +972,208 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
         }
         if (auto action = applyKey(*key, interaction, keyContext()))
             actions.push_back(std::move(*action));
-        // A copy the key asked for goes out with the next frame.
-        if (!interaction.clipboard.empty())
-            core::tui::appendOsc52(clipboardBytes,
-                                   std::exchange(interaction.clipboard, {}),
-                                   core::tui::ClipboardTarget::Clipboard);
         // A launcher a key opened gets its agent's session id now.
         mintSession();
         refilter(Keep::Position);
     }
-    if (interaction != before || !clipboardBytes.empty())
+    if (interaction != before)
         repaint = Repaint::Needed;
     return actions;
 }
+
+// }}}
+// {{{ the mouse
+
+namespace
+{
+    using State = Dashboard::State;
+
+    /// Which layer a hit is on: while a popup is open, only its own layer takes the mouse.
+    enum class Layer : uint8_t
+    {
+        Dashboard = 0, ///< The panes beneath.
+        Popup,         ///< A popup: the launcher, the palette or the timeline.
+    };
+
+    /// What a click on a hit of one kind does.
+    using ClickHandler = void (*)(State& state,
+                                  std::size_t value,
+                                  Clicks clicks,
+                                  std::vector<UiAction>& actions);
+    /// What the wheel over a hit of one kind does; @p steps is negative upwards.
+    using WheelHandler = void (*)(State& state, int steps, std::vector<UiAction>& actions);
+
+    /// What the mouse does on one kind of hit.
+    struct MouseRow
+    {
+        HitKind kind = HitKind::Popup;  ///< The kind.
+        Layer layer = Layer::Dashboard; ///< Its layer.
+        ClickHandler click = nullptr;   ///< A press of the left button; nullptr: it falls through.
+        WheelHandler wheel = nullptr;   ///< The wheel; nullptr: it falls through.
+    };
+
+    /// One row per HitKind, indexed by its value.
+    constexpr auto MouseRows = std::array {
+        // A popup covers the dashboard: a click on it that hits nothing of it does nothing, and the wheel
+        // moves its highlight.
+        MouseRow { .kind = HitKind::Popup,
+                   .layer = Layer::Popup,
+                   .click = [](State&, std::size_t, Clicks, std::vector<UiAction>&) {},
+                   .wheel =
+                       [](State& state, int steps, std::vector<UiAction>& actions) {
+                           state.press(steps < 0 ? core::tui::KeyCode::Up : core::tui::KeyCode::Down,
+                                       actions);
+                       } },
+        MouseRow { .kind = HitKind::FleetPane,
+                   .layer = Layer::Dashboard,
+                   .click = nullptr,
+                   .wheel =
+                       [](State& state, int steps, std::vector<UiAction>& /*actions*/) {
+                           auto const at = static_cast<std::ptrdiff_t>(state.interaction.selected) + steps;
+                           selectRow(state.interaction,
+                                     state.keyContext(),
+                                     static_cast<std::size_t>(std::max<std::ptrdiff_t>(0, at)));
+                       } },
+        MouseRow { .kind = HitKind::FocusPane,
+                   .layer = Layer::Dashboard,
+                   .click = nullptr,
+                   .wheel =
+                       [](State& state, int steps, std::vector<UiAction>& /*actions*/) {
+                           scrollFocus(state.interaction, state.keyContext(), steps * WheelLines);
+                       } },
+        // A click selects a row; a double click, or one on `+ new agent`, runs its primary action.
+        MouseRow { .kind = HitKind::Row,
+                   .layer = Layer::Dashboard,
+                   .click =
+                       [](State& state, std::size_t value, Clicks clicks, std::vector<UiAction>& actions) {
+                           selectRow(state.interaction, state.keyContext(), value);
+                           state.refilter(State::Keep::Position);
+                           auto const* const row = state.selectedRow();
+                           if (clicks == Clicks::Double || (row != nullptr && row->kind == RowKind::NewAgent))
+                               state.run(KeyCommand::Enter, actions);
+                       },
+                   .wheel = nullptr },
+        // A tab or a chip runs what its key would.
+        MouseRow { .kind = HitKind::Command,
+                   .layer = Layer::Dashboard,
+                   .click =
+                       [](State& state, std::size_t value, Clicks, std::vector<UiAction>& actions) {
+                           state.run(static_cast<KeyCommand>(value), actions);
+                       },
+                   .wheel = nullptr },
+        MouseRow { .kind = HitKind::MessageBox,
+                   .layer = Layer::Dashboard,
+                   .click =
+                       [](State& state, std::size_t, Clicks, std::vector<UiAction>& actions) {
+                           state.run(KeyCommand::Open, actions);
+                       },
+                   .wheel = nullptr },
+        // A palette entry runs at once, as the palette is a menu.
+        MouseRow { .kind = HitKind::PaletteEntry,
+                   .layer = Layer::Popup,
+                   .click =
+                       [](State& state, std::size_t value, Clicks, std::vector<UiAction>& actions) {
+                           state.interaction.palette->highlighted = value;
+                           state.press(core::tui::KeyCode::Enter, actions);
+                       },
+                   .wheel = nullptr },
+        // A launcher candidate is highlighted, its settings shown; a double click starts it.
+        MouseRow { .kind = HitKind::LauncherCandidate,
+                   .layer = Layer::Popup,
+                   .click =
+                       [](State& state, std::size_t value, Clicks clicks, std::vector<UiAction>& actions) {
+                           highlightCandidate(*state.interaction.launcher, state.engine, value);
+                           if (clicks == Clicks::Double)
+                               state.press(core::tui::KeyCode::Enter, actions);
+                       },
+                   .wheel = nullptr },
+    };
+
+    static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, MouseRows.size()),
+                                      [](std::size_t index) {
+                                          return std::to_underlying(MouseRows.at(index).kind) == index;
+                                      }),
+                  "MouseRows is indexed by the HitKind's value");
+
+    /// @return What the mouse does on @p hit.
+    [[nodiscard]] MouseRow const& mouseRowOf(Hit const& hit) noexcept
+    {
+        return MouseRows.at(std::to_underlying(hit.kind));
+    }
+
+    /// The most cells of a link the action bar names when it opens.
+    constexpr auto LinkLabelColumns = 48;
+} // namespace
+
+bool Dashboard::State::popupOpen() const noexcept
+{
+    return interaction.launcher || interaction.palette || interaction.overlay != Overlay::None;
+}
+
+void Dashboard::State::press(core::tui::KeyCode key, std::vector<UiAction>& actions)
+{
+    std::ranges::move(applyKeys({ core::tui::KeyEvent { .key = key } }, launcherHooks()),
+                      std::back_inserter(actions));
+}
+
+void Dashboard::State::run(KeyCommand command, std::vector<UiAction>& actions)
+{
+    if (auto action = dispatch(command, interaction, keyContext()))
+        actions.push_back(std::move(*action));
+    mintSession();
+    refilter(Keep::Position);
+}
+
+void Dashboard::State::applyMouse(core::tui::MouseEvent const& mouse, std::vector<UiAction>& actions)
+{
+    using Type = core::tui::MouseEvent::Type;
+    auto const x = mouse.x - 1;
+    auto const y = mouse.y - 1;
+    auto const under = hits.at(x, y);
+    auto const takes = [&](Hit const& hit) {
+        return !popupOpen() || mouseRowOf(hit).layer == Layer::Popup;
+    };
+    if (mouse.type == Type::ScrollUp || mouse.type == Type::ScrollDown)
+    {
+        // The pane under the pointer scrolls: the topmost hit that the wheel moves.
+        auto const pane =
+            std::ranges::find_if(under, [](Hit const& hit) { return mouseRowOf(hit).wheel != nullptr; });
+        if (pane != under.end() && takes(*pane))
+            mouseRowOf(*pane).wheel(*this, mouse.type == Type::ScrollUp ? -1 : 1, actions);
+        return;
+    }
+    if (mouse.type != Type::Press || mouse.button != 0)
+        return;
+    auto const now = nowMonoMs();
+    auto const clicks =
+        lastClick && lastClick->x == x && lastClick->y == y && now - lastClick->atMs <= DoubleClickMs
+            ? Clicks::Double
+            : Clicks::Single;
+    lastClick =
+        clicks == Clicks::Double ? std::nullopt : std::optional { LastClick { .x = x, .y = y, .atMs = now } };
+    interaction.notice.clear();
+    auto const target =
+        std::ranges::find_if(under, [](Hit const& hit) { return mouseRowOf(hit).click != nullptr; });
+    // A click beside an open popup closes it, as esc does.
+    if (popupOpen() && (under.empty() || !takes(under.front())))
+    {
+        press(core::tui::KeyCode::Escape, actions);
+        return;
+    }
+    // A link opens on the machine the user sits at.
+    if (!popupOpen())
+        if (auto const uri = core::tui::HyperlinkIndex { screen.renderedBuffer() }.uriAt(y, x); !uri.empty())
+        {
+            actions.emplace_back(
+                OpenUrlAction { .url = std::string { uri }, .label = cut(uri, LinkLabelColumns) });
+            return;
+        }
+    if (target != under.end())
+        mouseRowOf(*target).click(*this, target->value, clicks, actions);
+}
+
+// }}}
+// {{{ the engine's reads
 
 void Dashboard::State::syncBoard(std::vector<UiAction>& actions)
 {
@@ -1300,6 +1539,18 @@ void Dashboard::replyOutdated(std::string_view run)
         std::format("{} is no longer asking", row != rows.end() ? std::string_view { row->name } : run));
 }
 
+void Dashboard::urlOpened(std::string_view label)
+{
+    _state->interaction.notice = std::format("opening {} on your machine", label);
+    _state->repaint = State::Repaint::Needed;
+}
+
+void Dashboard::urlRefused(std::string_view why)
+{
+    _state->interaction.notice = std::format("not opened: {}", why);
+    _state->repaint = State::Repaint::Needed;
+}
+
 void Dashboard::dispatchRefused(DispatchRefusal refusal)
 {
     _state->interaction.notice = std::format("dispatch refused: {}", refusalText(refusal));
@@ -1351,17 +1602,18 @@ std::string Dashboard::frame()
     // The spinner turns on the redraws that happen anyway: it asks for no wake of its own.
     static_cast<void>(state.spinner.tick());
     state.noteSeen();
+    // Each component records what it covers as it draws.
+    state.hits.clear();
     state.screen.draw();
     state.clampScroll();
-    // A copy asked for goes out before the frame's cells.
-    auto bytes = std::exchange(state.clipboardBytes, {});
     // The cursor rests at the top-left, hidden: every frame addresses its cells absolutely, and a shorter tab
     // then cuts its bottom rows rather than pushing its top ones into a history -- in the terminal and in
     // every window that mirrors it.
     // Bracketed paste on, in every frame, so that a tab the host drew in the meantime gets it back: a paste
     // arrives as text, never as the keys it spells (an Enter in it would confirm the form).
-    bytes += std::exchange(state.frameBytes, {});
+    auto bytes = std::exchange(state.frameBytes, {});
     bytes += BracketedPasteOn;
+    bytes += MouseReportingOn;
     bytes += RestingCursor;
     state.repaint = State::Repaint::Clean;
     return bytes;
@@ -1370,6 +1622,11 @@ std::string Dashboard::frame()
 core::tui::Buffer const& Dashboard::rendered() const noexcept
 {
     return _state->screen.renderedBuffer();
+}
+
+HitMap const& Dashboard::hits() const noexcept
+{
+    return _state->hits;
 }
 
 std::string_view Dashboard::tab() const noexcept

@@ -347,12 +347,12 @@ TEST_CASE("left turns the transcript to an earlier page, which stops following; 
     CHECK(interaction.follow == Follow::Live);
 }
 
-TEST_CASE("o copies the run's link and says so", "[orchestrator][view][keys]")
+TEST_CASE("o asks to open the run's link", "[orchestrator][view][keys]")
 {
     auto live = LiveRun {};
     live.row.offers.push_back(KeyCommand::OpenLink);
     auto interaction = Interaction {};
-    CHECK(applyKey(character(U'o'), interaction, live.context()) == std::nullopt);
-    CHECK(interaction.clipboard == "https://github.com/contour-terminal/contour/pull/1");
-    CHECK(interaction.notice == "copied #1's link · ctrl+click it to open");
+    CHECK(applyKey(character(U'o'), interaction, live.context())
+          == UiAction {
+              OpenUrlAction { .url = "https://github.com/contour-terminal/contour/pull/1", .label = "#1" } });
 }

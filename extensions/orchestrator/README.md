@@ -79,9 +79,20 @@ run that starts asking shows you its request. Under the tab, `latest` shows the 
 is the message box of a live run, the asking box of one that asks (below), a done run's `✓ reported done`
 box, or how a finished run ended.
 
-Every URL the dashboard draws — the run's pull request or issue in its Details, and those in its board and
-its transcript — is an OSC 8 hyperlink, which Contour (and any terminal with OSC 8) opens with Ctrl+click on
-the machine you sit at. `o` copies the run's link with OSC 52 until the frontend can open it on its own.
+**Links.** `o` opens the selected run's pull request or issue on the machine you sit at, not the daemon's:
+the orchestrator asks the host's `url-open`, which hands the link to the window you pressed the key in, and
+that window opens it with its own launcher, as a hyperlink you follow there would. The action bar says
+`opening #2369 on your machine`, or why not (`not opened: this terminal cannot open links`). Every URL the
+dashboard draws is also recorded as an OSC 8 hyperlink, and a click on one opens it the same way. (A served
+tab does not pass OSC 8 or OSC 52 on to the terminal, so ctrl+click and copying do not apply there.)
+
+**The mouse.** The dashboard asks for the mouse (SGR reporting, DECSET 1000 and 1006). A click selects a row of
+the Fleet, and a double click runs its primary action; one click on `+ new agent` opens the launcher. A click
+switches the Focus's tab, answers with a quick-reply chip, gives the message box the keys, opens a link, runs a
+palette entry, or highlights a launcher candidate (a double click starts it). A click beside an open popup
+closes it. The wheel moves the Fleet's selection, scrolls the Focus's tab, or moves a popup's highlight,
+whichever is under the pointer. Each frame records what it drew where, so a click lands on what you see.
+Shift+drag still selects text in Contour.
 
 **Places and keys.** The Fleet has the keys by default, and its letters are commands; the Focus gets them with
 `Enter` on a live run or `Tab` on any, and its border lights up. In the Focus of a live run the message box
@@ -131,7 +142,7 @@ actions in rank order; the first is what `Enter` does, and the action bar lists 
 | a run that asks | `1 2 3 answer` · `⏎ see request` · `r agent tab` · `e end` |
 | a run that waits, or stopped by an error | `⏎ reply` · `t transcript` · `b board` (or `d details`) · `e end` |
 | a run starting or at work | `⏎ message` · `t transcript` · `b board` · `e end` (starting: `r agent tab`) |
-| a run that reported done | `⏎ follow up` · `o copy link` · `t transcript` · `e end` |
+| a run that reported done | `⏎ follow up` · `o open link` · `t transcript` · `e end` |
 | a finished run | `⏎ run again` (the launcher, on its item or topic, task and model) · `t transcript` · `del dismiss` |
 | a kept run | `⏎ retry removal` · `d details` · `del dismiss` |
 | a folded group's heading | `⏎ unfold` |

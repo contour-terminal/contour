@@ -31,6 +31,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <glaze/glaze.hpp>
@@ -291,6 +292,16 @@ class Window
         return vthost::testing::revealsOf(_window->log, session);
     }
 
+    /// @return Every link the window was asked to open (OpenUrl), in order.
+    [[nodiscard]] std::vector<std::string> linksOpened() const
+    {
+        auto links = std::vector<std::string> {};
+        for (auto const& event: _window->log.extensionEvents)
+            if (auto const* const open = std::get_if<vthost::proto::OpenUrl>(&event))
+                links.push_back(open->url);
+        return links;
+    }
+
     /// Detaches, and turns the loop until the connection ended.
     void leave()
     {
@@ -356,8 +367,21 @@ class Desk
     /// @return The dashboard's screen, as text.
     [[nodiscard]] std::string page() { return _live.pageText(dashboard); }
 
+    /// Clicks the left button at the 0-based cell (@p x, @p y), as a window that reports the mouse in SGR
+    /// encoding does.
+    void click(std::size_t x, std::size_t y)
+    {
+        _window.connection().client->sendInput(
+            dashboard.value,
+            std::format("\033[<0;{};{}M\033[<0;{};{}m", x + 1, y + 1, x + 1, y + 1),
+            proto::InputKind::ButtonPress);
+    }
+
     /// @see Window::revealsOf()
     [[nodiscard]] std::size_t revealsOf(SessionId session) const { return _window.revealsOf(session); }
+
+    /// @see Window::linksOpened()
+    [[nodiscard]] std::vector<std::string> linksOpened() const { return _window.linksOpened(); }
 
     /// @see Window::leave()
     void leave() { _window.leave(); }
@@ -794,6 +818,50 @@ TEST_CASE("a digit answers an agent that asks, as a key pressed in its tab", "[d
         desk.until([&] { return desk.page().contains(std::format("to {}", runName(dispatched.run.id))); });
     INFO("dashboard: " << desk.page());
     CHECK(box);
+}
+
+TEST_CASE("o asks the window to open the run's link", "[daemon][e2e][agents][url-open]")
+{
+    auto d = AgentDaemon {};
+    auto desk = Desk { *d.live, d.world };
+    auto const dispatched = dispatch(desk, *d.live, d.world, "2375", "pr-2375-");
+    report(*d.live, dispatched.agent, "done");
+    REQUIRE(desk.until([&] { return runIs(d.world, "pr-2375-", "done"); }));
+    selectRun(desk, 0, dispatched.run.id);
+    desk.type("o");
+    auto const opened = desk.until([&] { return !desk.linksOpened().empty(); });
+    INFO("dashboard: " << desk.page());
+    REQUIRE(opened);
+    CHECK(desk.linksOpened().front().ends_with("/pull/2375"));
+    CHECK(desk.until([&] { return desk.page().contains("opening #2375 on your machine"); }));
+}
+
+TEST_CASE("a click selects the Fleet row under it, the mouse read through the guest's tab",
+          "[daemon][e2e][agents][mouse]")
+{
+    auto d = AgentDaemon {};
+    auto desk = Desk { *d.live, d.world };
+    // The dashboard asks for the mouse; a click is its SGR report, typed into the tab. The world's leftover
+    // worktrees are the Fleet's rows, the first selected (`▍`).
+    auto const rowLines = [&] {
+        auto const lines = vthost::testing::pageLines(desk.page());
+        auto found = std::vector<std::size_t> {};
+        for (auto const [index, line]: std::views::enumerate(lines))
+            if (line.contains("⚑"))
+                found.push_back(static_cast<std::size_t>(index));
+        return std::pair { lines, found };
+    };
+    auto const [lines, rows] = rowLines();
+    INFO("dashboard: " << desk.page());
+    REQUIRE(rows.size() >= 2);
+    REQUIRE(lines.at(rows[0]).contains("▍"));
+    desk.click(3, rows[1]);
+    auto const moved = desk.until([&] {
+        auto const now = vthost::testing::pageLines(desk.page());
+        return now.size() > rows[1] && now.at(rows[1]).contains("▍") && !now.at(rows[0]).contains("▍");
+    });
+    INFO("dashboard: " << desk.page());
+    CHECK(moved);
 }
 
 TEST_CASE("an agent that starts to ask while another row is selected is named on the action bar",

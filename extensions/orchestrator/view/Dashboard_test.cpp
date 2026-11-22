@@ -25,6 +25,8 @@
 #include <orchestrator/view/Dashboard.hpp>
 #include <orchestrator/view/Fleet.hpp>
 #include <orchestrator/view/Focus.hpp>
+#include <orchestrator/view/HitMap.hpp>
+#include <orchestrator/view/Keys.hpp>
 #include <orchestrator/view/Sections.hpp>
 #include <orchestrator/view/Theme.hpp>
 #include <orchestrator/view/ViewFixtures.hpp>
@@ -47,6 +49,13 @@ constexpr auto NewId = "pr-2366-20261113-140211"sv;
 constexpr auto KeptId = "issue-2356-20261113-151001"sv;
 
 constexpr auto Wide = Size { .width = 120, .height = 40 };
+
+/// Which way the wheel turns.
+enum class MouseWheel : uint8_t
+{
+    Up = 0,
+    Down,
+};
 constexpr auto Medium = Size { .width = 80, .height = 24 };
 constexpr auto Narrow = Size { .width = 50, .height = 20 };
 
@@ -749,17 +758,183 @@ TEST_CASE("the palette lists an asking run's replies by their labels", "[orchest
 
 // }}}
 
-TEST_CASE("o copies the link with OSC 52 in the next frame", "[orchestrator][view]")
+TEST_CASE("o asks to open the link, and the bar says how it went", "[orchestrator][view]")
 {
     auto fixture = Fixture { fleetWorld() };
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.select(RunningId).empty());
     static_cast<void>(fixture.dashboard.frame());
-    CHECK(fixture.dashboard.input("o").empty());
-    auto const bytes = fixture.dashboard.frame();
-    CHECK(bytes.contains("\x1b]52;c;"));
-    CHECK(core::tui::test::canvasToString(fixture.dashboard.rendered()).contains("copied #2375's link"));
+    CHECK(fixture.dashboard.input("o")
+          == std::vector<UiAction> { OpenUrlAction {
+              .url = "https://github.com/contour-terminal/contour/pull/2375", .label = "#2375" } });
+    // No OSC 52: a served tab drops it.
+    CHECK_FALSE(fixture.dashboard.frame().contains("\x1b]52;"));
+    fixture.dashboard.urlOpened("#2375");
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(core::tui::test::canvasToString(fixture.dashboard.rendered())
+              .contains("opening #2375 on your machine"));
+    fixture.dashboard.urlRefused("this terminal cannot open links");
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(core::tui::test::canvasToString(fixture.dashboard.rendered())
+              .contains("not opened: this terminal cannot open links"));
 }
+
+// {{{ the mouse
+
+namespace
+{
+/// @return The SGR report of a press and release of the left button at the 0-based cell (@p x, @p y).
+[[nodiscard]] std::string clickAt(int x, int y)
+{
+    return std::format("\x1b[<0;{};{}M\x1b[<0;{};{}m", x + 1, y + 1, x + 1, y + 1);
+}
+
+/// @return The SGR report of one step of the wheel at the 0-based cell (@p x, @p y).
+[[nodiscard]] std::string wheelAt(int x, int y, MouseWheel direction)
+{
+    return std::format("\x1b[<{};{};{}M", direction == MouseWheel::Up ? 64 : 65, x + 1, y + 1);
+}
+
+/// @return The first region the last frame recorded for @p hit; fails the test when there is none.
+[[nodiscard]] core::tui::Rect regionOf(Dashboard const& dashboard, Hit hit)
+{
+    auto const regions = dashboard.hits().regions();
+    auto const found = std::ranges::find(regions, hit, &HitRegion::hit);
+    REQUIRE(found != regions.end());
+    return found->area;
+}
+} // namespace
+
+TEST_CASE("every frame asks for the mouse in SGR encoding", "[orchestrator][view][mouse]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    CHECK(fixture.dashboard.frame().contains(MouseReportingOn));
+}
+
+TEST_CASE("the hit map covers the rows, the panes and the Focus's tabs", "[orchestrator][view][mouse]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    static_cast<void>(fixture.dashboard.frame());
+    auto const& hits = fixture.dashboard.hits();
+    auto const kinds = std::ranges::to<std::vector>(
+        hits.regions() | std::views::transform([](auto const& region) { return region.hit.kind; }));
+    for (auto const kind: { HitKind::FleetPane, HitKind::FocusPane, HitKind::Row, HitKind::Command })
+        CHECK(std::ranges::contains(kinds, kind));
+    // No two rows share a cell, and each row's position is its own.
+    auto const rows =
+        std::ranges::to<std::vector>(hits.regions() | std::views::filter([](auto const& region) {
+                                         return region.hit.kind == HitKind::Row;
+                                     }));
+    for (auto const [index, row]: std::views::enumerate(rows))
+        CHECK(row.hit.value == static_cast<std::size_t>(index));
+}
+
+TEST_CASE("a click selects a row and gives the Fleet the keys", "[orchestrator][view][mouse]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    static_cast<void>(fixture.dashboard.frame());
+    auto const target = regionOf(fixture.dashboard, Hit { .kind = HitKind::Row, .value = 2 });
+    CHECK(fixture.dashboard.input(clickAt(target.x + 2, target.y)).empty());
+    CHECK(fixture.dashboard.interaction().selected == 2);
+    CHECK(fixture.dashboard.interaction().place == Place::Fleet);
+}
+
+TEST_CASE("a double click runs the row's primary action", "[orchestrator][view][mouse]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    static_cast<void>(fixture.dashboard.frame());
+    auto const selected = fixture.dashboard.interaction().selected;
+    auto const target = regionOf(fixture.dashboard, Hit { .kind = HitKind::Row, .value = selected });
+    auto const click = clickAt(target.x + 2, target.y);
+    static_cast<void>(fixture.dashboard.input(click + click));
+    // A working run's primary action writes to it: the message box gets the keys.
+    CHECK(fixture.dashboard.interaction().place == Place::Focus);
+}
+
+TEST_CASE("a click on a tab shows it", "[orchestrator][view][mouse]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    static_cast<void>(fixture.dashboard.frame());
+    auto const details =
+        regionOf(fixture.dashboard,
+                 Hit { .kind = HitKind::Command, .value = std::to_underlying(KeyCommand::DetailsTab) });
+    static_cast<void>(fixture.dashboard.input(clickAt(details.x, details.y)));
+    static_cast<void>(fixture.dashboard.frame());
+    REQUIRE(fixture.dashboard.interaction().chosenTab.has_value());
+    CHECK(fixture.dashboard.interaction().chosenTab->tab == FocusTab::Details);
+}
+
+TEST_CASE("the wheel moves the Fleet's selection and scrolls the Focus", "[orchestrator][view][mouse]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    static_cast<void>(fixture.dashboard.frame());
+    auto const fleet = regionOf(fixture.dashboard, Hit { .kind = HitKind::FleetPane });
+    auto const before = fixture.dashboard.interaction().selected;
+    static_cast<void>(fixture.dashboard.input(wheelAt(fleet.x + 1, fleet.y + 1, MouseWheel::Down)));
+    CHECK(fixture.dashboard.interaction().selected == before + 1);
+    static_cast<void>(fixture.dashboard.input(wheelAt(fleet.x + 1, fleet.y + 1, MouseWheel::Up)));
+    CHECK(fixture.dashboard.interaction().selected == before);
+}
+
+TEST_CASE("a click on a link asks to open it", "[orchestrator][view][mouse]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    CHECK(fixture.dashboard.input("d").empty());
+    static_cast<void>(fixture.screen());
+    auto const links = fixture.dashboard.rendered().hyperlinks();
+    auto const link = std::ranges::find(
+        links, "https://github.com/contour-terminal/contour/pull/2375", &core::tui::HyperlinkRegion::uri);
+    REQUIRE(link != links.end());
+    auto const actions = fixture.dashboard.input(clickAt(link->cellArea.x, link->cellArea.y));
+    REQUIRE(actions.size() == 1);
+    auto const* const open = std::get_if<OpenUrlAction>(&actions.front());
+    REQUIRE(open != nullptr);
+    CHECK(open->url == "https://github.com/contour-terminal/contour/pull/2375");
+}
+
+TEST_CASE("a click on a palette entry runs it; one beside the palette closes it",
+          "[orchestrator][view][mouse]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    CHECK(fixture.dashboard.input("\x0b").empty());
+    static_cast<void>(fixture.dashboard.frame());
+    REQUIRE(fixture.dashboard.interaction().palette.has_value());
+    // Beside it: closed, nothing run.
+    CHECK(fixture.dashboard.input(clickAt(0, 0)).empty());
+    CHECK_FALSE(fixture.dashboard.interaction().palette.has_value());
+
+    CHECK(fixture.dashboard.input("\x0b").empty());
+    static_cast<void>(fixture.dashboard.frame());
+    auto const regions = fixture.dashboard.hits().regions();
+    auto const entry = std::ranges::find_if(
+        regions, [](HitRegion const& region) { return region.hit.kind == HitKind::PaletteEntry; });
+    REQUIRE(entry != regions.end());
+    static_cast<void>(fixture.dashboard.input(clickAt(entry->area.x + 2, entry->area.y)));
+    CHECK_FALSE(fixture.dashboard.interaction().palette.has_value());
+}
+
+TEST_CASE("a click on a launcher candidate highlights it", "[orchestrator][view][mouse]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.input("n").empty());
+    static_cast<void>(fixture.dashboard.frame());
+    REQUIRE(fixture.dashboard.launcher().has_value());
+    auto const regions = fixture.dashboard.hits().regions();
+    auto const second =
+        std::ranges::find(regions, Hit { .kind = HitKind::LauncherCandidate, .value = 1 }, &HitRegion::hit);
+    REQUIRE(second != regions.end());
+    CHECK(fixture.dashboard.input(clickAt(second->area.x + 2, second->area.y)).empty());
+    REQUIRE(fixture.dashboard.launcher().has_value());
+    CHECK(fixture.dashboard.launcher()->highlighted == 1);
+}
+
+// }}}
 
 TEST_CASE("a URL drawn is a hyperlink", "[orchestrator][view]")
 {

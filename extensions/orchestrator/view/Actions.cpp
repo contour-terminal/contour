@@ -53,7 +53,7 @@ namespace
                      .label = "agent tab"sv,
                      .unoffered = "its agent has no tab open"sv },
         CommandRow {
-            .command = KeyCommand::OpenLink, .label = "copy link"sv, .unoffered = "it has no link"sv },
+            .command = KeyCommand::OpenLink, .label = "open link"sv, .unoffered = "it has no link"sv },
         CommandRow { .command = KeyCommand::RetryRemoval,
                      .label = "retry removal"sv,
                      .unoffered = "its removal cannot be tried again now"sv },

@@ -278,19 +278,28 @@ Focus::Focus(Engine const& engine,
              FocusFrame const& frame,
              std::string const& tab,
              core::IClock const& clock,
-             FocusPanels& panels):
+             FocusPanels& panels,
+             HitMap& hits):
     _engine { engine },
     _interaction { interaction },
     _frame { frame },
     _tab { tab },
     _panels { panels },
+    _hits { hits },
     _board { engine, frame.subject, clock, panels.board },
     _transcript { engine, frame.subject, tab, panels.transcript }
 {
 }
 
+HitRecorder Focus::recorder() const
+{
+    return HitRecorder { _hits, { .x = screenBounds().x, .y = screenBounds().y } };
+}
+
 void Focus::render(Canvas& canvas)
 {
+    // The wheel scrolls the tab under the pointer.
+    recorder().add(canvas.area(), Hit { .kind = HitKind::FocusPane });
     auto const border = _frame.place == Place::Focus ? Role::Focus : Role::Border;
     auto const* const row = _frame.row;
     auto const isRunOrWorktree = row != nullptr && (!row->run.empty() || row->kind == RowKind::Orphan);
@@ -367,6 +376,9 @@ void Focus::renderRun(Canvas& canvas, Run const* run)
             style.underline = active;
             auto key = style;
             key.underline = true;
+            recorder().shifted(1, 1).add(
+                Rect { .x = x, .y = y, .width = columnsOf(label.label), .height = 1 },
+                Hit { .kind = HitKind::Command, .value = std::to_underlying(label.command) });
             x += inside.putString(y, x, label.label.substr(0, 1), key);
             x += inside.putString(y, x, label.label.substr(1), style);
             if (_frame.tabNews[std::to_underlying(label.tab)] == News::Unseen)
@@ -407,11 +419,11 @@ void Focus::renderRun(Canvas& canvas, Run const* run)
                                            .y = inside.height() - bottomRows,
                                            .width = std::max(0, inside.width() - 2),
                                            .height = bottomRows });
-        renderBottom(box);
+        renderBottom(box, recorder().shifted(2, 1 + inside.height() - bottomRows));
     }
 }
 
-void Focus::renderAsking(Canvas& canvas)
+void Focus::renderAsking(Canvas& canvas, HitRecorder const& hits)
 {
     auto const& theme = canvas.theme();
     auto const& row = *_frame.row;
@@ -444,6 +456,14 @@ void Focus::renderAsking(Canvas& canvas)
                 key.inverse = true;
                 label = key;
             }
+            // A click on a chip answers with it, as its digit does.
+            hits.shifted(1, 1).add(Rect { .x = x,
+                                          .y = y,
+                                          .width = std::min(chipColumnsOf(*reply), std::max(0, width - x)),
+                                          .height = 1 },
+                                   Hit { .kind = HitKind::Command,
+                                         .value = std::to_underlying(KeyCommand::Reply1)
+                                                  + static_cast<std::size_t>(reply->key - '1') });
             x += inside.putString(y, x, std::string(1, reply->key), key);
             x += inside.putString(y, x, " ", label);
             x += inside.putString(y, x, cut(reply->label, std::max(0, width - x)), label) + ChipGap;
@@ -525,7 +545,7 @@ void Focus::renderLatest(Canvas& canvas, Run const& run)
             putLinked(canvas, y++, 1, line.text, styleOf(theme, line.role));
 }
 
-void Focus::renderBottom(Canvas& canvas)
+void Focus::renderBottom(Canvas& canvas, HitRecorder const& hits)
 {
     auto const& theme = canvas.theme();
     auto const& row = *_frame.row;
@@ -534,6 +554,8 @@ void Focus::renderBottom(Canvas& canvas)
     {
         case BottomBox::None: return;
         case BottomBox::Message: {
+            // A click in the message box gives it the keys.
+            hits.add(canvas.area(), Hit { .kind = HitKind::MessageBox });
             auto const draft = draftOf();
             if (_frame.place == Place::Focus)
             {
@@ -556,7 +578,7 @@ void Focus::renderBottom(Canvas& canvas)
             inside.putString(0, 1, cut(text, width), styleOf(theme, Role::Dim));
             return;
         }
-        case BottomBox::Asking: renderAsking(canvas); return;
+        case BottomBox::Asking: renderAsking(canvas, hits); return;
         case BottomBox::Done: {
             drawFrame(canvas, {}, Role::Passing);
             insideFrame(canvas).putString(

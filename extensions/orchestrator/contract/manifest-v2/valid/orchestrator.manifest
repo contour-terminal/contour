@@ -129,6 +129,7 @@ pane-env agent-plain GIT_CONFIG_KEY_1 = push.autoSetupRemote
 pane-env agent-plain GIT_CONFIG_VALUE_1 = true
 pane-input
 serve orchestrator
+url-open
 action open = Open Agents
 action refresh = Agents: Refresh now
 action show-blocked = Agents: Show blocked agent

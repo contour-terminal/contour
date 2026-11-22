@@ -159,6 +159,8 @@ class FakeGuestHost final: public IGuestHost
     std::vector<std::pair<std::string, std::string>> paneSends; ///< Every paneSend(): pane and text.
     std::expected<void, HostError> paneSendAnswer {};           ///< What paneSend() and paneKey() answer.
     std::vector<std::pair<std::string, PaneKey>> paneKeys;      ///< Every paneKey(): pane and key.
+    std::vector<std::pair<std::string, uint32_t>> urlOpens;     ///< Every urlOpen(): link and origin.
+    std::expected<void, HostError> urlOpenAnswer {};            ///< What urlOpen() answers.
 
     std::vector<TabInfo> tabList;                                  ///< What tabs() lists.
     std::pair<uint32_t, uint32_t> openSize { OpenCols, OpenRows }; ///< The size tabOpen() opens at.
@@ -393,6 +395,12 @@ class FakeGuestHost final: public IGuestHost
     {
         paneSends.emplace_back(std::string(pane), std::string(text));
         return paneSendAnswer;
+    }
+
+    [[nodiscard]] std::expected<void, HostError> urlOpen(std::string_view url, uint32_t origin) override
+    {
+        urlOpens.emplace_back(std::string(url), origin);
+        return urlOpenAnswer;
     }
 
     [[nodiscard]] std::expected<void, HostError> paneKey(std::string_view pane, PaneKey key) override
@@ -1355,10 +1363,13 @@ TEST_CASE("open opens one tab and draws it", "[guest]")
     REQUIRE(served.host.writesTo("tab-1") == served.host.writes.size());
     auto const frame = served.host.writtenTo("tab-1");
     CHECK(frame.starts_with(SynchronizedOutput));
-    // Then bracketed paste is asked for and the hidden cursor comes to rest, which draws nothing
-    // (@see view::BracketedPasteOn, view::RestingCursor).
-    CHECK(frame.ends_with(
-        std::format("{}{}{}", SynchronizedOutputEnd, view::BracketedPasteOn, view::RestingCursor)));
+    // Then bracketed paste and the mouse are asked for and the hidden cursor comes to rest, which draws
+    // nothing (@see view::BracketedPasteOn, view::MouseReportingOn, view::RestingCursor).
+    CHECK(frame.ends_with(std::format("{}{}{}{}",
+                                      SynchronizedOutputEnd,
+                                      view::BracketedPasteOn,
+                                      view::MouseReportingOn,
+                                      view::RestingCursor)));
     CHECK(countOf(frame, SynchronizedOutput) == 1);
 }
 
@@ -1894,6 +1905,22 @@ TEST_CASE("a quick reply presses its key in the asking agent's tab, and a refusa
     CHECK(served.host.paneKeys.back().second == PaneKey::Escape);
     CHECK(served.observer.inputsOf<AwaitMessage>().size() == 1);
     CHECK(served.driver->engine().runs().front().lastStatus == AgentStatus::Waiting);
+}
+
+TEST_CASE("o opens the link through url-open, and a refusal is said", "[guest][url-open]")
+{
+    auto served = Served {};
+    served.load();
+    served.invoke("open");
+    auto const open = view::OpenUrlAction { .url = "https://github.com/o/r/pull/7", .label = "#7" };
+    served.driver->apply("tab-1", open);
+    REQUIRE(served.host.urlOpens.size() == 1);
+    CHECK(served.host.urlOpens.front().first == "https://github.com/o/r/pull/7");
+    CHECK(served.dashboard().interaction().notice == "opening #7 on your machine");
+
+    served.host.urlOpenAnswer = std::unexpected(HostError::NotSupportedYet);
+    served.driver->apply("tab-1", open);
+    CHECK(served.dashboard().interaction().notice == "not opened: this terminal cannot open links");
 }
 
 TEST_CASE("a key split across two tab reads moves once", "[guest]")

@@ -9,7 +9,7 @@
 │ TO│  end                                                               e │   │
 ╰───│  agent tab                                                         r │───╯
 ╭─ p│  details                                                           d │6m ╮
-│ up│  copy link                                                         o │   │
+│ up│  open link                                                         o │   │
 │ Fi│  fold its group                                                    z │   │
 │ ☑ │  new agent                                                         n │   │
 │ ☑ │  filter the agents                                                 / │   │

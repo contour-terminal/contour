@@ -515,18 +515,15 @@ namespace
         HandlerRow { .command = KeyCommand::RetryRemoval, .handler = runAction<RetryRemovalAction> },
         HandlerRow { .command = KeyCommand::Dismiss, .handler = runAction<DismissAction> },
         HandlerRow { .command = KeyCommand::Reveal, .handler = runAction<RevealAgentAction> },
-        // `o` copies the run's link with OSC 52 until the frontend can open it (phase 6), and says so.
-        HandlerRow {
-            .command = KeyCommand::OpenLink,
-            .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                auto const* const run = selectedRun(context);
-                if (run == nullptr)
-                    return std::nullopt;
-                interaction.clipboard = run->url;
-                interaction.notice =
-                    std::format("copied {}'s link · ctrl+click it to open", itemLabel(run->item));
-                return std::nullopt;
-            } },
+        // `o` opens the run's link on the machine the user sits at; the guest says how it went.
+        HandlerRow { .command = KeyCommand::OpenLink,
+                     .handler = [](Interaction& /*interaction*/,
+                                   KeyContext const& context) -> std::optional<UiAction> {
+                         auto const* const run = selectedRun(context);
+                         if (run == nullptr)
+                             return std::nullopt;
+                         return UiAction { OpenUrlAction { .url = run->url, .label = itemLabel(run->item) } };
+                     } },
     };
 
     // }}}
@@ -656,6 +653,21 @@ bool hasMessageBox(Engine const* engine, Row const* row) noexcept
 void backToFleet(Interaction& interaction) noexcept
 {
     interaction.place = Place::Fleet;
+}
+
+void selectRow(Interaction& interaction, KeyContext const& context, std::size_t index) noexcept
+{
+    auto const before = interaction.selected;
+    select(interaction, context, index);
+    if (interaction.selected != before)
+        interaction.pendingEnd.clear();
+    backToFleet(interaction);
+}
+
+void scrollFocus(Interaction& interaction, KeyContext const& context, std::ptrdiff_t lines) noexcept
+{
+    auto const from = static_cast<std::ptrdiff_t>(scrollOf(interaction, context));
+    scrollTo(interaction, context, static_cast<std::size_t>(std::max<std::ptrdiff_t>(0, from + lines)));
 }
 
 void openLauncherFor(Interaction& interaction,

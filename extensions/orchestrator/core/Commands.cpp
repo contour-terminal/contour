@@ -675,6 +675,8 @@ std::vector<std::string> manifestLines()
     // The `m` line types what the user wrote into an agent's tab: nothing else is ever typed there.
     lines.emplace_back("pane-input");
     lines.push_back(concat({ "serve ", ServedScheme }));
+    // `o` and a click on a link ask the frontend the user is at to open the run's link.
+    lines.emplace_back("url-open");
     for (auto const& decl: ActionTable)
         lines.push_back(concat({ "action ", decl.id, " = ", decl.title }));
     return lines;

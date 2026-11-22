@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <orchestrator/core/Engine.hpp>
+#include <orchestrator/view/HitMap.hpp>
 #include <orchestrator/view/Keys.hpp>
 #include <orchestrator/view/Sections.hpp>
 
@@ -72,7 +73,11 @@ class PaletteView final: public core::tui::Component
 {
   public:
     /// @param palette The dashboard's palette; nullopt while none is open, when nothing is drawn.
-    explicit PaletteView(std::optional<PaletteState> const& palette): _palette { palette } {}
+    /// @param hits Where it records what a click on it lands on.
+    PaletteView(std::optional<PaletteState> const& palette, HitMap& hits):
+        _palette { palette }, _hits { hits }
+    {
+    }
     void render(core::tui::Canvas& canvas) override;
     /// @return The size place() gave it.
     [[nodiscard]] core::tui::Size preferredSize() const override { return _size; }
@@ -87,6 +92,7 @@ class PaletteView final: public core::tui::Component
 
   private:
     std::optional<PaletteState> const& _palette;
+    HitMap& _hits;
     core::tui::Size _size {};
     std::vector<PaletteEntry> _entries;
 };
@@ -100,13 +106,15 @@ class TimelineView final: public core::tui::Component
 {
   public:
     /// @param engine The engine whose runs it charts.
-    explicit TimelineView(Engine const& engine): _engine { engine } {}
+    /// @param hits Where it records the area it covers.
+    TimelineView(Engine const& engine, HitMap& hits): _engine { engine }, _hits { hits } {}
     void render(core::tui::Canvas& canvas) override;
     /// @return The size it needs: its lines and its box.
     [[nodiscard]] core::tui::Size preferredSize() const override;
 
   private:
     Engine const& _engine;
+    HitMap& _hits;
 };
 
 } // namespace orchestrator::view

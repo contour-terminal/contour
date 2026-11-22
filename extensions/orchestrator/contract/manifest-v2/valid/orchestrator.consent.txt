@@ -113,3 +113,4 @@ It may open tabs running: agent-plain (in worktrees): claude --model {model} --s
 It may type text you write into those tabs, or press a number key you choose, when you send it from its own tab
 It may read files in: worktrees
 It shows its own tab: orchestrator://
+It may ask your terminal to open web links you choose

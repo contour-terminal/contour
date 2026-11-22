@@ -255,6 +255,13 @@ void pasteIntoLauncher(std::optional<LauncherState>& launcher, Engine const& eng
     requery(*launcher, engine);
 }
 
+void highlightCandidate(LauncherState& state, Engine const& engine, std::size_t index)
+{
+    state.focus = LauncherFocus::List;
+    state.highlighted = index;
+    reform(state, engine, candidatesOf(engine, state.query));
+}
+
 std::optional<DispatchAction> applyLauncherKey(core::tui::KeyEvent const& key,
                                                std::optional<LauncherState>& launcher,
                                                Engine const& engine,
@@ -375,6 +382,8 @@ namespace
     {
         std::vector<Segment> left = {};
         std::vector<Segment> right = {};
+        std::optional<std::size_t>
+            candidate = {}; ///< The candidate it draws, for a click; none: no candidate.
     };
 
     /// How a group is headed; an empty heading heads nothing.
@@ -644,6 +653,7 @@ namespace
             if (index == state.highlighted)
                 layout.highlightedAt = layout.list.size();
             layout.list.push_back(candidateLine(candidate, index == state.highlighted, width));
+            layout.list.back().candidate = index;
         }
 
         auto& tail = layout.tail;
@@ -715,9 +725,16 @@ void LauncherView::render(core::tui::Canvas& canvas)
     auto const listRows = std::clamp(inside.height() - others, 1, MaxLauncherListRows);
     auto const lines = layout.lines(static_cast<std::size_t>(listRows));
     auto const shown = std::min(lines.size(), static_cast<std::size_t>(std::max(inside.height(), 0)));
+    // The popup covers the dashboard; each candidate drawn takes a click.
+    auto const hits = HitRecorder { _hits, { .x = screenBounds().x, .y = screenBounds().y } };
+    hits.add(canvas.area(), Hit { .kind = HitKind::Popup });
     for (auto const index: std::views::iota(std::size_t { 0 }, shown))
     {
         auto const y = static_cast<int>(index);
+        if (lines[index].candidate)
+            hits.shifted(1, 1).add(
+                core::tui::Rect { .x = 0, .y = y, .width = inside.width(), .height = 1 },
+                Hit { .kind = HitKind::LauncherCandidate, .value = *lines[index].candidate });
         auto x = 1;
         for (auto const& segment: lines[index].left)
         {

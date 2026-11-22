@@ -17,6 +17,7 @@
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/core/Uuid.hpp>
 #include <orchestrator/view/DispatchForm.hpp>
+#include <orchestrator/view/HitMap.hpp>
 #include <orchestrator/view/Keys.hpp>
 #include <orchestrator/view/Launcher.hpp>
 
@@ -29,6 +30,10 @@ inline constexpr auto RestingCursor = std::string_view { "\033[H" };
 /// What every frame sets before RestingCursor: bracketed paste (DECSET 2004), so that a paste reaches the
 /// dashboard as one PasteEvent rather than as keys.
 inline constexpr auto BracketedPasteOn = std::string_view { "\033[?2004h" };
+
+/// What every frame sets beside BracketedPasteOn: the mouse's buttons and wheel reported (DECSET 1000) in SGR
+/// encoding (DECSET 1006), which core::tui::VtParser decodes into mouse events. A served tab may set both.
+inline constexpr auto MouseReportingOn = std::string_view { "\033[?1000h\033[?1006h" };
 
 /// The dashboard tab: the Fleet (the runs, by what they need) and the Focus (the selected run) drawn with
 /// core::tui, laid out by breakpoint (narrowest first, the last one the tab's size meets wins:
@@ -120,6 +125,14 @@ class Dashboard
     /// @param run The run's id.
     void replyOutdated(std::string_view run);
 
+    /// A link asked for here is on its way to the frontend: the action bar says so, until the next key.
+    /// @param label What the link is called, such as `#2369`.
+    void urlOpened(std::string_view label);
+
+    /// A link asked for here was not sent: the action bar says why, until the next key.
+    /// @param why The host's reason, in words.
+    void urlRefused(std::string_view why);
+
     /// @return The run the selected row stands for; empty when it stands for none, or nothing is selected.
     [[nodiscard]] std::string_view selectedRun() const noexcept;
 
@@ -154,6 +167,9 @@ class Dashboard
 
     /// @return What the last frame drew: for golden tests.
     [[nodiscard]] core::tui::Buffer const& rendered() const noexcept;
+
+    /// @return Where the last frame drew what a click lands on.
+    [[nodiscard]] HitMap const& hits() const noexcept;
 
     /// @return Where the user is: what is selected, open and filtered.
     [[nodiscard]] Interaction const& interaction() const noexcept;

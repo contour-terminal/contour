@@ -178,6 +178,9 @@ void PaletteView::render(core::tui::Canvas& canvas)
         return;
     auto const& theme = canvas.theme();
     canvas.clear(styleOf(theme, Role::Text));
+    // The popup covers the dashboard; each entry drawn takes a click.
+    auto const hits = HitRecorder { _hits, { .x = screenBounds().x, .y = screenBounds().y } };
+    hits.add(canvas.area(), Hit { .kind = HitKind::Popup });
     drawFrame(canvas, "✦ All actions", Role::Focus);
     auto inside = insideFrame(canvas);
     auto const width = inside.width() - SideColumns;
@@ -207,6 +210,8 @@ void PaletteView::render(core::tui::Canvas& canvas)
         auto const& entry = _entries[match.entry];
         auto const isSelected = at == highlighted;
         auto const isDimmed = !entry.reason.empty();
+        hits.shifted(1, 1).add(core::tui::Rect { .x = 0, .y = y, .width = inside.width(), .height = 1 },
+                               Hit { .kind = HitKind::PaletteEntry, .value = at });
         if (isSelected)
             inside.putString(y, 0, "▍", styleOf(theme, Role::Accent));
         auto const key = entry.key.empty() ? PaletteOnly : entry.key;
@@ -330,6 +335,8 @@ void TimelineView::render(core::tui::Canvas& canvas)
 {
     auto const& theme = canvas.theme();
     canvas.clear(styleOf(theme, Role::Text));
+    HitRecorder { _hits, { .x = screenBounds().x, .y = screenBounds().y } }.add(
+        canvas.area(), Hit { .kind = HitKind::Popup });
     drawFrame(canvas, "Last 24 hours · an hour a bar", Role::Focus);
     auto inside = insideFrame(canvas);
     auto const width = inside.width() - SideColumns;
