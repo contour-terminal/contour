@@ -3065,12 +3065,15 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
              proto::DecodedPdu { proto::ServerHello { .layout = proto::HelloLayout::VersionAlone } });
         return false;
     }
-    auto const agreed = proto::negotiate(policy.versions, hello->versions);
+    // The range this hello is negotiated over, and named in any refusal or acceptance of it.
+    auto const ours =
+        hello->role == proto::ConnectionRole::Control ? policy.controlVersions : policy.versions;
+    auto const agreed = proto::negotiate(ours, hello->versions);
     if (!agreed)
     {
         errorLog()(
             "{}: handshake rejected: {}", _id, proto::describe(agreed.error(), proto::PeerRole::Client));
-        send(frame.serial, proto::DecodedPdu { refusalFor(*hello, policy.versions) });
+        send(frame.serial, proto::DecodedPdu { refusalFor(*hello, ours) });
         return false;
     }
     // Preshared-token auth (an empty token accepts any — the AF_UNIX default, where the socket's
@@ -3104,7 +3107,7 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
         // this indistinguishable from a version mismatch, so the log must not undo on disk what
         // the protocol is careful not to reveal on the network.
         errorLog()("{}: handshake rejected: authentication failed", _id);
-        send(frame.serial, proto::DecodedPdu { refusalFor(*hello, policy.versions) });
+        send(frame.serial, proto::DecodedPdu { refusalFor(*hello, ours) });
         return false;
     }
     // A narrow token is for Control connections alone: a viewer types into and reads every pane. Refused
@@ -3114,7 +3117,7 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
         errorLog()("{}: handshake rejected: token lacks the grants an attach connection needs (has {})",
                    _id,
                    vtcontrol::toString(*grants));
-        send(frame.serial, proto::DecodedPdu { refusalFor(*hello, policy.versions) });
+        send(frame.serial, proto::DecodedPdu { refusalFor(*hello, ours) });
         return false;
     }
     _grants = *grants;
@@ -3125,7 +3128,7 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
     auto stated = appSpecificIdentity(_host.identity().view());
     auto reply =
         proto::ServerHello { .agreedVersion = *agreed,
-                             .versions = policy.versions,
+                             .versions = ours,
                              .capabilities = policy.capabilities,
                              .machineId = std::move(stated.machineId),
                              .hostname = std::move(stated.hostname),

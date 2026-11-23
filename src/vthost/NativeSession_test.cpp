@@ -72,6 +72,7 @@
 #include <vthost/WorkspaceGit.hpp>
 #include <vthost/client/NativeClient.hpp>
 #include <vthost/control/ControlService.hpp>
+#include <vthost/proto/ControlVersions.hpp>
 #include <vthost/proto/PduTrace.hpp>
 #include <vthost/testing/FakeDaemonControl.hpp>
 #include <vthost/testing/FakeExtensionHosting.hpp>
@@ -4777,6 +4778,47 @@ TEST_CASE("a Control-role hello neither spawns a session nor counts as a client"
     CHECK(h.host.sessionCount() == 0);
     CHECK(control.census.count() == 0);
     CHECK(control.peakClients == 0);
+}
+
+TEST_CASE("a control hello one protocol version behind is accepted", "[vthost][native][control][negotiation]")
+{
+    auto control = vthost::testing::FakeDaemonControl {};
+    auto h = NativeHarness { HarnessOptions { .services = { .daemon = control } } };
+    auto const received = h.exchange(
+        { proto::ClientHello { .versions = { .min = 4, .max = 4 }, .role = proto::ConnectionRole::Control },
+          proto::DaemonStatusRequest {} },
+        2);
+    REQUIRE(received.size() == 2);
+    REQUIRE(std::holds_alternative<proto::ServerHello>(received[0].pdu));
+    auto const& hello = std::get<proto::ServerHello>(received[0].pdu);
+    CHECK(hello.agreedVersion == 4);
+    CHECK(hello.versions == proto::ControlVersions); // the range it negotiated over, for the client's words
+    CHECK(std::holds_alternative<proto::DaemonStatusReply>(received[1].pdu));
+}
+
+TEST_CASE("an attach hello one protocol version behind is still refused", "[vthost][native][negotiation]")
+{
+    auto capture = core::log::ScopedCapture {};
+    auto const reply = answerTo(helloFrame(proto::ClientHello { .versions = { .min = 4, .max = 4 } }),
+                                admitting(proto::SupportedVersions));
+    auto const decoded = proto::decodePdu(reply);
+    REQUIRE(decoded.has_value());
+    REQUIRE(std::holds_alternative<proto::ServerHello>(decoded->pdu));
+    CHECK(std::get<proto::ServerHello>(decoded->pdu).agreedVersion == 0);
+    CHECK(capture.contains("handshake rejected: the client speaks protocol 4-4, this daemon speaks 5-5"));
+}
+
+TEST_CASE("a pre-negotiation control hello is still refused", "[vthost][native][negotiation]")
+{
+    auto capture = core::log::ScopedCapture {};
+    auto const reply = answerTo(helloFrame(proto::ClientHello { .versions = { .min = 3, .max = 3 },
+                                                                .role = proto::ConnectionRole::Control }),
+                                admitting(proto::SupportedVersions));
+    auto const decoded = proto::decodePdu(reply);
+    REQUIRE(decoded.has_value());
+    REQUIRE(std::holds_alternative<proto::ServerHello>(decoded->pdu));
+    CHECK(std::get<proto::ServerHello>(decoded->pdu).agreedVersion == 0);
+    CHECK(capture.contains("handshake rejected"));
 }
 
 TEST_CASE("a Control connection hears nothing from the host's sessions", "[vthost][native][control]")

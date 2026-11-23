@@ -22,6 +22,7 @@
 #include <vthost/PduPump.hpp>
 #include <vthost/WireEnum.hpp>
 #include <vthost/client/NativeClient.hpp>
+#include <vthost/proto/ControlVersions.hpp>
 #include <vthost/proto/Negotiation.hpp>
 
 namespace vthost::client
@@ -165,7 +166,9 @@ namespace
         auto writer = core::net::WriteQueue { *loop, socket.get(), ControlQueueBytes };
         auto const offered = capabilitiesFor(purpose);
         auto conversation = Conversation {};
-        auto const ours = proto::SupportedVersions;
+        // A Control connection reaches back to every version its PDUs are unchanged since: a daemon from
+        // before the newest protocol bump still answers it.
+        auto const ours = proto::ControlVersions;
 
         auto const sendFailure = [&] {
             return fail(ControlErrorCode::Transport, writer.describeRefusal());

@@ -104,6 +104,8 @@ class StoppableDaemon final: public vthost::DaemonControl
     /// @return How many status requests reached it.
     [[nodiscard]] std::size_t statusRequests() const noexcept { return _statusRequests; }
     [[nodiscard]] std::vector<proto::StopReason> const& stops() const noexcept { return _inner.stops; }
+    /// @return The image id of every upgrade asked for, in order.
+    [[nodiscard]] std::vector<std::string> const& upgrades() const noexcept { return _inner.upgrades; }
 
   private:
     vthost::testing::FakeDaemonControl _inner;
@@ -119,8 +121,9 @@ struct ControlHarness
 {
     explicit ControlHarness(
         StoppableDaemon::OnStop onStop = StoppableDaemon::OnStop::GoAway,
-        proto::CapabilitySet offered = proto::CapabilitySet::of({ proto::Capability::DaemonControl })):
-        daemon(onStop), capabilities(std::move(offered))
+        proto::CapabilitySet offered = proto::CapabilitySet::of({ proto::Capability::DaemonControl }),
+        proto::VersionRange speaks = proto::SupportedVersions):
+        daemon(onStop), capabilities(std::move(offered)), versions(speaks)
     {
     }
 
@@ -135,6 +138,7 @@ struct ControlHarness
                                vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
     StoppableDaemon daemon;
     proto::CapabilitySet capabilities;
+    proto::VersionRange versions; ///< The protocol versions the daemon speaks, to every role.
     std::vector<std::unique_ptr<vthost::NativeSession>> sessions;
     std::size_t connections = 0;
     /// After the sessions, so destroyed before them: every run() serving one ends while it still exists.
@@ -160,10 +164,12 @@ struct ControlHarness
         sessions.push_back(std::make_unique<vthost::NativeSession>(
             loop,
             host,
-            vthost::ConnectionId { .endpoint = "test", .index = ++connections },
+            vthost::ConnectionId { .endpoint = "native", .index = ++connections },
             std::move(pair.first),
             vthost::NativeSession::DefaultWriteQueueBytes,
-            vthost::NativeSessionServices { .handshake = { .capabilities = capabilities },
+            vthost::NativeSessionServices { .handshake = { .versions = versions,
+                                                           .controlVersions = versions,
+                                                           .capabilities = capabilities },
                                             .daemon = daemon }));
         loop.spawn(runAndHangUpWhenGone(sessions.back().get(), serverEnd));
         co_return std::move(pair.second);
@@ -200,6 +206,33 @@ TEST_CASE("status() over a Control connection returns the daemon's report", "[vt
     CHECK(status->clients == 1);
     CHECK(status->lifecycle == vthost::DaemonLifecycle::ExitWhenIdle);
     CHECK(h.host.sessionCount() == 0);
+}
+
+/// The protocol versions of a daemon from before the newest protocol bump, which changed no control PDU.
+constexpr auto OneVersionBehind = proto::VersionRange { .min = 4, .max = 4 };
+
+TEST_CASE("status() reaches a daemon one protocol version behind", "[vthost][client][control]")
+{
+    auto h = ControlHarness { StoppableDaemon::OnStop::GoAway,
+                              proto::CapabilitySet::of({ proto::Capability::DaemonControl }),
+                              OneVersionBehind };
+    auto port = client::SocketDaemonControl { h.loop, h.connector(), 2s };
+    auto const status = port.status();
+    INFO((status ? std::string {} : status.error().toString()));
+    CHECK(status.has_value());
+}
+
+TEST_CASE("upgrade() reaches a daemon one protocol version behind", "[vthost][client][control]")
+{
+    auto h = ControlHarness { StoppableDaemon::OnStop::GoAway,
+                              proto::CapabilitySet::of(
+                                  { proto::Capability::DaemonControl, proto::Capability::LiveUpgrade }),
+                              OneVersionBehind };
+    auto port = client::SocketDaemonControl { h.loop, h.connector(), 2s };
+    auto const reply = port.upgrade("1.2.3-abcdef");
+    INFO((reply ? std::string {} : reply.error().toString()));
+    CHECK(reply.has_value());
+    CHECK(h.daemon.upgrades() == std::vector<std::string> { "1.2.3-abcdef" });
 }
 
 namespace

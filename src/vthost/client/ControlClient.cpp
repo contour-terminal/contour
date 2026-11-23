@@ -20,6 +20,7 @@
 #include <vthost/KeyAuth.hpp>
 #include <vthost/SocketPath.hpp>
 #include <vthost/client/NativeClient.hpp>
+#include <vthost/proto/ControlVersions.hpp>
 #include <vthost/proto/Negotiation.hpp>
 
 namespace vthost::client
@@ -279,7 +280,9 @@ core::async::Task<std::expected<proto::DecodedFrame, ControlClientError>> Contro
 
 core::async::Task<std::expected<void, ControlClientError>> ControlClient::handshake()
 {
-    auto const ours = proto::SupportedVersions;
+    // A Control connection reaches back to every version its PDUs are unchanged since: a daemon from
+    // before the newest protocol bump still answers it.
+    auto const ours = proto::ControlVersions;
     // compat(0.9.0): Names may stay; the legacy branches taken without it go.
     auto const offered =
         proto::CapabilitySet::of({ proto::Capability::ControlApi, proto::Capability::Names });

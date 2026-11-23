@@ -4,7 +4,9 @@
 #include <algorithm>
 #include <ranges>
 #include <utility>
+#include <vector>
 
+#include <vthost/proto/ControlVersions.hpp>
 #include <vthost/proto/Negotiation.hpp>
 
 using namespace vthost::proto;
@@ -195,4 +197,19 @@ TEST_CASE("the workspace switch capability keeps its ident and name",
         std::ranges::find(CapabilityTable, Capability::WorkspaceSwitch, &CapabilityRow::capability);
     REQUIRE(change != CapabilityTable.end());
     CHECK(change->name == "workspace-switch");
+}
+
+TEST_CASE("ControlVersions spans every version since a control PDU last changed", "[vthost][negotiation]")
+{
+    CHECK(ControlVersions == VersionRange { .min = 4, .max = 5 });
+    CHECK(negotiate(ControlVersions, { 4, 4 }) == 4u);
+    CHECK(negotiate(ControlVersions, { 5, 5 }) == 5u);
+    CHECK_FALSE(negotiate(ControlVersions, { 3, 3 }));
+}
+
+TEST_CASE("the control PDU table names each PDU once", "[vthost][negotiation]")
+{
+    auto types = std::ranges::to<std::vector>(std::views::transform(ControlPdus, &ControlPdu::type));
+    std::ranges::sort(types);
+    CHECK(std::ranges::adjacent_find(types) == types.end());
 }
