@@ -12,6 +12,7 @@
 
     #include <cstddef>
     #include <expected>
+    #include <memory>
     #include <span>
     #include <string_view>
 
@@ -67,6 +68,18 @@ class IWin32BeneathSystem
 
 /// @return This machine's calls.
 [[nodiscard]] IWin32BeneathSystem& nativeWin32BeneathSystem() noexcept;
+
+/// Each component is opened beneath the handle above it through @p system, as itself: a junction, symlink or
+/// mount point at any step is `Escapes`, as is a directory on another volume than the root's. A directory
+/// one of the fenced identities is `Fenced`, however its name is spelled (another case, an 8.3 short name).
+/// The last component is looked at (BeneathEntry::Entry) and, only when it is a regular file whose data is
+/// on disk, re-opened by its handle for reading; the re-opened handle's description is the authority: a
+/// regular file with one name on the root's volume. A zero file id is `Unreadable` at every step (some SMB
+/// servers report one for every file, and it would match every fence or none); so is an unbacked root.
+/// @param system The Win32 calls the reader makes; outlives the reader.
+/// @return A reader over this machine's filesystem through @p system, with IBeneathReader's contract on
+///         Windows.
+[[nodiscard]] std::unique_ptr<IBeneathReader> makeWin32BeneathReader(IWin32BeneathSystem& system);
 
 } // namespace vtpty
 

@@ -466,22 +466,4 @@ TEST_CASE("BeneathRead: a directory that may not be entered is unreadable", "[vt
     CHECK(read == std::unexpected(BeneathReadError::Unreadable));
 }
 
-#else
-
-    #include <array>
-    #include <string_view>
-
-TEST_CASE("BeneathRead: Windows reads nothing beneath a directory", "[vtpty][beneath]")
-{
-    auto const root = vtpty::DirectoryHandle::unbacked("C:\\");
-    auto const components = std::array { std::string_view { "README.md" } };
-    auto& reader = vtpty::nativeBeneathReader();
-    auto const read = reader.read(root, components, 1024, {});
-    REQUIRE_FALSE(read.has_value());
-    CHECK(read.error() == vtpty::BeneathReadError::Unsupported);
-    auto const identity = reader.identityOf(root, components);
-    REQUIRE_FALSE(identity.has_value());
-    CHECK(identity.error() == vtpty::BeneathReadError::Unsupported);
-}
-
 #endif

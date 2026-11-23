@@ -121,7 +121,9 @@ class IBeneathSystem
 };
 
 /// @param resolution How names are resolved.
-/// @return The system calls of this machine. Windows: every call fails with `ENOSYS`.
+/// @return The system calls of this machine. Windows: every call fails with `ENOSYS`, as this POSIX seam
+///         speaks descriptors Windows has not; the Windows reader is reached through its own seam
+///         (makeWin32BeneathReader() in Win32BeneathRead.hpp).
 [[nodiscard]] std::unique_ptr<IBeneathSystem> makeBeneathSystem(BeneathResolution resolution);
 
 /// @return The system calls of this machine, resolved by the kernel where it can (BeneathResolution::Kernel).
@@ -144,9 +146,19 @@ class IBeneathReader
     /// BeneathTarget::File; its descriptor is then `fstat`ed for a regular file with one name
     /// (`st_nlink == 1`) on the root's device. At most @p maxBytes + 1 bytes are read: more than @p maxBytes
     /// is `TooLarge`, whatever `fstat`'s size said.
+    ///
+    /// On Windows each component is opened beneath the handle above it, as itself (a junction, symlink or
+    /// mount point is `Escapes`); the last is looked at with attribute access only and re-opened by its
+    /// handle for reading only when it is a regular file whose data is on disk, and that handle's description
+    /// is the authority. A zero file id is `Unreadable`, at every step.
+    ///
+    /// Reads are synchronous and bounded by bytes, not by time: a stalled network filesystem (an NFS mount,
+    /// an SMB share) can hold a read as long as it stalls.
     /// @param root The directory to read beneath; the path is never resolved again from its name.
     /// @param components The path below @p root, one component each: none empty, `.`, `..`, or holding a
-    ///        `/` or a NUL (any such is `Escapes`).
+    ///        `/` or a NUL (any such is `Escapes`). On Windows each must also be one plain Windows name
+    ///        (isPlainWindowsName(): no `\`, `:` stream, device name or trailing `.` or space) in UTF-8, else
+    ///        `Escapes`; another case or an 8.3 short name of an entry opens that entry.
     /// @param maxBytes The most the file may hold.
     /// @param fenced Directories the walk may not enter, by identity (`Fenced`): another root's, however the
     ///        path spells them.
@@ -170,11 +182,12 @@ class IBeneathReader
 
 /// @param system The system calls the reader makes; outlives the reader.
 /// @return A reader over this machine's filesystem through @p system; Windows: one that answers
-///         `Unsupported`.
+///         `Unsupported`, as @p system speaks descriptors Windows has not (makeWin32BeneathReader() takes
+///         Windows' own seam).
 [[nodiscard]] std::unique_ptr<IBeneathReader> makeBeneathReader(IBeneathSystem& system);
 
-/// @return The reader over this machine's filesystem, through nativeBeneathSystem(). Windows: every read
-///         answers `Unsupported`.
+/// @return The reader over this machine's filesystem, through nativeBeneathSystem(); on Windows, through
+///         nativeWin32BeneathSystem() (makeWin32BeneathReader()).
 [[nodiscard]] IBeneathReader& nativeBeneathReader() noexcept;
 
 } // namespace vtpty
