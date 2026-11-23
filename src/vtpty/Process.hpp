@@ -66,6 +66,11 @@ class [[nodiscard]] Process: public Pty, public ChildProcess
         /// trampoline's fchdir()). Set, workingDirectory is only what the process reports as its directory
         /// until the child has settled; it is never resolved again. A spawn that cannot enter it by
         /// descriptor fails.
+        ///
+        /// Windows, where no CreateProcess takes a directory by handle: the child is started by its resolved
+        /// path, verified by file id before and after creation and guarded against a rename or removal while
+        /// the child runs; refused when renamed since it was opened. The program is the .exe found on the
+        /// absolute entries of the child's own PATH, and the child runs in a kill-on-close job of its own.
         std::shared_ptr<DirectoryHandle const> directory {};
     };
 
@@ -249,7 +254,7 @@ class [[nodiscard]] Process: public Pty, public ChildProcess
     [[nodiscard]] std::optional<std::string> foregroundProcessName() const override;
 
     /// Asks the child to end, or does nothing when there is no child running. On Windows, which has no
-    /// signals, every hint ends it outright.
+    /// signals, every hint ends it outright: a held-directory child's whole job, which is its tree.
     /// @param terminationHint How to ask.
     void terminate(TerminationHint terminationHint) override;
 

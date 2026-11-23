@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/ConPty.hpp>
+#include <vtpty/DirectoryHandle.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/test/HandoverSupport.hpp>
@@ -8,6 +9,7 @@
 #include <vtpty/test/PtyReading.hpp>
 #ifdef _WIN32
     #include <vtpty/Win32Handle.hpp>
+    #include <vtpty/testing/Junction.hpp>
 #endif
 
 #include <crispy/BufferObject.hpp>
@@ -24,6 +26,7 @@
 #include <gsl/gsl>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
@@ -35,6 +38,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <future>
 #include <memory>
 #include <optional>
@@ -110,6 +114,7 @@ std::string runProbe(vtpty::Process::ExecInfo const& exec = execInfo(core::pathT
     auto const endChild =
         gsl::finally([&process] { process.terminate(vtpty::Process::TerminationHint::Normal); });
 
+    INFO("start failure: " << (started.has_value() ? std::string {} : started.error().detail));
     REQUIRE(started.has_value());
     // The probe itself, not the login shell a failed spawn falls back to.
     REQUIRE(started->diagnostic.empty());
@@ -828,6 +833,251 @@ TEST_CASE("ConPty.childIsFoundOnThePathConfiguredForIt", "[vtpty][conpty]")
     exec.env = { { "Path", core::pathToUtf8(directory.path()) } }; // spelled as Windows spells it
     auto const output = runProbe(exec);
     CHECK(printedArguments(output) == std::vector<std::string> { "found" });
+}
+
+namespace
+{
+
+/// @return The directory at @p path, held open by the native opener.
+std::shared_ptr<vtpty::DirectoryHandle const> hold(std::filesystem::path const& path)
+{
+    auto opened = vtpty::nativeDirectoryOpener().open(core::pathToUtf8(path));
+    REQUIRE(opened.has_value());
+    return std::make_shared<vtpty::DirectoryHandle const>(std::move(*opened));
+}
+
+/// How to run @p probeCopy, by its name alone, in the directory @p work held open: the program is found on a
+/// PATH of the copy's own directory alone, as an agent is found on the PATH a pane gives it.
+/// @param probeCopy A copy of the probe, in a directory of its own.
+/// @param work The directory to start it in.
+/// @param arguments What to pass it.
+vtpty::Process::ExecInfo heldExec(std::filesystem::path const& probeCopy,
+                                  std::filesystem::path const& work,
+                                  std::vector<std::string> arguments = {})
+{
+    auto exec = execInfo(core::pathToUtf8(probeCopy.stem()), std::move(arguments));
+    exec.env = { { "Path", core::pathToUtf8(probeCopy.parent_path()) } };
+    exec.workingDirectory = work;
+    exec.directory = hold(work);
+    return exec;
+}
+
+/// A directory to hold, `work`, beside `bin`, which holds a copy of the probe.
+struct HeldProbe
+{
+    core::testing::ScopedTempDir directory { "contour-conpty-held" };
+    std::filesystem::path work = directory.path() / "work";
+    std::filesystem::path bin = directory.path() / "bin";
+    std::filesystem::path probe = probeCopiedInto(bin);
+
+    HeldProbe() { std::filesystem::create_directories(work); }
+};
+
+/// Starts @p exec, expecting it to start nothing.
+/// @return The detail of the failure.
+std::string refusedStart(vtpty::Process::ExecInfo const& exec)
+{
+    auto process = vtpty::testing::unplacedProcess(exec, pageSize(80, 24));
+    auto const started = process.start();
+    // Ended on the way out should it have started after all -- the program, or a login shell fallen back to.
+    auto const endChild =
+        gsl::finally([&process] { process.terminate(vtpty::Process::TerminationHint::Normal); });
+    REQUIRE_FALSE(started.has_value());
+    CHECK(started.error().error == vtpty::StartError::SpawnFailed);
+    CHECK_FALSE(process.alive());
+    return started.error().detail;
+}
+
+} // namespace
+
+// A child given a directory held open starts there, at the path the handle was read as, and runs the program
+// found on its own PATH: no ladder rung was taken.
+TEST_CASE("ConPty.childStartsInItsHeldDirectory", "[vtpty][conpty][held]")
+{
+    auto const fixture = HeldProbe {};
+    auto const exec = heldExec(fixture.probe, fixture.work, { "held" });
+
+    auto const output = runProbe(exec);
+    CHECK(printedArguments(output) == std::vector<std::string> { "held" });
+    CHECK(printedFields(output, "directory") == std::vector { exec.directory->resolvedPath() });
+    CHECK(printedFields(output, "module") == std::vector { core::pathToUtf8(fixture.probe) });
+}
+
+// A worktree is the agent's to write: a program put in it, or beneath it, under the agent's name is never the
+// one started -- not by an empty, a `.`, a relative or a drive-relative PATH entry, which all name the
+// directory the child starts in, or one beneath it.
+TEST_CASE("ConPty.aProgramPlantedInAHeldDirectoryIsNeverFoundOnThePath", "[vtpty][conpty][held]")
+{
+    auto const fixture = HeldProbe {};
+    std::ignore = probeCopiedInto(fixture.work);
+    std::ignore = probeCopiedInto(fixture.work / "bin");
+    // Only the entries before bin are generated: a generator's values are made once, and each run of the case
+    // has a temporary directory of its own.
+    auto const before = GENERATE(as<std::string> {}, ";", ".;", "bin;", "C:;");
+    auto const path = before + core::pathToUtf8(fixture.bin);
+    INFO("Path: " << path);
+
+    auto exec = heldExec(fixture.probe, fixture.work);
+    exec.env = { { "Path", path } };
+    auto const output = runProbe(exec);
+    CHECK(printedFields(output, "module") == std::vector { core::pathToUtf8(fixture.probe) });
+}
+
+// Only an .exe starts in a held directory: a batch file would run through cmd.exe, which reads its command
+// line by rules of its own. Neither named bare nor with its extension is it run -- nor is a login shell
+// instead.
+TEST_CASE("ConPty.aBatchFileIsNeverRunInAHeldDirectory", "[vtpty][conpty][held]")
+{
+    auto const fixture = HeldProbe {};
+    auto const marker = fixture.directory.path() / "marker";
+    {
+        auto script = std::ofstream { fixture.bin / "tool.cmd" };
+        script << std::format("@echo ran> \"{}\"\r\n", marker.string());
+    }
+    auto const program = GENERATE(std::string { "tool" }, std::string { "tool.cmd" });
+    INFO("program: " << program);
+
+    auto exec = heldExec(fixture.probe, fixture.work);
+    exec.program = program;
+    CHECK(refusedStart(exec).contains(std::format("\"{}\"", program)));
+    std::this_thread::sleep_for(
+        std::chrono::milliseconds { 500 }); // past what a batch file would take to run
+    CHECK_FALSE(std::filesystem::exists(marker));
+}
+
+// A program not found is a spawn that failed: a held directory is entered by the program asked for, or not at
+// all -- a PowerShell in the worktree where an agent was expected would be a fallback no one asked for.
+TEST_CASE("ConPty.aMissingProgramInAHeldDirectoryDoesNotFallBack", "[vtpty][conpty][held]")
+{
+    auto const fixture = HeldProbe {};
+    auto exec = heldExec(fixture.probe, fixture.work);
+    exec.program = "contour-no-such-program";
+    CHECK(refusedStart(exec) == R"(The program "contour-no-such-program" was not found.)");
+}
+
+// CreateProcessW takes the directory by path: a held directory renamed away, and another put at its name, is
+// refused rather than the other entered.
+TEST_CASE("ConPty.aHeldDirectoryReplacedAtItsNameStartsNothing", "[vtpty][conpty][held]")
+{
+    auto const fixture = HeldProbe {};
+    auto const exec = heldExec(fixture.probe, fixture.work);
+    std::filesystem::rename(fixture.work, fixture.directory.path() / "work.old");
+
+    SECTION("by a directory")
+    {
+        std::filesystem::create_directories(fixture.work);
+    }
+    SECTION("by a junction to another directory")
+    {
+        auto const elsewhere = fixture.directory.path() / "elsewhere";
+        std::filesystem::create_directories(elsewhere);
+        REQUIRE(vtpty::testing::createJunction(fixture.work, elsewhere).has_value());
+    }
+
+    CHECK(refusedStart(exec)
+          == std::format(R"(The directory "{}" is no longer the one that was opened.)",
+                         exec.directory->resolvedPath()));
+}
+
+// A held directory that is gone, or a handle that holds none, has no directory to start in.
+TEST_CASE("ConPty.aRemovedOrUnbackedHeldDirectoryStartsNothing", "[vtpty][conpty][held]")
+{
+    auto const fixture = HeldProbe {};
+    auto exec = heldExec(fixture.probe, fixture.work);
+
+    SECTION("removed")
+    {
+        std::filesystem::remove(fixture.work);
+        CHECK(refusedStart(exec)
+              == std::format(R"(The directory "{}" was removed.)", exec.directory->resolvedPath()));
+    }
+    SECTION("unbacked")
+    {
+        exec.directory = std::make_shared<vtpty::DirectoryHandle const>(
+            vtpty::DirectoryHandle::unbacked(core::pathToUtf8(fixture.work)));
+        CHECK(refusedStart(exec)
+              == std::format(R"(The directory "{}" cannot be entered by its handle here.)",
+                             core::pathToUtf8(fixture.work)));
+    }
+}
+
+// The arguments an agent is started with, as the orchestrator builds them: JSON with double quotes, free text
+// with newlines, backslashes and what cmd.exe would read as its own -- none of which is, for no cmd.exe runs.
+TEST_CASE("ConPty.anAgentsArgumentsReachItExactly", "[vtpty][conpty][held]")
+{
+    auto const fixture = HeldProbe {};
+    auto const arguments = std::vector<std::string> {
+        "--model",
+        "opus",
+        "--session-id",
+        "0f8b6c1e-3a2d-4c5e-9f7a-1b2c3d4e5f60",
+        "--settings",
+        R"json({"permissions":{"defaultMode":"acceptEdits","allow":["Bash(git *)"]}})json",
+        "--append-system-prompt",
+        "line one\nline \"two\" with \\ and %PATH% & | ^ <>",
+        "größer – 日本",
+    };
+
+    auto const output = runProbe(heldExec(fixture.probe, fixture.work, arguments));
+    CHECK(printedArguments(output) == arguments);
+}
+
+// A command line longer than CreateProcessW takes is refused, never cut short to one that fits.
+TEST_CASE("ConPty.anOverlongCommandLineInAHeldDirectoryStartsNothing", "[vtpty][conpty][held]")
+{
+    auto const fixture = HeldProbe {};
+    auto const detail = refusedStart(heldExec(fixture.probe, fixture.work, { std::string(33'000, 'x') }));
+    CHECK(detail.contains("command line"));
+}
+
+// As childIsHandedTheEnvironmentBuiltForIt, for a child in a held directory.
+TEST_CASE("ConPty.aHeldDirectoryChildIsHandedTheEnvironmentBuiltForIt", "[vtpty][conpty][held]")
+{
+    auto const fixture = HeldProbe {};
+    auto const inherited = core::testing::ScopedEnv { "CONTOUR_PROBE_INHERITED", "kept" };
+    auto const dropped = core::testing::ScopedEnv { "CONTOUR_PROBE_DROPPED", "lost" };
+    auto exec = heldExec(fixture.probe, fixture.work);
+    exec.env.emplace("CONTOUR_PROBE_SET", "configured");
+    exec.removedEnvironment = { "contour_probe_dropped" };
+
+    auto const output = runProbe(exec);
+    CHECK(printedFields(output, "environment")
+          == std::vector<std::string> { "CONTOUR_PROBE_INHERITED=kept", "CONTOUR_PROBE_SET=configured" });
+}
+
+// A child in a held directory inherits nothing of the daemon's but its console: not even a handle the daemon
+// made inheritable for a child of its own, as StdioChild does its pipes. Its read end sees the pipe broken
+// once the one write end is closed here -- which it would not, were a copy of it held by the running child.
+TEST_CASE("ConPty.anInheritableHandleOfTheDaemonDoesNotReachAHeldDirectoryChild", "[vtpty][conpty][held]")
+{
+    auto const fixture = HeldProbe {};
+    auto inheritable = SECURITY_ATTRIBUTES { .nLength = sizeof(SECURITY_ATTRIBUTES),
+                                             .lpSecurityDescriptor = nullptr,
+                                             .bInheritHandle = TRUE };
+    auto readEnd = HANDLE {};
+    auto writeEnd = HANDLE {};
+    REQUIRE(CreatePipe(&readEnd, &writeEnd, &inheritable, 0));
+    auto const closeEnds = gsl::finally([&] {
+        if (writeEnd != nullptr)
+            CloseHandle(writeEnd);
+        CloseHandle(readEnd);
+    });
+
+    auto process = vtpty::testing::unplacedProcess(
+        heldExec(fixture.probe, fixture.work, { "--linger-on-close" }), pageSize(80, 24));
+    auto const started = process.start();
+    auto const endChild =
+        gsl::finally([&process] { process.terminate(vtpty::Process::TerminationHint::Normal); });
+    REQUIRE(started.has_value());
+    readProbeOutput(process); // the probe is up, and stays
+
+    CloseHandle(std::exchange(writeEnd, nullptr));
+    auto available = DWORD {};
+    auto const peeked = PeekNamedPipe(readEnd, nullptr, 0, nullptr, &available, nullptr);
+    auto const error = GetLastError();
+    CHECK(peeked == FALSE);
+    CHECK(error == ERROR_BROKEN_PIPE);
+    CHECK(process.alive());
 }
 
 // A single word that names no program has no command line to read: the spawn falls back to the login

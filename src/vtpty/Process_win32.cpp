@@ -5,8 +5,12 @@
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
 #include <vtpty/SpawnLadder.hpp>
+#include <vtpty/UniqueHandle.hpp>
 #include <vtpty/Win32Handle.hpp>
+#include <vtpty/Win32HeldDirectory.hpp>
+#include <vtpty/Win32HeldSpawn.hpp>
 #include <vtpty/WindowsCommandLine.hpp>
+#include <vtpty/WindowsProcessRules.hpp>
 
 #include <core/Assert.hpp>
 #include <core/Environment.hpp>
@@ -15,6 +19,7 @@
 #include <core/WideString.hpp>
 #include <core/platform/NativeFileSystem.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cerrno>
@@ -28,7 +33,10 @@
 #include <mutex>
 #include <numeric>
 #include <optional>
+#include <ranges>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -113,10 +121,60 @@ namespace
         }
         return hr;
     }
+
+    /// The exit code a terminated held-directory child's tree is given.
+    constexpr auto TerminatedExitCode = UINT { 1 };
+
+    /// How a held-directory child is created: suspended, so that it is in its job before it runs a single
+    /// instruction; on its pseudoconsole; with a UTF-16 environment block.
+    constexpr auto HeldCreationFlags =
+        DWORD { EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED };
+
+    /// Why a held directory did not become a child's current directory, as the detail StartFailure carries,
+    /// the directory's resolved path in place of the `{}`: one row per HeldDirectoryEntryError, in its order.
+    constexpr auto HeldEntryDetails = std::to_array<std::pair<HeldDirectoryEntryError, std::string_view>>({
+        { HeldDirectoryEntryError::Unbacked, R"(The directory "{}" cannot be entered by its handle here.)" },
+        { HeldDirectoryEntryError::Removed, R"(The directory "{}" was removed.)" },
+        { HeldDirectoryEntryError::Replaced, R"(The directory "{}" is no longer the one that was opened.)" },
+        { HeldDirectoryEntryError::TooLong, R"(The directory "{}" is too long to start a program in.)" },
+        { HeldDirectoryEntryError::NotUtf8, R"(The directory "{}" is not UTF-8.)" },
+        { HeldDirectoryEntryError::Unguardable,
+          R"(The directory "{}" is open elsewhere in a way that lets it be renamed or removed.)" },
+    });
+    static_assert(HeldEntryDetails.size() == std::to_underlying(HeldDirectoryEntryError::Last) + 1U
+                      && std::ranges::all_of(std::views::iota(std::size_t { 0 }, HeldEntryDetails.size()),
+                                             [](std::size_t index) {
+                                                 return std::to_underlying(HeldEntryDetails.at(index).first)
+                                                        == index;
+                                             }),
+                  "HeldEntryDetails has one row per HeldDirectoryEntryError, in its order");
+
+    /// @return What a start refused by @p error says, of the held directory at @p path.
+    [[nodiscard]] std::string heldEntryDetail(HeldDirectoryEntryError error, std::string const& path)
+    {
+        return std::vformat(HeldEntryDetails.at(std::to_underlying(error)).second,
+                            std::make_format_args(path));
+    }
+
+    /// @return A start that failed for @p detail.
+    [[nodiscard]] std::unexpected<StartFailure> spawnFailed(std::string detail)
+    {
+        return std::unexpected(
+            StartFailure { .error = StartError::SpawnFailed, .detail = std::move(detail) });
+    }
 } // anonymous namespace
 
 struct Process::Private
 {
+    // Declared first, so destroyed last: the guard outlives the job, whose closing ends the tree it guards.
+
+    /// A held-directory child's directory, guarded so that no other directory takes the name it was started
+    /// at (see HeldDirectoryEntry): released once the child has ended. None for a child started otherwise.
+    std::optional<HeldDirectoryEntry> heldDirectory {};
+    /// A held-directory child's kill-on-close job, its whole tree; not inheritable. None for a user's shell,
+    /// whose `code .` or `explorer .` must outlive its tab.
+    UniqueHandle job {};
+
     ExecInfo exec;
     std::unique_ptr<Pty> pty {};
     /// Held for the Process's lifetime only: a ConPTY child has no cgroup to leave.
@@ -138,6 +196,17 @@ struct Process::Private
     /// for a spawned child and an adopted one alike.
     /// @param self The Process this is of.
     void watchExit(Process& self);
+
+    /// Starts exec in its held directory, exec.directory, or nothing at all: no ladder to fall down.
+    ///
+    /// The program is the .exe findWindowsHeldDirectoryProgram() finds on the absolute entries of the PATH
+    /// the child is given -- never a batch file, and never one in the directory -- started by that path, with
+    /// exec.program as its argv[0]. The directory is entered by its resolved path, guarded and checked by
+    /// prepareHeldDirectoryEntry(), and checked again while the child is still suspended. The child inherits
+    /// no handle but its pseudoconsole, and runs in a kill-on-close job of its own.
+    /// @param self The Process this is of.
+    /// @return An outcome with nothing given up; or why nothing was started.
+    [[nodiscard]] StartResult startInHeldDirectory(Process& self);
 };
 
 void Process::Private::watchExit(Process& self)
@@ -151,8 +220,94 @@ void Process::Private::watchExit(Process& self)
             ptyLog()("Process terminated with exit code {}.", *status);
         else
             ptyLog()("Process terminated without an exit status.");
+        heldDirectory.reset(); // the child is gone: its directory's name need be kept no longer
         pty->close();
     });
+}
+
+StartResult Process::Private::startInHeldDirectory(Process& self)
+{
+    auto const& held = *exec.directory;
+    auto entry = prepareHeldDirectoryEntry(held);
+    if (!entry)
+        return spawnFailed(heldEntryDetail(entry.error(), held.resolvedPath()));
+
+    // The environment the child is given, and the program found on its PATH, names read as Windows reads
+    // them.
+    auto const inherited = inheritedEnvironment();
+    auto const environment =
+        buildWindowsEnvironment(std::vector<std::string_view> { inherited.begin(), inherited.end() },
+                                exec.env,
+                                exec.removedEnvironment);
+    auto environmentBlock = windowsEnvironmentBlock(environment);
+    if (!environmentBlock)
+        return spawnFailed("The environment configured for it is not UTF-8.");
+    auto const searchPath = environmentValue(environment, "PATH", EnvironmentNames::CaseInsensitive)
+                                .value_or(std::string_view {});
+    auto const program = findWindowsHeldDirectoryProgram(exec.program, searchPath, isExecutableProgram);
+    if (!program)
+        return spawnFailed(std::format(R"(The program "{}" was not found.)", exec.program));
+
+    // argv[0] as declared, never read as a command line of its own: it is one token of a manifest's argv.
+    auto const programPath = core::toUtf16(*program);
+    auto commandLine = core::toUtf16(buildWindowsCommandLine(exec.program, exec.arguments));
+    if (!programPath || !commandLine)
+        return spawnFailed("The program or its arguments are not UTF-8.");
+    if (commandLine->size() > MaxWindowsCommandLineUnits)
+        return spawnFailed(
+            std::format("The command line is {} UTF-16 units long, longer than the {} Windows takes.",
+                        commandLine->size(),
+                        MaxWindowsCommandLineUnits));
+
+    auto newJob = createKillOnCloseJob();
+    if (!newJob)
+        return spawnFailed(std::format("Could not create the job it runs in: {}", newJob.error().message()));
+
+    if (auto started = pty->start(); !started)
+        return started;
+    if (auto const attached = initializeStartupInfoAttachedToPTY(startupInfo, static_cast<ConPty&>(*pty));
+        FAILED(attached))
+        return spawnFailed(std::format("Could not attach it to its pseudoconsole: {}",
+                                       std::system_category().message(attached)));
+
+    // Nothing inherited: with bInheritHandles FALSE no handle of this process reaches the child, whatever is
+    // inheritable here, and its console comes from the pseudoconsole attribute.
+    auto created = PROCESS_INFORMATION {};
+    if (CreateProcessW(programPath->c_str(),
+                       commandLine->data(),
+                       nullptr,
+                       nullptr,
+                       FALSE,
+                       HeldCreationFlags,
+                       environmentBlock->data(),
+                       entry->path.c_str(),
+                       &startupInfo.StartupInfo,
+                       &created)
+        == FALSE)
+        return spawnFailed("Could not create process. " + core::systemErrorMessage(GetLastError()));
+    auto process = UniqueHandle { created.hProcess };
+    auto thread = UniqueHandle { created.hThread };
+
+    // The child is suspended: what fails from here on ends it before it ran.
+    auto const kill = [&process](std::string detail) {
+        TerminateProcess(process.get(), TerminatedExitCode);
+        return spawnFailed(std::move(detail));
+    };
+    // Looked at again with the child suspended, redundantly while the guard holds the name: cheap.
+    if (auto const confirmed = confirmHeldDirectoryEntry(*entry); !confirmed)
+        return kill(heldEntryDetail(confirmed.error(), held.resolvedPath()));
+    if (AssignProcessToJobObject(newJob->get(), process.get()) == FALSE)
+        return kill("Could not put it in its job. " + core::systemErrorMessage(GetLastError()));
+    if (ResumeThread(thread.get()) == static_cast<DWORD>(-1))
+        return kill("Could not resume it. " + core::systemErrorMessage(GetLastError()));
+
+    processInfo = created;
+    processInfo.hProcess = process.release();
+    processInfo.hThread = thread.release();
+    job = std::move(*newJob);
+    heldDirectory = std::move(*entry);
+    watchExit(self);
+    return StartOutcome {};
 }
 
 Process::Process(ExecInfo exe,
@@ -205,11 +360,10 @@ StartResult Process::start()
     if (_d->processInfo.hProcess != nullptr)
         return {}; // Adopted: running already, on a pseudoconsole that is open.
 
-    // No CreateProcess takes a directory by handle: a spawn told to start in one held open fails rather
-    // than start where its path names now.
+    // In its directory or not at all: none of the ladder below, which gives up the directory, then the
+    // program.
     if (_d->exec.directory)
-        return std::unexpected(StartFailure { .error = StartError::SpawnFailed,
-                                              .detail = "A directory held open cannot be entered here." });
+        return _d->startInHeldDirectory(*this);
 
     if (auto started = _d->pty->start(); !started)
         return started;
@@ -485,10 +639,18 @@ void Process::terminate(TerminationHint terminationHint)
     // Windows has no hangup to send: either way the process is ended outright.
     core::ignoreUnused(terminationHint);
 
+    // A held-directory child's whole tree, whether or not its leader still runs: what it started may.
+    if (_d->job.valid())
+    {
+        if (TerminateJobObject(_d->job.get(), TerminatedExitCode) != FALSE)
+            return;
+        ptyLog()("TerminateJobObject() failed: {}", core::systemErrorMessage(GetLastError()));
+    }
+
     if (!alive())
         return;
 
-    TerminateProcess(_d->processInfo.hProcess, 1);
+    TerminateProcess(_d->processInfo.hProcess, TerminatedExitCode);
 }
 
 optional<Process::ExitStatus> Process::wait()
