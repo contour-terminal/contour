@@ -137,7 +137,8 @@ enum class DescriptorPaths : uint8_t
 ///         resolved path is read from the handle (GetFinalPathNameByHandleW), in DOS form without the `\\?\`
 ///         prefix; createBeneath() opens the child relative to the parent's handle, refusing a junction,
 ///         symlink or mount point in its place and any name Win32 spells differently (isPlainWindowsName()).
-///         A directory deleted by the time it is opened is `Missing`.
+///         A directory deleted by the time it is opened, or still delete-pending (removed under legacy
+///         semantics while another handle holds it), is `Missing`.
 [[nodiscard]] IDirectoryOpener& nativeDirectoryOpener() noexcept;
 
 } // namespace vtpty

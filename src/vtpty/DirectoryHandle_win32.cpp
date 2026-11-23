@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/DirectoryHandle.hpp>
 #include <vtpty/UniqueHandle.hpp>
+#include <vtpty/Win32Handle.hpp>
 #include <vtpty/Win32OpenBeneath.hpp>
 #include <vtpty/WindowsPathRules.hpp>
 
@@ -55,6 +56,19 @@ namespace
         return row != ErrorRows.end() ? row->meaning : DirectoryError::AccessDenied;
     }
 
+    /// @return Whether the open that just failed on this thread found its target delete-pending: removed
+    ///         under legacy semantics while some handle still holds it (STATUS_DELETE_PENDING, which Win32
+    ///         reports as ERROR_ACCESS_DENIED). Read from the thread's last NTSTATUS (RtlGetLastNtStatus);
+    ///         false where this Windows has no such call.
+    [[nodiscard]] bool lastOpenFoundDeletePending() noexcept
+    {
+        using LastNtStatus = LONG(NTAPI*)();
+        static auto const lastNtStatus = ntdllFunction<LastNtStatus>("RtlGetLastNtStatus");
+        // STATUS_DELETE_PENDING; <ntstatus.h> clashes with <Windows.h>'s own status codes.
+        constexpr auto StatusDeletePending = static_cast<LONG>(0xC0000056UL);
+        return lastNtStatus != nullptr && lastNtStatus() == StatusDeletePending;
+    }
+
     /// @param path A wide path.
     /// @return The absolute form GetFullPathNameW makes of it; empty where it fails.
     [[nodiscard]] std::wstring fullPathOf(std::wstring const& path)
@@ -98,7 +112,14 @@ namespace
                                                  FILE_FLAG_BACKUP_SEMANTICS,
                                                  nullptr) };
         if (!handle.valid())
-            return std::unexpected(directoryError(GetLastError()));
+        {
+            auto const error = GetLastError();
+            // A directory removed while another handle holds it: nothing is there to be denied, as open() of
+            // a removed path is ENOENT on POSIX.
+            if (error == ERROR_ACCESS_DENIED && lastOpenFoundDeletePending())
+                return std::unexpected(DirectoryError::Missing);
+            return std::unexpected(directoryError(error));
+        }
         return handle;
     }
 

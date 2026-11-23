@@ -4,6 +4,7 @@
 #ifdef _WIN32
     #include <vtpty/Win32OpenBeneath.hpp>
     #include <vtpty/testing/Junction.hpp>
+    #include <vtpty/testing/LegacyRemove.hpp>
 #endif
 
 #include <core/Utf8Path.hpp>
@@ -463,6 +464,24 @@ TEST_CASE("DirectoryHandle: createBeneath in a removed directory is Missing", "[
 
     // As mkdirat() in a removed directory is ENOENT on POSIX.
     CHECK(refusalOf(opener.createBeneath(*parent, "child")) == vtpty::DirectoryError::Missing);
+}
+
+TEST_CASE("DirectoryHandle: a directory removed while another handle holds it is Missing to open",
+          "[processrunner]")
+{
+    auto const directory = core::testing::ScopedTempDir { "contour-directoryhandle" };
+    auto const a = directory.path() / "a";
+    std::filesystem::create_directory(a);
+    auto& opener = vtpty::nativeDirectoryOpener();
+    auto const held = opener.open(pathToUtf8(a));
+    REQUIRE(held.has_value());
+
+    // Legacy semantics leave it delete-pending at its path while it is held: NTFS refuses the open with
+    // STATUS_DELETE_PENDING, an access error, but nothing is there to be denied.
+    REQUIRE(vtpty::testing::removeLegacy(a).has_value());
+    REQUIRE(held->isRemoved());
+    CHECK(refusalOf(opener.open(pathToUtf8(a))) == vtpty::DirectoryError::Missing);
+    CHECK(opener.canonical(pathToUtf8(a)) == std::unexpected(vtpty::DirectoryError::Missing));
 }
 
 TEST_CASE("DirectoryHandle: open refuses the device namespace", "[processrunner]")

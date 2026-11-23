@@ -17,6 +17,7 @@
     #include <vtpty/UniqueHandle.hpp>
     #include <vtpty/Win32BeneathRead.hpp>
     #include <vtpty/testing/Junction.hpp>
+    #include <vtpty/testing/ShortPath.hpp>
 
     #include <core/Utf8Path.hpp>
     #include <core/testing/ScopedTempDir.hpp>
@@ -64,18 +65,6 @@ void writeFile(std::filesystem::path const& path, std::string const& bytes)
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
                                      std::chrono::system_clock::now().time_since_epoch())
                                      .count());
-}
-
-/// @return @p path's 8.3 spelling; @p path itself when it has none.
-[[nodiscard]] std::filesystem::path shortPathOf(std::filesystem::path const& path)
-{
-    auto shortName = std::wstring(MAX_PATH, L'\0');
-    auto const length =
-        GetShortPathNameW(path.c_str(), shortName.data(), static_cast<DWORD>(shortName.size()));
-    if (length == 0 || length >= shortName.size())
-        return path;
-    shortName.resize(length);
-    return std::filesystem::path { shortName };
 }
 
 /// A temporary directory with a root beneath it, held open as the service holds a root, and an outside
@@ -315,7 +304,7 @@ TEST_CASE("BeneathRead: a fenced directory is not entered, however it is spelled
 
     // And an 8.3 short name, where the volume makes them.
     auto const longName = std::filesystem::path { L"Main-long-name" };
-    auto const shortName = pathToUtf8(shortPathOf(tree.root / longName).filename());
+    auto const shortName = pathToUtf8(vtpty::testing::shortPathOf(tree.root / longName).filename());
     if (shortName == pathToUtf8(longName))
         WARN("no 8.3 names on this volume");
     else
@@ -457,6 +446,38 @@ TEST_CASE("BeneathRead: a directory that may not be entered is unreadable", "[vt
     };
     auto const reader = vtpty::makeWin32BeneathReader(system);
     CHECK(tree.readWith(*reader, { "closed", "file" }) == std::unexpected(BeneathReadError::Unreadable));
+}
+
+TEST_CASE("BeneathRead: nothing opened beneath a directory whose deletion is pending is directory-missing",
+          "[vtpty][beneath]")
+{
+    // NTFS refuses every open beneath a delete-pending directory with STATUS_DELETE_PENDING, which Win32
+    // reports as ERROR_ACCESS_DENIED: the parent's own status, read with no link left, tells the two apart.
+    auto const tree = Tree {};
+    std::filesystem::create_directories(tree.root / "wt" / "run-1");
+    writeFile(tree.root / "wt" / "file", "inside");
+    writeFile(tree.root / "wt" / "run-1" / ".git", "inside");
+    auto system = ForwardingWin32System { tree.system };
+    auto const reader = vtpty::makeWin32BeneathReader(system);
+    auto parentRemoved = true;
+    system.failOpen = [](std::string const& name) -> std::optional<DWORD> {
+        return name == "file" || name == "run-1" ? std::optional { DWORD { ERROR_ACCESS_DENIED } }
+                                                 : std::nullopt;
+    };
+    system.rewriteStatus = [&](std::string const& name, vtpty::FileStatus& status) {
+        if (name == "wt" && parentRemoved)
+            status.links = 0;
+    };
+
+    // The file, and a directory on the way, beneath the delete-pending "wt".
+    CHECK(tree.readWith(*reader, { "wt", "file" }) == std::unexpected(BeneathReadError::DirectoryMissing));
+    CHECK(tree.readWith(*reader, { "wt", "run-1", ".git" })
+          == std::unexpected(BeneathReadError::DirectoryMissing));
+
+    // With the parent still linked, the same refusal is a real denial.
+    parentRemoved = false;
+    CHECK(tree.readWith(*reader, { "wt", "file" }) == std::unexpected(BeneathReadError::Unreadable));
+    CHECK(tree.readWith(*reader, { "wt", "run-1", ".git" }) == std::unexpected(BeneathReadError::Unreadable));
 }
 
 TEST_CASE("BeneathRead: a file another process holds exclusively is unreadable", "[vtpty][beneath]")

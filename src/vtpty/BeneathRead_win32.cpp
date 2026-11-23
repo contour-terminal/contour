@@ -88,6 +88,13 @@ namespace
     };
 
     /// Every Win32 error the walk answers by name; any other is `Unreadable`, never `DirectoryMissing`.
+    ///
+    /// A middle directory or the file itself whose deletion is pending (removed under legacy semantics while
+    /// some handle still holds it) refuses its own open with STATUS_DELETE_PENDING, which Win32 reports as
+    /// ERROR_ACCESS_DENIED: it answers `Unreadable` here, where POSIX, which has unlinked the name already,
+    /// answers `DirectoryMissing` or `NotRegular`. Only a delete-pending *parent* is told apart
+    /// (openFailure()), by its own status. Refusing is the safe side -- nothing is read -- and lasts only
+    /// while that handle is held: the Board shows the entry Unavailable for one poll instead of Gone.
     // clang-format off
     constexpr auto Win32ErrorRows = std::to_array<Win32ErrorRow>({
         { .step = Step::Directory, .error = ERROR_FILE_NOT_FOUND, .meaning = BeneathReadError::DirectoryMissing },
@@ -219,9 +226,8 @@ namespace
         }
 
       private:
-        /// @return Which directory @p root is; `Unreadable` for an unbacked or unknown one,
-        /// `DirectoryMissing`
-        ///         once it was removed while held.
+        /// @return Which directory @p root is; `Unreadable` for an unbacked or unknown one;
+        ///         `DirectoryMissing` once it was removed while held.
         [[nodiscard]] std::expected<FileIdentity, BeneathReadError> identityOfRoot(
             DirectoryHandle const& root)
         {

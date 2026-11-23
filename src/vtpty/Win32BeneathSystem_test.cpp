@@ -222,8 +222,10 @@ TEST_CASE("Win32BeneathSystem: a directory is never re-opened for reading", "[vt
 
     auto const looked = openIn(fixture.root.nativeHandle(), L"d");
     REQUIRE(looked.has_value());
-    CHECK_FALSE(system.reopenForRead(looked->get()).has_value());
-    CHECK_FALSE(system.reopenForRead(fixture.root.nativeHandle()).has_value());
+    // STATUS_FILE_IS_A_DIRECTORY, which Win32 reports as ERROR_ACCESS_DENIED.
+    CHECK(system.reopenForRead(looked->get()) == std::unexpected(DWORD { ERROR_ACCESS_DENIED }));
+    CHECK(system.reopenForRead(fixture.root.nativeHandle())
+          == std::unexpected(DWORD { ERROR_ACCESS_DENIED }));
 }
 
 TEST_CASE("Win32BeneathSystem: no handle it makes is inheritable", "[vtpty][beneath]")

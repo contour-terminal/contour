@@ -237,7 +237,7 @@ if(VTPTY_TESTING)
     if(WIN32)
         # ConPty is the Windows-only PTY backend.
         target_sources(vtpty_test PRIVATE BeneathRead_win32_test.cpp ConPty_test.cpp ProcessRunner_win32_test.cpp
-            Win32BeneathSystem_test.cpp testing/Junction.hpp)
+            Win32BeneathSystem_test.cpp testing/Junction.hpp testing/LegacyRemove.hpp testing/ShortPath.hpp)
 
         # The child half of the ConPty tests that run a program: a console program printing the arguments
         # it received, then writing OSC 133 marks the way a shell integration does, then a sentinel, so a
