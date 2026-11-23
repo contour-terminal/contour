@@ -103,7 +103,15 @@ namespace
         std::pair { HeldDirectoryEntryError::Replaced, ProcessStartError::DirectoryMissing },
         std::pair { HeldDirectoryEntryError::TooLong, ProcessStartError::SpawnFailed },
         std::pair { HeldDirectoryEntryError::NotUtf8, ProcessStartError::SpawnFailed },
+        std::pair { HeldDirectoryEntryError::Unguardable, ProcessStartError::SpawnFailed },
     };
+    static_assert(DirectoryErrors.size() == std::to_underlying(HeldDirectoryEntryError::Last) + 1U
+                      && std::ranges::all_of(std::views::iota(std::size_t { 0 }, DirectoryErrors.size()),
+                                             [](std::size_t index) {
+                                                 return std::to_underlying(DirectoryErrors.at(index).first)
+                                                        == index;
+                                             }),
+                  "DirectoryErrors has one row per HeldDirectoryEntryError, in its order");
 
     /// @return What @p error, a held working directory's refusal, means for the start.
     [[nodiscard]] ProcessStartError directoryError(HeldDirectoryEntryError error) noexcept
@@ -248,6 +256,9 @@ namespace
     /// on, the job (which ends what is left of the tree) last.
     struct Child
     {
+        /// The working directory's guard, which keeps another directory from taking its name (see
+        /// HeldDirectoryEntry): held until the child is reaped. None for a spec without one.
+        std::optional<HeldDirectoryEntry> directory;
         UniqueHandle job;              ///< Kill-on-close (see closeJob()); held only here, never inherited.
         UniqueHandle process;          ///< The leader.
         ExitWait exitWait;             ///< Posts the leader's exit to the port.
@@ -728,8 +739,7 @@ std::expected<ProcessToken, ProcessStartError> PipedProcessRunner::start(Process
         TerminateProcess(process.get(), 1);
         return std::unexpected(why);
     };
-    // Checked again with the child suspended: a directory swapped in under the name meanwhile is refused
-    // before the child could run in it (see prepareHeldDirectoryEntry()).
+    // Looked at again with the child suspended, redundantly while the guard holds the name: cheap.
     if (directory)
     {
         if (auto const confirmed = confirmHeldDirectoryEntry(*directory); !confirmed)
@@ -762,7 +772,8 @@ std::expected<ProcessToken, ProcessStartError> PipedProcessRunner::start(Process
                             .cap = capOf(capture),
                             .captured = {} };
         };
-    auto child = Child { .job = std::move(*job),
+    auto child = Child { .directory = std::move(directory),
+                         .job = std::move(*job),
                          .process = std::move(process),
                          .exitWait = {},
                          .streams = { streamOf(*output, reads[0], spec.standardOutput),

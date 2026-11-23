@@ -42,6 +42,7 @@
     #include <optional>
     #include <ranges>
     #include <string>
+    #include <tuple>
     #include <utility>
     #include <vector>
 
@@ -484,6 +485,40 @@ TEST_CASE("PipedProcessRunner: a working directory too long to enter is refused"
     spec.workingDirectory = std::move(*opened);
     CHECK(fixture.refusal(std::move(spec)) == ProcessStartError::SpawnFailed);
     CHECK_FALSE(std::filesystem::exists(marker));
+}
+
+TEST_CASE("PipedProcessRunner: a working directory exactly as long as a current directory may be is entered",
+          "[processrunner]")
+{
+    auto fixture = RunnerFixture {};
+    auto const base = core::toUtf16(fixture.spec({ "probe" }).workingDirectory->resolvedPath());
+    REQUIRE(base.has_value());
+    auto const chain =
+        vtpty::testing::LongDirectory::make(*base, vtpty::MaxWindowsCurrentDirectoryUnits, L'y');
+    REQUIRE(chain.has_value());
+    auto opened = vtpty::nativeDirectoryOpener().open(utf8(chain->path()));
+    REQUIRE(opened.has_value());
+
+    auto spec = fixture.spec({ "probe", "cwd" });
+    spec.workingDirectory = std::move(*opened);
+    auto const resolved = spec.workingDirectory->resolvedPath();
+    CHECK(fixture.runToCompletion(fixture.start(std::move(spec))).standardOutput.bytes == resolved + "\n");
+}
+
+TEST_CASE("PipedProcessRunner: a working directory cannot be renamed while its process runs",
+          "[processrunner]")
+{
+    auto fixture = RunnerFixture {};
+    auto const pidFile = fixture.directory.path() / "pid";
+    auto const token = fixture.start(fixture.spec({ "probe", "pid", utf8(pidFile), "sleep", "30000" }));
+    std::ignore = fixture.awaitPid(pidFile);
+
+    auto const old = fixture.directory.path() / "work.old";
+    CHECK(MoveFileExW(fixture.work.c_str(), old.c_str(), 0) == FALSE);
+
+    fixture.runner->cancel(token);
+    CHECK(fixture.runToCompletion(token).completion == ProcessCompletion::Cancelled);
+    CHECK(MoveFileExW(fixture.work.c_str(), old.c_str(), 0) != FALSE);
 }
 
 TEST_CASE("PipedProcessRunner: stdin is empty", "[processrunner]")
