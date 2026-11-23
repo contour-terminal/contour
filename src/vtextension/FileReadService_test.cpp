@@ -6,7 +6,11 @@
 #include <vtpty/DirectoryHandle.hpp>
 #include <vtpty/OwnedFd.hpp>
 #include <vtpty/PathStyle.hpp>
+#ifdef _WIN32
+    #include <vtpty/testing/Junction.hpp>
+#endif
 
+#include <core/Utf8Path.hpp>
 #include <core/testing/ScopedTempDir.hpp>
 
 #include <catch2/catch_message.hpp>
@@ -386,6 +390,42 @@ TEST_CASE("FileReadService: a nested root's other name is fenced by its identity
     CHECK(fixture.read("worktrees", "run-1/x").has_value());
 }
 
+namespace
+{
+
+/// This machine's directories, recording every path it is asked to open.
+class RecordingOpener final: public vtpty::IDirectoryOpener
+{
+  public:
+    [[nodiscard]] std::expected<vtpty::DirectoryHandle, vtpty::DirectoryError> open(
+        std::string_view path) override
+    {
+        opened.emplace_back(path);
+        return vtpty::nativeDirectoryOpener().open(path);
+    }
+
+    [[nodiscard]] std::expected<std::string, vtpty::DirectoryError> canonical(
+        std::string_view existingPath) override
+    {
+        return vtpty::nativeDirectoryOpener().canonical(existingPath);
+    }
+
+    [[nodiscard]] std::expected<vtpty::DirectoryHandle, vtpty::DirectoryError> createBeneath(
+        vtpty::DirectoryHandle const& parent, std::string_view name) override
+    {
+        return vtpty::nativeDirectoryOpener().createBeneath(parent, name);
+    }
+
+    [[nodiscard]] vtpty::PathStyle pathStyle() const noexcept override
+    {
+        return vtpty::nativeDirectoryOpener().pathStyle();
+    }
+
+    std::vector<std::string> opened; ///< Every path open() was asked for, in order.
+};
+
+} // namespace
+
 #ifndef _WIN32
 
 namespace
@@ -421,37 +461,6 @@ class MountedSystem final: public vtpty::IBeneathSystem
 
   private:
     std::vector<std::string> _mounted;
-};
-
-/// This machine's directories, recording every path it is asked to open.
-class RecordingOpener final: public vtpty::IDirectoryOpener
-{
-  public:
-    [[nodiscard]] std::expected<vtpty::DirectoryHandle, vtpty::DirectoryError> open(
-        std::string_view path) override
-    {
-        opened.emplace_back(path);
-        return vtpty::nativeDirectoryOpener().open(path);
-    }
-
-    [[nodiscard]] std::expected<std::string, vtpty::DirectoryError> canonical(
-        std::string_view existingPath) override
-    {
-        return vtpty::nativeDirectoryOpener().canonical(existingPath);
-    }
-
-    [[nodiscard]] std::expected<vtpty::DirectoryHandle, vtpty::DirectoryError> createBeneath(
-        vtpty::DirectoryHandle const& parent, std::string_view name) override
-    {
-        return vtpty::nativeDirectoryOpener().createBeneath(parent, name);
-    }
-
-    [[nodiscard]] vtpty::PathStyle pathStyle() const noexcept override
-    {
-        return vtpty::nativeDirectoryOpener().pathStyle();
-    }
-
-    std::vector<std::string> opened; ///< Every path open() was asked for, in order.
 };
 
 } // namespace
@@ -506,6 +515,108 @@ TEST_CASE("FileReadService: a nested root is fenced through the walk, not by pat
                                      vtpty::nativeBeneathReader() };
     CHECK(service.read("worktrees", "Main/.git/config") == std::unexpected(FileError::NotGranted));
     CHECK(std::ranges::all_of(opener.opened, [&](std::string const& path) { return path == wt.string(); }));
+}
+
+#endif
+
+#ifdef _WIN32
+
+namespace
+{
+
+/// An extension that declares `read worktrees` and nothing else.
+[[nodiscard]] vtextension::Manifest readingWorktrees()
+{
+    auto manifest = vtextension::Manifest {};
+    manifest.name = "orchestrator";
+    manifest.readableRoots = { "worktrees" };
+    return manifest;
+}
+
+/// Writes @p text to @p file, byte for byte.
+void writeFile(std::filesystem::path const& file, std::string_view text)
+{
+    auto out = std::ofstream { file, std::ios::binary };
+    out << text;
+}
+
+} // namespace
+
+TEST_CASE("FileReadService: a Windows worktree's STATUS.md is read through the native reader",
+          "[vtextension][file-read]")
+{
+    auto const temp = core::testing::ScopedTempDir { "contour-file-read-status" };
+    auto const wt = std::filesystem::canonical(temp.path());
+    std::filesystem::create_directories(wt / "contour" / "r1");
+    writeFile(wt / "contour" / "r1" / "STATUS.md", "# Board\n");
+
+    auto opener = RecordingOpener {};
+    auto service = FileReadService { readingWorktrees(),
+                                     { { .label = "worktrees", .paths = { core::pathToUtf8(wt) } } },
+                                     opener,
+                                     vtpty::nativeBeneathReader() };
+    auto const content = service.read("worktrees", "contour/r1/STATUS.md");
+    REQUIRE(content.has_value());
+    CHECK(content->bytes == bytesOf("# Board\n"));
+    CHECK(content->modifiedUnixMs != 0);
+    // Only the root is opened by path; everything beneath it is reached from its handle.
+    CHECK(opener.opened == std::vector { core::pathToUtf8(wt) });
+}
+
+TEST_CASE("FileReadService: a nested root is fenced through the walk, not by path, on Windows",
+          "[vtextension][file-read]")
+{
+    auto const temp = core::testing::ScopedTempDir { "contour-file-read-fence" };
+    auto const wt = std::filesystem::canonical(temp.path());
+    std::filesystem::create_directories(wt / "Main" / ".git");
+    writeFile(wt / "Main" / ".git" / "config", "[core]\n");
+
+    auto opener = RecordingOpener {};
+    auto service = FileReadService { readingWorktrees(),
+                                     { { .label = "worktrees", .paths = { core::pathToUtf8(wt) } },
+                                       { .label = "repos", .paths = { core::pathToUtf8(wt / "Main") } } },
+                                     opener,
+                                     vtpty::nativeBeneathReader() };
+    CHECK(service.read("worktrees", "Main/.git/config") == std::unexpected(FileError::NotGranted));
+    // Another case names the same directory: it is fenced by its identity.
+    CHECK(service.read("worktrees", "main/.git/config") == std::unexpected(FileError::NotGranted));
+}
+
+TEST_CASE("FileReadService: a junction inside a Windows root escapes", "[vtextension][file-read]")
+{
+    auto const temp = core::testing::ScopedTempDir { "contour-file-read-junction" };
+    auto const outsideTemp = core::testing::ScopedTempDir { "contour-file-read-outside" };
+    auto const wt = std::filesystem::canonical(temp.path());
+    auto const outside = std::filesystem::canonical(outsideTemp.path());
+    std::filesystem::create_directories(wt / "r1");
+    writeFile(outside / "secret", "secret\n");
+    REQUIRE(vtpty::testing::createJunction(wt / "r1" / "out", outside).has_value());
+
+    auto opener = RecordingOpener {};
+    auto service = FileReadService { readingWorktrees(),
+                                     { { .label = "worktrees", .paths = { core::pathToUtf8(wt) } } },
+                                     opener,
+                                     vtpty::nativeBeneathReader() };
+    CHECK(service.read("worktrees", "r1/out/secret") == std::unexpected(FileError::Escapes));
+}
+
+TEST_CASE("FileReadService: a Windows stream or device name is a bad argument", "[vtextension][file-read]")
+{
+    auto const temp = core::testing::ScopedTempDir { "contour-file-read-names" };
+    auto const wt = std::filesystem::canonical(temp.path());
+    std::filesystem::create_directories(wt / "r1");
+    writeFile(wt / "r1" / "STATUS.md", "# Board\n");
+
+    auto opener = RecordingOpener {};
+    auto service = FileReadService { readingWorktrees(),
+                                     { { .label = "worktrees", .paths = { core::pathToUtf8(wt) } } },
+                                     opener,
+                                     vtpty::nativeBeneathReader() };
+    for (auto const path: std::array { "r1/STATUS.md:x"sv, "r1/CON"sv, "r1/x."sv })
+    {
+        CAPTURE(path);
+        CHECK(service.read("worktrees", path) == std::unexpected(FileError::BadArgument));
+    }
 }
 
 #endif

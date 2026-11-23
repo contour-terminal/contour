@@ -9,6 +9,9 @@
 #include <vtpty/ChannelPty.hpp>
 #include <vtpty/DirectoryHandle.hpp>
 #include <vtpty/MockPty.hpp>
+#ifdef _WIN32
+    #include <vtpty/testing/Junction.hpp>
+#endif
 
 #include <core/Environment.hpp>
 #include <core/net/EventLoop.hpp>
@@ -942,8 +945,6 @@ TEST_CASE("DaemonWorldExtensions: what is typed into the host's frame never reac
     CHECK(read == "k");
 }
 
-#ifndef _WIN32 // The native reader reads beneath a directory handle, which Windows has none of.
-
 namespace
 {
 
@@ -952,6 +953,27 @@ constexpr auto ReadingManifest =
     "name = reader\nversion = 2\ntitle = Reader\nplacement daemon\nroot work = config:work\n"
     "read work\ncommand run short @work = true\n"sv;
 
+/// Makes @p link a way out of the root it sits in: a symbolic link to `/etc/passwd` on POSIX, and on Windows
+/// a junction (which any user may make) to the directory @p outside.
+/// @param link Where the way out is made; must not exist yet.
+/// @param outside A directory outside the root, the junction's target on Windows.
+void plantEscape(std::filesystem::path const& link, [[maybe_unused]] std::filesystem::path const& outside)
+{
+#ifdef _WIN32
+    REQUIRE(vtpty::testing::createJunction(link, outside).has_value());
+#else
+    std::filesystem::create_symlink("/etc/passwd", link);
+#endif
+}
+
+/// The path the guest reads through the way out @ref plantEscape makes: on Windows a junction is a directory,
+/// so the read goes one name below it.
+#ifdef _WIN32
+constexpr auto EscapePath = "run-1/escape/x"sv;
+#else
+constexpr auto EscapePath = "run-1/escape"sv;
+#endif
+
 } // namespace
 
 TEST_CASE("DaemonWorldExtensions: the daemon world reads files through the native reader",
@@ -959,13 +981,14 @@ TEST_CASE("DaemonWorldExtensions: the daemon world reads files through the nativ
 {
     // A real directory, its file read by the production reader beneath the production opener's handle.
     auto const temp = core::testing::ScopedTempDir { "contour-daemon-file-read" };
+    auto const outside = core::testing::ScopedTempDir { "contour-daemon-file-read-outside" };
     auto const work = std::filesystem::canonical(temp.path());
     std::filesystem::create_directory(work / "run-1");
     {
         auto out = std::ofstream { work / "run-1" / ".git", std::ios::binary };
         out << "gitdir: /src/repo/.git/worktrees/run-1\n";
     }
-    std::filesystem::create_symlink("/etc/passwd", work / "run-1" / "escape");
+    plantEscape(work / "run-1" / "escape", std::filesystem::canonical(outside.path()));
 
     using FileResult = std::expected<vtextension::FileContent, vtextension::FileError>;
     constexpr auto RootAddress = uint32_t { 100 };
@@ -993,7 +1016,7 @@ TEST_CASE("DaemonWorldExtensions: the daemon world reads files through the nativ
         };
         auto memory = vtextension::testing::FakeInstanceMemory { instance };
         put(RootAddress, "work");
-        for (auto const path: { "run-1/.git"sv, "run-1/escape"sv })
+        for (auto const path: { "run-1/.git"sv, EscapePath })
         {
             put(PathAddress, path);
             auto const arguments = std::array {
@@ -1028,7 +1051,7 @@ TEST_CASE("DaemonWorldExtensions: the daemon world reads files through the nativ
                 .name = "reader",
                 .modulePath = "/ext/reader.wasm",
                 .autostart = vtextension::ExtensionAutostart::OnDemand,
-                .configJson = std::format(R"({{"work":"{}"}})", work.string()),
+                .configJson = std::format(R"({{"work":"{}"}})", work.generic_string()),
                 .storeDirectory = "/state/extensions/default/reader/store" } },
             .grantsFile = "/config/extension-grants.daemon-scoped.txt",
             .home = "/home/me",
@@ -1063,8 +1086,6 @@ TEST_CASE("DaemonWorldExtensions: the daemon world reads files through the nativ
     CHECK(results[0]->modifiedUnixMs != 0);
     CHECK(results[1] == FileResult { std::unexpect, vtextension::FileError::Escapes });
 }
-
-#endif
 
 TEST_CASE("DaemonWorldExtensions: the pane calls reach the host's owned panes in the world's words",
           "[daemon][panes]")
