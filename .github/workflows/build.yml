@@ -2045,7 +2045,7 @@ jobs:
         run: |
           sudo ./scripts/add-ppa.sh ppa:ubuntu-toolchain-r/test
           sudo ./scripts/apt-update.sh
-          sudo apt install -y g++-${{ steps.extract_matrix.outputs.CC_VERSION }}
+          sudo ./scripts/apt-install.sh g++-${{ steps.extract_matrix.outputs.CC_VERSION }}
       - name: Install Clang
         if: ${{ startsWith(matrix.compiler, 'Clang') }}
         env:
@@ -2344,7 +2344,7 @@ jobs:
         run: |
           sudo ./scripts/add-ppa.sh ppa:ubuntu-toolchain-r/test
           sudo ./scripts/apt-update.sh
-          sudo apt install -y g++-15
+          sudo ./scripts/apt-install.sh g++-15
       # Qt's text-to-speech plugin links libspeechd, which linuxdeploy must find to bundle it.
       - name: "install libspeechd"
         run: sudo apt install -y libspeechd2
