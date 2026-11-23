@@ -105,7 +105,7 @@ has the keys: every printable key types, digits too, so no letter is ever both a
 | `Tab` | give the Focus the keys |
 | `b` `t` `d` | show the Focus's Board, Transcript or Details tab |
 | `PgUp` `PgDn` | scroll the Focus's tab |
-| `←` `→` | turn the transcript's pages |
+| `←` `→` | turn the transcript's pages; on the Board or Details, or past the transcript's first or last page, show the tab beside |
 | `n` | open the launcher: browse the pull requests and issues, or type a topic |
 | `/` | filter the runs by text, Finished's folded ones too; Enter keeps the filter, Esc drops it |
 | `Ctrl+K` `?` | open the command palette: every action, and the commands that have no key |
@@ -124,9 +124,11 @@ not while it is working`) and nothing happens.
 | Key | In the Focus, with the message box |
 | --- | --- |
 | printable keys | type |
+| `Backspace` `Alt+Backspace` `Ctrl+W` `Ctrl+U` | drop a character, a word, back to the last blank, everything |
 | `Enter` | send; the keys return to the Fleet, the selection stays on the run |
 | `Alt+Enter` | add a line; a paste keeps its line feeds |
 | `PgUp` `PgDn` `End` | scroll the tab; `End` back to live |
+| `←` `→` | as in the Fleet: pages, then the tab beside |
 | `Esc` `Tab` | back to the Fleet, keeping the draft (drafts are kept per run, in memory) |
 | `Ctrl+K` | open the command palette |
 
@@ -198,9 +200,17 @@ number and title, across every repository. While anything is typed, a row starts
 that text; a query that names an item exactly (`2375`, `#2375`, its URL or a Jira key) puts that item
 first. `↑` `↓` choose a row and `Enter` starts the agent.
 
+Under the query, the scope narrows the list: `repo  all  contour  pace …` and `show  all  needs attention  pull
+requests  issues`. On the list, `←` `→` step the repository and `Ctrl+←` `Ctrl+→` the kind; a click on a chip
+picks it. A topic starts in the repository the list is narrowed to, and the launcher opens again as you left it.
+While every repository is listed, each row names its own. In a wide tab the launcher takes three quarters of the
+width, from 80 to 160 columns.
+
 Below the list are the settings for the chosen row: a topic's repository, the task (one that applies to
 the item), the model, the permission profile, and an item's optional note, which is added to the prompt.
-`Tab` moves into them and through them, `←` `→` change one, and typing into the note fills it. Each
+`Tab` moves into them and through them, `←` `→` change one, and typing into the note fills it. The query, the
+note, the message box, the filter and the palette all take `Backspace`, `Alt+Backspace` (a word), `Ctrl+W` (back
+to the last blank) and `Ctrl+U` (everything). Each
 follows the chosen row, so the defaults are the task's own. The checkout and the worktree are shown
 below them; `Ctrl+P` also shows the prompt and the agent's exact command line. `Esc` closes the
 launcher. A dispatch the engine would refuse, an item an agent already works on for instance, says why

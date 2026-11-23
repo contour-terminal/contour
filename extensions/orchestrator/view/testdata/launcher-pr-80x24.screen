@@ -4,20 +4,20 @@
 │                                                                              │
 │   ╭─ ✦ New agent ────────────────────────────────────────────────────────╮   │
 │   │ › #2375▏                            pull requests · issues · a topic │   │
+│   │ repo  ‹ all ›    show  ‹ all ›                                       │   │
 │   │                                                                      │   │
 │   │ MY PULL REQUESTS                                                     │   │
-│   │ ▍#2375 Say why the stdio relay failed, and send a hello bef… ●       │   │
-╰───│  ✎ topic “#2375”                                          new branch │───╯
-╭───│ ──────────────────────────────────────────────────────────────────── │───╮
-│ No│ task ‹ fix CI ›   model ‹ sonnet ›   perms ‹ standard ›   note none  │   │
-│ yo│ #2375 · contour · checks running                                     │   │
-│ On│ checkout  gh pr checkout 2375 --branch agent/pr-2375-…               │   │
-│ es│ worktree  /home/u/worktrees/contour/pr-2375-…                        │   │
-│ Ev│ perms     standard · 19 allowed · 4 denied · edits need no approval  │   │
+╰───│ ▍#2375 Say why the stdio relay failed, and send a hello bef… ●       │───╯
+╭───│  ✎ topic “#2375”                                          new branch │───╮
+│ No│ ──────────────────────────────────────────────────────────────────── │   │
+│ yo│ task ‹ fix CI ›   model ‹ sonnet ›   perms ‹ standard ›   note none  │   │
+│ On│ #2375 · contour · checks running                                     │   │
+│ es│ checkout  gh pr checkout 2375 --branch agent/pr-2375-…               │   │
+│ Ev│ worktree  /home/u/worktrees/contour/pr-2375-…                        │   │
+│   │ perms     standard · 19 allowed · 4 denied · edits need no approval  │   │
 │   │                                                                      │   │
-│   │ enter start · ↑↓ choose · tab settings · ctrl+p more · esc close     │   │
+│   │ enter start · ↑↓ choose · ←→ repo · ctrl+←→ kind · tab settings      │   │
 │   ╰──────────────────────────────────────────────────────────────────────╯   │
-│                                                                              │
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯

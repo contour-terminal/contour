@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -48,6 +49,24 @@ struct Candidate
     [[nodiscard]] bool operator==(Candidate const&) const = default;
 };
 
+/// Which kind of item the launcher lists.
+enum class KindScope : uint8_t
+{
+    All = 0,        ///< Every item.
+    NeedsAttention, ///< Pull requests whose checks fail or whose reviewer asked for changes.
+    PullRequests,   ///< Every pull request.
+    Issues,         ///< Issues without a pull request.
+};
+
+/// What the launcher narrows its list to, besides the query: kept while it is closed, so that it opens as the
+/// user left it.
+struct LauncherScope
+{
+    std::string repo = {};           ///< The repository listed, by configured name; empty: every one.
+    KindScope kind = KindScope::All; ///< The kind of item listed.
+    [[nodiscard]] bool operator==(LauncherScope const&) const = default;
+};
+
 /// What the launcher lists for @p query.
 /// @param engine Its lists and runs.
 /// @param query What was typed; blanks around it are ignored.
@@ -55,7 +74,10 @@ struct Candidate
 ///         the issues, each in the engine's order. Otherwise the items whose `#<number> <title>` (or Jira key
 ///         and title) holds the query, case folded: one the query names exactly (its number, `#number`, URL
 ///         or Jira key) first, then the topic row on the query, then the rest in group order.
-[[nodiscard]] std::vector<Candidate> candidatesOf(Engine const& engine, std::string_view query);
+/// @param scope The repository and the kind listed; the topic row stays, whatever the kind.
+[[nodiscard]] std::vector<Candidate> candidatesOf(Engine const& engine,
+                                                  std::string_view query,
+                                                  LauncherScope const& scope = {});
 
 /// Where the launcher's keys go.
 enum class LauncherFocus : uint8_t
@@ -81,10 +103,11 @@ struct LauncherState
     /// What Enter would dispatch: the highlighted candidate with its settings; none when nothing is listed or
     /// no task applies to it.
     std::optional<DispatchFormState> form = {};
-    std::string session = {};                         ///< The agent's session UUID, minted as it opened.
+    std::string session = {}; ///< The agent's session UUID, minted as it opened.
     HooksWarning hooks =
         HooksWarning::None; ///< How far the user got past the warning of an incomplete setup.
     LauncherPreview preview = LauncherPreview::Short; ///< How much it shows.
+    LauncherScope scope = {}; ///< What the list is narrowed to; a topic starts in its repository.
     [[nodiscard]] bool operator==(LauncherState const&) const = default;
 };
 
@@ -92,10 +115,29 @@ struct LauncherState
 /// @param engine Its lists and configuration.
 /// @param query What it starts with typed: empty to browse, or a finished topic run's text.
 /// @param session The agent's session UUID.
+/// @param scope What the list is narrowed to: as the user left it, or a finished topic run's repository. A
+///        repository no longer configured lists every one.
 /// @return The launcher, its first candidate highlighted; std::nullopt when the engine is not configured.
 [[nodiscard]] std::optional<LauncherState> openLauncher(Engine const& engine,
                                                         std::string query,
-                                                        std::string session);
+                                                        std::string session,
+                                                        LauncherScope scope = {});
+
+/// Narrows the launcher to a repository, as ←/→ on its list or a click on the repository's chip does.
+/// @param state The open launcher.
+/// @param engine The engine it was opened with.
+/// @param repo The repository's configured name; empty: every one.
+void scopeLauncherToRepo(LauncherState& state, Engine const& engine, std::string repo);
+
+/// Narrows the launcher to a kind of item, as Ctrl+←/→ on its list or a click on the kind's chip does.
+/// @param state The open launcher.
+/// @param engine The engine it was opened with.
+/// @param kind The kind listed.
+void scopeLauncherToKind(LauncherState& state, Engine const& engine, KindScope kind);
+
+/// @param engine The engine.
+/// @return The repositories the launcher's scope cycles through: the configured ones, in their order.
+[[nodiscard]] std::vector<std::string> scopeRepos(Engine const& engine);
 
 /// Why the launcher did not open on an item.
 enum class LauncherRefusal : uint8_t
@@ -128,8 +170,10 @@ void pasteIntoLauncher(std::optional<LauncherState>& launcher, Engine const& eng
 /// Applies one key to an open launcher. Esc closes it, and so does a key with Alt (an Esc and the key after
 /// it, read together); Ctrl+P shows more or less of what a dispatch runs; any other Ctrl chord does nothing.
 /// Printable keys and Backspace edit the query; ↑/↓ move the highlight; Tab moves through the settings and
-/// back; ←/→ change one. Enter starts the agent, unless the engine would refuse it (the launcher shows why);
-/// while the agents' setup is incomplete the first Enter only confirms the warning, as the dispatch form did.
+/// back; ←/→ change one. On the list, ←/→ narrow it to the previous or next repository and Ctrl+←/→ to the
+/// previous or next kind of item. Enter starts the agent, unless the engine would refuse it (the launcher
+/// shows why); while the agents' setup is incomplete the first Enter only confirms the warning, as the
+/// dispatch form did.
 /// @param key A key the terminal sent.
 /// @param launcher The open launcher; closed (reset) when the key cancels or confirms it.
 /// @param engine The engine it was opened with.
@@ -148,6 +192,8 @@ void pasteIntoLauncher(std::optional<LauncherState>& launcher, Engine const& eng
 /// @param index The candidate's position in candidatesOf(engine, state.query); kept within them.
 void highlightCandidate(LauncherState& state, Engine const& engine, std::size_t index);
 
+struct LauncherLayout;
+
 /// The launcher, drawn in a rounded box titled `✦ New agent`: the query, the candidates in their groups with
 /// their checks, review and agent columns, the settings, what the dispatch runs, the setup's warnings and the
 /// keys. Shown as an overlay over the dashboard, at the size the dashboard places it at.
@@ -157,10 +203,12 @@ class LauncherView final: public core::tui::Component
     /// @param engine The engine it lists and previews against.
     /// @param launcher The dashboard's launcher; nullopt while none is open, when nothing is drawn.
     /// @param hits Where it records what a click on it lands on.
-    LauncherView(Engine const& engine, std::optional<LauncherState> const& launcher, HitMap& hits):
-        _engine { engine }, _launcher { launcher }, _hits { hits }
-    {
-    }
+    LauncherView(Engine const& engine, std::optional<LauncherState> const& launcher, HitMap& hits);
+    ~LauncherView() override;
+    LauncherView(LauncherView const&) = delete;
+    LauncherView& operator=(LauncherView const&) = delete;
+    LauncherView(LauncherView&&) = delete;
+    LauncherView& operator=(LauncherView&&) = delete;
     void render(core::tui::Canvas& canvas) override;
     /// @return The size place() gave it.
     [[nodiscard]] core::tui::Size preferredSize() const override { return _size; }
@@ -173,8 +221,15 @@ class LauncherView final: public core::tui::Component
     [[nodiscard]] int heightAt(int width) const;
 
   private:
+    /// @param width The cells its lines take.
+    /// @return Its lines at @p width: built again only once the launcher, the engine or the width changed.
+    [[nodiscard]] LauncherLayout const& layoutAt(int width) const;
+
+    struct LayoutCache;
+
     Engine const& _engine;
     std::optional<LauncherState> const& _launcher;
+    mutable std::unique_ptr<LayoutCache> _cache; ///< The last layout, and what it was built from.
     HitMap& _hits;
     core::tui::Size _size {};
 };

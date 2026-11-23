@@ -347,6 +347,68 @@ TEST_CASE("left turns the transcript to an earlier page, which stops following; 
     CHECK(interaction.follow == Follow::Live);
 }
 
+TEST_CASE(
+    "left and right step through the Focus's tabs, the message box's too, but for the transcript's pages",
+    "[orchestrator][view][keys]")
+{
+    auto live = LiveRun {};
+    auto interaction = Interaction { .place = Place::Focus };
+    auto const shown = [&] {
+        return activeTabOf(interaction, &live.row);
+    };
+    auto const press = [&](KeyCode code, FocusTab tab, uint32_t pages = 0) {
+        auto context = live.context(tab);
+        context.pages = pages;
+        CHECK(applyKey(special(code), interaction, context) == std::nullopt);
+    };
+
+    // The message box has the keys and keeps them: the arrows are not text.
+    press(KeyCode::Right, FocusTab::Board);
+    CHECK(shown() == FocusTab::Transcript);
+    CHECK(interaction.place == Place::Focus);
+    // On the transcript's last page, right shows the details; on its first, left shows the board.
+    press(KeyCode::Right, FocusTab::Transcript, 1);
+    CHECK(shown() == FocusTab::Details);
+    press(KeyCode::Right, FocusTab::Details);
+    CHECK(shown() == FocusTab::Details);
+    press(KeyCode::Left, FocusTab::Details);
+    CHECK(shown() == FocusTab::Transcript);
+    press(KeyCode::Left, FocusTab::Transcript, 1);
+    CHECK(shown() == FocusTab::Board);
+    press(KeyCode::Left, FocusTab::Board);
+    CHECK(shown() == FocusTab::Board);
+
+    // A tab the row does not offer is stepped over.
+    live.row.offers = { KeyCommand::BoardTab, KeyCommand::DetailsTab };
+    press(KeyCode::Right, FocusTab::Board);
+    CHECK(shown() == FocusTab::Details);
+    CHECK_FALSE(interaction.drafts.contains(std::string { RunId }));
+}
+
+TEST_CASE("the message box takes the line-editing keys", "[orchestrator][view][keys]")
+{
+    auto const live = LiveRun {};
+    auto interaction = Interaction { .place = Place::Focus };
+    for (auto const c: U"fix the flaky test")
+        if (c != U'\0')
+            CHECK(applyKey(character(c), interaction, live.context()) == std::nullopt);
+    CHECK(applyKey(special(KeyCode::Backspace, Modifier::Alt), interaction, live.context()) == std::nullopt);
+    CHECK(interaction.place == Place::Focus);
+    CHECK(interaction.drafts.at(std::string { RunId }) == "fix the flaky ");
+    auto const ctrlW = core::tui::KeyEvent { .key = static_cast<KeyCode>(U'w'),
+                                             .modifiers = Modifier::Ctrl,
+                                             .codepoint = U'w' };
+    CHECK(applyKey(ctrlW, interaction, live.context()) == std::nullopt);
+    CHECK(interaction.drafts.at(std::string { RunId }) == "fix the ");
+    auto const ctrlU = core::tui::KeyEvent { .key = static_cast<KeyCode>(U'u'),
+                                             .modifiers = Modifier::Ctrl,
+                                             .codepoint = U'u' };
+    CHECK(applyKey(ctrlU, interaction, live.context()) == std::nullopt);
+    // A draft emptied is no draft.
+    CHECK_FALSE(interaction.drafts.contains(std::string { RunId }));
+    CHECK(interaction.place == Place::Focus);
+}
+
 TEST_CASE("o asks to open the run's link", "[orchestrator][view][keys]")
 {
     auto live = LiveRun {};

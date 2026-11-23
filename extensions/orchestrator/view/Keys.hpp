@@ -303,6 +303,8 @@ struct Interaction
     std::optional<LauncherState> launcher = {}; ///< The launcher, while it is open: it takes every key.
     std::optional<PaletteState> palette = {};   ///< The palette, while it is open: it takes every key.
     std::string paletteQuery = {}; ///< The query the palette had when esc closed it: it opens with it again.
+    LauncherScope
+        launcherScope = {};  ///< What the launcher's list was narrowed to: it opens narrowed so again.
     std::string notice = {}; ///< A one-line notice on the action bar, until the next key; empty: none.
     std::optional<TabChoice>
         chosenTab = {};           ///< The tab the user chose for a run; none: each opens on its own.
@@ -310,7 +312,7 @@ struct Interaction
     Follow follow = Follow::Live; ///< Whether the transcript follows the agent.
     uint32_t page = 0; ///< The transcript's 1-based page while Away on an earlier one; 0: its last.
     std::map<std::string, std::string, std::less<>> drafts = {}; ///< The message box's draft, per run.
-    std::optional<SentMessage> sent = {}; ///< The last message sent, until it shows or is refused.
+    std::optional<SentMessage> sent = {};         ///< The last message sent, until it shows or is refused.
     std::optional<AnsweredRequest> answered = {}; ///< The last quick reply, until its agent stops asking.
     std::string followGroup = {}; ///< A group whose heading the selection moves to once the rows are built
                                   ///< again, as folding from one of its runs asks; empty: none.

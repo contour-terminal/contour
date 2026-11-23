@@ -11,20 +11,20 @@
 │                                              │ │                                                                     │
 │                                              │ │                                                                     │
 │                                              │ │                                                                     │
-│                   ╭─ ✦ New agent ────────────────────────────────────────────────────────────────╮                   │
-│                   │ › Investigate why the shell integration test hangs on CI▏                    │                   │
-│                   │                                                                              │                   │
-│                   │ ▍✎ topic “Investigate why the shell integration test hangs on CI” new branch │                   │
-│                   │ ──────────────────────────────────────────────────────────────────────────── │                   │
-│                   │ repo ‹ contour ›   task ‹ topic ›   model ‹ opus ›   perms ‹ standard ›      │                   │
-│                   │ an agent on what you typed, on a new branch                                  │                   │
-│                   │ checkout  new branch agent/topic-investigate-why-the-shell-integration-te-…  │                   │
-│                   │ worktree  /home/u/worktrees/contour/topic-investigate-why-the-shell-integrat │                   │
-│                   │             ion-te-…                                                         │                   │
-│                   │ perms     standard · 19 allowed · 4 denied · edits need no approval          │                   │
-│                   │                                                                              │                   │
-│                   │ enter start · ↑↓ choose · tab settings · ctrl+p more · esc close             │                   │
-│                   ╰──────────────────────────────────────────────────────────────────────────────╯                   │
+│              ╭─ ✦ New agent ──────────────────────────────────────────────────────────────────────────╮              │
+│              │ › Investigate why the shell integration test hangs on CI▏                              │              │
+│              │ repo  all  contour    show  all  needs attention  pull requests  issues                │              │
+│              │                                                                                        │              │
+│              │ ▍✎ topic “Investigate why the shell integration test hangs on CI”           new branch │              │
+│              │ ────────────────────────────────────────────────────────────────────────────────────── │              │
+│              │ repo ‹ contour ›   task ‹ topic ›   model ‹ opus ›   perms ‹ standard ›                │              │
+│              │ an agent on what you typed, on a new branch                                            │              │
+│              │ checkout  new branch agent/topic-investigate-why-the-shell-integration-te-…            │              │
+│              │ worktree  /home/u/worktrees/contour/topic-investigate-why-the-shell-integration-te-…   │              │
+│              │ perms     standard · 19 allowed · 4 denied · edits need no approval                    │              │
+│              │                                                                                        │              │
+│              │ enter start · ↑↓ choose · ←→ repo · ctrl+←→ kind · tab settings · ctrl+p more          │              │
+│              ╰────────────────────────────────────────────────────────────────────────────────────────╯              │
 │                                              │ │                                                                     │
 │                                              │ │                                                                     │
 │                                              │ │                                                                     │

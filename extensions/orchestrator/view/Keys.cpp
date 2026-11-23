@@ -20,6 +20,7 @@
 #include <orchestrator/view/Actions.hpp>
 #include <orchestrator/view/Palette.hpp>
 #include <orchestrator/view/Sections.hpp>
+#include <orchestrator/view/TextEdit.hpp>
 
 using namespace std::string_view_literals;
 
@@ -293,11 +294,41 @@ namespace
         return std::nullopt;
     }
 
+    /// Which way ← and → step through the Focus's tabs.
+    enum class TabStep : uint8_t
+    {
+        Previous = 0, ///< Towards the Board.
+        Next,         ///< Towards the Details.
+    };
+
+    /// Shows the tab beside the one shown, in TabCommands' order, skipping a tab the selected row does not
+    /// offer; at the first or the last tab nothing changes.
+    void stepTab(Interaction& interaction, KeyContext const& context, TabStep step)
+    {
+        if (context.selected == nullptr)
+            return;
+        auto const offered = [&](TabCommand const& tab) {
+            return std::ranges::contains(context.selected->offers, tab.command);
+        };
+        auto const pick = [&](auto&& tabs) {
+            auto const from = std::ranges::find(tabs, context.tab, &TabCommand::tab);
+            if (from == std::ranges::end(tabs))
+                return;
+            auto const rest = std::ranges::subrange(std::ranges::next(from), std::ranges::end(tabs));
+            if (auto const to = std::ranges::find_if(rest, offered); to != std::ranges::end(rest))
+                (void) chooseTab(interaction, context, to->command);
+        };
+        if (step == TabStep::Next)
+            pick(TabCommands);
+        else
+            pick(TabCommands | std::views::reverse);
+    }
+
     /// Opens the launcher, empty: dispatch() said already when the orchestrator is not configured.
     [[nodiscard]] std::optional<UiAction> openNewAgent(Interaction& interaction, KeyContext const& context)
     {
         if (context.engine != nullptr)
-            interaction.launcher = openLauncher(*context.engine, {}, {});
+            interaction.launcher = openLauncher(*context.engine, {}, {}, interaction.launcherScope);
         return std::nullopt;
     }
 
@@ -414,14 +445,25 @@ namespace
         HandlerRow {
             .command = KeyCommand::PreviousPage,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
+                // ← turns the transcript back a page; on another tab, or from its first page, it shows the
+                // tab to the left.
                 auto const page = shownPage(interaction, context);
-                turnTo(interaction, context, page > 1 ? page - 1 : 1);
+                if (context.tab == FocusTab::Transcript && page > 1)
+                    turnTo(interaction, context, page - 1);
+                else
+                    stepTab(interaction, context, TabStep::Previous);
                 return std::nullopt;
             } },
         HandlerRow {
             .command = KeyCommand::NextPage,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                turnTo(interaction, context, shownPage(interaction, context) + 1);
+                // → turns the transcript on a page; on another tab, or from its last page, it shows the tab
+                // to the right.
+                auto const page = shownPage(interaction, context);
+                if (context.tab == FocusTab::Transcript && page < context.pages)
+                    turnTo(interaction, context, page + 1);
+                else
+                    stepTab(interaction, context, TabStep::Next);
                 return std::nullopt;
             } },
         // `b`, `t` and `d` choose the Focus tab; the choice sticks for the run until its state changes.
@@ -688,7 +730,12 @@ void openLauncherFor(Interaction& interaction,
     if (std::holds_alternative<TopicRef>(item))
     {
         // A topic is listed nowhere: the launcher opens on its text, which its topic row then holds.
-        auto launcher = openLauncher(engine, std::string { topic }, {});
+        // In the run's repository: the list narrowed to it, which is where its topic row starts.
+        auto launcher = openLauncher(
+            engine,
+            std::string { topic },
+            {},
+            LauncherScope { .repo = std::string { repo }, .kind = interaction.launcherScope.kind });
         if (!launcher)
         {
             interaction.notice = RefusalNotices[std::to_underlying(LauncherRefusal::NotConfigured)];
@@ -785,6 +832,14 @@ namespace
         }
         auto const& run = context.selected->run;
         auto& draft = interaction.drafts[run];
+        // The line-editing keys come first: Alt+Backspace drops a word rather than reading as Esc.
+        if (auto const edit = textEditOf(key))
+        {
+            applyTextEdit(draft, *edit);
+            if (draft.empty())
+                interaction.drafts.erase(run);
+            return std::optional<UiAction> {};
+        }
         auto const alt = core::tui::hasModifier(key.modifiers, core::tui::Modifier::Alt);
         // Alt+Enter adds a line. Any other key with Alt is how an Esc reads when the next key follows it in
         // the same read: back to the Fleet, the draft kept.
@@ -802,8 +857,6 @@ namespace
             backToFleet(interaction);
             return std::optional { UiAction { SendMessageAction { .run = run, .text = std::move(text) } } };
         }
-        else if (key.key == core::tui::KeyCode::Backspace)
-            dropLastCodepoint(draft);
         else if (auto const printable = printableOf(key))
             appendUtf8(draft, *printable);
         // A draft emptied is no draft: nothing is kept for the run.
@@ -819,6 +872,11 @@ FilterInput typeIntoFilter(core::tui::KeyEvent const& key, Interaction& interact
 {
     if (interaction.filtering != Filtering::Typing)
         return FilterInput::NotTaken;
+    if (auto const edit = textEditOf(key))
+    {
+        applyTextEdit(interaction.filter, *edit);
+        return FilterInput::Taken;
+    }
     switch (key.key)
     {
         case core::tui::KeyCode::Escape:
@@ -826,7 +884,6 @@ FilterInput typeIntoFilter(core::tui::KeyEvent const& key, Interaction& interact
             interaction.filtering = Filtering::Off;
             return FilterInput::Taken;
         case core::tui::KeyCode::Enter: interaction.filtering = Filtering::Off; return FilterInput::Taken;
-        case core::tui::KeyCode::Backspace: dropLastCodepoint(interaction.filter); return FilterInput::Taken;
         case core::tui::KeyCode::Delete: return FilterInput::Taken; // Typing, never a run command.
         default: break;
     }

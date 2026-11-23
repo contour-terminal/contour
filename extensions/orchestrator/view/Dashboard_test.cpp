@@ -14,6 +14,7 @@
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <variant>
 #include <vector>
 
@@ -1132,6 +1133,38 @@ TEST_CASE("n opens the launcher; enter on + new agent too", "[orchestrator][view
     CHECK(unconfigured.screen().contains("not configured"));
 }
 
+TEST_CASE("a key in an open popup sends what changed and not the whole tab", "[orchestrator][view]")
+{
+    auto fixture = Fixture { World {} };
+    std::ignore = fixture.dashboard.frame();
+    CHECK(fixture.dashboard.input("n").empty());
+    auto const opened = fixture.dashboard.frame();
+    REQUIRE_FALSE(opened.empty());
+    // The popup stays where it is: the frame carries the highlight's move, no repaint.
+    CHECK(fixture.dashboard.input("\x1b[B").empty());
+    auto const typed = fixture.dashboard.frame();
+    REQUIRE_FALSE(typed.empty());
+    CHECK(typed.size() * 2 < opened.size());
+}
+
+TEST_CASE("the launcher opens again as it was narrowed", "[orchestrator][view]")
+{
+    auto fixture = Fixture { World {} };
+    CHECK(fixture.dashboard.input("n").empty());
+    // → narrows it to contour, ctrl+→ to what needs attention.
+    CHECK(fixture.dashboard.input("\x1b[C\x1b[1;5C").empty());
+    REQUIRE(fixture.dashboard.launcher().has_value());
+    CHECK(fixture.dashboard.launcher()->scope
+          == LauncherScope { .repo = "contour", .kind = KindScope::NeedsAttention });
+    CHECK(fixture.dashboard.input("\x1b").empty());
+    fixture.escapeTimesOut();
+    REQUIRE_FALSE(fixture.dashboard.launcher().has_value());
+    CHECK(fixture.dashboard.input("n").empty());
+    REQUIRE(fixture.dashboard.launcher().has_value());
+    CHECK(fixture.dashboard.launcher()->scope
+          == LauncherScope { .repo = "contour", .kind = KindScope::NeedsAttention });
+}
+
 TEST_CASE("enter on a finished run runs it again through the launcher", "[orchestrator][view]")
 {
     auto fixture = Fixture { fleetWorld() };
@@ -1237,8 +1270,12 @@ TEST_CASE("the rows are built once per input, not once per key", "[orchestrator]
     CHECK(fixture.dashboard.rowBuilds() == before + 1);
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.rowBuilds() == before + 1);
-    // An age that moved on builds them again at the next frame that draws.
+    // A pause that moves no age on builds nothing: these ages count in minutes.
     fixture.clock.advance(std::chrono::seconds { 2 });
+    CHECK(fixture.dashboard.input("j").empty());
+    CHECK(fixture.dashboard.rowBuilds() == before + 1);
+    // An age that moved on builds them again at the next frame that draws.
+    fixture.clock.advance(std::chrono::minutes { 61 });
     CHECK(fixture.dashboard.input("j").empty());
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.rowBuilds() == before + 2);

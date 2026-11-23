@@ -23,6 +23,7 @@
 #include <orchestrator/core/Utf8.hpp>
 #include <orchestrator/view/Keys.hpp>
 #include <orchestrator/view/Sections.hpp>
+#include <orchestrator/view/TextEdit.hpp>
 #include <orchestrator/view/Theme.hpp>
 
 namespace orchestrator::view
@@ -38,6 +39,47 @@ namespace
     [[nodiscard]] bool needsAttention(ChangeRequest const& request) noexcept
     {
         return request.ci == CiState::Failing || request.review == ReviewState::ChangesRequested;
+    }
+
+    /// Which of the scope's two parts a key steps.
+    enum class ScopeAxis : uint8_t
+    {
+        Repo = 0, ///< The repository (←/→).
+        Kind,     ///< The kind of item (Ctrl+←/→).
+    };
+
+    /// The groups each kind of item lists, the topic row's among them, indexed by KindScope.
+    struct KindRow
+    {
+        KindScope kind;
+        std::string_view label;                 ///< Its chip.
+        std::span<CandidateGroup const> groups; ///< The groups it lists.
+    };
+    constexpr auto EveryGroup = std::array { CandidateGroup::Topic,
+                                             CandidateGroup::NeedsAttention,
+                                             CandidateGroup::MyPullRequests,
+                                             CandidateGroup::Issues };
+    constexpr auto AttentionGroups = std::array { CandidateGroup::Topic, CandidateGroup::NeedsAttention };
+    constexpr auto PullRequestGroups =
+        std::array { CandidateGroup::Topic, CandidateGroup::NeedsAttention, CandidateGroup::MyPullRequests };
+    constexpr auto IssueGroups = std::array { CandidateGroup::Topic, CandidateGroup::Issues };
+    constexpr auto KindRows = std::array {
+        KindRow { .kind = KindScope::All, .label = "all"sv, .groups = EveryGroup },
+        KindRow {
+            .kind = KindScope::NeedsAttention, .label = "needs attention"sv, .groups = AttentionGroups },
+        KindRow { .kind = KindScope::PullRequests, .label = "pull requests"sv, .groups = PullRequestGroups },
+        KindRow { .kind = KindScope::Issues, .label = "issues"sv, .groups = IssueGroups },
+    };
+    static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, KindRows.size()),
+                                      [](std::size_t i) {
+                                          return std::to_underlying(KindRows[i].kind) == i;
+                                      }));
+
+    /// @return Whether @p scope lists @p candidate: its repository, and its kind.
+    [[nodiscard]] bool isInScope(Candidate const& candidate, LauncherScope const& scope) noexcept
+    {
+        return (scope.repo.empty() || candidate.repo == scope.repo)
+               && std::ranges::contains(KindRows[std::to_underlying(scope.kind)].groups, candidate.group);
     }
 
     /// @return Every item the engine lists, in group order and, within a group, the engine's.
@@ -118,8 +160,10 @@ namespace
         auto const previous = std::move(state.form);
         if (std::holds_alternative<TopicRef>(candidate.item))
         {
-            auto const repo = previous && std::holds_alternative<TopicRef>(previous->item) ? previous->repo
-                                                                                           : std::string {};
+            // A topic starts in the repository the list is narrowed to; else in the one chosen before.
+            auto const repo = !state.scope.repo.empty() ? state.scope.repo
+                              : previous && std::holds_alternative<TopicRef>(previous->item) ? previous->repo
+                                                                                             : std::string {};
             state.form = openTopicForm(engine, repo, candidate.title, state.session);
         }
         else
@@ -142,7 +186,7 @@ namespace
     {
         state.focus = LauncherFocus::List;
         state.highlighted = 0;
-        reform(state, engine, candidatesOf(engine, state.query));
+        reform(state, engine, candidatesOf(engine, state.query, state.scope));
     }
 
     /// @return Whether the keys go to an item's note: the one text field among the settings.
@@ -178,9 +222,10 @@ namespace
     // }}}
 } // namespace
 
-std::vector<Candidate> candidatesOf(Engine const& engine, std::string_view query)
+std::vector<Candidate> candidatesOf(Engine const& engine, std::string_view query, LauncherScope const& scope)
 {
     auto items = itemsOf(engine);
+    std::erase_if(items, [&](Candidate const& candidate) { return !isInScope(candidate, scope); });
     auto const typed = core::trim(query);
     if (typed.empty())
         return items;
@@ -202,14 +247,20 @@ std::vector<Candidate> candidatesOf(Engine const& engine, std::string_view query
     return candidates;
 }
 
-std::optional<LauncherState> openLauncher(Engine const& engine, std::string query, std::string session)
+std::optional<LauncherState> openLauncher(Engine const& engine,
+                                          std::string query,
+                                          std::string session,
+                                          LauncherScope scope)
 {
     if (engine.config() == nullptr)
         return std::nullopt;
+    if (!std::ranges::contains(engine.repositories(), scope.repo))
+        scope.repo.clear();
     auto state =
         LauncherState { .query = std::move(query),
                         .session = std::move(session),
-                        .hooks = isSetupIncomplete(engine) ? HooksWarning::Shown : HooksWarning::None };
+                        .hooks = isSetupIncomplete(engine) ? HooksWarning::Shown : HooksWarning::None,
+                        .scope = std::move(scope) };
     requery(state, engine);
     return state;
 }
@@ -231,7 +282,7 @@ std::expected<LauncherState, LauncherRefusal> openLauncherOn(Engine const& engin
                         .hooks = isSetupIncomplete(engine) ? HooksWarning::Shown : HooksWarning::None };
     // The label names the item exactly, so it stands first; another repository's item of the same number
     // stands beside it.
-    auto const candidates = candidatesOf(engine, state.query);
+    auto const candidates = candidatesOf(engine, state.query, state.scope);
     auto const at = std::ranges::find_if(candidates, [&](Candidate const& candidate) {
         return candidate.repo == repo && candidate.item == item;
     });
@@ -259,8 +310,48 @@ void highlightCandidate(LauncherState& state, Engine const& engine, std::size_t 
 {
     state.focus = LauncherFocus::List;
     state.highlighted = index;
-    reform(state, engine, candidatesOf(engine, state.query));
+    reform(state, engine, candidatesOf(engine, state.query, state.scope));
 }
+
+std::vector<std::string> scopeRepos(Engine const& engine)
+{
+    return std::ranges::to<std::vector<std::string>>(engine.repositories());
+}
+
+void scopeLauncherToRepo(LauncherState& state, Engine const& engine, std::string repo)
+{
+    // The topic row's repository follows the list's; back on every repository it keeps the one it had.
+    state.scope.repo = std::move(repo);
+    requery(state, engine);
+}
+
+void scopeLauncherToKind(LauncherState& state, Engine const& engine, KindScope kind)
+{
+    state.scope.kind = kind;
+    requery(state, engine);
+}
+
+namespace
+{
+    /// Steps @p state's scope to the repository or the kind beside the one it lists, wrapping around; every
+    /// repository counts as the first.
+    void stepScope(LauncherState& state, Engine const& engine, ScopeAxis axis, int step)
+    {
+        if (axis == ScopeAxis::Kind)
+        {
+            auto const count = static_cast<int>(KindRows.size());
+            auto const at = (static_cast<int>(std::to_underlying(state.scope.kind)) + step + count) % count;
+            scopeLauncherToKind(state, engine, KindRows[static_cast<std::size_t>(at)].kind);
+            return;
+        }
+        auto choices = scopeRepos(engine);
+        choices.insert(choices.begin(), std::string {});
+        auto const count = static_cast<int>(choices.size());
+        auto const found = std::ranges::find(choices, state.scope.repo);
+        auto const index = found != choices.end() ? static_cast<int>(found - choices.begin()) : 0;
+        scopeLauncherToRepo(state, engine, choices[static_cast<std::size_t>((index + step + count) % count)]);
+    }
+} // namespace
 
 std::optional<DispatchAction> applyLauncherKey(core::tui::KeyEvent const& key,
                                                std::optional<LauncherState>& launcher,
@@ -274,6 +365,18 @@ std::optional<DispatchAction> applyLauncherKey(core::tui::KeyEvent const& key,
     using core::tui::KeyCode;
     using core::tui::Modifier;
 
+    // The line-editing keys come first: Alt+Backspace drops a word rather than reading as Esc.
+    if (auto const edit = textEditOf(key))
+    {
+        if (isOnNote(state))
+            applyTextEdit(state.form->note, *edit);
+        else
+        {
+            applyTextEdit(state.query, *edit);
+            requery(state, engine);
+        }
+        return std::nullopt;
+    }
     // A key with Alt is how an Esc reads when the next key follows it in the same read: the user pressed Esc.
     if (core::tui::hasModifier(key.modifiers, Modifier::Alt))
     {
@@ -286,8 +389,14 @@ std::optional<DispatchAction> applyLauncherKey(core::tui::KeyEvent const& key,
             state.preview == LauncherPreview::Short ? LauncherPreview::Full : LauncherPreview::Short;
         return std::nullopt;
     }
+    auto const isArrow = key.key == KeyCode::Left || key.key == KeyCode::Right;
+    auto const step = key.key == KeyCode::Right ? 1 : -1;
     if (core::tui::hasModifier(key.modifiers, Modifier::Ctrl))
+    {
+        if (isArrow)
+            stepScope(state, engine, ScopeAxis::Kind, step);
         return std::nullopt;
+    }
 
     switch (key.key)
     {
@@ -322,7 +431,7 @@ std::optional<DispatchAction> applyLauncherKey(core::tui::KeyEvent const& key,
                 state.focus = LauncherFocus::List;
                 return std::nullopt;
             }
-            auto const candidates = candidatesOf(engine, state.query);
+            auto const candidates = candidatesOf(engine, state.query, state.scope);
             if (candidates.empty())
                 return std::nullopt;
             auto const count = candidates.size();
@@ -334,16 +443,9 @@ std::optional<DispatchAction> applyLauncherKey(core::tui::KeyEvent const& key,
         case KeyCode::Left:
         case KeyCode::Right:
             if (state.focus == LauncherFocus::Settings && state.form)
-                changeSetting(*state.form, state.setting, key.key == KeyCode::Right ? 1 : -1, engine);
-            return std::nullopt;
-        case KeyCode::Backspace:
-            if (isOnNote(state))
-                dropLastCodepoint(state.form->note);
-            else
-            {
-                dropLastCodepoint(state.query);
-                requery(state, engine);
-            }
+                changeSetting(*state.form, state.setting, step, engine);
+            else if (state.focus == LauncherFocus::List)
+                stepScope(state, engine, ScopeAxis::Repo, step);
             return std::nullopt;
         case KeyCode::Enter: {
             auto action = confirm(state, engine, hooksAtInput, nearTab);
@@ -375,6 +477,7 @@ namespace
     {
         std::string text;
         Role role = Role::Text;
+        std::optional<Hit> hit = {}; ///< What a click on it does; none: nothing of its own.
     };
 
     /// One drawn line: segments from the left, and a few from the right edge.
@@ -429,7 +532,17 @@ namespace
     }
 
     /// @return The line one candidate is listed on.
-    [[nodiscard]] Line candidateLine(Candidate const& candidate, bool selected, int width)
+    /// Whether a candidate's row names its repository: while the list holds every repository's.
+    enum class RepoColumn : uint8_t
+    {
+        Hidden = 0,
+        Shown,
+    };
+
+    [[nodiscard]] Line candidateLine(Candidate const& candidate,
+                                     bool selected,
+                                     int width,
+                                     RepoColumn repoColumn)
     {
         auto const marker = Segment { .text = selected ? "▍"s : " "s, .role = Role::Accent };
         auto const textRole = selected ? Role::Selection : Role::Text;
@@ -445,6 +558,11 @@ namespace
                           .right = std::move(right) };
         }
         auto right = std::vector<Segment> {};
+        if (repoColumn == RepoColumn::Shown)
+        {
+            right.push_back({ .text = candidate.repo, .role = Role::Dim });
+            right.push_back({ .text = "  " });
+        }
         if (std::holds_alternative<ChangeRequestRef>(candidate.item))
         {
             right.push_back(glyphOf(entryOf(CiLooks, candidate.ci)));
@@ -580,6 +698,51 @@ namespace
     }
 
     /// @return The hint line: what Enter does now, then the other keys, cut between hints.
+    /// The scope's chips: the repositories, then the kinds, the listed one of each drawn selected. Where they
+    /// do not fit, each part shows only its listed chip, between arrows, and a click steps it on.
+    [[nodiscard]] Line scopeLine(LauncherState const& state, Engine const& engine, int width)
+    {
+        auto repos = scopeRepos(engine);
+        repos.insert(repos.begin(), std::string {});
+        auto const repoAt = static_cast<std::size_t>(
+            std::max<std::ptrdiff_t>(0, std::ranges::find(repos, state.scope.repo) - repos.begin()));
+        auto const repoLabel = [](std::string const& repo) {
+            return repo.empty() ? "all"s : repo;
+        };
+        auto const chip = [](std::string label, bool selected, Hit hit) {
+            return Segment { .text = std::format(" {} ", label),
+                             .role = selected ? Role::Selection : Role::Dim,
+                             .hit = hit };
+        };
+
+        auto full = Line { .left = { { .text = "repo ", .role = Role::Dim } } };
+        for (auto const index: std::views::iota(std::size_t { 0 }, repos.size()))
+            full.left.push_back(chip(repoLabel(repos[index]),
+                                     index == repoAt,
+                                     Hit { .kind = HitKind::LauncherRepo, .value = index }));
+        full.left.push_back({ .text = "   show ", .role = Role::Dim });
+        for (auto const& kind: KindRows)
+            full.left.push_back(
+                chip(std::string { kind.label },
+                     kind.kind == state.scope.kind,
+                     Hit { .kind = HitKind::LauncherKind, .value = std::to_underlying(kind.kind) }));
+        if (columnsOf(full.left) <= width)
+            return full;
+
+        auto const nextRepo = (repoAt + 1) % repos.size();
+        auto const nextKind = (std::to_underlying(state.scope.kind) + 1U) % KindRows.size();
+        return Line { .left = {
+                          { .text = "repo ", .role = Role::Dim },
+                          chip(std::format("‹ {} ›", repoLabel(repos[repoAt])),
+                               true,
+                               Hit { .kind = HitKind::LauncherRepo, .value = nextRepo }),
+                          { .text = "   show ", .role = Role::Dim },
+                          chip(std::format("‹ {} ›", KindRows[std::to_underlying(state.scope.kind)].label),
+                               true,
+                               Hit { .kind = HitKind::LauncherKind, .value = nextKind }),
+                      } };
+    }
+
     [[nodiscard]] Line hintLine(LauncherState const& state, bool confirmable, bool incomplete, int width)
     {
         auto hints = std::vector<std::string_view> {};
@@ -591,42 +754,71 @@ namespace
         if (confirmable)
             hints.push_back(incomplete ? IncompleteEnterHints[std::to_underlying(state.hooks)]
                                        : "enter start"sv);
-        hints.insert(hints.end(), { "↑↓ choose"sv, "tab settings"sv, "ctrl+p more"sv, "esc close"sv });
+        hints.push_back("↑↓ choose"sv);
+        if (state.focus == LauncherFocus::List)
+            hints.insert(hints.end(), { "←→ repo"sv, "ctrl+←→ kind"sv });
+        hints.insert(hints.end(), { "tab settings"sv, "ctrl+p more"sv, "esc close"sv });
         return Line { .left = { { .text = joinHints(hints, width), .role = Role::Dim } } };
     }
 
-    /// The launcher's lines in three parts: the query above the list, every row of the list, and what follows
-    /// it.
-    struct Layout
+    /// One row of the launcher's list: a group's heading, or a candidate, formatted only once it is shown.
+    struct ListRow
     {
-        std::vector<Line> head = {};
-        std::vector<Line> list = {};
-        std::size_t highlightedAt = 0; ///< The highlighted candidate's row in @ref list.
-        std::vector<Line> tail = {};
-
-        /// @return Every line, the list cut to @p rows rows around the highlight, and a row saying how many
-        ///         more there are when it is cut.
-        [[nodiscard]] std::vector<Line> lines(std::size_t rows) const
-        {
-            auto all = head;
-            rows = std::max<std::size_t>(rows, 1);
-            // A cut list gives its last row to the line that says how many more there are.
-            if (list.size() > rows && rows > 1)
-                --rows;
-            auto const first =
-                list.size() <= rows
-                    ? std::size_t { 0 }
-                    : std::min(highlightedAt > rows / 2 ? highlightedAt - (rows / 2) : 0, list.size() - rows);
-            for (auto const& line: list | std::views::drop(first) | std::views::take(rows))
-                all.push_back(line);
-            if (list.size() > first + rows)
-                all.push_back(
-                    Line { .left = { { .text = std::format("  ↓ {} more", list.size() - first - rows),
-                                       .role = Role::Dim } } });
-            std::ranges::copy(tail, std::back_inserter(all));
-            return all;
-        }
+        std::string_view heading = {}; ///< The heading; empty for a candidate's row.
+        std::size_t candidate = 0;     ///< The candidate's position, for a candidate's row.
     };
+
+} // namespace
+
+/// The launcher's lines in three parts: the query above the list, every row of the list, and what follows it.
+/// The list's rows are formatted only as lines() shows them: a list of hundreds draws a few.
+struct LauncherLayout
+{
+    std::vector<Line> head = {};
+    std::vector<Candidate> candidates = {}; ///< candidatesOf() the query.
+    std::vector<ListRow> list = {};
+    std::size_t highlighted = 0;                ///< The highlighted candidate.
+    std::size_t highlightedAt = 0;              ///< The highlighted candidate's row in @ref list.
+    int width = 0;                              ///< The cells a row is formatted for.
+    RepoColumn repoColumn = RepoColumn::Hidden; ///< Whether a row names its repository.
+    std::vector<Line> tail = {};
+
+    /// @return Every line, the list cut to @p rows rows around the highlight, and a row saying how many more
+    ///         there are when it is cut.
+    [[nodiscard]] std::vector<Line> lines(std::size_t rows) const
+    {
+        auto all = head;
+        rows = std::max<std::size_t>(rows, 1);
+        // A cut list gives its last row to the line that says how many more there are.
+        if (list.size() > rows && rows > 1)
+            --rows;
+        auto const first =
+            list.size() <= rows
+                ? std::size_t { 0 }
+                : std::min(highlightedAt > rows / 2 ? highlightedAt - (rows / 2) : 0, list.size() - rows);
+        for (auto const& row: list | std::views::drop(first) | std::views::take(rows))
+        {
+            if (!row.heading.empty())
+            {
+                all.push_back(
+                    Line { .left = { { .text = std::string { row.heading }, .role = Role::Dim } } });
+                continue;
+            }
+            all.push_back(
+                candidateLine(candidates[row.candidate], row.candidate == highlighted, width, repoColumn));
+            all.back().candidate = row.candidate;
+        }
+        if (list.size() > first + rows)
+            all.push_back(Line { .left = { { .text = std::format("  ↓ {} more", list.size() - first - rows),
+                                             .role = Role::Dim } } });
+        std::ranges::copy(tail, std::back_inserter(all));
+        return all;
+    }
+};
+
+namespace
+{
+    using Layout = LauncherLayout;
 
     [[nodiscard]] Layout layoutOf(LauncherState const& state, Engine const& engine, int width)
     {
@@ -639,21 +831,35 @@ namespace
                                                   ? std::format("{}▏", state.query)
                                                   : state.query } },
             .right = { { .text = "pull requests · issues · a topic", .role = Role::Dim } } });
+        layout.head.push_back(scopeLine(state, engine, width));
         layout.head.emplace_back();
 
         // The list: each candidate, with a heading where its group starts.
-        auto const candidates = candidatesOf(engine, state.query);
+        layout.candidates = candidatesOf(engine, state.query, state.scope);
+        layout.highlighted = state.highlighted;
+        layout.width = width;
+        layout.repoColumn = state.scope.repo.empty() && engine.repositories().size() > 1 ? RepoColumn::Shown
+                                                                                         : RepoColumn::Hidden;
+        // A scope that lists nothing says what is left to do there.
+        if (layout.candidates.empty())
+            layout.head.push_back(Line {
+                .left = { {
+                    .text = state.scope.repo.empty() ? "nothing listed here · type to start a topic"s
+                                                     : std::format("nothing listed in {} · type to start a "
+                                                                   "topic there",
+                                                                   state.scope.repo),
+                    .role = Role::Dim,
+                } } });
+        auto const& candidates = layout.candidates;
         for (auto const index: std::views::iota(std::size_t { 0 }, candidates.size()))
         {
             auto const& candidate = candidates[index];
             auto const heading = GroupRows[std::to_underlying(candidate.group)].heading;
             if (!heading.empty() && (index == 0 || candidates[index - 1].group != candidate.group))
-                layout.list.push_back(
-                    Line { .left = { { .text = std::string { heading }, .role = Role::Dim } } });
+                layout.list.push_back(ListRow { .heading = heading });
             if (index == state.highlighted)
                 layout.highlightedAt = layout.list.size();
-            layout.list.push_back(candidateLine(candidate, index == state.highlighted, width));
-            layout.list.back().candidate = index;
+            layout.list.push_back(ListRow { .candidate = index });
         }
 
         auto& tail = layout.tail;
@@ -719,7 +925,7 @@ void LauncherView::render(core::tui::Canvas& canvas)
     drawFrame(canvas, "✦ New agent");
     auto inside = insideFrame(canvas);
     auto const width = inside.width() - SideColumns;
-    auto const layout = layoutOf(*_launcher, _engine, width);
+    auto const& layout = layoutAt(width);
     // The list takes what the rest leaves.
     auto const others = static_cast<int>(layout.head.size() + layout.tail.size());
     auto const listRows = std::clamp(inside.height() - others, 1, MaxLauncherListRows);
@@ -741,6 +947,10 @@ void LauncherView::render(core::tui::Canvas& canvas)
             // Segments are sanitised already, and their blanks separate them: cutSanitised() keeps them.
             auto const text = cutSanitised(segment.text, width + 1 - x);
             inside.putString(y, x, text, styleOf(theme, segment.role));
+            if (segment.hit && !text.empty())
+                hits.shifted(1, 1).add(
+                    core::tui::Rect { .x = x, .y = y, .width = view::columnsOf(text), .height = 1 },
+                    *segment.hit);
             x += view::columnsOf(text);
         }
         auto const rightWidth = columnsOf(lines[index].right);
@@ -761,7 +971,37 @@ int LauncherView::heightAt(int width) const
         return 0;
     auto const inner = width - 2 - SideColumns;
     // The box's two rows around its lines.
-    return static_cast<int>(layoutOf(*_launcher, _engine, inner).lines(MaxLauncherListRows).size()) + 2;
+    return static_cast<int>(layoutAt(inner).lines(MaxLauncherListRows).size()) + 2;
+}
+
+/// The last layout the launcher drew, and what it was built from.
+struct LauncherView::LayoutCache
+{
+    LauncherState state;
+    uint64_t revision = 0;
+    int width = 0;
+    LauncherLayout layout;
+};
+
+LauncherView::LauncherView(Engine const& engine, std::optional<LauncherState> const& launcher, HitMap& hits):
+    _engine { engine }, _launcher { launcher }, _hits { hits }
+{
+}
+
+LauncherView::~LauncherView() = default;
+
+LauncherLayout const& LauncherView::layoutAt(int width) const
+{
+    // A frame asks for the height and then draws at it: one layout serves both, and the frames that change
+    // neither the launcher, nor the engine, nor the width.
+    if (!_cache || _cache->width != width || _cache->revision != _engine.revision()
+        || _cache->state != *_launcher)
+        _cache =
+            std::make_unique<LayoutCache>(LayoutCache { .state = *_launcher,
+                                                        .revision = _engine.revision(),
+                                                        .width = width,
+                                                        .layout = layoutOf(*_launcher, _engine, width) });
+    return _cache->layout;
 }
 
 } // namespace orchestrator::view

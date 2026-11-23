@@ -5,18 +5,18 @@
 │ ⠋ pr-2346 · fix CI                                                working 6m │
 │ ⠋ ╭─ ✦ New agent ────────────────────────────────────────────────────────╮6m │
 │   │ › #2375▏                            pull requests · issues · a topic │   │
-│ + │                                                                      │   │
-│   │ MY PULL REQUESTS                                                     │   │
-╰───│ ▍#2375 Say why the stdio relay failed, and send a hello bef… ●       │───╯
-╭─ p│  ✎ topic “#2375”                                          new branch │6m ╮
-│ re│ ──────────────────────────────────────────────────────────────────── │   │
+│ + │ repo  ‹ all ›    show  ‹ all ›                                       │   │
+│   │                                                                      │   │
+╰───│ MY PULL REQUESTS                                                     │───╯
+╭─ p│ ▍#2375 Say why the stdio relay failed, and send a hello bef… ●       │6m ╮
+│ re│  ✎ topic “#2375”                                          new branch │   │
+│   │ ──────────────────────────────────────────────────────────────────── │   │
 │   │ task ‹ fix CI ›   model ‹ sonnet ›   perms ‹ standard ›   note none  │   │
 │   │ #2375 · contour · checks running                                     │   │
 │   │ refused   max_agents agents are running: end one first               │   │
 │   │                                                                      │   │
-│   │ ↑↓ choose · tab settings · ctrl+p more · esc close                   │   │
+│   │ ↑↓ choose · ←→ repo · ctrl+←→ kind · tab settings · ctrl+p more      │   │
 │   ╰──────────────────────────────────────────────────────────────────────╯   │
-│                                                                              │
 │ ╭──────────────────────────────────────────────────────────────────────────╮ │
 │ │ ⏎ to write to pr-1847                                                    │ │
 │ ╰──────────────────────────────────────────────────────────────────────────╯ │

@@ -26,6 +26,9 @@ enum class HitKind : uint8_t
     MessageBox, ///< The message box: a click gives it the keys.
     PaletteEntry,      ///< A palette entry; Hit::value is its position among the entries the query matches.
     LauncherCandidate, ///< A launcher candidate; Hit::value is its position among the candidates.
+    LauncherRepo,      ///< A launcher's repository chip; Hit::value is 0 for every one, else 1 + its position
+                       ///< among scopeRepos().
+    LauncherKind,      ///< A launcher's kind chip; Hit::value is the KindScope.
 };
 
 /// What a click lands on.

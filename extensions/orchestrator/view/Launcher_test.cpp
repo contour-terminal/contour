@@ -172,6 +172,38 @@ TEST_CASE("the launcher's query is typed, and Enter on the topic row starts a to
     CHECK(action->nearTab == "t1");
 }
 
+TEST_CASE("the launcher's query takes the line-editing keys", "[orchestrator][view][launcher]")
+{
+    using core::tui::KeyCode;
+    using core::tui::Modifier;
+    auto const engine = bootEngine(World {});
+    auto launcher = openLauncher(engine, "", std::string { SessionOne });
+    REQUIRE(launcher.has_value());
+    type(launcher, engine, "investigate the flaky test");
+    auto const ctrl = [](char32_t letter) {
+        return core::tui::KeyEvent { .key = static_cast<KeyCode>(letter),
+                                     .modifiers = Modifier::Ctrl,
+                                     .codepoint = letter };
+    };
+    CHECK_FALSE(applyLauncherKey(ctrl(U'w'), launcher, engine, HooksWarning::None, "t1"));
+    REQUIRE(launcher.has_value());
+    CHECK(launcher->query == "investigate the flaky ");
+    REQUIRE(launcher->form.has_value());
+    CHECK(launcher->form->topic == "investigate the flaky");
+    // Alt+Backspace drops a word, rather than reading as Esc and closing the launcher.
+    CHECK_FALSE(
+        applyLauncherKey(core::tui::KeyEvent { .key = KeyCode::Backspace, .modifiers = Modifier::Alt },
+                         launcher,
+                         engine,
+                         HooksWarning::None,
+                         "t1"));
+    REQUIRE(launcher.has_value());
+    CHECK(launcher->query == "investigate the ");
+    CHECK_FALSE(applyLauncherKey(ctrl(U'u'), launcher, engine, HooksWarning::None, "t1"));
+    REQUIRE(launcher.has_value());
+    CHECK(launcher->query.empty());
+}
+
 TEST_CASE("the launcher's highlight moves, and Enter on an item starts its first task",
           "[orchestrator][view][launcher]")
 {
@@ -294,4 +326,97 @@ TEST_CASE("the launcher refuses an item an agent works on, and asks twice while 
     CHECK_FALSE(press(launcher, incomplete, KeyCode::Up));
     CHECK(launcher->hooks == HooksWarning::Confirmed);
     CHECK(press(launcher, incomplete, KeyCode::Enter, HooksWarning::Confirmed).has_value());
+}
+
+namespace
+{
+/// Two repositories, each listing the same recorded pull requests and issues.
+[[nodiscard]] World twoRepositories()
+{
+    return World {
+        .repos = R"([ { "name": "contour", "path": "~/projects/contour", "forge": "github",
+                        "issues": [ { "source": "forge", "query": "assignee:@me" } ] },
+                      { "name": "other", "path": "~/projects/other", "forge": "github",
+                        "issues": [ { "source": "forge", "query": "assignee:@me" } ] } ])",
+        .repoPaths = { std::string { ContourPath }, std::string { OtherPath } },
+    };
+}
+
+[[nodiscard]] core::tui::KeyEvent arrow(core::tui::KeyCode code, core::tui::Modifier modifiers = {})
+{
+    return core::tui::KeyEvent { .key = code, .modifiers = modifiers };
+}
+} // namespace
+
+TEST_CASE("the launcher's scope narrows the list to a repository and a kind",
+          "[orchestrator][view][launcher]")
+{
+    auto const engine = bootEngine(twoRepositories());
+    auto const every = candidatesOf(engine, "");
+    REQUIRE(std::ranges::any_of(every, [](Candidate const& c) { return c.repo == "contour"; }));
+    REQUIRE(std::ranges::any_of(every, [](Candidate const& c) { return c.repo == "other"; }));
+
+    auto const other = candidatesOf(engine, "", LauncherScope { .repo = "other" });
+    REQUIRE_FALSE(other.empty());
+    CHECK(std::ranges::all_of(other, [](Candidate const& c) { return c.repo == "other"; }));
+    CHECK(other.size() * 2 == every.size());
+
+    auto const issues = candidatesOf(engine, "", LauncherScope { .kind = KindScope::Issues });
+    REQUIRE_FALSE(issues.empty());
+    CHECK(std::ranges::all_of(issues, [](Candidate const& c) { return c.group == CandidateGroup::Issues; }));
+    auto const attention = candidatesOf(engine, "", LauncherScope { .kind = KindScope::NeedsAttention });
+    REQUIRE_FALSE(attention.empty());
+    CHECK(std::ranges::all_of(attention,
+                              [](Candidate const& c) { return c.group == CandidateGroup::NeedsAttention; }));
+    auto const prs = candidatesOf(engine, "", LauncherScope { .kind = KindScope::PullRequests });
+    CHECK(std::ranges::none_of(prs, [](Candidate const& c) { return c.group == CandidateGroup::Issues; }));
+
+    // A typed query keeps its topic row whatever the kind.
+    auto const typed = candidatesOf(engine, "flaky", LauncherScope { .kind = KindScope::NeedsAttention });
+    CHECK(std::ranges::any_of(typed, [](Candidate const& c) { return c.group == CandidateGroup::Topic; }));
+}
+
+TEST_CASE("left and right step the launcher's repository, ctrl the kind; a topic starts in the repository",
+          "[orchestrator][view][launcher]")
+{
+    using core::tui::KeyCode;
+    using core::tui::Modifier;
+    auto const engine = bootEngine(twoRepositories());
+    auto launcher = openLauncher(engine, "", std::string { SessionOne });
+    REQUIRE(launcher.has_value());
+    auto const step = [&](core::tui::KeyEvent const& key) {
+        CHECK_FALSE(applyLauncherKey(key, launcher, engine, HooksWarning::None, "t1"));
+        REQUIRE(launcher.has_value());
+    };
+    step(arrow(KeyCode::Right));
+    CHECK(launcher->scope.repo == "contour");
+    step(arrow(KeyCode::Right));
+    CHECK(launcher->scope.repo == "other");
+    step(arrow(KeyCode::Right));
+    CHECK(launcher->scope.repo.empty());
+    step(arrow(KeyCode::Left));
+    CHECK(launcher->scope.repo == "other");
+    step(arrow(KeyCode::Right, Modifier::Ctrl));
+    CHECK(launcher->scope.kind == KindScope::NeedsAttention);
+    step(arrow(KeyCode::Left, Modifier::Ctrl));
+    step(arrow(KeyCode::Left, Modifier::Ctrl));
+    CHECK(launcher->scope.kind == KindScope::Issues);
+
+    type(launcher, engine, "bump the vendored copy");
+    REQUIRE(launcher->form.has_value());
+    CHECK(launcher->form->repo == "other");
+    auto const action = press(launcher, engine, KeyCode::Enter);
+    REQUIRE(action.has_value());
+    CHECK(action->repo == "other");
+}
+
+TEST_CASE("the launcher opens on a repository no longer configured as listing every one",
+          "[orchestrator][view][launcher]")
+{
+    auto const engine = bootEngine(World {});
+    auto const launcher =
+        openLauncher(engine, "", {}, LauncherScope { .repo = "gone", .kind = KindScope::Issues });
+    REQUIRE(launcher.has_value());
+    CHECK(launcher->scope.repo.empty());
+    CHECK(launcher->scope.kind == KindScope::Issues);
 }

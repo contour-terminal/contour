@@ -56,13 +56,15 @@ namespace
 
     /// How long a lone ESC that ended an input waits for the rest of a sequence before it is the Escape key.
     constexpr auto EscapeTimeout = std::chrono::milliseconds { 50 };
-    /// How far an agent's age moves before the rows are built again for it.
-    constexpr auto AgeTickMs = uint64_t { 1000 };
     /// How often the transcript of a live run the Focus shows is read again.
     constexpr auto TranscriptFollowMs = uint64_t { 5000 };
 
     /// The widest the launcher is in the Wide band.
-    constexpr auto LauncherMaxColumns = 80;
+    /// The launcher's width in a wide tab: three quarters of it, at least 80 columns and at most 160, so that
+    /// titles and the repository column fit beside each other.
+    constexpr auto LauncherMinColumns = 80;
+    constexpr auto LauncherMaxColumns = 160;
+    constexpr auto LauncherWidePercent = 75;
     /// The widest the palette is in the Wide band.
     constexpr auto PaletteMaxColumns = 64;
     /// How much of the tab's width a popup takes in the Medium band, in percent.
@@ -326,7 +328,6 @@ struct Dashboard::State
     std::vector<std::size_t> visible; ///< The indices of the rows the filter keeps.
     std::string visibleFilter;        ///< The filter @ref visible was made with.
     Rows rowsState = Rows::Stale;     ///< Whether @ref rows must be built again.
-    uint64_t rowsBuiltAtMs = 0;       ///< When @ref rows was built, in the engine's monotonic milliseconds.
     std::size_t rowBuilds = 0;        ///< How often @ref rows was built.
     std::optional<uint64_t>
         rowChangeMs; ///< When a row changes next with time alone (nextRowChange()); std::nullopt: none does.
@@ -341,8 +342,11 @@ struct Dashboard::State
     std::unique_ptr<LauncherView> launcherView; ///< Draws interaction.launcher.
     std::unique_ptr<PaletteView> paletteView;   ///< Draws interaction.palette.
     std::unique_ptr<TimelineView> timelineView; ///< Draws the last 24 hours while Overlay::Timeline.
-    FocusFrame focus;                           ///< What the Focus draws this frame.
-    FocusPanels focusPanels;                    ///< What the Focus's tabs learnt drawing themselves.
+    /// Where each shown overlay was last put: moving one repaints the whole tab, so an overlay is moved only
+    /// when it is put elsewhere, not on every frame it stays.
+    std::vector<std::pair<Component const*, core::tui::Point>> overlayAt;
+    FocusFrame focus;           ///< What the Focus draws this frame.
+    FocusPanels focusPanels;    ///< What the Focus's tabs learnt drawing themselves.
     core::tui::Spinner spinner; ///< Turns a frame per drawn frame (at most one per its interval): no timer.
     SeenLedger seen;            ///< What the user saw of each run.
     std::optional<std::vector<std::string>> needing; ///< The runs in Needs you as the rows were last built;
@@ -769,12 +773,13 @@ uint64_t Dashboard::State::nowMonoMs() const noexcept
 void Dashboard::State::ensureRows()
 {
     auto const now = nowMonoMs();
-    if (rowsState == Rows::Current && now - rowsBuiltAtMs < AgeTickMs)
+    // Built again once the engine changed, or once a row says otherwise with time alone (an age, a
+    // countdown): a key after a pause finds the rows as they were.
+    if (rowsState == Rows::Current && (!rowChangeMs || now < *rowChangeMs))
         return;
     rows = buildRows(engine, now);
     rowChangeMs = nextRowChange(engine, now);
     rowsState = Rows::Current;
-    rowsBuiltAtMs = now;
     ++rowBuilds;
     visible.clear();
     refilter(Keep::Row);
@@ -965,6 +970,9 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
                 startedSession = dispatched->session;
                 actions.emplace_back(std::move(*dispatched));
             }
+            // The launcher opens next time as it was narrowed.
+            if (interaction.launcher)
+                interaction.launcherScope = interaction.launcher->scope;
             continue;
         }
         if (auto action = applyKey(*key, interaction, keyContext()))
@@ -1082,6 +1090,33 @@ namespace
                            highlightCandidate(*state.interaction.launcher, state.engine, value);
                            if (clicks == Clicks::Double)
                                state.press(core::tui::KeyCode::Enter, actions);
+                       },
+                   .wheel = nullptr },
+        // A repository's chip narrows the list to it; the first, to every one.
+        MouseRow { .kind = HitKind::LauncherRepo,
+                   .layer = Layer::Popup,
+                   .click =
+                       [](State& state, std::size_t value, Clicks, std::vector<UiAction>&) {
+                           auto const repos = scopeRepos(state.engine);
+                           auto& launcher = *state.interaction.launcher;
+                           scopeLauncherToRepo(launcher,
+                                               state.engine,
+                                               value == 0 || value > repos.size() ? "" : repos[value - 1]);
+                           state.interaction.launcherScope = launcher.scope;
+                       },
+                   .wheel = nullptr },
+        // A kind's chip narrows the list to that kind.
+        MouseRow { .kind = HitKind::LauncherKind,
+                   .layer = Layer::Popup,
+                   .click =
+                       [](State& state, std::size_t value, Clicks, std::vector<UiAction>&) {
+                           auto& launcher = *state.interaction.launcher;
+                           scopeLauncherToKind(launcher,
+                                               state.engine,
+                                               value <= std::to_underlying(KindScope::Issues)
+                                                   ? static_cast<KindScope>(value)
+                                                   : KindScope::All);
+                           state.interaction.launcherScope = launcher.scope;
                        },
                    .wheel = nullptr },
     };
@@ -1314,10 +1349,22 @@ void Dashboard::State::showCentred(Component& overlay, Size wanted)
 {
     auto const at =
         core::tui::Point { .x = (size.width - wanted.width) / 2, .y = (size.height - wanted.height) / 2 };
+    auto const last =
+        std::ranges::find(overlayAt, &overlay, &std::pair<Component const*, core::tui::Point>::first);
     if (screen.isOverlayVisible(overlay))
+    {
+        // Its contents are drawn afresh every frame and sent as a diff; only a move needs the whole tab
+        // again.
+        if (last != overlayAt.end() && last->second == at)
+            return;
         screen.positionOverlay(overlay, at);
+    }
     else
         screen.showOverlay(overlay, at);
+    if (last != overlayAt.end())
+        last->second = at;
+    else
+        overlayAt.emplace_back(&overlay, at);
 }
 
 void Dashboard::State::syncPalette()
@@ -1362,7 +1409,10 @@ void Dashboard::State::syncLauncher()
     }
     // Centred; the Narrow band gives it the whole tab.
     auto const band = this->band();
-    auto const width = popupWidthIn(band, size.width, LauncherMaxColumns);
+    auto const width = popupWidthIn(
+        band,
+        size.width,
+        std::clamp(size.width * LauncherWidePercent / 100, LauncherMinColumns, LauncherMaxColumns));
     auto const height =
         band == Band::Narrow ? size.height : std::min(launcherView->heightAt(width), size.height);
     auto const wanted = Size { .width = width, .height = height };

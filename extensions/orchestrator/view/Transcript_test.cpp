@@ -492,8 +492,11 @@ TEST_CASE("right and left turn the transcript's pages, read as they are turned t
         Answers { .transcript = printed(pageJson({ { .kind = "user", .text = "three" } }, 3, 3)) });
     REQUIRE(last.size() == 1);
     CHECK(fixture.screen().contains("page 3 of 3"));
-    // Right on the last page turns nothing.
+    // Right on the last page turns no page: it shows the tab to the right, and left comes back.
     CHECK(fixture.dashboard.input("\x1b[C").empty());
+    CHECK(fixture.screen().contains("page 3 of 3") == false);
+    CHECK(fixture.dashboard.input("\x1b[D").empty());
+    CHECK(fixture.screen().contains("page 3 of 3"));
     CHECK(fixture.settle().empty());
 
     CHECK(fixture.dashboard.input("\x1b[D").empty());

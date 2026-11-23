@@ -1,0 +1,40 @@
+ ✦ Agents                                                                                                                                            ⬢ 0/4 ▱▱▱▱ 
+╭─ Agents 0 ───────────────────────────────────────────────────╮ ╭─────────────────────────────────────────────────────────────────────────────────────────────╮
+│▍+ new agent                                                  │ │ No agents yet. ⏎ or n starts one on a pull request, an issue, or anything you type.         │
+│                                                              │ │ Once agents run: ⏎ talks to the selected one, 1 2 3 answers one that asks, esc steps back.  │
+│                                                              │ │ Everything else is in ^K.                                                                   │
+│                                                              │ │                                                                                             │
+│                   ╭─ ✦ New agent ────────────────────────────────────────────────────────────────────────────────────────────────────────╮                   │
+│                   │ › ▏type to filter, or describe a topic                                              pull requests · issues · a topic │                   │
+│                   │ repo  all  contour  other    show  all  needs attention  pull requests  issues                                       │                   │
+│                   │                                                                                                                      │                   │
+│                   │ NEEDS ATTENTION                                                                                                      │                   │
+│                   │ ▍#2114 vtbackend: WIP -- DEC mode 44 and a partial margin-bell trigger                              contour  ✗       │                   │
+│                   │  #1847 Adds ability to set Contour as default terminal on Windows OS                                contour  ✗       │                   │
+│                   │  #2114 vtbackend: WIP -- DEC mode 44 and a partial margin-bell trigger                                other  ✗       │                   │
+│                   │  #1847 Adds ability to set Contour as default terminal on Windows OS                                  other  ✗       │                   │
+│                   │ MY PULL REQUESTS                                                                                                     │                   │
+│                   │  #2375 Say why the stdio relay failed, and send a hello before half-closing in the starter case     contour  ●       │                   │
+│                   │  #2369 examples: add donut-animation, a full-screen animation done right                            contour  ✓       │                   │
+│                   │  #2346 contour: tab_style — shapes, fills, materials and widths for the tab bar, on its own Settin… contour  ✓       │                   │
+│                   │  #2375 Say why the stdio relay failed, and send a hello before half-closing in the starter case       other  ●       │                   │
+│                   │  #2369 examples: add donut-animation, a full-screen animation done right                              other  ✓       │                   │
+│                   │  #2346 contour: tab_style — shapes, fills, materials and widths for the tab bar, on its own Settings… other  ✓       │                   │
+│                   │ ISSUES WITHOUT A PR                                                                                                  │                   │
+│                   │   ↓ 10 more                                                                                                          │                   │
+│                   │ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │                   │
+│                   │ task ‹ fix CI ›   model ‹ sonnet ›   perms ‹ standard ›   note none                                                  │                   │
+│                   │ #2114 · contour · checks failing: Check clang-tidy and 9 more                                                        │                   │
+│                   │ checkout  gh pr checkout 2114 --branch agent/pr-2114-…                                                               │                   │
+│                   │ worktree  /home/u/worktrees/contour/pr-2114-…                                                                        │                   │
+│                   │ perms     standard · 19 allowed · 4 denied · edits need no approval                                                  │                   │
+│                   │                                                                                                                      │                   │
+│                   │ enter start · ↑↓ choose · ←→ repo · ctrl+←→ kind · tab settings · ctrl+p more · esc close                            │                   │
+│                   ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯                   │
+│                                                              │ │                                                                                             │
+│                                                              │ │                                                                                             │
+│                                                              │ │                                                                                             │
+│                                                              │ │                                                                                             │
+│                                                              │ │                                                                                             │
+╰──────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────────────────────────────╯
+ ⏎ new agent · ^k all actions                                                                                                                                   

@@ -291,7 +291,7 @@ TEST_CASE("the form offers Enter only while Enter dispatches", "[orchestrator][v
 {
     auto fixture = DashboardFixture { World {} };
     fixture.dashboard.openLauncherOn("contour", ChangeRequestRef { 2375 }, "fix_ci");
-    CHECK(fixture.screen().contains("enter start · ↑↓ choose · tab settings"));
+    CHECK(fixture.screen().contains("enter start · ↑↓ choose · ←→ repo"));
     CHECK(fixture.screen().contains("task ‹ fix CI ›"));
     CHECK(fixture.dashboard.input("\t\t\t\t-").empty());
     CHECK_FALSE(fixture.screen().contains("enter start"));
@@ -364,6 +364,29 @@ TEST_CASE("the launcher browses with nothing typed", "[orchestrator][view][launc
             checkGolden(name, screen);
         }
     }
+}
+
+TEST_CASE("the launcher names each row's repository while it lists several", "[orchestrator][view][launcher]")
+{
+    auto const world = World {
+        .repos = R"([ { "name": "contour", "path": "~/projects/contour", "forge": "github",
+                        "issues": [ { "source": "forge", "query": "assignee:@me" } ] },
+                      { "name": "other", "path": "~/projects/other", "forge": "github",
+                        "issues": [ { "source": "forge", "query": "assignee:@me" } ] } ])",
+        .repoPaths = { std::string { ContourPath }, std::string { OtherPath } },
+    };
+    auto fixture = DashboardFixture { world, core::tui::Size { .width = 160, .height = 40 } };
+    CHECK(fixture.dashboard.input("n").empty());
+    auto const every = fixture.screen();
+    CHECK(every.contains("repo  all  contour  other    show  all  needs attention"));
+    CHECK(every.contains("other  ✗"));
+    checkGolden("launcher-repos-160x40", every);
+
+    // Narrowed to one, the rows no longer name it.
+    CHECK(fixture.dashboard.input("\x1b[C\x1b[C").empty());
+    auto const narrowed = fixture.screen();
+    CHECK_FALSE(narrowed.contains("contour  ✗"));
+    checkGolden("launcher-repos-narrowed-160x40", narrowed);
 }
 
 TEST_CASE("topic form goldens", "[orchestrator][view][form][topic]")
