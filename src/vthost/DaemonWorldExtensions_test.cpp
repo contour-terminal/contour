@@ -14,6 +14,7 @@
 #endif
 
 #include <core/Environment.hpp>
+#include <core/Utf8Path.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/testing/ScriptedBackend.hpp>
 #include <core/platform/Clock.hpp>
@@ -989,6 +990,9 @@ TEST_CASE("DaemonWorldExtensions: the daemon world reads files through the nativ
         out << "gitdir: /src/repo/.git/worktrees/run-1\n";
     }
     plantEscape(work / "run-1" / "escape", std::filesystem::canonical(outside.path()));
+    // UTF-8, whatever the ANSI code page, with `/` for `\`, which JSON would have to escape.
+    auto workJson = core::pathToUtf8(work);
+    std::ranges::replace(workJson, '\\', '/');
 
     using FileResult = std::expected<vtextension::FileContent, vtextension::FileError>;
     constexpr auto RootAddress = uint32_t { 100 };
@@ -1051,7 +1055,7 @@ TEST_CASE("DaemonWorldExtensions: the daemon world reads files through the nativ
                 .name = "reader",
                 .modulePath = "/ext/reader.wasm",
                 .autostart = vtextension::ExtensionAutostart::OnDemand,
-                .configJson = std::format(R"({{"work":"{}"}})", work.generic_string()),
+                .configJson = std::format(R"({{"work":"{}"}})", workJson),
                 .storeDirectory = "/state/extensions/default/reader/store" } },
             .grantsFile = "/config/extension-grants.daemon-scoped.txt",
             .home = "/home/me",

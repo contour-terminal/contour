@@ -18,6 +18,7 @@
 #ifdef _WIN32
     #include <vtpty/DirectoryHandle.hpp>
     #include <vtpty/testing/Junction.hpp>
+    #include <vtpty/testing/ShortPath.hpp>
 
     #include <core/Utf8Path.hpp>
     #include <core/platform/NativeFileSystem.hpp>
@@ -26,8 +27,6 @@
     #include <algorithm>
     #include <filesystem>
     #include <format>
-
-    #include <Windows.h>
 
     #include <vtextension/Manifest.hpp>
     #include <vtextension/RootPointer.hpp>
@@ -357,18 +356,6 @@ namespace
     return escaped;
 }
 
-/// @return @p path's 8.3 spelling; @p path itself when it has none.
-[[nodiscard]] std::filesystem::path shortPathOf(std::filesystem::path const& path)
-{
-    auto shortName = std::wstring(MAX_PATH, L'\0');
-    auto const length =
-        GetShortPathNameW(path.c_str(), shortName.data(), static_cast<DWORD>(shortName.size()));
-    if (length == 0 || length >= shortName.size())
-        return path;
-    shortName.resize(length);
-    return std::filesystem::path { shortName };
-}
-
 } // namespace
 
 TEST_CASE("RootResolution: a Windows root, end to end through the native opener", "[daemon][processes]")
@@ -428,7 +415,7 @@ TEST_CASE("RootResolution: a Windows root, end to end through the native opener"
     CHECK_FALSE(contour.contains('~'));
     auto const longLeaf = top / "repos" / "contour" / "a-long-directory-name";
     std::filesystem::create_directories(longLeaf);
-    auto const shortLeaf = core::pathToUtf8(shortPathOf(longLeaf).filename());
+    auto const shortLeaf = core::pathToUtf8(vtpty::testing::shortPathOf(longLeaf).filename());
     if (!shortLeaf.contains('~'))
         SKIP("8.3 names are disabled on this volume");
     auto const throughShort = vtextension::openInRoot(opener, *roots, "repos", contour + R"(\)" + shortLeaf);
@@ -437,7 +424,7 @@ TEST_CASE("RootResolution: a Windows root, end to end through the native opener"
     CHECK(throughShort->resolvedPath() == contour + R"(\a-long-directory-name)");
     CHECK_FALSE(throughShort->resolvedPath().contains('~'));
 
-    auto const shortContour = core::pathToUtf8(shortPathOf(top / "repos" / "contour"));
+    auto const shortContour = core::pathToUtf8(vtpty::testing::shortPathOf(top / "repos" / "contour"));
     if (shortContour.contains('~'))
         CHECK(vtextension::openInRoot(opener, *roots, "repos", shortContour)
               == std::unexpected(RootError::OutsideRoots));

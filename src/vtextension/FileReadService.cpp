@@ -216,6 +216,10 @@ std::expected<FileContent, FileError> FileReadService::readIn(std::string_view r
         && _reader.identityOf(*cached->second.handle, {})
                == std::unexpected(vtpty::BeneathReadError::DirectoryMissing))
     {
+        // Let go of the stale handle before the path is opened again: on Windows a directory removed under
+        // legacy delete semantics stays at its path, delete-pending, while any handle holds it, and opening
+        // the path then fails with an access error rather than finding nothing.
+        cached->second = OpenedDirectory {};
         cached->second = openDirectory(root, directory);
         answer = readBeneath(cached->second, components);
     }

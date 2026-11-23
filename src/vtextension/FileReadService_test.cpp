@@ -8,6 +8,10 @@
 #include <vtpty/PathStyle.hpp>
 #ifdef _WIN32
     #include <vtpty/testing/Junction.hpp>
+    #include <vtpty/testing/LegacyRemove.hpp>
+    #include <vtpty/testing/ShortPath.hpp>
+
+    #include <Windows.h>
 #endif
 
 #include <core/Utf8Path.hpp>
@@ -19,9 +23,11 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cstddef>
 #include <expected>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -284,6 +290,25 @@ TEST_CASE("FileReadService: a root that did not exist is opened once it does", "
     CHECK(fixture.directories.opened == std::vector<std::string> { "/wt", "/wt" });
 }
 
+TEST_CASE("FileReadService: a root removed while held is directory-gone until it is back",
+          "[vtextension][file-read]")
+{
+    auto fixture = Fixture {};
+    fixture.reader.add("/wt/run-1/.git", "gitdir: x\n");
+    REQUIRE(fixture.read("worktrees", "run-1/.git").has_value());
+
+    // Removed, and not there when it is opened again.
+    fixture.reader.removedRoots.insert("/wt");
+    fixture.directories.directories.erase("/wt");
+    CHECK(fixture.read("worktrees", "run-1/.git") == std::unexpected(FileError::DirectoryGone));
+
+    // Back: opened anew on the next read.
+    fixture.reader.removedRoots.clear();
+    fixture.directories.add("/wt");
+    CHECK(fixture.read("worktrees", "run-1/.git").has_value());
+    CHECK(fixture.directories.opened == std::vector<std::string> { "/wt", "/wt", "/wt" });
+}
+
 namespace
 {
 
@@ -401,7 +426,12 @@ class RecordingOpener final: public vtpty::IDirectoryOpener
         std::string_view path) override
     {
         opened.emplace_back(path);
-        return vtpty::nativeDirectoryOpener().open(path);
+        if (beforeOpen)
+            beforeOpen();
+        auto handle = vtpty::nativeDirectoryOpener().open(path);
+        if (handle && onOpened)
+            onOpened(*handle);
+        return handle;
     }
 
     [[nodiscard]] std::expected<std::string, vtpty::DirectoryError> canonical(
@@ -422,6 +452,9 @@ class RecordingOpener final: public vtpty::IDirectoryOpener
     }
 
     std::vector<std::string> opened; ///< Every path open() was asked for, in order.
+
+    std::function<void()> beforeOpen;                                   ///< Runs before every open.
+    std::function<void(vtpty::DirectoryHandle const& handle)> onOpened; ///< Runs on every directory opened.
 };
 
 } // namespace
@@ -566,20 +599,74 @@ TEST_CASE("FileReadService: a Windows worktree's STATUS.md is read through the n
 TEST_CASE("FileReadService: a nested root is fenced through the walk, not by path, on Windows",
           "[vtextension][file-read]")
 {
+    // The nested root reached by its 8.3 name: no spelling rule ties `MAIN-L~1` to `Main-long-name`, so the
+    // path check passes it, and only the identity the walk meets refuses it.
     auto const temp = core::testing::ScopedTempDir { "contour-file-read-fence" };
     auto const wt = std::filesystem::canonical(temp.path());
-    std::filesystem::create_directories(wt / "Main" / ".git");
-    writeFile(wt / "Main" / ".git" / "config", "[core]\n");
+    auto const nested = wt / "Main-long-name";
+    std::filesystem::create_directories(nested / ".git");
+    writeFile(nested / ".git" / "config", "[core]\n");
+    auto const shortName = core::pathToUtf8(vtpty::testing::shortPathOf(nested).filename());
+    if (!shortName.contains('~'))
+    {
+        WARN("no 8.3 names on this volume");
+        return;
+    }
 
     auto opener = RecordingOpener {};
     auto service = FileReadService { readingWorktrees(),
                                      { { .label = "worktrees", .paths = { core::pathToUtf8(wt) } },
-                                       { .label = "repos", .paths = { core::pathToUtf8(wt / "Main") } } },
+                                       { .label = "repos", .paths = { core::pathToUtf8(nested) } } },
                                      opener,
                                      vtpty::nativeBeneathReader() };
-    CHECK(service.read("worktrees", "Main/.git/config") == std::unexpected(FileError::NotGranted));
-    // Another case names the same directory: it is fenced by its identity.
-    CHECK(service.read("worktrees", "main/.git/config") == std::unexpected(FileError::NotGranted));
+    CHECK(service.read("worktrees", shortName + "/.git/config") == std::unexpected(FileError::NotGranted));
+    // Only the readable root's own directory was opened by path; the nested root never was.
+    CHECK(std::ranges::all_of(opener.opened,
+                              [&](std::string const& path) { return path == core::pathToUtf8(wt); }));
+}
+
+TEST_CASE("FileReadService: a Windows root removed while held is read again once it is back",
+          "[vtextension][file-read]")
+{
+    // Removed under legacy delete semantics, a directory stays delete-pending at its path while any handle
+    // holds it, and an open of that path is refused: the held handle is let go before the path is opened
+    // again.
+    auto const temp = core::testing::ScopedTempDir { "contour-file-read-removed" };
+    auto const wt = std::filesystem::canonical(temp.path()) / "wt";
+    auto const populate = [&wt] {
+        std::filesystem::create_directories(wt / "run-1");
+        writeFile(wt / "run-1" / ".git", "gitdir: x\n");
+    };
+    populate();
+
+    auto opener = RecordingOpener {};
+    auto handedOut = std::vector<HANDLE> {};
+    auto heldAtOpen = std::ptrdiff_t { 0 };
+    opener.beforeOpen = [&] {
+        heldAtOpen += std::ranges::count_if(handedOut, [](HANDLE handle) {
+            auto flags = DWORD { 0 };
+            return GetHandleInformation(handle, &flags) != FALSE;
+        });
+    };
+    opener.onOpened = [&](vtpty::DirectoryHandle const& handle) {
+        handedOut.push_back(handle.nativeHandle());
+    };
+    auto service = FileReadService { readingWorktrees(),
+                                     { { .label = "worktrees", .paths = { core::pathToUtf8(wt) } } },
+                                     opener,
+                                     vtpty::nativeBeneathReader() };
+    REQUIRE(service.read("worktrees", "run-1/.git").has_value());
+
+    std::filesystem::remove_all(wt / "run-1");
+    REQUIRE(vtpty::testing::removeLegacy(wt).has_value());
+    CHECK(service.read("worktrees", "run-1/.git") == std::unexpected(FileError::DirectoryGone));
+    CHECK(heldAtOpen == 0);
+
+    populate();
+    auto const content = service.read("worktrees", "run-1/.git");
+    REQUIRE(content.has_value());
+    CHECK(content->bytes == bytesOf("gitdir: x\n"));
+    CHECK(opener.opened == std::vector<std::string>(3, core::pathToUtf8(wt)));
 }
 
 TEST_CASE("FileReadService: a junction inside a Windows root escapes", "[vtextension][file-read]")
@@ -617,6 +704,7 @@ TEST_CASE("FileReadService: a Windows stream or device name is a bad argument", 
         CAPTURE(path);
         CHECK(service.read("worktrees", path) == std::unexpected(FileError::BadArgument));
     }
+    CHECK(opener.opened.empty());
 }
 
 #endif
