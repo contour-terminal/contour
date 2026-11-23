@@ -199,6 +199,11 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
                          "until it closes",
                          id.value,
                          session.child.pid);
+            // Its job, though, is let go of: no one here could end the tree it holds, which would otherwise
+            // outlive the pane by as long as this process runs. Its process handle is left alone: canAdopt()
+            // may have refused it for naming something other than the child.
+            vtpty::releaseUnadopted(
+                vtpty::AdoptedChild { .job = std::exchange(session.child.job, vtpty::CrossingHandle {}) });
             return std::move(*pty);
         }
         auto process = vtpty::Process::adopt(session.child, std::move(*pty));

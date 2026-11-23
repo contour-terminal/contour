@@ -40,6 +40,7 @@ namespace fs = std::filesystem;
 namespace
 {
 
+#if !defined(_WIN32) || defined(VTHOST_PROCESS_RUNNER_PROBE)
 /// @return What @p path holds once it exists, waiting up to @p patience while @p turn runs; empty if never.
 std::string awaitFile(
     fs::path const& path, std::function<void()> const& turn = [] {}, std::chrono::milliseconds patience = 10s)
@@ -53,6 +54,7 @@ std::string awaitFile(
     auto in = std::ifstream { path };
     return std::string { std::istreambuf_iterator<char> { in }, {} };
 }
+#endif
 
 /// The names an agent's pane withholds, set in this process for its children to inherit -- and one kept.
 struct InheritedRepositorySelection
@@ -113,7 +115,12 @@ std::string expectedReport(SwappedDirectory const& directory)
 /// The shell a host spawns when it is not told otherwise.
 constexpr auto DefaultShell = "/bin/sh";
 #else
-// The helpers of the Windows-only cases below.
+/// The shell a host spawns when it is not told otherwise.
+constexpr auto DefaultShell = "cmd.exe";
+
+    #ifdef VTHOST_PROCESS_RUNNER_PROBE
+// The helpers of the Windows-only cases below, which run the process runner's probe: built only where its
+// target is.
 
 /// A worktree held open, beside a `bin` holding a copy of the probe: an agent's pane is given the first as
 /// its directory and the second as its PATH.
@@ -159,9 +166,7 @@ std::vector<std::string> linesOf(std::string_view text)
            | std::views::transform([](auto const& line) { return std::string { std::string_view { line } }; })
            | std::ranges::to<std::vector>();
 }
-
-/// The shell a host spawns when it is not told otherwise.
-constexpr auto DefaultShell = "cmd.exe";
+    #endif
 #endif
 
 /// A host spawning through the daemon's own factories, with or without a profile catalog.
@@ -259,7 +264,7 @@ TEST_CASE("a host without profiles spawns an agent in the handle's directory", "
 
     CHECK(awaitFile(directory.report(), [&] { h.turn(); }) == expectedReport(directory));
 }
-#else
+#elifdef VTHOST_PROCESS_RUNNER_PROBE
 TEST_CASE("a host without profiles spawns an agent in the handle's directory, on Windows", "[vthost][spawn]")
 {
     auto const worktree = HeldWorktree {};

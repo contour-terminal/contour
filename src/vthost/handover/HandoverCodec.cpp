@@ -248,7 +248,12 @@ static void visitForeignFields(Visitor& visitor, T& child)
     visitor(6, child.processHandle);
     // Written only for a child that runs in a job, so that an image without one is the bytes a daemon from
     // before jobs crossed wrote; read as none where it is absent, as such a daemon's image has it.
-    if (!std::is_same_v<Visitor, FieldEncoder> || !child.job.isNone())
+    if constexpr (std::is_same_v<Visitor, FieldEncoder>)
+    {
+        if (!child.job.isNone())
+            visitor(7, child.job);
+    }
+    else
         visitor(7, child.job);
     if constexpr (std::is_same_v<Visitor, FieldDecoder>)
     {
