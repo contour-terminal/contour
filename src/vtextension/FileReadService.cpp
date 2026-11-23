@@ -3,6 +3,7 @@
 
 #include <vtpty/BeneathRead.hpp>
 #include <vtpty/DirectoryHandle.hpp>
+#include <vtpty/PathStyle.hpp>
 
 #include <algorithm>
 #include <array>
@@ -16,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include <vtextension/RootPathSyntax.hpp>
 #include <vtextension/RootResolution.hpp>
 
 namespace vtextension
@@ -71,9 +73,13 @@ namespace
                                       }),
                   "DirectoryErrorRows is indexed by DirectoryError, one row each");
 
-    /// @return @p path's components; std::nullopt when it is empty, absolute, or holds an empty, `.` or `..`
-    ///         component or a NUL.
-    [[nodiscard]] std::optional<std::vector<std::string_view>> componentsOf(std::string_view path)
+    /// @param path A `file-read` path: `/`-separated on every platform, as the world's contract has it.
+    /// @param style The grammar each component must be one name of.
+    /// @return @p path's components; std::nullopt when it is empty, absolute, or holds a component that
+    ///         isPlainComponent() refuses in @p style (empty, `.`, `..`, a NUL; on Windows also a `\`, which
+    ///         Win32 would read as a separator, a stream, a device name, a trailing dot or space).
+    [[nodiscard]] std::optional<std::vector<std::string_view>> componentsOf(std::string_view path,
+                                                                            vtpty::PathStyle style)
     {
         if (path.empty() || path.starts_with('/') || path.contains('\0'))
             return std::nullopt;
@@ -81,20 +87,21 @@ namespace
         for (auto const component: path | std::views::split('/'))
         {
             auto const name = std::string_view { component.begin(), component.end() };
-            if (name.empty() || name == "." || name == "..")
+            if (!isPlainComponent(name, style))
                 return std::nullopt;
             components.push_back(name);
         }
         return components;
     }
 
-    /// @return @p components joined beneath @p directory.
+    /// @return @p components joined beneath @p directory with @p style's separator.
     [[nodiscard]] std::string pathBeneath(std::string_view directory,
-                                          std::span<std::string_view const> components)
+                                          std::span<std::string_view const> components,
+                                          vtpty::PathStyle style)
     {
-        auto path = std::string { directory == "/" ? "" : directory };
+        auto path = std::string { directory };
         for (auto const component: components)
-            path.append("/").append(component);
+            path = childPath(path, component, style);
         return path;
     }
 } // namespace
@@ -114,7 +121,8 @@ std::expected<FileContent, FileError> FileReadService::read(std::string_view roo
 {
     if (!std::ranges::contains(_readableRoots, root))
         return std::unexpected(FileError::NotGranted);
-    auto const components = componentsOf(path);
+    auto const style = _directories.pathStyle();
+    auto const components = componentsOf(path, style);
     if (!components)
         return std::unexpected(FileError::BadArgument);
     auto const declared = std::ranges::find(_roots, root, &ResolvedRoot::label);
@@ -128,7 +136,7 @@ std::expected<FileContent, FileError> FileReadService::read(std::string_view roo
         // A root nested inside this one keeps its files to itself, as it keeps the commands of this one out:
         // by its spelling here, and by its identity in the walk (a case-insensitive name spells it
         // otherwise).
-        if (mostSpecificRoot(_roots, pathBeneath(directory, *components), _directories.pathStyle()) != root)
+        if (mostSpecificRoot(_roots, pathBeneath(directory, *components, style), style) != root)
             return std::unexpected(FileError::NotGranted);
         answer = readIn(root, directory, *components);
         if (answer || answer.error() != FileError::DirectoryGone)
@@ -147,8 +155,10 @@ FileReadService::OpenedDirectory FileReadService::openDirectory(std::string_view
         opened.handle = std::unexpected(DirectoryErrorRows.at(std::to_underlying(handle.error())).file);
         return opened;
     }
-    // The opener follows links: a root's directory swapped for one is caught by where it now leads.
-    if (handle->resolvedPath() != directory)
+    // The opener follows links: a root's directory swapped for one is caught by where it now leads. The
+    // handle reads back the case the directory has on disk, which on Windows is still the same directory.
+    auto const style = _directories.pathStyle();
+    if (!samePath(handle->resolvedPath(), directory, style))
     {
         opened.handle = std::unexpected(FileError::Escapes);
         return opened;
@@ -161,16 +171,10 @@ FileReadService::OpenedDirectory FileReadService::openDirectory(std::string_view
         if (other.label == root)
             continue;
         for (auto const& nested: other.paths)
-        {
-            auto const prefix = directory == "/" ? std::string_view {} : directory;
-            auto const below = std::string_view { nested }.substr(std::min(prefix.size(), nested.size()));
-            if (!nested.starts_with(prefix) || !below.starts_with('/'))
-                continue;
-            if (auto const components = componentsOf(below.substr(1)))
+            if (auto const components = componentsBeneath(directory, nested, style))
                 opened.nested.push_back(NestedRoot {
                     .components = std::vector<std::string>(components->begin(), components->end()),
                     .identity = std::nullopt });
-        }
     }
     return opened;
 }

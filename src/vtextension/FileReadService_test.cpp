@@ -5,6 +5,7 @@
 #include <vtpty/BeneathRead.hpp>
 #include <vtpty/DirectoryHandle.hpp>
 #include <vtpty/OwnedFd.hpp>
+#include <vtpty/PathStyle.hpp>
 
 #include <core/testing/ScopedTempDir.hpp>
 
@@ -51,7 +52,14 @@ struct Fixture
 {
     explicit Fixture(std::vector<ResolvedRoot> resolved = { { .label = "worktrees", .paths = { "/wt" } },
                                                             { .label = "repos", .paths = { "/src/repo" } } }):
-        roots { std::move(resolved) }
+        Fixture { vtpty::PathStyle::Posix, std::move(resolved) }
+    {
+    }
+
+    /// @param style The path grammar the directory opener and the reader speak.
+    /// @param resolved The roots, as resolved in @p style.
+    Fixture(vtpty::PathStyle style, std::vector<ResolvedRoot> resolved):
+        roots { std::move(resolved) }, directories { style }, reader { style }
     {
         manifest.name = "orchestrator";
         manifest.readableRoots = { "worktrees" };
@@ -270,6 +278,91 @@ TEST_CASE("FileReadService: a root that did not exist is opened once it does", "
     fixture.directories.add("/wt");
     CHECK(fixture.read("worktrees", "run-1/.git").has_value());
     CHECK(fixture.directories.opened == std::vector<std::string> { "/wt", "/wt" });
+}
+
+namespace
+{
+
+/// An extension that declares `read worktrees`, and `repos` beside it, on Windows.
+[[nodiscard]] Fixture windowsFixture()
+{
+    return Fixture { vtpty::PathStyle::Windows,
+                     { { .label = "worktrees", .paths = { R"(C:\wt)" } },
+                       { .label = "repos", .paths = { R"(C:\src\repo)" } } } };
+}
+
+} // namespace
+
+TEST_CASE("FileReadService: on Windows a component Windows spells otherwise is a bad argument",
+          "[vtextension][file-read]")
+{
+    auto fixture = windowsFixture();
+    fixture.reader.otherwise = BeneathReadError::NotRegular;
+    for (auto const path:
+         std::array { R"(a\..\..\x)"sv, "STATUS.md:x"sv, "con"sv, "x."sv, "x "sv, R"(a/b\c)"sv, R"(a\b)"sv })
+    {
+        CAPTURE(path);
+        CHECK(fixture.read("worktrees", path) == std::unexpected(FileError::BadArgument));
+    }
+    CHECK(fixture.reader.reads.empty());
+
+    // A POSIX name may hold a backslash: there it is one more byte of the name.
+    auto posix = Fixture {};
+    posix.reader.add(R"(/wt/a\b)", "plain");
+    auto const content = posix.read("worktrees", R"(a\b)");
+    REQUIRE(content.has_value());
+    CHECK(content->bytes == bytesOf("plain"));
+}
+
+TEST_CASE("FileReadService: a Windows file beneath a readable root is read", "[vtextension][file-read]")
+{
+    auto fixture = windowsFixture();
+    fixture.reader.add(R"(C:\wt\contour\r1\STATUS.md)", "# r1\n");
+
+    auto const content = fixture.read("worktrees", "contour/r1/STATUS.md");
+    REQUIRE(content.has_value());
+    CHECK(content->bytes == bytesOf("# r1\n"));
+    CHECK(fixture.reader.reads
+          == std::vector {
+              std::pair { std::string { R"(C:\wt\contour\r1\STATUS.md)" }, vtextension::MaxFileReadBytes } });
+}
+
+TEST_CASE("FileReadService: a Windows root read back in another case is the same directory",
+          "[vtextension][file-read]")
+{
+    SECTION("the same directory, in the case it has on disk")
+    {
+        auto fixture = windowsFixture();
+        fixture.directories.link(R"(C:\wt)", R"(C:\WT)");
+        fixture.reader.add(R"(C:\WT\x)", "read");
+        auto const content = fixture.read("worktrees", "x");
+        REQUIRE(content.has_value());
+        CHECK(content->bytes == bytesOf("read"));
+    }
+    SECTION("another drive")
+    {
+        auto fixture = windowsFixture();
+        fixture.directories.link(R"(C:\wt)", R"(D:\wt)");
+        fixture.reader.add(R"(D:\wt\x)", "elsewhere");
+        CHECK(fixture.read("worktrees", "x") == std::unexpected(FileError::Escapes));
+        CHECK(fixture.reader.reads.empty());
+    }
+}
+
+TEST_CASE("FileReadService: a Windows nested root in another case is still fenced",
+          "[vtextension][file-read]")
+{
+    auto fixture = Fixture { vtpty::PathStyle::Windows,
+                             { { .label = "worktrees", .paths = { R"(C:\wt)" } },
+                               { .label = "repos", .paths = { R"(C:\WT\inner)" } } } };
+    fixture.reader.identities.emplace(R"(C:\wt\inner)", vtpty::FileIdentity { .device = 1, .inode = 7 });
+    fixture.reader.add(R"(C:\wt\inner\x)", "fenced");
+    fixture.reader.add(R"(C:\wt\run-1\x)", "beside");
+
+    CHECK(fixture.read("worktrees", "inner/x") == std::unexpected(FileError::NotGranted));
+    CHECK(fixture.read("worktrees", "run-1/x").has_value());
+    // The walk is handed the nested root by its components beneath this one, whatever their case.
+    CHECK(std::ranges::contains(fixture.reader.identified, std::string { R"(C:\wt\inner)" }));
 }
 
 #ifndef _WIN32

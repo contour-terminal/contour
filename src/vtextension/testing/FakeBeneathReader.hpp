@@ -6,6 +6,7 @@
 
 #include <vtpty/BeneathRead.hpp>
 #include <vtpty/DirectoryHandle.hpp>
+#include <vtpty/PathStyle.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -20,14 +21,23 @@
 #include <utility>
 #include <vector>
 
+#include <vtextension/RootPathSyntax.hpp>
+
 namespace vtextension::testing
 {
 
-/// Answers each read from @ref files by the path it names: the root's resolved path, then each component.
-/// A path it holds no answer for is answered @ref otherwise.
+/// Answers each read from @ref files by the path it names: the root's resolved path, then each component,
+/// joined by childPath() in the fake's path grammar. A path it holds no answer for is answered @ref
+/// otherwise.
 class FakeBeneathReader final: public vtpty::IBeneathReader
 {
   public:
+    /// A fake that joins paths in the POSIX grammar.
+    FakeBeneathReader() = default;
+
+    /// @param style The path grammar the fake joins a root's resolved path and its components in.
+    explicit FakeBeneathReader(vtpty::PathStyle style) noexcept: _style { style } {}
+
     /// What a read of each path answers: its file, or why it is not read.
     std::map<std::string, std::expected<vtpty::BeneathFile, vtpty::BeneathReadError>, std::less<>> files;
 
@@ -52,10 +62,10 @@ class FakeBeneathReader final: public vtpty::IBeneathReader
     {
         if (removedRoots.contains(root.resolvedPath()))
             return std::unexpected(vtpty::BeneathReadError::DirectoryMissing);
-        auto path = root.resolvedPath() == "/" ? std::string {} : root.resolvedPath();
+        auto path = root.resolvedPath();
         for (auto const component: components.first(components.empty() ? 0 : components.size() - 1))
         {
-            path.append("/").append(component);
+            path = childPath(path, component, _style);
             // any_of, not contains: MSVC's STL takes find's vectorized path for a trivially comparable
             // 16-byte element under clang-cl, and fails its static_assert on the element's size.
             if (auto const identity = identities.find(path);
@@ -64,7 +74,7 @@ class FakeBeneathReader final: public vtpty::IBeneathReader
                 return std::unexpected(vtpty::BeneathReadError::Fenced);
         }
         if (!components.empty())
-            path.append("/").append(components.back());
+            path = childPath(path, components.back(), _style);
         reads.emplace_back(path, maxBytes);
         if (auto const file = files.find(path); file != files.end())
             return file->second;
@@ -76,9 +86,9 @@ class FakeBeneathReader final: public vtpty::IBeneathReader
     {
         if (removedRoots.contains(root.resolvedPath()))
             return std::unexpected(vtpty::BeneathReadError::DirectoryMissing);
-        auto path = root.resolvedPath() == "/" ? std::string {} : root.resolvedPath();
+        auto path = root.resolvedPath();
         for (auto const component: components)
-            path.append("/").append(component);
+            path = childPath(path, component, _style);
         identified.push_back(path);
         if (auto const identity = identities.find(path); identity != identities.end())
             return identity->second;
@@ -94,6 +104,9 @@ class FakeBeneathReader final: public vtpty::IBeneathReader
 
     /// The identity of each directory, by its whole path: one without is unreachable, and never fenced.
     std::map<std::string, vtpty::FileIdentity, std::less<>> identities;
+
+  private:
+    vtpty::PathStyle _style = vtpty::PathStyle::Posix;
 };
 
 } // namespace vtextension::testing

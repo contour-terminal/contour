@@ -50,11 +50,14 @@ class IFileReadService
 /// One extension's readable roots.
 ///
 /// read() refuses, in this order: a root not declared `read` (`not-granted`); a
-/// path that is empty, absolute, or holds an empty, `.` or `..` component or a NUL (`bad-argument`); a path
-/// whose most specific root is another one (`not-granted`). It then reads beneath the root's directory,
-/// opened on its first read and held from then on (a mount placed over the path later does not reach the
-/// handle): one that does not exist is `directory-gone`, and opened again on a later read, as is one removed
-/// while held; one that resolves elsewhere is `escapes`. The file is read beneath that handle
+/// path that is empty, absolute, or holds an empty, `.` or `..` component or a NUL (`bad-argument`) -- the
+/// path is `/`-separated on every platform, and on a Windows-styled opener a component that
+/// vtpty::isPlainWindowsName() refuses (a `\`, a stream, a device name, a trailing dot or space) is
+/// `bad-argument` too; a path whose most specific root is another one (`not-granted`). Paths are joined and
+/// compared in the opener's grammar (IDirectoryOpener::pathStyle()). It then reads beneath the root's
+/// directory, opened on its first read and held from then on (a mount placed over the path later does not
+/// reach the handle): one that does not exist is `directory-gone`, and opened again on a later read, as is
+/// one removed while held; one that resolves elsewhere is `escapes`. The file is read beneath that handle
 /// (vtpty::IBeneathReader): a directory below the root that does not exist is `directory-gone`, a missing
 /// file `not-regular`, a link, a second name or another device `escapes`, and a directory that is another
 /// root's -- by identity, however the path spells it -- `not-granted`. A root of several directories is read
