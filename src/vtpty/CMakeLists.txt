@@ -89,6 +89,7 @@ set(vtpty_HEADERS
     SshSessionRules.hpp
     SshSocketWait.hpp
     SshTerminfoInstall.hpp
+    UniqueHandle.hpp
     WindowsCommandLine.hpp
     WindowsPathRules.hpp
     Win32Handle.hpp
@@ -149,7 +150,7 @@ if(UNIX)
     list(APPEND vtpty_SOURCES ProcessCgroup.cpp ScopeRequestEncoding.cpp SystemdScopePlacement.cpp UnixPty.cpp UnixUtils.cpp)
     list(APPEND vtpty_SOURCES ProcessCgroup.hpp PosixSpawn.hpp ScopeRequestEncoding.hpp SystemdScopePlacement.hpp UnixPty.hpp UnixUtils.hpp)
 else()
-    list(APPEND vtpty_SOURCES ConPty.cpp)
+    list(APPEND vtpty_SOURCES ConPty.cpp UniqueHandle.cpp)
     list(APPEND vtpty_HEADERS ConPty.hpp)
     #TODO: list(APPEND vtpty_SOURCES WinPty.cpp)
 endif()

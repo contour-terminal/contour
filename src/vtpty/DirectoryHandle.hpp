@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtpty/OwnedFd.hpp>
+#ifdef _WIN32
+    #include <vtpty/UniqueHandle.hpp>
+
+    #include <core/platform/Types.hpp>
+#else
+    #include <vtpty/OwnedFd.hpp>
+#endif
 
 #include <cstdint>
 #include <expected>
@@ -24,37 +30,50 @@ enum class DirectoryError : uint8_t
     Unsupported,   ///< This platform has no directory handles.
 };
 
+#ifdef _WIN32
+using OwnedDirectory = UniqueHandle; ///< What a DirectoryHandle owns here: a directory HANDLE.
+#else
+using OwnedDirectory = OwnedFd; ///< What a DirectoryHandle owns here: a directory descriptor.
+#endif
+
 /// An open directory: a child entered by it runs there even if the path is replaced afterwards.
 class DirectoryHandle
 {
   public:
-    /// @param descriptor The open directory; -1 for none (see unbacked()).
-    /// @param resolvedPath The directory's canonical path, as read from @p descriptor when it was opened.
-    DirectoryHandle(OwnedFd descriptor, std::string resolvedPath) noexcept:
-        _descriptor { std::move(descriptor) }, _resolvedPath { std::move(resolvedPath) }
+    /// @param directory The open directory; a default-constructed one for none (see unbacked()).
+    /// @param resolvedPath The directory's canonical path, as read from @p directory when it was opened.
+    DirectoryHandle(OwnedDirectory directory, std::string resolvedPath) noexcept:
+        _directory { std::move(directory) }, _resolvedPath { std::move(resolvedPath) }
     {
     }
 
-    /// A handle that holds no descriptor, for test doubles that never enter it.
+    /// A handle that holds no open directory, for test doubles that never enter it.
     /// @param resolvedPath The path it stands for.
-    /// @return The handle; its descriptor() is -1.
+    /// @return The handle; its descriptor() is -1 (POSIX), its nativeHandle() null (Windows).
     [[nodiscard]] static DirectoryHandle unbacked(std::string resolvedPath) noexcept
     {
-        return DirectoryHandle { OwnedFd {}, std::move(resolvedPath) };
+        return DirectoryHandle { OwnedDirectory {}, std::move(resolvedPath) };
     }
 
+#ifndef _WIN32
     /// @return The open directory's descriptor; -1 when unbacked.
-    [[nodiscard]] int descriptor() const noexcept { return _descriptor.get(); }
+    [[nodiscard]] int descriptor() const noexcept { return _directory.get(); }
+#else
+    /// @return The open directory's HANDLE, still owned; null when unbacked. Opened with
+    ///         HeldDirectoryAccess, shared read/write/delete, not inheritable.
+    [[nodiscard]] core::platform::NativeHandle nativeHandle() const noexcept { return _directory.get(); }
+#endif
 
-    /// @return The directory's canonical path, read from the descriptor when it was opened.
+    /// @return The directory's canonical path, read from the open directory when it was opened.
     [[nodiscard]] std::string const& resolvedPath() const noexcept { return _resolvedPath; }
 
     /// @return Whether the open directory has been removed since -- no name links to it any more, whatever
-    ///         stands at its path now; false for an unbacked handle, and where it cannot be told (Windows).
+    ///         stands at its path now (Windows: its deletion is pending, or no link is left); false for an
+    ///         unbacked handle.
     [[nodiscard]] bool isRemoved() const noexcept;
 
   private:
-    OwnedFd _descriptor;
+    OwnedDirectory _directory;
     std::string _resolvedPath;
 };
 
@@ -71,7 +90,8 @@ class IDirectoryOpener
     virtual ~IDirectoryOpener() = default;
 
     /// Opens the directory at @p path, following symlinks.
-    /// @return The open directory, its resolved path read from the descriptor; or why it could not be opened.
+    /// @return The open directory, its resolved path read from the open directory; or why it could not be
+    ///         opened.
     [[nodiscard]] virtual std::expected<DirectoryHandle, DirectoryError> open(std::string_view path) = 0;
 
     /// @param existingPath A path that exists.
@@ -100,14 +120,18 @@ enum class DescriptorPaths : uint8_t
     FromKernel,
 };
 
-/// @param paths Where an opened directory's path is read from.
-/// @return An opener over this machine's filesystem; Windows: one whose every call answers `Unsupported`.
+/// @param paths Where an opened directory's path is read from; ignored on Windows, where it is always read
+///              from the handle.
+/// @return An opener over this machine's filesystem.
 [[nodiscard]] std::unique_ptr<IDirectoryOpener> makeDirectoryOpener(DescriptorPaths paths);
 
 /// @return The opener over this machine's filesystem. POSIX: a directory is opened
 ///         `O_RDONLY | O_DIRECTORY | O_CLOEXEC`, and its resolved path read from the descriptor
-///         (DescriptorPaths::FromKernel). A directory deleted by the time it is opened is `Missing`. Windows:
-///         every call answers `Unsupported`.
+///         (DescriptorPaths::FromKernel). Windows: a directory is opened with backup semantics, shared for
+///         read, write and delete so that holding it stops no rename or removal, not inheritable; its
+///         resolved path is read from the handle (GetFinalPathNameByHandleW), in DOS form without the `\\?\`
+///         prefix; createBeneath() answers `Unsupported` there for now. A directory deleted by the time it is
+///         opened is `Missing`.
 [[nodiscard]] IDirectoryOpener& nativeDirectoryOpener() noexcept;
 
 } // namespace vtpty

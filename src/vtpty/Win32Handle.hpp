@@ -7,6 +7,8 @@
 
 #ifdef _WIN32
 
+    #include <vtpty/UniqueHandle.hpp>
+
     #include <cstddef>
     #include <cstdint>
     #include <expected>
@@ -30,47 +32,6 @@ namespace vtpty
     auto const type = GetFileType(handle);
     return type == FILE_TYPE_PIPE || type == FILE_TYPE_DISK;
 }
-
-/// Owns a Win32 HANDLE and closes it on destruction.
-class UniqueHandle
-{
-  public:
-    UniqueHandle() noexcept = default;
-    explicit UniqueHandle(HANDLE handle) noexcept: _handle { handle } {}
-    UniqueHandle(UniqueHandle const&) = delete;
-    UniqueHandle& operator=(UniqueHandle const&) = delete;
-    UniqueHandle(UniqueHandle&& other) noexcept: _handle { std::exchange(other._handle, nullptr) } {}
-    UniqueHandle& operator=(UniqueHandle&& other) noexcept
-    {
-        if (this != &other)
-        {
-            reset();
-            _handle = std::exchange(other._handle, nullptr);
-        }
-        return *this;
-    }
-    ~UniqueHandle() { reset(); }
-
-    /// @return The handle, still owned.
-    [[nodiscard]] HANDLE get() const noexcept { return _handle; }
-
-    /// @return Whether it owns a handle.
-    [[nodiscard]] bool valid() const noexcept
-    {
-        return _handle != nullptr && _handle != INVALID_HANDLE_VALUE;
-    }
-
-    /// Closes the handle, if it owns one.
-    void reset() noexcept
-    {
-        if (valid())
-            CloseHandle(_handle);
-        _handle = nullptr;
-    }
-
-  private:
-    HANDLE _handle = nullptr;
-};
 
 /// @return @p code as the system error it is.
 [[nodiscard]] inline std::error_code errorFrom(DWORD code) noexcept
