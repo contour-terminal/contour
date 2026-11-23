@@ -156,10 +156,10 @@ namespace
     enum class Listing : uint8_t
     {
         None,
-        Forges,       ///< ForgeSpellings whose provider row is Recorded.
-        IssueSources, ///< The issueSources() that are Recorded.
-        ItemKinds,    ///< AppliesToSpellings.
-        ReservedKeys, ///< The dashboardKeys() that type a character.
+        Forges,          ///< ForgeSpellings whose provider row is Recorded.
+        IssueSources,    ///< The issueSources() that are Recorded.
+        ItemKinds,       ///< AppliesToSpellings.
+        ReservedKeys,    ///< The dashboardKeys() that type a character.
         PermissionModes, ///< PermissionModeNames.
         BuiltinProfiles, ///< builtinProfiles().
         PaneKeys,        ///< paneKeyNames().
@@ -553,6 +553,19 @@ namespace
         return ConfigProblem::NotAName;
     }
 
+    /// @return What is wrong with @p value as a repository's name, which names a directory beneath the
+    ///         worktree root: a Name, and on a Windows host one Win32 addresses by that spelling (not `con`,
+    ///         not `x.`).
+    [[nodiscard]] constexpr std::optional<ConfigProblem> repoNameProblem(std::string_view value,
+                                                                         PathStyle style) noexcept
+    {
+        if (auto const problem = nameProblem(value))
+            return problem;
+        if (style == PathStyle::Windows && !detail::isPlainWindowsName(value))
+            return ConfigProblem::NotAName;
+        return std::nullopt;
+    }
+
     /// @return What is wrong with @p value as a model: a plain alias or id, a Name without a bracketed
     ///         variant.
     [[nodiscard]] constexpr std::optional<ConfigProblem> modelProblem(std::string_view value) noexcept
@@ -733,7 +746,7 @@ namespace
         if (written)
         {
             auto key = std::format("{}.name", prefix);
-            if (auto const problem = nameProblem(*written))
+            if (auto const problem = repoNameProblem(*written, style))
                 return fail(std::move(key), *problem);
             if (std::ranges::contains(earlier, *written, &Repo::name))
                 return fail(std::move(key), ConfigProblem::Duplicate);

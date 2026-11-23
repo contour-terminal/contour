@@ -449,6 +449,18 @@ TEST_CASE("Config: a Windows host's roots", "[config]")
         CHECK(posix->pathStyle() == PathStyle::Posix);
     }
 
+    SECTION("a POSIX host's repository may be named after a Windows device")
+    {
+        for (auto const name: { "con"sv, "x."sv })
+        {
+            CAPTURE(name);
+            auto const replace = std::format(R"("name": "{}", "path":)", name);
+            auto const config = parse({ .find = R"("path":)", .replace = replace });
+            REQUIRE(config.has_value());
+            CHECK(config->repos()[0].name == name);
+        }
+    }
+
     struct Row
     {
         std::string_view label;
@@ -459,6 +471,7 @@ TEST_CASE("Config: a Windows host's roots", "[config]")
     constexpr auto RootInAnotherCase = std::array { R"(c:\users\me\WT)"sv };
     constexpr auto PosixRepo = std::array { "/home/u/repo/contour"sv };
     constexpr auto ForwardSlashes = std::array { "C:/Users/me/src/contour"sv };
+    constexpr auto DeviceDirectory = std::array { R"(C:\Users\me\src\nul)"sv };
     constexpr auto SameInAnotherCase =
         std::array { R"(C:\Users\me\src\contour)"sv, R"(c:\USERS\me\SRC\Contour)"sv };
     for (auto const& row: std::array {
@@ -482,6 +495,29 @@ TEST_CASE("Config: a Windows host's roots", "[config]")
                    .problem = ConfigProblem::NotAbsolutePath },
              Row { .label = "a repository spelled with forward slashes",
                    .input = { .worktreeRoot = Root, .repoPaths = ForwardSlashes },
+                   .problem = ConfigProblem::NotAbsolutePath },
+             // A repository's name names its worktrees' directory, so Win32 must address it by that spelling.
+             Row { .label = "a repository named after a device",
+                   .input = { .find = R"("path":)",
+                              .replace = R"("name": "con", "path":)",
+                              .worktreeRoot = Root,
+                              .repoPaths = Contour },
+                   .problem = ConfigProblem::NotAName },
+             Row { .label = "a repository named after a device, with an extension",
+                   .input = { .find = R"("path":)",
+                              .replace = R"("name": "AUX.git", "path":)",
+                              .worktreeRoot = Root,
+                              .repoPaths = Contour },
+                   .problem = ConfigProblem::NotAName },
+             Row { .label = "a repository name with a trailing dot",
+                   .input = { .find = R"("path":)",
+                              .replace = R"("name": "x.", "path":)",
+                              .worktreeRoot = Root,
+                              .repoPaths = Contour },
+                   .problem = ConfigProblem::NotAName },
+             // A directory's own name is the path's last component, which the path grammar already judges.
+             Row { .label = "a repository directory named after a device",
+                   .input = { .worktreeRoot = Root, .repoPaths = DeviceDirectory },
                    .problem = ConfigProblem::NotAbsolutePath },
          })
     {
