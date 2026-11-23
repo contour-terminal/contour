@@ -82,21 +82,41 @@ inline constexpr auto InheritanceRules = std::array {
         .name = "REMOTE_NICKNAME", .match = NameMatch::Exact, .inheritance = Inheritance::Withheld },
 };
 
+/// How environment variable names compare.
+enum class EnvironmentNameCase : uint8_t
+{
+    Sensitive = 0, ///< Byte for byte, as on POSIX.
+    Insensitive,   ///< ASCII letters fold, as Windows does; a name with a non-ASCII byte is withheld, since
+                   ///< Windows folds it by a table this host does not share (Decision 10).
+};
+
+/// The platform's own rule: Insensitive on Windows, Sensitive elsewhere.
+#ifdef _WIN32
+inline constexpr auto NativeEnvironmentNameCase = EnvironmentNameCase::Insensitive;
+#else
+inline constexpr auto NativeEnvironmentNameCase = EnvironmentNameCase::Sensitive;
+#endif
+
 /// Tells whether a command inherits a variable, by InheritanceRules.
 /// @param name The variable's name.
-/// @return What the most specific matching rule says; Kept when none matches.
-[[nodiscard]] Inheritance inheritanceOf(std::string_view name) noexcept;
+/// @param rule How @p name is compared with the rules' names; NativeEnvironmentNameCase for the platform's.
+/// @return What the most specific matching rule says; Kept when none matches. Withheld, whatever the rules
+///         say, for a name with a non-ASCII byte under EnvironmentNameCase::Insensitive.
+[[nodiscard]] Inheritance inheritanceOf(std::string_view name, EnvironmentNameCase rule) noexcept;
 
 /// Builds a declared command's whole environment: the inherited variables InheritanceRules keeps, then the
 /// manifest's `command-env`, then the command's own `command-env-for`. A later layer replaces a name in
-/// place, so every name appears once.
+/// place, so every name appears once; where names compare by @p rule as equal but are spelled differently,
+/// the later spelling replaces the earlier one with its value.
 /// @param inherited The daemon's environment, as `NAME=value` entries; an entry without `=` is skipped.
 /// @param commandEnvironment The manifest's `command-env` values.
 /// @param perCommand The command's `command-env-for` values.
+/// @param rule How names compare; NativeEnvironmentNameCase for the platform's.
 /// @return The environment, as name and value pairs.
 [[nodiscard]] std::vector<std::pair<std::string, std::string>> childEnvironment(
     std::span<std::string const> inherited,
     std::span<EnvironmentEntry const> commandEnvironment,
-    std::span<EnvironmentEntry const> perCommand);
+    std::span<EnvironmentEntry const> perCommand,
+    EnvironmentNameCase rule);
 
 } // namespace vtextension

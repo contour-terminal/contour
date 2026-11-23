@@ -109,7 +109,7 @@ std::vector<std::string> paneWithheldNames(std::span<std::string const> inherite
     for (std::string_view const entry: inherited)
     {
         auto const split = splitEntry(entry);
-        if (!split || inheritanceOf(split->first) == Inheritance::Kept)
+        if (!split || inheritanceOf(split->first, NativeEnvironmentNameCase) == Inheritance::Kept)
             continue;
         auto const appended = std::ranges::any_of(
             AppendedPaneEnvironment, [&](auto const& family) { return belongsTo(family, split->first); });

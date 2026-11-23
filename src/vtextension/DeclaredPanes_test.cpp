@@ -313,6 +313,14 @@ TEST_CASE("the pane withholds git and gh repository selection", "[vtextension][p
     }
 }
 
+#ifdef _WIN32
+TEST_CASE("paneWithheldNames folds names on Windows", "[vtextension][panes]")
+{
+    auto const inherited = std::vector<std::string> { "Git_Dir=x" };
+    CHECK(vtextension::paneWithheldNames(inherited) == std::vector<std::string> { "Git_Dir" });
+}
+#endif
+
 TEST_CASE("close, list and reveal are the host's", "[vtextension][panes]")
 {
     auto f = Fixture {};

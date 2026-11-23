@@ -16,6 +16,9 @@
 
 using vtextension::EnvironmentEntry;
 
+constexpr auto Sensitive = vtextension::EnvironmentNameCase::Sensitive;
+constexpr auto Insensitive = vtextension::EnvironmentNameCase::Insensitive;
+
 namespace
 {
 
@@ -46,7 +49,7 @@ TEST_CASE("ChildEnvironment: inheritance rows", "[daemon][processes]")
         "MYGIT_DIR=kept",
         "NO_EQUALS_SIGN",
     };
-    auto const environment = vtextension::childEnvironment(inherited, {}, {});
+    auto const environment = vtextension::childEnvironment(inherited, {}, {}, Sensitive);
 
     for (auto const name: std::array<std::string_view, 7> { "GIT_DIR",
                                                             "GIT_CONFIG_PARAMETERS",
@@ -81,7 +84,7 @@ TEST_CASE("ChildEnvironment: a later layer replaces a name in place", "[daemon][
         { .name = "GIT_CONFIG_COUNT", .value = "3" },
         { .name = "GIT_OPTIONAL_LOCKS", .value = "0" },
     };
-    CHECK(vtextension::childEnvironment(inherited, commandEnvironment, perCommand)
+    CHECK(vtextension::childEnvironment(inherited, commandEnvironment, perCommand, Sensitive)
           == Environment {
               { "PATH", "/usr/bin" },
               { "LC_ALL", "C" },
@@ -107,13 +110,13 @@ TEST_CASE("GitLab's host selectors are withheld", "[daemon][processes]")
     for (auto const name: Withheld)
     {
         INFO(name);
-        CHECK(vtextension::inheritanceOf(name) == vtextension::Inheritance::Withheld);
+        CHECK(vtextension::inheritanceOf(name, Sensitive) == vtextension::Inheritance::Withheld);
     }
-    CHECK(vtextension::inheritanceOf("GITLAB_TOKEN") == vtextension::Inheritance::Kept);
+    CHECK(vtextension::inheritanceOf("GITLAB_TOKEN", Sensitive) == vtextension::Inheritance::Kept);
 
     SECTION("a declared command")
     {
-        auto const environment = vtextension::childEnvironment(inherited, {}, {});
+        auto const environment = vtextension::childEnvironment(inherited, {}, {}, Sensitive);
         for (auto const name: Withheld)
         {
             INFO(name);
@@ -131,4 +134,95 @@ TEST_CASE("GitLab's host selectors are withheld", "[daemon][processes]")
         }
         CHECK_FALSE(std::ranges::contains(withheld, "GITLAB_TOKEN"));
     }
+}
+
+TEST_CASE("ChildEnvironment: names fold where the platform folds them", "[daemon][processes]")
+{
+    auto const inherited = std::vector<std::string> {
+        R"(Git_Dir=C:\elsewhere\.git)",
+        "git_config_parameters='core.pager'='evil'",
+        "contour_pane=1",
+        "Gh_Repo=someone/else",
+        "gitlab_host=gitlab.example.com",
+        "Glab_Remote_Alias=fork",
+        "git_ssh_command=ssh -i key",
+        R"(Git_Askpass=C:\askpass.exe)",
+        R"(Path=C:\Windows)",
+        "gh_token=token",
+    };
+    constexpr auto Withheld = std::array<std::string_view, 6> {
+        "Git_Dir", "git_config_parameters", "contour_pane", "Gh_Repo", "gitlab_host", "Glab_Remote_Alias",
+    };
+    constexpr auto Kept =
+        std::array<std::string_view, 4> { "git_ssh_command", "Git_Askpass", "Path", "gh_token" };
+
+    SECTION("insensitively")
+    {
+        auto const environment = vtextension::childEnvironment(inherited, {}, {}, Insensitive);
+        for (auto const name: Withheld)
+        {
+            INFO(name);
+            CHECK(vtextension::inheritanceOf(name, Insensitive) == vtextension::Inheritance::Withheld);
+            CHECK_FALSE(has(environment, name));
+        }
+        for (auto const name: Kept)
+        {
+            INFO(name);
+            CHECK(has(environment, name));
+        }
+    }
+    SECTION("sensitively, as today: no rule matches")
+    {
+        auto const environment = vtextension::childEnvironment(inherited, {}, {}, Sensitive);
+        for (auto const name: Withheld)
+        {
+            INFO(name);
+            CHECK(vtextension::inheritanceOf(name, Sensitive) == vtextension::Inheritance::Kept);
+            CHECK(has(environment, name));
+        }
+        for (auto const name: Kept)
+        {
+            INFO(name);
+            CHECK(has(environment, name));
+        }
+    }
+}
+
+TEST_CASE("ChildEnvironment: a non-ASCII name is withheld where names fold", "[daemon][processes]")
+{
+    // The names, spelled as UTF-8 bytes: g, U+0131 (dotless i), t_dir; and U+00DC (U umlaut), BER. Windows'
+    // table upper-cases U+0131 to I, so the first is GIT_DIR there.
+    constexpr auto Names = std::array<std::string_view, 2> { "g\xC4\xB1t_dir",
+                                                             "\xC3\x9C"
+                                                             "BER" };
+    auto inherited = std::vector<std::string> {};
+    for (auto const name: Names)
+        inherited.push_back(std::format("{}=x", name));
+
+    for (auto const name: Names)
+    {
+        INFO(name);
+        CHECK(vtextension::inheritanceOf(name, Insensitive) == vtextension::Inheritance::Withheld);
+        CHECK(vtextension::inheritanceOf(name, Sensitive) == vtextension::Inheritance::Kept);
+        CHECK_FALSE(has(vtextension::childEnvironment(inherited, {}, {}, Insensitive), name));
+        CHECK(has(vtextension::childEnvironment(inherited, {}, {}, Sensitive), name));
+    }
+}
+
+TEST_CASE("ChildEnvironment: a later layer replaces a name that differs only in case", "[daemon][processes]")
+{
+    auto const inherited = std::vector<std::string> { R"(Path=C:\a)" };
+    auto const commandEnvironment = std::vector<EnvironmentEntry> { { .name = "PATH", .value = R"(C:\b)" } };
+
+    CHECK(vtextension::childEnvironment(inherited, commandEnvironment, {}, Insensitive)
+          == Environment { { "PATH", R"(C:\b)" } });
+    CHECK(vtextension::childEnvironment(inherited, commandEnvironment, {}, Sensitive)
+          == Environment { { "Path", R"(C:\a)" }, { "PATH", R"(C:\b)" } });
+}
+
+TEST_CASE("ChildEnvironment: inherited names that differ only in case collapse, last wins",
+          "[daemon][processes]")
+{
+    auto const inherited = std::vector<std::string> { "Tmp=a", "TMP=b" };
+    CHECK(vtextension::childEnvironment(inherited, {}, {}, Insensitive) == Environment { { "TMP", "b" } });
 }

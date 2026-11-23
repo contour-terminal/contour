@@ -2,6 +2,7 @@
 #include <vtextension/ChildEnvironment.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <span>
 #include <string>
@@ -16,33 +17,81 @@ namespace
 {
     using Environment = std::vector<std::pair<std::string, std::string>>;
 
-    /// Sets @p name to @p value: in place where it is already set, appended otherwise.
-    void assign(Environment& environment, std::string_view name, std::string_view value)
+    /// @return @p c as it is.
+    [[nodiscard]] constexpr char unchanged(char c) noexcept
     {
-        auto const existing = std::ranges::find(
-            environment, name, [](auto const& entry) -> std::string_view { return entry.first; });
+        return c;
+    }
+
+    /// Folds an ASCII lower-case letter to upper case; every other byte, the UTF-8 ones included, as it is.
+    [[nodiscard]] constexpr char asciiUpper(char c) noexcept
+    {
+        return (c >= 'a' && c <= 'z') ? static_cast<char>(c - ('a' - 'A')) : c;
+    }
+
+    /// What a comparison ignores, indexed by EnvironmentNameCase.
+    constexpr auto FoldOf = std::array {
+        &unchanged,  // Sensitive
+        &asciiUpper, // Insensitive
+    };
+    static_assert(FoldOf.size() == std::to_underlying(EnvironmentNameCase::Insensitive) + 1U);
+
+    /// @return Whether @p a and @p b name one variable under @p rule.
+    [[nodiscard]] bool namesMatch(std::string_view a, std::string_view b, EnvironmentNameCase rule) noexcept
+    {
+        auto const fold = FoldOf.at(std::to_underlying(rule));
+        return std::ranges::equal(a, b, std::ranges::equal_to {}, fold, fold);
+    }
+
+    /// @return Whether @p name starts with @p prefix under @p rule.
+    [[nodiscard]] bool startsWithName(std::string_view name,
+                                      std::string_view prefix,
+                                      EnvironmentNameCase rule) noexcept
+    {
+        return name.size() >= prefix.size() && namesMatch(name.substr(0, prefix.size()), prefix, rule);
+    }
+
+    /// @return Whether every byte of @p name is ASCII.
+    [[nodiscard]] bool isAscii(std::string_view name) noexcept
+    {
+        return std::ranges::all_of(name, [](char c) { return static_cast<unsigned char>(c) < 0x80; });
+    }
+
+    /// Sets @p name to @p value: in place, under @p name's spelling, where a name matching it by @p rule is
+    /// already set; appended otherwise.
+    void assign(Environment& environment,
+                std::string_view name,
+                std::string_view value,
+                EnvironmentNameCase rule)
+    {
+        auto const existing = std::ranges::find_if(
+            environment, [&](auto const& entry) { return namesMatch(entry.first, name, rule); });
         if (existing != environment.end())
-            existing->second = value;
+            *existing = { std::string { name }, std::string { value } };
         else
             environment.emplace_back(name, value);
     }
 } // namespace
 
-Inheritance inheritanceOf(std::string_view name) noexcept
+Inheritance inheritanceOf(std::string_view name, EnvironmentNameCase rule) noexcept
 {
-    auto const exact = std::ranges::find_if(InheritanceRules, [&](InheritanceRule const& rule) {
-        return rule.match == NameMatch::Exact && rule.name == name;
+    if (rule == EnvironmentNameCase::Insensitive && !isAscii(name))
+        return Inheritance::Withheld;
+
+    auto const exact = std::ranges::find_if(InheritanceRules, [&](InheritanceRule const& candidate) {
+        return candidate.match == NameMatch::Exact && namesMatch(candidate.name, name, rule);
     });
     if (exact != InheritanceRules.end())
         return exact->inheritance;
 
     auto inheritance = Inheritance::Kept;
     auto longest = std::size_t { 0 };
-    for (auto const& rule: InheritanceRules)
-        if (rule.match == NameMatch::Prefix && name.starts_with(rule.name) && rule.name.size() > longest)
+    for (auto const& candidate: InheritanceRules)
+        if (candidate.match == NameMatch::Prefix && startsWithName(name, candidate.name, rule)
+            && candidate.name.size() > longest)
         {
-            inheritance = rule.inheritance;
-            longest = rule.name.size();
+            inheritance = candidate.inheritance;
+            longest = candidate.name.size();
         }
     return inheritance;
 }
@@ -50,7 +99,8 @@ Inheritance inheritanceOf(std::string_view name) noexcept
 std::vector<std::pair<std::string, std::string>> childEnvironment(
     std::span<std::string const> inherited,
     std::span<EnvironmentEntry const> commandEnvironment,
-    std::span<EnvironmentEntry const> perCommand)
+    std::span<EnvironmentEntry const> perCommand,
+    EnvironmentNameCase rule)
 {
     auto environment = Environment {};
     for (std::string_view const entry: inherited)
@@ -59,12 +109,12 @@ std::vector<std::pair<std::string, std::string>> childEnvironment(
         if (equals == std::string_view::npos)
             continue;
         auto const name = entry.substr(0, equals);
-        if (inheritanceOf(name) == Inheritance::Kept)
-            assign(environment, name, entry.substr(equals + 1));
+        if (inheritanceOf(name, rule) == Inheritance::Kept)
+            assign(environment, name, entry.substr(equals + 1), rule);
     }
     for (auto const& layer: { commandEnvironment, perCommand })
         for (auto const& [name, value]: layer)
-            assign(environment, name, value);
+            assign(environment, name, value, rule);
     return environment;
 }
 

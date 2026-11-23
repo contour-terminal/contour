@@ -331,8 +331,10 @@ std::expected<ProcessHandle, ProcessError> DeclaredProcesses::start(std::string_
     auto spec = vtpty::ProcessSpec {
         .argv = std::move(*argv),
         .workingDirectory = std::move(*directory),
-        .environment = childEnvironment(
-            _config.inheritedEnvironment, _config.manifest.commandEnvironment, declared->environment),
+        .environment = childEnvironment(_config.inheritedEnvironment,
+                                        _config.manifest.commandEnvironment,
+                                        declared->environment,
+                                        NativeEnvironmentNameCase),
         .timeout = declared->timeout == CommandTimeout::Short ? _config.timeouts.shortClass
                                                               : _config.timeouts.longClass,
         .outputCap = _config.limits.streamCap,
