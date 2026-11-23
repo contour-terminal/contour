@@ -218,6 +218,10 @@ namespace
     /// Whether @p path lies below @p root, which is compared by sameHostPath()'s rule, any trailing separator
     /// aside: byte for byte on Posix; on Windows ASCII letters folded and `/` and `\` both separators, as
     /// git spells a Windows path `C:/…`.
+    ///
+    /// Not isStrictlyInside(), which takes @p root normalised, where only a Windows drive root ends in a
+    /// separator: it would miss everything under a POSIX root of `/`, and under a root written with a
+    /// trailing separator. Here any trailing separators are dropped first; the comparison is the same.
     [[nodiscard]] bool isUnder(std::string_view path, std::string_view root, PathStyle style) noexcept
     {
         if (root.empty())

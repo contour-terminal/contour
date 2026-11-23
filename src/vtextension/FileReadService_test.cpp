@@ -365,6 +365,27 @@ TEST_CASE("FileReadService: a Windows nested root in another case is still fence
     CHECK(std::ranges::contains(fixture.reader.identified, std::string { R"(C:\wt\inner)" }));
 }
 
+TEST_CASE("FileReadService: a nested root's other name is fenced by its identity alone",
+          "[vtextension][file-read]")
+{
+    // `INNER-~1` is an 8.3 name of the nested root: no spelling rule ties it to `inner-repository`, so the
+    // path check passes it, and only the identity the walk meets refuses it.
+    auto fixture = Fixture { vtpty::PathStyle::Windows,
+                             { { .label = "worktrees", .paths = { R"(C:\wt)" } },
+                               { .label = "repos", .paths = { R"(C:\wt\inner-repository)" } } } };
+    auto constexpr Nested = vtpty::FileIdentity { .device = 1, .inode = 7 };
+    fixture.reader.identities.emplace(R"(C:\wt\inner-repository)", Nested);
+    fixture.reader.identities.emplace(R"(C:\wt\INNER-~1)", Nested);
+    fixture.reader.identities.emplace(R"(C:\wt\run-1)", vtpty::FileIdentity { .device = 1, .inode = 8 });
+    fixture.reader.add(R"(C:\wt\INNER-~1\x)", "fenced");
+    fixture.reader.add(R"(C:\wt\run-1\x)", "beside");
+
+    CHECK(fixture.read("worktrees", "inner-repository/x") == std::unexpected(FileError::NotGranted));
+    CHECK(fixture.reader.reads.empty());
+    CHECK(fixture.read("worktrees", "INNER-~1/x") == std::unexpected(FileError::NotGranted));
+    CHECK(fixture.read("worktrees", "run-1/x").has_value());
+}
+
 #ifndef _WIN32
 
 namespace
@@ -425,7 +446,10 @@ class RecordingOpener final: public vtpty::IDirectoryOpener
         return vtpty::nativeDirectoryOpener().createBeneath(parent, name);
     }
 
-    [[nodiscard]] vtpty::PathStyle pathStyle() const noexcept override { return vtpty::PathStyle::Posix; }
+    [[nodiscard]] vtpty::PathStyle pathStyle() const noexcept override
+    {
+        return vtpty::nativeDirectoryOpener().pathStyle();
+    }
 
     std::vector<std::string> opened; ///< Every path open() was asked for, in order.
 };

@@ -153,6 +153,8 @@ namespace detail
         constexpr auto DriveRootBytes = std::size_t { 3 };
         if (value.size() < 2 || value.size() > MaxPathBytes || value.contains('\0'))
             return false;
+        // A value spelled in neither style (a relative one, say) is judged as POSIX, which refuses it for not
+        // starting with `/`.
         switch (pathStyleOf(value).value_or(PathStyle::Posix))
         {
             case PathStyle::Posix:

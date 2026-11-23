@@ -377,17 +377,16 @@ class Harness
         REQUIRE(found != _reads.end());
         auto file = std::move(*found);
         _reads.erase(found);
-        if (file.path.ends_with("/.git"))
+        // A worktree's .git file, in the host's spelling: `/.git`, or `\.git` on a Windows host.
+        auto const style = styleOf(file.path);
+        if (file.path.ends_with(std::format("{}.git", separatorOf(style))))
         {
             auto const worktree = file.path.substr(0, file.path.size() - 5);
-            auto const id = worktree.substr(worktree.rfind('/') + 1);
-            auto const intact =
-                content && gitFileIsIntact(*content, mainOf(file.path), worktree, styleOf(worktree));
+            auto const intact = content && gitFileIsIntact(*content, mainOf(file.path), worktree, style);
             if (intact)
                 _tainted.erase(worktree);
             else if (content)
                 _tainted.insert(worktree);
-            static_cast<void>(id);
         }
         return feed(FileRead { .tag = file.tag, .content = std::move(content) });
     }
@@ -527,11 +526,12 @@ class Harness
 
     [[nodiscard]] std::string mainOf(std::string_view path) const
     {
-        // Every test repository's worktrees lie under `<root>/<repo>/`.
-        auto const rest = path.substr(WorktreeRoot.size() + 1);
-        auto const repo = rest.substr(0, rest.find('/'));
+        // Every test repository's worktrees lie under `<root>/<repo>/`, in the host's spelling.
+        auto const style = styleOf(_root);
+        auto const rest = path.substr(_root.size() + 1);
+        auto const repo = rest.substr(0, rest.find(separatorOf(style)));
         for (auto const& candidate: _repoPaths)
-            if (candidate.ends_with(std::format("/{}", repo)))
+            if (lastComponent(candidate, style) == repo)
                 return candidate;
         return std::string(ContourPath);
     }
@@ -1952,6 +1952,12 @@ TEST_CASE("a Windows host's worktree files are read by the host's spelling", "[o
     // The pane gone, the removal checks start with the worktree's .git file.
     harness.list({});
     CHECK(harness.hasRead(std::format(R"({}\.git)", worktree)));
+    // git spells the main checkout with forward slashes on Windows too; the file is intact, so the worktree
+    // is not tainted, and the harness lets the removal checks run in it.
+    harness.read(R"(\.git)", std::format("gitdir: C:/Users/u/src/contour/.git/worktrees/{}\n", PrId));
+    auto const commonDir = harness.pending("git-common-dir");
+    REQUIRE(commonDir.has_value());
+    CHECK(commonDir->cwd == worktree);
 }
 
 TEST_CASE("past the threshold, a running agent's wakes read its status board until it exists",
