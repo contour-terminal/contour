@@ -9,6 +9,8 @@
     #include <vtpty/OwnedFd.hpp>
 #endif
 
+#include <vtpty/PathStyle.hpp>
+
 #include <cstdint>
 #include <expected>
 #include <memory>
@@ -107,6 +109,9 @@ class IDirectoryOpener
     ///         the way.
     [[nodiscard]] virtual std::expected<DirectoryHandle, DirectoryError> createBeneath(
         DirectoryHandle const& parent, std::string_view name) = 0;
+
+    /// @return The grammar of the paths this opener takes and resolves.
+    [[nodiscard]] virtual PathStyle pathStyle() const noexcept = 0;
 };
 
 /// Where an opened directory's path is read from.

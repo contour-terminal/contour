@@ -204,6 +204,8 @@ namespace
                 return DirectoryHandle { std::move(*child), std::move(resolved) };
             });
         }
+
+        [[nodiscard]] PathStyle pathStyle() const noexcept override { return NativePathStyle; }
     };
 } // namespace
 

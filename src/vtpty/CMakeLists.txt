@@ -72,6 +72,7 @@ set(vtpty_HEADERS
     OwnedFd.hpp
     PageSize.hpp
     PathContainment.hpp
+    PathStyle.hpp
     PreparedSpawn.hpp
     PlacementBreaker.hpp
     Process.hpp

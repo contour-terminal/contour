@@ -53,6 +53,16 @@ TEST_CASE("DirectoryHandle: a file", "[processrunner]")
     CHECK(opened.error() == vtpty::DirectoryError::NotADirectory);
 }
 
+TEST_CASE("DirectoryHandle: the native opener speaks the platform's path grammar", "[vtpty][directory]")
+{
+#ifdef _WIN32
+    STATIC_CHECK(vtpty::NativePathStyle == vtpty::PathStyle::Windows);
+#else
+    STATIC_CHECK(vtpty::NativePathStyle == vtpty::PathStyle::Posix);
+#endif
+    CHECK(vtpty::nativeDirectoryOpener().pathStyle() == vtpty::NativePathStyle);
+}
+
 #ifndef _WIN32
 
 TEST_CASE("DirectoryHandle: a handle keeps its directory when the name is replaced", "[processrunner]")

@@ -18,6 +18,12 @@ namespace vtextension::testing
 class FakeDirectoryOpener final: public vtpty::IDirectoryOpener
 {
   public:
+    /// A fake that speaks the POSIX path grammar.
+    FakeDirectoryOpener() = default;
+
+    /// @param style The path grammar the fake reports it speaks.
+    explicit FakeDirectoryOpener(vtpty::PathStyle style) noexcept: _style { style } {}
+
     /// The directories that exist: path to resolved path.
     std::map<std::string, std::string, std::less<>> directories;
 
@@ -74,6 +80,8 @@ class FakeDirectoryOpener final: public vtpty::IDirectoryOpener
         return vtpty::DirectoryHandle::unbacked(path);
     }
 
+    [[nodiscard]] vtpty::PathStyle pathStyle() const noexcept override { return _style; }
+
     /// Every path open() was asked for, in order.
     std::vector<std::string> opened;
 
@@ -82,6 +90,9 @@ class FakeDirectoryOpener final: public vtpty::IDirectoryOpener
 
     /// Every directory createBeneath() created, by its whole path, in order.
     std::vector<std::string> created;
+
+  private:
+    vtpty::PathStyle _style = vtpty::PathStyle::Posix;
 };
 
 } // namespace vtextension::testing

@@ -160,6 +160,8 @@ namespace
             return DirectoryHandle { std::move(descriptor), std::move(*resolved) };
         }
 
+        [[nodiscard]] PathStyle pathStyle() const noexcept override { return NativePathStyle; }
+
       private:
         DescriptorPaths _paths;
     };

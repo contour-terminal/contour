@@ -332,6 +332,8 @@ class RecordingOpener final: public vtpty::IDirectoryOpener
         return vtpty::nativeDirectoryOpener().createBeneath(parent, name);
     }
 
+    [[nodiscard]] vtpty::PathStyle pathStyle() const noexcept override { return vtpty::PathStyle::Posix; }
+
     std::vector<std::string> opened; ///< Every path open() was asked for, in order.
 };
 
