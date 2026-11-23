@@ -5,7 +5,8 @@
 // finds nothing in them to interpret:
 //   "argument: [<hex>]"     each argument it was given;
 //   "environment: [<hex>]"  each variable whose name starts with CONTOUR_PROBE_, as NAME=VALUE;
-//   "directory: [<hex>]"    the directory it runs in.
+//   "directory: [<hex>]"    the directory it runs in;
+//   "module: [<hex>]"       the path of the program it runs.
 // Then OSC 133 marks the way a shell integration does (prompt start and end, command start with its
 // command line, command end), followed by a sentinel; and it keeps the pseudoconsole open long enough to
 // be read. All of it is read through the wide API, which spells what it was given as it was given.
@@ -98,6 +99,10 @@ int main()
     auto directory = std::wstring(MAX_PATH * 4, L'\0');
     directory.resize(GetCurrentDirectoryW(static_cast<DWORD>(directory.size()), directory.data()));
     report(output, "directory", directory);
+
+    auto module = std::wstring(32768, L'\0');
+    module.resize(GetModuleFileNameW(nullptr, module.data(), static_cast<DWORD>(module.size())));
+    report(output, "module", module);
 
     write(output,
           "\x1b]133;A\x1b\\prompt> \x1b]133;B\x1b\\\r\n"

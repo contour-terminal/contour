@@ -673,6 +673,8 @@ TEST_CASE("ConPty.childReceivesItsProgramPathAndArgumentsIntact", "[vtpty][conpt
     // Not read as a command line either, which would split it at the same space: it names a program.
     auto const output = runProbe(execInfo(core::pathToUtf8(program), arguments));
     CHECK(printedArguments(output) == arguments);
+    // The program it ran is the one it was given, by the path it was given.
+    CHECK(printedFields(output, "module") == std::vector<std::string> { core::pathToUtf8(program) });
 }
 
 // A program configured as a whole command line still runs -- a `shell:` setting "wsl.exe -d Ubuntu",

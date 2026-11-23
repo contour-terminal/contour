@@ -579,6 +579,12 @@ if(VTHOST_TESTING)
             VTHOST_TEST_ECHO_WASM="${CONTOUR_CARGO_TARGET_DIR}/${CONTOUR_WASM_TARGET}/release/echo.wasm")
         add_dependencies(vthost_test echo_wasm)
     endif()
+    # The process runner's child, for the Windows tests that run a command through it (see vtpty's CMakeLists).
+    if(WIN32)
+        add_dependencies(vthost_test process_runner_probe)
+        target_compile_definitions(vthost_test PRIVATE
+            VTHOST_PROCESS_RUNNER_PROBE="$<TARGET_FILE:process_runner_probe>")
+    endif()
     add_test(NAME vthost_test COMMAND vthost_test)
     # `ctest -L daemon` selects everything daemon mode must pass to be trusted -- see the same
     # label on vtworkspace, a layer it is built on. The other two, core::async and core::net, are

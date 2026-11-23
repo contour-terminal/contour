@@ -20,6 +20,11 @@
 //   spawn <file> ... [--]       starts itself with the verbs up to `--` on its own standard handles, writes
 //                               the grandchild's pid to <file>, does not wait; runs the verbs after `--`
 //   spawn-quiet <file> ... [--] the same, the grandchild's standard handles NUL and nothing else inherited
+//   report <file>               from here on, what the verbs write goes to <file>.part, moved to <file> when
+//                               the probe exits normally
+//   spawn-detached <file> ...   starts itself with the verbs that follow, detached from every console, its
+//                               standard handles NUL and nothing else inherited; writes the grandchild's pid
+//                               to <file>, does not wait -- only a job object reaches such a grandchild
 //   crash                       raises an exception nothing handles, of code UnhandledExceptionCode
 //
 // Everything it writes is UTF-8, through WriteFile(): no C runtime buffer stands between a verb and its pipe.
@@ -37,6 +42,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
@@ -139,6 +145,10 @@ void writeWhole(std::wstring_view path, std::string_view text)
     return path;
 }
 
+/// The creation flags of a spawn-detached grandchild: no console of its own, and a process group that ignores
+/// the console's control events.
+constexpr auto DetachedFlags = DWORD { DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP };
+
 /// What a grandchild's standard handles are.
 enum class GrandchildStreams : uint8_t
 {
@@ -146,8 +156,9 @@ enum class GrandchildStreams : uint8_t
     Null,     ///< NUL, and nothing else inherited.
 };
 
-/// Starts this program with @p verbs, and writes the grandchild's pid to @p pidFile; does not wait.
-void spawnSelf(std::wstring_view pidFile, Arguments verbs, GrandchildStreams streams)
+/// Starts this program with @p verbs under @p creationFlags, and writes the grandchild's pid to @p pidFile;
+/// does not wait.
+void spawnSelf(std::wstring_view pidFile, Arguments verbs, GrandchildStreams streams, DWORD creationFlags)
 {
     auto const self = selfPath();
     auto commandLine = quotedArgument(self);
@@ -215,12 +226,14 @@ void spawnSelf(std::wstring_view pidFile, Arguments verbs, GrandchildStreams str
                                              nullptr)
                        == FALSE)
                 fail("cannot build the handle list");
-            flags = EXTENDED_STARTUPINFO_PRESENT;
             break;
         }
     }
 
     auto process = PROCESS_INFORMATION {};
+    if (streams == GrandchildStreams::Null)
+        flags |= EXTENDED_STARTUPINFO_PRESENT;
+    flags |= creationFlags;
     if (CreateProcessW(self.c_str(),
                        commandLine.data(),
                        nullptr,
@@ -348,6 +361,44 @@ void writeLine(HANDLE output, Arguments arguments)
     write(output, core::toUtf8(arguments.front()) + '\n');
 }
 
+/// Where `report` sends what the verbs write: the file it is finally moved to, and the part it is written to
+/// until then, through @p handle.
+struct ReportTarget
+{
+    std::wstring file; ///< The file the part is moved to when the probe exits normally.
+    std::wstring part; ///< The file the output is written to meanwhile.
+    HANDLE handle;     ///< The part, open for writing; not inherited.
+};
+
+/// Set by `report`: the output the verbs write goes to a part until the probe exits normally.
+std::optional<ReportTarget> reportTarget;
+
+/// Sends everything the verbs write from here on to `<path>.part`, which finishReport() moves to @p path.
+void reportTo(std::wstring_view path)
+{
+    auto part = std::wstring { path } + L".part";
+    auto const handle =
+        CreateFileW(part.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE)
+        fail("cannot create the report file");
+    SetStdHandle(STD_OUTPUT_HANDLE, handle);
+    SetStdHandle(STD_ERROR_HANDLE, handle);
+    reportTarget = ReportTarget { .file = std::wstring { path }, .part = std::move(part), .handle = handle };
+}
+
+/// Moves the report's part over its file, if `report` ran: the output is complete once the probe exits.
+/// @return 0, or the usage error when the part cannot be moved.
+[[nodiscard]] int finishReport()
+{
+    if (!reportTarget)
+        return 0;
+    CloseHandle(reportTarget->handle);
+    if (MoveFileExW(reportTarget->part.c_str(), reportTarget->file.c_str(), MOVEFILE_REPLACE_EXISTING)
+        == FALSE)
+        return static_cast<int>(UsageError);
+    return 0;
+}
+
 /// Every verb the probe knows.
 constexpr auto Verbs = std::array {
     Verb { .name = L"out",
@@ -397,13 +448,22 @@ constexpr auto Verbs = std::array {
            .arity = { .fixed = 1, .trailing = Trailing::UntilSeparator },
            .action =
                [](Arguments arguments) {
-                   spawnSelf(arguments.front(), arguments.subspan(1), GrandchildStreams::Ours);
+                   spawnSelf(arguments.front(), arguments.subspan(1), GrandchildStreams::Ours, DWORD { 0 });
                } },
     Verb { .name = L"spawn-quiet",
            .arity = { .fixed = 1, .trailing = Trailing::UntilSeparator },
            .action =
                [](Arguments arguments) {
-                   spawnSelf(arguments.front(), arguments.subspan(1), GrandchildStreams::Null);
+                   spawnSelf(arguments.front(), arguments.subspan(1), GrandchildStreams::Null, DWORD { 0 });
+               } },
+    Verb { .name = L"report",
+           .arity = { .fixed = 1 },
+           .action = [](Arguments arguments) { reportTo(arguments.front()); } },
+    Verb { .name = L"spawn-detached",
+           .arity = { .fixed = 1, .trailing = Trailing::Rest },
+           .action =
+               [](Arguments arguments) {
+                   spawnSelf(arguments.front(), arguments.subspan(1), GrandchildStreams::Null, DetachedFlags);
                } },
     Verb { .name = L"crash",
            .arity = { .fixed = 0 },
@@ -455,5 +515,5 @@ int main()
         | std::ranges::to<std::vector>();
     run(arguments);
     LocalFree(static_cast<HLOCAL>(argv));
-    return 0;
+    return finishReport();
 }

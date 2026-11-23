@@ -6,10 +6,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <iterator>
 #include <ranges>
 #include <string>
 #include <system_error>
@@ -446,12 +448,98 @@ TEST_CASE("ProgramCommandCapture.spawnFailure", "[commandcapture]")
     CHECK(result.error().cause);
 }
 
+namespace
+{
+/// @return What @p file holds, read whole.
+std::string readWhole(std::filesystem::path const& file)
+{
+    auto in = std::ifstream { file, std::ios::binary };
+    return std::string { std::istreambuf_iterator<char> { in }, std::istreambuf_iterator<char> {} };
+}
+
+/// Ends the process whose pid @p pidFile holds, on destruction, whatever the test did: a process a failed
+/// check left running must not outlive the test. Nothing is ended when the file is missing or unreadable.
+class ProcessEndedOnExit
+{
+  public:
+    explicit ProcessEndedOnExit(std::filesystem::path pidFile): _pidFile { std::move(pidFile) } {}
+    ProcessEndedOnExit(ProcessEndedOnExit const&) = delete;
+    ProcessEndedOnExit& operator=(ProcessEndedOnExit const&) = delete;
+    ~ProcessEndedOnExit()
+    {
+        auto ec = std::error_code {};
+        if (!std::filesystem::exists(_pidFile, ec))
+            return;
+        auto const text = readWhole(_pidFile);
+        auto pid = DWORD {};
+        if (std::from_chars(text.data(), text.data() + text.size(), pid).ec != std::errc {})
+            return;
+        if (auto* const process = OpenProcess(PROCESS_TERMINATE, FALSE, pid); process != nullptr)
+        {
+            TerminateProcess(process, 0);
+            CloseHandle(process);
+        }
+    }
+
+  private:
+    std::filesystem::path _pidFile;
+};
+/// Runs @p commandLine to its end, outside any job object, so a grandchild it leaves is not ended with it.
+/// Fails the test unless the command starts and exits 0 within ten seconds.
+void runOutsideAnyJob(std::wstring commandLine)
+{
+    auto startup = STARTUPINFOW { .cb = sizeof(STARTUPINFOW) };
+    auto process = PROCESS_INFORMATION {};
+    REQUIRE(CreateProcessW(
+                nullptr, commandLine.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startup, &process)
+            != FALSE);
+    CloseHandle(process.hThread);
+    REQUIRE(WaitForSingleObject(process.hProcess, 10000) == WAIT_OBJECT_0);
+    auto exitCode = DWORD {};
+    REQUIRE(GetExitCodeProcess(process.hProcess, &exitCode) != FALSE);
+    CloseHandle(process.hProcess);
+    CHECK(exitCode == 0);
+}
+} // namespace
+
 TEST_CASE("process_runner_probe runs its verbs", "[processrunner][probe]")
 {
     auto capture = ProgramCommandCapture { core::async::StopToken {} };
     auto const line = capture.run(std::format(R"("{}" args a "b c")", VTPTY_PROCESS_RUNNER_PROBE), 10s, {});
     REQUIRE(line.has_value());
     CHECK(*line == "a|b c");
+
+    auto const scratch = ScratchDir {};
+    auto const probe = std::format(R"("{}")", VTPTY_PROCESS_RUNNER_PROBE);
+
+    // `report` moves what the verbs wrote into the file, once the probe has exited normally.
+    auto const reported = scratch.path() / "r";
+    REQUIRE(
+        capture.run(std::format(R"({} report "{}" args a)", probe, reported.string()), 10s, {}).has_value());
+    CHECK(readWhole(reported) == "a\n");
+
+    // `spawn-detached` leaves a grandchild that outlives the probe; the grandchild's pid is written twice.
+    // ProgramCommandCapture ends every process in its job when it returns, so the probe runs outside one
+    // here: the grandchild must still be alive when the probe has exited.
+    auto const grandchildPid = scratch.path() / "g";
+    auto const grandchildSelfPid = scratch.path() / "gp";
+    auto const endGrandchild = ProcessEndedOnExit { grandchildPid };
+    runOutsideAnyJob(std::format(L"\"{}\" spawn-detached \"{}\" pid \"{}\" sleep 2000",
+                                 std::filesystem::path { VTPTY_PROCESS_RUNNER_PROBE }.wstring(),
+                                 grandchildPid.wstring(),
+                                 grandchildSelfPid.wstring()));
+    auto const deadline = std::chrono::steady_clock::now() + 5s;
+    while ((!std::filesystem::exists(grandchildPid) || !std::filesystem::exists(grandchildSelfPid))
+           && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(20ms);
+    REQUIRE(std::filesystem::exists(grandchildPid));
+    REQUIRE(std::filesystem::exists(grandchildSelfPid));
+    auto const pid = readWhole(grandchildPid);
+    CHECK(pid == readWhole(grandchildSelfPid));
+    auto const process = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(std::stoul(pid)));
+    REQUIRE(process != nullptr);
+    CHECK(WaitForSingleObject(process, 0) == WAIT_TIMEOUT);
+    CloseHandle(process);
 }
 #endif
 
