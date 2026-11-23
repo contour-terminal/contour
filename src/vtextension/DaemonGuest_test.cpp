@@ -704,6 +704,8 @@ struct Spread
 /// @return What `findmnt -no FSTYPE -T` says of @p directory: its filesystem's type.
 [[nodiscard]] std::string fileSystemTypeOf(std::filesystem::path const& directory)
 {
+    // findmnt is util-linux, absent on macOS and Windows, and the value is only printed beside a benchmark figure.
+#ifdef __linux__
     auto const command = std::format("findmnt -no FSTYPE -T '{}'", directory.string());
     auto* pipe = ::popen(command.c_str(), "r");
     if (pipe == nullptr)
@@ -716,6 +718,10 @@ struct Spread
     while (!output.empty() && (output.back() == '\n' || output.back() == ' '))
         output.pop_back();
     return output.empty() ? std::string("unknown") : output;
+#else
+    std::ignore = directory;
+    return "unknown";
+#endif
 }
 
 /// What one series of measured callbacks took, and wrote.
