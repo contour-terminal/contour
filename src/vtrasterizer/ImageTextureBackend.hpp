@@ -34,8 +34,8 @@ struct CreateImageTexture
     /// @c owner is held, which is why the command carries the owner along with it.
     std::span<uint8_t const> data;
     /// Keeps the storage behind @c data alive until this queued command executes -- either the source
-    /// image, whose pixels upload straight out of its own buffer, or a widened copy of them. Uploading
-    /// a full-screen image would otherwise copy tens of megabytes on the render thread.
+    /// image itself or a widened copy of its pixels -- so that queuing the upload copies nothing; the
+    /// backend reads the pixels once, when it executes the command.
     std::shared_ptr<void const> owner;
 };
 

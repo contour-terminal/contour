@@ -9,6 +9,7 @@ set(QT_RESOURCES DisplayResources.qrc)
 add_library(ContourTerminalDisplay STATIC
     ContentScale.cpp ContentScale.hpp
     ImageDecoding.cpp ImageDecoding.hpp
+    ImagePremultiply.hpp
     RhiRenderer.cpp RhiRenderer.hpp
     ShaderConfig.cpp ShaderConfig.hpp
     TerminalDisplay.cpp TerminalDisplay.hpp
@@ -33,6 +34,7 @@ qt6_add_shaders(ContourTerminalDisplay "contour_rhi_shaders"
         shaders/background.frag
         shaders/text.vert
         shaders/text.frag
+        shaders/image.frag
 )
 
 # Disable all deprecated Qt functions prior to Qt 6.0

@@ -19,6 +19,19 @@
 namespace vtrasterizer
 {
 
+/// The GPU memory an image's texture takes, which is what the image texture budget counts.
+///
+/// Whatever the protocol sent, the texture is RGBA8, and it carries a full mip chain so that it filters
+/// smoothly at any size it is drawn at. The chain is counted as a third again on top of the texture's own
+/// level, which is what it takes for any picture a few pixels wide and tall; a strip one pixel high takes
+/// up to twice its level, a difference the budget does not need to resolve.
+/// @param size The image's size in pixels.
+/// @return The texture's size in bytes.
+[[nodiscard]] constexpr size_t imageTextureBytes(vtbackend::ImageSize size) noexcept
+{
+    return static_cast<size_t>(size.area()) * 4 * 4 / 3;
+}
+
 /// Image Rendering API.
 ///
 /// Can render any arbitrary RGBA image (for example Sixel Graphics images).

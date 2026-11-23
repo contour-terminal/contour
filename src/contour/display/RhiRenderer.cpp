@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/display/ImagePremultiply.hpp>
 #include <contour/display/Logging.hpp>
 #include <contour/display/RhiRenderer.hpp>
 #include <contour/display/RhiVertexLayout.hpp>
@@ -13,6 +14,7 @@
 #include <core/Defines.hpp>
 #include <core/Utils.hpp>
 
+#include <QtCore/QByteArray>
 #include <QtCore/QFile>
 #include <QtCore/QVarLengthArray>
 #include <QtCore/QtGlobal>
@@ -73,6 +75,7 @@ namespace
     constexpr auto BackgroundFragmentShaderPath = ":/contour/display/shaders/background.frag.qsb";
     constexpr auto TextVertexShaderPath = ":/contour/display/shaders/text.vert.qsb";
     constexpr auto TextFragmentShaderPath = ":/contour/display/shaders/text.frag.qsb";
+    constexpr auto ImageFragmentShaderPath = ":/contour/display/shaders/image.frag.qsb";
     // }}}
 
     // {{{ Data-driven render-pass table
@@ -264,50 +267,96 @@ void RhiRenderer::createAtlasTexture(QRhi* rhi, ImageSize size)
     }
 }
 
-QVarLengthArray<QRhiShaderResourceBinding, 2> RhiRenderer::atlasSrbBindings(QRhiBuffer* uniformBuffer,
-                                                                            bool hasSampler) const
+void RhiRenderer::createImageSampler(QRhi* rhi)
 {
-    // Binding 0 (the uniform block) is shared by every pass; binding 1 (the atlas sampler) is added only for
-    // sampling passes.
-    QVarLengthArray<QRhiShaderResourceBinding, 2> bindings;
+    // Images are drawn at whatever size their placement asks for. image.frag box-filters a shrunk image
+    // over each pixel's footprint from bilinear taps at an explicit mip level, so this sampler is linear
+    // with a mip chain to choose from. Nearest, as the atlas samples, would keep one texel in N and drop
+    // the rest, which is what made a downscaled picture's text look aliased.
+    if (!_imageSampler)
+    {
+        _imageSampler.reset(rhi->newSampler(QRhiSampler::Linear,
+                                            QRhiSampler::Linear,
+                                            QRhiSampler::Linear,
+                                            QRhiSampler::ClampToEdge,
+                                            QRhiSampler::ClampToEdge));
+        if (!_imageSampler->create())
+            errorLog()("Failed to create RHI image sampler.");
+    }
+}
+
+QVarLengthArray<QRhiShaderResourceBinding, 3> RhiRenderer::srbBindings(FramePass pass,
+                                                                       QRhiBuffer* uniformBuffer) const
+{
+    // Binding 0 (the uniform block) is shared by every pass; the sampling passes add their texture at
+    // binding 1, and the image pass its size block at binding 2.
+    QVarLengthArray<QRhiShaderResourceBinding, 3> bindings;
     bindings.append(QRhiShaderResourceBinding::uniformBuffer(
         0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage, uniformBuffer));
-    if (hasSampler)
-        bindings.append(QRhiShaderResourceBinding::sampledTexture(
-            1, QRhiShaderResourceBinding::FragmentStage, _atlasTexture.get(), _atlasSampler.get()));
+    switch (pass)
+    {
+        case FramePass::Rect: break;
+        case FramePass::Text:
+            bindings.append(QRhiShaderResourceBinding::sampledTexture(
+                1, QRhiShaderResourceBinding::FragmentStage, _atlasTexture.get(), _atlasSampler.get()));
+            break;
+        case FramePass::Image:
+            // Layout only: every draw binds the image's own set. Stand-ins of the right kinds.
+            bindings.append(QRhiShaderResourceBinding::sampledTexture(
+                1, QRhiShaderResourceBinding::FragmentStage, _atlasTexture.get(), _imageSampler.get()));
+            bindings.append(QRhiShaderResourceBinding::uniformBuffer(
+                2, QRhiShaderResourceBinding::FragmentStage, uniformBuffer));
+            break;
+    }
     return bindings;
 }
 
-void RhiRenderer::rebindAtlasTexture(RhiPipeline& pipeline, QRhiBuffer* uniformBuffer)
+void RhiRenderer::rebindAtlasTexture(RhiPipeline& pipeline, FramePass pass, QRhiBuffer* uniformBuffer)
 {
     if (!pipeline.srb)
         return;
     // The binding layout is unchanged; only the atlas texture object differs after a recreate. Rebuild the
-    // QRhiShaderResourceBindings in place (same layout as createPipeline via atlasSrbBindings) so the
-    // pipeline keeps its srb object while binding 1 points at the new _atlasTexture. Every atlas rebind is a
-    // sampling pass, so hasSampler is always true here.
-    auto const bindings = atlasSrbBindings(uniformBuffer, /*hasSampler*/ true);
+    // QRhiShaderResourceBindings in place (same layout as createPipeline via srbBindings) so the pipeline
+    // keeps its srb object while binding 1 points at the new _atlasTexture.
+    auto const bindings = srbBindings(pass, uniformBuffer);
     pipeline.srb->setBindings(bindings.cbegin(), bindings.cend());
     pipeline.srb->create();
 }
 
-RhiRenderer::PassDescriptor RhiRenderer::passDescriptor(bool isText)
+RhiRenderer::PassDescriptor RhiRenderer::passDescriptor(FramePass pass)
 {
-    if (isText)
-        return PassDescriptor { .vertexShaderPath = TextVertexShaderPath,
-                                .fragmentShaderPath = TextFragmentShaderPath,
-                                .uniformBlockSize = TextUniformBlockSize,
-                                .vertexStride = TextVertexStride,
-                                .attributes = textVertexAttributes(),
-                                .hasSampler = true,
-                                .debugName = "text/glyph" };
-    return PassDescriptor { .vertexShaderPath = BackgroundVertexShaderPath,
-                            .fragmentShaderPath = BackgroundFragmentShaderPath,
-                            .uniformBlockSize = RectUniformBlockSize,
-                            .vertexStride = RectVertexStride,
-                            .attributes = rectVertexAttributes(),
-                            .hasSampler = false,
-                            .debugName = "background/rect" };
+    switch (pass)
+    {
+        case FramePass::Rect:
+            return PassDescriptor { .pass = pass,
+                                    .vertexShaderPath = BackgroundVertexShaderPath,
+                                    .fragmentShaderPath = BackgroundFragmentShaderPath,
+                                    .uniformBlockSize = RectUniformBlockSize,
+                                    .vertexStride = RectVertexStride,
+                                    .attributes = rectVertexAttributes(),
+                                    .blending = Blending::StraightAlpha,
+                                    .debugName = "background/rect" };
+        case FramePass::Text:
+            return PassDescriptor { .pass = pass,
+                                    .vertexShaderPath = TextVertexShaderPath,
+                                    .fragmentShaderPath = TextFragmentShaderPath,
+                                    .uniformBlockSize = TextUniformBlockSize,
+                                    .vertexStride = TextVertexStride,
+                                    .attributes = textVertexAttributes(),
+                                    .blending = Blending::StraightAlpha,
+                                    .debugName = "text/glyph" };
+        case FramePass::Image:
+            // The text pass's vertex shader and vertex layout: image quads are written into its buffer.
+            return PassDescriptor { .pass = pass,
+                                    .vertexShaderPath = TextVertexShaderPath,
+                                    .fragmentShaderPath = ImageFragmentShaderPath,
+                                    .uniformBlockSize = TextUniformBlockSize,
+                                    .vertexStride = TextVertexStride,
+                                    .attributes = textVertexAttributes(),
+                                    .blending = Blending::PremultipliedAlpha,
+                                    .debugName = "image" };
+    }
+    std::unreachable();
 }
 
 void RhiRenderer::createPipeline(QRhi* rhi,
@@ -321,12 +370,13 @@ void RhiRenderer::createPipeline(QRhi* rhi,
     if (!vertexShader.isValid() || !fragmentShader.isValid())
         return;
 
-    // A pass that samples the glyph atlas needs the atlas texture + sampler to already exist (they are
-    // referenced by binding 1); createPipelines() guarantees this ordering before invoking us.
-    if (desc.hasSampler)
+    // A sampling pass needs the atlas texture and the samplers to already exist (they are referenced by
+    // binding 1); createPipelines() guarantees this ordering before invoking us.
+    if (desc.pass != FramePass::Rect)
     {
         Require(_atlasTexture != nullptr);
         Require(_atlasSampler != nullptr);
+        Require(_imageSampler != nullptr);
     }
 
     // Dynamic uniform buffer feeding both stages (std140 `Buf` block at binding 0). The vertex buffer is
@@ -343,7 +393,7 @@ void RhiRenderer::createPipeline(QRhi* rhi,
         uniformBuffer = out.uniformBuffer.get();
     }
 
-    auto const bindings = atlasSrbBindings(uniformBuffer, desc.hasSampler);
+    auto const bindings = srbBindings(desc.pass, uniformBuffer);
     out.srb.reset(rhi->newShaderResourceBindings());
     out.srb->setBindings(bindings.cbegin(), bindings.cend());
     out.srb->create();
@@ -362,12 +412,14 @@ void RhiRenderer::createPipeline(QRhi* rhi,
     // QRhiCommandBuffer::setScissor, which requires the pipeline to opt into dynamic scissoring.
     pipeline->setFlags(QRhiGraphicsPipeline::UsesScissor);
 
-    // Blend: glBlendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA, ONE, ONE), color write all.
+    // Blend: glBlendFuncSeparate(SRC_ALPHA or ONE, ONE_MINUS_SRC_ALPHA, ONE, ONE), color write all. The
+    // source factor follows what the pass's shader outputs: straight or premultiplied alpha.
     QRhiGraphicsPipeline::TargetBlend blend;
     blend.enable = true;
     blend.colorWrite = QRhiGraphicsPipeline::ColorMask(QRhiGraphicsPipeline::R | QRhiGraphicsPipeline::G
                                                        | QRhiGraphicsPipeline::B | QRhiGraphicsPipeline::A);
-    blend.srcColor = QRhiGraphicsPipeline::SrcAlpha;
+    blend.srcColor = desc.blending == Blending::PremultipliedAlpha ? QRhiGraphicsPipeline::One
+                                                                   : QRhiGraphicsPipeline::SrcAlpha;
     blend.dstColor = QRhiGraphicsPipeline::OneMinusSrcAlpha;
     blend.opColor = QRhiGraphicsPipeline::Add;
     blend.srcAlpha = QRhiGraphicsPipeline::One;
@@ -422,25 +474,40 @@ void RhiRenderer::createPipelines(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
         auto const size = requested.area() != 0 ? requested : ImageSize { Width(1), Height(1) };
         createAtlasTexture(rhi, size);
     }
+    createImageSampler(rhi);
 
     // The render passes, described as data (passDescriptor()), each paired with the pipeline slot it
     // populates. Adding a pass is one more row here plus its FramePass tag and record step — no new
-    // near-duplicate builder function.
+    // near-duplicate builder function. A row may share an earlier row's uniform buffer (the image pass
+    // shares the text pass's, as it shares its vertex shader), so the rows are built in order.
     struct PassEntry
     {
         PassDescriptor descriptor;
         RhiPipeline* slot = nullptr;
+        RhiPipeline const* uniformsOf = nullptr; ///< Whose uniform buffer to share; null to own one.
     };
     std::array const passes {
-        PassEntry { .descriptor = passDescriptor(/*isText*/ false), .slot = &_rectPipeline },
-        PassEntry { .descriptor = passDescriptor(/*isText*/ true), .slot = &_textPipeline },
+        PassEntry {
+            .descriptor = passDescriptor(FramePass::Rect), .slot = &_rectPipeline, .uniformsOf = nullptr },
+        PassEntry {
+            .descriptor = passDescriptor(FramePass::Text), .slot = &_textPipeline, .uniformsOf = nullptr },
+        PassEntry { .descriptor = passDescriptor(FramePass::Image),
+                    .slot = &_imagePipeline,
+                    .uniformsOf = &_textPipeline },
     };
     for (auto const& entry: passes)
-        createPipeline(rhi, rpDesc, entry.descriptor, *entry.slot);
+        createPipeline(rhi,
+                       rpDesc,
+                       entry.descriptor,
+                       *entry.slot,
+                       entry.uniformsOf != nullptr ? entry.uniformsOf->uniformBuffer.get() : nullptr);
 
-    display::displayLog()("createPipelines: rect={} text={}",
+    if (_imagePipeline.pipeline == nullptr)
+        errorLog()("The image pipeline could not be built; images will not be drawn.");
+    display::displayLog()("createPipelines: rect={} text={} image={}",
                           _rectPipeline.pipeline != nullptr,
-                          _textPipeline.pipeline != nullptr);
+                          _textPipeline.pipeline != nullptr,
+                          _imagePipeline.pipeline != nullptr);
 }
 // }}}
 
@@ -634,6 +701,7 @@ void RhiRenderer::renderImageQuad(atlas::RenderImageQuad param)
     auto const nw = param.source.width;
     auto const nh = param.source.height;
 
+    // The image pass's shader has no selector to read; the text pass's columns are kept as they are.
     float const i = 0;
     auto const u = static_cast<float>(FRAGMENT_SELECTOR_IMAGE_BGRA);
 
@@ -794,9 +862,11 @@ void RhiRenderer::executeCreateImageTexture(QRhiResourceUpdateBatch& updates,
     }
 
     auto const pixelSize = QSize(unbox<int>(param.size.width), unbox<int>(param.size.height));
-    auto resources = ImageTextureResources { .texture = {}, .swapchain = {}, .offscreen = {} };
+    auto resources =
+        ImageTextureResources { .texture = {}, .sizeUniform = {}, .swapchain = {}, .offscreen = {} };
 
-    resources.texture.reset(_rhi->newTexture(QRhiTexture::RGBA8, pixelSize, 1, {}));
+    resources.texture.reset(_rhi->newTexture(
+        QRhiTexture::RGBA8, pixelSize, 1, QRhiTexture::MipMapped | QRhiTexture::UsedWithGenerateMips));
     if (!resources.texture->create())
     {
         errorLog()("Failed to create RHI image texture of size {}.", param.size);
@@ -804,10 +874,31 @@ void RhiRenderer::executeCreateImageTexture(QRhiResourceUpdateBatch& updates,
         return;
     }
 
-    auto subresource =
-        QRhiTextureSubresourceUploadDescription(param.data.data(), static_cast<int>(param.data.size()));
+    // Every resource is created before anything is queued on @p updates: a failure returns with
+    // resources destroyed, and a queued upload naming one of them would outlive it.
+    resources.sizeUniform.reset(
+        _rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, rhilayout::ImageUniformBlockSize));
+    if (!resources.sizeUniform->create())
+    {
+        errorLog()("Failed to create RHI image-size buffer for an image of size {}.", param.size);
+        _failedImageTextures.push_back(param.id);
+        return;
+    }
+
+    // The upload takes its own copy of the pixels anyway, so they are premultiplied on the way into it: the
+    // image's own buffer stays straight alpha for everything else that reads it.
+    auto pixels = QByteArray(static_cast<qsizetype>(param.data.size()), Qt::Uninitialized);
+    premultiplyAlpha(
+        param.data,
+        std::span { reinterpret_cast<uint8_t*>(pixels.data()), static_cast<size_t>(pixels.size()) });
+    auto subresource = QRhiTextureSubresourceUploadDescription(pixels);
     subresource.setDataStride(unbox<quint32>(param.size.width) * 4);
     updates.uploadTexture(resources.texture.get(), QRhiTextureUploadDescription({ 0, 0, subresource }));
+    updates.generateMips(resources.texture.get());
+    auto const imageSize =
+        std::array { unbox<float>(param.size.width), unbox<float>(param.size.height), 0.0f, 0.0f };
+    updates.updateDynamicBuffer(
+        resources.sizeUniform.get(), rhilayout::ImageUniformSizeOffset, sizeof(imageSize), imageSize.data());
 
     // The binding sets are deliberately not built here. Both name a pipeline's uniform buffer, and
     // neither pipeline need exist yet -- the screenshot one is not built until the first capture --
@@ -816,21 +907,25 @@ void RhiRenderer::executeCreateImageTexture(QRhiResourceUpdateBatch& updates,
     _imageTextures.insert_or_assign(param.id.value, std::move(resources));
 }
 
-QRhiShaderResourceBindings* RhiRenderer::createImageSrb(QRhiTexture* texture, QRhiBuffer* uniformBuffer)
+QRhiShaderResourceBindings* RhiRenderer::createImageSrb(QRhiTexture* texture,
+                                                        QRhiBuffer* sizeUniform,
+                                                        QRhiBuffer* uniformBuffer)
 {
     Require(_rhi != nullptr);
 
-    // Binding 1 names this image instead of the atlas; binding 0 names the uniform buffer of
-    // whichever pipeline ends up drawing. The atlas sampler is Nearest + ClampToEdge, which is
-    // exactly what the CPU resampler this replaces did (it truncates the source coordinate).
-    // Anything else would move pixels.
+    // Binding 1 names this image instead of the atlas, sampled through the image sampler (linear, mipmapped,
+    // ClampToEdge), and binding 2 its size; binding 0 names the uniform buffer of whichever pipeline ends up
+    // drawing. The layout matches srbBindings(FramePass::Image), as every set used with the image pipeline
+    // must.
     auto* srb = _rhi->newShaderResourceBindings();
     srb->setBindings({ QRhiShaderResourceBinding::uniformBuffer(
                            0,
                            QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage,
                            uniformBuffer),
                        QRhiShaderResourceBinding::sampledTexture(
-                           1, QRhiShaderResourceBinding::FragmentStage, texture, _atlasSampler.get()) });
+                           1, QRhiShaderResourceBinding::FragmentStage, texture, _imageSampler.get()),
+                       QRhiShaderResourceBinding::uniformBuffer(
+                           2, QRhiShaderResourceBinding::FragmentStage, sizeUniform) });
     if (!srb->create())
     {
         errorLog()("Failed to create RHI image shader resource bindings.");
@@ -842,7 +937,7 @@ QRhiShaderResourceBindings* RhiRenderer::createImageSrb(QRhiTexture* texture, QR
 
 void RhiRenderer::refreshImageShaderResources(bool offscreen)
 {
-    if (_rhi == nullptr || _atlasSampler == nullptr)
+    if (_rhi == nullptr || _imageSampler == nullptr)
         return;
 
     auto const& pipeline = offscreen ? _screenshotTextPipeline : _textPipeline;
@@ -856,7 +951,7 @@ void RhiRenderer::refreshImageShaderResources(bool offscreen)
         if (set.srb != nullptr && set.uniformBuffer == uniformBuffer)
             continue; // already names the buffer that will be bound
 
-        set.srb.reset(createImageSrb(resources.texture.get(), uniformBuffer));
+        set.srb.reset(createImageSrb(resources.texture.get(), resources.sizeUniform.get(), uniformBuffer));
         set.uniformBuffer = set.srb != nullptr ? uniformBuffer : nullptr;
     }
 }
@@ -885,8 +980,8 @@ void RhiRenderer::recordImagePass(std::vector<ImageQuadBatch> const& batches)
             continue;
         }
 
-        // Images ride the text pass's vertex buffer: identical layout, so the only thing that makes
-        // this a separate draw is which texture binding 1 names.
+        // Images ride the text pass's vertex buffer: identical layout, drawn by the image pipeline with
+        // the image's own resource set.
         auto const firstVertex =
             static_cast<quint32>(_frameTextVertices.size() / rhilayout::TextVertexFloats);
         _frameTextVertices.reserve(_frameTextVertices.size() + batch.buffer.size());
@@ -970,10 +1065,14 @@ void RhiRenderer::replayDrawItems(QRhiCommandBuffer* cb, QSize targetPixelSize, 
     // render-pass descriptor, with its own uniform buffers carrying the item-local transform) or the
     // swapchain set. Both share the swapchain set's vertex buffers (geometry is identical), so
     // `geometry` always refers to the swapchain pipeline that owns them.
-    auto const& drawSet = [&](bool isRect) -> RhiPipeline const& {
-        if (offscreen)
-            return isRect ? _screenshotRectPipeline : _screenshotTextPipeline;
-        return isRect ? _rectPipeline : _textPipeline;
+    auto const& drawSet = [&](FramePass pass) -> RhiPipeline const& {
+        switch (pass)
+        {
+            case FramePass::Rect: return offscreen ? _screenshotRectPipeline : _rectPipeline;
+            case FramePass::Text: return offscreen ? _screenshotTextPipeline : _textPipeline;
+            case FramePass::Image: return offscreen ? _screenshotImagePipeline : _imagePipeline;
+        }
+        std::unreachable();
     };
 
     for (auto const& item: _frameDrawItems)
@@ -982,12 +1081,14 @@ void RhiRenderer::replayDrawItems(QRhiCommandBuffer* cb, QSize targetPixelSize, 
             continue;
 
         auto const isRect = item.pass == FramePass::Rect;
-        auto const& drawPipeline = drawSet(isRect);
+        auto const& drawPipeline = drawSet(item.pass);
+        if (drawPipeline.pipeline == nullptr)
+            continue; // the image pass is optional: a backend that cannot build it still draws the text
         auto const& geometry = isRect ? _rectPipeline : _textPipeline;
         auto const vertexStride = isRect ? RectVertexStride : TextVertexStride;
 
-        // An image draw is a text draw whose binding 1 names one whole image instead of the atlas.
-        // Same pipeline, same vertex layout, same buffer — only the resource set differs.
+        // An image draw uses the text pass's vertex layout and buffer, and the image's own resource set:
+        // its texture at binding 1, its size at binding 2.
         auto* const shaderResources = [&]() -> QRhiShaderResourceBindings* {
             if (item.pass != FramePass::Image)
                 return drawPipeline.srb.get();
@@ -1150,8 +1251,14 @@ void RhiRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
         // Each rebinds against its OWN uniform buffer (the screenshot pipeline owns one so its offscreen
         // pass can use an item-local transform). Listed here as the single place that enumerates the
         // atlas-sampling set — add a future one here and both build and rebind stay correct.
-        for (RhiPipeline* pipeline: { &_textPipeline, &_screenshotTextPipeline })
-            rebindAtlasTexture(*pipeline, pipeline->uniformBuffer.get());
+        // The image pipelines name the atlas too, as a layout stand-in, and share their text pipeline's
+        // uniform buffer.
+        rebindAtlasTexture(_textPipeline, FramePass::Text, _textPipeline.uniformBuffer.get());
+        rebindAtlasTexture(
+            _screenshotTextPipeline, FramePass::Text, _screenshotTextPipeline.uniformBuffer.get());
+        rebindAtlasTexture(_imagePipeline, FramePass::Image, _textPipeline.uniformBuffer.get());
+        rebindAtlasTexture(
+            _screenshotImagePipeline, FramePass::Image, _screenshotTextPipeline.uniformBuffer.get());
     }
 
     // No full-texture clear: the rasterizer only ever samples atlas tiles it has uploaded, so untouched
@@ -1389,8 +1496,9 @@ bool RhiRenderer::ensureScreenshotTarget(QRhi* rhi, ImageSize size)
     // pipelines' vertex buffers and atlas texture/sampler, but own their uniform buffers: the offscreen
     // pass renders into an ITEM-sized target and needs an item-local transform (uploaded by
     // recordScreenshotPass), not the swapchain's item→window transform.
-    createScreenshotPipeline(rhi, /*isText*/ false);
-    createScreenshotPipeline(rhi, /*isText*/ true);
+    createScreenshotPipeline(rhi, FramePass::Rect);
+    createScreenshotPipeline(rhi, FramePass::Text);
+    createScreenshotPipeline(rhi, FramePass::Image); // optional, as on screen: images are skipped without it
     if (_screenshotRectPipeline.pipeline == nullptr || _screenshotTextPipeline.pipeline == nullptr)
     {
         errorLog()("Screenshot: failed to create offscreen pipelines.");
@@ -1401,7 +1509,7 @@ bool RhiRenderer::ensureScreenshotTarget(QRhi* rhi, ImageSize size)
     return true;
 }
 
-void RhiRenderer::createScreenshotPipeline(QRhi* rhi, bool isText)
+void RhiRenderer::createScreenshotPipeline(QRhi* rhi, FramePass pass)
 {
     // Reuse the data-driven pipeline builder with the offscreen render-pass descriptor. Unlike the vertex
     // buffers and atlas (shared with the swapchain set), the screenshot pipeline OWNS its uniform buffer
@@ -1409,9 +1517,24 @@ void RhiRenderer::createScreenshotPipeline(QRhi* rhi, bool isText)
     // an item-local transform — replaying with the swapchain's item→window transform captured every
     // screenshot shifted by the item's window offset and scaled by the item/window size ratio.
     // recordScreenshotPass() uploads the screenshot uniforms per capture.
-    auto const desc = passDescriptor(isText);
-    auto& out = isText ? _screenshotTextPipeline : _screenshotRectPipeline;
-    createPipeline(rhi, _screenshotRpDesc.get(), desc, out, /*sharedUniformBuffer=*/nullptr);
+    // The image pass shares the screenshot text pipeline's buffer, as the swapchain image pass shares the
+    // swapchain text pipeline's.
+    switch (pass)
+    {
+        case FramePass::Rect:
+            createPipeline(rhi, _screenshotRpDesc.get(), passDescriptor(pass), _screenshotRectPipeline);
+            break;
+        case FramePass::Text:
+            createPipeline(rhi, _screenshotRpDesc.get(), passDescriptor(pass), _screenshotTextPipeline);
+            break;
+        case FramePass::Image:
+            createPipeline(rhi,
+                           _screenshotRpDesc.get(),
+                           passDescriptor(pass),
+                           _screenshotImagePipeline,
+                           _screenshotTextPipeline.uniformBuffer.get());
+            break;
+    }
 }
 
 void RhiRenderer::recordScreenshotPass(QRhi* rhi, QRhiCommandBuffer* cb)

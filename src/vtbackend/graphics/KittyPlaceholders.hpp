@@ -23,6 +23,11 @@ inline constexpr size_t DiacriticCount = 297;
 /// @return Its 1-based position in kitty's `rowcolumn-diacritics.txt`, or 0 if it is not one of them.
 [[nodiscard]] uint32_t diacriticOrdinal(char32_t codepoint) noexcept;
 
+/// Maps a row/column number to the diacritic that encodes it: the inverse of diacriticOrdinal().
+/// @param ordinal A 1-based position in kitty's `rowcolumn-diacritics.txt`.
+/// @return Its diacritic, or U+0000 if @p ordinal is 0 or above DiacriticCount.
+[[nodiscard]] char32_t diacriticOf(uint32_t ordinal) noexcept;
+
 /// Maps a placeholder cell's foreground (or underline) colour to the id it encodes.
 /// @param color The colour as the cell carries it.
 /// @return The 24-bit RGB value for an RGB colour, the palette index for an indexed one (8 + n for

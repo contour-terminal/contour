@@ -8,7 +8,7 @@
 // Render a alpha-antialiased glyph tile using the red channel.
 #define FRAGMENT_SELECTOR_GLYPH_ALPHA 0
 
-// Render a raw BGRA image (e.g. emoji or image data)
+// Render a pre-coloured RGBA atlas tile as it is (e.g. a colour glyph such as an emoji)
 #define FRAGMENT_SELECTOR_IMAGE_BGRA 1
 
 // Render an LCD-subpixel antialiased glyph (simple algorithm)

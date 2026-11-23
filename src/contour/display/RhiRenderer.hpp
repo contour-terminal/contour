@@ -95,7 +95,9 @@ class RhiRenderer final:
     /// @param rpDesc The render-pass descriptor of the current render target (non-owning).
     void createPipelines(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc);
 
-    /// @return true once createPipelines() has built the RHI resources successfully.
+    /// @return true once createPipelines() has built the RHI resources the terminal cannot draw without.
+    ///         The image pipeline is not among them: without it images are skipped and the text still
+    ///         draws.
     [[nodiscard]] bool pipelinesReady() const noexcept
     {
         return _rectPipeline.pipeline != nullptr && _textPipeline.pipeline != nullptr;
@@ -263,55 +265,81 @@ class RhiRenderer final:
 
     // Forward reference: the pass descriptor accessor is defined out-of-line after the struct.
 
-    /// Describes the per-pass variation between the RHI graphics pipelines (shaders, uniform-block size,
-    /// vertex stride + attribute layout, whether the pass samples the glyph atlas). Everything not captured
-    /// here (topology, depth/blend/scissor state, the binding-0 uniform buffer) is identical for every pass
-    /// and lives directly in createPipeline(). The concrete pass table + backing attribute arrays live in
-    /// the .cpp; this is the interpreter contract.
-    struct PassDescriptor
+    /// The render passes, one pipeline each.
+    enum class FramePass : uint8_t
     {
-        QString vertexShaderPath;     ///< qrc path of the baked vertex shader (.qsb).
-        QString fragmentShaderPath;   ///< qrc path of the baked fragment shader (.qsb).
-        quint32 uniformBlockSize = 0; ///< std140 uniform block size in bytes (binding 0).
-        quint32 vertexStride = 0;     ///< Interleaved vertex stride in bytes (single binding 0).
-        std::span<QRhiVertexInputAttribute const> attributes; ///< Vertex-input attributes for this pass.
-        bool hasSampler = false;         ///< Whether the pass samples the glyph atlas at binding 1.
-        char const* debugName = nullptr; ///< Human-readable pass name for diagnostics.
+        Rect,  ///< Background/filled-rect pipeline.
+        Text,  ///< Text/glyph pipeline (samples the atlas).
+        Image, ///< Image pipeline: one whole-image texture, filtered to the size it is drawn at.
     };
 
-    /// @return the pass descriptor for the background/rect pass (isText == false) or the text/glyph pass
-    ///         (isText == true). The two-row pass table; shared by the swapchain and screenshot pipelines.
-    /// @param isText true for the text/glyph pass, false for background/rect.
-    [[nodiscard]] static PassDescriptor passDescriptor(bool isText);
+    /// How a pass's fragment output is blended onto the target.
+    enum class Blending : uint8_t
+    {
+        StraightAlpha = 0,  ///< The shader outputs straight alpha (SrcAlpha, OneMinusSrcAlpha).
+        PremultipliedAlpha, ///< The shader outputs premultiplied alpha (One, OneMinusSrcAlpha).
+    };
+
+    /// Describes the per-pass variation between the RHI graphics pipelines (shaders, uniform-block size,
+    /// vertex stride + attribute layout, blending, and which resources it binds). Everything not captured
+    /// here (topology, depth/scissor state, the binding-0 uniform buffer) is identical for every pass and
+    /// lives directly in createPipeline(). The concrete pass table + backing attribute arrays live in the
+    /// .cpp; this is the interpreter contract.
+    struct PassDescriptor
+    {
+        FramePass pass = FramePass::Rect; ///< Which pass this is; decides its binding layout (srbBindings()).
+        QString vertexShaderPath;         ///< qrc path of the baked vertex shader (.qsb).
+        QString fragmentShaderPath;       ///< qrc path of the baked fragment shader (.qsb).
+        quint32 uniformBlockSize = 0;     ///< std140 uniform block size in bytes (binding 0).
+        quint32 vertexStride = 0;         ///< Interleaved vertex stride in bytes (single binding 0).
+        std::span<QRhiVertexInputAttribute const> attributes; ///< Vertex-input attributes for this pass.
+        Blending blending = Blending::StraightAlpha;          ///< How the fragment output is blended.
+        char const* debugName = nullptr;                      ///< Human-readable pass name for diagnostics.
+    };
+
+    /// @return the pass descriptor for @p pass: the pass table, shared by the swapchain and screenshot
+    ///         pipelines.
+    /// @param pass The pass to describe.
+    [[nodiscard]] static PassDescriptor passDescriptor(FramePass pass);
 
     /// Builds one graphics pipeline (+ its SRB) from a pass descriptor into @p out.
     ///
     /// Data-driven replacement for the former per-pass createRectPipeline()/createTextPipeline(): the only
-    /// variation is carried by @p desc. A pass that samples the atlas (desc.hasSampler) requires the atlas
-    /// texture + sampler to already exist (createPipelines() ensures that ordering).
+    /// variation is carried by @p desc. A pass that samples (text, image) requires the atlas texture and
+    /// the samplers to already exist (createPipelines() ensures that ordering).
     /// @param rhi    The scene graph's RHI instance.
     /// @param rpDesc The render-pass descriptor to bake into the pipeline.
     /// @param desc   The pass description (shaders, layout, sampler flag).
     /// @param out    The pipeline slot to populate.
     /// @param sharedUniformBuffer When non-null, the SRB binds this existing uniform buffer instead of the
-    ///                            method creating a new one in @p out. Used by the screenshot pipelines to
-    ///                            share the swapchain set's per-frame uniforms; pass nullptr for the normal
-    ///                            (owning) case.
+    ///                            method creating a new one in @p out. The image pipelines use it to share
+    ///                            their text pipeline's uniforms, as they share its vertex shader and
+    ///                            buffer; pass nullptr for the normal (owning) case.
     void createPipeline(QRhi* rhi,
                         QRhiRenderPassDescriptor* rpDesc,
                         PassDescriptor const& desc,
                         RhiPipeline& out,
                         QRhiBuffer* sharedUniformBuffer = nullptr);
 
-    /// The shader-resource bindings shared by every pass: the uniform block at binding 0 (both stages),
-    /// plus the atlas sampler at binding 1 (fragment stage) for sampling passes. Single source of truth for
-    /// the binding layout, used both when creating a pipeline's SRB and when re-pointing it at a recreated
-    /// atlas texture, so the two never drift.
+    /// A pass pipeline's own shader-resource bindings: the uniform block at binding 0 (both stages) for
+    /// every pass; for the text pass the atlas and its sampler at binding 1; for the image pass the image
+    /// sampler at binding 1 and the image-size block at binding 2. Single source of truth for the binding
+    /// layout, used both when creating a pipeline's SRB and when re-pointing it at a recreated atlas
+    /// texture, so the two never drift.
+    ///
+    /// The image pipeline draws with each image's own set (createImageSrb()) and uses this one only for
+    /// its layout, so it names stand-ins of the right kinds: the atlas texture, and @p uniformBuffer again
+    /// at binding 2.
+    /// @param pass          The pass whose bindings to build.
     /// @param uniformBuffer The uniform buffer to bind at slot 0.
-    /// @param hasSampler    Whether to add the atlas sampler at slot 1 (true for the text/glyph pass).
-    /// @return The 1- or 2-element binding list.
-    [[nodiscard]] QVarLengthArray<QRhiShaderResourceBinding, 2> atlasSrbBindings(QRhiBuffer* uniformBuffer,
-                                                                                 bool hasSampler) const;
+    /// @return The binding list.
+    [[nodiscard]] QVarLengthArray<QRhiShaderResourceBinding, 3> srbBindings(FramePass pass,
+                                                                            QRhiBuffer* uniformBuffer) const;
+
+    /// Creates, once, the sampler every image texture is drawn through. Called before the pipelines are
+    /// built, as the image pipeline's binding set names it.
+    /// @param rhi The scene graph's RHI instance.
+    void createImageSampler(QRhi* rhi);
 
     /// Creates (or re-creates) the glyph atlas texture and its sampler for the given size.
     /// @param rhi  The scene graph's RHI instance.
@@ -325,10 +353,11 @@ class RhiRenderer final:
     /// or it samples a freed texture. executeConfigureAtlas() calls this for each atlas-sampling pipeline
     /// after a recreate.
     /// @param pipeline      The pipeline whose srb references the atlas (no-op if it has no srb).
-    /// @param uniformBuffer The uniform buffer bound at slot 0. The screenshot pipelines share the
-    ///                      swapchain pipeline's buffer (their own uniformBuffer field is null), so it is
-    ///                      passed explicitly rather than read from @p pipeline.
-    void rebindAtlasTexture(RhiPipeline& pipeline, QRhiBuffer* uniformBuffer);
+    /// @param pass          Its pass, which decides its binding layout.
+    /// @param uniformBuffer The uniform buffer bound at slot 0. An image pipeline shares its text
+    ///                      pipeline's buffer (its own uniformBuffer field is null), so it is passed
+    ///                      explicitly rather than read from @p pipeline.
+    void rebindAtlasTexture(RhiPipeline& pipeline, FramePass pass, QRhiBuffer* uniformBuffer);
 
     /// Appends one execute() call's filled-rect (background) geometry to the per-frame accumulator.
     ///
@@ -384,9 +413,10 @@ class RhiRenderer final:
     /// renders into an ITEM-sized target and therefore needs an item-local transform, not the swapchain's
     /// item→window transform (sharing that captured every screenshot shifted by the item's window offset
     /// and scaled by the item/window size ratio). recordScreenshotPass() uploads the screenshot uniforms.
-    /// @param rhi    The scene graph's RHI instance.
-    /// @param isText true to build the text/glyph pass (adds the atlas sampler), false for background/rect.
-    void createScreenshotPipeline(QRhi* rhi, bool isText);
+    /// The image pass shares the screenshot text pipeline's uniform buffer, so it is built after it.
+    /// @param rhi  The scene graph's RHI instance.
+    /// @param pass The pass to build.
+    void createScreenshotPipeline(QRhi* rhi, FramePass pass);
 
     /// Uploads one pass's per-frame uniform block into @p uniformBuffer: the transform + time, plus the
     /// text pass's pixel_x + outline color. Shared by flushFrame() (swapchain buffers, item→window
@@ -434,9 +464,12 @@ class RhiRenderer final:
 
     /// Builds the shader-resource set one image quad is drawn with.
     /// @param texture the image's texture; named by binding 1.
+    /// @param sizeUniform the image's size block; named by binding 2.
     /// @param uniformBuffer the drawing pipeline's uniform buffer; named by binding 0.
     /// @return the new set, or nullptr if it could not be created.
-    [[nodiscard]] QRhiShaderResourceBindings* createImageSrb(QRhiTexture* texture, QRhiBuffer* uniformBuffer);
+    [[nodiscard]] QRhiShaderResourceBindings* createImageSrb(QRhiTexture* texture,
+                                                             QRhiBuffer* sizeUniform,
+                                                             QRhiBuffer* uniformBuffer);
 
     /// Rebuilds every image binding set that does not name the uniform buffer its pipeline now owns.
     ///
@@ -548,12 +581,6 @@ class RhiRenderer final:
     // of the prepare phase (flushFrame()), and recordDraws() replays the draw items in order.
 
     /// One queued draw call captured during the prepare phase, replayed in recordDraws().
-    enum class FramePass : uint8_t
-    {
-        Rect,  ///< Background/filled-rect pipeline.
-        Text,  ///< Text/glyph pipeline (samples the atlas).
-        Image, ///< Text pipeline, but sampling one whole-image texture instead of the atlas.
-    };
     struct FrameDrawItem
     {
         FramePass pass = FramePass::Rect;   ///< Which pipeline to draw with.
@@ -589,6 +616,10 @@ class RhiRenderer final:
     struct ImageTextureResources
     {
         QRhiResourcePtr<QRhiTexture> texture;
+        /// The image's size in texels (`ImageBuf` at binding 2), which image.frag's box filter needs to
+        /// know how many texels a pixel covers; `textureSize` is not available to every shading language
+        /// the shaders are baked for.
+        QRhiResourcePtr<QRhiBuffer> sizeUniform;
         ImageShaderResources swapchain; ///< Bound when drawing into the swapchain.
         ImageShaderResources offscreen; ///< Bound when replaying into the screenshot target.
     };
@@ -610,12 +641,19 @@ class RhiRenderer final:
     // {{{ RHI pipelines and atlas resources
     RhiPipeline _rectPipeline; ///< Background/filled-rect pass.
     RhiPipeline _textPipeline; ///< Text/glyph pass (samples the atlas).
+    /// Image pass: whole-image textures, box-filtered when shrunk. Shares the text pass's vertex shader,
+    /// vertex buffer and uniform buffer, so it owns none of the latter two.
+    RhiPipeline _imagePipeline;
 
     // The glyph atlas texture (RGBA8) and the sampler used by the text pass. Both are referenced by the
     // text pipeline's shader-resource-bindings. The texture is re-created on configureAtlas when the atlas
     // size changes.
     QRhiResourcePtr<QRhiTexture> _atlasTexture;
     QRhiResourcePtr<QRhiSampler> _atlasSampler;
+
+    /// The sampler every image texture is drawn through: linear, mipmapped and clamped, unlike the atlas's
+    /// Nearest, because an image is drawn at whatever size its placement asks for.
+    QRhiResourcePtr<QRhiSampler> _imageSampler;
     ImageSize _atlasTextureSize {};
 
     // The pixel size the live atlas QRhiTexture was actually created at. Distinct from _atlasTextureSize,
@@ -659,8 +697,9 @@ class RhiRenderer final:
     QRhiResourcePtr<QRhiRenderBuffer> _screenshotDepthStencil; ///< Depth-stencil for the offscreen pass.
     QRhiResourcePtr<QRhiTextureRenderTarget> _screenshotRenderTarget; ///< The offscreen render target.
     QRhiResourcePtr<QRhiRenderPassDescriptor> _screenshotRpDesc;      ///< Its render-pass descriptor.
-    RhiPipeline _screenshotRectPipeline; ///< Rect pass built against the offscreen render-pass desc.
-    RhiPipeline _screenshotTextPipeline; ///< Text pass built against the offscreen render-pass desc.
+    RhiPipeline _screenshotRectPipeline;  ///< Rect pass built against the offscreen render-pass desc.
+    RhiPipeline _screenshotTextPipeline;  ///< Text pass built against the offscreen render-pass desc.
+    RhiPipeline _screenshotImagePipeline; ///< Image pass built against the offscreen render-pass desc.
     // }}}
 
     // render state cache

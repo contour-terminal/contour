@@ -75,5 +75,12 @@ inline constexpr std::uint32_t TextUniformOutlineColorOffset = 80;
 inline constexpr std::uint32_t Vec4Size = 16;
 /// Allocated size of the text uniform block (std140, multiple of 16).
 inline constexpr std::uint32_t TextUniformBlockSize = 96;
+
+// Image pass UBO `ImageBuf` { vec4 u_imageSize; } at binding 2 (image.frag): the sampled image's width and
+//   height in texels in .xy (.zw unused). One per image texture.
+/// Byte offset of `u_imageSize` (vec4) in the image uniform block.
+inline constexpr std::uint32_t ImageUniformSizeOffset = 0;
+/// Allocated size of the image uniform block (std140, multiple of 16).
+inline constexpr std::uint32_t ImageUniformBlockSize = 16;
 // }}}
 } // namespace contour::display::rhilayout
