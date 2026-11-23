@@ -3,6 +3,16 @@
 // PipedProcessRunner on Windows, run against process_runner_probe: a console program that runs its arguments
 // as a sequence of verbs. Where a case ports one of ProcessRunner_test.cpp's POSIX cases, it keeps that
 // case's name, so that the two suites read side by side.
+//
+// Not ported, each for a reason of the platform's:
+// - "a child ignoring SIGTERM is killed after the grace": Windows has no SIGTERM, so no graceful phase -- a
+//   timed-out or cancelled process's job is terminated at once.
+// - "a leader reaped by someone else completes with its status lost", and cancelling such a process: no one
+//   else can reap a process while the runner holds its handle.
+// - "a child has no controlling terminal": POSIX sessions; a Windows child gets a console that is never
+// shown.
+// - "a relative program is found in the directory entered by handle": Windows refuses a relative program path
+//   (it can hand CreateProcessW only a path, never a handle), as "a relative program path is refused" checks.
 #ifdef _WIN32
 
     #include <vtpty/DirectoryHandle.hpp>
@@ -26,11 +36,14 @@
     #include <future>
     #include <map>
     #include <memory>
+    #include <optional>
     #include <ranges>
     #include <sstream>
     #include <string>
     #include <utility>
     #include <vector>
+
+    #include <Windows.h>
 
 using namespace std::chrono_literals;
 using vtpty::PipedProcessRunner;
@@ -80,6 +93,36 @@ void copyProbe(std::filesystem::path const& target)
     return lines;
 }
 
+/// How long isDead() waits for a process to end, in milliseconds.
+constexpr auto DeathWait = DWORD { 5000 };
+
+/// How long process_runner_host has to start the probe and end itself, in milliseconds.
+constexpr auto HostWait = DWORD { 30000 };
+
+/// The exit code process_runner_host ends itself with, once the probe runs.
+constexpr auto HostDiedHoldingTheRunner = DWORD { 7 };
+
+/// @return The pid the probe wrote to @p file; std::nullopt until it has.
+[[nodiscard]] std::optional<DWORD> readPid(std::filesystem::path const& file)
+{
+    auto pid = DWORD { 0 };
+    if (auto stream = std::ifstream { file }; stream >> pid)
+        return pid;
+    return std::nullopt;
+}
+
+/// @return Whether the process @p pid has ended, waiting a bounded time for a kill already made to take
+///         effect. One that cannot be opened is gone.
+[[nodiscard]] bool isDead(DWORD pid)
+{
+    auto* const process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (process == nullptr)
+        return true;
+    auto const waited = WaitForSingleObject(process, DeathWait);
+    CloseHandle(process);
+    return waited == WAIT_OBJECT_0;
+}
+
 /// A PipedProcessRunner on a ManualClock; a temporary directory holding a copy of the probe in `bin` and the
 /// directory processes run in, `work`; and what each process's handler was called with.
 struct RunnerFixture
@@ -122,6 +165,15 @@ struct RunnerFixture
             runner->pump(100ms);
         }
         REQUIRE(condition());
+    }
+
+    /// @return The pid the probe wrote to @p file, pumping until it has.
+    [[nodiscard]] DWORD awaitPid(std::filesystem::path const& file)
+    {
+        pumpUntil([&] { return readPid(file).has_value(); });
+        auto const pid = readPid(file);
+        REQUIRE(pid.has_value());
+        return pid.value_or(0);
     }
 
     /// Starts @p spec, recording its exit in finished.
@@ -463,6 +515,209 @@ TEST_CASE("PipedProcessRunner: no handler runs inside start", "[processrunner]")
     auto const exit = fixture.runToCompletion(token);
     CHECK(exit.completion == ProcessCompletion::Exited);
     CHECK(exit.exitCode == 0);
+}
+
+TEST_CASE("PipedProcessRunner: a timeout terminates", "[processrunner]")
+{
+    auto fixture = RunnerFixture {};
+    auto const pidFile = fixture.directory.path() / "pid";
+    auto const token = fixture.start(fixture.spec({ "probe", "pid", utf8(pidFile), "sleep", "600000" }));
+    auto const pid = fixture.awaitPid(pidFile);
+    CHECK(fixture.runner->running() == 1);
+
+    fixture.clock.advance(30s + 1ms);
+    auto const exit = fixture.runToCompletion(token);
+    // Ended at once: no grace is waited for, which the clock never reaches here.
+    CHECK(fixture.clock.now()
+          < core::platform::SteadyTimePoint {} + 30s + 1ms + fixture.tuning.terminateGrace);
+    CHECK(exit.completion == ProcessCompletion::TimedOut);
+    CHECK_FALSE(exit.exitCode.has_value());
+    CHECK_FALSE(exit.signal.has_value());
+    CHECK(isDead(pid));
+}
+
+TEST_CASE("PipedProcessRunner: a timeout kills a grandchild that holds no pipe", "[processrunner]")
+{
+    auto fixture = RunnerFixture {};
+    auto const grandFile = fixture.directory.path() / "grandchild";
+    auto const ready = fixture.directory.path() / "ready";
+    auto const token = fixture.start(fixture.spec({ "probe",
+                                                    "spawn-quiet",
+                                                    utf8(grandFile),
+                                                    "pid",
+                                                    utf8(ready),
+                                                    "sleep",
+                                                    "600000",
+                                                    "--",
+                                                    "sleep",
+                                                    "600000" }));
+    auto const grandchild = fixture.awaitPid(grandFile);
+    CHECK(fixture.awaitPid(ready) == grandchild);
+
+    fixture.clock.advance(30s + 1ms);
+    auto const exit = fixture.runToCompletion(token);
+    CHECK(exit.completion == ProcessCompletion::TimedOut);
+    CHECK_FALSE(exit.exitCode.has_value());
+    CHECK(isDead(grandchild));
+}
+
+TEST_CASE("PipedProcessRunner: cancel", "[processrunner]")
+{
+    auto fixture = RunnerFixture {};
+    auto const pidFile = fixture.directory.path() / "pid";
+    auto const token = fixture.start(fixture.spec({ "probe", "pid", utf8(pidFile), "sleep", "600000" }));
+    auto const pid = fixture.awaitPid(pidFile);
+    fixture.runner->cancel(token);
+    auto const exit = fixture.runToCompletion(token);
+    CHECK(exit.completion == ProcessCompletion::Cancelled);
+    CHECK_FALSE(exit.exitCode.has_value());
+    CHECK_FALSE(exit.signal.has_value());
+    CHECK(isDead(pid));
+
+    // A token that has completed is ignored.
+    fixture.runner->cancel(token);
+    CHECK(fixture.runner->running() == 0);
+}
+
+TEST_CASE("PipedProcessRunner: cancelling a process that already exited keeps its exit code",
+          "[processrunner]")
+{
+    auto fixture = RunnerFixture {};
+    fixture.tuning.orphanedOutputGrace = 1h;
+    fixture.runner = makeRunner(fixture.clock, fixture.tuning);
+    auto const grandFile = fixture.directory.path() / "grandchild";
+    auto const leaderFile = fixture.directory.path() / "leader";
+    // The leader exits 6; the grandchild holds its pipe.
+    auto const token = fixture.start(fixture.spec({ "probe",
+                                                    "spawn",
+                                                    utf8(grandFile),
+                                                    "sleep",
+                                                    "600000",
+                                                    "--",
+                                                    "pid",
+                                                    utf8(leaderFile),
+                                                    "exit",
+                                                    "6" }));
+    auto const grandchild = fixture.awaitPid(grandFile);
+    auto const leader = fixture.awaitPid(leaderFile);
+    REQUIRE(isDead(leader));
+    for ([[maybe_unused]] auto const round: std::views::iota(0, 5))
+        fixture.runner->pump(50ms);
+    REQUIRE(fixture.runner->running() == 1);
+
+    fixture.runner->cancel(token);
+    auto const exit = fixture.runToCompletion(token);
+    CHECK(exit.completion == ProcessCompletion::Cancelled);
+    CHECK(exit.exitCode == 6);
+    CHECK_FALSE(exit.signal.has_value());
+    CHECK(isDead(grandchild));
+}
+
+TEST_CASE("PipedProcessRunner: an orphaned grandchild does not hold the reply", "[processrunner]")
+{
+    auto fixture = RunnerFixture {};
+    auto const grandFile = fixture.directory.path() / "grandchild";
+    auto const token = fixture.start(
+        fixture.spec({ "probe", "spawn", utf8(grandFile), "sleep", "600000", "--", "out", "done" }, 1h));
+    // The leader's exit is seen in some round; each round moves the clock on by the grace, so the round after
+    // that finds it spent.
+    auto const exit =
+        fixture.runToCompletion(token, [&] { fixture.clock.advance(fixture.tuning.orphanedOutputGrace); });
+    CHECK(exit.completion == ProcessCompletion::Exited);
+    CHECK(exit.exitCode == 0);
+    CHECK(exit.standardOutput.bytes == "done\n");
+    auto const grandchild = readPid(grandFile);
+    REQUIRE(grandchild.has_value());
+    CHECK(isDead(*grandchild));
+}
+
+TEST_CASE("PipedProcessRunner: destruction kills the process tree", "[processrunner]")
+{
+    auto fixture = RunnerFixture {};
+    auto const grandFile = fixture.directory.path() / "grandchild";
+    auto const pidFile = fixture.directory.path() / "pid";
+    std::ignore = fixture.start(fixture.spec({ "probe",
+                                               "spawn",
+                                               utf8(grandFile),
+                                               "sleep",
+                                               "600000",
+                                               "--",
+                                               "pid",
+                                               utf8(pidFile),
+                                               "sleep",
+                                               "600000" }));
+    auto const grandchild = fixture.awaitPid(grandFile);
+    auto const leader = fixture.awaitPid(pidFile);
+
+    fixture.runner.reset();
+    CHECK(isDead(leader));
+    CHECK(isDead(grandchild));
+    CHECK(fixture.finished.empty());
+}
+
+TEST_CASE("PipedProcessRunner: the children die with the process that runs them", "[processrunner]")
+{
+    // process_runner_host starts the probe on a runner, then terminates itself: no destructor runs, and the
+    // system closing its handles -- the job's among them -- is all that can end the probe.
+    auto const directory = core::testing::ScopedTempDir { "contour-processrunner" };
+    auto const probe = directory.path() / "bin" / "probe.exe";
+    copyProbe(probe);
+    auto const pidFile = directory.path() / "pid";
+    auto commandLine = std::format(L"\"{}\" \"{}\" \"{}\"",
+                                   std::filesystem::path { VTPTY_PROCESS_RUNNER_HOST }.wstring(),
+                                   probe.wstring(),
+                                   pidFile.wstring());
+    auto startup = STARTUPINFOW {};
+    startup.cb = sizeof(startup);
+    auto info = PROCESS_INFORMATION {};
+    REQUIRE(CreateProcessW(nullptr,
+                           commandLine.data(),
+                           nullptr,
+                           nullptr,
+                           FALSE,
+                           CREATE_NO_WINDOW,
+                           nullptr,
+                           nullptr,
+                           &startup,
+                           &info)
+            != FALSE);
+    CloseHandle(info.hThread);
+    auto const waited = WaitForSingleObject(info.hProcess, HostWait);
+    auto code = DWORD { 0 };
+    GetExitCodeProcess(info.hProcess, &code);
+    CloseHandle(info.hProcess);
+    REQUIRE(waited == WAIT_OBJECT_0);
+    REQUIRE(code == HostDiedHoldingTheRunner);
+
+    auto const probePid = readPid(pidFile);
+    REQUIRE(probePid.has_value());
+    CHECK(isDead(*probePid));
+}
+
+TEST_CASE("PipedProcessRunner: an inheritable handle of the daemon does not reach the child",
+          "[processrunner]")
+{
+    auto fixture = RunnerFixture {};
+    auto inheritable = SECURITY_ATTRIBUTES { .nLength = sizeof(SECURITY_ATTRIBUTES),
+                                             .lpSecurityDescriptor = nullptr,
+                                             .bInheritHandle = TRUE };
+    auto* read = HANDLE { nullptr };
+    auto* write = HANDLE { nullptr };
+    REQUIRE(CreatePipe(&read, &write, &inheritable, 0) != FALSE);
+    auto const token = fixture.start(fixture.spec({ "probe", "sleep", "600000" }));
+    fixture.runner->pump(0ms);
+
+    // Had the child inherited the write end, closing ours would not break the pipe.
+    CloseHandle(write);
+    auto available = DWORD { 0 };
+    auto const peeked = PeekNamedPipe(read, nullptr, 0, nullptr, &available, nullptr);
+    auto const error = GetLastError();
+    CloseHandle(read);
+    CHECK(peeked == FALSE);
+    CHECK(error == ERROR_BROKEN_PIPE);
+
+    fixture.runner->cancel(token);
+    CHECK(fixture.runToCompletion(token).completion == ProcessCompletion::Cancelled);
 }
 
 TEST_CASE("ThreadedProcessRunner: runs to completion", "[processrunner][threading]")

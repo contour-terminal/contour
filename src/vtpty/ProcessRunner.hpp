@@ -29,13 +29,20 @@ enum class ProcessToken : uint64_t
 };
 
 /// How a process came to an end.
+///
+/// On Windows `signal` is never set: a process the runner ends has neither `exitCode` nor `signal`, unless
+/// its leader had exited by itself first, in which case its `exitCode` is kept. `Signalled` and `StatusLost`
+/// never occur there, since no one else can reap a process whose handle the runner holds.
 enum class ProcessCompletion : uint8_t
 {
-    Exited,     ///< It exited by itself (exitCode is set).
-    Signalled,  ///< A signal ended it, not one the runner sent (signal is set).
-    TimedOut,   ///< It outlived its timeout, and the runner ended it (signal is set).
-    Cancelled,  ///< The runner ended it on cancel() (signal is set, unless it exited by itself first).
-    StatusLost, ///< Its leader was reaped by someone else, so how it ended is unknown (neither is set).
+    Exited, ///< It exited by itself (exitCode is set; on Windows an NTSTATUS such as 0xC0000005 is negative).
+    Signalled,  ///< A signal ended it, not one the runner sent (signal is set). POSIX only.
+    TimedOut,   ///< It outlived its timeout, and the runner ended it (signal is set; on Windows neither is,
+                ///< unless it exited by itself first).
+    Cancelled,  ///< The runner ended it on cancel() (signal is set, unless it exited by itself first; on
+                ///< Windows neither is, unless it exited by itself first).
+    StatusLost, ///< Its leader was reaped by someone else, so how it ended is unknown (neither is set). POSIX
+                ///< only.
 };
 
 /// What becomes of what a process writes to one of its output streams.
@@ -100,7 +107,8 @@ enum class ProcessStartError : uint8_t
 /// Why a process runner could not be made.
 enum class ProcessRunnerError : uint8_t
 {
-    WakeChannelUnavailable, ///< The pipe that wakes a waiting pump() could not be made.
+    WakeChannelUnavailable, ///< The pipe, or on Windows the completion port, that wakes a waiting pump()
+                            ///< could not be made.
     ThreadUnavailable,      ///< The thread that pumps could not be started.
 };
 
@@ -125,6 +133,7 @@ class IProcessRunner
 
     /// Terminates the process: SIGTERM to its group now, SIGKILL to the group once its leader has ended or
     /// the grace has passed. It completes as `Cancelled` (at once, if its leader was reaped by someone else).
+    /// On Windows its job, and so its whole tree, is terminated at once: there is no graceful phase.
     /// A token that has completed (or never was) is ignored.
     virtual void cancel(ProcessToken token) = 0;
 };
@@ -133,7 +142,9 @@ class IProcessRunner
 struct ProcessRunnerTuning
 {
     /// How long a process group's leader has between SIGTERM and SIGKILL. The group gets SIGKILL sooner, as
-    /// soon as the leader has ended.
+    /// soon as the leader has ended. Not used on Windows, which has no SIGTERM: a process is ended at once
+    /// there -- so a `git` timed out mid-operation may leave `.git/index.lock` behind, which on POSIX its
+    /// SIGTERM handler removes.
     std::chrono::milliseconds terminateGrace { 2000 };
     /// How long the output of a leader that has exited is still awaited while another process of its group
     /// holds a pipe open; then the group is killed and the process completes with what was read.
@@ -148,6 +159,12 @@ struct ProcessRunnerTuning
 /// has ended, or once the grace has passed if it has not: the leader is reaped only after that, so that its
 /// id, which is the group's, cannot be reused by an unrelated process the SIGKILL would reach. A leader that
 /// ends on SIGTERM completes within a round; one that ignores it, after the grace.
+///
+/// On Windows each process runs in a kill-on-close Job Object of its own, which only the runner holds. A
+/// process timed out or cancelled has its job terminated at once, which ends its whole tree, grandchildren
+/// included; closing the job -- on destruction, or when the process holding the runner dies in any way --
+/// ends it too. Only a program whose name ends in `.exe` is started, found on the spec's PATH's absolute
+/// entries alone; a `.cmd` or `.bat` is refused, so no argument ever passes through `cmd.exe`.
 ///
 /// start(), cancel() and running() may be called from any thread, pump() from one at a time.
 class PipedProcessRunner final: public IProcessRunner
@@ -170,7 +187,8 @@ class PipedProcessRunner final: public IProcessRunner
     /// For create() only.
     PipedProcessRunner(Key key, std::unique_ptr<State> state) noexcept;
 
-    /// SIGKILLs every process group, reaps every process, and calls no handler.
+    /// SIGKILLs every process group, reaps every process, and calls no handler. On Windows: terminates
+    /// every job and closes it, waiting at most a second for each leader to be gone.
     ~PipedProcessRunner() override;
 
     [[nodiscard]] std::expected<ProcessToken, ProcessStartError> start(ProcessSpec spec,

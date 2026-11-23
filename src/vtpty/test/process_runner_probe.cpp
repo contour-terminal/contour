@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // The child of the process runner's Windows tests (ProcessRunner_test.cpp). A console program that runs its
-// arguments as a sequence of verbs, each followed by as many arguments as it takes; `args`, `spawn` and
-// `spawn-quiet` take all that follow. At the end of the verbs it exits 0.
+// arguments as a sequence of verbs, each followed by as many arguments as it takes; `args` takes all that
+// follow, `spawn` and `spawn-quiet` all up to a `--` (or the end), which the probe then goes on after. At the
+// end of the verbs it exits 0.
 //
 //   out <text> / err <text>     writes <text> and "\n" to stdout / stderr
 //   zeros <n> / zeros-err <n>   writes n zero bytes to stdout / stderr, 64 KiB a write
@@ -16,10 +17,9 @@
 //   stdin                       reads stdin to its end, writes the byte count and "\n"
 //   close-out / close-err       closes its stdout / stderr
 //   args ...                    writes the remaining arguments, '|' between each, and "\n"
-//   spawn <file> ...            starts itself with the remaining verbs on its own standard handles, writes
-//   the
-//                               grandchild's pid to <file>, does not wait
-//   spawn-quiet <file> ...      the same, the grandchild's standard handles NUL and nothing else inherited
+//   spawn <file> ... [--]       starts itself with the verbs up to `--` on its own standard handles, writes
+//                               the grandchild's pid to <file>, does not wait; runs the verbs after `--`
+//   spawn-quiet <file> ... [--] the same, the grandchild's standard handles NUL and nothing else inherited
 //
 // Everything it writes is UTF-8, through WriteFile(): no C runtime buffer stands between a verb and its pipe.
 // An unknown verb, or one short of its arguments, is reported on stderr and exits 64.
@@ -312,12 +312,16 @@ void writeArguments(Arguments arguments)
     write(GetStdHandle(STD_OUTPUT_HANDLE), line + '\n');
 }
 
-/// Whether a verb takes every argument that follows its own.
+/// Whether a verb takes arguments that follow its own.
 enum class Trailing : uint8_t
 {
-    None = 0, ///< It takes its own arguments alone.
-    Rest,     ///< It takes all that follow, too.
+    None = 0,       ///< It takes its own arguments alone.
+    Rest,           ///< It takes all that follow, too.
+    UntilSeparator, ///< It takes all up to the Separator, too; the verbs after it run next.
 };
+
+/// What ends the verbs a `spawn` hands its grandchild.
+constexpr auto Separator = std::wstring_view { L"--" };
 
 /// How many arguments a verb takes.
 struct Arity
@@ -386,13 +390,13 @@ constexpr auto Verbs = std::array {
            .arity = { .fixed = 0, .trailing = Trailing::Rest },
            .action = [](Arguments arguments) { writeArguments(arguments); } },
     Verb { .name = L"spawn",
-           .arity = { .fixed = 1, .trailing = Trailing::Rest },
+           .arity = { .fixed = 1, .trailing = Trailing::UntilSeparator },
            .action =
                [](Arguments arguments) {
                    spawnSelf(arguments.front(), arguments.subspan(1), GrandchildStreams::Ours);
                } },
     Verb { .name = L"spawn-quiet",
-           .arity = { .fixed = 1, .trailing = Trailing::Rest },
+           .arity = { .fixed = 1, .trailing = Trailing::UntilSeparator },
            .action =
                [](Arguments arguments) {
                    spawnSelf(arguments.front(), arguments.subspan(1), GrandchildStreams::Null);
@@ -411,9 +415,22 @@ void run(Arguments arguments)
     auto const rest = arguments.subspan(1);
     if (rest.size() < verb->arity.fixed)
         fail(std::format("{} needs {} argument(s)", core::toUtf8(name), verb->arity.fixed));
-    auto const taken = verb->arity.trailing == Trailing::Rest ? rest.size() : verb->arity.fixed;
+    auto taken = verb->arity.fixed;
+    auto skipped = std::size_t { 0 };
+    switch (verb->arity.trailing)
+    {
+        case Trailing::None: break;
+        case Trailing::Rest: taken = rest.size(); break;
+        case Trailing::UntilSeparator: {
+            auto const trailing = rest.subspan(verb->arity.fixed);
+            taken += static_cast<std::size_t>(
+                std::distance(trailing.begin(), std::ranges::find(trailing, Separator)));
+            skipped = taken < rest.size() ? 1 : 0;
+            break;
+        }
+    }
     verb->action(rest.first(taken));
-    run(rest.subspan(taken));
+    run(rest.subspan(taken + skipped));
 }
 
 } // namespace

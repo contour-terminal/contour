@@ -13,7 +13,7 @@ Linux and macOS against GitHub today.
 | 1 | `glab` provider, `acli` issue source | `Verification::Unmeasured`: refused by the configuration, absent from the manifest | GitLab repos, Jira issues — every platform |
 | A | `vtpty` directory opener (`DirectoryHandle_win32.cpp`) | **done**: handles open, resolve and create beneath on Windows (plan `2026-11-23-orchestrator-windows-directory-handles.md`); nothing remains for A | — |
 | A2 | extension roots and environment on Windows (plan `2026-11-23-orchestrator-windows-extension-roots.md`) | `vtextension`'s root grammar refuses `C:\...` as `NotAbsolute`; `childEnvironment` compares variable names case-sensitively | resolving `@repos`/`@worktrees`, so every command |
-| B | `vtpty::PipedProcessRunner` (`ProcessRunner_win32.cpp`; plan `2026-11-23-orchestrator-windows-process-runner.md`) | `start()` answers `Unsupported` | `git`, `gh`, `glab`, `acli`, `claude`, `contour agent …` |
+| B | `vtpty::PipedProcessRunner` (`ProcessRunner_win32.cpp`; plan `2026-11-23-orchestrator-windows-process-runner.md`) | **done**: `.exe` programs start in a kill-on-close job each, both streams captured, timeout and cancel end the whole tree at once (no graceful phase: no SIGTERM), destruction or the daemon dying ends it too | — |
 | C | `file-read` beneath a root (`BeneathRead_win32.cpp`) | `not-supported-yet` (design sketched in the file) | the Board tab (`STATUS.md`) |
 | D | `pane-open` in a held directory | unsupported on Windows | starting an agent |
 | E | Packaging | Windows packages do not carry the orchestrator (`docs/extensions.md`, Limitations) | use outside a dev tree |

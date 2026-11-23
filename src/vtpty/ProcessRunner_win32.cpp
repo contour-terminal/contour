@@ -33,6 +33,10 @@
 // suspended in a kill-on-close job of its own, with NUL and the write ends of two pipes alone inherited. Both
 // pipes are read by overlapped reads that complete on one I/O completion port per runner, which wake() posts
 // to as well, and each leader's exit is posted to it by a thread-pool wait: pump() waits on that port alone.
+//
+// A process is ended by terminating its job, which ends its whole tree at once: Windows has no SIGTERM, so
+// there is no graceful phase, and ProcessRunnerTuning::terminateGrace is not used. Closing the job, which
+// only the runner holds, ends the tree too -- on destruction, and when the daemon dies in any way.
 namespace vtpty
 {
 
@@ -58,6 +62,14 @@ namespace
 
     /// How many completion packets one dequeue takes at most.
     constexpr auto PacketsPerDequeue = std::size_t { 64 };
+
+    /// The exit code a terminated job's processes are given.
+    constexpr auto TerminatedExitCode = UINT { 1 };
+
+    /// How long the destructor waits for each terminated leader to be gone, in milliseconds; as
+    /// CommandCapture's KillGracePeriod. Bounded, so that a process the system is slow to end cannot keep the
+    /// daemon's shutdown from returning.
+    constexpr auto KillGracePeriod = DWORD { 1000 };
 
     /// How a child is created: suspended, so that it is in its job before it runs a single instruction; with
     /// a console that is never shown, so that a detached daemon flashes no window per command; with a UTF-16
@@ -87,7 +99,21 @@ namespace
     {
         OVERLAPPED overlapped {};
         std::array<char, ReadChunkSize> buffer {};
+        /// Manual-reset, set when the read completes: what cancelRead() waits on. The pipe's own handle is
+        /// not signalled reliably for that once the pipe is on a completion port, and a wait on it can hang.
+        UniqueHandle completed;
     };
+
+    /// @return A PendingRead with its event; or nullptr if the event could not be made.
+    [[nodiscard]] std::unique_ptr<PendingRead> makePendingRead()
+    {
+        auto completed = UniqueHandle { CreateEventW(nullptr, TRUE, FALSE, nullptr) };
+        if (!completed.valid())
+            return nullptr;
+        auto read = std::make_unique<PendingRead>();
+        read->completed = std::move(completed);
+        return read;
+    }
 
     /// Whether a stream has a read pending.
     enum class ReadState : uint8_t
@@ -177,6 +203,13 @@ namespace
         std::unique_ptr<ExitPost> _post;
     };
 
+    /// Where a process is in being ended by the runner.
+    enum class Ending : uint8_t
+    {
+        NotAsked, ///< Nobody has asked it to end.
+        Killed,   ///< Its job was terminated: everything in it ends, the leader included.
+    };
+
     /// Whether the leader has exited, as the runner has seen it.
     enum class Leader : uint8_t
     {
@@ -193,9 +226,10 @@ namespace
         ExitWait exitWait;                        ///< Posts the leader's exit to the port.
         std::array<Stream, 2> streams;            ///< Standard output, then standard error.
         SteadyTimePoint deadline;                 ///< When it is timed out.
+        Ending ending = Ending::NotAsked;         ///< Whether the runner has ended it.
         std::optional<ProcessCompletion> endedBy; ///< TimedOut or Cancelled, once the runner ended it.
         Leader leader = Leader::Running;          ///< Whether its leader has exited.
-        std::optional<int32_t> exitCode;          ///< The leader's exit code, once it exited by itself.
+        std::optional<int32_t> exitCode;          ///< The leader's exit code, if it exited by itself.
         SteadyTimePoint leaderExitedAt;           ///< When the leader's exit was seen, once it was.
         CompletionHandler done;
 
@@ -207,6 +241,10 @@ namespace
 
         /// @return Whether it has ended: its leader exited and its pipes closed.
         [[nodiscard]] bool hasEnded() const noexcept { return leader == Leader::Exited && !hasOpenStream(); }
+
+        /// @return Whether its leader exited and a pipe is still held open, by what is left of its tree (or
+        ///         by a process elsewhere that inherited the write end).
+        [[nodiscard]] bool isOrphaned() const noexcept { return leader == Leader::Exited && hasOpenStream(); }
 
         /// @return How it ended, for its handler.
         [[nodiscard]] ProcessExit exit() &&
@@ -224,6 +262,9 @@ namespace
     void issueRead(Stream& stream) noexcept
     {
         stream.read->overlapped = OVERLAPPED {};
+        // The completion still comes through the port: only an hEvent with its low bit set would keep it
+        // away.
+        stream.read->overlapped.hEvent = stream.read->completed.get();
         if (ReadFile(stream.pipe.get(),
                      stream.read->buffer.data(),
                      static_cast<DWORD>(stream.read->buffer.size()),
@@ -251,15 +292,28 @@ namespace
         stream.keep(std::span { stream.read->buffer }.first(count));
     }
 
-    /// Cancels the read pending on @p stream, if one is, and waits until the system no longer writes into it.
+    /// Cancels the read pending on @p stream, if one is, and waits until the system no longer writes into it;
+    /// what it read before it was cancelled is kept. Its completion packet still comes through the port, and
+    /// is ignored there: the stream is no longer Pending.
     void cancelRead(Stream& stream) noexcept
     {
         if (stream.state != ReadState::Pending)
             return;
         CancelIoEx(stream.pipe.get(), &stream.read->overlapped);
         auto count = DWORD { 0 };
-        GetOverlappedResult(stream.pipe.get(), &stream.read->overlapped, &count, TRUE);
+        if (GetOverlappedResult(stream.pipe.get(), &stream.read->overlapped, &count, TRUE) != FALSE)
+            stream.keep(std::span { stream.read->buffer }.first(count));
         stream.state = ReadState::Idle;
+    }
+
+    /// Keeps what @p child's pipes gave, and closes them.
+    void closeStreams(Child& child) noexcept
+    {
+        for (auto& stream: child.streams)
+        {
+            cancelRead(stream);
+            stream.pipe.reset();
+        }
     }
 
     /// @return Which file @p handle is, by volume and file id; std::nullopt where neither can be read.
@@ -450,19 +504,53 @@ struct PipedProcessRunner::State
     State& operator=(State const&) = delete;
     State& operator=(State&&) = delete;
 
-    /// Ends every process and forgets it, its handler uncalled: the reads pending on its pipes are cancelled
-    /// and awaited before the buffers they write into are freed.
+    /// Ends every process tree and forgets it, its handler uncalled: every job is terminated first, so that
+    /// the trees end together; then each exit wait is unregistered, the reads pending on its pipes are
+    /// cancelled and awaited before the buffers they write into are freed, and its leader is given
+    /// KillGracePeriod to be gone before its job is closed.
     ~State()
     {
         auto const lock = std::scoped_lock { mutex };
+        for (auto const& child: children | std::views::values)
+            TerminateJobObject(child.job.get(), TerminatedExitCode);
         for (auto& child: children | std::views::values)
         {
-            TerminateJobObject(child.job.get(), 1);
             child.exitWait.reset();
             for (auto& stream: child.streams)
                 cancelRead(stream);
+            WaitForSingleObject(child.process.get(), KillGracePeriod);
         }
         children.clear();
+    }
+
+    /// Ends what is due by @p now: times out a process past its deadline, and gives up on the pipes of one
+    /// whose leader exited longer than orphanedOutputGrace ago, ending what is left of its tree and keeping
+    /// what was read.
+    void applyDeadlines(SteadyTimePoint now)
+    {
+        for (auto& child: children | std::views::values)
+        {
+            if (child.ending == Ending::NotAsked && now >= child.deadline)
+                terminate(child, ProcessCompletion::TimedOut);
+            // Whether the runner ended it or not: after a kill, a process outside the job may still hold a
+            // pipe it inherited.
+            if (child.isOrphaned() && now >= child.leaderExitedAt + tuning.orphanedOutputGrace)
+            {
+                TerminateJobObject(child.job.get(), TerminatedExitCode);
+                closeStreams(child);
+            }
+        }
+    }
+
+    /// Ends @p child's tree at once, for @p reason. A leader that had exited by itself keeps its exit code,
+    /// even if its exit has not come through the port yet.
+    void terminate(Child& child, ProcessCompletion reason) const noexcept
+    {
+        if (child.leader == Leader::Running && WaitForSingleObject(child.process.get(), 0) == WAIT_OBJECT_0)
+            noteLeaderExit(child);
+        child.endedBy = reason;
+        child.ending = Ending::Killed;
+        TerminateJobObject(child.job.get(), TerminatedExitCode);
     }
 
     /// Issues a read on every open, Idle stream that has not had its share of this round.
@@ -483,13 +571,28 @@ struct PipedProcessRunner::State
                 stream.readsThisRound = 0;
     }
 
-    /// @return When the next deadline falls due by the clock, @p now for a process that has ended already;
-    ///         std::nullopt if none will.
+    /// @return When the next deadline of a process falls due by the clock, @p now for one that has ended
+    ///         already; std::nullopt if none will. A killed process has none but its orphan's grace: the
+    ///         port tells when its tree has gone.
     [[nodiscard]] std::optional<SteadyTimePoint> nextDeadline(SteadyTimePoint now) const
     {
-        auto const anyEnded = std::ranges::any_of(children | std::views::values,
-                                                  [](Child const& child) { return child.hasEnded(); });
-        return anyEnded ? std::optional { now } : std::nullopt;
+        auto next = std::optional<SteadyTimePoint> {};
+        auto const consider = [&next](SteadyTimePoint when) {
+            next = next ? std::min(*next, when) : when;
+        };
+        for (auto const& child: children | std::views::values)
+        {
+            if (child.hasEnded())
+                consider(now);
+            else
+            {
+                if (child.ending == Ending::NotAsked)
+                    consider(child.deadline);
+                if (child.isOrphaned())
+                    consider(child.leaderExitedAt + tuning.orphanedOutputGrace);
+            }
+        }
+        return next;
     }
 
     /// Takes in one completion packet.
@@ -512,8 +615,9 @@ struct PipedProcessRunner::State
                 completeRead(stream);
     }
 
-    /// Notes that @p child's leader has exited, and how.
-    void noteLeaderExit(Child& child) const
+    /// Notes that @p child's leader has exited, and how: its exit code, if it exited by itself rather than
+    /// by the runner terminating its job.
+    void noteLeaderExit(Child& child) const noexcept
     {
         if (child.leader == Leader::Exited)
             return;
@@ -521,7 +625,7 @@ struct PipedProcessRunner::State
         child.leaderExitedAt = clock.now();
         auto code = DWORD { 0 };
         // The exit is told by the handle being signalled, never by STILL_ACTIVE, which is a legal exit code.
-        if (GetExitCodeProcess(child.process.get(), &code) != FALSE)
+        if (child.ending == Ending::NotAsked && GetExitCodeProcess(child.process.get(), &code) != FALSE)
             child.exitCode = static_cast<int32_t>(code);
     }
 
@@ -611,7 +715,8 @@ std::expected<ProcessToken, ProcessStartError> PipedProcessRunner::start(Process
     auto error = createOverlappedPipe(PipeDirection::Inbound, L"runner-stderr", PipeBufferSize);
     auto input = openNullInput();
     auto job = createKillOnCloseJob();
-    if (!output || !error || !input || !job)
+    auto reads = std::array { makePendingRead(), makePendingRead() };
+    if (!output || !error || !input || !job || !reads[0] || !reads[1])
         return std::unexpected(ProcessStartError::SpawnFailed);
 
     auto const created = createSuspended(*invocation,
@@ -649,25 +754,27 @@ std::expected<ProcessToken, ProcessStartError> PipedProcessRunner::start(Process
     auto const capOf = [&spec](StreamCapture capture) {
         return capture == StreamCapture::Capture ? spec.outputCap : std::size_t { 0 };
     };
-    auto const streamOf = [&](OverlappedPipe& pipe, StreamCapture capture) {
-        return Stream { .pipe = std::move(pipe.ours),
-                        .read = std::make_unique<PendingRead>(),
-                        .state = ReadState::Idle,
-                        .readsThisRound = 0,
-                        .cap = capOf(capture),
-                        .captured = {} };
-    };
-    auto child =
-        Child { .job = std::move(*job),
-                .process = std::move(process),
-                .exitWait = {},
-                .streams = { streamOf(*output, spec.standardOutput), streamOf(*error, spec.standardError) },
-                .deadline = _state->clock.now() + spec.timeout,
-                .endedBy = std::nullopt,
-                .leader = Leader::Running,
-                .exitCode = std::nullopt,
-                .leaderExitedAt = {},
-                .done = std::move(done) };
+    auto const streamOf =
+        [&](OverlappedPipe& pipe, std::unique_ptr<PendingRead>& read, StreamCapture capture) {
+            return Stream { .pipe = std::move(pipe.ours),
+                            .read = std::move(read),
+                            .state = ReadState::Idle,
+                            .readsThisRound = 0,
+                            .cap = capOf(capture),
+                            .captured = {} };
+        };
+    auto child = Child { .job = std::move(*job),
+                         .process = std::move(process),
+                         .exitWait = {},
+                         .streams = { streamOf(*output, reads[0], spec.standardOutput),
+                                      streamOf(*error, reads[1], spec.standardError) },
+                         .deadline = _state->clock.now() + spec.timeout,
+                         .ending = Ending::NotAsked,
+                         .endedBy = std::nullopt,
+                         .leader = Leader::Running,
+                         .exitCode = std::nullopt,
+                         .leaderExitedAt = {},
+                         .done = std::move(done) };
     {
         // Registered under the lock and inserted before it is released: a leader that exits at once posts a
         // packet that pump() takes in only once the child is in the table.
@@ -685,9 +792,19 @@ std::expected<ProcessToken, ProcessStartError> PipedProcessRunner::start(Process
     return token;
 }
 
-void PipedProcessRunner::cancel(ProcessToken /*token*/)
+void PipedProcessRunner::cancel(ProcessToken token)
 {
-    // Ending a process is not wired on Windows yet: a cancel is ignored, and the process runs to its end.
+    {
+        auto const lock = std::scoped_lock { _state->mutex };
+        auto const found = _state->children.find(token);
+        if (found == _state->children.end())
+            return;
+        auto& child = found->second;
+        if (child.hasEnded() || child.ending != Ending::NotAsked)
+            return;
+        _state->terminate(child, ProcessCompletion::Cancelled);
+    }
+    _state->wake();
 }
 
 void PipedProcessRunner::pump(std::chrono::milliseconds maxWait)
@@ -696,9 +813,10 @@ void PipedProcessRunner::pump(std::chrono::milliseconds maxWait)
     auto wait = maxWait;
     {
         auto const lock = std::scoped_lock { _state->mutex };
+        auto const now = _state->clock.now();
+        _state->applyDeadlines(now);
         _state->startRound();
         _state->issueReads();
-        auto const now = _state->clock.now();
         if (auto const next = _state->nextDeadline(now))
             wait = std::min(wait, until(*next, now));
     }
@@ -727,6 +845,7 @@ void PipedProcessRunner::pump(std::chrono::milliseconds maxWait)
                 break;
         }
         takeIn(count); // Every packet dequeued is taken in: a read's would otherwise be lost.
+        _state->applyDeadlines(_state->clock.now());
         ended = _state->takeEnded();
     }
 
