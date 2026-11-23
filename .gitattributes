@@ -22,3 +22,8 @@ src/contour/config/testdata/*.txt text eol=lf
 # CRLF checkout would change both, so the text stays LF and the stream is never converted.
 src/vtbackend/state/golden/*.txt text eol=lf
 src/vtbackend/state/golden/*.bin binary
+
+# The agent orchestrator's screen goldens, recorded fixtures and stores are compared byte for byte, and its
+# sources are hashed into the manifest digest. A CRLF checkout fails every comparison, so its text stays LF; its
+# manifest corpus pins its own line ends (contract/manifest-v2/.gitattributes) and binary fixtures are detected.
+extensions/orchestrator/** text=auto eol=lf
