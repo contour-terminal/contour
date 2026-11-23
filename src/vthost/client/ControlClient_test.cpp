@@ -46,6 +46,7 @@
 #include <vthost/Transport.hpp>
 #include <vthost/client/ControlClient.hpp>
 #include <vthost/control/ControlService.hpp>
+#include <vthost/proto/ControlVersions.hpp>
 #include <vthost/testing/CountingRandom.hpp>
 
 using core::async::Task;
@@ -397,7 +398,7 @@ TEST_CASE("a version refusal is reported verbatim", "[vthost][client][control]")
     REQUIRE_FALSE(outcome);
     CHECK(outcome.error().failure == ControlFailure::Refused);
     CHECK(outcome.error().message
-          == proto::describe(proto::HandshakeRefusal { .ours = proto::SupportedVersions, .theirs = theirs },
+          == proto::describe(proto::HandshakeRefusal { .ours = proto::ControlVersions, .theirs = theirs },
                              proto::PeerRole::Daemon));
 }
 
