@@ -45,10 +45,10 @@ class IWin32BeneathSystem
 
     /// Re-opens the object @p looked holds for reading its data (reopenHeld(), as ReOpenFile() does): no name
     /// is resolved, so what is read is what was looked at. Opened shared for read, write and delete,
-    /// following no reparse point and recalling no data from remote storage.
+    /// following no reparse point and recalling no data from remote storage. A directory is never re-opened.
     /// @param looked A handle open() returned.
     /// @return A synchronous handle with FILE_READ_DATA and FILE_READ_ATTRIBUTES (so that status() can
-    ///         describe it again), not inheritable; or the Win32 error.
+    ///         describe it again), not inheritable; or the Win32 error (ERROR_ACCESS_DENIED for a directory).
     [[nodiscard]] virtual std::expected<UniqueHandle, DWORD> reopenForRead(HANDLE looked) = 0;
 
     /// @param handle An open handle with FILE_READ_ATTRIBUTES.

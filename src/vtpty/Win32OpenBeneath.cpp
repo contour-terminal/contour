@@ -30,12 +30,16 @@ namespace
         { .entry = BeneathEntry::DirectoryCreatedIfMissing,
           .disposition = FILE_OPEN_IF,
           .options = FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT },
+        // No FILE_OPEN_NO_RECALL: a directory is walked, not read, and walking a cloud placeholder directory
+        // is accepted (Decision 3); asking for no recall could make its children look missing.
         { .entry = BeneathEntry::Directory,
           .disposition = FILE_OPEN,
           .options = FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT },
+        // FILE_OPEN_NO_RECALL: looking at a file must not fetch a placeholder's data from remote storage
+        // before its attributes tell it is not on disk.
         { .entry = BeneathEntry::Entry,
           .disposition = FILE_OPEN,
-          .options = FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT },
+          .options = FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT | FILE_OPEN_NO_RECALL },
     });
     // A row per enumerator, each at its enumerator's index: a new BeneathEntry is a new row, here.
     static_assert(EntryRows.size() == std::to_underlying(BeneathEntry::Last) + std::size_t { 1 });
@@ -50,6 +54,8 @@ namespace
                                                  && (row.options & FILE_NON_DIRECTORY_FILE) == 0;
                                       }),
                   "Every entry is opened itself, never a reparse point's target, and as a directory or not");
+    static_assert((EntryRows.at(std::to_underlying(BeneathEntry::Entry)).options & FILE_OPEN_NO_RECALL) != 0,
+                  "Looking at a file to be read recalls nothing from remote storage");
 
     /// @param name What openBeneath() was asked to open.
     /// @return Whether @p name is one component: not empty, and no separator, so that NtCreateFile neither
@@ -60,9 +66,11 @@ namespace
     }
 
     /// How reopenHeld() opens the object it is given: itself, never a reparse point's target; without
-    /// recalling data held in remote storage; read front to back.
-    constexpr auto ReopenOptions = ULONG { FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT
-                                           | FILE_OPEN_NO_RECALL | FILE_SEQUENTIAL_ONLY };
+    /// recalling data held in remote storage; read front to back; never a directory, so that no handle a
+    /// read holds (the parent's included) can be turned into one that lists or reads a directory.
+    constexpr auto ReopenOptions =
+        ULONG { FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT | FILE_OPEN_NO_RECALL
+                | FILE_SEQUENTIAL_ONLY | FILE_NON_DIRECTORY_FILE };
 
     /// The ntdll functions openBeneath() calls, looked up once.
     struct NtFunctions
@@ -83,15 +91,18 @@ namespace
 
     /// Opens @p name relative to @p root (NtCreateFile with a RootDirectory), shared for read, write and
     /// delete, not inheritable.
-    /// @param root An open file or directory, not null.
+    /// @param root An open file or directory; a null one is refused (ERROR_ACCESS_DENIED).
     /// @param name What to open beneath @p root; empty for @p root's own object.
     /// @param access The access asked for; SYNCHRONIZE is added.
     /// @param disposition NtCreateFile's CreateDisposition.
     /// @param options NtCreateFile's CreateOptions; FILE_SYNCHRONOUS_IO_NONALERT among them.
-    /// @return The handle; or the Win32 error the NTSTATUS maps to.
+    /// @return The handle; ERROR_ACCESS_DENIED for a null @p root; or the Win32 error the NTSTATUS maps to.
     [[nodiscard]] std::expected<UniqueHandle, DWORD> createRelative(
         HANDLE root, std::wstring_view name, DWORD access, ULONG disposition, ULONG options)
     {
+        // With no RootDirectory, NtCreateFile would read the name as an absolute object path.
+        if (root == nullptr)
+            return std::unexpected(DWORD { ERROR_ACCESS_DENIED });
         auto const& nt = ntFunctions();
         if (nt.createFile == nullptr || nt.statusToDosError == nullptr)
             return std::unexpected(DWORD { ERROR_CALL_NOT_IMPLEMENTED });
@@ -140,7 +151,7 @@ std::expected<UniqueHandle, DWORD> openBeneath(HANDLE parent,
                                                BeneathEntry entry,
                                                DWORD access)
 {
-    if (parent == nullptr || !isOneComponent(name))
+    if (!isOneComponent(name))
         return std::unexpected(DWORD { ERROR_ACCESS_DENIED });
     auto const& row = EntryRows.at(std::to_underlying(entry));
     return createRelative(parent, name, access, row.disposition, row.options);
@@ -148,8 +159,6 @@ std::expected<UniqueHandle, DWORD> openBeneath(HANDLE parent,
 
 std::expected<UniqueHandle, DWORD> reopenHeld(HANDLE held, DWORD access)
 {
-    if (held == nullptr)
-        return std::unexpected(DWORD { ERROR_ACCESS_DENIED });
     return createRelative(held, std::wstring_view {}, access, FILE_OPEN, ReopenOptions);
 }
 

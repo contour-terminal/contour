@@ -25,7 +25,9 @@ inline constexpr DWORD HeldDirectoryAccess =
     FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE;
 
 /// What openBeneath() opens. None is opened as FILE_NON_DIRECTORY_FILE: its STATUS_FILE_IS_A_DIRECTORY maps
-/// to ERROR_ACCESS_DENIED, which could not be told from a real denial.
+/// to ERROR_ACCESS_DENIED, which could not be told from a real denial. Entry, the look at a file that may be
+/// read, recalls nothing from remote storage (FILE_OPEN_NO_RECALL); Directory does, as walking a cloud
+/// placeholder directory is accepted.
 enum class BeneathEntry : uint8_t
 {
     DirectoryCreatedIfMissing = 0, ///< A directory, created when nothing has the name.
@@ -55,10 +57,12 @@ enum class BeneathEntry : uint8_t
 /// an empty name, as ReOpenFile() does, so what is opened is what @p held looked at whatever its name is now.
 /// Opened itself (FILE_OPEN_REPARSE_POINT), recalling no data from remote storage (FILE_OPEN_NO_RECALL, which
 /// ReOpenFile() refuses as ERROR_INVALID_PARAMETER), sequentially, synchronously, shared for read, write and
-/// delete, not inheritable.
+/// delete, not inheritable. Never a directory (FILE_NON_DIRECTORY_FILE): only a file classified regular is
+/// re-opened, so no directory handle a read holds, the parent's included, can be re-opened through it.
 /// @param held An open file. A null one is refused, before anything is opened.
 /// @param access The access the new handle is opened with; SYNCHRONIZE is always added.
-/// @return The new handle; ERROR_ACCESS_DENIED for a null @p held; or the Win32 error the NTSTATUS maps to.
+/// @return The new handle; ERROR_ACCESS_DENIED for a null @p held or for a directory
+///         (STATUS_FILE_IS_A_DIRECTORY); or the Win32 error the NTSTATUS maps to.
 [[nodiscard]] std::expected<UniqueHandle, DWORD> reopenHeld(HANDLE held, DWORD access);
 
 /// @return Whether @p handle is a name-surrogate reparse point (junction, symlink, mount point):

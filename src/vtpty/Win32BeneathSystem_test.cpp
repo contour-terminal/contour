@@ -205,11 +205,25 @@ TEST_CASE("Win32BeneathSystem: a re-opened file reads its bytes, and is the same
 
     // Shared for deletion: reading never stops the file from being removed.
     CHECK(std::filesystem::remove(fixture.rootPath / "f"));
+}
 
-    // Nothing is re-opened without a handle to re-open.
-    auto const unheld = system.reopenForRead(nullptr);
+TEST_CASE("Win32BeneathSystem: nothing is re-opened without a handle", "[vtpty][beneath]")
+{
+    auto const unheld = vtpty::nativeWin32BeneathSystem().reopenForRead(nullptr);
     REQUIRE_FALSE(unheld.has_value());
     CHECK(unheld.error() == DWORD { ERROR_ACCESS_DENIED });
+}
+
+TEST_CASE("Win32BeneathSystem: a directory is never re-opened for reading", "[vtpty][beneath]")
+{
+    auto const fixture = Fixture {};
+    std::filesystem::create_directory(fixture.rootPath / "d");
+    auto& system = vtpty::nativeWin32BeneathSystem();
+
+    auto const looked = openIn(fixture.root.nativeHandle(), L"d");
+    REQUIRE(looked.has_value());
+    CHECK_FALSE(system.reopenForRead(looked->get()).has_value());
+    CHECK_FALSE(system.reopenForRead(fixture.root.nativeHandle()).has_value());
 }
 
 TEST_CASE("Win32BeneathSystem: no handle it makes is inheritable", "[vtpty][beneath]")
