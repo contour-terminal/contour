@@ -134,10 +134,12 @@ TEST_CASE("DaemonConsentKey: the run that holds the socket clears what earlier r
 
     auto const third = vthost::createDaemonConsentKey(files, random, "/state/consent", Socket, 3);
     REQUIRE(third.has_value());
+    // The in-memory store lists files by name, and a name's hash prefix depends on how the platform spells the
+    // socket path, so the two names are compared as a set rather than in list order.
     auto const names = *files.list("/state/consent");
-    CHECK(names
-          == std::vector { vthost::daemonConsentKeyName("/other/socket", 5),
-                           vthost::daemonConsentKeyName(Socket, 3) });
+    CHECK(std::set<std::string>(names.begin(), names.end())
+          == std::set<std::string> { vthost::daemonConsentKeyName("/other/socket", 5),
+                                     vthost::daemonConsentKeyName(Socket, 3) });
     // Another daemon's key stays its own.
     CHECK(vthost::readDaemonConsentKey(files, "/state/consent", "/other/socket", 5).has_value());
 }
