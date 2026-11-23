@@ -445,6 +445,14 @@ TEST_CASE("ProgramCommandCapture.spawnFailure", "[commandcapture]")
     CHECK(result.error().kind == CommandCaptureError::Kind::SpawnFailed);
     CHECK(result.error().cause);
 }
+
+TEST_CASE("process_runner_probe runs its verbs", "[processrunner][probe]")
+{
+    auto capture = ProgramCommandCapture { core::async::StopToken {} };
+    auto const line = capture.run(std::format(R"("{}" args a "b c")", VTPTY_PROCESS_RUNNER_PROBE), 10s, {});
+    REQUIRE(line.has_value());
+    CHECK(*line == "a|b c");
+}
 #endif
 
 #ifndef _WIN32

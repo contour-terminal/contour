@@ -2,6 +2,7 @@
 #include <vtpty/ConPty.hpp>
 
 #include <vtpty/ChunkedWrite.hpp>
+#include <vtpty/OverlappedPipe.hpp>
 #include <vtpty/Win32Handle.hpp>
 
 #include <crispy/BufferObject.hpp>
@@ -10,7 +11,6 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cassert>
 #include <cerrno>
 #include <concepts>
@@ -145,101 +145,6 @@ namespace
     /// How much either side of a pseudoconsole's pipes may write ahead of the other's reads: Windows
     /// Terminal's size for the same pipes.
     constexpr auto PipeBufferSize = DWORD { 128 * 1024 };
-
-    /// Which way a pipe between this process and the pseudoconsole carries the bytes.
-    enum class PipeFlow : uint8_t
-    {
-        FromPseudoconsole = 0, ///< The program's output: this process reads.
-        ToPseudoconsole,       ///< The program's input: this process writes.
-    };
-
-    /// How a pipe of one flow is opened at either end.
-    struct PipeFlowRow
-    {
-        PipeFlow flow;
-        DWORD ourAccess;           ///< This process's end, as CreateNamedPipeW() opens it.
-        DWORD pseudoconsoleAccess; ///< The pseudoconsole's end, as CreateFileW() opens it.
-        std::wstring_view tag;     ///< Part of the pipe's name, which tells the two of a pseudoconsole apart.
-    };
-
-    /// One row per flow, in enumerator order.
-    constexpr auto PipeFlows = std::array {
-        PipeFlowRow { .flow = PipeFlow::FromPseudoconsole,
-                      .ourAccess = PIPE_ACCESS_INBOUND,
-                      .pseudoconsoleAccess = GENERIC_WRITE | FILE_READ_ATTRIBUTES,
-                      .tag = L"out" },
-        // Duplex, though nothing comes back: an outbound end may not read its own attributes, and this one
-        // asks how much room the pipe has (writableWithoutWaiting()).
-        PipeFlowRow { .flow = PipeFlow::ToPseudoconsole,
-                      .ourAccess = PIPE_ACCESS_DUPLEX,
-                      .pseudoconsoleAccess = GENERIC_READ | FILE_WRITE_ATTRIBUTES,
-                      .tag = L"in" },
-    };
-
-    static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, PipeFlows.size()),
-                                      [](std::size_t index) {
-                                          return std::to_underlying(PipeFlows.at(index).flow) == index;
-                                      }),
-                  "PipeFlows must list every flow in enumerator order");
-
-    /// @return When this process started, in 100 ns ticks: what tells it apart from a later process given the
-    ///         same id. A pipe outlives the process that named it once a live upgrade hands it on, and the
-    ///         name must not then be asked for again.
-    [[nodiscard]] std::uint64_t processStartTime() noexcept
-    {
-        static auto const started = [] {
-            auto creation = FILETIME {};
-            auto exit = FILETIME {};
-            auto kernel = FILETIME {};
-            auto user = FILETIME {};
-            if (GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernel, &user) == FALSE)
-                return std::uint64_t { 0 };
-            return (std::uint64_t { creation.dwHighDateTime } << 32) | creation.dwLowDateTime;
-        }();
-        return started;
-    }
-
-    /// Creates a pipe between this process and the pseudoconsole. A named one, so that our end can be
-    /// opened for overlapped I/O, which alone can be bounded by a timeout and ended early: CreatePipe() takes
-    /// no flags, and its ends block until the other side reads or writes. The pseudoconsole's end stays
-    /// synchronous, as CreatePseudoConsole() requires of it.
-    /// @param flow Which way it carries the bytes.
-    /// @return Our end, then the pseudoconsole's; or why the pipe could not be created.
-    [[nodiscard]] std::expected<std::pair<HANDLE, HANDLE>, DWORD> createPipe(PipeFlow flow)
-    {
-        static auto pipesCreated = std::atomic<unsigned> { 0 };
-        auto const& row = PipeFlows.at(std::to_underlying(flow));
-        auto const name = std::format(L"\\\\.\\pipe\\contour-conpty-{}-{}-{}-{}",
-                                      GetCurrentProcessId(),
-                                      processStartTime(),
-                                      pipesCreated++,
-                                      row.tag);
-
-        // One instance, ours, and only for a client on this machine.
-        auto* const ours =
-            CreateNamedPipeW(name.c_str(),
-                             row.ourAccess | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
-                             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-                             1,
-                             PipeBufferSize,
-                             PipeBufferSize,
-                             0,
-                             nullptr);
-        if (ours == INVALID_HANDLE_VALUE)
-            return std::unexpected(GetLastError());
-
-        // Connected as it is opened: a client that connects before ConnectNamedPipe() is called leaves the
-        // pipe connected, and the call is then not needed.
-        auto* const theirs = CreateFileW(
-            name.c_str(), row.pseudoconsoleAccess, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (theirs == INVALID_HANDLE_VALUE)
-        {
-            auto const error = GetLastError();
-            CloseHandle(ours);
-            return std::unexpected(error);
-        }
-        return std::pair { ours, theirs };
-    }
 
     /// FILE_PIPE_LOCAL_INFORMATION (ntifs.h): what NtQueryInformationFile() tells of one end of a pipe.
     struct PipeLocalInformation
@@ -580,30 +485,24 @@ StartResult ConPty::start()
         return failed("Could not create the events this PTY waits on.");
 
     // Create the pipes to which the ConPty will connect to
-    auto const inputPipe = createPipe(PipeFlow::ToPseudoconsole);
+    auto inputPipe = createOverlappedPipe(PipeDirection::Outbound, L"conpty-in", PipeBufferSize);
     if (!inputPipe)
-        return failed(core::systemErrorMessage(inputPipe.error()));
-    auto* const hPipePTYIn = inputPipe->second;
-    _output = inputPipe->first;
+        return failed(core::systemErrorMessage(static_cast<DWORD>(inputPipe.error().value())));
+    _output = inputPipe->ours.release();
 
-    auto const outputPipe = createPipe(PipeFlow::FromPseudoconsole);
+    auto outputPipe = createOverlappedPipe(PipeDirection::Inbound, L"conpty-out", PipeBufferSize);
     if (!outputPipe)
-    {
-        CloseHandle(hPipePTYIn);
-        return failed(core::systemErrorMessage(outputPipe.error()));
-    }
-    auto* const hPipePTYOut = outputPipe->second;
-    _input = outputPipe->first;
+        return failed(core::systemErrorMessage(static_cast<DWORD>(outputPipe.error().value())));
+    _input = outputPipe->ours.release();
 
-    // Create the Pseudo Console of the required size, attached to the PTY-end of the pipes
-    HRESULT const hr = _conptyApi->createPseudoConsole(
-        { unbox<SHORT>(_size.columns), unbox<SHORT>(_size.lines) }, hPipePTYIn, hPipePTYOut, 0, &_master);
-
-    if (hPipePTYIn != INVALID_HANDLE_VALUE)
-        CloseHandle(hPipePTYIn);
-
-    if (hPipePTYOut != INVALID_HANDLE_VALUE)
-        CloseHandle(hPipePTYOut);
+    // Create the Pseudo Console of the required size, attached to the PTY-end of the pipes, which it
+    // duplicates: ours close as they go out of scope.
+    HRESULT const hr =
+        _conptyApi->createPseudoConsole({ unbox<SHORT>(_size.columns), unbox<SHORT>(_size.lines) },
+                                        inputPipe->theirs.get(),
+                                        outputPipe->theirs.get(),
+                                        0,
+                                        &_master);
 
     if (hr != S_OK)
         return failed(resultMessage(hr));

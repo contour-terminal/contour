@@ -49,6 +49,10 @@ class UniqueHandle
     /// Closes the handle, if it owns one.
     void reset() noexcept;
 
+    /// Gives up ownership without closing.
+    /// @return The handle; the UniqueHandle owns none afterwards.
+    [[nodiscard]] core::platform::NativeHandle release() noexcept { return std::exchange(_handle, nullptr); }
+
   private:
     core::platform::NativeHandle _handle = nullptr;
 };

@@ -152,8 +152,8 @@ if(UNIX)
     list(APPEND vtpty_SOURCES ProcessCgroup.cpp ScopeRequestEncoding.cpp SystemdScopePlacement.cpp UnixPty.cpp UnixUtils.cpp)
     list(APPEND vtpty_SOURCES ProcessCgroup.hpp PosixSpawn.hpp ScopeRequestEncoding.hpp SystemdScopePlacement.hpp UnixPty.hpp UnixUtils.hpp)
 else()
-    list(APPEND vtpty_SOURCES ConPty.cpp UniqueHandle.cpp Win32OpenBeneath.cpp)
-    list(APPEND vtpty_HEADERS ConPty.hpp Win32OpenBeneath.hpp)
+    list(APPEND vtpty_SOURCES ConPty.cpp OverlappedPipe_win32.cpp UniqueHandle.cpp Win32OpenBeneath.cpp)
+    list(APPEND vtpty_HEADERS ConPty.hpp OverlappedPipe.hpp Win32OpenBeneath.hpp)
     #TODO: list(APPEND vtpty_SOURCES WinPty.cpp)
 endif()
 
@@ -257,6 +257,22 @@ if(VTPTY_TESTING)
         add_dependencies(vtpty_test gui_subsystem_echo)
         target_compile_definitions(vtpty_test PRIVATE
             VTPTY_GUI_SUBSYSTEM_ECHO="$<TARGET_FILE:gui_subsystem_echo>")
+
+        # The process runner's child: a console program that runs its arguments as a sequence of verbs (write,
+        # exit, sleep, spawn a grandchild, print its environment and directory), for the runner's tests.
+        add_executable(process_runner_probe test/process_runner_probe.cpp)
+        target_link_libraries(process_runner_probe PRIVATE core::base)
+        add_dependencies(vtpty_test process_runner_probe)
+        target_compile_definitions(vtpty_test PRIVATE
+            VTPTY_PROCESS_RUNNER_PROBE="$<TARGET_FILE:process_runner_probe>")
+
+        # A process that dies holding a runner, its destructor never run: what must still end the runner's
+        # children.
+        add_executable(process_runner_host test/process_runner_host.cpp)
+        target_link_libraries(process_runner_host PRIVATE vtpty)
+        add_dependencies(vtpty_test process_runner_host)
+        target_compile_definitions(vtpty_test PRIVATE
+            VTPTY_PROCESS_RUNNER_HOST="$<TARGET_FILE:process_runner_host>")
     else()
         target_sources(vtpty_test PRIVATE ProcessCgroup_test.cpp ProcessPlacement_test.cpp ScopeRequestEncoding_test.cpp SystemdScopePlacement_test.cpp UnixPty_test.cpp UnixUtils_test.cpp)
     endif()
