@@ -9,6 +9,8 @@
 #include <ranges>
 #include <string_view>
 
+#include <vtextension/RootPathSyntax.hpp>
+
 namespace vtextension
 {
 
@@ -23,9 +25,6 @@ enum class ArgumentKind : uint8_t
     Path,   ///< An absolute, normalised path inside its root (`path:<root>`).
     Text,   ///< Up to MaxTextArgumentBytes, without NUL, not starting with `-`.
 };
-
-/// The longest value a Path argument may have, in bytes.
-inline constexpr std::size_t MaxPathArgumentBytes = 4096;
 
 /// The longest value a Text argument may have, in bytes.
 inline constexpr std::size_t MaxTextArgumentBytes = std::size_t { 8 } * 1024;

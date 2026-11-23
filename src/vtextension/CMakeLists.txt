@@ -34,6 +34,7 @@ set(vtextension_SOURCES
     HostState.cpp
     Instance.cpp
     Manifest.cpp
+    RootPathSyntax.cpp
     RootPointer.cpp
     RootResolution.cpp
     Runner.cpp
@@ -94,6 +95,7 @@ set(vtextension_HEADERS
     PaneService.hpp
     Placement.hpp
     ProcessService.hpp
+    RootPathSyntax.hpp
     RootPointer.hpp
     RootResolution.hpp
     Runner.hpp
@@ -165,6 +167,7 @@ if(VTEXTENSION_TESTING)
         Isolation_test.cpp
         Manifest_test.cpp
         ParseBudget_test.cpp
+        RootPathSyntax_test.cpp
         RootPointer_test.cpp
         RootResolution_test.cpp
         Runner_test.cpp
