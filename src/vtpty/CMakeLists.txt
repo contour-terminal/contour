@@ -46,6 +46,7 @@ set(vtpty_SOURCES
     SshSocketWait.cpp
     SshTerminfoInstall.cpp
     WindowsCommandLine.cpp
+    WindowsPathRules.cpp
 )
 
 set(vtpty_HEADERS
@@ -89,6 +90,7 @@ set(vtpty_HEADERS
     SshSocketWait.hpp
     SshTerminfoInstall.hpp
     WindowsCommandLine.hpp
+    WindowsPathRules.hpp
     Win32Handle.hpp
 )
 
@@ -218,6 +220,7 @@ if(VTPTY_TESTING)
         SshSocketWait_test.cpp
         SshTerminfoInstall_test.cpp
         WindowsCommandLine_test.cpp
+        WindowsPathRules_test.cpp
         test/PtyReading_test.cpp
     )
     if(WIN32)
