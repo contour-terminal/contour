@@ -183,14 +183,17 @@ inline constexpr auto DefaultPollEvery = std::chrono::milliseconds { std::chrono
 /// The shortest `poll_every` accepted.
 inline constexpr auto MinPollEvery = std::chrono::milliseconds { std::chrono::seconds { 30 } };
 /// What every agent's system prompt asks of it unless `status_board` says otherwise: the board the dashboard
-/// shows (Claude Code's `--append-system-prompt`, which holds for the whole session).
+/// shows (Claude Code's `--append-system-prompt`, which holds for the whole session). The skill publishes the
+/// board as a page; the agent must never open it, since a page opened by every agent on every publish is a
+/// browser window the user did not ask for. The page's link goes into STATUS.md's preamble, which the page
+/// itself leaves out, so that the dashboard's Board tab links it (view::boardPageOf()).
 inline constexpr std::string_view DefaultBoardInstruction =
     "Keep a status board for this run with the contour-workflows:status-board skill: STATUS.md at the root "
-    "of "
-    "this worktree, current at every state change -- what you are doing, what is done, what is left, and "
-    "what "
-    "blocks you. Never commit it. The orchestrator that started you shows it to the user, who may not see "
-    "your terminal; publishing it anywhere else is optional.";
+    "of this worktree, current at every state change -- what you are doing, what is done, what is left, and "
+    "what blocks you. Never commit it. The orchestrator that started you shows it to the user, who may not "
+    "see your terminal. Publish it as the skill says, but never open it: no Artifact open action, no "
+    "browser. After the first publish, put the page's link in STATUS.md on its own line between the title "
+    "and the Last updated stamp, as: **Page:** <the artifact URL>";
 
 /// What `status_board` spells to ask for no board: agents then run without the instruction.
 inline constexpr std::string_view BoardOff = "off";

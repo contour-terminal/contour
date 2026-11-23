@@ -548,6 +548,21 @@ TEST_CASE("a board's URL is a hyperlink", "[orchestrator][view][board]")
                               }));
 }
 
+TEST_CASE("a board that names its page links it from its age line", "[orchestrator][view][board]")
+{
+    constexpr auto Page = "https://claude.ai/code/artifact/0b3c5d8e-2f41-4a6b-9c7d-1e2f3a4b5c6d"sv;
+    auto fixture = DashboardFixture { boardWorld(), Wide };
+    openBoard(
+        fixture, RunningId, std::format("# contour — status\n\n**Page:** {}\n\n**Last updated:** x", Page));
+    auto const screen = fixture.screen();
+    CHECK(screen.contains(std::format("updated at an unknown time{}{}", HintSeparator, PageLabel)));
+    // The short label is linked whole, to the whole link, however narrow the panel.
+    CHECK(std::ranges::any_of(
+        fixture.dashboard.rendered().hyperlinks(), [&](core::tui::HyperlinkRegion const& link) {
+            return link.uri == Page && link.cellArea.width == static_cast<int>(PageLabel.size());
+        }));
+}
+
 TEST_CASE("the board's age follows the clock", "[orchestrator][view][board]")
 {
     auto fixture = DashboardFixture { boardWorld(), Wide };
@@ -583,4 +598,32 @@ TEST_CASE("a paste into the message box keeps its line feeds", "[orchestrator][v
     CHECK(fixture.dashboard.select(FinishedId).empty());
     CHECK(fixture.dashboard.input("\r").empty());
     CHECK(fixture.screen().contains("#2366 is not listed any more"));
+}
+
+TEST_CASE("a board names its page on a Page: line, and only a claude.ai one", "[orchestrator][view][board]")
+{
+    struct Row
+    {
+        std::string_view board;
+        std::optional<std::string> page;
+    };
+    auto const rows = std::array {
+        Row {
+            .board =
+                "# contour — status\n\n**Page:** https://claude.ai/code/artifact/abc\n\n**Last updated:** x",
+            .page = "https://claude.ai/code/artifact/abc" },
+        Row { .board = "page: https://claude.ai/artifact/1  \r", .page = "https://claude.ai/artifact/1" },
+        Row { .board = "  **PAGE:**   https://claude.ai/x", .page = "https://claude.ai/x" },
+        Row { .board = "**Page:** https://evil.example/claude.ai/", .page = std::nullopt },
+        Row { .board = "**Page:** https://claude.ai.evil.example/x", .page = std::nullopt },
+        Row { .board = "**Page:** https://claude.ai/", .page = std::nullopt },
+        Row { .board = "**Page:** https://claude.ai/a b", .page = std::nullopt },
+        Row { .board = "the page: https://claude.ai/x", .page = std::nullopt },
+        Row { .board = "", .page = std::nullopt },
+    };
+    for (auto const& row: rows)
+    {
+        INFO(row.board);
+        CHECK(boardPageOf(row.board) == row.page);
+    }
 }

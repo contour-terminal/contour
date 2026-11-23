@@ -51,6 +51,19 @@ struct BoardAge
 [[nodiscard]] std::optional<std::string_view> boardScreenText(Engine const& engine,
                                                               std::string_view run) noexcept;
 
+/// Where a board's published page may live: the only links boardPageOf() accepts, so that a board, which is
+/// untrusted text, cannot dress any other link up as its page.
+inline constexpr std::string_view BoardPageOrigin = "https://claude.ai/";
+
+/// What the board's age line says for its page, linked to it.
+inline constexpr std::string_view PageLabel = "open page";
+
+/// @param bytes A board's contents.
+/// @return The link of the page its agent published it to: the first line that reads `Page: <link>`, the
+///         label in any case and optionally bold (`**Page:** <link>`), whose link is a whole printable-ASCII
+///         URL under BoardPageOrigin; std::nullopt for a board that names none.
+[[nodiscard]] std::optional<std::string> boardPageOf(std::string_view bytes);
+
 /// What the board panel learnt drawing itself, for the keys and the next repaint.
 struct BoardPanelState
 {
@@ -78,6 +91,12 @@ class StatusBoardPanel final: public core::tui::Component
     void render(core::tui::Canvas& canvas) override;
 
   private:
+    /// Draws the board's age on the first row, and after it the link to its page while it names one.
+    /// @param canvas The panel.
+    /// @param width The cells the line may take.
+    /// @param age What the age says.
+    void drawAgeLine(core::tui::Canvas& canvas, int width, std::string_view age) const;
+
     /// @return The board's contents at @p columns, from the top through line @p count: wrapped only as far as
     ///         that, and wrapped again only when the contents or the width changed.
     [[nodiscard]] std::span<BoardLine const> linesFor(std::string_view bytes, int columns, std::size_t count);
@@ -86,11 +105,12 @@ class StatusBoardPanel final: public core::tui::Component
     FocusSubject const& _subject;
     core::IClock const& _clock;
     BoardPanelState& _state;
-    std::string _wrappedBytes;       ///< The bytes @ref _logical was made from.
-    int _wrappedColumns = -1;        ///< The width @ref _wrapped is made for.
-    std::vector<BoardLine> _logical; ///< The contents' lines, sanitised (displayLines()) and rendered as
-                                     ///< Markdown (renderBoardMarkdown()), not wrapped.
-    LazyLines<BoardLine> _wrapped;   ///< The contents' lines, wrapped as far as a draw asked.
+    std::string _wrappedBytes;        ///< The bytes @ref _logical was made from.
+    std::optional<std::string> _page; ///< boardPageOf() the bytes @ref _logical was made from.
+    int _wrappedColumns = -1;         ///< The width @ref _wrapped is made for.
+    std::vector<BoardLine> _logical;  ///< The contents' lines, sanitised (displayLines()) and rendered as
+                                      ///< Markdown (renderBoardMarkdown()), not wrapped.
+    LazyLines<BoardLine> _wrapped;    ///< The contents' lines, wrapped as far as a draw asked.
 };
 
 } // namespace orchestrator::view

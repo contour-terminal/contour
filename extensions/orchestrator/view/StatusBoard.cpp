@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <orchestrator/view/StatusBoard.hpp>
 
+#include <core/Utils.hpp>
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -11,6 +13,7 @@
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 #include <orchestrator/core/Run.hpp>
@@ -121,6 +124,31 @@ std::optional<std::string_view> boardStateText(Board const* board) noexcept
     return std::nullopt;
 }
 
+std::optional<std::string> boardPageOf(std::string_view bytes)
+{
+    constexpr auto Label = "page:"sv;
+    constexpr auto Bold = "**"sv;
+    for (auto const piece: std::views::split(bytes, '\n'))
+    {
+        auto line = core::trim(std::string_view { piece.begin(), piece.end() });
+        if (line.starts_with(Bold))
+            line.remove_prefix(Bold.size());
+        if (line.size() < Label.size()
+            || !std::ranges::equal(line.substr(0, Label.size()), Label, [](char a, char b) {
+                   return (a >= 'A' && a <= 'Z' ? static_cast<char>(a - 'A' + 'a') : a) == b;
+               }))
+            continue;
+        line.remove_prefix(Label.size());
+        if (line.starts_with(Bold))
+            line.remove_prefix(Bold.size());
+        auto const url = core::trim(line);
+        auto const printable = std::ranges::all_of(url, [](char c) { return c > ' ' && c < '\x7f'; });
+        if (url.starts_with(BoardPageOrigin) && url.size() > BoardPageOrigin.size() && printable)
+            return std::string { url };
+    }
+    return std::nullopt;
+}
+
 std::optional<std::string_view> boardScreenText(Engine const& engine, std::string_view run) noexcept
 {
     // The engine reads no board of a run it no longer knows, nor any while its configuration is refused.
@@ -159,6 +187,7 @@ std::span<BoardLine const> StatusBoardPanel::linesFor(std::string_view bytes, in
     if (bytes != _wrappedBytes)
     {
         _logical = renderBoardMarkdown(displayLines(bytes, MaxBoardLines, MaxBoardLineChars));
+        _page = boardPageOf(bytes);
         _wrappedBytes = bytes;
         _wrappedColumns = -1;
     }
@@ -179,6 +208,22 @@ std::span<BoardLine const> StatusBoardPanel::linesFor(std::string_view bytes, in
     });
 }
 
+void StatusBoardPanel::drawAgeLine(core::tui::Canvas& canvas, int width, std::string_view age) const
+{
+    auto const& theme = canvas.theme();
+    auto const taken = canvas.putString(0, 1, cut(age, width), styleOf(theme, Role::Dim));
+    if (!_page)
+        return;
+    // The page's link is drawn as a short label, linked whole however narrow the panel: a click on it opens
+    // the page on the user's machine, as every link the dashboard draws does.
+    auto const label = std::format("{}{}", HintSeparator, PageLabel);
+    if (1 + taken + columnsOf(label) > width + 1)
+        return;
+    auto const at = 1 + taken + columnsOf(HintSeparator);
+    canvas.putString(0, 1 + taken, label, styleOf(theme, Role::Accent));
+    canvas.addHyperlink(0, at, columnsOf(PageLabel), *_page);
+}
+
 void StatusBoardPanel::render(core::tui::Canvas& canvas)
 {
     auto const& theme = canvas.theme();
@@ -197,6 +242,8 @@ void StatusBoardPanel::render(core::tui::Canvas& canvas)
     }
 
     auto const& board = *shown;
+    // Read with the contents: the page's link is parsed once a board changes, not on every frame.
+    std::ignore = linesFor(board.bytes, width, 0);
     // The age is the wall time now, carried on from the read by the monotonic clock, less the file's.
     auto const nowMonoMs = monoMsOf(_clock);
     if (board.modifiedWallMs != 0 && board.readWallMs != 0)
@@ -204,11 +251,11 @@ void StatusBoardPanel::render(core::tui::Canvas& canvas)
         auto const nowWallMs =
             board.readWallMs + (nowMonoMs > board.readMonoMs ? nowMonoMs - board.readMonoMs : 0);
         auto const age = boardAgeOf(nowWallMs > board.modifiedWallMs ? nowWallMs - board.modifiedWallMs : 0);
-        inside.putString(0, 1, cut(std::format("updated {}", age.text), width), styleOf(theme, Role::Dim));
+        drawAgeLine(inside, width, std::format("updated {}", age.text));
         _state.ageChangeMs = nowMonoMs + age.changesInMs;
     }
     else
-        inside.putString(0, 1, cut("updated at an unknown time", width), styleOf(theme, Role::Dim));
+        drawAgeLine(inside, width, "updated at an unknown time");
 
     auto const rows = static_cast<std::size_t>(std::max(0, height - 1));
     // Wrapped as far as the lines shown: a board scrolled to its end is wrapped whole.

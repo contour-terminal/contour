@@ -267,7 +267,11 @@ Both are tabs of the Focus, and both are read-only.
 **The board** is the agent's `STATUS.md` at its worktree's root, read with `file-read` from the `worktrees`
 root and shown with how long ago it was written, again every five seconds while its run is selected. Every
 agent is asked to keep one: its system prompt (`--append-system-prompt`) carries `status_board`, by default an
-instruction to keep `STATUS.md` with the `contour-workflows:status-board` skill. A hook's request proved
+instruction to keep `STATUS.md` with the `contour-workflows:status-board` skill. The skill publishes the board
+as a private claude.ai page; the agent is told never to open it — no browser window per agent — and to put the
+page's link in `STATUS.md` as a `**Page:** <link>` line under its title. The Board tab's first line then ends in
+`open page`, a link that opens the page on your machine (only a `https://claude.ai/` link is taken, since a board
+is untrusted text). A hook's request proved
 unreliable; a system prompt holds for the whole session. `status_board: off` asks for none. Once an agent
 has run for `status_board_after` the engine looks for the file. A board is untrusted text: drawn inert, cut at
 64 KiB, and refused when it leads outside the worktree. Ending a run removes an untracked `STATUS.md` (`git
