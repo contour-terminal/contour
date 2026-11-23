@@ -15,6 +15,24 @@
 #include <vtextension/RootResolution.hpp>
 #include <vtextension/testing/FakeDirectoryOpener.hpp>
 
+#ifdef _WIN32
+    #include <vtpty/DirectoryHandle.hpp>
+    #include <vtpty/testing/Junction.hpp>
+
+    #include <core/Utf8Path.hpp>
+    #include <core/platform/NativeFileSystem.hpp>
+    #include <core/testing/ScopedTempDir.hpp>
+
+    #include <algorithm>
+    #include <filesystem>
+    #include <format>
+
+    #include <Windows.h>
+
+    #include <vtextension/Manifest.hpp>
+    #include <vtextension/RootPointer.hpp>
+#endif
+
 using namespace std::string_view_literals;
 using vtextension::mostSpecificRoot;
 using vtextension::ResolvedRoot;
@@ -215,3 +233,116 @@ TEST_CASE("RootResolution: a Windows directory is judged by its resolved path", 
     REQUIRE(opened.has_value());
     CHECK(opened->resolvedPath() == R"(C:\wt\a)");
 }
+
+#ifdef _WIN32
+namespace
+{
+
+/// @return @p text with every ASCII letter upper-cased.
+[[nodiscard]] std::string asciiUpper(std::string text)
+{
+    std::ranges::transform(text, text.begin(), [](char c) {
+        return c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c;
+    });
+    return text;
+}
+
+/// @return @p text with every ASCII letter lower-cased.
+[[nodiscard]] std::string asciiLower(std::string text)
+{
+    std::ranges::transform(text, text.begin(), [](char c) {
+        return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+    });
+    return text;
+}
+
+/// @return @p text as the body of a JSON string: every `\` and `"` escaped.
+[[nodiscard]] std::string jsonEscaped(std::string_view text)
+{
+    auto escaped = std::string {};
+    for (auto const c: text)
+    {
+        if (c == '\\' || c == '"')
+            escaped += '\\';
+        escaped += c;
+    }
+    return escaped;
+}
+
+/// @return @p path's 8.3 spelling; @p path itself when it has none.
+[[nodiscard]] std::filesystem::path shortPathOf(std::filesystem::path const& path)
+{
+    auto shortName = std::wstring(MAX_PATH, L'\0');
+    auto const length =
+        GetShortPathNameW(path.c_str(), shortName.data(), static_cast<DWORD>(shortName.size()));
+    if (length == 0 || length >= shortName.size())
+        return path;
+    shortName.resize(length);
+    return std::filesystem::path { shortName };
+}
+
+} // namespace
+
+TEST_CASE("RootResolution: a Windows root, end to end through the native opener", "[daemon][processes]")
+{
+    auto const directory = core::testing::ScopedTempDir { "contour-a2-roots" };
+    auto const& top = directory.path();
+    std::filesystem::create_directories(top / "repos" / "contour");
+    std::filesystem::create_directories(top / "elsewhere");
+    REQUIRE(vtpty::testing::createJunction(top / "repos" / "contour" / "out", top / "elsewhere").has_value());
+
+    auto const manifest =
+        vtextension::parseManifestText("name = orchestrator\nversion = 2\nplacement daemon\n"
+                                       "root worktrees create = config:worktree_root\n"
+                                       "root repos = config:repos/*/path\n");
+    REQUIRE(manifest.has_value());
+    auto slashed = asciiLower(core::pathToUtf8(top));
+    std::ranges::replace(slashed, '\\', '/');
+    auto const config = std::format(R"({{"worktree_root":"{}/wt","repos":[{{"path":"{}"}}]}})",
+                                    jsonEscaped(slashed),
+                                    jsonEscaped(core::pathToUtf8(top / "repos" / "contour")));
+    auto const roots = vtextension::resolveRoots(
+        *manifest, config, "", core::platform::NativeFileSystem::instance(), PathStyle::Windows);
+    REQUIRE(roots.has_value());
+    REQUIRE(roots->size() == 2);
+    auto const& wt = roots->at(0).paths.at(0);
+    auto const& contour = roots->at(1).paths.at(0);
+    INFO("worktrees: " << wt << ", repos: " << contour);
+    auto& opener = vtpty::nativeDirectoryOpener();
+    REQUIRE(opener.pathStyle() == PathStyle::Windows);
+
+    CHECK(vtextension::ensureRoot(opener, *roots, "worktrees").has_value());
+    CHECK(std::filesystem::is_directory(top / "wt"));
+
+    auto const opened = vtextension::openInRoot(opener, *roots, "repos", asciiUpper(contour));
+    REQUIRE(opened.has_value());
+    CHECK(opened->resolvedPath() == contour);
+
+    CHECK(vtextension::openInRoot(opener, *roots, "repos", contour + R"(\out)")
+          == std::unexpected(RootError::OutsideRoots));
+
+    auto const run = vtextension::createPathParents(opener, *roots, "worktrees", wt + R"(\contour\r1)");
+    REQUIRE(run.has_value());
+    CHECK(*run == wt + R"(\contour\r1)");
+    CHECK_FALSE(run->contains('/'));
+    CHECK(std::filesystem::is_directory(core::pathFromTrustedUtf8(*run).parent_path()));
+
+    auto wtSlashed = wt;
+    std::ranges::replace(wtSlashed, '\\', '/');
+    CHECK(vtextension::resolvePathArgument(opener, *roots, "worktrees", wtSlashed)
+          == std::unexpected(RootError::NotAbsolute));
+    CHECK(vtextension::resolvePathArgument(opener, *roots, "worktrees", asciiUpper(wt))
+          == std::unexpected(RootError::OutsideRoots));
+
+    auto const shortContour = core::pathToUtf8(shortPathOf(top / "repos" / "contour"));
+    if (shortContour == contour)
+        WARN("8.3 names disabled");
+    else
+    {
+        INFO("through " << shortContour);
+        auto const throughShort = vtextension::openInRoot(opener, *roots, "repos", shortContour);
+        REQUIRE(throughShort.has_value());
+        CHECK(throughShort->resolvedPath() == contour);
+    }
+}
+#endif

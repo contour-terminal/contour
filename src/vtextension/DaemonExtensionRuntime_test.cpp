@@ -41,6 +41,17 @@
 #include <vtextension/testing/FakeProcessRunner.hpp>
 #include <vtextension/testing/TestModules.hpp>
 
+#ifdef _WIN32
+    #include <vtpty/DirectoryHandle.hpp>
+
+    #include <core/Utf8Path.hpp>
+    #include <core/platform/NativeFileSystem.hpp>
+    #include <core/testing/ScopedTempDir.hpp>
+
+    #include <format>
+    #include <fstream>
+#endif
+
 using namespace std::chrono_literals;
 using namespace std::string_view_literals;
 using namespace vtextension;
@@ -760,3 +771,89 @@ TEST_CASE("DaemonExtensionRuntime: restart does nothing unless disabled", "[daem
     fixture.runtime->hint("good", DaemonHint::Actions);
     CHECK(fixture.loads.load() == 1);
 }
+
+#ifdef _WIN32
+TEST_CASE("DaemonExtensionRuntime: a Windows root is shown and granted by its resolved spelling",
+          "[daemon][runtime][consent]")
+{
+    auto const directory = core::testing::ScopedTempDir { "contour-a2-runtime" };
+    auto const& top = directory.path();
+    std::filesystem::create_directories(top / "Repos");
+    std::filesystem::create_directories(top / "ext");
+    {
+        auto module = std::ofstream { top / "ext" / "good.wasm", std::ios::binary };
+        module << textOf(testing::withManifest(testing::toModule(testing::DaemonProbeModule), WorkManifest));
+    }
+    auto& directories = vtpty::nativeDirectoryOpener();
+    auto const opened = directories.open(core::pathToUtf8(top / "Repos"));
+    REQUIRE(opened.has_value());
+    auto const& resolved = opened->resolvedPath();
+    REQUIRE(resolved.size() > 3);
+    CHECK((resolved[0] >= 'A' && resolved[0] <= 'Z'));
+    CHECK(resolved.substr(1, 2) == R"(:\)");
+
+    auto harness = DaemonRunnerHarness {};
+    auto runner = FakeProcessRunner {};
+    auto files = vtextension::testing::FakeBeneathReader {};
+    auto const locker = FakeFileLocker {};
+    auto const localTime = vtbackend::LocalTimeConverter { &vtbackend::systemLocalTime };
+    struct Asked
+    {
+        std::string directoryLine;
+        std::string grantDigest;
+    };
+    // The question the runtime asks of `good` over the root @p work.
+    auto const askedFor = [&](std::string_view work) -> Asked {
+        auto escaped = std::string {};
+        for (auto const c: work)
+        {
+            if (c == '\\')
+                escaped += '\\';
+            escaped += c;
+        }
+        auto composed = DaemonExtensionRuntime::create(
+            DaemonExtensionRuntimeConfig { .declarations = { DaemonExtensionDeclaration {
+                                               .name = "good",
+                                               .modulePath = top / "ext" / "good.wasm",
+                                               .autostart = ExtensionAutostart::AtDaemonStart,
+                                               .configJson = std::format(R"({{"work":"{}"}})", escaped),
+                                               .storeDirectory = top / "state" / "good" / "store" } },
+                                           .grantsFile = top / "config" / "grants.txt",
+                                           .home = "",
+                                           .inheritedEnvironment = {},
+                                           .bundledDirectories = {},
+                                           .limits = daemonWorldLimits() },
+            DaemonExtensionRuntimeServices { .backend = harness.backend,
+                                             .runner = runner,
+                                             .directories = directories,
+                                             .files = files,
+                                             .fileSystem = core::platform::NativeFileSystem::instance(),
+                                             .locker = locker,
+                                             .wallClock = harness.wallClock,
+                                             .localTime = localTime,
+                                             .presence = harness.presence,
+                                             .onLog = {} });
+        REQUIRE(composed.runtime != nullptr);
+        for (auto const& problem: composed.problems)
+            UNSCOPED_INFO(problem.message);
+        REQUIRE(composed.problems.empty());
+        auto const pending = composed.runtime->pending();
+        REQUIRE(pending.size() == 1);
+        auto asked = Asked { .directoryLine = pending[0].question.lines.at(1).text,
+                             .grantDigest = pending[0].grantDigest };
+        composed.runtime->stop();
+        return asked;
+    };
+
+    auto lowerSlashed = core::pathToUtf8(top / "repos");
+    std::ranges::replace(lowerSlashed, '\\', '/');
+    std::ranges::transform(lowerSlashed, lowerSlashed.begin(), [](char c) {
+        return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+    });
+    auto const lower = askedFor(lowerSlashed);
+    auto const trailing = askedFor(core::pathToUtf8(top / "Repos") + "\\");
+    CHECK(lower.directoryLine == "Directory (work): " + resolved);
+    CHECK(trailing.directoryLine == lower.directoryLine);
+    CHECK(trailing.grantDigest == lower.grantDigest);
+}
+#endif
