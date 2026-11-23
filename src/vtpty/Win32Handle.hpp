@@ -114,7 +114,7 @@ class AttributeList
         if (UpdateProcThreadAttribute(_list,
                                       0,
                                       PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-                                      handles.data(),
+                                      static_cast<void*>(handles.data()),
                                       handles.size() * sizeof(HANDLE),
                                       nullptr,
                                       nullptr)

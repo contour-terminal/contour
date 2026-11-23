@@ -554,18 +554,4 @@ TEST_CASE("ThreadedProcessRunner: runs to completion", "[processrunner][threadin
     } // Destruction joins the thread.
 }
 
-#else
-
-TEST_CASE("PipedProcessRunner: start is unsupported", "[processrunner]")
-{
-    auto clock = core::platform::ManualClock {};
-    auto runner = PipedProcessRunner::create(clock, {});
-    REQUIRE(runner.has_value());
-    auto const started = (*runner)->start(
-        ProcessSpec { .argv = { "cmd" }, .workingDirectory = std::nullopt, .environment = {} },
-        [](ProcessToken, ProcessExit) {});
-    REQUIRE_FALSE(started.has_value());
-    CHECK(started.error() == vtpty::ProcessStartError::Unsupported);
-}
-
 #endif
