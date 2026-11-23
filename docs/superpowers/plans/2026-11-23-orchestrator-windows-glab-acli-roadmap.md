@@ -11,8 +11,9 @@ Linux and macOS against GitHub today.
 | # | Piece | Today | Blocks |
 | --- | --- | --- | --- |
 | 1 | `glab` provider, `acli` issue source | `Verification::Unmeasured`: refused by the configuration, absent from the manifest | GitLab repos, Jira issues — every platform |
-| A | `vtpty` directory opener (`DirectoryHandle_win32.cpp`) | every call `Unsupported`; `DirectoryHandle` holds a POSIX fd (`OwnedFd`) | resolving `@repos`/`@worktrees`, so every command |
-| B | `vtpty::PipedProcessRunner` (`ProcessRunner_win32.cpp`) | `start()` answers `Unsupported` | `git`, `gh`, `glab`, `acli`, `claude`, `contour agent …` |
+| A | `vtpty` directory opener (`DirectoryHandle_win32.cpp`) | **done**: handles open, resolve and create beneath on Windows (plan `2026-11-23-orchestrator-windows-directory-handles.md`); nothing remains for A | — |
+| A2 | extension roots and environment on Windows (plan `2026-11-23-orchestrator-windows-extension-roots.md`) | `vtextension`'s root grammar refuses `C:\...` as `NotAbsolute`; `childEnvironment` compares variable names case-sensitively | resolving `@repos`/`@worktrees`, so every command |
+| B | `vtpty::PipedProcessRunner` (`ProcessRunner_win32.cpp`; plan `2026-11-23-orchestrator-windows-process-runner.md`) | `start()` answers `Unsupported` | `git`, `gh`, `glab`, `acli`, `claude`, `contour agent …` |
 | C | `file-read` beneath a root (`BeneathRead_win32.cpp`) | `not-supported-yet` (design sketched in the file) | the Board tab (`STATUS.md`) |
 | D | `pane-open` in a held directory | unsupported on Windows | starting an agent |
 | E | Packaging | Windows packages do not carry the orchestrator (`docs/extensions.md`, Limitations) | use outside a dev tree |
@@ -39,14 +40,22 @@ Findings from the recording that shaped phase 1:
    `FILE_OPEN_REPARSE_POINT`, refusing reparse points. Port `DirectoryHandle_test`.
    Gap left after it (plan `2026-11-23-orchestrator-windows-directory-handles.md`, "Out of scope"):
    `vtextension`'s root grammar is POSIX-only (`RootPointer.cpp`, `RootResolution.cpp` refuse `C:\...` as
-   `NotAbsolute`), so `@repos`/`@worktrees` still do not resolve on Windows; a Windows path grammar in
-   `vtextension` needs its own phase before B–D are relied on for the orchestrator.
-3. **B — Windows process runner.** `CreateProcessW` suspended → Job Object (`KILL_ON_JOB_CLOSE`) → resume;
+   `NotAbsolute`), so `@repos`/`@worktrees` still do not resolve on Windows: phase A2.
+   **Done**; the Windows differences it leaves are measured under "Known Windows differences" below.
+   - **A2 — extension roots and environment on Windows** (plan
+     `2026-11-23-orchestrator-windows-extension-roots.md`). A Windows path grammar for `vtextension`'s roots
+     (`RootPointer.cpp`, `RootResolution.cpp` refuse `C:\...`), and case-insensitive variable names in
+     `childEnvironment`. Needed before B–D are relied on for the orchestrator.
+3. **B — Windows process runner** (plan `2026-11-23-orchestrator-windows-process-runner.md`).
+   `CreateProcessW` suspended → Job Object (`KILL_ON_JOB_CLOSE`) → resume;
    overlapped pipes for stdout/stderr, pumped by `pump()` with the injected clock; PATH lookup over absolute
    entries with `PATHEXT` restricted to `.exe` (a `.cmd`/`.bat` is refused: no argument ever passes through
    `cmd.exe`); argv by `buildWindowsCommandLine()`; cwd from the handle's resolved path (the TOCTOU residual
    documented); the environment block built from `ProcessSpec::environment` only. Port the
    `ProcessRunner_test` cases that are not POSIX-signal specific.
+   Gap to close with it: `src/vthost/StdioChild_win32.cpp` calls `CreateProcessW(..., TRUE, ...)` with
+   inheritable pipes and no `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`, so its child inherits every inheritable
+   handle other spawners have open at that moment; restrict it to an explicit handle list.
 4. **C — Windows `file-read`.** Follow the design comment in `BeneathRead_win32.cpp`.
 5. **D — Windows `pane-open`.** ConPTY in the held directory, through the runner's program lookup.
 6. **E — Packaging and docs.** Ship the guest in Windows packages; drop the Windows limitation from
@@ -61,3 +70,20 @@ as regressions.
 - The `[consent]` case "DaemonExtensionRuntime: revoke…" fails.
 - `vthost_test`: `DaemonConsentKey_test.cpp:140` fails.
 - `contour_e2e_daemon_live_upgrade` times out waiting for the daemons to bind (20 s).
+- `vthost_test`: `DaemonWorldE2E_test.cpp:196` fails (`status("orchestrator")` is empty).
+- `vthost_test`: `StdioChild_test.cpp:145` fails: under Git Bash `cmd /c sort` resolves Git's `sort.exe`,
+  which writes LF where the test expects CRLF.
+
+`OwnedPanes_test.cpp:1171` (`REQUIRE( opened.has_value() )`), failing before phase A, passes since
+it and is no longer listed.
+
+Once `vtextension_test` compiles on Windows, its cases that `SKIP`ped on `GitSandboxError::Unsupported`
+(e.g. `DeclaredCleanup_test.cpp:110`) run, since the Windows opener no longer answers `Unsupported`:
+expect failures there until A2.
+
+## Known Windows differences
+
+- **A held directory's parent cannot be renamed.** NTFS refuses to rename a directory while any handle
+  beneath it is open (`ERROR_ACCESS_DENIED`), whatever that handle shares; POSIX allows it. Removing the
+  parent tree (`git worktree remove`) succeeds, and the held handle then reports `isRemoved()`. Pinned by
+  `DirectoryHandle_test`, "a held directory's parent may be removed, but not renamed".
