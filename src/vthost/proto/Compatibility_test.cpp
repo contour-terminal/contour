@@ -31,9 +31,14 @@
 #include <vthost/SessionHost.hpp>
 #include <vthost/SessionSnapshot.hpp>
 #include <vthost/TappingPty.hpp>
+#include <vthost/client/DaemonControlClient.hpp>
 #include <vthost/client/NativeClient.hpp>
+#include <vthost/proto/ControlVersions.hpp>
 #include <vthost/proto/Pdu.hpp>
+#include <vthost/proto/PduTrace.hpp>
 #include <vthost/proto/ReleasedVersions.hpp>
+#include <vthost/testing/FakeDaemonControl.hpp>
+#include <vthost/testing/PduExamples.hpp>
 #include <vthost/testing/RecordedTranscripts.hpp>
 #include <vthost/testing/TestHelpers.hpp>
 
@@ -157,6 +162,7 @@ enum class ExchangeEnd : uint8_t
 {
     StreamEnded, ///< The daemon closed the connection, or the budget ran out, before the attach landed.
     Attached,    ///< The attach snapshot landed over a connection still open.
+    Answered,    ///< A control request's answer arrived.
 };
 
 /// One host and one connection to it, driven with raw bytes.
@@ -188,12 +194,13 @@ struct ServingHarness
 /// by an attach that works.
 constexpr auto AttachBudget = std::chrono::milliseconds { 60'000 };
 
-/// Decodes the daemon's answer into @p out until the attach snapshot landed or the stream ended.
-Task<void> decodeAttach(core::net::ISocket* client, std::vector<proto::DecodedFrame>* out)
+/// Decodes what @p client is sent into @p out until a frame satisfying @p done arrived or the stream ended.
+template <typename Done>
+Task<void> decodeUntil(core::net::ISocket* client, std::vector<proto::DecodedFrame>* out, Done done)
 {
     auto buffer = std::vector<std::byte> {};
     auto scratch = std::vector<std::byte>(4096);
-    while (!std::ranges::any_of(*out, endsSnapshotRun))
+    while (!std::ranges::any_of(*out, done))
     {
         if (auto decoded = proto::decodePdu(buffer))
         {
@@ -217,38 +224,45 @@ Task<void> attachWith(core::net::EventLoop* loop,
                       ExchangeEnd* end)
 {
     std::ignore = co_await client->write(std::span<std::byte const> { *bytes });
-    co_await core::net::testing::anyOf(decodeAttach(client, out),
+    co_await core::net::testing::anyOf(decodeUntil(client, out, endsSnapshotRun),
                                        core::net::testing::sleepFor(loop, AttachBudget));
     if (std::ranges::any_of(*out, endsSnapshotRun))
         *end = ExchangeEnd::Attached;
     client->close();
 }
 
+/// @return Whether @p frame is a ServerHello.
+[[nodiscard]] bool isServerHello(proto::DecodedFrame const& frame)
+{
+    return std::holds_alternative<proto::ServerHello>(frame.pdu);
+}
+
+/// @return Whether @p frame is a DaemonStatusReply.
+[[nodiscard]] bool isStatusReply(proto::DecodedFrame const& frame)
+{
+    return std::holds_alternative<proto::DaemonStatusReply>(frame.pdu);
+}
+
 /// @return Whether @p received holds a ServerHello.
 [[nodiscard]] bool hasServerHello(std::vector<proto::DecodedFrame> const& received)
 {
-    return std::ranges::any_of(
-        received, [](auto const& frame) { return std::holds_alternative<proto::ServerHello>(frame.pdu); });
+    return std::ranges::any_of(received, isServerHello);
 }
 
-/// Decodes what @p client sends into @p received until a ServerHello arrived or the stream ended.
-Task<void> readUntilHello(core::net::ISocket* client, std::vector<proto::DecodedFrame>* received)
+/// Writes @p bytes, decodes the answer into @p out until a DaemonStatusReply arrived, the stream ended or
+/// AttachBudget is spent, says in @p end which it was, and closes the client end.
+Task<void> askStatusWith(core::net::EventLoop* loop,
+                         core::net::ISocket* client,
+                         std::vector<std::byte> const* bytes,
+                         std::vector<proto::DecodedFrame>* out,
+                         ExchangeEnd* end)
 {
-    auto buffer = std::vector<std::byte> {};
-    auto scratch = std::vector<std::byte>(4096);
-    while (!hasServerHello(*received))
-    {
-        if (auto decoded = proto::decodePdu(buffer))
-        {
-            buffer.erase(buffer.begin(), buffer.begin() + static_cast<long>(decoded->consumed));
-            received->push_back(std::move(*decoded));
-            continue;
-        }
-        auto const n = co_await client->read(scratch);
-        if (!n.has_value() || *n == 0)
-            break;
-        buffer.insert(buffer.end(), scratch.begin(), scratch.begin() + static_cast<long>(*n));
-    }
+    std::ignore = co_await client->write(std::span<std::byte const> { *bytes });
+    co_await core::net::testing::anyOf(decodeUntil(client, out, isStatusReply),
+                                       core::net::testing::sleepFor(loop, AttachBudget));
+    if (std::ranges::any_of(*out, isStatusReply))
+        *end = ExchangeEnd::Answered;
+    client->close();
 }
 
 /// Writes @p bytes, decodes the answer until its ServerHello arrived, the stream ended or AttachBudget is
@@ -260,7 +274,7 @@ Task<void> helloWith(core::net::EventLoop* loop,
 {
     std::ignore = co_await client->write(std::span<std::byte const> { *bytes });
     auto received = std::vector<proto::DecodedFrame> {};
-    co_await core::net::testing::anyOf(readUntilHello(client, &received),
+    co_await core::net::testing::anyOf(decodeUntil(client, &received, isServerHello),
                                        core::net::testing::sleepFor(loop, AttachBudget));
     if (hasServerHello(received))
         *out = std::get<proto::ServerHello>(received.front().pdu);
@@ -285,6 +299,52 @@ Task<void> recordedDaemon(core::net::ISocket* socket, std::span<std::byte const>
         std::ignore = co_await socket->write(reply);
     socket->close();
 }
+
+/// A daemon that answers the client's n-th frame with @p replies[n], and hangs up after the last.
+Task<void> scriptedDaemon(core::net::ISocket* socket, std::vector<std::span<std::byte const>> replies)
+{
+    auto buffer = std::vector<std::byte> {};
+    auto scratch = std::vector<std::byte>(4096);
+    for (auto const reply: replies)
+    {
+        auto frame = proto::readFrame(buffer);
+        while (!frame && frame.error() == proto::DecodeError::NeedMoreData)
+        {
+            auto const n = co_await socket->read(scratch);
+            if (!n.has_value() || *n == 0)
+            {
+                socket->close();
+                co_return;
+            }
+            buffer.insert(buffer.end(), scratch.begin(), scratch.begin() + static_cast<long>(*n));
+            frame = proto::readFrame(buffer);
+        }
+        if (!frame)
+            break;
+        buffer.erase(buffer.begin(), buffer.begin() + static_cast<long>(frame->consumed));
+        std::ignore = co_await socket->write(reply);
+    }
+    socket->close();
+}
+
+/// Serves @p socket as scriptedDaemon() does, owning it for as long.
+Task<void> serveScripted(std::unique_ptr<core::net::ISocket> socket,
+                         std::vector<std::span<std::byte const>> replies)
+{
+    co_await scriptedDaemon(socket.get(), std::move(replies));
+}
+
+/// @return One end of a fresh pair, a scriptedDaemon() of @p replies serving the other on @p loop.
+Task<std::expected<std::unique_ptr<core::net::ISocket>, vthost::client::ControlError>> connectScripted(
+    core::net::EventLoop* loop, std::vector<std::span<std::byte const>> replies)
+{
+    auto pair = *core::net::testing::makeSocketPair(*loop);
+    loop->spawn(serveScripted(std::move(pair.first), std::move(replies)));
+    co_return std::move(pair.second);
+}
+
+/// How long a control call against a recorded daemon may take: a bound against a hang, never reached.
+constexpr auto ControlBudget = std::chrono::seconds { 2 };
 
 /// @param version A protocol version.
 /// @return Its recorded transcript, if one is.
@@ -333,6 +393,49 @@ Task<void> recordedDaemon(core::net::ISocket* socket, std::span<std::byte const>
     auto sink = proto::Writer {};
     proto::encodePdu(sink, serial, pdu);
     return sink.take();
+}
+
+/// The release the recorded control conversations name, both as the daemon's and as the upgrade target's.
+constexpr auto RecordedControlRelease = std::string_view { "0.8.1" };
+constexpr auto RecordedUpgradeImage = std::string_view { "0.8.2-0123456789abcdef" };
+
+/// @param version The protocol version a recorded control conversation is of.
+/// @return This build's control conversation, as a client and a daemon of exactly @p version write it.
+[[nodiscard]] std::array<std::vector<std::byte>, 6> controlConversationOf(uint32_t version)
+{
+    auto const capabilities =
+        proto::CapabilitySet::of({ proto::Capability::DaemonControl, proto::Capability::LiveUpgrade });
+    auto const range = proto::VersionRange { .min = version, .max = version };
+    return {
+        frameOf(1,
+                proto::ClientHello { .versions = range,
+                                     .capabilities = capabilities,
+                                     .role = proto::ConnectionRole::Control }),
+        frameOf(1,
+                proto::ServerHello { .agreedVersion = version,
+                                     .versions = range,
+                                     .capabilities = capabilities,
+                                     .machineId = "5f1d2c3b4a596877",
+                                     .hostname = "recorded-host",
+                                     .releaseVersion = std::string { RecordedControlRelease } }),
+        frameOf(2, proto::DaemonStatusRequest {}),
+        frameOf(2,
+                proto::DaemonStatusReply { .releaseVersion = std::string { RecordedControlRelease },
+                                           .processId = 4711,
+                                           .uptimeSeconds = 90,
+                                           .socketPath = "/run/contour/control" }),
+        frameOf(2, proto::UpgradeDaemon { .imageId = std::string { RecordedUpgradeImage } }),
+        frameOf(2, proto::UpgradeDaemonReply {}),
+    };
+}
+
+/// @param transcript A recorded control conversation.
+/// @return Its frames, in the order controlConversationOf() returns them.
+[[nodiscard]] std::array<std::span<std::byte const>, 6> framesOf(
+    vthost::testing::RecordedControlTranscript const& transcript)
+{
+    return { transcript.clientHello, transcript.serverHello,    transcript.statusRequest,
+             transcript.statusReply, transcript.upgradeRequest, transcript.upgradeReply };
 }
 
 } // namespace
@@ -572,6 +675,138 @@ TEST_CASE("a hello that tells what a restore brought back reaches the client", "
     CHECK(client.restoredCounts() == vthost::RestoredCounts { .workspaces = 2, .tabs = 7 });
 }
 
+TEST_CASE("every version a control connection spans has a recorded control conversation",
+          "[vthost][negotiation][control]")
+{
+    for (auto const version: std::views::iota(proto::ControlVersions.min, proto::ControlVersions.max + 1))
+    {
+        INFO("protocol version " << version);
+        CHECK(std::ranges::contains(vthost::testing::RecordedControlTranscripts,
+                                    version,
+                                    &vthost::testing::RecordedControlTranscript::version));
+    }
+}
+
+TEST_CASE("recorded control conversations decode in full", "[vthost][negotiation][control]")
+{
+    for (auto const& transcript: vthost::testing::RecordedControlTranscripts)
+    {
+        INFO("protocol version " << transcript.version);
+        for (auto const frame: framesOf(transcript))
+        {
+            auto const decoded = proto::decodePdu(frame);
+            REQUIRE(decoded.has_value());
+            CHECK(decoded->consumed == frame.size());
+        }
+    }
+}
+
+TEST_CASE("every control PDU is recorded at every version a control connection spans",
+          "[vthost][negotiation][control]")
+{
+    for (auto const version: std::views::iota(proto::ControlVersions.min, proto::ControlVersions.max + 1))
+    {
+        INFO("protocol version " << version);
+        auto const set = std::ranges::find(
+            vthost::testing::RecordedControlPduSets, version, &vthost::testing::RecordedControlPdus::version);
+        REQUIRE(set != vthost::testing::RecordedControlPduSets.end());
+        for (auto const& row: proto::ControlPdus)
+        {
+            INFO("PDU " << proto::toString(row.type));
+            CHECK(std::ranges::contains(set->pdus, row.type, &vthost::testing::RecordedControlPdu::type));
+        }
+    }
+}
+
+TEST_CASE("every recorded control PDU decodes in full to the PDU it names", "[vthost][negotiation][control]")
+{
+    for (auto const& set: vthost::testing::RecordedControlPduSets)
+        for (auto const& recorded: set.pdus)
+        {
+            INFO("protocol version " << set.version << ", PDU " << proto::toString(recorded.type));
+            auto const decoded = proto::decodePdu(recorded.frame);
+            REQUIRE(decoded.has_value());
+            CHECK(decoded->consumed == recorded.frame.size());
+            CHECK(proto::typeOf(decoded->pdu) == recorded.type);
+        }
+}
+
+// The tripwire: a change to how this build writes a control PDU fails here, and its author decides. A change
+// older peers read past -- a trailing field they skip -- re-records the newest version's frame and keeps the
+// PDU's ControlPdus row; a change they would misread sets the row to the new version.
+TEST_CASE("this build writes the newest recorded control PDUs byte for byte",
+          "[vthost][negotiation][control]")
+{
+    REQUIRE_FALSE(vthost::testing::RecordedControlPduSets.empty());
+    auto const& newest = vthost::testing::RecordedControlPduSets.back();
+    CHECK(newest.version == proto::ControlVersions.max);
+    for (auto const& recorded: newest.pdus)
+    {
+        INFO("PDU " << proto::toString(recorded.type));
+        auto const decoded = proto::decodePdu(recorded.frame);
+        REQUIRE(decoded.has_value());
+        CHECK(std::ranges::equal(frameOf(decoded->serial, decoded->pdu), recorded.frame));
+    }
+}
+
+TEST_CASE("a recorded control client of every control version is served", "[vthost][negotiation][control]")
+{
+    for (auto const& transcript: vthost::testing::RecordedControlTranscripts)
+    {
+        INFO("protocol version " << transcript.version);
+        auto control = vthost::testing::FakeDaemonControl {};
+        auto h = ServingHarness {};
+        auto pair = *core::net::testing::makeSocketPair(h.loop);
+        auto session = vthost::NativeSession { h.loop,
+                                               h.host,
+                                               vthost::ConnectionId { .endpoint = "native", .index = 2 },
+                                               std::move(pair.first),
+                                               vthost::NativeSession::DefaultWriteQueueBytes,
+                                               vthost::NativeSessionServices { .daemon = control } };
+        auto bytes = std::vector<std::byte> {};
+        for (auto const frame: { transcript.clientHello, transcript.statusRequest })
+            bytes.insert(bytes.end(), frame.begin(), frame.end());
+        auto received = std::vector<proto::DecodedFrame> {};
+        auto end = ExchangeEnd::StreamEnded;
+        h.loop.blockOn(core::net::testing::allOf(
+            session.run(), askStatusWith(&h.loop, pair.second.get(), &bytes, &received, &end)));
+
+        CHECK(end == ExchangeEnd::Answered); // the answer ended it, not the budget
+        REQUIRE(session.negotiated().has_value());
+        CHECK(session.negotiated()->version == transcript.version);
+    }
+}
+
+TEST_CASE("a recorded daemon of every control version answers status and upgrade",
+          "[vthost][negotiation][control]")
+{
+    for (auto const& transcript: vthost::testing::RecordedControlTranscripts)
+    {
+        INFO("protocol version " << transcript.version);
+        auto const source = core::net::makeDefaultBackend();
+        auto loop = core::net::EventLoop { *source };
+        auto const connector = [&](std::span<std::byte const> reply) {
+            return [&loop, hello = transcript.serverHello, reply] {
+                return connectScripted(&loop, { hello, reply });
+            };
+        };
+
+        auto statusPort =
+            vthost::client::SocketDaemonControl { loop, connector(transcript.statusReply), ControlBudget };
+        auto const status = statusPort.status();
+        INFO((status ? std::string {} : status.error().toString()));
+        REQUIRE(status.has_value());
+        CHECK(status->releaseVersion == RecordedControlRelease);
+
+        auto upgradePort =
+            vthost::client::SocketDaemonControl { loop, connector(transcript.upgradeReply), ControlBudget };
+        auto const upgraded = upgradePort.upgrade(std::string { RecordedUpgradeImage });
+        INFO((upgraded ? std::string {} : upgraded.error().toString()));
+        REQUIRE(upgraded.has_value());
+        CHECK(upgraded->result == 0);
+    }
+}
+
 // Prints this build's attach PDUs in the layout of RecordedTranscripts.hpp, to record a NEW protocol
 // version's transcripts when the release that ships it is cut. Hidden: a shipped version's are never
 // re-recorded.
@@ -598,6 +833,30 @@ TEST_CASE("dump this build's transcripts", "[.dump]")
     std::cout << spelled("ClientHello", frameOf(1, clientHello))
               << spelled("ServerHello", frameOf(1, serverHello))
               << spelled("ResizeRequest", frameOf(2, resize)) << spelled("Input", frameOf(3, input));
+}
+
+// Prints this build's control conversation at each version a control connection spans, in the layout of
+// RecordedTranscripts.hpp, to record a NEW version's when the release that ships it is cut. Hidden, as above.
+TEST_CASE("dump this build's control conversations", "[.dump]")
+{
+    constexpr auto Names = std::array { "ClientHello",       "ServerHello",   "DaemonStatusRequest",
+                                        "DaemonStatusReply", "UpgradeDaemon", "UpgradeDaemonReply" };
+    for (auto const version: std::views::iota(proto::ControlVersions.min, proto::ControlVersions.max + 1))
+    {
+        std::cout << std::format("// protocol version {}\n", version);
+        auto const frames = controlConversationOf(version);
+        for (auto const& [name, frame]: std::views::zip(Names, frames))
+            std::cout << spelled(name, frame);
+    }
+}
+
+// Prints one frame of every PDU in proto::ControlPdus, every optional field stated (testing/PduExamples.hpp),
+// in the layout of RecordedTranscripts.hpp. Hidden, as above.
+TEST_CASE("dump this build's control PDUs", "[.dump]")
+{
+    for (auto const& [type, pdu]: vthost::testing::everyAlternative())
+        if (std::ranges::contains(proto::ControlPdus, type, &proto::ControlPdu::type))
+            std::cout << spelled(proto::toString(type), frameOf(1, pdu));
 }
 
 TEST_CASE("the summary of a restore is told once, to the first Attach connection",
