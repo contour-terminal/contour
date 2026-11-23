@@ -14,6 +14,10 @@ namespace
     /// The FILETIMEs in one millisecond: 100 ns ticks.
     constexpr auto FileTimeTicksPerMs = uint64_t { 10'000 };
 
+    /// The attributes of an entry whose data is not on disk: opening or reading it would fetch it.
+    constexpr auto DataOffDiskAttributes =
+        WindowsAttribute::Offline | WindowsAttribute::RecallOnOpen | WindowsAttribute::RecallOnDataAccess;
+
     /// @param tag A reparse tag of an entry with FILE_ATTRIBUTE_REPARSE_POINT.
     /// @return Whether @p tag is one of AcceptedStorageReparseTags, its variable bits ignored by each row's
     /// mask.
@@ -37,8 +41,7 @@ FileKind windowsFileKindOf(WindowsEntryFacts const facts) noexcept
             return FileKind::Other;
     }
 
-    auto const dataOffDisk =
-        (facts.attributes & (WindowsAttribute::RecallOnDataAccess | WindowsAttribute::Offline)) != 0;
+    auto const dataOffDisk = (facts.attributes & DataOffDiskAttributes) != 0;
     if (dataOffDisk && !isDirectory)
         return FileKind::Other;
 

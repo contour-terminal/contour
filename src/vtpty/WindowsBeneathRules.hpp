@@ -20,6 +20,7 @@ namespace WindowsAttribute
     inline constexpr uint32_t Directory = 0x0000'0010;          ///< FILE_ATTRIBUTE_DIRECTORY
     inline constexpr uint32_t ReparsePoint = 0x0000'0400;       ///< FILE_ATTRIBUTE_REPARSE_POINT
     inline constexpr uint32_t Offline = 0x0000'1000;            ///< FILE_ATTRIBUTE_OFFLINE
+    inline constexpr uint32_t RecallOnOpen = 0x0004'0000;       ///< FILE_ATTRIBUTE_RECALL_ON_OPEN
     inline constexpr uint32_t RecallOnDataAccess = 0x0040'0000; ///< FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
 } // namespace WindowsAttribute
 
@@ -59,7 +60,7 @@ struct WindowsEntryFacts
 /// @param facts What a handle tells of its entry.
 /// @return What the entry is to a read beneath a directory (Decision 3): Symlink for a name surrogate;
 ///         Other for a reparse tag not in AcceptedStorageReparseTags, a non-disk handle, or data not on disk
-///         (Offline, RecallOnDataAccess) on a non-directory; Directory; else Regular.
+///         (Offline, RecallOnOpen, RecallOnDataAccess) on a non-directory; Directory; else Regular.
 [[nodiscard]] FileKind windowsFileKindOf(WindowsEntryFacts facts) noexcept;
 
 /// @param fileTime A FILETIME as one 64-bit count of 100 ns since 1601-01-01 UTC.

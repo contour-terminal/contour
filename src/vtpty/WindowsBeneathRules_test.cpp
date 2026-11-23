@@ -88,13 +88,26 @@ TEST_CASE("windowsFileKindOf: any other reparse tag is something else", "[vtpty]
     }
 }
 
+TEST_CASE("windowsFileKindOf: a storage tag on a handle that is no disk file is something else",
+          "[vtpty][windowsbeneathrules]")
+{
+    using vtpty::FileKind;
+    using vtpty::WindowsHandleType;
+    namespace A = vtpty::WindowsAttribute;
+    for (auto const tag: { uint32_t { 0x8000'0013 }, uint32_t { 0x8000'0017 }, uint32_t { 0x9000'001A } })
+        CHECK(
+            vtpty::windowsFileKindOf(
+                { .attributes = A::ReparsePoint, .reparseTag = tag, .handleType = WindowsHandleType::Other })
+            == FileKind::Other);
+}
+
 TEST_CASE("windowsFileKindOf: a file whose data is not on disk is something else",
           "[vtpty][windowsbeneathrules]")
 {
     using vtpty::FileKind;
     using vtpty::WindowsHandleType;
     namespace A = vtpty::WindowsAttribute;
-    for (auto const extra: { A::RecallOnDataAccess, A::Offline })
+    for (auto const extra: { A::RecallOnDataAccess, A::RecallOnOpen, A::Offline })
     {
         CHECK(vtpty::windowsFileKindOf({ .attributes = ArchiveAttribute | extra,
                                          .reparseTag = 0,
