@@ -158,7 +158,7 @@ if(UNIX)
 else()
     list(APPEND vtpty_SOURCES ConPty.cpp OverlappedPipe_win32.cpp UniqueHandle.cpp Win32BeneathSystem.cpp
         Win32HeldDirectory.cpp Win32OpenBeneath.cpp)
-    list(APPEND vtpty_HEADERS ConPty.hpp OverlappedPipe.hpp Win32BeneathRead.hpp Win32HeldDirectory.hpp
+    list(APPEND vtpty_HEADERS ConPty.hpp OverlappedPipe.hpp Win32BeneathRead.hpp Win32HeldDirectory.hpp Win32HeldSpawn.hpp
         Win32OpenBeneath.hpp)
     #TODO: list(APPEND vtpty_SOURCES WinPty.cpp)
 endif()

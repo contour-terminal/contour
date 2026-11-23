@@ -4,12 +4,11 @@
 #include <vtpty/ProcessRunner.hpp>
 #include <vtpty/Win32Handle.hpp>
 #include <vtpty/Win32HeldDirectory.hpp>
+#include <vtpty/Win32HeldSpawn.hpp>
 #include <vtpty/WindowsCommandLine.hpp>
 #include <vtpty/WindowsProcessRules.hpp>
 
-#include <core/Utf8Path.hpp>
 #include <core/WideString.hpp>
-#include <core/platform/NativeFileSystem.hpp>
 
 #include <algorithm>
 #include <array>
@@ -65,11 +64,6 @@ namespace
 
     /// The exit code a terminated job's processes are given.
     constexpr auto TerminatedExitCode = UINT { 1 };
-
-    /// The limits of a job while the runner holds it: closing it ends its tree, and a process in it that
-    /// raises an exception nothing handles ends at once rather than waiting on Windows Error Reporting.
-    constexpr auto HeldJobLimits =
-        DWORD { JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION };
 
     /// The limits of a job whose leader exited by itself: closing it leaves what is left of its tree.
     constexpr auto ReleasedJobLimits = DWORD { JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION };
@@ -354,33 +348,6 @@ namespace
         }
     }
 
-    /// @return Whether @p candidate, absolute and UTF-8, names a file to run.
-    [[nodiscard]] bool isExecutable(std::string const& candidate)
-    {
-        auto const path = core::pathFromUtf8(candidate);
-        return path && core::platform::NativeFileSystem::instance().isExecutableFile(*path);
-    }
-
-    /// Sets @p job's limits to @p flags alone.
-    /// @return Nothing; or why they could not be set.
-    [[nodiscard]] std::expected<void, std::error_code> setJobLimits(HANDLE job, DWORD flags) noexcept
-    {
-        auto limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {};
-        limits.BasicLimitInformation.LimitFlags = flags;
-        if (SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits)) == FALSE)
-            return std::unexpected(lastError());
-        return {};
-    }
-
-    /// @return A job with HeldJobLimits; or why it could not be made.
-    [[nodiscard]] std::expected<UniqueHandle, std::error_code> createKillOnCloseJob()
-    {
-        auto job = UniqueHandle { CreateJobObjectW(nullptr, nullptr) };
-        if (!job.valid())
-            return std::unexpected(lastError());
-        return setJobLimits(job.get(), HeldJobLimits).transform([&job] { return std::move(job); });
-    }
-
     /// Ends @p child's tree at once: its job is terminated, or, should that fail, its leader alone, so that
     /// a process the runner ends still completes.
     void terminateTree(Child const& child) noexcept
@@ -413,7 +380,7 @@ namespace
         // The PATH searched is read from the collapsed entries, so it is the PATH the child sees.
         auto const entries = windowsEnvironmentEntries(spec.environment);
         auto const program = findWindowsHeldDirectoryProgram(
-            spec.argv.front(), windowsSearchPathOf(spec.environment), isExecutable);
+            spec.argv.front(), windowsSearchPathOf(spec.environment), isExecutableProgram);
         if (!program)
             return std::unexpected(ProcessStartError::ProgramNotFound);
         auto wideProgram = core::toUtf16(*program);
