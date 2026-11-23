@@ -27,6 +27,7 @@
 #include <orchestrator/core/Permissions.hpp>
 #include <orchestrator/core/Provider.hpp>
 #include <orchestrator/core/Run.hpp>
+#include <orchestrator/core/UnmeasuredSources.hpp>
 
 using namespace std::string_literals;
 using namespace std::string_view_literals;
@@ -3892,33 +3893,29 @@ TEST_CASE("an auth check's output is never kept", "[orchestrator][engine][gitlab
 
 // }}}
 
-// {{{ Jira, as a recording would enable it
+// {{{ Jira
 
 namespace
 {
 
-/// The shipped issue sources, each marked Recorded, as the recording step leaves Jira's.
-[[nodiscard]] std::span<IssueSourceRow const> recordedIssueSources()
-{
-    static auto const rows = [] {
-        auto recorded = std::vector<IssueSourceRow>(issueSources().begin(), issueSources().end());
-        for (auto& row: recorded)
-            row.verification = Verification::Recorded;
-        return recorded;
-    }();
-    return rows;
-}
+/// The work items in testdata/jira/issues-open.json.
+constexpr auto RecordedWorkItems = std::ptrdiff_t { 29 };
 
 /// A GitHub repository whose issues come from its forge and from Jira.
 [[nodiscard]] StartContext jiraContext()
 {
-    auto context = contextFor(
+    return contextFor(
         Settings { .repos = R"j([ { "name": "contour", "path": "~/projects/contour", "forge": "github",
                         "issues": [ { "source": "forge", "query": "assignee:@me" },
                                     { "source": "jira", "jql": "assignee = currentUser()",
                                       "site": "https://example.atlassian.net/" } ] } ])j" });
-    context.sources.issueSources = recordedIssueSources();
-    return context;
+}
+
+/// @return How many of @p issues are Jira work items.
+[[nodiscard]] std::ptrdiff_t jiraItemsIn(std::span<Issue const> issues)
+{
+    return std::ranges::count_if(
+        issues, [](Issue const& issue) { return std::holds_alternative<JiraRef>(issue.item); });
 }
 
 } // namespace
@@ -3939,16 +3936,33 @@ TEST_CASE("a jira query runs acli in the repository", "[orchestrator][engine][ji
     CHECK(harness.pending("gh-issues"));
     harness.boot();
     CHECK(!mentions(harness.engine().problems(), "issue list"));
-    auto const jiraItems =
-        std::ranges::count_if(harness.engine().unclaimedIssues("contour"),
-                              [](Issue const& issue) { return std::holds_alternative<JiraRef>(issue.item); });
-    CHECK(jiraItems == 2);
+    CHECK(jiraItemsIn(harness.engine().unclaimedIssues("contour")) == RecordedWorkItems);
     auto const found =
         std::ranges::find_if(harness.engine().unclaimedIssues("contour"), [](Issue const& issue) {
-            return issue.item == ItemRef { JiraRef { .key = "ABC-123" } };
+            return issue.item == ItemRef { JiraRef { .key = "ABC-1" } };
         });
     REQUIRE(found != harness.engine().unclaimedIssues("contour").end());
-    CHECK(found->url == "https://example.atlassian.net/browse/ABC-123");
+    CHECK(found->url == "https://example.atlassian.net/browse/ABC-1");
+}
+
+TEST_CASE("a failing acli shows its problem line", "[orchestrator][engine][jira]")
+{
+    // A JQL acli refuses: exit 1, nothing on stdout, the reason on stderr.
+    auto harness = Harness { jiraContext() };
+    harness.boot();
+    REQUIRE(jiraItemsIn(harness.engine().unclaimedIssues("contour")) == RecordedWorkItems);
+    harness.wake(2 * Minute);
+    harness.finish("acli-issues", failed(1, readFixture(FixtureRoot::Testdata, "jira/acli-bad-jql.stderr")));
+    harness.boot();
+    auto const problems = harness.engine().problems();
+    CHECK(std::ranges::count_if(problems,
+                                [](std::string const& line) {
+                                    return line.contains("Jira")
+                                           && line.contains("failed to parse JQL query");
+                                })
+          == 1);
+    // What the last search found stays: a failure is no empty list.
+    CHECK(jiraItemsIn(harness.engine().unclaimedIssues("contour")) == RecordedWorkItems);
 }
 
 TEST_CASE("each issue source's login check runs once in the poll", "[orchestrator][engine][jira]")
@@ -3960,7 +3974,6 @@ TEST_CASE("each issue source's login check runs once in the poll", "[orchestrato
                       { "name": "other", "path": "~/projects/other", "forge": "github",
                         "issues": [ { "source": "jira", "jql": "b", "site": "https://example.atlassian.net" } ] } ])j",
                    .repoPaths = { ContourPath, OtherPath } });
-    context.sources.issueSources = recordedIssueSources();
     auto harness = Harness { std::move(context) };
     auto const check = harness.pending("acli-auth");
     REQUIRE(check);
@@ -3986,12 +3999,12 @@ TEST_CASE("each issue source's login check runs once in the poll", "[orchestrato
 
 TEST_CASE("an unmeasured issue source's login check never runs", "[orchestrator][engine][jira]")
 {
-    // The shipped Jira row is Unmeasured: the configuration naming it is refused, and nothing of it runs.
-    auto harness = Harness {
-        contextFor(
-            Settings { .repos = R"j([ { "name": "contour", "path": "~/projects/contour", "forge": "github",
-                        "issues": [ { "source": "jira", "jql": "a", "site": "https://example.atlassian.net" } ] } ])j" })
-    };
+    // A Jira row that is Unmeasured: the configuration naming it is refused, and nothing of it runs.
+    auto context = contextFor(
+        Settings { .repos = R"j([ { "name": "contour", "path": "~/projects/contour", "forge": "github",
+                        "issues": [ { "source": "jira", "jql": "a", "site": "https://example.atlassian.net" } ] } ])j" });
+    context.sources = unmeasuredSources();
+    auto harness = Harness { std::move(context) };
     harness.boot();
     CHECK(harness.commandsIssued("acli-auth") == 0);
     CHECK(harness.commandsIssued("acli-issues") == 0);
@@ -4195,10 +4208,10 @@ TEST_CASE("a jira item dispatches on a new branch named from its key", "[orchest
 {
     auto harness = Harness { jiraContext() };
     harness.boot();
-    constexpr auto Id = "abc-123-20261113-150847"sv;
+    constexpr auto Id = "abc-1-20261113-150847"sv;
     auto request = issueDispatch();
-    request.item = JiraRef { .key = "ABC-123" };
-    request.url = "https://example.atlassian.net/browse/ABC-123";
+    request.item = JiraRef { .key = "ABC-1" };
+    request.url = "https://example.atlassian.net/browse/ABC-1";
     harness.feed(request);
     auto const added = all<RunCommand>(harness.finish("git-fetch", ok()));
     REQUIRE(added.size() == 1);

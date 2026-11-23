@@ -751,7 +751,14 @@ void Engine::onListResult(std::string_view tag, ProcessOutcome const& outcome, s
         if (parsed->list == DefaultBranchList)
             return std::string("the default branch");
         if (query && *query < repo->issueQueries.size())
-            return std::format("the issue list \"{}\"", repo->issueQueries[*query].text);
+        {
+            // A source other than the forge is named, so that a line about its tool says whose it is.
+            auto const& issueQuery = repo->issueQueries[*query];
+            auto const* const source = findIssueSource(_config->sources().issueSources, issueQuery.source);
+            if (source != nullptr && source->map != nullptr)
+                return std::format("the {} issue list \"{}\"", source->title, issueQuery.text);
+            return std::format("the issue list \"{}\"", issueQuery.text);
+        }
         return std::string(parsed->list);
     }();
     auto const failed = [&](Judgement const& why) {

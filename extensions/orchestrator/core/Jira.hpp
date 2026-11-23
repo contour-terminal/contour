@@ -10,9 +10,9 @@
 #include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Model.hpp>
 
-/// The mapping from what Atlassian's `acli jira workitem search --json` prints to the model. Written from its
-/// documentation and not yet checked against its output: the issue source stays Unmeasured until it is. The
-/// JSON reader stays in Jira.cpp: this header must not pull it in.
+/// The mapping from what Atlassian's `acli jira workitem search --json` prints to the model, tested against
+/// the output of acli 1.3.41 (core/testdata/jira/). The JSON reader stays in Jira.cpp: this header must not
+/// pull it in.
 namespace orchestrator::jira
 {
 

@@ -253,8 +253,8 @@ namespace
     // objects unprojected and has no `--jq`. JSON is asked for with `--output json`, never `-F json`: `-F` is
     // `--output` on `glab mr list` and `glab repo view` but `--output-format` on `glab issue list`, where
     // `-F json` prints a sentence instead.
-    // Jira, through Atlassian's `acli`: written from its documentation and Unmeasured until its output is
-    // recorded, so it is not in the manifest yet.
+    // Jira, through Atlassian's `acli`: recorded from acli 1.3.41 (core/testdata/jira/). The search prints
+    // one indented JSON array, `[]` when nothing matches; a JQL it refuses exits 1 with the reason on stderr.
     constexpr auto GlabAuthArgv = std::array { "glab"sv, "auth"sv, "status"sv };
     constexpr auto GlabDefaultBranchArgv =
         std::array { "glab"sv, "repo"sv, "view"sv, "--output"sv, "json"sv };
@@ -439,14 +439,14 @@ namespace
                       .root = Root::Repos,
                       .argv = AcliAuthArgv,
                       .environment = {},
-                      .verification = Verification::Unmeasured,
+                      .verification = Verification::Recorded,
                       .output = OutputUse::ExitStatusOnly },
         CommandDecl { .name = "acli-issues",
                       .timeout = Timeout::Long,
                       .root = Root::Repos,
                       .argv = AcliIssuesArgv,
                       .environment = {},
-                      .verification = Verification::Unmeasured },
+                      .verification = Verification::Recorded },
     };
 
     // }}}

@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// UNVERIFIED AGAINST REAL OUTPUT. The inputs below and in testdata/jira/ follow the shape Atlassian
-// documents:
-//   https://developer.atlassian.com/cloud/acli/reference/commands/jira-workitem-search/
-//   https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-search/
-// No `acli` printed them (testdata/jira/README.md); the issue source stays Unmeasured until one does.
+// testdata/jira/ holds what `acli jira workitem search --json` printed (acli 1.3.41), scrubbed by
+// harness/scrub-fixture.py; testdata/jira/README.md says which file is hand-made.
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <cstddef>
+#include <format>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 
 #include <orchestrator/core/Fixtures.hpp>
 #include <orchestrator/core/IssueSources.hpp>
@@ -26,19 +26,38 @@ using namespace orchestrator;
 
 constexpr auto Site = IssueSourceContext { .site = "https://example.atlassian.net" };
 
+/// The work items in testdata/jira/issues-open.json.
+constexpr auto RecordedWorkItems = std::size_t { 29 };
+
 } // namespace
 
-TEST_CASE("Jira: the documented work items map to the model", "[jira]")
+TEST_CASE("Jira: the recorded work items map to the model", "[jira]")
 {
     auto const listed =
         jira::issues(readFixture(FixtureRoot::Testdata, "jira/issues-open.json"), OutputExtent::Whole, Site);
     REQUIRE(listed);
     CHECK(listed->skipped == 0);
     CHECK(listed->completeness == ListCompleteness::Complete);
-    REQUIRE(listed->items.size() == 2);
-    CHECK(listed->items[0].item == ItemRef { JiraRef { .key = "ABC-123" } });
-    CHECK(listed->items[0].title == "Crash when resizing during output");
-    CHECK(listed->items[1].item == ItemRef { JiraRef { .key = "ABC-7" } });
+    REQUIRE(listed->items.size() == RecordedWorkItems);
+    CHECK(listed->items.front().item == ItemRef { JiraRef { .key = "ABC-1" } });
+    CHECK(listed->items.front().title == "Work item 1");
+    for (auto const& issue: listed->items)
+    {
+        auto const* const ref = std::get_if<JiraRef>(&issue.item);
+        REQUIRE(ref != nullptr);
+        CHECK(issue.url == std::format("https://example.atlassian.net/browse/{}", ref->key));
+    }
+}
+
+TEST_CASE("Jira: an empty search", "[jira]")
+{
+    // A search matching nothing prints `[]` and exits 0.
+    auto const listed =
+        jira::issues(readFixture(FixtureRoot::Testdata, "jira/issues-empty.json"), OutputExtent::Whole, Site);
+    REQUIRE(listed);
+    CHECK(listed->items.empty());
+    CHECK(listed->skipped == 0);
+    CHECK(listed->completeness == ListCompleteness::Complete);
 }
 
 TEST_CASE("a key that is not a Jira key is skipped", "[jira]")
@@ -98,11 +117,27 @@ TEST_CASE("Jira: a site is https with a host and no path", "[jira]")
 
 TEST_CASE("Jira: a cut reply keeps the whole entries before the cut", "[jira]")
 {
-    auto const whole = readFixture(FixtureRoot::Testdata, "jira/issues-open.json");
-    auto const cut = std::string_view(whole).substr(0, (whole.size() * 3) / 4);
-    auto const listed = jira::issues(cut, OutputExtent::Truncated, Site);
-    REQUIRE(listed);
-    CHECK(listed->completeness == ListCompleteness::Cut);
-    CHECK(listed->items.size() == 1);
+    SECTION("compact")
+    {
+        constexpr auto Whole =
+            R"([{"key":"ABC-123","fields":{"summary":"a"}},{"key":"ABC-7","fields":{"summary":"b"}}])"sv;
+        auto const listed =
+            jira::issues(Whole.substr(0, (Whole.size() * 3) / 4), OutputExtent::Truncated, Site);
+        REQUIRE(listed);
+        CHECK(listed->completeness == ListCompleteness::Cut);
+        CHECK(listed->items.size() == 1);
+    }
+    SECTION("recorded, cut in the middle of its second entry")
+    {
+        auto const whole = readFixture(FixtureRoot::Testdata, "jira/issues-open.json");
+        auto const second = whole.find(R"("key": "ABC-2")");
+        REQUIRE(second != std::string::npos);
+        auto const listed =
+            jira::issues(std::string_view(whole).substr(0, second), OutputExtent::Truncated, Site);
+        REQUIRE(listed);
+        CHECK(listed->completeness == ListCompleteness::Cut);
+        REQUIRE(listed->items.size() == 1);
+        CHECK(listed->items.front().item == ItemRef { JiraRef { .key = "ABC-1" } });
+    }
     CHECK(!jira::issues("{}", OutputExtent::Whole, Site));
 }

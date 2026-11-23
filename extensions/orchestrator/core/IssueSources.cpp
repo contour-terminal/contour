@@ -24,8 +24,7 @@ namespace
                          .authCheck = {},
                          .verification = Verification::Recorded,
                          .map = nullptr },
-        // Written from Atlassian's documentation of `acli`; refused by the configuration until its output is
-        // recorded.
+        // Atlassian's `acli`, recorded from acli 1.3.41 (core/testdata/jira/).
         IssueSourceRow { .name = "jira",
                          .title = "Jira",
                          .command = "acli-issues",
@@ -33,7 +32,7 @@ namespace
                          .configKey = "jql",
                          .site = SiteUse::Required,
                          .authCheck = "acli-auth",
-                         .verification = Verification::Unmeasured,
+                         .verification = Verification::Recorded,
                          .map = &jira::issues },
     };
 } // namespace

@@ -1,22 +1,36 @@
-# `acli` output — UNMEASURED
+# `acli` output — Recorded, then scrubbed
 
-**Nothing here was printed by `acli`.** No `acli` was installed and no Jira site was at hand when the Jira
-issue source was written, so these files follow the shape Atlassian documents (the URLs in `VERSION`): the
-Jira REST API's issue objects, which `acli jira workitem search --json` is assumed to print as one array. The
-issue source and its commands stay `Verification::Unmeasured` — refused by the configuration and absent from
-the manifest — until real output replaces these files and `VERSION` names the `acli` that printed it.
+Recorded with the `acli` named in `VERSION` against a Jira Cloud site, as the declared `acli-issues` command
+(core/Commands.cpp) prints it, and scrubbed before it was committed: the recording names real people, sites,
+projects and titles. `../../../harness/scrub-fixture.py` rewrites every string into a placeholder — users are
+`user`, the site is `example.atlassian.net`, keys are `ABC-<n>`, a summary is `Work item <n>` — and keeps what
+the mapping decides on: every key, JSON type, number, boolean, null and date, and every enumerated string (a
+status category, an issue type, a priority). There are no e-mail addresses (`ctest -R fixture-privacy`). From
+this directory:
 
-| File | Command | Shape assumed |
+```
+python -I -X utf8 ../../../harness/scrub-fixture.py --shape acli-issues issues-recorded.json issues-open.json
+```
+
+The script keeps an issue type's, a status's and a priority's name as recorded. Where the recording held a
+site's own workflow name, the committed file carries a stock Jira name in its place (`New Feature`,
+`Improvement`, `Under Review`, `Waiting for support`); nothing reads them.
+
+| File | Command | What it holds |
 | --- | --- | --- |
-| `issues-open.json` | `acli-issues` | an array of two work items, `ABC-123` and `ABC-7` |
-| `issues-bad-key.json` | `acli-issues` | four work items, three of whose keys are no Jira key (lower case, a `;`, an option) |
+| `issues-open.json` | `acli-issues` | 29 recorded work items |
+| `issues-empty.json` | `acli-issues` | `[]`, as recorded for a search matching nothing |
+| `acli-bad-jql.stderr` | `acli-issues` | what it writes on stderr for a JQL it refuses, in recorded form with a placeholder field value |
+| `issues-bad-key.json` | `acli-issues` | **hand-made**: four work items, three of whose keys are no Jira key (lower case, a `;`, an option) |
+
+**What was measured.** `acli jira workitem search --jql … --limit 100 --json` prints one JSON array, indented by
+two, of the Jira REST API's issue objects (`expand`, `id`, `key`, `self`, `fields`, and `changelog`, `editmeta`,
+`names`, `operations`, `properties`, `renderedFields`, `schema`, `transitions`, `versionedRepresentations`,
+`fieldsToInclude` as `null`); `fields` holds `summary`, `status`, `issuetype`, `priority` and `assignee`. A
+search matching nothing prints `[]` and exits 0. A JQL it refuses exits 1 with nothing on stdout and one line
+on stderr. `acli jira auth status` exits 0 when logged in.
+
+**Assumed, not measured.** That `--limit 100` caps the array at 100 entries: the recorded search matched fewer.
 
 Fields the mapping reads (Jira.cpp): a work item's `key` and `fields.summary`; every other key is skipped. The
 issue's page is never read from the output: it is built as `<site>/browse/<key>` from the configured `site`.
-
-Assumed, and to be confirmed by the recording: that the output is a bare array rather than an object holding
-`issues`; that `--limit 100` caps it at 100; that the summary sits at `fields.summary`; and which variables, if
-any, select the site `acli` talks to (they would be withheld from commands and panes, as `GH_HOST` is).
-
-Placeholders: users are `user`, the site is `example.atlassian.net`, there are no e-mail addresses
-(`ctest -R fixture-privacy`).

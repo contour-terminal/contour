@@ -21,6 +21,7 @@ arg source = text
 arg page = number
 arg format = number
 arg record = text
+arg jql = text
 command-env GIT_TERMINAL_PROMPT = 0
 command-env GIT_ALLOW_PROTOCOL = https:ssh:git:file
 command-env GIT_CONFIG_COUNT = 2
@@ -56,6 +57,8 @@ command glab-default-branch short @repos = glab repo view --output json
 command glab-mrs long @repos = glab mr list --author=@me --per-page 100 --output json
 command glab-issues long @repos = glab issue list --assignee=@me --per-page 100 --search {query} --output json
 command glab-mr-checkout long @worktrees = glab mr checkout {number} --branch {branch}
+command acli-auth short @repos = acli jira auth status
+command acli-issues long @repos = acli jira workitem search --jql {jql} --limit 100 --json
 command-env-for git-common-dir GIT_CONFIG_COUNT = 3
 command-env-for git-common-dir GIT_CONFIG_KEY_0 = core.fsmonitor
 command-env-for git-common-dir GIT_CONFIG_VALUE_0 = false

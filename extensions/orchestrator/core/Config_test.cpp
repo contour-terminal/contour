@@ -230,6 +230,11 @@ constexpr auto AcceptRows = std::array {
     AcceptRow { .label = "an explicit name",
                 .input = { .find = R"("path":)", .replace = R"("name": "terminal", "path":)" } },
     AcceptRow { .label = "forge: gitlab", .input = { .find = R"("github")", .replace = R"("gitlab")" } },
+    AcceptRow {
+        .label = "source: jira, with a jql and a site",
+        .input = { .find = R"("source": "forge", "query": "assignee:@me")",
+                   .replace =
+                       R"j("source": "jira", "jql": "assignee = currentUser()", "site": "https://example.atlassian.net")j" } },
 };
 
 } // namespace
@@ -360,7 +365,7 @@ constexpr auto RejectRows = std::array {
     RejectRow { "a remote that is no Name", { .find = R"("origin")", .replace = R"("-origin")" }, "repos[0].remote", ConfigProblem::NotAName },
     RejectRow { "a base that is no Ref", { .find = R"("remote": "origin",)", .replace = R"("remote": "origin", "base": "a..b",)" }, "repos[0].base", ConfigProblem::NotARef },
     RejectRow { "an issue source no row stands for", { .find = R"("source": "forge")", .replace = R"("source": "linear")" }, "repos[0].issues[0].source", ConfigProblem::UnsupportedSource },
-    RejectRow { "an unmeasured issue source", { .find = R"("source": "forge", "query": "assignee:@me")", .replace = R"j("source": "jira", "jql": "assignee = currentUser()", "site": "https://example.atlassian.net")j" }, "repos[0].issues[0].source", ConfigProblem::Unrecorded },
+    RejectRow { "an unmeasured issue source", { .find = R"("source": "forge", "query": "assignee:@me")", .replace = R"j("source": "jira", "jql": "assignee = currentUser()", "site": "https://example.atlassian.net")j", .sources = Sources::WithUnmeasured }, "repos[0].issues[0].source", ConfigProblem::Unrecorded },
     RejectRow { "a forge source with a jql", { .find = R"("query": "assignee:@me")", .replace = R"("query": "assignee:@me", "jql": "x")" }, "repos[0].issues[0].jql", ConfigProblem::UnknownKey },
     RejectRow { "an issue query starting with -", { .find = R"("assignee:@me")", .replace = R"("-label:x assignee:@me")" }, "repos[0].issues[0].query", ConfigProblem::LeadingDash },
     RejectRow { "an empty issue query", { .find = R"("assignee:@me")", .replace = R"("")" }, "repos[0].issues[0].query", ConfigProblem::Empty },
@@ -578,40 +583,29 @@ TEST_CASE("Config.parseDuration", "[config]")
 namespace
 {
 
-/// The shipped tables, with every issue source marked Recorded, as the recording step leaves Jira's.
-[[nodiscard]] SourceTables recordedSources()
-{
-    static auto const rows = [] {
-        auto recorded = std::vector<IssueSourceRow>(issueSources().begin(), issueSources().end());
-        for (auto& row: recorded)
-            row.verification = Verification::Recorded;
-        return recorded;
-    }();
-    return SourceTables { .providers = providers(), .issueSources = rows };
-}
-
 [[nodiscard]] std::expected<Config, ConfigError> parseIssues(std::string_view issues)
 {
     auto const input =
         Input { .find = R"([ { "source": "forge", "query": "assignee:@me" } ])", .replace = issues };
-    return Config::parse(documentOf(input), hostOf(input), recordedSources());
+    return Config::parse(documentOf(input), hostOf(input), sourceTables());
 }
 
 } // namespace
 
 TEST_CASE("an unmeasured issue source is refused", "[config]")
 {
-    auto const config = parse(
-        Input { .find = R"("source": "forge", "query": "assignee:@me")",
-                .replace = R"("source": "jira", "jql": "x", "site": "https://example.atlassian.net")" });
+    auto const config =
+        parse(Input { .find = R"("source": "forge", "query": "assignee:@me")",
+                      .replace = R"("source": "jira", "jql": "x", "site": "https://example.atlassian.net")",
+                      .sources = Sources::WithUnmeasured });
     REQUIRE_FALSE(config);
     CHECK(config.error().problem == ConfigProblem::Unrecorded);
-    CHECK(message(config.error(), sourceTables())
+    CHECK(message(config.error(), unmeasuredSources())
           == "repos[0].issues[0].source: is not yet supported: jira has no recorded fixture");
     // The sources a configuration may name are the Recorded ones, of the rows it was checked against.
-    CHECK(describe(ConfigProblem::UnsupportedSource, sourceTables())
+    CHECK(describe(ConfigProblem::UnsupportedSource, unmeasuredSources())
           == "is not a supported issue source: forge");
-    CHECK(describe(ConfigProblem::UnsupportedSource, recordedSources())
+    CHECK(describe(ConfigProblem::UnsupportedSource, sourceTables())
           == "is not a supported issue source: forge, jira");
 }
 
