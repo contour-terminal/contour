@@ -10,6 +10,7 @@
 #include <string_view>
 #include <utility>
 
+#include <orchestrator/core/HostPaths.hpp>
 #include <orchestrator/core/Model.hpp>
 
 namespace orchestrator
@@ -156,19 +157,28 @@ inline constexpr std::string_view BranchPrefix = "agent/";
 /// @return The branch name, such as "agent/pr-2334-20261113-150847".
 [[nodiscard]] std::string branchName(RunId const& runId);
 
-/// A run's worktree: `<root>/<repo>/<runId>`, a Path whenever @p root is one and @p repo is a Name.
+/// A run's worktree: `<root>/<repo>/<runId>`, with @p style's separator, a Path whenever @p root is one and
+/// @p repo is a Name.
 /// @param root The worktree root, absolute and normalised.
 /// @param repo The repository's name.
 /// @param runId The run's id.
-/// @return The worktree's path.
-[[nodiscard]] std::string worktreePath(std::string_view root, std::string_view repo, RunId const& runId);
+/// @param style How the host spells its paths (Config::pathStyle()).
+/// @return The worktree's path, such as `/home/u/wt/contour/<runId>` or `C:\wt\contour\<runId>`.
+[[nodiscard]] std::string worktreePath(std::string_view root,
+                                       std::string_view repo,
+                                       RunId const& runId,
+                                       PathStyle style);
 
 /// The worktree a dispatch under @p root names for a run already made, such as a stored one: what its stored
 /// worktree is compared with. It makes no new name, so the id need not be a RunId.
 /// @param root The worktree root.
 /// @param repo The repository's name.
 /// @param runId The stored run's id.
-/// @return `<root>/<repo>/<runId>`.
-[[nodiscard]] std::string worktreePath(std::string_view root, std::string_view repo, std::string_view runId);
+/// @param style How the host spells its paths (Config::pathStyle()).
+/// @return `<root>/<repo>/<runId>`, with @p style's separator.
+[[nodiscard]] std::string worktreePath(std::string_view root,
+                                       std::string_view repo,
+                                       std::string_view runId,
+                                       PathStyle style);
 
 } // namespace orchestrator

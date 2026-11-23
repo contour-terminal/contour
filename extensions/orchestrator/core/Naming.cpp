@@ -8,6 +8,7 @@
 #include <string_view>
 #include <variant>
 
+#include <orchestrator/core/HostPaths.hpp>
 #include <orchestrator/core/Model.hpp>
 
 namespace orchestrator
@@ -102,14 +103,17 @@ std::string branchName(RunId const& runId)
     return std::format("{}{}", BranchPrefix, runId.text());
 }
 
-std::string worktreePath(std::string_view root, std::string_view repo, RunId const& runId)
+std::string worktreePath(std::string_view root, std::string_view repo, RunId const& runId, PathStyle style)
 {
-    return worktreePath(root, repo, runId.text());
+    return worktreePath(root, repo, runId.text(), style);
 }
 
-std::string worktreePath(std::string_view root, std::string_view repo, std::string_view runId)
+std::string worktreePath(std::string_view root,
+                         std::string_view repo,
+                         std::string_view runId,
+                         PathStyle style)
 {
-    return std::format("{}/{}/{}", root, repo, runId);
+    return joinPath(joinPath(root, repo, style), runId, style);
 }
 
 } // namespace orchestrator

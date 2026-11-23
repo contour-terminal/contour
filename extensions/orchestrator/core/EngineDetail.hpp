@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include <orchestrator/core/Engine.hpp>
+#include <orchestrator/core/HostPaths.hpp>
 
 /// What Engine.cpp, EngineDispatch.cpp and EnginePoll.cpp share; nothing else includes this header.
 namespace orchestrator::engine::detail
@@ -67,6 +68,16 @@ struct Judgement
         interval = interval > most / 2 ? most : interval * 2;
     }
     return interval;
+}
+
+/// A file directly inside a run's worktree, such as its `.git` or `STATUS.md`. The separator is the one the
+/// worktree's own spelling names: a stored run is read before, or without, a configuration.
+/// @param run The run.
+/// @param name The file's name.
+/// @return Its path, such as `/home/u/wt/contour/<id>/STATUS.md` or `C:\wt\contour\<id>\STATUS.md`.
+[[nodiscard]] inline std::string inWorktree(Run const& run, std::string_view name)
+{
+    return joinPath(run.worktree, name, pathStyleOf(run.worktree).value_or(PathStyle::Posix));
 }
 
 /// The suffix of the tag a status board is read with until one is found (the threshold read).

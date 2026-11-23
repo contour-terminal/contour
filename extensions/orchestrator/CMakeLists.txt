@@ -61,6 +61,8 @@ add_library(orchestrator_core STATIC
     core/GitLabJson.hpp
     core/Hooks.cpp
     core/Hooks.hpp
+    core/HostPaths.cpp
+    core/HostPaths.hpp
     core/HooksJson.hpp
     core/IssueSources.cpp
     core/IssueSources.hpp
@@ -188,6 +190,7 @@ if(ORCHESTRATOR_TESTING)
         core/Finished_test.cpp
         core/GitHub_test.cpp
         core/GitLab_test.cpp
+        core/HostPaths_test.cpp
         core/Jira_test.cpp
         core/JsonPrefix_test.cpp
         core/Naming_test.cpp

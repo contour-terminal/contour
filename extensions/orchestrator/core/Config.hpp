@@ -12,6 +12,7 @@
 #include <variant>
 #include <vector>
 
+#include <orchestrator/core/HostPaths.hpp>
 #include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Permissions.hpp>
@@ -224,6 +225,9 @@ class Config
 
     /// @return The resolved directory under which every agent's worktree lies.
     [[nodiscard]] std::string const& worktreeRoot() const noexcept { return _worktreeRoot; }
+    /// @return How the host spells its paths, read from the worktree root's spelling: every repository is
+    ///         spelled alike, and every path built beneath the root follows it.
+    [[nodiscard]] PathStyle pathStyle() const noexcept { return _pathStyle; }
     /// @return The models a run may choose, in the configured order.
     [[nodiscard]] std::span<std::string const> models() const noexcept { return _models; }
     /// @return The most agents running at once.
@@ -286,6 +290,7 @@ class Config
     struct Values
     {
         std::string worktreeRoot = {};
+        PathStyle pathStyle = PathStyle::Posix;
         std::vector<std::string> models = {};
         uint32_t maxAgents = DefaultMaxAgents;
         uint32_t maxAgentsPerRepo = DefaultMaxAgentsPerRepo;
@@ -306,6 +311,7 @@ class Config
     explicit Config(Values values) noexcept;
 
     std::string _worktreeRoot;
+    PathStyle _pathStyle;
     std::vector<std::string> _models;
     uint32_t _maxAgents;
     uint32_t _maxAgentsPerRepo;

@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include <orchestrator/core/ArgumentKinds.hpp>
+#include <orchestrator/core/HostPaths.hpp>
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Naming.hpp>
 
@@ -213,9 +214,15 @@ TEST_CASE("Naming", "[orchestrator][naming]")
             auto const branch = orchestrator::branchName(*runId);
             CHECK(branch == row.branch);
             CHECK(orchestrator::argumentAccepts(orchestrator::ArgumentKind::Ref, branch));
-            auto const worktree = orchestrator::worktreePath("/home/u/wt", "contour", *runId);
+            auto const worktree =
+                orchestrator::worktreePath("/home/u/wt", "contour", *runId, orchestrator::PathStyle::Posix);
             CHECK(worktree == row.worktree);
             CHECK(orchestrator::argumentAccepts(orchestrator::ArgumentKind::Path, worktree));
+            // A Windows host's worktree root is joined with its own separator.
+            auto const windows =
+                orchestrator::worktreePath(R"(C:\wt)", "contour", *runId, orchestrator::PathStyle::Windows);
+            CHECK(windows == std::string(R"(C:\wt\contour\)") + std::string(runId->text()));
+            CHECK(orchestrator::argumentAccepts(orchestrator::ArgumentKind::Path, windows));
         }
     }
 
@@ -266,8 +273,9 @@ TEST_CASE("Naming", "[orchestrator][naming]")
             CHECK(orchestrator::argumentAccepts(orchestrator::ArgumentKind::Name, runId->text()));
             CHECK(orchestrator::argumentAccepts(orchestrator::ArgumentKind::Ref,
                                                 orchestrator::branchName(*runId)));
-            CHECK(orchestrator::argumentAccepts(orchestrator::ArgumentKind::Path,
-                                                orchestrator::worktreePath("/w", "r", *runId)));
+            CHECK(orchestrator::argumentAccepts(
+                orchestrator::ArgumentKind::Path,
+                orchestrator::worktreePath("/w", "r", *runId, orchestrator::PathStyle::Posix)));
         }
     }
 }

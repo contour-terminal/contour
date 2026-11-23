@@ -13,6 +13,7 @@
 
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Engine.hpp>
+#include <orchestrator/core/HostPaths.hpp>
 #include <orchestrator/core/Naming.hpp>
 #include <orchestrator/core/Permissions.hpp>
 #include <orchestrator/core/Prompt.hpp>
@@ -127,11 +128,13 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
     // worktree no run accounts for, or its branch, which `git worktree add -b` would refuse: the new run
     // takes the next ordinal (no active run of the item exists here; that was refused above).
     auto const isTaken = [&](RunId const& candidate) {
-        auto const path = worktreePath(_config->worktreeRoot(), repo->name, candidate);
+        auto const path = worktreePath(_config->worktreeRoot(), repo->name, candidate, _config->pathStyle());
         auto const branch = branchName(candidate);
+        // git spells a Windows path its own way (`C:/…`): the listing is compared by the host's rule.
         return std::ranges::contains(_runs, candidate.text(), &Run::id)
                || std::ranges::any_of(state->worktrees, [&](WorktreeEntry const& worktree) {
-                      return worktree.path == path || worktree.branch == branch;
+                      return sameHostPath(worktree.path, path, _config->pathStyle())
+                             || worktree.branch == branch;
                   });
     };
     auto const stamp = stampFromUnixMs(request.wallMs, _host.utcOffsetMinutes);
@@ -169,7 +172,7 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
                      .settings = settingsJsonOf(*profile),
                      .session = request.session,
                      .branch = branchName(*id),
-                     .worktree = worktreePath(_config->worktreeRoot(), repo->name, *id),
+                     .worktree = worktreePath(_config->worktreeRoot(), repo->name, *id, _config->pathStyle()),
                      .pane = std::nullopt,
                      .nearTab = request.nearTab,
                      .state = Preparing { PrepareStep::Fetch },

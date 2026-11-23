@@ -734,7 +734,7 @@ struct Served
     /// Loads the driver and answers its poll.
     void load()
     {
-        driver.emplace(Driver::load(host, host.ids, configJson(), hostInfo(), observer));
+        driver.emplace(Driver::load(host, host.ids, configJson(), info, observer));
         while (host.completeRunning() > 0)
             driver->update(Hint::Procs);
     }
@@ -762,6 +762,7 @@ struct Served
 
     FakeGuestHost host;
     RecordingObserver observer;
+    HostInfo info = hostInfo(); ///< What the host resolved, handed to load().
     std::optional<Driver> driver;
 };
 
@@ -1738,6 +1739,30 @@ void addAgent(Served& served)
 }
 
 } // namespace
+
+TEST_CASE("a Windows host's file-read path is /-separated", "[guest][board]")
+{
+    constexpr auto Root = R"(C:\wt)"sv;
+    constexpr auto Main = R"(C:\src\contour)"sv;
+    constexpr auto Id = "pr-2375-20261113-150847"sv;
+    auto served = Served {};
+    addAgent(served);
+    auto run = view::test::storedRun(Running {}, Id, ChangeRequestRef { 2375 });
+    run.repoPath = std::string(Main);
+    run.worktree = std::format(R"({}\contour\{})", Root, Id);
+    served.host.store.insert_or_assign(runKey(run.id), toJson(run));
+    served.info = HostInfo { .home = R"(C:\Users\u)",
+                             .worktreeRoot = std::string(Root),
+                             .repoPaths = { std::string(Main) },
+                             .utcOffsetMinutes = 0 };
+    served.load();
+    served.invoke("open");
+
+    served.driver->apply("tab-1", view::ShowBoardAction { .run = std::string(Id) });
+
+    REQUIRE(served.host.fileReads.size() == 1);
+    CHECK(served.host.fileReads.front() == std::format("contour/{}/STATUS.md", Id));
+}
 
 TEST_CASE("a file read carries its modification time", "[guest][board]")
 {

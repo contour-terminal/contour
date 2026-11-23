@@ -114,6 +114,32 @@ constexpr auto AcceptRows = std::array {
     AcceptRow { .kind = ArgumentKind::Path, .value = "/a/b/", .expected = Verdict::Refused },
     AcceptRow { .kind = ArgumentKind::Path, .value = "/a/..", .expected = Verdict::Refused },
     AcceptRow { .kind = ArgumentKind::Path, .value = "/a\0b"sv, .expected = Verdict::Refused },
+    // A Windows host's paths, as it spells them.
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(C:\wt\contour\r1)", .expected = Verdict::Accepted },
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(\\s\sh\x)", .expected = Verdict::Accepted },
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(\\s\sh)", .expected = Verdict::Accepted },
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(C:\)", .expected = Verdict::Accepted },
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(C:\wt\)", .expected = Verdict::Refused },
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(C:\a\..\b)", .expected = Verdict::Refused },
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(C:\a\.\b)", .expected = Verdict::Refused },
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(C:\a\\b)", .expected = Verdict::Refused },
+    AcceptRow { .kind = ArgumentKind::Path, .value = "C:/a", .expected = Verdict::Refused },
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(C:\a/b)", .expected = Verdict::Refused },
+    AcceptRow { .kind = ArgumentKind::Path, .value = "C:a", .expected = Verdict::Refused },
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(\x)", .expected = Verdict::Refused },
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(\\s)", .expected = Verdict::Refused },
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(\\s\)", .expected = Verdict::Refused },
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(\\?\C:\a)", .expected = Verdict::Refused },
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(\\.\COM1)", .expected = Verdict::Refused },
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(C:\repos.)", .expected = Verdict::Refused },
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(C:\repos )", .expected = Verdict::Refused },
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(C:\repos:x)", .expected = Verdict::Refused },
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(C:\con)", .expected = Verdict::Refused },
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(C:\Nul.txt)", .expected = Verdict::Refused },
+    AcceptRow { .kind = ArgumentKind::Path, .value = "C:\\LPT\xc2\xb9", .expected = Verdict::Refused },
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(C:\a|b)", .expected = Verdict::Refused },
+    AcceptRow { .kind = ArgumentKind::Path, .value = "C:\\a\tb", .expected = Verdict::Refused },
+    AcceptRow { .kind = ArgumentKind::Path, .value = R"(C:\console)", .expected = Verdict::Accepted },
 
     AcceptRow { .kind = ArgumentKind::Uuid,
                 .value = "550e8400-e29b-41d4-a716-446655440000",
@@ -143,6 +169,8 @@ static_assert(argumentAccepts(ArgumentKind::Number, "2334"));
 static_assert(argumentAccepts(ArgumentKind::Uuid, "550e8400-e29b-41d4-a716-446655440000"));
 static_assert(!argumentAccepts(ArgumentKind::Ref, "a..b"));
 static_assert(!argumentAccepts(ArgumentKind::Path, "/a/../b"));
+static_assert(argumentAccepts(ArgumentKind::Path, R"(C:\wt\contour\r1)"));
+static_assert(!argumentAccepts(ArgumentKind::Path, R"(C:\a\..\b)"));
 
 } // namespace
 

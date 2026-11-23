@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <orchestrator/core/Config.hpp>
+#include <orchestrator/core/HostPaths.hpp>
 #include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/UnmeasuredSources.hpp>
@@ -422,6 +423,71 @@ TEST_CASE("Config.rejects", "[config]")
         auto const config = parse(row.input);
         REQUIRE_FALSE(config.has_value());
         CHECK(config.error().key == row.key);
+        CHECK(config.error().problem == row.problem);
+    }
+}
+
+TEST_CASE("Config: a Windows host's roots", "[config]")
+{
+    constexpr auto Root = R"(C:\Users\me\wt)"sv;
+    constexpr auto Contour = std::array { R"(C:\Users\me\src\contour)"sv };
+    constexpr auto UncContour = std::array { R"(\\srv\share\contour)"sv };
+
+    SECTION("a repository is named after its directory, by the host's separator")
+    {
+        for (auto const repos: { std::span<std::string_view const> { Contour },
+                                 std::span<std::string_view const> { UncContour } })
+        {
+            auto const config = parse({ .worktreeRoot = Root, .repoPaths = repos });
+            REQUIRE(config.has_value());
+            CHECK(config->pathStyle() == PathStyle::Windows);
+            CHECK(config->worktreeRoot() == Root);
+            CHECK(config->repos()[0].name == "contour");
+        }
+        auto const posix = parse({});
+        REQUIRE(posix.has_value());
+        CHECK(posix->pathStyle() == PathStyle::Posix);
+    }
+
+    struct Row
+    {
+        std::string_view label;
+        Input input;
+        ConfigProblem problem;
+    };
+    constexpr auto InsideInAnotherCase = std::array { R"(C:\USERS\me\wt\x)"sv };
+    constexpr auto RootInAnotherCase = std::array { R"(c:\users\me\WT)"sv };
+    constexpr auto PosixRepo = std::array { "/home/u/repo/contour"sv };
+    constexpr auto ForwardSlashes = std::array { "C:/Users/me/src/contour"sv };
+    constexpr auto SameInAnotherCase =
+        std::array { R"(C:\Users\me\src\contour)"sv, R"(c:\USERS\me\SRC\Contour)"sv };
+    for (auto const& row: std::array {
+             Row { .label = "a repository inside the root, in another case",
+                   .input = { .worktreeRoot = Root, .repoPaths = InsideInAnotherCase },
+                   .problem = ConfigProblem::InsideWorktreeRoot },
+             Row { .label = "a repository equal to the root, in another case",
+                   .input = { .worktreeRoot = Root, .repoPaths = RootInAnotherCase },
+                   .problem = ConfigProblem::EqualRoots },
+             Row { .label = "two repositories equal in another case",
+                   .input = { .find = R"("repos": [)",
+                              .replace = TwoRepoJson,
+                              .worktreeRoot = Root,
+                              .repoPaths = SameInAnotherCase },
+                   .problem = ConfigProblem::EqualRoots },
+             Row { .label = "a POSIX repository beside a Windows worktree root",
+                   .input = { .worktreeRoot = Root, .repoPaths = PosixRepo },
+                   .problem = ConfigProblem::NotAbsolutePath },
+             Row { .label = "a Windows repository beside a POSIX worktree root",
+                   .input = { .repoPaths = Contour },
+                   .problem = ConfigProblem::NotAbsolutePath },
+             Row { .label = "a repository spelled with forward slashes",
+                   .input = { .worktreeRoot = Root, .repoPaths = ForwardSlashes },
+                   .problem = ConfigProblem::NotAbsolutePath },
+         })
+    {
+        CAPTURE(row.label);
+        auto const config = parse(row.input);
+        REQUIRE_FALSE(config.has_value());
         CHECK(config.error().problem == row.problem);
     }
 }

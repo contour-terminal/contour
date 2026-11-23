@@ -65,6 +65,7 @@ namespace
 {
     using engine::detail::BoardTagSuffix;
     using engine::detail::BoardViewTagSuffix;
+    using engine::detail::inWorktree;
     using engine::detail::judge;
     using engine::detail::later;
     using engine::detail::PollTagPrefix;
@@ -313,8 +314,9 @@ RunScope Engine::scopeOf(Run const& run) const noexcept
     if (repo == nullptr || repo->path != run.repoPath)
         return RunScope::Outside;
     // Exactly where a dispatch under this configuration puts it.
-    return run.worktree == worktreePath(_config->worktreeRoot(), run.repo, run.id) ? RunScope::Inside
-                                                                                   : RunScope::Outside;
+    return run.worktree == worktreePath(_config->worktreeRoot(), run.repo, run.id, _config->pathStyle())
+               ? RunScope::Inside
+               : RunScope::Outside;
 }
 
 StepContext Engine::contextFor(Run const& run) const noexcept
@@ -525,7 +527,7 @@ void Engine::apply(std::string_view runId, std::vector<RunEffect> effects, std::
                 },
                 [&](ReadGitFile const&) {
                     out.emplace_back(ReadFile { .tag = callTag(*run).value_or(run->id),
-                                                .path = std::format("{}/.git", run->worktree) });
+                                                .path = inWorktree(*run, ".git") });
                 },
                 [&](OpenAgentPane const&) {
                     auto const* const pane = findPaneTemplate(agentPaneTemplateOf(*run));

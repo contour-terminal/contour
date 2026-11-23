@@ -16,6 +16,7 @@
 
 #include <orchestrator/core/Config.hpp>
 #include <orchestrator/core/Engine.hpp>
+#include <orchestrator/core/HostPaths.hpp>
 #include <orchestrator/core/Uuid.hpp>
 #include <orchestrator/guest/GuestClock.hpp>
 #include <orchestrator/guest/HostCalls.hpp>
@@ -203,6 +204,7 @@ class Driver
     IUuidSource& _ids; ///< Handed to every dashboard: the session ids of the agents it dispatches.
     IDriverObserver& _observer;
     std::string _worktreeRoot; ///< What ReadFile paths are made relative to.
+    PathStyle _pathStyle;      ///< How the host spells _worktreeRoot, and so every ReadFile path.
     // Held by pointer: the dashboards keep references to both, and the driver moves.
     std::unique_ptr<Engine> _engine;
     std::unique_ptr<GuestClock> _clock; ///< The time last read from the host, which the dashboards read.

@@ -24,6 +24,7 @@
 #include <orchestrator/core/ArgumentKinds.hpp>
 #include <orchestrator/core/ConfigJson.hpp>
 #include <orchestrator/core/DashboardKeys.hpp>
+#include <orchestrator/core/HostPaths.hpp>
 #include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Jira.hpp>
 #include <orchestrator/core/Json.hpp>
@@ -339,12 +340,6 @@ namespace
         return std::unexpected(ConfigError { .key = std::move(key), .problem = problem });
     }
 
-    /// @return Whether @p path lies strictly inside the directory @p root.
-    [[nodiscard]] constexpr bool isInside(std::string_view path, std::string_view root) noexcept
-    {
-        return path.size() > root.size() && path.starts_with(root) && path[root.size()] == '/';
-    }
-
     /// The JSON types a configuration value may have; null is accepted everywhere and means absent.
     enum class JsonType : uint8_t
     {
@@ -550,12 +545,6 @@ namespace
         return std::nullopt;
     }
 
-    /// @return The last component of the normalised, absolute @p path: its directory's name.
-    [[nodiscard]] constexpr std::string_view lastComponent(std::string_view path) noexcept
-    {
-        return path.substr(path.rfind('/') + 1);
-    }
-
     /// @return What is wrong with @p value as a Name, if anything.
     [[nodiscard]] constexpr std::optional<ConfigProblem> nameProblem(std::string_view value) noexcept
     {
@@ -737,6 +726,7 @@ namespace
     /// @return The name a repository is known by: the one written at `name`, or else its directory's.
     [[nodiscard]] Checked<std::string> repoNameOf(std::optional<std::string> const& written,
                                                   std::string_view path,
+                                                  PathStyle style,
                                                   std::string_view prefix,
                                                   std::span<Repo const> earlier)
     {
@@ -751,7 +741,7 @@ namespace
         }
         // Unwritten, the name is the directory's, and a problem with it is the path's.
         auto key = std::format("{}.path", prefix);
-        auto const name = lastComponent(path);
+        auto const name = lastComponent(path, style);
         if (nameProblem(name))
             return fail(std::move(key), ConfigProblem::UnnamedDirectory);
         if (std::ranges::contains(earlier, name, &Repo::name))
@@ -779,6 +769,7 @@ namespace
                                        std::size_t index,
                                        std::string_view path,
                                        std::string_view worktreeRoot,
+                                       PathStyle style,
                                        std::span<Repo const> earlier,
                                        SourceTables const& sources)
     {
@@ -789,12 +780,16 @@ namespace
 
         if (!json.path)
             return fail(key("path"), ConfigProblem::Missing);
-        if (!argumentAccepts(ArgumentKind::Path, path))
+        // A repository is spelled in the worktree root's style: one host spells all its paths alike.
+        if (!argumentAccepts(ArgumentKind::Path, path) || pathStyleOf(path) != style)
             return fail(key("path"), ConfigProblem::NotAbsolutePath);
-        if (path == worktreeRoot || std::ranges::contains(earlier, path, &Repo::path))
+        auto const isSame = [&](std::string_view other) {
+            return sameHostPath(path, other, style);
+        };
+        if (isSame(worktreeRoot) || std::ranges::any_of(earlier, isSame, &Repo::path))
             return fail(key("path"), ConfigProblem::EqualRoots);
         // A worktree root inside a repository is fine: a directory belongs to its most specific root.
-        if (isInside(path, worktreeRoot))
+        if (isStrictlyInside(path, worktreeRoot, style))
             return fail(key("path"), ConfigProblem::InsideWorktreeRoot);
 
         if (!json.forge)
@@ -803,7 +798,7 @@ namespace
         if (!forge)
             return std::unexpected(forge.error());
 
-        auto const name = repoNameOf(json.name, path, prefix, earlier);
+        auto const name = repoNameOf(json.name, path, style, prefix, earlier);
         if (!name)
             return std::unexpected(name.error());
 
@@ -837,6 +832,7 @@ namespace
 
     [[nodiscard]] Checked<std::vector<Repo>> reposOf(std::optional<std::vector<JsonRepo>> const& value,
                                                      HostInfo const& host,
+                                                     PathStyle style,
                                                      SourceTables const& sources)
     {
         if (!value)
@@ -848,8 +844,8 @@ namespace
         auto repos = std::vector<Repo> {};
         for (auto const index: std::views::iota(std::size_t { 0 }, value->size()))
         {
-            auto repo =
-                repoOf((*value)[index], index, host.repoPaths[index], host.worktreeRoot, repos, sources);
+            auto repo = repoOf(
+                (*value)[index], index, host.repoPaths[index], host.worktreeRoot, style, repos, sources);
             if (!repo)
                 return std::unexpected(repo.error());
             repos.push_back(std::move(*repo));
@@ -1229,10 +1225,11 @@ std::expected<Config, ConfigError> Config::parse(std::string_view json,
 
     if (!document.worktreeRoot)
         return fail("worktree_root", ConfigProblem::Missing);
-    if (!argumentAccepts(ArgumentKind::Path, host.worktreeRoot))
+    auto const style = pathStyleOf(host.worktreeRoot);
+    if (!style || !argumentAccepts(ArgumentKind::Path, host.worktreeRoot))
         return fail("worktree_root", ConfigProblem::NotAbsolutePath);
 
-    auto values = Values { .worktreeRoot = host.worktreeRoot, .sources = sources };
+    auto values = Values { .worktreeRoot = host.worktreeRoot, .pathStyle = *style, .sources = sources };
     auto const assign = [](auto& target, auto checkedValue) -> std::optional<ConfigError> {
         if (!checkedValue)
             return std::move(checkedValue.error());
@@ -1270,7 +1267,7 @@ std::expected<Config, ConfigError> Config::parse(std::string_view json,
                 durationOf(
                     document.finishedRetention, "finished_retention", DefaultFinishedRetention, NoMinimum)))
             return e;
-        if (auto e = assign(values.repos, reposOf(document.repos, host, sources)))
+        if (auto e = assign(values.repos, reposOf(document.repos, host, values.pathStyle, sources)))
             return e;
         if (auto e = assign(values.tasks, tasksOf(document.tasks, values.models)))
             return e;
@@ -1292,6 +1289,7 @@ std::expected<Config, ConfigError> Config::parse(std::string_view json,
 
 Config::Config(Values values) noexcept:
     _worktreeRoot { std::move(values.worktreeRoot) },
+    _pathStyle { values.pathStyle },
     _models { std::move(values.models) },
     _maxAgents { values.maxAgents },
     _maxAgentsPerRepo { values.maxAgentsPerRepo },

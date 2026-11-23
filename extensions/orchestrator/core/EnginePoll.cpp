@@ -33,6 +33,7 @@ namespace
 {
     using engine::detail::BoardTagSuffix;
     using engine::detail::BoardViewTagSuffix;
+    using engine::detail::inWorktree;
     using engine::detail::judge;
     using engine::detail::Judgement;
     using engine::detail::later;
@@ -896,7 +897,7 @@ void Engine::readBoards(std::vector<Effect>& out)
     for (auto const& run: std::span(_runs).first(_insideCount))
         if (auto const due = boardDueAt(run); due && _monoMs >= *due)
             out.emplace_back(ReadFile { .tag = std::format("{}{}", run.id, BoardTagSuffix),
-                                        .path = std::format("{}/STATUS.md", run.worktree) });
+                                        .path = inWorktree(run, "STATUS.md") });
 }
 
 void Engine::onBoardRead(std::string_view runId, FileRead const& read)
@@ -962,7 +963,7 @@ void Engine::readShownBoard(Run const& run, std::vector<Effect>& out)
         return;
     shown->nextReadMs = later(_monoMs, static_cast<uint64_t>(BoardRefreshEvery.count()));
     out.emplace_back(ReadFile { .tag = std::format("{}{}", run.id, BoardViewTagSuffix),
-                                .path = std::format("{}/STATUS.md", run.worktree) });
+                                .path = inWorktree(run, "STATUS.md") });
 }
 
 void Engine::refreshShownBoards(std::vector<Effect>& out)

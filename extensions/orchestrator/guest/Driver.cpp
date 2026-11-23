@@ -18,6 +18,7 @@
 
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/FailureWords.hpp>
+#include <orchestrator/core/HostPaths.hpp>
 #include <orchestrator/core/Overloaded.hpp>
 #include <orchestrator/view/Theme.hpp>
 
@@ -98,12 +99,11 @@ namespace
         return mapping != FileErrorMappings.end() ? mapping->reason : FileReadError::Unreadable;
     }
 
-    /// @return @p path relative to @p root, if it lies inside it; else @p path, which the host refuses.
-    [[nodiscard]] std::string_view relativeTo(std::string_view root, std::string_view path) noexcept
+    /// @return @p path relative to @p root and `/`-separated, as `file-read` takes it, if it lies inside it;
+    ///         else @p path, which the host refuses.
+    [[nodiscard]] std::string relativeTo(std::string_view root, std::string_view path, PathStyle style)
     {
-        if (path.size() > root.size() && path.starts_with(root) && path[root.size()] == '/')
-            return path.substr(root.size() + 1);
-        return path;
+        return slashRelative(root, path, style).value_or(std::string(path));
     }
 
     /// A stream of a finished process, as its pages were read.
@@ -309,6 +309,7 @@ Driver::Driver(
     _ids { ids },
     _observer { observer },
     _worktreeRoot { std::move(worktreeRoot) },
+    _pathStyle { pathStyleOf(_worktreeRoot).value_or(PathStyle::Posix) },
     _engine { std::make_unique<Engine>(std::move(engine)) },
     _clock { std::make_unique<GuestClock>() }
 {
@@ -870,7 +871,8 @@ void Driver::carryOut(std::span<Effect const> effects)
                             .tag = command.tag, .outcome = notStarted(started.error()), .monoMs = nowMs() });
                 },
                 [&](ReadFile const& read) {
-                    auto file = _host.fileRead(WorktreesRoot, relativeTo(_worktreeRoot, read.path));
+                    auto file =
+                        _host.fileRead(WorktreesRoot, relativeTo(_worktreeRoot, read.path, _pathStyle));
                     auto const clock = readClock();
                     auto reply = FileRead { .tag = read.tag,
                                             .content = std::unexpected { FileReadError::Unreadable },

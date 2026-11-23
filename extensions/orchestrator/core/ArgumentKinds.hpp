@@ -8,6 +8,8 @@
 #include <ranges>
 #include <string_view>
 
+#include <orchestrator/core/HostPaths.hpp>
+
 namespace orchestrator
 {
 
@@ -94,15 +96,75 @@ namespace detail
         });
     }
 
-    /// Whether @p value is absolute and normalised: no empty, `.` or `..` component, no trailing '/'.
+    /// The device names Win32 reserves in every directory, by their stems; the superscript digits are UTF-8.
+    inline constexpr auto ReservedWindowsStems = std::to_array<std::string_view>({
+        "CON",  "PRN",         "AUX",         "NUL",         "CONIN$",      "CONOUT$", "COM0",
+        "COM1", "COM2",        "COM3",        "COM4",        "COM5",        "COM6",    "COM7",
+        "COM8", "COM9",        "COM\xc2\xb9", "COM\xc2\xb2", "COM\xc2\xb3", "LPT0",    "LPT1",
+        "LPT2", "LPT3",        "LPT4",        "LPT5",        "LPT6",        "LPT7",    "LPT8",
+        "LPT9", "LPT\xc2\xb9", "LPT\xc2\xb2", "LPT\xc2\xb3",
+    });
+
+    [[nodiscard]] constexpr char asciiUpper(char c) noexcept
+    {
+        return (c >= 'a' && c <= 'z') ? static_cast<char>(c - 'a' + 'A') : c;
+    }
+
+    /// Whether @p name is one component Win32 addresses by exactly this spelling, by the host's rule: not
+    /// empty, `.` or `..`; none of `<>:"/\|?*` or a control character; not ending in `.` or ` `; its stem (up
+    /// to the first `.`, trailing spaces dropped) not a reserved device name, ASCII case folded.
+    [[nodiscard]] constexpr bool isPlainWindowsName(std::string_view name) noexcept
+    {
+        constexpr auto Forbidden = std::string_view { R"(<>:"/\|?*)" };
+        if (name.empty() || name == "." || name == ".." || name.back() == '.' || name.back() == ' ')
+            return false;
+        if (std::ranges::any_of(
+                name, [&](char c) { return Forbidden.contains(c) || static_cast<unsigned char>(c) < 0x20; }))
+            return false;
+        auto stem = name.substr(0, name.find('.'));
+        stem = stem.substr(0, stem.find_last_not_of(' ') + 1);
+        return std::ranges::none_of(ReservedWindowsStems, [stem](std::string_view row) {
+            return std::ranges::equal(stem, row, std::ranges::equal_to {}, asciiUpper, asciiUpper);
+        });
+    }
+
+    [[nodiscard]] constexpr bool isPlainPosixName(std::string_view name) noexcept
+    {
+        return !name.empty() && name != "." && name != "..";
+    }
+
+    /// Whether @p part, split at @p separator, is a run of components each @p isPlain accepts.
+    [[nodiscard]] constexpr bool arePlain(std::string_view part,
+                                          char separator,
+                                          bool (*isPlain)(std::string_view) noexcept) noexcept
+    {
+        return std::ranges::all_of(std::views::split(part, separator), [&](auto const& component) {
+            return isPlain(std::string_view(component.begin(), component.end()));
+        });
+    }
+
+    /// Whether @p value is absolute and normalised, in the style its spelling names (the host judges it
+    /// again in its own). Posix: `/` and then `/`-separated components, none empty, `.` or `..`. Windows:
+    /// `X:\` alone, or `X:\` or `\\server\share` and then `\`-separated components, each of them, the server
+    /// and the share among them, isPlainWindowsName(); so a `/` or a trailing `\` is refused there.
     [[nodiscard]] constexpr bool isNormalisedAbsolute(std::string_view value) noexcept
     {
-        if (value.size() < 2 || value.size() > MaxPathBytes || value.front() != '/' || value.contains('\0'))
+        constexpr auto UncPrefix = std::string_view { R"(\\)" };
+        constexpr auto DriveRootBytes = std::size_t { 3 };
+        if (value.size() < 2 || value.size() > MaxPathBytes || value.contains('\0'))
             return false;
-        return std::ranges::none_of(std::views::split(value.substr(1), '/'), [](auto const& part) {
-            auto const component = std::string_view(part.begin(), part.end());
-            return component.empty() || component == "." || component == "..";
-        });
+        switch (pathStyleOf(value).value_or(PathStyle::Posix))
+        {
+            case PathStyle::Posix:
+                return value.front() == '/' && arePlain(value.substr(1), '/', isPlainPosixName);
+            case PathStyle::Windows:
+                if (value.starts_with(UncPrefix))
+                    return value.substr(UncPrefix.size()).contains('\\')
+                           && arePlain(value.substr(UncPrefix.size()), '\\', isPlainWindowsName);
+                return value.size() == DriveRootBytes
+                       || arePlain(value.substr(DriveRootBytes), '\\', isPlainWindowsName);
+        }
+        return false;
     }
 } // namespace detail
 

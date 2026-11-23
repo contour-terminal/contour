@@ -22,6 +22,7 @@
 #include <orchestrator/core/EngineDetail.hpp>
 #include <orchestrator/core/Fixtures.hpp>
 #include <orchestrator/core/Hooks.hpp>
+#include <orchestrator/core/HostPaths.hpp>
 #include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Overloaded.hpp>
 #include <orchestrator/core/Permissions.hpp>
@@ -217,9 +218,15 @@ template <typename T>
     return names;
 }
 
+/// @return How the host spells @p root, and the paths beneath it.
+[[nodiscard]] PathStyle styleOf(std::string_view root)
+{
+    return pathStyleOf(root).value_or(PathStyle::Posix);
+}
+
 [[nodiscard]] bool isUnder(std::string_view path, std::string_view root)
 {
-    return path.size() > root.size() + 1 && path.starts_with(root) && path[root.size()] == '/';
+    return path.size() > root.size() + 1 && isStrictlyInside(path, root, styleOf(root));
 }
 
 [[nodiscard]] std::string_view runOfTag(std::string_view tag)
@@ -547,7 +554,7 @@ class Harness
                     [&](ReadFile const& file) {
                         CAPTURE(file.path);
                         CHECK(isUnder(file.path, _root));
-                        if (file.path.ends_with("/.git"))
+                        if (file.path.ends_with("/.git") || file.path.ends_with(R"(\.git)"))
                             checkWriteAhead(file.tag);
                         _reads.push_back(file);
                     },
@@ -571,7 +578,7 @@ class Harness
                         // The runs this configuration covers: one outside it is left alone.
                         auto const tracked = [&](Run const& run) {
                             return isUnfinished(run) && std::ranges::contains(_repoPaths, run.repoPath)
-                                   && isUnder(run.worktree, std::format("{}/{}", _root, run.repo));
+                                   && isUnder(run.worktree, joinPath(_root, run.repo, styleOf(_root)));
                         };
                         if (std::ranges::any_of(_engine ? _engine->runs() : std::span<Run const> {}, tracked))
                             CHECK(wake.monoMs <= _now + static_cast<uint64_t>(ReconcileEvery.count()));
@@ -1922,6 +1929,29 @@ TEST_CASE("a run waiting for the main checkout settles only on a definitive answ
 
 // }}}
 // {{{ 14. status boards
+
+TEST_CASE("a Windows host's worktree files are read by the host's spelling", "[orchestrator][engine]")
+{
+    constexpr auto Root = R"(C:\Users\u\wt)"sv;
+    constexpr auto Main = R"(C:\Users\u\src\contour)"sv;
+    auto const settings = Settings { .repoPaths = { Main } };
+    auto context = contextFor(settings);
+    context.host = hostFor(settings, Root);
+    auto harness = Harness { std::move(context) };
+    harness.boot();
+    harness.runToRunning(prDispatch());
+    auto const worktree = std::format(R"({}\contour\{})", Root, PrId);
+    REQUIRE(harness.run(PrId) != nullptr);
+    CHECK(harness.run(PrId)->worktree == worktree);
+
+    harness.list({ paneOf(PrId) });
+    harness.wake(15 * Minute);
+    CHECK(harness.hasRead(std::format(R"({}\STATUS.md)", worktree)));
+
+    // The pane gone, the removal checks start with the worktree's .git file.
+    harness.list({});
+    CHECK(harness.hasRead(std::format(R"({}\.git)", worktree)));
+}
 
 TEST_CASE("past the threshold, a running agent's wakes read its status board until it exists",
           "[orchestrator][engine]")
