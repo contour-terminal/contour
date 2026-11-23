@@ -38,10 +38,10 @@ Findings from the recording that shaped phase 1:
    POSIX) behind one type; `open` = `CreateFileW(FILE_FLAG_BACKUP_SEMANTICS)`, `canonical` =
    `GetFinalPathNameByHandleW`, `createBeneath` = `NtCreateFile` relative to the parent handle with
    `FILE_OPEN_REPARSE_POINT`, refusing reparse points. Port `DirectoryHandle_test`.
+   **Done**; the Windows differences it leaves are measured under "Known Windows differences" below.
    Gap left after it (plan `2026-11-23-orchestrator-windows-directory-handles.md`, "Out of scope"):
    `vtextension`'s root grammar is POSIX-only (`RootPointer.cpp`, `RootResolution.cpp` refuse `C:\...` as
    `NotAbsolute`), so `@repos`/`@worktrees` still do not resolve on Windows: phase A2.
-   **Done**; the Windows differences it leaves are measured under "Known Windows differences" below.
    - **A2 — extension roots and environment on Windows** (plan
      `2026-11-23-orchestrator-windows-extension-roots.md`). A Windows path grammar for `vtextension`'s roots
      (`RootPointer.cpp`, `RootResolution.cpp` refuse `C:\...`), and case-insensitive variable names in
@@ -74,8 +74,9 @@ as regressions.
 - `vthost_test`: `StdioChild_test.cpp:145` fails: under Git Bash `cmd /c sort` resolves Git's `sort.exe`,
   which writes LF where the test expects CRLF.
 
-`OwnedPanes_test.cpp:1171` (`REQUIRE( opened.has_value() )`), failing before phase A, passes since
-it and is no longer listed.
+`OwnedPanes_test.cpp:1171` (`REQUIRE( opened.has_value() )`), failing before phase A, has passed since
+phase A and is no longer listed. `DaemonConsentKey_test.cpp:140` is a test-only ordering difference (the key
+files' names hash the socket path, spelled with backslashes on Windows); phase A2's last task fixes it.
 
 Once `vtextension_test` compiles on Windows, its cases that `SKIP`ped on `GitSandboxError::Unsupported`
 (e.g. `DeclaredCleanup_test.cpp:110`) run, since the Windows opener no longer answers `Unsupported`:
