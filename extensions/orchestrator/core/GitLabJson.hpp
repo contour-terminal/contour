@@ -5,9 +5,9 @@
 #include <optional>
 #include <string>
 
-/// What `glab … -F json` prints, as GitLab.cpp reads it; nothing else includes this header. Glaze reflects
-/// only types with linkage, so these cannot sit in GitLab.cpp's anonymous namespace. Only the keys the
-/// mapping reads are members: every other key of GitLab's objects is skipped. The snake_case keys are in
+/// What `glab … --output json` prints, as GitLab.cpp reads it; nothing else includes this header. Glaze
+/// reflects only types with linkage, so these cannot sit in GitLab.cpp's anonymous namespace. Only the keys
+/// the mapping reads are members: every other key of GitLab's objects is skipped. The snake_case keys are in
 /// GitLab.cpp's glz::meta.
 namespace orchestrator::gitlab::detail
 {

@@ -249,17 +249,21 @@ namespace
         "--cwd"sv,   "{path}"sv, "--format"sv, "{format}"sv,  "--json"sv,
     };
 
-    // GitLab, through `glab`, and Jira, through Atlassian's `acli`: written from the tools' documentation and
-    // Unmeasured until their output is recorded, so none of them is in the manifest yet. `glab` prints the
-    // REST API's objects unprojected (`-F json`); it has no `--jq`.
+    // GitLab, through `glab`: recorded from glab 1.119.0 (core/testdata/gitlab/). It prints the REST API's
+    // objects unprojected and has no `--jq`. JSON is asked for with `--output json`, never `-F json`: `-F` is
+    // `--output` on `glab mr list` and `glab repo view` but `--output-format` on `glab issue list`, where
+    // `-F json` prints a sentence instead.
+    // Jira, through Atlassian's `acli`: written from its documentation and Unmeasured until its output is
+    // recorded, so it is not in the manifest yet.
     constexpr auto GlabAuthArgv = std::array { "glab"sv, "auth"sv, "status"sv };
-    constexpr auto GlabDefaultBranchArgv = std::array { "glab"sv, "repo"sv, "view"sv, "-F"sv, "json"sv };
+    constexpr auto GlabDefaultBranchArgv =
+        std::array { "glab"sv, "repo"sv, "view"sv, "--output"sv, "json"sv };
     constexpr auto GlabMrsArgv = std::array {
-        "glab"sv, "mr"sv, "list"sv, "--author=@me"sv, "--per-page"sv, "100"sv, "-F"sv, "json"sv,
+        "glab"sv, "mr"sv, "list"sv, "--author=@me"sv, "--per-page"sv, "100"sv, "--output"sv, "json"sv,
     };
     constexpr auto GlabIssuesArgv = std::array {
-        "glab"sv,     "issue"sv,   "list"sv, "--assignee=@me"sv, "--per-page"sv, "100"sv,
-        "--search"sv, "{query}"sv, "-F"sv,   "json"sv,
+        "glab"sv, "issue"sv,    "list"sv,    "--assignee=@me"sv, "--per-page"sv,
+        "100"sv,  "--search"sv, "{query}"sv, "--output"sv,       "json"sv,
     };
     constexpr auto AcliAuthArgv = std::array { "acli"sv, "jira"sv, "auth"sv, "status"sv };
     constexpr auto AcliIssuesArgv = std::array {
@@ -404,32 +408,32 @@ namespace
                       .root = Root::Repos,
                       .argv = GlabAuthArgv,
                       .environment = {},
-                      .verification = Verification::Unmeasured,
+                      .verification = Verification::Recorded,
                       .output = OutputUse::ExitStatusOnly },
         CommandDecl { .name = "glab-default-branch",
                       .timeout = Timeout::Short,
                       .root = Root::Repos,
                       .argv = GlabDefaultBranchArgv,
                       .environment = {},
-                      .verification = Verification::Unmeasured },
+                      .verification = Verification::Recorded },
         CommandDecl { .name = "glab-mrs",
                       .timeout = Timeout::Long,
                       .root = Root::Repos,
                       .argv = GlabMrsArgv,
                       .environment = {},
-                      .verification = Verification::Unmeasured },
+                      .verification = Verification::Recorded },
         CommandDecl { .name = "glab-issues",
                       .timeout = Timeout::Long,
                       .root = Root::Repos,
                       .argv = GlabIssuesArgv,
                       .environment = {},
-                      .verification = Verification::Unmeasured },
+                      .verification = Verification::Recorded },
         CommandDecl { .name = "glab-mr-checkout",
                       .timeout = Timeout::Long,
                       .root = Root::Worktrees,
                       .argv = GlabMrCheckoutArgv,
                       .environment = {},
-                      .verification = Verification::Unmeasured },
+                      .verification = Verification::Recorded },
         CommandDecl { .name = "acli-auth",
                       .timeout = Timeout::Short,
                       .root = Root::Repos,

@@ -98,6 +98,11 @@ claude-plugin-install (long, in worktrees): claude plugin install {plugin}
 agent-transcript (short, in worktrees): contour agent transcript --session {session} --cwd {path} --page {page} --format {format} --json
 agent-record (short, in worktrees): contour agent record --line {record} --format {format}
 agent-stats (short, in worktrees): contour agent stats --session {session} --cwd {path} --format {format} --json
+glab-auth (short, in repos): glab auth status
+glab-default-branch (short, in repos): glab repo view --output json
+glab-mrs (long, in repos): glab mr list --author=@me --per-page 100 --output json
+glab-issues (long, in repos): glab issue list --assignee=@me --per-page 100 --search {query} --output json
+glab-mr-checkout (long, in worktrees): glab mr checkout {number} --branch {branch}
 It may open tabs running: agent (in worktrees): claude --model {model} --session-id {session} --settings {settings} --append-system-prompt {board} {prompt}
   GIT_CONFIG_COUNT=2
   GIT_CONFIG_KEY_0=push.default

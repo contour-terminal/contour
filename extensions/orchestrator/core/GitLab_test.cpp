@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// UNVERIFIED AGAINST REAL OUTPUT. The inputs below and in testdata/gitlab/ follow the GitLab REST API's
-// documented response shapes, which `glab … -F json` is documented to print:
-//   https://docs.gitlab.com/api/merge_requests/#list-merge-requests
-//   https://docs.gitlab.com/api/issues/#list-issues
-//   https://docs.gitlab.com/api/projects/#get-a-single-project
-//   https://gitlab.com/gitlab-org/cli/-/blob/main/docs/source/mr/list.md
-// No `glab` printed them (testdata/gitlab/README.md); the provider row stays Unmeasured until one does.
+// The merge request list and the project in testdata/gitlab/ were printed by glab 1.119.0
+// (`glab mr list --output json`, `glab repo view --output json`) and scrubbed by harness/scrub-fixture.py;
+// the non-empty issue list is still the REST API's documented shape (testdata/gitlab/README.md).
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <format>
+#include <ranges>
 #include <string>
 #include <string_view>
 
@@ -43,31 +41,65 @@ using namespace orchestrator;
         status);
 }
 
+/// What the recorded list says of each merge request, in its order: its `detailed_merge_status` and `draft`.
+struct Recorded
+{
+    std::string_view status;
+    Readiness readiness;
+};
+
+// clang-format off
+constexpr auto RecordedRows = std::array {
+        Recorded { .status = "discussions_not_resolved", .readiness = Readiness::Ready },
+        Recorded { .status = "ci_still_running", .readiness = Readiness::Ready },
+        Recorded { .status = "draft_status", .readiness = Readiness::Draft },
+        Recorded { .status = "discussions_not_resolved", .readiness = Readiness::Ready },
+        Recorded { .status = "ci_still_running", .readiness = Readiness::Ready },
+        Recorded { .status = "not_approved", .readiness = Readiness::Ready },
+        Recorded { .status = "draft_status", .readiness = Readiness::Draft },
+        Recorded { .status = "draft_status", .readiness = Readiness::Draft },
+        Recorded { .status = "draft_status", .readiness = Readiness::Draft },
+        Recorded { .status = "draft_status", .readiness = Readiness::Draft },
+        Recorded { .status = "draft_status", .readiness = Readiness::Draft },
+        Recorded { .status = "draft_status", .readiness = Readiness::Draft },
+        Recorded { .status = "conflict", .readiness = Readiness::Ready },
+        Recorded { .status = "draft_status", .readiness = Readiness::Draft },
+        Recorded { .status = "discussions_not_resolved", .readiness = Readiness::Ready },
+        Recorded { .status = "not_approved", .readiness = Readiness::Ready },
+};
+// clang-format on
+
 } // namespace
 
-TEST_CASE("GitLab: the documented merge requests map to the model", "[gitlab]")
+TEST_CASE("GitLab: the recorded merge requests map to the model", "[gitlab]")
 {
     auto const listed = gitlab::changeRequests(readFixture(FixtureRoot::Testdata, "gitlab/mrs-open.json"),
                                                OutputExtent::Whole);
     REQUIRE(listed);
     CHECK(listed->completeness == ListCompleteness::Complete);
     CHECK(listed->skipped == 0);
-    REQUIRE(listed->items.size() == 3);
+    // The fifteen glab printed, and the hand-made fork after them (testdata/gitlab/README.md).
+    REQUIRE(listed->items.size() == 16);
     auto const& first = listed->items[0];
-    CHECK(first.number == 41);
-    CHECK(first.title == "Fix the scrollback reflow");
-    CHECK(first.url == "https://gitlab.example.com/group/project/-/merge_requests/41");
-    CHECK(first.head == "fix/reflow");
-    CHECK(first.base == "main");
-    CHECK(first.readiness == Readiness::Ready);
+    CHECK(first.number == 5752);
+    CHECK(first.title == "Merge request 1");
+    CHECK(first.url == "https://gitlab.example.com/group/project/-/merge_requests/5752");
+    CHECK(first.head == "feature/branch-1");
+    CHECK(first.base == "master");
     CHECK(first.origin == HeadOrigin::SameRepository);
-    CHECK(first.review == ReviewState::Approved);
-    // GitLab's list says nothing about pipelines or the issues a merge request closes.
-    CHECK(first.ci == CiState::None);
+    // GitLab's list says nothing about the issues a merge request closes, nor which checks fail.
     CHECK(first.failingChecks.empty());
     CHECK(first.closesIssues.empty());
-    CHECK(listed->items[2].base == "release/1.2");
-    CHECK(listed->items[2].review == ReviewState::ChangesRequested);
+
+    REQUIRE(RecordedRows.size() == listed->items.size());
+    for (auto const& [request, recorded]: std::views::zip(listed->items, RecordedRows))
+    {
+        CAPTURE(request.number, recorded.status);
+        CHECK(request.number != 0);
+        CHECK(request.readiness == recorded.readiness);
+        CHECK(request.review == gitlab::reviewStateOf(recorded.status));
+        CHECK(request.ci == (recorded.status == "ci_still_running" ? CiState::Pending : CiState::None));
+    }
 }
 
 TEST_CASE("a fork MR is a fork", "[gitlab]")
@@ -75,11 +107,12 @@ TEST_CASE("a fork MR is a fork", "[gitlab]")
     auto const listed = gitlab::changeRequests(readFixture(FixtureRoot::Testdata, "gitlab/mrs-open.json"),
                                                OutputExtent::Whole);
     REQUIRE(listed);
-    REQUIRE(listed->items.size() == 3);
-    auto const& fork = listed->items[1];
-    CHECK(fork.number == 40);
+    REQUIRE(listed->items.size() == 16);
+    CHECK(std::ranges::count(listed->items, HeadOrigin::Fork, &ChangeRequest::origin) == 1);
+    auto const& fork = listed->items.back();
+    CHECK(fork.number == 5800);
     CHECK(fork.origin == HeadOrigin::Fork);
-    CHECK(fork.readiness == Readiness::Draft);
+    CHECK(fork.readiness == Readiness::Ready);
     CHECK(fork.review == ReviewState::Required);
 }
 
@@ -107,6 +140,9 @@ TEST_CASE("review states by table", "[gitlab]")
         Row { .status = "mergeable", .expected = ReviewState::Approved },
         Row { .status = "ci_must_pass", .expected = ReviewState::None },
         Row { .status = "draft_status", .expected = ReviewState::None },
+        Row { .status = "conflict", .expected = ReviewState::None },
+        Row { .status = "discussions_not_resolved", .expected = ReviewState::None },
+        Row { .status = "ci_still_running", .expected = ReviewState::None },
         Row { .status = "", .expected = ReviewState::None },
         Row { .status = "something_newer", .expected = ReviewState::None },
     };
@@ -123,6 +159,28 @@ TEST_CASE("review states by table", "[gitlab]")
     REQUIRE(absent);
     REQUIRE(absent->items.size() == 1);
     CHECK(absent->items.front().review == ReviewState::None);
+}
+
+TEST_CASE("CI states by table", "[gitlab]")
+{
+    struct Row
+    {
+        std::string_view status;
+        CiState expected;
+    };
+    constexpr auto Rows = std::array {
+        Row { .status = "ci_still_running", .expected = CiState::Pending },
+        Row { .status = "ci_must_pass", .expected = CiState::Failing },
+        Row { .status = "conflict", .expected = CiState::None },
+        Row { .status = "draft_status", .expected = CiState::None },
+        Row { .status = "mergeable", .expected = CiState::None },
+        Row { .status = "", .expected = CiState::None },
+    };
+    for (auto const& row: Rows)
+    {
+        CAPTURE(row.status);
+        CHECK(gitlab::ciStateOf(row.status) == row.expected);
+    }
 }
 
 TEST_CASE("100 MRs are AtLimit", "[gitlab]")
@@ -177,8 +235,22 @@ TEST_CASE("GitLab: issues and the default branch", "[gitlab]")
     CHECK(issues->items[0].title == "Crash when resizing during output");
     CHECK(issues->items[0].url == "https://gitlab.example.com/group/project/-/issues/12");
     CHECK(gitlab::issues(R"([{"title":"no iid"}])", OutputExtent::Whole)->skipped == 1);
+    // `-F` is `--output-format` on `glab issue list`: `-F json` prints a sentence, not JSON.
+    CHECK(gitlab::issues("No open issues match your search in group/project.\n\n\n", OutputExtent::Whole)
+              .error()
+          == ParseError::NotJson);
 
     CHECK(gitlab::defaultBranch(readFixture(FixtureRoot::Testdata, "gitlab/default-branch.json")) == "main");
     CHECK(gitlab::defaultBranch(R"({"default_branch":"--orphan"})").error() == ParseError::WrongShape);
     CHECK(gitlab::defaultBranch(R"({"default_branch":)").error() == ParseError::NotJson);
+}
+
+TEST_CASE("GitLab: an empty issue list", "[gitlab]")
+{
+    auto const listed =
+        gitlab::issues(readFixture(FixtureRoot::Testdata, "gitlab/issues-empty.json"), OutputExtent::Whole);
+    REQUIRE(listed);
+    CHECK(listed->items.empty());
+    CHECK(listed->skipped == 0);
+    CHECK(listed->completeness == ListCompleteness::Complete);
 }

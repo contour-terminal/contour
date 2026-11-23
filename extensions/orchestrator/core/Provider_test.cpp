@@ -13,6 +13,7 @@
 #include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Provider.hpp>
+#include <orchestrator/core/UnmeasuredSources.hpp>
 
 using namespace std::string_view_literals;
 
@@ -42,6 +43,21 @@ constexpr auto CommandRoles = std::array {
 
 /// The commands whose `--limit` ListLimit must equal: AtLimit is only true if both say the same number.
 constexpr auto LimitedRoles = std::array { "listChangeRequests"sv, "listIssues"sv };
+
+/// One GitLab repository.
+constexpr auto GitLabJson = R"({ "worktree_root": "~/worktrees",
+  "repos": [ { "path": "~/repo/contour", "forge": "gitlab" } ],
+  "tasks": [ { "id": "issue", "key": "w", "label": "work on issue", "applies_to": "issue", "model": "opus",
+               "prompt": "/contour-workflows:work-issue {url}" } ] })"sv;
+
+/// @return The host GitLabJson is read on.
+[[nodiscard]] HostInfo gitlabHost()
+{
+    return HostInfo { .home = "/home/u",
+                      .worktreeRoot = "/home/u/worktrees",
+                      .repoPaths = { "/home/u/repo/contour" },
+                      .utcOffsetMinutes = 0 };
+}
 
 /// How a tool spells the most entries a list asks for: `gh` and `acli` say `--limit`, `glab` `--per-page`.
 constexpr auto LimitFlags = std::array { "--limit"sv, "--per-page"sv };
@@ -193,41 +209,32 @@ TEST_CASE("Provider.one_row_per_forge", "[provider]")
     }
 }
 
-TEST_CASE("an unmeasured forge is refused by the configuration", "[provider]")
+TEST_CASE("GitLab is Recorded and a configuration may name it", "[provider]")
 {
     auto const* const gitlab = findProvider(Forge::GitLab);
     REQUIRE(gitlab != nullptr);
+    CHECK(gitlab->verification == Verification::Recorded);
+    auto const config = Config::parse(GitLabJson, gitlabHost(), sourceTables());
+    REQUIRE(config);
+    CHECK(config->repos().front().forge == Forge::GitLab);
+    CHECK(describe(ConfigProblem::UnknownForge, sourceTables())
+          == "is not a supported forge: github, gitlab");
+}
+
+TEST_CASE("an unmeasured forge is refused by the configuration", "[provider]")
+{
+    // No shipped forge is Unmeasured any more: the refusal is tested against a table that holds one.
+    auto const sources = unmeasuredSources();
+    auto const* const gitlab = findProvider(sources.providers, Forge::GitLab);
+    REQUIRE(gitlab != nullptr);
     CHECK(gitlab->verification == Verification::Unmeasured);
 
-    constexpr auto Json = R"({ "worktree_root": "~/worktrees",
-  "repos": [ { "path": "~/repo/contour", "forge": "gitlab" } ],
-  "tasks": [ { "id": "issue", "key": "w", "label": "work on issue", "applies_to": "issue", "model": "opus",
-               "prompt": "/contour-workflows:work-issue {url}" } ] })"sv;
-    auto const host = HostInfo { .home = "/home/u",
-                                 .worktreeRoot = "/home/u/worktrees",
-                                 .repoPaths = { "/home/u/repo/contour" },
-                                 .utcOffsetMinutes = 0 };
-    auto const config = Config::parse(Json, host, sourceTables());
+    auto const config = Config::parse(GitLabJson, gitlabHost(), sources);
     REQUIRE(!config);
     CHECK(config.error().key == "repos[0].forge");
     CHECK(config.error().problem == ConfigProblem::Unrecorded);
-    CHECK(message(config.error(), sourceTables())
+    CHECK(message(config.error(), sources)
           == "repos[0].forge: is not yet supported: GitLab has no recorded fixture");
     // The forges a configuration may name are the Recorded ones.
-    CHECK(describe(ConfigProblem::UnknownForge, sourceTables()) == "is not a supported forge: github");
-
-    SECTION("a Recorded row is accepted")
-    {
-        auto recorded = std::vector<Provider>(providers().begin(), providers().end());
-        for (auto& row: recorded)
-            row.verification = Verification::Recorded;
-        auto const accepted =
-            Config::parse(Json, host, SourceTables { .providers = recorded, .issueSources = issueSources() });
-        REQUIRE(accepted);
-        CHECK(accepted->repos().front().forge == Forge::GitLab);
-        // The refusal of an unknown forge lists the rows the configuration was checked against.
-        CHECK(describe(ConfigProblem::UnknownForge,
-                       SourceTables { .providers = recorded, .issueSources = issueSources() })
-              == "is not a supported forge: github, gitlab");
-    }
+    CHECK(describe(ConfigProblem::UnknownForge, sources) == "is not a supported forge: github");
 }

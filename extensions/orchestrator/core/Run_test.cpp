@@ -20,6 +20,7 @@
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Naming.hpp>
 #include <orchestrator/core/Run.hpp>
+#include <orchestrator/core/UnmeasuredSources.hpp>
 
 using namespace std::string_view_literals;
 
@@ -2304,7 +2305,8 @@ TEST_CASE("preparation runs what the provider row of the run's forge names", "[o
               .effects = "persist, run git-worktree-add path base",
               .state = "Preparing(worktree-add)",
               .failure = "" },
-        // GitLab's row is Unmeasured: its commands are not in the manifest, so the host is never asked.
+        // GitLab's row is Unmeasured in unmeasuredSources(): an Unmeasured row's commands are not in the
+        // manifest, so the host is never asked.
         Row { .name = "an unmeasured forge runs nothing",
               .forge = orchestrator::Forge::GitLab,
               .from = From::Dispatch,
@@ -2330,18 +2332,27 @@ TEST_CASE("preparation runs what the provider row of the run's forge names", "[o
               .state = "Ending(verify, preparation-failed)",
               .failure = "worktree-add: no provider stands for the repository's forge" },
     };
+    // No shipped forge is Unmeasured any more: the rows are checked against a table that holds one.
+    auto context = knownContext();
+    context.providers = orchestrator::unmeasuredSources().providers;
     for (auto const& row: Rows)
     {
         CAPTURE(row.name);
         auto run = makeRun(Item::Pr, Preparing { PrepareStep::Fetch });
         run.forge = row.forge;
         auto const effects = row.from == From::Dispatch
-                                 ? beginEffects(run)
-                                 : orchestrator::advance(run, CommandOk { .stdoutText = "" }, knownContext());
+                                 ? orchestrator::beginRun(run, context).value_or(std::vector<RunEffect> {})
+                                 : orchestrator::advance(run, CommandOk { .stdoutText = "" }, context);
         CHECK(describe(effects) == row.effects);
         CHECK(describe(run.state) == row.state);
         CHECK(describe(run.failure) == row.failure);
     }
+
+    // The shipped GitLab row is Recorded: its run fetches.
+    auto gitlab = makeRun(Item::Pr, Preparing { PrepareStep::Fetch });
+    gitlab.forge = orchestrator::Forge::GitLab;
+    CHECK(describe(beginEffects(gitlab)) == "persist, run git-fetch remote");
+    CHECK(describe(gitlab.state) == "Preparing(fetch)");
 }
 
 // }}}

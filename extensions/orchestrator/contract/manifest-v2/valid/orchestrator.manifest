@@ -51,6 +51,11 @@ command claude-plugin-install long @worktrees = claude plugin install {plugin}
 command agent-transcript short @worktrees = contour agent transcript --session {session} --cwd {path} --page {page} --format {format} --json
 command agent-record short @worktrees = contour agent record --line {record} --format {format}
 command agent-stats short @worktrees = contour agent stats --session {session} --cwd {path} --format {format} --json
+command glab-auth short @repos = glab auth status
+command glab-default-branch short @repos = glab repo view --output json
+command glab-mrs long @repos = glab mr list --author=@me --per-page 100 --output json
+command glab-issues long @repos = glab issue list --assignee=@me --per-page 100 --search {query} --output json
+command glab-mr-checkout long @worktrees = glab mr checkout {number} --branch {branch}
 command-env-for git-common-dir GIT_CONFIG_COUNT = 3
 command-env-for git-common-dir GIT_CONFIG_KEY_0 = core.fsmonitor
 command-env-for git-common-dir GIT_CONFIG_VALUE_0 = false

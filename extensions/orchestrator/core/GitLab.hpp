@@ -7,9 +7,9 @@
 
 #include <orchestrator/core/Model.hpp>
 
-/// The mapping from what `glab` prints to the model. Written from the GitLab REST API's documented shapes and
-/// not yet checked against glab's own output: the provider row stays Unmeasured until it is. The JSON reader
-/// stays in GitLab.cpp: this header must not pull it in.
+/// The mapping from what `glab ... --output json` prints to the model: the REST API's objects, unprojected.
+/// Tested against the output of glab 1.119.0 (core/testdata/gitlab/README.md). The JSON reader stays in
+/// GitLab.cpp: this header must not pull it in.
 namespace orchestrator::gitlab
 {
 
@@ -18,13 +18,19 @@ namespace orchestrator::gitlab
 ///         changes, Approved once it can be merged, and None for every other value.
 [[nodiscard]] ReviewState reviewStateOf(std::string_view detailedMergeStatus) noexcept;
 
-/// Maps the output of the declared `glab-mrs` command. GitLab's list carries no pipeline status and no
-/// closing issues: every change request maps to CiState::None and claims no issue.
+/// @param detailedMergeStatus A merge request's `detailed_merge_status`.
+/// @return Its CI state: Pending while a pipeline still runs, Failing when one must pass and has not, and
+/// None
+///         for every other value, a merge request blocked by something else and one with no pipeline alike.
+[[nodiscard]] CiState ciStateOf(std::string_view detailedMergeStatus) noexcept;
+
+/// Maps the output of the declared `glab-mrs` command. GitLab's list carries no pipeline object and no
+/// closing issues: a change request's CI state is only what its `detailed_merge_status` says (ciStateOf), it
+/// names no failing check, and it claims no issue.
 /// @param stdoutText What it printed.
 /// @param extent Whether the host kept all of it; a cut output is read up to its last whole entry.
 /// @return Its merge requests, leaving out (and counting) each without an `iid` or whose target branch is not
-/// a
-///         Ref argument; or why the output was refused.
+///         a Ref argument; or why the output was refused.
 [[nodiscard]] std::expected<Listed<ChangeRequest>, ParseError> changeRequests(std::string_view stdoutText,
                                                                               OutputExtent extent);
 

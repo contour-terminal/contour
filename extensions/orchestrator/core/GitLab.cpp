@@ -78,16 +78,25 @@ namespace
     constexpr auto ReadOptions = glz::opts { .null_terminated = false, .error_on_unknown_keys = false };
 
     /// The `detailed_merge_status` values that say something about review; every other one (`mergeable`'s
-    /// blockers such as `ci_must_pass` or `draft_status` among them) says nothing about it.
+    /// blockers such as `ci_still_running`, `conflict`, `discussions_not_resolved` or `draft_status` among
+    /// them) says nothing about it.
     constexpr auto MergeStatuses = std::array {
         Spelling { .text = "not_approved"sv, .meaning = ReviewState::Required },
         Spelling { .text = "requested_changes"sv, .meaning = ReviewState::ChangesRequested },
         Spelling { .text = "mergeable"sv, .meaning = ReviewState::Approved },
     };
 
+    /// The `detailed_merge_status` values that say something about the pipeline. GitLab's list carries no
+    /// pipeline object: this status is all it says, and it names a pipeline only while one blocks the merge.
+    constexpr auto CiStatuses = std::array {
+        Spelling { .text = "ci_still_running"sv, .meaning = CiState::Pending },
+        Spelling { .text = "ci_must_pass"sv, .meaning = CiState::Failing },
+    };
+
     /// @return @p json in the model.
     ChangeRequest changeRequestOf(JsonMergeRequest const& json)
     {
+        auto const status = std::string_view { json.detailedMergeStatus ? *json.detailedMergeStatus : ""sv };
         return ChangeRequest {
             .number = json.iid,
             .title = displayText(json.title, MaxTitleChars),
@@ -97,9 +106,9 @@ namespace
             .readiness = json.draft ? Readiness::Draft : Readiness::Ready,
             .origin =
                 json.sourceProjectId != json.targetProjectId ? HeadOrigin::Fork : HeadOrigin::SameRepository,
-            .ci = CiState::None,
+            .ci = ciStateOf(status),
             .failingChecks = {},
-            .review = reviewStateOf(json.detailedMergeStatus.value_or(std::string {})),
+            .review = reviewStateOf(status),
             .closesIssues = {},
         };
     }
@@ -108,6 +117,11 @@ namespace
 ReviewState reviewStateOf(std::string_view detailedMergeStatus) noexcept
 {
     return meaningOf(MergeStatuses, detailedMergeStatus, ReviewState::None);
+}
+
+CiState ciStateOf(std::string_view detailedMergeStatus) noexcept
+{
+    return meaningOf(CiStatuses, detailedMergeStatus, CiState::None);
 }
 
 std::expected<Listed<ChangeRequest>, ParseError> changeRequests(std::string_view stdoutText,

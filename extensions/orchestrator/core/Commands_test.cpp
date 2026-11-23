@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <ranges>
@@ -1080,14 +1081,34 @@ TEST_CASE("unmeasured commands are not in the manifest", "[orchestrator][command
         if (decl.verification == Verification::Unmeasured)
             ++unmeasured;
     }
-    // GitLab's five and Jira's two, until their output is recorded.
-    CHECK(unmeasured == 7);
-    CHECK(std::ranges::none_of(
-        lines, [](std::string const& line) { return line.contains("glab") || line.contains("acli"); }));
+    // Jira's two, until their output is recorded; GitLab's five are declared.
+    CHECK(unmeasured == 2);
+    CHECK(std::ranges::none_of(lines, [](std::string const& line) { return line.contains("acli"); }));
+    CHECK(std::ranges::count_if(lines, [](std::string const& line) { return line.contains(" = glab "); })
+          == 5);
     // The argument only an unmeasured command names is left out too.
     CHECK(findArgumentDecl("jql") != nullptr);
     CHECK(std::ranges::none_of(lines, [](std::string const& line) { return line.starts_with("arg jql "); }));
     CHECK(manifestText() == readFixture(FixtureRoot::Contract, "manifest-v2/valid/orchestrator.manifest"));
+}
+
+TEST_CASE("glab is asked for JSON with --output, never -F", "[orchestrator][commands][gitlab]")
+{
+    // `-F` is `--output` on `glab mr list` and `glab repo view`, but `--output-format` on `glab issue list`,
+    // where `-F json` prints a sentence: `--output json` means JSON on all three.
+    constexpr auto JsonLists = std::array { "glab-mrs"sv, "glab-issues"sv, "glab-default-branch"sv };
+    for (auto const name: JsonLists)
+    {
+        CAPTURE(name);
+        auto const* const command = findCommand(name);
+        REQUIRE(command != nullptr);
+        auto const output = std::ranges::find(command->argv, "--output"sv);
+        REQUIRE(output != command->argv.end());
+        REQUIRE(std::next(output) != command->argv.end());
+        CHECK(*std::next(output) == "json");
+        CHECK(!std::ranges::contains(command->argv, "-F"sv));
+        CHECK(command->verification == Verification::Recorded);
+    }
 }
 
 TEST_CASE("the manifest-v2 corpus", "[orchestrator][commands][manifest][corpus]")

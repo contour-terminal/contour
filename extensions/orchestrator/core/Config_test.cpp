@@ -18,6 +18,7 @@
 #include <orchestrator/core/Config.hpp>
 #include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Model.hpp>
+#include <orchestrator/core/UnmeasuredSources.hpp>
 
 using namespace std::string_view_literals;
 using namespace std::chrono_literals;
@@ -89,6 +90,13 @@ constexpr auto UnnamedRepo = std::array { "/home/u/repo/my repo"sv };
 constexpr auto NestedRepos = std::array { "/home/u/repo/contour/vendor/lib"sv, ContourPath };
 constexpr auto SiblingOfWorktreeRoot = std::array { "/home/u/worktrees-old/contour"sv };
 
+/// The tables a configuration is checked against.
+enum class Sources : uint8_t
+{
+    Shipped,        ///< sourceTables(): the rows the extension ships.
+    WithUnmeasured, ///< unmeasuredSources(): a table holding an Unmeasured forge and issue source.
+};
+
 /// A configuration a row parses: a document, with one substring replaced, and what the host resolved.
 struct Input
 {
@@ -97,6 +105,7 @@ struct Input
     std::string_view replace = {};
     std::string_view worktreeRoot = WorktreeRoot;
     std::span<std::string_view const> repoPaths = OneRepo;
+    Sources sources = Sources::Shipped; ///< The tables it is checked against.
 };
 
 [[nodiscard]] std::string documentOf(Input const& input)
@@ -123,7 +132,9 @@ struct Input
 
 [[nodiscard]] std::expected<Config, ConfigError> parse(Input const& input)
 {
-    return Config::parse(documentOf(input), hostOf(input), sourceTables());
+    return Config::parse(documentOf(input),
+                         hostOf(input),
+                         input.sources == Sources::Shipped ? sourceTables() : unmeasuredSources());
 }
 
 } // namespace
@@ -218,6 +229,7 @@ constexpr auto AcceptRows = std::array {
                            .repoPaths = UnnamedRepo } },
     AcceptRow { .label = "an explicit name",
                 .input = { .find = R"("path":)", .replace = R"("name": "terminal", "path":)" } },
+    AcceptRow { .label = "forge: gitlab", .input = { .find = R"("github")", .replace = R"("gitlab")" } },
 };
 
 } // namespace
@@ -344,7 +356,7 @@ constexpr auto RejectRows = std::array {
     RejectRow { "a repository without a path", { .find = R"("path": "~/repo/contour",)", .replace = "" }, "repos[0].path", ConfigProblem::Missing },
     RejectRow { "a repository without a forge", { .find = R"("forge": "github",)", .replace = "" }, "repos[0].forge", ConfigProblem::Missing },
     RejectRow { "forge: bitbucket", { .find = R"("github")", .replace = R"("bitbucket")" }, "repos[0].forge", ConfigProblem::UnknownForge },
-    RejectRow { "forge: gitlab has no recorded output", { .find = R"("github")", .replace = R"("gitlab")" }, "repos[0].forge", ConfigProblem::Unrecorded },
+    RejectRow { "a forge with no recorded output", { .find = R"("github")", .replace = R"("gitlab")", .sources = Sources::WithUnmeasured }, "repos[0].forge", ConfigProblem::Unrecorded },
     RejectRow { "a remote that is no Name", { .find = R"("origin")", .replace = R"("-origin")" }, "repos[0].remote", ConfigProblem::NotAName },
     RejectRow { "a base that is no Ref", { .find = R"("remote": "origin",)", .replace = R"("remote": "origin", "base": "a..b",)" }, "repos[0].base", ConfigProblem::NotARef },
     RejectRow { "an issue source no row stands for", { .find = R"("source": "forge")", .replace = R"("source": "linear")" }, "repos[0].issues[0].source", ConfigProblem::UnsupportedSource },

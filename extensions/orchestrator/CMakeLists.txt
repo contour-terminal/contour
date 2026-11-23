@@ -205,6 +205,7 @@ if(ORCHESTRATOR_TESTING)
         core/Timeline_test.cpp
         core/Transcript_test.cpp
         core/Utf8_test.cpp
+        core/UnmeasuredSources.hpp
         core/Uuid_test.cpp
         guest/Driver_test.cpp
         view/Actions_test.cpp

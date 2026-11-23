@@ -30,8 +30,9 @@ namespace
                    .issues = &github::issues,
                    .defaultBranchOf = &github::defaultBranch,
                    .verification = Verification::Recorded },
-        // Written from the GitLab REST API's documented list shape; refused by the configuration until glab's
-        // own output is recorded. It carries no pipeline status and no closing issues.
+        // Recorded from glab 1.119.0 (core/testdata/gitlab/). Its list carries no pipeline object and no
+        // closing issues: the CI state is what `detailed_merge_status` says, and no merge request claims an
+        // issue.
         Provider { .forge = Forge::GitLab,
                    .name = "GitLab",
                    .authCheck = "glab-auth",
@@ -45,7 +46,7 @@ namespace
                    .changeRequests = &gitlab::changeRequests,
                    .issues = &gitlab::issues,
                    .defaultBranchOf = &gitlab::defaultBranch,
-                   .verification = Verification::Unmeasured },
+                   .verification = Verification::Recorded },
     };
 } // namespace
 

@@ -3826,31 +3826,17 @@ TEST_CASE("reading a Finished run's transcript marks it seen", "[orchestrator][e
 
 // }}}
 
-// {{{ GitLab, as a recording would enable it
+// {{{ GitLab
 
 namespace
 {
 
-/// The shipped provider rows, each marked Recorded, as the recording step leaves GitLab's.
-[[nodiscard]] std::span<Provider const> recordedProviders()
-{
-    static auto const rows = [] {
-        auto recorded = std::vector<Provider>(providers().begin(), providers().end());
-        for (auto& row: recorded)
-            row.verification = Verification::Recorded;
-        return recorded;
-    }();
-    return rows;
-}
-
-/// One GitLab repository, accepted because its row is passed as Recorded.
+/// One GitLab repository.
 [[nodiscard]] StartContext gitlabContext()
 {
-    auto context = contextFor(
+    return contextFor(
         Settings { .repos = R"([ { "name": "contour", "path": "~/projects/contour", "forge": "gitlab",
                         "issues": [ { "source": "forge", "query": "crash" } ] } ])" });
-    context.sources.providers = recordedProviders();
-    return context;
 }
 
 } // namespace
@@ -3866,11 +3852,11 @@ TEST_CASE("the engine polls glab-mrs and checks out with glab-mr-checkout", "[or
     CHECK(harness.commandsIssued("glab-issues") == 1);
     CHECK(harness.commandsIssued("gh-prs") == 0);
     CHECK(harness.engine().problems().empty());
-    CHECK(harness.engine().changeRequests("contour").size() == 3);
+    CHECK(harness.engine().changeRequests("contour").size() == 16);
 
-    constexpr auto Id = "pr-41-20261113-150847"sv;
-    auto request = prDispatch(41);
-    request.url = "https://gitlab.example.com/group/project/-/merge_requests/41";
+    constexpr auto Id = "pr-5752-20261113-150847"sv;
+    auto request = prDispatch(5752);
+    request.url = "https://gitlab.example.com/group/project/-/merge_requests/5752";
     harness.feed(request);
     harness.finish("git-fetch", ok());
     auto const checkout = all<RunCommand>(harness.finish("git-worktree-add", ok()));
@@ -3878,7 +3864,7 @@ TEST_CASE("the engine polls glab-mrs and checks out with glab-mr-checkout", "[or
     CHECK(checkout.front().command == "glab-mr-checkout");
     CHECK(checkout.front().cwd == worktreeOf("contour", Id));
     CHECK(std::ranges::contains(
-        checkout.front().arguments, "41"sv, [](Argument const& a) -> std::string_view { return a.value; }));
+        checkout.front().arguments, "5752"sv, [](Argument const& a) -> std::string_view { return a.value; }));
     auto const opened = all<OpenPane>(harness.finish("glab-mr-checkout", ok()));
     CHECK(opened.size() == 1);
 }
