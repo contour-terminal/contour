@@ -256,6 +256,7 @@ add_library(vthost STATIC
     handover/SuccessorLaunch_win32.cpp
     handover/UpgradeError.hpp
     handover/UpgradeTarget.hpp
+    proto/ControlVersions.hpp
     proto/Negotiation.cpp
     proto/Negotiation.hpp
     proto/Pdu.cpp
