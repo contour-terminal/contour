@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtpty/PathStyle.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -78,25 +80,17 @@ namespace detail
             return std::ranges::contains(UuidDashes, index) ? value[index] == '-' : isLowerHex(value[index]);
         });
     }
-
-    /// Whether @p value is absolute and normalised: every component is non-empty and neither `.` nor `..`.
-    [[nodiscard]] constexpr bool isNormalisedAbsolutePath(std::string_view value) noexcept
-    {
-        if (value.size() > MaxPathArgumentBytes || !value.starts_with('/') || value.contains('\0'))
-            return false;
-        return std::ranges::all_of(std::views::split(value.substr(1), '/'), [](auto const& part) {
-            auto const component = std::string_view(part.begin(), part.end());
-            return !component.empty() && component != "." && component != "..";
-        });
-    }
 } // namespace detail
 
 /// Judges a value passed for an argument of @p kind, syntactically. A Path also needs resolving against
 /// its root, which this cannot do: it only accepts the paths that can lie inside one.
 /// @param kind The argument's declared kind.
 /// @param value The value passed for it.
-/// @return Whether @p value is one of @p kind.
-[[nodiscard]] constexpr bool argumentAccepts(ArgumentKind kind, std::string_view value) noexcept
+/// @param style The grammar a Path is judged by; the opener's. The other kinds ignore it.
+/// @return Whether @p value is one of @p kind. Constant-evaluable for every kind but Path.
+[[nodiscard]] constexpr bool argumentAccepts(ArgumentKind kind,
+                                             std::string_view value,
+                                             vtpty::PathStyle style) noexcept
 {
     switch (kind)
     {
@@ -108,7 +102,7 @@ namespace detail
         case ArgumentKind::Ref:
             return detail::isWord(value, detail::MaxRefBytes, "._/@#+-") && !value.contains("..")
                    && !value.contains("//") && !value.contains("@{");
-        case ArgumentKind::Path: return detail::isNormalisedAbsolutePath(value);
+        case ArgumentKind::Path: return isNormalisedAbsolutePath(value, style);
         case ArgumentKind::Text:
             return value.size() <= MaxTextArgumentBytes && !value.contains('\0') && !value.starts_with('-');
     }

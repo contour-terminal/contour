@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtpty/PathStyle.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
@@ -13,8 +15,9 @@ using namespace std::string_view_literals;
 using vtextension::argumentAccepts;
 using vtextension::ArgumentKind;
 using vtextension::argumentKindOf;
+using vtpty::PathStyle;
 
-static_assert(argumentAccepts(ArgumentKind::Number, "1"));
+static_assert(argumentAccepts(ArgumentKind::Number, "1", PathStyle::Posix));
 
 namespace
 {
@@ -103,8 +106,18 @@ TEST_CASE("argumentAccepts", "[vtextension][manifest]")
     for (auto const& row: rows)
     {
         CAPTURE(row.kind, row.value);
-        CHECK(argumentAccepts(row.kind, row.value) == (row.expected == Accepted));
+        CHECK(argumentAccepts(row.kind, row.value, PathStyle::Posix) == (row.expected == Accepted));
     }
+}
+
+TEST_CASE("argumentAccepts: a Windows Path", "[vtextension][manifest]")
+{
+    using enum ArgumentKind;
+    CHECK(argumentAccepts(Path, R"(C:\wt\x)", PathStyle::Windows));
+    CHECK_FALSE(argumentAccepts(Path, "/wt/x", PathStyle::Windows));
+    CHECK_FALSE(argumentAccepts(Path, "C:/wt/x", PathStyle::Windows));
+    CHECK_FALSE(argumentAccepts(Path, R"(C:\wt\..\x)", PathStyle::Windows));
+    CHECK_FALSE(argumentAccepts(Path, R"(C:\wt\x)", PathStyle::Posix));
 }
 
 TEST_CASE("argumentKindOf", "[vtextension][manifest]")

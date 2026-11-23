@@ -25,7 +25,7 @@ namespace vtextension
 /// Why a directory, or a path, is not one a root's command may use.
 enum class RootError : uint8_t
 {
-    NotAbsolute,      ///< The path does not start with `/`.
+    NotAbsolute,      ///< The path is not absolute in the opener's grammar.
     Unnormalized,     ///< The path has an empty, `.` or `..` component, or is too long.
     Missing,          ///< Nothing exists at the path, or the root's directory could not be created.
     OutsideRoots,     ///< The resolved path lies inside no declared root.

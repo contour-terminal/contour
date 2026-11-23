@@ -46,13 +46,31 @@ struct PathRow
     Verdict expected;
 };
 
+/// How a containment row's verdict relates to vtpty::isAtOrBeneath(), the filesystem-path rule.
+enum class NativeRule : uint8_t
+{
+    Agrees,   ///< Both rules give the same verdict; the native-grammar cross-check compares them.
+    Stricter, ///< A fail-closed row: this rule refuses a spelling the filesystem-path rule may admit.
+};
+
 struct ContainmentRow
 {
     std::string_view path;
     std::string_view directory;
     PathStyle style;
     Verdict expected;
+    NativeRule native = NativeRule::Agrees;
 };
+
+/// A Windows row this rule refuses beneath `C:\w`, whatever the filesystem-path rule says of it.
+[[nodiscard]] constexpr ContainmentRow failsClosedBeneathW(std::string_view path) noexcept
+{
+    return { .path = path,
+             .directory = R"(C:\w)",
+             .style = PathStyle::Windows,
+             .expected = Verdict::Refused,
+             .native = NativeRule::Stricter };
+}
 
 using Split = std::optional<std::pair<std::string_view, std::string_view>>;
 using Components = std::optional<std::vector<std::string_view>>;
@@ -82,6 +100,14 @@ constexpr auto ContainmentRows = std::to_array<ContainmentRow>({
       .directory = "C:\\\xc3\xa4", // C:\ä
       .style = PathStyle::Windows,
       .expected = Verdict::Refused },
+    failsClosedBeneathW(R"(C:\w\x.)"),
+    failsClosedBeneathW(R"(C:\w\x )"),
+    failsClosedBeneathW(R"(C:\w\con)"),
+    failsClosedBeneathW(R"(C:\w\x:y)"),
+    failsClosedBeneathW(R"(C:\w/x)"),
+    failsClosedBeneathW(R"(C:\w\x\..\y)"),
+    failsClosedBeneathW(R"(\\?\C:\w\x)"),
+    failsClosedBeneathW(R"(C:\w\)"),
 });
 
 /// An absolute POSIX path of exactly @p bytes bytes: `/` and then `a`s.
@@ -236,7 +262,7 @@ TEST_CASE("RootPathSyntax: agrees with vtpty::isAtOrBeneath in the native gramma
     auto checked = 0;
     for (auto const& row: ContainmentRows)
     {
-        if (row.style != vtpty::NativePathStyle)
+        if (row.style != vtpty::NativePathStyle || row.native != NativeRule::Agrees)
             continue;
         CAPTURE(row.path, row.directory);
         CHECK(isAtOrBeneath(row.path, row.directory, vtpty::NativePathStyle)

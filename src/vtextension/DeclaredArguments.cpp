@@ -42,7 +42,8 @@ std::expected<std::vector<std::string>, ArgumentFault> substituteDeclared(
         if (argument == args.end())
             return std::unexpected(ArgumentFault::Missing);
         auto const declared = std::ranges::find(manifest.arguments, *name, &ArgumentDecl::name);
-        if (declared == manifest.arguments.end() || !argumentAccepts(declared->kind, argument->second))
+        if (declared == manifest.arguments.end()
+            || !argumentAccepts(declared->kind, argument->second, directories.pathStyle()))
             return std::unexpected(ArgumentFault::NotItsKind);
         if (declared->kind != ArgumentKind::Path)
         {

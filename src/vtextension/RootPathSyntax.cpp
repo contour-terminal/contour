@@ -99,10 +99,9 @@ namespace
         return Grammars.at(std::to_underlying(style));
     }
 
-    /// @return The part of @p path after its volume root and the separator that follows it, which is empty
-    /// for
-    ///         a volume root; std::nullopt when @p path has no volume root, or ends in a separator after one
-    ///         that does not end in one itself (`\\s\sh\`).
+    /// @return The part of @p path after its volume root and the separator that follows it, which is
+    ///         empty for a volume root; std::nullopt when @p path has no volume root, or ends in a
+    ///         separator after one that does not end in one itself (`\\s\sh\`).
     [[nodiscard]] std::optional<std::string_view> componentsPart(std::string_view path,
                                                                  Grammar const& grammar) noexcept
     {

@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <vtextension/ArgumentKind.hpp>
+#include <vtextension/RootPathSyntax.hpp>
 
 namespace vtextension
 {
@@ -52,12 +53,13 @@ namespace
         return RootError::Unopenable;
     }
 
-    /// Refuses a path that is not absolute and normalised, by the grammar of a Path argument.
-    [[nodiscard]] std::expected<void, RootError> checkSyntax(std::string_view path) noexcept
+    /// Refuses a path that is not absolute and normalised, by the grammar of a Path argument in @p style.
+    [[nodiscard]] std::expected<void, RootError> checkSyntax(std::string_view path,
+                                                             vtpty::PathStyle style) noexcept
     {
-        if (!path.starts_with('/'))
+        if (!hasAbsoluteRoot(path, style))
             return std::unexpected(RootError::NotAbsolute);
-        if (!argumentAccepts(ArgumentKind::Path, path))
+        if (!argumentAccepts(ArgumentKind::Path, path, style))
             return std::unexpected(RootError::Unnormalized);
         return {};
     }
@@ -188,7 +190,7 @@ std::expected<vtpty::DirectoryHandle, RootError> openInRoot(vtpty::IDirectoryOpe
                                                             std::string_view root,
                                                             std::string_view path)
 {
-    if (auto const syntax = checkSyntax(path); !syntax)
+    if (auto const syntax = checkSyntax(path, opener.pathStyle()); !syntax)
         return std::unexpected(syntax.error());
     auto directory = opener.open(path);
     if (!directory)
@@ -207,7 +209,7 @@ namespace
         std::string_view root,
         std::string_view value)
     {
-        if (auto const syntax = checkSyntax(value); !syntax)
+        if (auto const syntax = checkSyntax(value, opener.pathStyle()); !syntax)
             return std::unexpected(syntax.error());
         auto ancestor = openExistingAncestor(opener, value);
         if (!ancestor)
