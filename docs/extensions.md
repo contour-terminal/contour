@@ -665,7 +665,7 @@ daemon:
                     - path: ~/repo/contour
                       forge: github
                       issues:
-                          - { source: forge, query: "assignee:@me" }
+                          - { source: forge, query: "assignee:@me" }   # GitHub's syntax; on GitLab, free text
                 tasks:
                     - { id: fix_ci,         key: f, label: "fix CI",         applies_to: pr,    model: sonnet,
                         prompt: "/contour-workflows:fix-ci {url}" }
@@ -714,22 +714,26 @@ Key      | Meaning
 `forge`  | Required. Where it lives: `github`, which the orchestrator reaches with `gh`, or `gitlab`, which it reaches with `glab`.
 `remote` | The git remote that points at the forge. Default `origin`.
 `base`   | The branch an issue's worktree starts from. Default: the forge's default branch.
-`issues` | The searches that list the issues offered for work; none lists no issues. `{ source: forge, query: "<search>" }` searches the repository's forge, with `gh issue list --search`, or on GitLab the issues assigned to you, with `glab issue list --search`. `{ source: jira, jql: "<JQL>", site: "https://<site>" }` lists Jira's work items (below).
+`issues` | The searches that list the issues offered for work; none lists no issues. `{ source: forge, query: "<search>" }` searches the repository's forge, with `gh issue list --search`, or on GitLab the issues assigned to you, with `glab issue list --search`: there `query` is free text matched against an issue's title and description, always combined with "assigned to you", and a GitHub qualifier such as `assignee:@me` finds nothing. `{ source: jira, jql: "<JQL>", site: "https://<site>" }` lists Jira's work items (below).
 
 **GitLab.** The orchestrator asks `glab` for your open merge requests (`glab mr list --author=@me`), the
 project's default branch and, for a forge search, the issues assigned to you, each with `--output json` (on
 `glab issue list`, `-F` is `--output-format` and prints no JSON). It checks a merge request out with
 `glab mr checkout <n> --branch <branch>`. `glab`'s list carries no pipeline, so a merge request's CI state is
 what GitLab's `detailed_merge_status` says: `ci_still_running` is pending, `ci_must_pass` failing, anything
-else none, and no failing check is named. Log `glab` in for the host the remote names (`glab auth status`
-succeeds; `GITLAB_TOKEN` is passed through); the variables that would point it at another host or project are
-withheld (see [The daemon world](#the-daemon-world) above).
+else none, and no failing check is named. That status names a single blocker, and it names the pipeline only
+when the project requires pipelines to succeed (or auto-merge is set) and no higher blocker, such as a draft
+or a conflict, outranks it: a blank CI mark means "not known", not "passing", and `ci_must_pass` also covers
+a cancelled, skipped, manual or missing pipeline. Log `glab` in for the host the remote names
+(`glab auth status` succeeds; `GITLAB_TOKEN` is passed through); the variables that would point it at another
+host or project are withheld (see [The daemon world](#the-daemon-world) above).
 
 **Jira.** An issue source `{ source: jira, jql: "<JQL>", site: "https://<site>" }` lists the work items its
 JQL finds, through Atlassian's `acli` (`acli jira workitem search --jql <JQL> --limit 100 --json`), which
 must be logged in (`acli jira auth status` succeeds). Both keys are required: `site` is an `https://` address
 with a host and no path, such as `https://example.atlassian.net`, and each item's link is built from it as
-`<site>/browse/<key>`.
+`<site>/browse/<key>`. That is all `site` does: `acli` searches whichever site it is logged in to
+(`acli jira auth status` shows it), so the two must match.
 
 A `tasks` entry:
 

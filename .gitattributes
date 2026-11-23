@@ -26,4 +26,5 @@ src/vtbackend/state/golden/*.bin binary
 # The agent orchestrator's screen goldens, recorded fixtures and stores are compared byte for byte, and its
 # sources are hashed into the manifest digest. A CRLF checkout fails every comparison, so its text stays LF; its
 # manifest corpus pins its own line ends (contract/manifest-v2/.gitattributes) and binary fixtures are detected.
+# A fixture whose line ends are data (a recorded CRLF, say) gets a `-text` rule of its own.
 extensions/orchestrator/** text=auto eol=lf

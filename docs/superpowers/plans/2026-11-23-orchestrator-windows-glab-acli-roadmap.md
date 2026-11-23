@@ -47,3 +47,13 @@ Findings from the recording that shaped phase 1:
 5. **D — Windows `pane-open`.** ConPTY in the held directory, through the runner's program lookup.
 6. **E — Packaging and docs.** Ship the guest in Windows packages; drop the Windows limitation from
    `docs/extensions.md`; an end-to-end run on this machine: daemon, orchestrator, a GitLab repo, a JQL source.
+
+## Pre-existing Windows test failures
+
+Failing on Windows before phase 2 starts, none of them in the orchestrator: phases 2 to 6 must not count them
+as regressions.
+
+- `vtextension_test` does not compile: `popen` at `src/vtextension/DaemonGuest_test.cpp:708`.
+- The `[consent]` case "DaemonExtensionRuntime: revoke…" fails.
+- `vthost_test`: `OwnedPanes_test.cpp:1171` ("pane-open is refused…") and `DaemonConsentKey_test.cpp:140` fail.
+- `contour_e2e_daemon_live_upgrade` times out waiting for the daemons to bind (20 s).

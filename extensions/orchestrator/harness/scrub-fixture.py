@@ -257,7 +257,7 @@ HOSTS = {"glab-mrs": GITLAB_HOST, "glab-issues": GITLAB_HOST, "glab-repo": GITLA
 JIRA_KEY = re.compile(r"[A-Z][A-Z0-9_]*-[0-9]+")
 
 # The characters Go's encoding/json escapes inside a string, as `glab` and `acli` print them.
-GO_ESCAPES = {"<": "\\u003c", ">": "\\u003e", "&": "\\u0026", " ": "\\u2028", " ": "\\u2029"}
+GO_ESCAPES = {"<": "\\u003c", ">": "\\u003e", "&": "\\u0026", "\u2028": "\\u2028", "\u2029": "\\u2029"}
 
 
 class Context(dict):

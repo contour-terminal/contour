@@ -44,4 +44,5 @@ Fields the mapping reads (GitLab.cpp): a merge request's `iid`, `title`, `web_ur
 `target_branch`, `draft`, `source_project_id`, `target_project_id` and `detailed_merge_status`; an issue's
 `iid`, `title` and `web_url`; a project's `default_branch`. Every other key is skipped.
 
-**Not run during the recording.** `glab mr checkout {n} --branch {b}` (its `--branch` is as `glab mr checkout --help` documents it) and `glab auth status` (only its exit status is read).
+**Not run during the recording.** `glab mr checkout {n} --branch {b}` (its `--branch` is as
+`glab mr checkout --help` documents it) and `glab auth status` (only its exit status is read).

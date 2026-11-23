@@ -18,10 +18,13 @@ namespace orchestrator::gitlab
 ///         changes, Approved once it can be merged, and None for every other value.
 [[nodiscard]] ReviewState reviewStateOf(std::string_view detailedMergeStatus) noexcept;
 
+/// `detailed_merge_status` names a single blocker, and it names the pipeline only when the project requires
+/// pipelines to succeed (or auto-merge is set) and no higher blocker, such as a draft or a conflict, outranks
+/// it. None therefore means "not known", not "passing"; `ci_must_pass` also covers a cancelled, skipped,
+/// manual or missing pipeline.
 /// @param detailedMergeStatus A merge request's `detailed_merge_status`.
-/// @return Its CI state: Pending while a pipeline still runs, Failing when one must pass and has not, and
-/// None
-///         for every other value, a merge request blocked by something else and one with no pipeline alike.
+/// @return Its CI state: Pending for `ci_still_running`, Failing for `ci_must_pass`, and None for every other
+///         value.
 [[nodiscard]] CiState ciStateOf(std::string_view detailedMergeStatus) noexcept;
 
 /// Maps the output of the declared `glab-mrs` command. GitLab's list carries no pipeline object and no

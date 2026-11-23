@@ -34,3 +34,5 @@ on stderr. `acli jira auth status` exits 0 when logged in.
 
 Fields the mapping reads (Jira.cpp): a work item's `key` and `fields.summary`; every other key is skipped. The
 issue's page is never read from the output: it is built as `<site>/browse/<key>` from the configured `site`.
+`site` builds those links and nothing else: `acli` searches whichever site it is logged in to
+(`acli jira auth status` shows it), so the two must match.

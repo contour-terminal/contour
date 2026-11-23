@@ -1067,7 +1067,7 @@ TEST_CASE("agent-stats runs in the worktree root", "[orchestrator][commands][sta
                                 "{session} --cwd {path} --format {format} --json"sv));
 }
 
-TEST_CASE("unmeasured commands are not in the manifest", "[orchestrator][commands][manifest]")
+TEST_CASE("every shipped command is in the manifest", "[orchestrator][commands][manifest]")
 {
     auto const lines = manifestLines();
     auto unmeasured = 0;
