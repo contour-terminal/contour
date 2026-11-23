@@ -47,6 +47,7 @@ set(vtpty_SOURCES
     SshTerminfoInstall.cpp
     WindowsCommandLine.cpp
     WindowsPathRules.cpp
+    WindowsProcessRules.cpp
 )
 
 set(vtpty_HEADERS
@@ -92,6 +93,7 @@ set(vtpty_HEADERS
     UniqueHandle.hpp
     WindowsCommandLine.hpp
     WindowsPathRules.hpp
+    WindowsProcessRules.hpp
     Win32Handle.hpp
 )
 
@@ -222,6 +224,7 @@ if(VTPTY_TESTING)
         SshTerminfoInstall_test.cpp
         WindowsCommandLine_test.cpp
         WindowsPathRules_test.cpp
+        WindowsProcessRules_test.cpp
         test/PtyReading_test.cpp
     )
     if(WIN32)
