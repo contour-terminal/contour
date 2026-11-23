@@ -395,7 +395,9 @@ ProgramHost Process::programHost(SandboxEscape escape)
 
 HeldDirectorySpawn Process::heldDirectorySpawn(SandboxEscape /*escape*/)
 {
-    return HeldDirectorySpawn::Unsupported; // No CreateProcess takes a directory by handle.
+    // No sandbox to escape on Windows: a held directory is entered by its path, verified against the handle
+    // before and after the child is created (startInHeldDirectory()).
+    return HeldDirectorySpawn::Supported;
 }
 
 bool Process::findsProgram(ExecInfo const& exec)
@@ -409,6 +411,10 @@ bool Process::findsProgram(ExecInfo const& exec)
     auto const searchPath = std::string {
         environmentValue(environment, "PATH", EnvironmentNames::CaseInsensitive).value_or(std::string_view {})
     };
+    // A held directory's program is looked up as startInHeldDirectory() looks it up: an .exe on an absolute
+    // entry of that PATH, or nothing -- so a program its spawn would refuse is named missing beforehand.
+    if (exec.directory)
+        return findWindowsHeldDirectoryProgram(exec.program, searchPath, isExecutableProgram).has_value();
     return namesProgram(exec.program,
                         ProgramSearch { .path = searchPath,
                                         .workingDirectory = {},

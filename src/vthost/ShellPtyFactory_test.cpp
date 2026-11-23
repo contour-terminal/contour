@@ -4,6 +4,7 @@
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/test/ProcessTesting.hpp>
 
+#include <core/Utf8Path.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
 #include <core/testing/EnvHelper.hpp>
@@ -11,6 +12,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <format>
@@ -20,7 +22,9 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -36,15 +40,11 @@ namespace fs = std::filesystem;
 namespace
 {
 
-#ifndef _WIN32
-// The helpers of the POSIX-only cases below: a Windows build compiles none of those cases, and an unused
-// helper there is a warning.
-constexpr auto PageSize = vtbackend::PageSize { vtbackend::LineCount(24), vtbackend::ColumnCount(80) };
-
-/// @return What @p path holds once it exists, waiting up to ten seconds while @p turn runs; empty if never.
-std::string awaitFile(fs::path const& path, std::function<void()> const& turn = [] {})
+/// @return What @p path holds once it exists, waiting up to @p patience while @p turn runs; empty if never.
+std::string awaitFile(
+    fs::path const& path, std::function<void()> const& turn = [] {}, std::chrono::milliseconds patience = 10s)
 {
-    auto const deadline = std::chrono::steady_clock::now() + 10s;
+    auto const deadline = std::chrono::steady_clock::now() + patience;
     while (!fs::exists(path) && std::chrono::steady_clock::now() < deadline)
     {
         turn();
@@ -53,6 +53,19 @@ std::string awaitFile(fs::path const& path, std::function<void()> const& turn = 
     auto in = std::ifstream { path };
     return std::string { std::istreambuf_iterator<char> { in }, {} };
 }
+
+/// The names an agent's pane withholds, set in this process for its children to inherit -- and one kept.
+struct InheritedRepositorySelection
+{
+    core::testing::ScopedEnv gitDir { "GIT_DIR", "/elsewhere/.git" };
+    core::testing::ScopedEnv ghRepo { "GH_REPO", "someone/else" };
+    core::testing::ScopedEnv sshCommand { "GIT_SSH_COMMAND", "ssh -i kept" };
+};
+
+#ifndef _WIN32
+// The helpers of the POSIX-only cases below: a Windows build compiles none of those cases, and an unused
+// helper there is a warning.
+constexpr auto PageSize = vtbackend::PageSize { vtbackend::LineCount(24), vtbackend::ColumnCount(80) };
 
 /// A directory opened by handle, then moved away with a symlink to /tmp put at its name: a child entered by
 /// the path would start in /tmp, one entered by the handle starts where it went.
@@ -77,14 +90,6 @@ struct SwappedDirectory
     [[nodiscard]] fs::path report() const { return scratch.path() / "report"; }
 };
 
-/// The names an agent's pane withholds, set in this process for its children to inherit -- and one kept.
-struct InheritedRepositorySelection
-{
-    core::testing::ScopedEnv gitDir { "GIT_DIR", "/elsewhere/.git" };
-    core::testing::ScopedEnv ghRepo { "GH_REPO", "someone/else" };
-    core::testing::ScopedEnv sshCommand { "GIT_SSH_COMMAND", "ssh -i kept" };
-};
-
 /// @return An agent pane's override: a program reporting its directory and the three names into @p report,
 ///         started in @p directory by its handle, GIT_DIR and GH_REPO withheld.
 vtpty::Process::ExecInfo agentOverride(SwappedDirectory const& directory)
@@ -104,6 +109,59 @@ std::string expectedReport(SwappedDirectory const& directory)
 {
     return std::format("{}|unset|unset|ssh -i kept", fs::canonical(directory.moved).string());
 }
+
+/// The shell a host spawns when it is not told otherwise.
+constexpr auto DefaultShell = "/bin/sh";
+#else
+// The helpers of the Windows-only cases below.
+
+/// A worktree held open, beside a `bin` holding a copy of the probe: an agent's pane is given the first as
+/// its directory and the second as its PATH.
+struct HeldWorktree
+{
+    core::testing::ScopedTempDir scratch { "contour-spawn" };
+    fs::path named = scratch.path() / "worktree";
+    fs::path bin = scratch.path() / "bin";
+    std::shared_ptr<vtpty::DirectoryHandle const> handle;
+
+    HeldWorktree()
+    {
+        fs::create_directories(named);
+        fs::create_directories(bin);
+        fs::copy_file(fs::path { VTHOST_PROCESS_RUNNER_PROBE }, bin / "probe.exe");
+        auto opened = vtpty::nativeDirectoryOpener().open(core::pathToUtf8(named));
+        REQUIRE(opened.has_value());
+        handle = std::make_shared<vtpty::DirectoryHandle const>(std::move(*opened));
+    }
+
+    /// @return The file the child reports into.
+    [[nodiscard]] fs::path report() const { return scratch.path() / "report"; }
+};
+
+/// @return An agent pane's override: the probe, found on a PATH of its `bin` alone, reporting its working
+///         directory and its environment into @p worktree's report, started in @p worktree by its handle,
+///         GIT_DIR and GH_REPO withheld.
+vtpty::Process::ExecInfo agentOverride(HeldWorktree const& worktree)
+{
+    auto exec =
+        vtpty::testing::execInfo("probe", { "report", core::pathToUtf8(worktree.report()), "cwd", "env" });
+    exec.env = { { "Path", core::pathToUtf8(worktree.bin) } };
+    exec.workingDirectory = worktree.named;
+    exec.removedEnvironment = { "GIT_DIR", "GH_REPO" };
+    exec.directory = worktree.handle;
+    return exec;
+}
+
+/// @return The lines of @p text.
+std::vector<std::string> linesOf(std::string_view text)
+{
+    return text | std::views::split('\n')
+           | std::views::transform([](auto const& line) { return std::string { std::string_view { line } }; })
+           | std::ranges::to<std::vector>();
+}
+
+/// The shell a host spawns when it is not told otherwise.
+constexpr auto DefaultShell = "cmd.exe";
 #endif
 
 /// A host spawning through the daemon's own factories, with or without a profile catalog.
@@ -115,7 +173,7 @@ struct SpawningHost
 
     explicit SpawningHost(std::shared_ptr<vthost::ProfileCatalog const> const& profiles = {}):
         host { loop,
-               vthost::makeShellPtyFactory(vtpty::testing::execInfo("/bin/sh"),
+               vthost::makeShellPtyFactory(vtpty::testing::execInfo(DefaultShell),
                                            vthost::SandboxEscape::Contained,
                                            "/nonexistent/socket",
                                            vthost::ownShellDevices(std::make_shared<vtpty::NoPlacement>())),
@@ -125,7 +183,7 @@ struct SpawningHost
                    .profiles = profiles,
                    .profilePtys = profiles
                                       ? vthost::makeProfilePtyFactory(
-                                            vtpty::testing::execInfo("/bin/sh"),
+                                            vtpty::testing::execInfo(DefaultShell),
                                             "/nonexistent/socket",
                                             vthost::ownShellDevices(std::make_shared<vtpty::NoPlacement>()))
                                       : vthost::ProfilePtyFactory {} } }
@@ -200,6 +258,39 @@ TEST_CASE("a host without profiles spawns an agent in the handle's directory", "
     REQUIRE(tab != nullptr);
 
     CHECK(awaitFile(directory.report(), [&] { h.turn(); }) == expectedReport(directory));
+}
+#else
+TEST_CASE("a host without profiles spawns an agent in the handle's directory, on Windows", "[vthost][spawn]")
+{
+    auto const worktree = HeldWorktree {};
+    auto const inherited = InheritedRepositorySelection {};
+    auto h = SpawningHost {};
+
+    auto const* tab = h.host.createTab(
+        { .commandOverride = agentOverride(worktree), .startDirectory = vthost::StartDirectory::Required });
+    REQUIRE(tab != nullptr);
+
+    auto const lines = linesOf(awaitFile(worktree.report(), [&] { h.turn(); }));
+    REQUIRE_FALSE(lines.empty());
+    CHECK(lines.front() == worktree.handle->resolvedPath());
+    CHECK(std::ranges::none_of(lines, [](std::string_view line) { return line.starts_with("GIT_DIR="); }));
+    CHECK(std::ranges::none_of(lines, [](std::string_view line) { return line.starts_with("GH_REPO="); }));
+    CHECK(std::ranges::contains(lines, std::string { "GIT_SSH_COMMAND=ssh -i kept" }));
+}
+
+// CreateProcessW takes the directory by path: a worktree renamed away, and another put at its name, is
+// refused rather than entered -- the agent starts in the directory it was granted, or not at all.
+TEST_CASE("a held directory replaced at its name starts no agent, on Windows", "[vthost][spawn]")
+{
+    auto const worktree = HeldWorktree {};
+    fs::rename(worktree.named, worktree.scratch.path() / "moved");
+    fs::create_directories(worktree.named);
+    auto h = SpawningHost {};
+
+    std::ignore = h.host.createTab(
+        { .commandOverride = agentOverride(worktree), .startDirectory = vthost::StartDirectory::Required });
+
+    CHECK(awaitFile(worktree.report(), [&] { h.turn(); }, 3s).empty());
 }
 #endif
 

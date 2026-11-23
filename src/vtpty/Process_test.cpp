@@ -8,6 +8,7 @@
 #include <vtpty/test/PtyReading.hpp>
 
 #include <core/Environment.hpp>
+#include <core/Utf8Path.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/testing/ScopedTempDir.hpp>
 
@@ -1154,5 +1155,56 @@ TEST_CASE("Process.findsProgramOnThePathTheChildIsGiven", "[process]")
     exec.env.clear();
     exec.removedEnvironment = { "PATH" };
     CHECK_FALSE(vtpty::Process::findsProgram(exec));
+}
+#endif
+
+#ifdef _WIN32
+// Windows has no sandbox to escape: a held directory is entered by its verified path, under either policy.
+TEST_CASE("Process.a held directory can be entered on Windows", "[process]")
+{
+    CHECK(vtpty::Process::heldDirectorySpawn(vtpty::SandboxEscape::Contained)
+          == vtpty::HeldDirectorySpawn::Supported);
+    CHECK(vtpty::Process::heldDirectorySpawn(vtpty::SandboxEscape::Escapes)
+          == vtpty::HeldDirectorySpawn::Supported);
+}
+
+// pane-open asks whether the program is found before it opens a tab: for a held directory the answer is the
+// spawn's own lookup -- an .exe on an absolute entry of the child's PATH, never a batch file, never one in
+// the directory -- so a program the spawn would refuse is named missing rather than opened into a failing
+// tab.
+TEST_CASE("Process.findsProgram in a held directory finds only an .exe on an absolute PATH entry",
+          "[process]")
+{
+    auto const scratch = core::testing::ScopedTempDir { "contour-finds-held-program" };
+    auto const bin = scratch.path() / "bin";
+    auto const work = scratch.path() / "work";
+    std::filesystem::create_directories(bin);
+    std::filesystem::create_directories(work);
+    std::ofstream { bin / "tool.exe" } << "MZ";
+    std::ofstream { bin / "script.cmd" } << "@echo off\r\n";
+    std::ofstream { work / "planted.exe" } << "MZ";
+
+    auto opened = vtpty::nativeDirectoryOpener().open(core::pathToUtf8(work));
+    REQUIRE(opened.has_value());
+    auto exec = vtpty::Process::ExecInfo {};
+    exec.workingDirectory = work;
+    exec.directory = std::make_shared<vtpty::DirectoryHandle const>(std::move(*opened));
+    exec.env = { { "Path", core::pathToUtf8(bin) } };
+
+    auto const findsUnder = [&exec](std::string program, std::string path) {
+        exec.program = std::move(program);
+        exec.env["Path"] = std::move(path);
+        return vtpty::Process::findsProgram(exec);
+    };
+    auto const binPath = core::pathToUtf8(bin);
+    CHECK(findsUnder("tool", binPath));
+    CHECK_FALSE(findsUnder("script", binPath));
+    CHECK_FALSE(findsUnder("script.cmd", binPath));
+    CHECK_FALSE(findsUnder("planted", binPath));
+    CHECK_FALSE(findsUnder("planted", ".;" + binPath));
+
+    // A spawn without a held directory keeps its own lookup, which runs a batch file through cmd.exe.
+    exec.directory.reset();
+    CHECK(findsUnder("script.cmd", binPath));
 }
 #endif

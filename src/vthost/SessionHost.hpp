@@ -1260,7 +1260,7 @@ struct SessionHostConfig
     SandboxEscape ptySandbox = SandboxEscape::Escapes;
     /// Whether a program spawned under a sandbox policy can be started in a directory held open
     /// (vtpty::Process::heldDirectorySpawn). Where an agent's spawn could not (a Flatpak whose shells run on
-    /// the host, Windows), an extension's pane-open is refused not-supported-yet. Empty: everywhere, for a
+    /// the host), an extension's pane-open is refused not-supported-yet. Empty: everywhere, for a
     /// host whose devices start no program.
     std::function<vtpty::HeldDirectorySpawn(SandboxEscape)> heldDirectorySpawn {};
     /// Whether an agent pane's program is found where its spawn would look it up

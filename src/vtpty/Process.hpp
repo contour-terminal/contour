@@ -29,7 +29,7 @@ namespace vtpty
 enum class HeldDirectorySpawn : uint8_t
 {
     Unsupported = 0, ///< It cannot: the spawn would have to name the path, which is what the handle replaces.
-    Supported,       ///< It can: the trampoline enters the handle.
+    Supported,       ///< It can: POSIX's trampoline enters the handle; Windows enters its verified path.
 };
 
 /// @param host Where a spawn's program runs.
@@ -206,14 +206,14 @@ class [[nodiscard]] Process: public Pty, public ChildProcess
     [[nodiscard]] static ProgramHost programHost(SandboxEscape escape);
 
     /// Whether a spawn from this process can start its program in a directory held open
-    /// (ExecInfo::directory): only on this machine's spawn trampoline -- never through flatpak-spawn to the
-    /// host, nor on Windows.
+    /// (ExecInfo::directory): only on this machine -- never through flatpak-spawn to the host.
     /// @param escape The profile's `escape_sandbox`.
     /// @return Whether such a spawn can succeed here.
     [[nodiscard]] static HeldDirectorySpawn heldDirectorySpawn(SandboxEscape escape);
 
     /// Whether a spawn of @p exec on this machine would find its program: looked up as start() looks it up,
-    /// on the PATH the child is given -- @p exec's own, else the inherited one unless @p exec withholds it.
+    /// on the PATH the child is given -- @p exec's own, else the inherited one unless @p exec withholds it --
+    /// and, for a spawn into a held directory, by that spawn's own rules.
     /// Asked before a spawn whose failure would otherwise say only that it failed.
     /// @param exec What would be spawned.
     /// @return Whether its program is found.
