@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/WindowsPathRules.hpp>
 
+#include <vtpty/AsciiFold.hpp>
+
 #include <algorithm>
 #include <array>
 #include <functional>
@@ -31,18 +33,11 @@ namespace
     constexpr auto DevicePrefix = std::string_view { R"(\\.\)" };
     constexpr auto UncPrefix = std::string_view { R"(\\)" };
 
-    /// Folds an ASCII letter to upper case; every other byte, the UTF-8 ones included, is left as it is.
-    [[nodiscard]] constexpr char asciiUpper(char c) noexcept
-    {
-        return (c >= 'a' && c <= 'z') ? static_cast<char>(c - ('a' - 'A')) : c;
-    }
-
     /// Whether @p stem is one of the reserved device names, compared ASCII-case-insensitively.
     [[nodiscard]] bool isReservedStem(std::string_view stem) noexcept
     {
-        return std::ranges::any_of(ReservedStems, [stem](std::string_view row) {
-            return std::ranges::equal(stem, row, std::ranges::equal_to {}, asciiUpper, asciiUpper);
-        });
+        return std::ranges::any_of(
+            ReservedStems, [stem](std::string_view row) { return equalsIgnoringAsciiCase(stem, row); });
     }
 } // namespace
 
@@ -92,8 +87,7 @@ bool isFileSystemPath(std::string_view fullPath) noexcept
         return true;
     // `\\?\X:\`: a drive letter, a colon and the root. `\\?\X:` alone is the volume, not its root.
     auto const rest = fullPath.substr(VerbatimPrefix.size());
-    return rest.size() >= 3 && asciiUpper(rest[0]) >= 'A' && asciiUpper(rest[0]) <= 'Z' && rest[1] == ':'
-           && rest[2] == '\\';
+    return rest.size() >= 3 && isAsciiLetter(rest[0]) && rest[1] == ':' && rest[2] == '\\';
 }
 
 } // namespace vtpty

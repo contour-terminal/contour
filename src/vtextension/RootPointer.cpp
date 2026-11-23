@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtextension/RootPointer.hpp>
 
+#include <vtpty/AsciiFold.hpp>
 #include <vtpty/PathStyle.hpp>
 #include <vtpty/WindowsPathRules.hpp>
 
@@ -58,18 +59,6 @@ namespace
 
     /// The prefix of a UNC path.
     constexpr auto UncPrefix = std::string_view { R"(\\)" };
-
-    /// @return Whether @p c is an ASCII letter: the drive letters Win32 knows.
-    [[nodiscard]] constexpr bool isAsciiLetter(char c) noexcept
-    {
-        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-    }
-
-    /// @return @p c, upper-cased if it is an ASCII lower-case letter.
-    [[nodiscard]] constexpr char asciiUpper(char c) noexcept
-    {
-        return (c >= 'a' && c <= 'z') ? static_cast<char>(c - ('a' - 'A')) : c;
-    }
 
     /// @return @p text without the trailing @p separator characters.
     [[nodiscard]] constexpr std::string_view withoutTrailing(std::string_view text,
@@ -160,12 +149,13 @@ namespace
             return comparableWindowsSpelling(std::string(path));
         }
 
-        if (spelled.size() < 3 || !isAsciiLetter(spelled[0]) || spelled[1] != ':' || spelled[2] != '\\')
+        // A UNC path is handled above, so this is the drive-absolute `X:\`.
+        if (!hasAbsoluteRoot(spelled, vtpty::PathStyle::Windows))
             return std::unexpected(RootPointerError::NotAbsolute);
         auto const below = withoutTrailing(std::string_view { spelled }.substr(3), "\\");
         if (!below.empty() && !arePlainWindowsNames(below))
             return std::unexpected(RootPointerError::NotPlainName);
-        return comparableWindowsSpelling(std::format("{}:\\{}", asciiUpper(spelled[0]), below));
+        return comparableWindowsSpelling(std::format("{}:\\{}", vtpty::asciiUpper(spelled[0]), below));
     }
 } // namespace
 

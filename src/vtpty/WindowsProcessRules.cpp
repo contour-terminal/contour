@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/WindowsProcessRules.hpp>
 
+#include <vtpty/AsciiFold.hpp>
+
 #include <algorithm>
 #include <iterator>
 #include <map>
@@ -26,19 +28,6 @@ namespace
     /// The prefix of a UNC path, and of the verbatim form of one.
     constexpr auto UncPrefix = std::string_view { R"(\\)" };
 
-    /// Folds an ASCII upper-case letter to lower case; every other byte, the UTF-8 ones included, is left.
-    [[nodiscard]] constexpr char asciiLower(char c) noexcept
-    {
-        return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + ('a' - 'A')) : c;
-    }
-
-    /// Whether @p text equals @p other, compared ASCII-case-insensitively.
-    [[nodiscard]] bool equalsIgnoringAsciiCase(std::string_view text, std::string_view other) noexcept
-    {
-        return std::ranges::equal(
-            text, other, {}, [](char c) { return asciiLower(c); }, [](char c) { return asciiLower(c); });
-    }
-
     /// @param text A name, UTF-8.
     /// @return It with its ASCII letters folded to lower case. Windows folds Unicode too, which no real
     ///         environment variable name needs, so the fold is ASCII only.
@@ -57,20 +46,13 @@ namespace
         auto const cut = path.find_last_of(Separators);
         return cut == std::string_view::npos ? path : path.substr(cut + 1);
     }
-
-    /// @param c A byte.
-    /// @return Whether @p c is an ASCII letter, the drive letter of a path among them.
-    [[nodiscard]] constexpr bool isAsciiLetter(char c) noexcept
-    {
-        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
-    }
 } // namespace
 
 bool isAbsoluteWindowsPath(std::string_view path) noexcept
 {
     // A drive, its colon, then a separator: `C:\x` or `C:/x`. `C:x` is relative to the drive's directory.
-    auto const isDriveAbsolute = path.size() >= 3 && isAsciiLetter(path[0]) && path[1] == ':'
-                                 && Separators.find(path[2]) != std::string_view::npos;
+    auto const isDriveAbsolute =
+        path.size() >= 3 && isAsciiLetter(path[0]) && path[1] == ':' && Separators.contains(path[2]);
     // A UNC path, `\\server\share`, or a verbatim one, `\\?\…`: anything after the two separators.
     auto const isUncAbsolute = path.starts_with(UncPrefix) && path.size() > UncPrefix.size();
     return isDriveAbsolute || isUncAbsolute;
@@ -95,7 +77,7 @@ std::optional<std::string> findWindowsHeldDirectoryProgram(std::string_view prog
                                                            std::string_view searchPath,
                                                            ExecutableTest const& isExecutable)
 {
-    auto const image = windowsImageName(program);
+    auto image = windowsImageName(program);
     if (!image)
         return std::nullopt;
 

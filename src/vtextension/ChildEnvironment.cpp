@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtextension/ChildEnvironment.hpp>
 
+#include <vtpty/AsciiFold.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -23,16 +25,10 @@ namespace
         return c;
     }
 
-    /// Folds an ASCII lower-case letter to upper case; every other byte, the UTF-8 ones included, as it is.
-    [[nodiscard]] constexpr char asciiUpper(char c) noexcept
-    {
-        return (c >= 'a' && c <= 'z') ? static_cast<char>(c - ('a' - 'A')) : c;
-    }
-
     /// What a comparison ignores, indexed by EnvironmentNameCase.
     constexpr auto FoldOf = std::array {
-        &unchanged,  // Sensitive
-        &asciiUpper, // Insensitive
+        &unchanged,         // Sensitive
+        &vtpty::asciiUpper, // Insensitive
     };
     static_assert(FoldOf.size() == std::to_underlying(EnvironmentNameCase::Insensitive) + 1U);
 

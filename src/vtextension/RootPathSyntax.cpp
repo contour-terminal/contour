@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtextension/RootPathSyntax.hpp>
 
+#include <vtpty/AsciiFold.hpp>
 #include <vtpty/WindowsPathRules.hpp>
 
 #include <algorithm>
@@ -14,20 +15,9 @@ namespace vtextension
 
 namespace
 {
-    /// Folds an ASCII upper-case letter to lower case; every other byte, the UTF-8 ones included, as it is.
-    [[nodiscard]] constexpr char asciiLower(char c) noexcept
-    {
-        return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
-    }
-
     [[nodiscard]] constexpr char unchanged(char c) noexcept
     {
         return c;
-    }
-
-    [[nodiscard]] constexpr bool isAsciiLetter(char c) noexcept
-    {
-        return asciiLower(c) >= 'a' && asciiLower(c) <= 'z';
     }
 
     [[nodiscard]] bool isPlainPosixName(std::string_view name) noexcept
@@ -44,7 +34,7 @@ namespace
     /// Whether @p path starts with `X:\` or `\\`.
     [[nodiscard]] bool hasWindowsRoot(std::string_view path) noexcept
     {
-        return (path.size() >= 3 && isAsciiLetter(path[0]) && path[1] == ':' && path[2] == '\\')
+        return (path.size() >= 3 && vtpty::isAsciiLetter(path[0]) && path[1] == ':' && path[2] == '\\')
                || path.starts_with(R"(\\)");
     }
 
@@ -95,7 +85,7 @@ namespace
                   // another across a non-ASCII case difference is not seen as nested (a create root is then
                   // made beside it, and judged by its handle), and a path is refused rather than admitted by
                   // a folding NTFS may not share.
-                  .fold = asciiLower },
+                  .fold = vtpty::asciiLower },
     };
 
     [[nodiscard]] constexpr Grammar const& grammarOf(vtpty::PathStyle style) noexcept

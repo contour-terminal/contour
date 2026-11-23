@@ -52,6 +52,7 @@ set(vtpty_SOURCES
 
 set(vtpty_HEADERS
     AdoptedChild.hpp
+    AsciiFold.hpp
     BeneathRead.hpp
     ChannelPty.hpp
     ChildProcess.hpp
@@ -226,6 +227,7 @@ if(VTPTY_TESTING)
         WindowsCommandLine_test.cpp
         WindowsPathRules_test.cpp
         WindowsProcessRules_test.cpp
+        AsciiFold_test.cpp
         test/PtyReading_test.cpp
     )
     if(WIN32)
