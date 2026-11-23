@@ -4,6 +4,13 @@
 // directory is opened by handle and judged by the path read back from it, a `path:<root>` argument by its
 // longest existing ancestor. A directory belongs to its most specific root, so that a root nested inside
 // another keeps the commands of the outer one out.
+//
+// A path a guest supplies is judged lexically, then opened, then judged again by handle. Opening is not
+// harmless: on Windows a UNC path is a connection to its server, which is handed the user's credentials, and
+// on POSIX an automounter or a FUSE mount answers a lookup. So nothing is opened unless the path as written
+// is at or beneath one of its root's directories (RootPathSyntax's isAtOrBeneath()); what the open then
+// resolves to (a symlink, a junction, an 8.3 name, another case) is judged again by the path read back from
+// the handle.
 #pragma once
 
 #include <vtpty/DirectoryHandle.hpp>
@@ -97,7 +104,8 @@ static_assert(CwdRefusalOfRootError.size() == std::to_underlying(RootError::Unre
                                                         std::string_view root);
 
 /// Opens an existing directory and judges it by the path read back from its handle: inside @p root, and
-/// @p root its most specific root.
+/// @p root its most specific root. A path not at or beneath one of @p root's directories as written is
+/// refused without being opened.
 /// @param opener Where directories are opened.
 /// @param roots The declared roots, resolved.
 /// @param root The label of the root the directory must belong to.
@@ -109,9 +117,8 @@ static_assert(CwdRefusalOfRootError.size() == std::to_underlying(RootError::Unre
                                                                           std::string_view path);
 
 /// Resolves a `path:<root>` argument, which may not exist yet, creating nothing: its longest existing
-/// ancestor opened, the rest appended, and the result judged as openInRoot() judges a directory, and strictly
-/// below
-/// @p root's own directory.
+/// ancestor opened, the rest appended, and the result judged as openInRoot() judges a directory (as written
+/// first, then as resolved), and strictly below @p root's own directory.
 /// @param opener Where paths are opened.
 /// @param roots The declared roots, resolved.
 /// @param root The label of the root the argument is declared inside.

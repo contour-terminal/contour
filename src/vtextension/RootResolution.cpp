@@ -124,6 +124,26 @@ namespace
         });
     }
 
+    /// Judges a path as written, before anything is opened: at or beneath one of @p root's own directories by
+    /// isAtOrBeneath() in @p style. Opening is not harmless (a UNC path connects to its server and hands it
+    /// the user's credentials; an automounter or a FUSE mount answers a lookup), so a path that could not be
+    /// inside @p root is refused without one.
+    /// @return Nothing; otherwise the error the path would be refused with had it resolved to itself:
+    ///         `NotItsRoot` when another root holds it, `OutsideRoots` when none does.
+    [[nodiscard]] std::expected<void, RootError> judgeAsWritten(std::span<ResolvedRoot const> roots,
+                                                                std::string_view root,
+                                                                std::string_view path,
+                                                                vtpty::PathStyle style)
+    {
+        auto const* const declared = rootNamed(roots, root);
+        if (declared && std::ranges::any_of(declared->paths, [&](std::string const& directory) {
+                return isAtOrBeneath(path, directory, style);
+            }))
+            return {};
+        return std::unexpected(mostSpecificRoot(roots, path, style) ? RootError::NotItsRoot
+                                                                    : RootError::OutsideRoots);
+    }
+
     /// Judges a resolved path: inside @p root, and @p root its most specific root.
     [[nodiscard]] std::expected<void, RootError> judge(std::span<ResolvedRoot const> roots,
                                                        std::string_view root,
@@ -183,12 +203,15 @@ std::expected<vtpty::DirectoryHandle, RootError> openInRoot(vtpty::IDirectoryOpe
                                                             std::string_view root,
                                                             std::string_view path)
 {
-    if (auto const syntax = checkSyntax(path, opener.pathStyle()); !syntax)
+    auto const style = opener.pathStyle();
+    if (auto const syntax =
+            checkSyntax(path, style).and_then([&] { return judgeAsWritten(roots, root, path, style); });
+        !syntax)
         return std::unexpected(syntax.error());
     auto directory = opener.open(path);
     if (!directory)
         return std::unexpected(rootErrorOf(directory.error()));
-    if (auto const judged = judge(roots, root, directory->resolvedPath(), opener.pathStyle()); !judged)
+    if (auto const judged = judge(roots, root, directory->resolvedPath(), style); !judged)
         return std::unexpected(judged.error());
     return std::move(*directory);
 }
@@ -203,7 +226,9 @@ namespace
         std::string_view value)
     {
         auto const style = opener.pathStyle();
-        if (auto const syntax = checkSyntax(value, style); !syntax)
+        if (auto const syntax =
+                checkSyntax(value, style).and_then([&] { return judgeAsWritten(roots, root, value, style); });
+            !syntax)
             return std::unexpected(syntax.error());
         auto ancestor = openExistingAncestor(opener, value);
         if (!ancestor)

@@ -234,6 +234,61 @@ TEST_CASE("RootResolution: a Windows directory is judged by its resolved path", 
     CHECK(opened->resolvedPath() == R"(C:\wt\a)");
 }
 
+TEST_CASE("RootResolution: a path outside the root is refused before anything is opened",
+          "[daemon][processes]")
+{
+    // Opening is not harmless: on Windows a UNC path is a connection to its server, which is handed the
+    // user's credentials, and on POSIX an automounter or a FUSE mount answers a lookup. So a guest's path is
+    // judged as written first.
+    struct Row
+    {
+        PathStyle style;
+        std::string_view root;
+        std::string_view other;
+        std::string_view outside;
+        std::string_view inOther;
+    };
+    for (auto const& row: std::array {
+             Row { .style = PathStyle::Windows,
+                   .root = R"(C:\wt)",
+                   .other = R"(C:\repos)",
+                   .outside = R"(\\attacker\s\x)",
+                   .inOther = R"(C:\repos\x)" },
+             Row { .style = PathStyle::Posix,
+                   .root = "/w",
+                   .other = "/r",
+                   .outside = "/net/attacker/x",
+                   .inOther = "/r/x" },
+         })
+    {
+        INFO(row.outside);
+        auto const roots = std::vector<ResolvedRoot> {
+            { .label = "worktrees", .paths = { std::string { row.root } } },
+            { .label = "repos", .paths = { std::string { row.other } } },
+        };
+        auto opener = FakeDirectoryOpener { row.style };
+        opener.add(std::string { row.root });
+        opener.add(std::string { row.other });
+        opener.add(std::string { row.outside });
+        opener.add(std::string { row.inOther });
+
+        CHECK(vtextension::openInRoot(opener, roots, "worktrees", row.outside)
+              == std::unexpected(RootError::OutsideRoots));
+        CHECK(vtextension::resolvePathArgument(opener, roots, "worktrees", row.outside)
+              == std::unexpected(RootError::OutsideRoots));
+        CHECK(vtextension::createPathParents(opener, roots, "worktrees", row.outside)
+              == std::unexpected(RootError::OutsideRoots));
+        CHECK(vtextension::openInRoot(opener, roots, "worktrees", row.inOther)
+              == std::unexpected(RootError::NotItsRoot));
+        CHECK(vtextension::resolvePathArgument(opener, roots, "worktrees", row.inOther)
+              == std::unexpected(RootError::NotItsRoot));
+        CHECK(vtextension::openInRoot(opener, roots, "unknown", row.outside)
+              == std::unexpected(RootError::OutsideRoots));
+        CHECK(opener.opened.empty());
+        CHECK(opener.created.empty());
+    }
+}
+
 #ifdef _WIN32
 namespace
 {
@@ -334,15 +389,24 @@ TEST_CASE("RootResolution: a Windows root, end to end through the native opener"
     CHECK(vtextension::resolvePathArgument(opener, *roots, "worktrees", asciiUpper(wt))
           == std::unexpected(RootError::OutsideRoots));
 
+    // A root is resolved to its long names, and so is a directory named beneath it by an 8.3 name. The root
+    // itself spelled by its short name is not beneath it as written, and is refused before it is opened.
+    CHECK_FALSE(wt.contains('~'));
+    CHECK_FALSE(contour.contains('~'));
+    auto const longLeaf = top / "repos" / "contour" / "a-long-directory-name";
+    std::filesystem::create_directories(longLeaf);
+    auto const shortLeaf = core::pathToUtf8(shortPathOf(longLeaf).filename());
+    if (!shortLeaf.contains('~'))
+        SKIP("8.3 names are disabled on this volume");
+    auto const throughShort = vtextension::openInRoot(opener, *roots, "repos", contour + R"(\)" + shortLeaf);
+    INFO("through " << shortLeaf);
+    REQUIRE(throughShort.has_value());
+    CHECK(throughShort->resolvedPath() == contour + R"(\a-long-directory-name)");
+    CHECK_FALSE(throughShort->resolvedPath().contains('~'));
+
     auto const shortContour = core::pathToUtf8(shortPathOf(top / "repos" / "contour"));
-    if (shortContour == contour)
-        WARN("8.3 names disabled");
-    else
-    {
-        INFO("through " << shortContour);
-        auto const throughShort = vtextension::openInRoot(opener, *roots, "repos", shortContour);
-        REQUIRE(throughShort.has_value());
-        CHECK(throughShort->resolvedPath() == contour);
-    }
+    if (shortContour.contains('~'))
+        CHECK(vtextension::openInRoot(opener, *roots, "repos", shortContour)
+              == std::unexpected(RootError::OutsideRoots));
 }
 #endif
