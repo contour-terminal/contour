@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// A process that dies holding a process runner (ProcessRunner_test.cpp): `process_runner_host <probe>
+// A process that dies holding a process runner (ProcessRunner_win32_test.cpp): `process_runner_host <probe>
 // <pidfile>` starts `<probe> pid <pidfile> sleep 600000` on a PipedProcessRunner, pumps until the probe has
 // written its pid, and then terminates itself with exit code 7 -- no destructor runs, so whatever ends the
 // probe is what the system does with the runner's handles.
@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <ranges>
 #include <span>

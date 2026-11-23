@@ -163,8 +163,12 @@ struct ProcessRunnerTuning
 /// On Windows each process runs in a kill-on-close Job Object of its own, which only the runner holds. A
 /// process timed out or cancelled has its job terminated at once, which ends its whole tree, grandchildren
 /// included; closing the job -- on destruction, or when the process holding the runner dies in any way --
-/// ends it too. Only a program whose name ends in `.exe` is started, found on the spec's PATH's absolute
-/// entries alone; a `.cmd` or `.bat` is refused, so no argument ever passes through `cmd.exe`.
+/// ends it too, as does the orphaned output's grace running out. A leader that exits by itself, its pipes
+/// closed, leaves what it started running, as on POSIX (a daemon such as git's fsmonitor or gpg-agent): its
+/// job loses kill-on-close before the runner closes it. A process in a job that raises an exception nothing
+/// handles ends at once, rather than waiting on Windows Error Reporting. Only a program whose name ends in
+/// `.exe` is started, found on the spec's PATH's absolute entries alone; a `.cmd` or `.bat` is refused, so no
+/// argument ever passes through `cmd.exe`.
 ///
 /// start(), cancel() and running() may be called from any thread, pump() from one at a time.
 class PipedProcessRunner final: public IProcessRunner

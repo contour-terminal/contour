@@ -24,6 +24,7 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -36,7 +37,9 @@
 //
 // A process is ended by terminating its job, which ends its whole tree at once: Windows has no SIGTERM, so
 // there is no graceful phase, and ProcessRunnerTuning::terminateGrace is not used. Closing the job, which
-// only the runner holds, ends the tree too -- on destruction, and when the daemon dies in any way.
+// only the runner holds, ends the tree too -- on destruction, and when the daemon dies in any way. A leader
+// that exits by itself, its pipes closed, leaves what it started running, as on POSIX: its job loses
+// kill-on-close before it is closed.
 namespace vtpty
 {
 
@@ -65,6 +68,14 @@ namespace
 
     /// The exit code a terminated job's processes are given.
     constexpr auto TerminatedExitCode = UINT { 1 };
+
+    /// The limits of a job while the runner holds it: closing it ends its tree, and a process in it that
+    /// raises an exception nothing handles ends at once rather than waiting on Windows Error Reporting.
+    constexpr auto HeldJobLimits =
+        DWORD { JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION };
+
+    /// The limits of a job whose leader exited by itself: closing it leaves what is left of its tree.
+    constexpr auto ReleasedJobLimits = DWORD { JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION };
 
     /// How long the destructor waits for each terminated leader to be gone, in milliseconds; as
     /// CommandCapture's KillGracePeriod. Bounded, so that a process the system is slow to end cannot keep the
@@ -207,7 +218,8 @@ namespace
     enum class Ending : uint8_t
     {
         NotAsked, ///< Nobody has asked it to end.
-        Killed,   ///< Its job was terminated: everything in it ends, the leader included.
+        Killed,   ///< Its job was terminated (timeout, cancel, the orphaned output's grace): everything in it
+                  ///< ends, the leader included.
     };
 
     /// Whether the leader has exited, as the runner has seen it.
@@ -221,17 +233,17 @@ namespace
     /// on, the job (which ends what is left of the tree) last.
     struct Child
     {
-        UniqueHandle job;                         ///< Kill-on-close; held only here, never inherited.
-        UniqueHandle process;                     ///< The leader.
-        ExitWait exitWait;                        ///< Posts the leader's exit to the port.
-        std::array<Stream, 2> streams;            ///< Standard output, then standard error.
-        SteadyTimePoint deadline;                 ///< When it is timed out.
+        UniqueHandle job;              ///< Kill-on-close (see closeJob()); held only here, never inherited.
+        UniqueHandle process;          ///< The leader.
+        ExitWait exitWait;             ///< Posts the leader's exit to the port.
+        std::array<Stream, 2> streams; ///< Standard output, then standard error.
+        SteadyTimePoint deadline;      ///< When it is timed out.
         Ending ending = Ending::NotAsked;         ///< Whether the runner has ended it.
         std::optional<ProcessCompletion> endedBy; ///< TimedOut or Cancelled, once the runner ended it.
         Leader leader = Leader::Running;          ///< Whether its leader has exited.
         std::optional<int32_t> exitCode;          ///< The leader's exit code, if it exited by itself.
         SteadyTimePoint leaderExitedAt;           ///< When the leader's exit was seen, once it was.
-        CompletionHandler done;
+        CompletionHandler done;                   ///< Called with how it ended, once it has.
 
         /// @return Whether a pipe of it is still open.
         [[nodiscard]] bool hasOpenStream() const noexcept
@@ -376,18 +388,42 @@ namespace
         return path && core::platform::NativeFileSystem::instance().isExecutableFile(*path);
     }
 
-    /// @return A kill-on-close job; or why it could not be made.
+    /// Sets @p job's limits to @p flags alone.
+    /// @return Nothing; or why they could not be set.
+    [[nodiscard]] std::expected<void, std::error_code> setJobLimits(HANDLE job, DWORD flags) noexcept
+    {
+        auto limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {};
+        limits.BasicLimitInformation.LimitFlags = flags;
+        if (SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits)) == FALSE)
+            return std::unexpected(lastError());
+        return {};
+    }
+
+    /// @return A job with HeldJobLimits; or why it could not be made.
     [[nodiscard]] std::expected<UniqueHandle, std::error_code> createKillOnCloseJob()
     {
         auto job = UniqueHandle { CreateJobObjectW(nullptr, nullptr) };
         if (!job.valid())
             return std::unexpected(lastError());
-        auto limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {};
-        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        if (SetInformationJobObject(job.get(), JobObjectExtendedLimitInformation, &limits, sizeof(limits))
-            == FALSE)
-            return std::unexpected(lastError());
-        return job;
+        return setJobLimits(job.get(), HeldJobLimits).transform([&job] { return std::move(job); });
+    }
+
+    /// Ends @p child's tree at once: its job is terminated, or, should that fail, its leader alone, so that
+    /// a process the runner ends still completes.
+    void terminateTree(Child const& child) noexcept
+    {
+        if (TerminateJobObject(child.job.get(), TerminatedExitCode) == FALSE)
+            TerminateProcess(child.process.get(), TerminatedExitCode);
+    }
+
+    /// Closes @p child's job. A leader that exited by itself, nobody having asked it to end, leaves what is
+    /// left of its tree running, as on POSIX (a daemon the command started, such as git's fsmonitor): its
+    /// job loses kill-on-close first. Any other job ends what is left of its tree as it closes.
+    void closeJob(Child& child) noexcept
+    {
+        if (child.ending == Ending::NotAsked)
+            std::ignore = setJobLimits(child.job.get(), ReleasedJobLimits);
+        child.job.reset();
     }
 
     /// The UTF-16 a CreateProcessW() call takes, spelled from a spec.
@@ -512,7 +548,7 @@ struct PipedProcessRunner::State
     {
         auto const lock = std::scoped_lock { mutex };
         for (auto const& child: children | std::views::values)
-            TerminateJobObject(child.job.get(), TerminatedExitCode);
+            terminateTree(child);
         for (auto& child: children | std::views::values)
         {
             child.exitWait.reset();
@@ -536,7 +572,10 @@ struct PipedProcessRunner::State
             // pipe it inherited.
             if (child.isOrphaned() && now >= child.leaderExitedAt + tuning.orphanedOutputGrace)
             {
-                TerminateJobObject(child.job.get(), TerminatedExitCode);
+                // Killed, so that closing the job ends whatever of the tree a failed termination left; the
+                // leader exited by itself, so its exit code and Exited stand.
+                child.ending = Ending::Killed;
+                terminateTree(child);
                 closeStreams(child);
             }
         }
@@ -550,7 +589,7 @@ struct PipedProcessRunner::State
             noteLeaderExit(child);
         child.endedBy = reason;
         child.ending = Ending::Killed;
-        TerminateJobObject(child.job.get(), TerminatedExitCode);
+        terminateTree(child);
     }
 
     /// Issues a read on every open, Idle stream that has not had its share of this round.
@@ -641,23 +680,21 @@ struct PipedProcessRunner::State
         return count;
     }
 
-    /// Takes every process that has ended out of the table, its exit wait unregistered and its job closed,
-    /// which ends anything of its tree still running.
+    /// Takes every process that has ended out of the table, its exit wait unregistered and its job closed
+    /// (see closeJob()).
     [[nodiscard]] std::vector<std::pair<ProcessToken, Child>> takeEnded()
     {
         auto ended = std::vector<std::pair<ProcessToken, Child>> {};
-        for (auto entry = children.begin(); entry != children.end();)
+        for (auto& [token, child]: children)
         {
-            if (entry->second.hasEnded())
-            {
-                entry->second.exitWait.reset();
-                entry->second.job.reset();
-                ended.emplace_back(entry->first, std::move(entry->second));
-                entry = children.erase(entry);
-            }
-            else
-                ++entry;
+            if (!child.hasEnded())
+                continue;
+            child.exitWait.reset();
+            closeJob(child);
+            ended.emplace_back(token, std::move(child));
         }
+        for (auto const& entry: ended)
+            children.erase(entry.first);
         return ended;
     }
 

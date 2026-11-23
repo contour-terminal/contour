@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// The child of the process runner's Windows tests (ProcessRunner_test.cpp). A console program that runs its
-// arguments as a sequence of verbs, each followed by as many arguments as it takes; `args` takes all that
+// The child of the process runner's Windows tests (ProcessRunner_win32_test.cpp). A console program that runs
+// its arguments as a sequence of verbs, each followed by as many arguments as it takes; `args` takes all that
 // follow, `spawn` and `spawn-quiet` all up to a `--` (or the end), which the probe then goes on after. At the
 // end of the verbs it exits 0.
 //
@@ -20,6 +20,7 @@
 //   spawn <file> ... [--]       starts itself with the verbs up to `--` on its own standard handles, writes
 //                               the grandchild's pid to <file>, does not wait; runs the verbs after `--`
 //   spawn-quiet <file> ... [--] the same, the grandchild's standard handles NUL and nothing else inherited
+//   crash                       raises an exception nothing handles, of code UnhandledExceptionCode
 //
 // Everything it writes is UTF-8, through WriteFile(): no C runtime buffer stands between a verb and its pipe.
 // An unknown verb, or one short of its arguments, is reported on stderr and exits 64.
@@ -61,6 +62,9 @@ constexpr auto EntryEnd = L'\0';
 
 /// The exit code of a command line it cannot run.
 constexpr auto UsageError = UINT { 64 };
+
+/// The code of the exception `crash` raises; ProcessRunner_win32_test.cpp expects it as the exit code.
+constexpr auto UnhandledExceptionCode = DWORD { 0xE0000042 };
 
 /// Writes @p text to @p output, as it is.
 void write(HANDLE output, std::string_view text)
@@ -401,6 +405,9 @@ constexpr auto Verbs = std::array {
                [](Arguments arguments) {
                    spawnSelf(arguments.front(), arguments.subspan(1), GrandchildStreams::Null);
                } },
+    Verb { .name = L"crash",
+           .arity = { .fixed = 0 },
+           .action = [](Arguments) { RaiseException(UnhandledExceptionCode, 0, 0, nullptr); } },
 };
 
 /// Runs the verbs @p arguments spell, the first of them and then the rest.

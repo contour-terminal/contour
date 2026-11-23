@@ -74,7 +74,14 @@ process runner"). Builds on `2026-11-23-orchestrator-windows-directory-handles.m
    (`TerminateJobObject`); closing the job handle (destruction, or the daemon dying in any way) ends it too,
    because the handle is held only by the runner and never inherited. No `JOB_OBJECT_LIMIT_BREAKAWAY_OK`: a
    grandchild cannot leave the job. Nested jobs (Windows 8+) make this work when the daemon itself runs inside a
-   job (a terminal, an IDE, CI).
+   job (a terminal, an IDE, CI). **Natural completion keeps the tree (POSIX parity):** when the leader exited by
+   itself and its pipes closed, nobody having asked it to end, `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` is cleared
+   with `SetInformationJobObject` before the job is closed, so a background process the command started
+   (`git fsmonitor--daemon`, `gpg-agent`) survives it. Kill-on-close stays for timeout, cancel, destruction, the
+   orphaned-output grace and the daemon's death. Should `TerminateJobObject` fail, the leader alone is
+   terminated (`TerminateProcess`), so that a process the runner ends still completes. The job also carries
+   `JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION`: a crashing child ends at once rather than waiting on Windows
+   Error Reporting.
 2. **No graceful phase on Windows: termination is immediate, and `ProcessRunnerTuning::terminateGrace` is not
    used there.** There is no SIGTERM. `GenerateConsoleCtrlEvent` reaches only processes sharing the *caller's*
    console, which a detached daemon does not have, and attaching the daemon to each child's console is

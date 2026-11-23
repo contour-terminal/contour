@@ -38,7 +38,6 @@
     #include <memory>
     #include <optional>
     #include <ranges>
-    #include <sstream>
     #include <string>
     #include <utility>
     #include <vector>
@@ -82,19 +81,26 @@ void copyProbe(std::filesystem::path const& target)
                                std::filesystem::copy_options::overwrite_existing);
 }
 
-/// @return @p text split into its lines, sorted.
+/// @return @p text split into its lines, each ended by a newline, sorted.
 [[nodiscard]] std::vector<std::string> sortedLines(std::string const& text)
 {
-    auto lines = std::vector<std::string> {};
-    auto stream = std::istringstream { text };
-    for (auto line = std::string {}; std::getline(stream, line);)
-        lines.push_back(line);
+    auto lines = text | std::views::split('\n') | std::ranges::to<std::vector<std::string>>();
+    // The newline that ends the last line starts no line of its own.
+    if (!lines.empty() && lines.back().empty())
+        lines.pop_back();
     std::ranges::sort(lines);
     return lines;
 }
 
 /// How long isDead() waits for a process to end, in milliseconds.
 constexpr auto DeathWait = DWORD { 5000 };
+
+/// How many pump rounds a process ended at once, or crashed, may take to complete: far fewer than a grace,
+/// or Windows Error Reporting, would hold it for.
+constexpr auto ImmediateEndRounds = 20;
+
+/// The exit code of the probe's `crash`: the code of the exception it raises.
+constexpr auto UnhandledExceptionCode = static_cast<int32_t>(0xE0000042);
 
 /// How long process_runner_host has to start the probe and end itself, in milliseconds.
 constexpr auto HostWait = DWORD { 30000 };
@@ -121,6 +127,16 @@ constexpr auto HostDiedHoldingTheRunner = DWORD { 7 };
     auto const waited = WaitForSingleObject(process, DeathWait);
     CloseHandle(process);
     return waited == WAIT_OBJECT_0;
+}
+
+/// Ends the process @p pid, if it still runs: what a test leaves running past the runner, it cleans up.
+void killPid(DWORD pid)
+{
+    auto* const process = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
+    if (process == nullptr)
+        return;
+    TerminateProcess(process, 1);
+    CloseHandle(process);
 }
 
 /// A PipedProcessRunner on a ManualClock; a temporary directory holding a copy of the probe in `bin` and the
@@ -482,6 +498,17 @@ TEST_CASE("PipedProcessRunner: a child that closes its streams completes when it
     CHECK(exit.standardOutput.bytes == "a\n");
 }
 
+TEST_CASE("PipedProcessRunner: a crashing child ends at once, its exception code its exit code",
+          "[processrunner]")
+{
+    // Its job lets no unhandled exception wait on Windows Error Reporting.
+    auto fixture = RunnerFixture {};
+    auto const exit =
+        fixture.runToCompletion(fixture.start(fixture.spec({ "probe", "crash" })), [] {}, ImmediateEndRounds);
+    CHECK(exit.completion == ProcessCompletion::Exited);
+    CHECK(exit.exitCode == UnhandledExceptionCode);
+}
+
 TEST_CASE("PipedProcessRunner: a GUI-subsystem program's output is captured", "[processrunner]")
 {
     auto fixture = RunnerFixture {};
@@ -526,10 +553,9 @@ TEST_CASE("PipedProcessRunner: a timeout terminates", "[processrunner]")
     CHECK(fixture.runner->running() == 1);
 
     fixture.clock.advance(30s + 1ms);
-    auto const exit = fixture.runToCompletion(token);
-    // Ended at once: no grace is waited for, which the clock never reaches here.
-    CHECK(fixture.clock.now()
-          < core::platform::SteadyTimePoint {} + 30s + 1ms + fixture.tuning.terminateGrace);
+    // Ended at once: the clock never moves on to a grace, so a process waiting for one would not complete
+    // within these few rounds.
+    auto const exit = fixture.runToCompletion(token, [] {}, ImmediateEndRounds);
     CHECK(exit.completion == ProcessCompletion::TimedOut);
     CHECK_FALSE(exit.exitCode.has_value());
     CHECK_FALSE(exit.signal.has_value());
@@ -629,6 +655,28 @@ TEST_CASE("PipedProcessRunner: an orphaned grandchild does not hold the reply", 
     auto const grandchild = readPid(grandFile);
     REQUIRE(grandchild.has_value());
     CHECK(isDead(*grandchild));
+}
+
+TEST_CASE("PipedProcessRunner: a background process outlives a leader that exits by itself",
+          "[processrunner]")
+{
+    // As on POSIX: a daemon a command starts (git's fsmonitor, gpg-agent) is not ended with it. Only the
+    // runner ending a process -- timeout, cancel, destruction, the orphan's grace -- ends its tree.
+    auto fixture = RunnerFixture {};
+    auto const grandFile = fixture.directory.path() / "grandchild";
+    auto const token = fixture.start(fixture.spec(
+        { "probe", "spawn-quiet", utf8(grandFile), "sleep", "600000", "--", "out", "done", "exit", "0" }));
+    auto const exit = fixture.runToCompletion(token);
+    auto const grandchild = readPid(grandFile);
+    REQUIRE(grandchild.has_value());
+    auto const outlived = !isDead(*grandchild);
+    killPid(*grandchild);
+
+    CHECK(exit.completion == ProcessCompletion::Exited);
+    CHECK(exit.exitCode == 0);
+    CHECK(exit.standardOutput.bytes == "done\n");
+    CHECK(fixture.runner->running() == 0);
+    CHECK(outlived);
 }
 
 TEST_CASE("PipedProcessRunner: destruction kills the process tree", "[processrunner]")
