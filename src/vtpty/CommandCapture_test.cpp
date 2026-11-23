@@ -19,8 +19,10 @@
 #include <utility>
 
 #ifdef _WIN32
+    #include <vtpty/UniqueHandle.hpp>
     #include <vtpty/WindowsCommandLine.hpp>
 
+    #include <optional>
     #include <vector>
 
     #include <windows.h>
@@ -457,47 +459,63 @@ std::string readWhole(std::filesystem::path const& file)
     return std::string { std::istreambuf_iterator<char> { in }, std::istreambuf_iterator<char> {} };
 }
 
-/// Ends the process whose pid @p pidFile holds, on destruction, whatever the test did: a process a failed
-/// check left running must not outlive the test. Nothing is ended when the file is missing or unreadable.
+/// @return The pid @p file holds; std::nullopt when it is missing or holds none.
+std::optional<DWORD> pidIn(std::filesystem::path const& file)
+{
+    auto const text = readWhole(file);
+    auto pid = DWORD {};
+    if (text.empty() || std::from_chars(text.data(), text.data() + text.size(), pid).ec != std::errc {})
+        return std::nullopt;
+    return pid;
+}
+
+/// Ends a process on destruction, whatever the test did, through a handle opened as soon as its pid was
+/// known: a process a failed check left running must not outlive the test, and a pid read only then may name
+/// another process by that time.
 class ProcessEndedOnExit
 {
   public:
-    explicit ProcessEndedOnExit(std::filesystem::path pidFile): _pidFile { std::move(pidFile) } {}
+    /// @param pid The process to end, opened here and now.
+    explicit ProcessEndedOnExit(DWORD pid) noexcept:
+        _process { OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid) }
+    {
+    }
     ProcessEndedOnExit(ProcessEndedOnExit const&) = delete;
     ProcessEndedOnExit& operator=(ProcessEndedOnExit const&) = delete;
+    ProcessEndedOnExit(ProcessEndedOnExit&&) = delete;
+    ProcessEndedOnExit& operator=(ProcessEndedOnExit&&) = delete;
     ~ProcessEndedOnExit()
     {
-        auto ec = std::error_code {};
-        if (!std::filesystem::exists(_pidFile, ec))
-            return;
-        auto const text = readWhole(_pidFile);
-        auto pid = DWORD {};
-        if (std::from_chars(text.data(), text.data() + text.size(), pid).ec != std::errc {})
-            return;
-        if (auto* const process = OpenProcess(PROCESS_TERMINATE, FALSE, pid); process != nullptr)
-        {
-            TerminateProcess(process, 0);
-            CloseHandle(process);
-        }
+        if (_process.valid())
+            TerminateProcess(_process.get(), 0);
     }
 
+    /// @return The process, open for waiting on; null when it could not be opened.
+    [[nodiscard]] HANDLE handle() const noexcept { return _process.get(); }
+
   private:
-    std::filesystem::path _pidFile;
+    vtpty::UniqueHandle _process;
 };
-/// Runs @p commandLine to its end, outside any job object, so a grandchild it leaves is not ended with it.
-/// Fails the test unless the command starts and exits 0 within ten seconds.
-void runOutsideAnyJob(std::wstring commandLine)
+
+/// Runs @p commandLine to its end outside the job ProgramCommandCapture would put it in, so that a grandchild
+/// it leaves is not ended with it. Fails the test unless the command starts and exits 0 within ten seconds; a
+/// command that does not is ended, not left running.
+void runOutsideTheCaptureJob(std::wstring commandLine)
 {
     auto startup = STARTUPINFOW { .cb = sizeof(STARTUPINFOW) };
-    auto process = PROCESS_INFORMATION {};
+    auto info = PROCESS_INFORMATION {};
     REQUIRE(CreateProcessW(
-                nullptr, commandLine.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startup, &process)
+                nullptr, commandLine.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startup, &info)
             != FALSE);
-    CloseHandle(process.hThread);
-    REQUIRE(WaitForSingleObject(process.hProcess, 10000) == WAIT_OBJECT_0);
+    auto const process = vtpty::UniqueHandle { info.hProcess };
+    auto const thread = vtpty::UniqueHandle { info.hThread };
+    auto const exited = WaitForSingleObject(process.get(), 10000) == WAIT_OBJECT_0;
     auto exitCode = DWORD {};
-    REQUIRE(GetExitCodeProcess(process.hProcess, &exitCode) != FALSE);
-    CloseHandle(process.hProcess);
+    auto const known = exited && GetExitCodeProcess(process.get(), &exitCode) != FALSE;
+    if (!known)
+        TerminateProcess(process.get(), 1);
+    REQUIRE(exited);
+    REQUIRE(known);
     CHECK(exitCode == 0);
 }
 } // namespace
@@ -517,29 +535,29 @@ TEST_CASE("process_runner_probe runs its verbs", "[processrunner][probe]")
     REQUIRE(
         capture.run(std::format(R"({} report "{}" args a)", probe, reported.string()), 10s, {}).has_value());
     CHECK(readWhole(reported) == "a\n");
+    CHECK_FALSE(std::filesystem::exists(reported.string() + ".part"));
 
-    // `spawn-detached` leaves a grandchild that outlives the probe; the grandchild's pid is written twice.
-    // ProgramCommandCapture ends every process in its job when it returns, so the probe runs outside one
-    // here: the grandchild must still be alive when the probe has exited.
+    // `spawn-detached` leaves a grandchild that outlives the probe; the grandchild's pid is written twice, by
+    // the probe before it exits and by the grandchild itself. ProgramCommandCapture ends every process in its
+    // job when it returns, so the probe runs outside one here: the grandchild must still be alive when the
+    // probe has exited. It sleeps far longer than the test takes, and is ended on the way out.
     auto const grandchildPid = scratch.path() / "g";
     auto const grandchildSelfPid = scratch.path() / "gp";
-    auto const endGrandchild = ProcessEndedOnExit { grandchildPid };
-    runOutsideAnyJob(std::format(L"\"{}\" spawn-detached \"{}\" pid \"{}\" sleep 2000",
-                                 std::filesystem::path { VTPTY_PROCESS_RUNNER_PROBE }.wstring(),
-                                 grandchildPid.wstring(),
-                                 grandchildSelfPid.wstring()));
+    runOutsideTheCaptureJob(std::format(L"\"{}\" spawn-detached \"{}\" pid \"{}\" sleep 60000",
+                                        std::filesystem::path { VTPTY_PROCESS_RUNNER_PROBE }.wstring(),
+                                        grandchildPid.wstring(),
+                                        grandchildSelfPid.wstring()));
+    auto const pid = pidIn(grandchildPid);
+    REQUIRE(pid.has_value());
+    auto const grandchild = ProcessEndedOnExit { *pid };
+    REQUIRE(grandchild.handle() != nullptr);
+
     auto const deadline = std::chrono::steady_clock::now() + 5s;
-    while ((!std::filesystem::exists(grandchildPid) || !std::filesystem::exists(grandchildSelfPid))
-           && std::chrono::steady_clock::now() < deadline)
+    while (!std::filesystem::exists(grandchildSelfPid) && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(20ms);
-    REQUIRE(std::filesystem::exists(grandchildPid));
     REQUIRE(std::filesystem::exists(grandchildSelfPid));
-    auto const pid = readWhole(grandchildPid);
-    CHECK(pid == readWhole(grandchildSelfPid));
-    auto const process = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(std::stoul(pid)));
-    REQUIRE(process != nullptr);
-    CHECK(WaitForSingleObject(process, 0) == WAIT_TIMEOUT);
-    CloseHandle(process);
+    CHECK(pidIn(grandchildSelfPid) == pid);
+    CHECK(WaitForSingleObject(grandchild.handle(), 0) == WAIT_TIMEOUT);
 }
 #endif
 

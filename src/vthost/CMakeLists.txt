@@ -580,7 +580,7 @@ if(VTHOST_TESTING)
         add_dependencies(vthost_test echo_wasm)
     endif()
     # The process runner's child, for the Windows tests that run a command through it (see vtpty's CMakeLists).
-    if(WIN32)
+    if(WIN32 AND TARGET process_runner_probe)
         add_dependencies(vthost_test process_runner_probe)
         target_compile_definitions(vthost_test PRIVATE
             VTHOST_PROCESS_RUNNER_PROBE="$<TARGET_FILE:process_runner_probe>")
