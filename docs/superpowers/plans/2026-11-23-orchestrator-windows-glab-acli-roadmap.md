@@ -1,0 +1,49 @@
+# Orchestrator on Windows, with GitLab (`glab`) and Jira (`acli`) — Roadmap
+
+> Roadmap only: each phase gets its own implementation plan in this directory before it starts. Phase 1's is
+> `2026-11-23-orchestrator-glab-acli.md`.
+
+**Goal:** the agent orchestrator runs on Windows against GitLab repositories and Jira issues, as it runs on
+Linux and macOS against GitHub today.
+
+## Where it stands (measured 2026-11-23, Windows 11, glab 1.119.0, acli 1.3.41, gh 2.97)
+
+| # | Piece | Today | Blocks |
+| --- | --- | --- | --- |
+| 1 | `glab` provider, `acli` issue source | `Verification::Unmeasured`: refused by the configuration, absent from the manifest | GitLab repos, Jira issues — every platform |
+| A | `vtpty` directory opener (`DirectoryHandle_win32.cpp`) | every call `Unsupported`; `DirectoryHandle` holds a POSIX fd (`OwnedFd`) | resolving `@repos`/`@worktrees`, so every command |
+| B | `vtpty::PipedProcessRunner` (`ProcessRunner_win32.cpp`) | `start()` answers `Unsupported` | `git`, `gh`, `glab`, `acli`, `claude`, `contour agent …` |
+| C | `file-read` beneath a root (`BeneathRead_win32.cpp`) | `not-supported-yet` (design sketched in the file) | the Board tab (`STATUS.md`) |
+| D | `pane-open` in a held directory | unsupported on Windows | starting an agent |
+| E | Packaging | Windows packages do not carry the orchestrator (`docs/extensions.md`, Limitations) | use outside a dev tree |
+
+Findings from the recording that shaped phase 1:
+
+- `glab issue list -F json` prints **text**: on `issue list`, `-F` is `--output-format` (details/ids/urls) and
+  JSON is `-O/--output json`; on `mr list` and `repo view`, `-F` is `--output`. `--output json` is right for
+  all three, and an empty issue list then prints `[]`.
+- `glab mr list --output json` prints one compact JSON array carrying every field `GitLab.cpp` reads, no
+  pipeline object, and `detailed_merge_status` values including `ci_still_running`, `draft_status`,
+  `discussions_not_resolved`, `conflict`, `not_approved`.
+- `acli jira workitem search --json` prints a pretty-printed JSON array; each item has `key` and
+  `fields.summary` (plus `expand`, `id`, `self`, … at the top level); `[]` when nothing matches; exit 1 and
+  a message on stderr for bad JQL. `acli jira auth status` exits 0 when logged in.
+
+## Phases
+
+1. **GitLab + Jira recorded** (plan: `2026-11-23-orchestrator-glab-acli.md`). Platform-independent; verified
+   by `orchestrator_test` and the manifest corpus test on Windows and Linux.
+2. **A — Windows directory handles.** `DirectoryHandle` carries a native handle (`HANDLE` on Windows, fd on
+   POSIX) behind one type; `open` = `CreateFileW(FILE_FLAG_BACKUP_SEMANTICS)`, `canonical` =
+   `GetFinalPathNameByHandleW`, `createBeneath` = `NtCreateFile` relative to the parent handle with
+   `FILE_OPEN_REPARSE_POINT`, refusing reparse points. Port `DirectoryHandle_test`.
+3. **B — Windows process runner.** `CreateProcessW` suspended → Job Object (`KILL_ON_JOB_CLOSE`) → resume;
+   overlapped pipes for stdout/stderr, pumped by `pump()` with the injected clock; PATH lookup over absolute
+   entries with `PATHEXT` restricted to `.exe` (a `.cmd`/`.bat` is refused: no argument ever passes through
+   `cmd.exe`); argv by `buildWindowsCommandLine()`; cwd from the handle's resolved path (the TOCTOU residual
+   documented); the environment block built from `ProcessSpec::environment` only. Port the
+   `ProcessRunner_test` cases that are not POSIX-signal specific.
+4. **C — Windows `file-read`.** Follow the design comment in `BeneathRead_win32.cpp`.
+5. **D — Windows `pane-open`.** ConPTY in the held directory, through the runner's program lookup.
+6. **E — Packaging and docs.** Ship the guest in Windows packages; drop the Windows limitation from
+   `docs/extensions.md`; an end-to-end run on this machine: daemon, orchestrator, a GitLab repo, a JQL source.
