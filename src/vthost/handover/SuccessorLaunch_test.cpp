@@ -79,10 +79,12 @@ TEST_CASE("an image names each of its handles once, for the successor to inherit
                                                   .reference = CrossingHandle { 52 },
                                                   .consoleHost = CrossingHandle { 56 } };
     session.child.processHandle = CrossingHandle { 60 };
+    session.child.job = CrossingHandle { 64 };
     image.sessions.push_back(session);
     // A second session that shares a handle with the first, as no real one does: it is named once.
     session.pty.conpty->outputReader = CrossingHandle { 44 };
     session.child.processHandle = CrossingHandle {};
+    session.child.job = CrossingHandle {};
     image.sessions.push_back(session);
     image.listeners.push_back(InheritedListener { .name = "control", .handle = CrossingHandle { 100 } });
     image.listeners.push_back(InheritedListener { .name = "native", .handle = CrossingHandle {} });
@@ -96,6 +98,7 @@ TEST_CASE("an image names each of its handles once, for the successor to inherit
                                            CrossingHandle { 52 },
                                            CrossingHandle { 56 },
                                            CrossingHandle { 60 },
+                                           CrossingHandle { 64 },
                                            CrossingHandle { 100 } });
 }
 

@@ -246,6 +246,10 @@ static void visitForeignFields(Visitor& visitor, T& child)
     // Only the duration of the grace crosses; its clock is the new process's own.
     visitor(5, child.hangupGrace.duration);
     visitor(6, child.processHandle);
+    // Written only for a child that runs in a job, so that an image without one is the bytes a daemon from
+    // before jobs crossed wrote; read as none where it is absent, as such a daemon's image has it.
+    if (!std::is_same_v<Visitor, FieldEncoder> || !child.job.isNone())
+        visitor(7, child.job);
     if constexpr (std::is_same_v<Visitor, FieldDecoder>)
     {
         auto cwd = std::string {};

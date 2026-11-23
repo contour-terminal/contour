@@ -276,6 +276,24 @@ TEST_CASE("a none handle round-trips as none", "[handover]")
     CHECK(decoded->listeners.at(1).handle == vtpty::CrossingHandle { 0 });
 }
 
+TEST_CASE("a child's job crosses beside its process handle", "[handover]")
+{
+    auto image = sampleImage();
+    image.sessions.at(0).child.processHandle = vtpty::CrossingHandle { 60 };
+    image.sessions.at(0).child.job = vtpty::CrossingHandle { 64 };
+    // The second child runs in no job: a user's shell, or a child of a daemon from before jobs crossed.
+    image.sessions.at(1).child.processHandle = vtpty::CrossingHandle { 68 };
+    image.sessions.at(1).child.job = vtpty::CrossingHandle {};
+
+    auto const decoded = decodeHandover(encodeHandover(image));
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded->sessions.size() == 2);
+    CHECK(decoded->sessions.at(0).child.processHandle == vtpty::CrossingHandle { 60 });
+    CHECK(decoded->sessions.at(0).child.job == vtpty::CrossingHandle { 64 });
+    CHECK(decoded->sessions.at(1).child.processHandle == vtpty::CrossingHandle { 68 });
+    CHECK(decoded->sessions.at(1).child.job.isNone());
+}
+
 TEST_CASE("equal images encode to equal bytes", "[handover]")
 {
     CHECK(encodeHandover(sampleImage()) == encodeHandover(sampleImage()));

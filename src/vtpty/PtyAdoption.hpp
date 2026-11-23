@@ -42,8 +42,9 @@ namespace vtpty
 /// @param pty What Pty::handover() named, as it crossed.
 void closeInherited(InheritedPty const& pty) noexcept;
 
-/// Lets go of what this process holds of a child it did not adopt: on Windows the handle to it, closed; on
-/// POSIX nothing, the child being waited for by its process id, by whoever reaps it.
+/// Lets go of what this process holds of a child it did not adopt: on Windows the handle to it and to its
+/// job, closed -- which ends a held-directory child's tree, as closing its pane would; on POSIX nothing, the
+/// child being waited for by its process id, by whoever reaps it.
 /// @param child The child, as it crossed.
 void releaseUnadopted(AdoptedChild const& child) noexcept;
 

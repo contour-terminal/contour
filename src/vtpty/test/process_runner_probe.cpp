@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// The child of the process runner's Windows tests (ProcessRunner_win32_test.cpp). A console program that runs
+// The child of the process runner's Windows tests (ProcessRunner_win32_test.cpp), and of the held-directory
+// process trees ConPty_test.cpp starts on a pseudoconsole. A console program that runs
 // its arguments as a sequence of verbs, each followed by as many arguments as it takes; `args` takes all that
-// follow, `spawn` and `spawn-quiet` all up to a `--` (or the end), which the probe then goes on after. At the
+// follow, the `spawn` verbs all up to a `--` (or the end), which the probe then goes on after. At the
 // end of the verbs it exits 0.
 //
 //   out <text> / err <text>     writes <text> and "\n" to stdout / stderr
@@ -22,9 +23,11 @@
 //   spawn-quiet <file> ... [--] the same, the grandchild's standard handles NUL and nothing else inherited
 //   report <file>               from here on, what the verbs write goes to <file>.part, moved to <file> when
 //                               the probe exits normally
-//   spawn-detached <file> ...   starts itself with the verbs that follow, detached from every console, its
+//   spawn-detached <file> ... [--]
+//                               starts itself with the verbs up to `--`, detached from every console, its
 //                               standard handles NUL and nothing else inherited; writes the grandchild's pid
-//                               to <file>, does not wait -- only a job object reaches such a grandchild
+//                               to <file>, does not wait -- only a job object reaches such a grandchild; runs
+//                               the verbs after `--`
 //   crash                       raises an exception nothing handles, of code UnhandledExceptionCode
 //
 // Everything it writes is UTF-8, through WriteFile(): no C runtime buffer stands between a verb and its pipe.
@@ -460,7 +463,7 @@ constexpr auto Verbs = std::array {
            .arity = { .fixed = 1 },
            .action = [](Arguments arguments) { reportTo(arguments.front()); } },
     Verb { .name = L"spawn-detached",
-           .arity = { .fixed = 1, .trailing = Trailing::Rest },
+           .arity = { .fixed = 1, .trailing = Trailing::UntilSeparator },
            .action =
                [](Arguments arguments) {
                    spawnSelf(arguments.front(), arguments.subspan(1), GrandchildStreams::Null, DetachedFlags);

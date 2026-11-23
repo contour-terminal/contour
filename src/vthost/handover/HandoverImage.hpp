@@ -43,7 +43,9 @@ namespace vthost::handover
 /// same id, a new framing -- is. Format 2 carries a listener's descriptor or handle, and the lease's, as one
 /// field each (vtpty::CrossingHandle), where format 1 carried a descriptor and a Windows handle apart. Under
 /// the same field ids, InheritedConPty's handles and AdoptedChild::processHandle changed encoding too: each
-/// was a uint64 with none as 0, and is a nested int64 with none as -1.
+/// was a uint64 with none as 0, and is a nested int64 with none as -1. AdoptedChild::job (field 7 of a
+/// child), added within format 2, is written only for a child that runs in a job and read as none where
+/// absent, so an image from either side of it is read by the other.
 inline constexpr uint32_t HandoverFormatVersion = 2;
 
 /// The oldest handover format this build can still read.

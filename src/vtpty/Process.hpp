@@ -180,7 +180,9 @@ class [[nodiscard]] Process: public Pty, public ChildProcess
 
     /// Gives up the child without signalling or reaping it, leaving this Process without one, so that
     /// destroying it neither kills nor waits for it; for an adopter in the same process. On Windows the
-    /// handle to the child is the caller's from then on (AdoptedChild::processHandle), to adopt or close.
+    /// handles to the child and to its job are the caller's from then on (AdoptedChild::processHandle and
+    /// AdoptedChild::job), to adopt or close (releaseUnadopted()); closing the job's last handle ends its
+    /// tree.
     /// @return The child, or nullopt where there is none running.
     [[nodiscard]] std::optional<AdoptedChild> releaseChild();
 

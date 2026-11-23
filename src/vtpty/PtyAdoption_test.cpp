@@ -219,17 +219,21 @@ TEST_CASE("a device that cannot be handed over says so", "[vtpty][handover]")
 TEST_CASE("an unadopted child is let go", "[vtpty][handover]")
 {
 #ifdef _WIN32
-    // Its handle is the only thing of it this process holds, and closed.
+    // Its handle and its job's are all this process holds of it, and closed.
     auto process = HANDLE {};
     REQUIRE(
         DuplicateHandle(
             GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(), &process, SYNCHRONIZE, FALSE, 0)
         != FALSE);
+    auto* const job = CreateJobObjectW(nullptr, nullptr);
+    REQUIRE(job != nullptr);
     auto child = vtpty::AdoptedChild {};
     child.pid = static_cast<std::int64_t>(GetCurrentProcessId());
     child.processHandle = vtpty::CrossingHandle::of(process);
+    child.job = vtpty::CrossingHandle::of(job);
     vtpty::releaseUnadopted(child);
     CHECK_FALSE(isOpen(child.processHandle));
+    CHECK_FALSE(isOpen(child.job));
 #else
     // Nothing of it is held but its process id, which is waited for by whoever reaps it.
     auto const fresh = unnamedHandle();

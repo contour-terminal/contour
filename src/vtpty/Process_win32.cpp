@@ -23,17 +23,21 @@
 #include <array>
 #include <cassert>
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <numeric>
 #include <optional>
 #include <ranges>
+#include <ratio>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -161,6 +165,63 @@ namespace
     {
         return std::unexpected(
             StartFailure { .error = StartError::SpawnFailed, .detail = std::move(detail) });
+    }
+
+    /// How long a held-directory child's tree outlives its closed console before its job is closed: the time
+    /// Windows gives a console process to handle CTRL_CLOSE_EVENT.
+    constexpr auto ConsoleCloseGrace = std::chrono::seconds { 5 };
+
+    /// What a deferred close of a job owns until it runs: the job, and the process whose exit ends the wait.
+    struct DeferredJobClose
+    {
+        UniqueHandle job;     ///< Closed when the wait ends, ending whatever still runs in it.
+        UniqueHandle process; ///< The job's leader, waited for.
+    };
+
+    /// The thread pool's callback of closeJobAfter(): the leader exited or the grace passed, either way the
+    /// job is closed now, and then the wait object that called it.
+    /// @param context The DeferredJobClose, owned from here on.
+    /// @param wait The wait object, closed last.
+    void CALLBACK closeDeferredJob(PTP_CALLBACK_INSTANCE /*instance*/,
+                                   PVOID context,
+                                   PTP_WAIT wait,
+                                   TP_WAIT_RESULT /*result*/)
+    {
+        auto pending = std::unique_ptr<DeferredJobClose> { static_cast<DeferredJobClose*>(context) };
+        pending.reset(); // the job first, ending what still runs in it
+        // Freed once this callback has returned: closing a wait object from its own callback is allowed.
+        CloseThreadpoolWait(wait);
+    }
+
+    /// Closes @p job once @p process has exited or @p grace has passed, whichever is first, on the thread
+    /// pool (CreateThreadpoolWait; the callback closes the job and then its own wait object). Owns both
+    /// handles.
+    ///
+    /// It outlives the Process that called it, on purpose: a Process is freed without waiting for its child
+    /// (~Process), and the child's console having been closed, its leader is owed the grace to handle that
+    /// before what it started is ended. Nothing is lost should this process exit first: its exit closes the
+    /// job's handle all the same, which ends the tree at once.
+    /// @param job The job to close: a kill-on-close one, so that closing its last handle ends its tree.
+    /// @param process Its leader, open for SYNCHRONIZE.
+    /// @param grace How long the leader is given to exit by itself.
+    void closeJobAfter(UniqueHandle job, UniqueHandle process, std::chrono::milliseconds grace)
+    {
+        auto pending = std::make_unique<DeferredJobClose>(std::move(job), std::move(process));
+        auto* const wait = CreateThreadpoolWait(&closeDeferredJob, pending.get(), nullptr);
+        if (wait == nullptr)
+        {
+            ptyLog()("Could not defer closing a job; it is closed now: {}",
+                     core::systemErrorMessage(GetLastError()));
+            return; // pending goes, and the job with it
+        }
+        // Relative, in 100 ns units: a negative due time.
+        using FileTimeTicks = std::chrono::duration<std::int64_t, std::ratio<1, 10'000'000>>;
+        auto const due =
+            static_cast<std::uint64_t>(-std::chrono::duration_cast<FileTimeTicks>(grace).count());
+        auto dueTime = FILETIME { .dwLowDateTime = static_cast<DWORD>(due & 0xFFFF'FFFFU),
+                                  .dwHighDateTime = static_cast<DWORD>(due >> 32U) };
+        SetThreadpoolWait(wait, pending->process.get(), &dueTime);
+        std::ignore = pending.release(); // the callback's from here on
     }
 } // anonymous namespace
 
@@ -501,6 +562,16 @@ std::expected<std::unique_ptr<Process>, AdoptError> Process::adopt(AdoptedChild 
         ptyLog()("An adopted child's handle stays inheritable: {}", set.error().message());
     process->_d->processInfo.hProcess = handle;
     process->_d->processInfo.dwProcessId = static_cast<DWORD>(child.pid);
+    // Its tree's job, where it runs in one: this Process ends it, as the one that started the child did. No
+    // guard of its directory comes with it, nor is one needed: by now the child's loader has long made the
+    // directory its current one, which Windows holds against a rename as the guard did.
+    if (!child.job.isNone())
+    {
+        auto* const job = child.job.native();
+        if (auto const set = setInheritance(job, HandleInheritance::NotInherited); !set)
+            ptyLog()("An adopted child's job stays inheritable: {}", set.error().message());
+        process->_d->job = UniqueHandle { job };
+    }
     process->_d->watchExit(*process);
     return process;
 }
@@ -516,14 +587,16 @@ std::optional<AdoptedChild> Process::handoverChild() const
                           .args = _d->exec.arguments,
                           .cwd = _d->exec.workingDirectory,
                           .hangupGrace = {},
-                          .processHandle = CrossingHandle::of(_d->processInfo.hProcess) };
+                          .processHandle = CrossingHandle::of(_d->processInfo.hProcess),
+                          .job = CrossingHandle::of(_d->job.get()) };
 }
 
 std::optional<AdoptedChild> Process::releaseChild()
 {
     auto child = handoverChild();
-    // Its watcher stops without the child, and nothing here waits for or closes the child from now on: the
-    // handle is the caller's.
+    // Its watcher stops without the child, and nothing here waits for, ends or closes the child from now on:
+    // the handles to it and to its job are the caller's, so that neither terminate() nor ~Process ends a tree
+    // this Process no longer owns.
     if (_d->exitWatcher)
     {
         if (_d->stopWatching != nullptr)
@@ -532,7 +605,13 @@ std::optional<AdoptedChild> Process::releaseChild()
         _d->exitWatcher.reset();
     }
     if (child)
+    {
         _d->processInfo.hProcess = nullptr;
+        std::ignore = _d->job.release();
+    }
+    // The guard of its directory stays here until this Process goes. It ends nothing -- it only keeps the
+    // directory's name -- and cannot cross: by the time a child is given up, its loader has long made the
+    // directory its current one, which Windows holds against a rename as the guard does.
     return child;
 }
 
@@ -572,6 +651,28 @@ Process::~Process()
         _d->exitWatcher.value().join();
     if (_d->stopWatching != nullptr)
         CloseHandle(_d->stopWatching);
+
+    // A held-directory child's tree: once its leader exited, or while its console is open (the leader was
+    // waited for above), the job closes with Private, ending any straggler at once. A leader still running on
+    // a closed console is owed the time to handle that close, which no one here waits for: its job is closed
+    // after the grace, or as soon as the leader exits.
+    if (_d->job.valid() && _d->pty->isClosed() && _d->processInfo.hProcess != nullptr
+        && !_d->checkStatus(false).has_value())
+    {
+        auto leader = HANDLE {};
+        if (DuplicateHandle(GetCurrentProcess(),
+                            _d->processInfo.hProcess,
+                            GetCurrentProcess(),
+                            &leader,
+                            SYNCHRONIZE,
+                            FALSE,
+                            0)
+            != FALSE)
+            closeJobAfter(std::move(_d->job), UniqueHandle { leader }, ConsoleCloseGrace);
+        else
+            ptyLog()("Could not wait for a closed console's child; its job is closed now: {}",
+                     core::systemErrorMessage(GetLastError()));
+    }
 
     // Only what start() got as far as creating: a Process that never spawned holds no handles.
     if (_d->processInfo.hThread != nullptr)

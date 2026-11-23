@@ -38,7 +38,8 @@ struct HangupGrace
 /// Plain data, compiled on every platform so a handover image can carry it anywhere; only
 /// Process::adopt() turns it back into a Process. On POSIX the child stays a child of this process across
 /// exec (the process id is kept), so waiting for it works as for a spawned one; on Windows the successor
-/// inherits a handle to it (processHandle), which is what it waits on.
+/// inherits a handle to it (processHandle), which is what it waits on, and to the job its tree runs in, if
+/// any (job), which is what keeps that tree alive once the predecessor's own handle to it is gone.
 struct AdoptedChild
 {
     std::int64_t pid = -1;            ///< The child's process id.
@@ -47,6 +48,9 @@ struct AdoptedChild
     std::filesystem::path cwd {};     ///< Its working directory, as spawned.
     HangupGrace hangupGrace {};       ///< The grace close() gives it.
     CrossingHandle processHandle {};  ///< On Windows, the handle to the process that crosses; none elsewhere.
+    /// On Windows, the Job Object a held-directory child runs in, crossing with it; none for a user's shell
+    /// and elsewhere.
+    CrossingHandle job {};
 };
 
 } // namespace vtpty

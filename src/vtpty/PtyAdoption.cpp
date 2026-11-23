@@ -64,6 +64,9 @@ void releaseUnadopted([[maybe_unused]] AdoptedChild const& child) noexcept
 #ifdef _WIN32
     if (!child.processHandle.isNone())
         CloseHandle(child.processHandle.native());
+    // The job's last handle, once its predecessor's is gone: closing it ends the tree no one serves any more.
+    if (!child.job.isNone())
+        CloseHandle(child.job.native());
 #endif
 }
 

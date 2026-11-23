@@ -377,6 +377,7 @@ std::vector<vtpty::CrossingHandle> handlesNamedBy(HandoverImage const& image)
     {
         std::ranges::copy(session.pty.handles(), std::back_inserter(named));
         named.push_back(session.child.processHandle);
+        named.push_back(session.child.job);
     }
     for (auto const& listener: image.listeners)
         named.push_back(listener.handle);

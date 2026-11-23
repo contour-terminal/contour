@@ -38,9 +38,9 @@ inline constexpr std::string_view UnrestoredScreenNotice =
 
 /// @param image A handover image.
 /// @return Every descriptor or handle @p image names -- each session's PTY (its master and fast-pipe ends on
-///         POSIX, its pseudoconsole on Windows) and child (Windows), each listener, the image lease --
-///         sorted, each once, none none: what the old image keeps open across its exec on POSIX, and what the
-///         successor inherits on Windows.
+///         POSIX, its pseudoconsole on Windows), child and child's job (Windows), each listener, the image
+///         lease -- sorted, each once, none none: what the old image keeps open across its exec on POSIX, and
+///         what the successor inherits on Windows.
 [[nodiscard]] std::vector<vtpty::CrossingHandle> handlesNamedBy(HandoverImage const& image);
 
 #ifndef _WIN32

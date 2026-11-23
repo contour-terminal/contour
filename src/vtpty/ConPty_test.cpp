@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/ConPty.hpp>
 #include <vtpty/DirectoryHandle.hpp>
+#include <vtpty/MockPty.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/ProcessPlacement.hpp>
+#include <vtpty/PtyAdoption.hpp>
 #include <vtpty/test/HandoverSupport.hpp>
 #include <vtpty/test/NonAsciiSample.hpp>
 #include <vtpty/test/ProcessTesting.hpp>
@@ -1078,6 +1080,300 @@ TEST_CASE("ConPty.anInheritableHandleOfTheDaemonDoesNotReachAHeldDirectoryChild"
     CHECK(peeked == FALSE);
     CHECK(error == ERROR_BROKEN_PIPE);
     CHECK(process.alive());
+}
+
+namespace
+{
+
+/// How long isDead() waits for a process to end.
+constexpr auto DeathWait = std::chrono::seconds { 10 };
+
+/// How long a test waits for a pid file the probe writes.
+constexpr auto PidWait = std::chrono::seconds { 30 };
+
+/// The Windows console-close grace: how long a held-directory child's tree may outlive its closed console.
+constexpr auto ConsoleCloseGrace = std::chrono::seconds { 5 };
+
+/// @return Whether the process @p pid has ended, waiting at most @p timeout for it to. One that cannot be
+///         opened is gone.
+[[nodiscard]] bool isDead(DWORD pid, std::chrono::milliseconds timeout = DeathWait)
+{
+    auto* const process = OpenProcess(SYNCHRONIZE, FALSE, pid);
+    if (process == nullptr)
+        return true;
+    auto const waited = WaitForSingleObject(process, static_cast<DWORD>(timeout.count()));
+    CloseHandle(process);
+    return waited == WAIT_OBJECT_0;
+}
+
+/// @return Whether the process @p pid still runs.
+[[nodiscard]] bool isAlive(DWORD pid)
+{
+    return !isDead(pid, std::chrono::milliseconds { 0 });
+}
+
+/// Ends the process @p pid, if it still runs, and waits for it to have ended.
+void endPid(DWORD pid)
+{
+    if (auto* const process = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid); process != nullptr)
+    {
+        TerminateProcess(process, 1);
+        WaitForSingleObject(process, static_cast<DWORD>(std::chrono::milliseconds { DeathWait }.count()));
+        CloseHandle(process);
+    }
+}
+
+/// A process tree in a held directory: process_runner_probe, copied into `bin`, started on a pseudoconsole in
+/// `work` held open; the files the leader and a grandchild write their pids to. Whatever it learned the pid
+/// of is ended on the way out, whatever the test did.
+struct HeldTree
+{
+    core::testing::ScopedTempDir directory { "contour-conpty-tree" };
+    std::filesystem::path work = directory.path() / "work";
+    std::filesystem::path probe =
+        programCopiedInto(std::filesystem::path { VTPTY_PROCESS_RUNNER_PROBE }, directory.path() / "bin");
+    std::filesystem::path leaderFile = directory.path() / "leader";
+    std::filesystem::path grandchildFile = directory.path() / "grandchild";
+    std::vector<DWORD> seen {};
+
+    HeldTree() { std::filesystem::create_directories(work); }
+    HeldTree(HeldTree const&) = delete;
+    HeldTree(HeldTree&&) = delete;
+    HeldTree& operator=(HeldTree const&) = delete;
+    HeldTree& operator=(HeldTree&&) = delete;
+    ~HeldTree() { endAll(); }
+
+    /// Starts the probe with @p verbs.
+    /// @return The started process.
+    [[nodiscard]] std::unique_ptr<vtpty::Process> start(std::vector<std::string> verbs) const
+    {
+        auto process = std::make_unique<vtpty::Process>(heldExec(probe, work, std::move(verbs)),
+                                                        std::make_unique<ConPty>(pageSize(80, 24)),
+                                                        vtpty::SandboxEscape::Contained,
+                                                        std::make_shared<vtpty::NoPlacement>());
+        auto const started = process->start();
+        INFO("start failure: " << (started.has_value() ? std::string {} : started.error().detail));
+        REQUIRE(started.has_value());
+        return process;
+    }
+
+    /// Starts a leader that starts a grandchild detached from every console, and both sleep.
+    /// @return The started leader.
+    [[nodiscard]] std::unique_ptr<vtpty::Process> startDetachedTree() const
+    {
+        return start({ "spawn-detached",
+                       core::pathToUtf8(grandchildFile),
+                       "sleep",
+                       "600000",
+                       "--",
+                       "pid",
+                       core::pathToUtf8(leaderFile),
+                       "sleep",
+                       "600000" });
+    }
+
+    /// @return The pid the probe wrote to @p file, once it has; remembered, to be ended on the way out.
+    [[nodiscard]] DWORD awaitPid(std::filesystem::path const& file)
+    {
+        auto const read = [&file] {
+            auto pid = DWORD { 0 };
+            auto stream = std::ifstream { file };
+            stream >> pid;
+            return pid;
+        };
+        auto const deadline = std::chrono::steady_clock::now() + PidWait;
+        auto pid = read();
+        while (pid == 0 && std::chrono::steady_clock::now() < deadline)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds { 20 });
+            pid = read();
+        }
+        REQUIRE(pid != 0);
+        seen.push_back(pid);
+        return pid;
+    }
+
+    /// Ends every process whose pid it learned.
+    void endAll()
+    {
+        for (auto const pid: std::exchange(seen, {}))
+            endPid(pid);
+    }
+
+  private:
+    /// Copies @p program into @p directory, which it creates.
+    /// @return The copy.
+    static std::filesystem::path programCopiedInto(std::filesystem::path const& program,
+                                                   std::filesystem::path const& directory)
+    {
+        std::filesystem::create_directories(directory);
+        auto copy = directory / program.filename();
+        std::filesystem::copy_file(program, copy);
+        return copy;
+    }
+};
+
+/// @return Whether @p handle is inherited by a child created to inherit handles.
+[[nodiscard]] bool isInheritable(HANDLE handle)
+{
+    auto flags = DWORD {};
+    REQUIRE(GetHandleInformation(handle, &flags) != FALSE);
+    return (flags & HANDLE_FLAG_INHERIT) != 0;
+}
+
+} // namespace
+
+// Windows has no hangup to send: ending a held-directory child ends its whole job, which holds what it
+// started -- even a grandchild detached from every console, which no console close reaches.
+TEST_CASE("ConPty.terminatingAHeldDirectoryChildEndsItsTree", "[vtpty][conpty][held]")
+{
+    auto tree = HeldTree {};
+    auto process = tree.startDetachedTree();
+    auto const cleanup = gsl::finally([&] {
+        process->terminate(vtpty::Process::TerminationHint::Normal);
+        tree.endAll();
+    });
+    auto const grandchild = tree.awaitPid(tree.grandchildFile);
+    auto const leader = tree.awaitPid(tree.leaderFile);
+
+    process->terminate(vtpty::Process::TerminationHint::Normal);
+    CHECK(isDead(leader));
+    CHECK(isDead(grandchild));
+}
+
+// A leader that exited leaves its tree all the same: what it started is still its job's to end.
+TEST_CASE("ConPty.terminatingAHeldDirectoryChildWhoseLeaderExitedEndsItsTree", "[vtpty][conpty][held]")
+{
+    auto tree = HeldTree {};
+    auto process = tree.start({ "spawn-detached",
+                                core::pathToUtf8(tree.grandchildFile),
+                                "sleep",
+                                "600000",
+                                "--",
+                                "pid",
+                                core::pathToUtf8(tree.leaderFile) });
+    auto const cleanup = gsl::finally([&] {
+        process->terminate(vtpty::Process::TerminationHint::Normal);
+        tree.endAll();
+    });
+    auto const grandchild = tree.awaitPid(tree.grandchildFile);
+    auto const leader = tree.awaitPid(tree.leaderFile);
+    REQUIRE(isDead(leader));
+    REQUIRE(isAlive(grandchild));
+
+    process->terminate(vtpty::Process::TerminationHint::Normal);
+    CHECK(isDead(grandchild));
+}
+
+// Closing a pane closes its console; the agent is given the console-close grace to handle that, and then what
+// it left behind ends with its job -- without the Process that is freed waiting for any of it.
+TEST_CASE("ConPty.closingAHeldDirectoryChildsConsoleEndsADetachedGrandchild", "[vtpty][conpty][held]")
+{
+    auto tree = HeldTree {};
+    auto process = tree.startDetachedTree();
+    auto const cleanup = gsl::finally([&] {
+        if (process)
+            process->terminate(vtpty::Process::TerminationHint::Normal);
+        tree.endAll();
+    });
+    auto const grandchild = tree.awaitPid(tree.grandchildFile);
+    std::ignore = tree.awaitPid(tree.leaderFile);
+
+    process->close();
+    auto const freeing = std::chrono::steady_clock::now();
+    process.reset();
+    CHECK(std::chrono::steady_clock::now() - freeing < ConsoleCloseGrace);
+    CHECK(isDead(grandchild, ConsoleCloseGrace + std::chrono::seconds { 5 }));
+}
+
+// The daemon dying in any way closes every handle it held: the job's last among them, which ends the tree.
+TEST_CASE("ConPty.theLastHandleOfTheJobEndsTheTree", "[vtpty][conpty][held]")
+{
+    auto tree = HeldTree {};
+    auto process = tree.startDetachedTree();
+    auto child = std::optional<vtpty::AdoptedChild> {};
+    auto const cleanup = gsl::finally([&] {
+        if (child)
+            vtpty::releaseUnadopted(*child);
+        process->terminate(vtpty::Process::TerminationHint::Normal);
+        tree.endAll();
+    });
+    auto const grandchild = tree.awaitPid(tree.grandchildFile);
+    std::ignore = tree.awaitPid(tree.leaderFile);
+
+    child = process->releaseChild();
+    REQUIRE(child.has_value());
+    REQUIRE_FALSE(child->job.isNone());
+    CHECK_FALSE(isInheritable(child->job.native()));
+    CHECK(isAlive(grandchild));
+
+    CloseHandle(std::exchange(child->job, vtpty::CrossingHandle {}).native());
+    CHECK(isDead(grandchild));
+}
+
+// A child given up is no longer its Process's to end: terminate() leaves it, and its tree, running.
+TEST_CASE("ConPty.terminateAfterReleaseDoesNotEndTheChild", "[vtpty][conpty][held]")
+{
+    auto tree = HeldTree {};
+    auto process = tree.startDetachedTree();
+    auto child = std::optional<vtpty::AdoptedChild> {};
+    auto const cleanup = gsl::finally([&] {
+        if (child)
+            vtpty::releaseUnadopted(*child);
+        tree.endAll();
+    });
+    auto const grandchild = tree.awaitPid(tree.grandchildFile);
+    auto const leader = tree.awaitPid(tree.leaderFile);
+
+    child = process->releaseChild();
+    REQUIRE(child.has_value());
+    process->terminate(vtpty::Process::TerminationHint::Normal);
+    CHECK_FALSE(isDead(leader, std::chrono::seconds { 1 }));
+    CHECK(isAlive(grandchild));
+}
+
+// A user's shell runs in no job: a `code .` or `explorer .` it starts must outlive its tab.
+TEST_CASE("ConPty.aUsersShellRunsInNoJob", "[vtpty][conpty]")
+{
+    auto process =
+        vtpty::testing::unplacedProcess(execInfo(core::pathToUtf8(probeProgram())), pageSize(80, 24));
+    REQUIRE(process.start().has_value());
+    auto const endChild =
+        gsl::finally([&process] { process.terminate(vtpty::Process::TerminationHint::Normal); });
+
+    auto const child = process.handoverChild();
+    REQUIRE(child.has_value());
+    CHECK(child->job.isNone());
+    readProbeOutput(process);
+}
+
+// A live upgrade carries the job with the child: the old daemon's Process going does not end the tree, and
+// the adopter's terminate() does.
+TEST_CASE("ConPty.anAdoptedHeldDirectoryChildKeepsItsJob", "[vtpty][conpty][held][handover]")
+{
+    auto tree = HeldTree {};
+    auto process = tree.startDetachedTree();
+    auto child = std::optional<vtpty::AdoptedChild> {};
+    auto const cleanup = gsl::finally([&] {
+        if (child)
+            vtpty::releaseUnadopted(*child);
+        tree.endAll();
+    });
+    auto const grandchild = tree.awaitPid(tree.grandchildFile);
+    std::ignore = tree.awaitPid(tree.leaderFile);
+
+    child = process->releaseChild();
+    REQUIRE(child.has_value());
+    REQUIRE_FALSE(child->job.isNone());
+    process.reset(); // its console closes, as the old daemon's do
+    std::this_thread::sleep_for(std::chrono::seconds { 2 });
+    CHECK(isAlive(grandchild));
+
+    auto adopted = vtpty::Process::adopt(*std::exchange(child, std::nullopt),
+                                         std::make_unique<vtpty::MockPty>(pageSize(80, 24)));
+    REQUIRE(adopted.has_value());
+    (*adopted)->terminate(vtpty::Process::TerminationHint::Normal);
+    CHECK(isDead(grandchild));
 }
 
 // A single word that names no program has no command line to read: the spawn falls back to the login
