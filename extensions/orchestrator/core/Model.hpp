@@ -133,6 +133,7 @@ struct ChangeRequest
     ReviewState review = ReviewState::None;         ///< Where it stands with its reviewers.
     std::vector<uint64_t>
         closesIssues; ///< The issues of its own repository it closes when merged, by number.
+    [[nodiscard]] bool operator==(ChangeRequest const&) const = default;
 };
 
 /// One open issue, as a provider's mapping returns it.
@@ -141,6 +142,7 @@ struct Issue
     ItemRef item;      ///< Its reference: an IssueRef for a forge issue.
     std::string title; ///< Sanitised, at most MaxTitleChars.
     std::string url;   ///< Its web page, as the forge reported it.
+    [[nodiscard]] bool operator==(Issue const&) const = default;
 };
 
 /// Whether a process's output was kept in full.

@@ -559,6 +559,11 @@ class Engine
     /// @return Now, in wall-clock milliseconds, as the last wake said: what a timeline is drawn up to.
     [[nodiscard]] uint64_t wallMs() const noexcept { return _wallMs; }
 
+    /// @return How many changes the dashboard shows the engine made: what is drawn from it may be kept while
+    /// this
+    ///         stays the same.
+    [[nodiscard]] uint64_t revision() const noexcept { return _revision; }
+
     /// @param tab A tab.
     /// @param run A run's id.
     /// @return The run's transcript as @p tab last asked for it (ReadTranscript); nullptr when it did not, or
@@ -714,6 +719,10 @@ class Engine
                                    std::string cwd,
                                    std::vector<Effect>& out);
     void onPollResult(std::string_view tag, ProcessOutcome const& outcome, std::vector<Effect>& out);
+    /// A check of the setup answered: the hooks, the plugins, a plugin's install step or a login.
+    void onSetupResult(std::string_view tag, ProcessOutcome const& outcome, std::vector<Effect>& out);
+    /// A repository's list answered: its pull requests, an issue query, its default branch or its worktrees.
+    void onListResult(std::string_view tag, ProcessOutcome const& outcome, std::vector<Effect>& out);
     void onHooksResult(ProcessOutcome const& outcome);
     void onAuthResult(ProcessOutcome const& outcome, std::vector<Effect>& out);
     void issueSourceAuthChecks(std::vector<Effect>& out);

@@ -2482,6 +2482,32 @@ TEST_CASE("a worktree a later listing still names for a removed run is an orphan
     CHECK_FALSE(harness.pending("git-worktree-list"));
 }
 
+TEST_CASE("a list that comes back as it was asks for no redraw", "[orchestrator][engine]")
+{
+    auto harness = Harness { contextFor({}) };
+    auto const prs = readFixture(FixtureRoot::Testdata, "github/prs-open.json");
+    auto const issues = readFixture(FixtureRoot::Testdata, "github/issues-open.json");
+    auto const branch = readFixture(FixtureRoot::Testdata, "github/default-branch.json");
+    // One poll: every list answered, the pull requests last.
+    auto const poll = [&](ProcessOutcome const& prsOutcome) {
+        if (harness.pending("gh-auth"))
+            harness.finish("gh-auth", ok());
+        if (harness.pending("gh-default-branch"))
+            harness.finish("gh-default-branch", ok(branch));
+        if (harness.pending("gh-issues"))
+            harness.finish("gh-issues", ok(issues));
+        return countOf<Redraw>(harness.finish("gh-prs", prsOutcome));
+    };
+    CHECK(poll(ok(prs)) == 1);
+    REQUIRE(harness.engine().changeRequests("contour").size() == 5);
+
+    harness.wake(2 * Minute);
+    CHECK(poll(ok(prs)) == 0);
+    // A failure is a problem line: drawn.
+    harness.wake(2 * Minute);
+    CHECK(poll(failed(1, "boom")) == 1);
+}
+
 TEST_CASE("orphans are not problem lines", "[orchestrator][engine]")
 {
     // The dashboard lists them in a section of their own; a problem line as well would show each twice.
@@ -3588,6 +3614,26 @@ TEST_CASE("ReadTranscript runs the command in the worktree root", "[orchestrator
         ReadTranscript { .run = "pr-1-20261113-150847", .tab = {}, .page = 1, .monoMs = harness.now() });
     harness.feed(ReadTranscript { .run = id, .tab = {}, .page = 0, .monoMs = harness.now() });
     CHECK_FALSE(harness.pending("agent-transcript"));
+}
+
+TEST_CASE("a page read again as it was asks for no redraw", "[orchestrator][engine][transcript]")
+{
+    auto harness = withFinishedRuns(1);
+    auto const id = finishedId(0);
+    harness.feed(ReadTranscript { .run = id, .tab = {}, .page = 1, .monoMs = harness.now() });
+    CHECK(countOf<Redraw>(harness.finish("agent-transcript", ok(basicPage()))) == 1);
+
+    // A followed transcript is read again every few seconds: while its page stays drawn and comes back the
+    // same, nothing is drawn anew.
+    CHECK(countOf<Redraw>(
+              harness.feed(ReadTranscript { .run = id, .tab = {}, .page = 1, .monoMs = harness.now() }))
+          == 0);
+    CHECK(countOf<Redraw>(harness.finish("agent-transcript", ok(basicPage()))) == 0);
+
+    // Another page is drawn: "reading" first, then the page.
+    CHECK(countOf<Redraw>(
+              harness.feed(ReadTranscript { .run = id, .tab = {}, .page = 2, .monoMs = harness.now() }))
+          == 1);
 }
 
 TEST_CASE("a transcript page is kept per run, four runs at most", "[orchestrator][engine][transcript]")

@@ -62,6 +62,28 @@ void Engine::dropUnshownTranscripts()
     });
 }
 
+namespace
+{
+    /// @return Whether @p view shows the page it asks for: read, or read again while the page it held stays
+    ///         drawn. An empty page is left out, since what stands in for it says whether it is being read.
+    [[nodiscard]] bool showsItsPage(TranscriptView const& view) noexcept
+    {
+        return (view.state == FetchState::Loaded || view.state == FetchState::Loading) && view.content
+               && view.content->page == view.page && !view.content->entries.empty();
+    }
+
+    /// @return Whether @p before and @p after draw the same: both show the same page, or neither shows one
+    /// and
+    ///         they agree on why.
+    [[nodiscard]] bool isDrawnAlike(TranscriptView const& before, TranscriptView const& after)
+    {
+        if (showsItsPage(before) && showsItsPage(after))
+            return before.content == after.content;
+        return before.state == after.state && before.failure == after.failure
+               && before.content == after.content;
+    }
+} // namespace
+
 void Engine::closeTab(std::string_view tab)
 {
     hideBoard(tab);
@@ -85,17 +107,22 @@ void Engine::readTranscript(ReadTranscript const& request, std::vector<Effect>& 
                                  .state = FetchState::Loading,
                                  .content = std::nullopt,
                                  .failure = {} };
+    // A page read again while it is shown, as a followed transcript is every few seconds, is drawn as it was
+    // until the new one comes: the dashboard has nothing to redraw for it.
+    auto rereads = false;
     if (auto const kept = std::ranges::find_if(
             _transcripts,
             [&](TranscriptView const& held) { return held.tab == request.tab && held.run == request.run; });
         kept != _transcripts.end())
     {
+        rereads = kept->page == request.page && showsItsPage(*kept);
         view.content = std::move(kept->content);
         _transcripts.erase(kept);
     }
     _transcripts.push_back(std::move(view));
     dropUnshownTranscripts();
-    ++_revision;
+    if (!rereads)
+        ++_revision;
     if (std::holds_alternative<Finished>(run->state))
         feed(request.run, MarkSeen {}, out);
     // One page of a run is read at a time: a page asked for meanwhile, here or in another tab, is read once
@@ -162,8 +189,12 @@ void Engine::onTranscriptResult(std::string_view runId,
         issueWaitingTranscript(runId, out);
         return;
     }
-    ++_revision;
+    // A page that came back as it was shown changes nothing drawn: a followed agent that wrote nothing new
+    // costs no redraw.
+    auto const previous = *view;
     applyTranscriptOutcome(*view, outcome);
+    if (!isDrawnAlike(previous, *view))
+        ++_revision;
     issueWaitingTranscript(runId, out);
 }
 

@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <map>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -112,6 +113,44 @@ namespace
     [[nodiscard]] std::string sourceAuthTag(IssueSourceRow const& source)
     {
         return std::format("{}/{}", AuthTag, source.name);
+    }
+
+    /// @return Whether @p tag is a check of the setup rather than a repository's list: the hooks, the
+    /// plugins,
+    ///         a plugin's install step, or a login.
+    [[nodiscard]] bool isSetupTag(std::string_view tag) noexcept
+    {
+        return tag == HooksTag || tag == PluginsTag || tag == PluginStepTag || isAuthTag(tag);
+    }
+
+    /// What a repository's lists show: on the dashboard, in the launcher and in what a dispatch would do.
+    struct ShownLists
+    {
+        std::vector<ChangeRequest> changeRequests;
+        std::vector<Issue> unclaimed;
+        std::optional<std::string> defaultBranch;
+        std::vector<WorktreeEntry> worktrees;
+        CheckoutUnknown unknownCheckout = CheckoutUnknown::Pending;
+        [[nodiscard]] bool operator==(ShownLists const&) const = default;
+    };
+
+    /// @return What @p state shows, copied.
+    template <typename RepoState>
+    [[nodiscard]] ShownLists shownOf(RepoState const& state)
+    {
+        return ShownLists { .changeRequests = state.changeRequests,
+                            .unclaimed = state.unclaimed,
+                            .defaultBranch = state.defaultBranch,
+                            .worktrees = state.worktrees,
+                            .unknownCheckout = state.unknownCheckout };
+    }
+
+    /// @return The problem lines @p problems holds for @p tag; none when it holds none.
+    [[nodiscard]] std::vector<std::string> problemsOf(
+        std::map<std::string, std::vector<std::string>, std::less<>> const& problems, std::string_view tag)
+    {
+        auto const found = problems.find(tag);
+        return found != problems.end() ? found->second : std::vector<std::string> {};
     }
 
     /// The line a failed login check leaves. Only whether it succeeded is shown, never what it printed: a
@@ -618,7 +657,27 @@ void Engine::onSourceAuthResult(std::string_view tag, ProcessOutcome const& outc
 
 void Engine::onPollResult(std::string_view tag, ProcessOutcome const& outcome, std::vector<Effect>& out)
 {
-    ++_revision;
+    // A repository's list that came back as it was changes nothing drawn: a poll every two minutes over
+    // several repositories and queries costs a redraw only where a list, or a problem it reports, changed.
+    if (isSetupTag(tag))
+    {
+        ++_revision;
+        onSetupResult(tag, outcome, out);
+        return;
+    }
+    auto const parsed = parsePollTag(tag);
+    auto const* const state = parsed ? findRepoState(parsed->repo) : nullptr;
+    if (state == nullptr)
+        return;
+    auto const shownBefore = shownOf(*state);
+    auto const problemsBefore = problemsOf(_pollProblems, tag);
+    onListResult(tag, outcome, out);
+    if (shownOf(*state) != shownBefore || problemsOf(_pollProblems, tag) != problemsBefore)
+        ++_revision;
+}
+
+void Engine::onSetupResult(std::string_view tag, ProcessOutcome const& outcome, std::vector<Effect>& out)
+{
     if (tag == HooksTag)
     {
         onHooksResult(outcome);
@@ -643,10 +702,11 @@ void Engine::onPollResult(std::string_view tag, ProcessOutcome const& outcome, s
         return;
     }
     if (isAuthTag(tag))
-    {
         onSourceAuthResult(tag, outcome, out);
-        return;
-    }
+}
+
+void Engine::onListResult(std::string_view tag, ProcessOutcome const& outcome, std::vector<Effect>& out)
+{
     auto const judgement = judge(outcome);
     auto const ok = judgement.verdict == Verdict::Ok;
 
