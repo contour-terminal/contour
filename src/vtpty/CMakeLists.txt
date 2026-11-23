@@ -45,6 +45,7 @@ set(vtpty_SOURCES
     SshSessionRules.cpp
     SshSocketWait.cpp
     SshTerminfoInstall.cpp
+    WindowsBeneathRules.cpp
     WindowsCommandLine.cpp
     WindowsPathRules.cpp
     WindowsProcessRules.cpp
@@ -93,6 +94,7 @@ set(vtpty_HEADERS
     SshSocketWait.hpp
     SshTerminfoInstall.hpp
     UniqueHandle.hpp
+    WindowsBeneathRules.hpp
     WindowsCommandLine.hpp
     WindowsPathRules.hpp
     WindowsProcessRules.hpp
@@ -224,6 +226,7 @@ if(VTPTY_TESTING)
         SshSessionRules_test.cpp
         SshSocketWait_test.cpp
         SshTerminfoInstall_test.cpp
+        WindowsBeneathRules_test.cpp
         WindowsCommandLine_test.cpp
         WindowsPathRules_test.cpp
         WindowsProcessRules_test.cpp
