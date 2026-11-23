@@ -158,18 +158,25 @@ int adopter(std::span<char const* const> arguments)
         return fail(AdopterFailure::ProgramNotAdopted,
                     std::format("Process::adopt() refused with {}", std::to_underlying(process.error())));
     auto& adopted = **process;
+    // Each failure from here on closes the pseudoconsole first, which ends the program on it: a Process whose
+    // pseudoconsole is still open waits for its child as it goes, and the program would wait for input
+    // forever.
+    auto const failAdopted = [&adopted](AdopterFailure failure, std::string_view why) {
+        adopted.close();
+        return fail(failure, why);
+    };
 
     adopted.resizeScreen(AdoptedSize);
     std::ignore = adopted.write("size\r\n");
     auto const seen = std::format("size={}x{}", AdoptedSize.columns.value, AdoptedSize.lines.value);
     if (!awaitOutput(adopted, seen))
-        return fail(AdopterFailure::ResizeNotSeen, std::format("the program never said '{}'", seen));
+        return failAdopted(AdopterFailure::ResizeNotSeen, std::format("the program never said '{}'", seen));
 
     std::ignore = adopted.write("quit\r\n");
     auto const status = adopted.wait();
     auto const* const exit = status ? std::get_if<vtpty::Process::NormalExit>(&*status) : nullptr;
     if (exit == nullptr || exit->exitCode != QuitExitCode)
-        return fail(AdopterFailure::WrongExitCode, "the program did not exit as told");
+        return failAdopted(AdopterFailure::WrongExitCode, "the program did not exit as told");
 
     adopted.close();
     if (WaitForSingleObject(consoleHost, 10'000) != WAIT_OBJECT_0)

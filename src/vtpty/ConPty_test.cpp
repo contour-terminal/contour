@@ -11,6 +11,7 @@
 #include <vtpty/test/PtyReading.hpp>
 #ifdef _WIN32
     #include <vtpty/Win32Handle.hpp>
+    #include <vtpty/Win32HeldSpawn.hpp>
     #include <vtpty/testing/Junction.hpp>
 #endif
 
@@ -1112,9 +1113,6 @@ constexpr auto DeathWait = std::chrono::seconds { 10 };
 /// How long a test waits for a pid file the probe writes.
 constexpr auto PidWait = std::chrono::seconds { 30 };
 
-/// The Windows console-close grace: how long a held-directory child's tree may outlive its closed console.
-constexpr auto ConsoleCloseGrace = std::chrono::seconds { 5 };
-
 /// @return Whether the process @p pid has ended, waiting at most @p timeout for it to. One that cannot be
 ///         opened is gone.
 [[nodiscard]] bool isDead(DWORD pid, std::chrono::milliseconds timeout = DeathWait)
@@ -1133,20 +1131,18 @@ constexpr auto ConsoleCloseGrace = std::chrono::seconds { 5 };
     return !isDead(pid, std::chrono::milliseconds { 0 });
 }
 
-/// Ends the process @p pid, if it still runs, and waits for it to have ended.
-void endPid(DWORD pid)
+/// Ends @p process, if it still runs, and waits for it to have ended.
+/// @param process Open for PROCESS_TERMINATE and SYNCHRONIZE.
+void endProcess(HANDLE process)
 {
-    if (auto* const process = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid); process != nullptr)
-    {
-        TerminateProcess(process, 1);
-        WaitForSingleObject(process, static_cast<DWORD>(std::chrono::milliseconds { DeathWait }.count()));
-        CloseHandle(process);
-    }
+    TerminateProcess(process, 1);
+    WaitForSingleObject(process, static_cast<DWORD>(std::chrono::milliseconds { DeathWait }.count()));
 }
 
 /// A process tree in a held directory: process_runner_probe, copied into `bin`, started on a pseudoconsole in
 /// `work` held open; the files the leader and a grandchild write their pids to. Whatever it learned the pid
-/// of is ended on the way out, whatever the test did.
+/// of is opened at once, and ended on the way out through that handle, whatever the test did: never by its
+/// pid, which a process gone meanwhile may have handed on.
 struct HeldTree
 {
     core::testing::ScopedTempDir directory { "contour-conpty-tree" };
@@ -1155,7 +1151,7 @@ struct HeldTree
         programCopiedInto(std::filesystem::path { VTPTY_PROCESS_RUNNER_PROBE }, directory.path() / "bin");
     std::filesystem::path leaderFile = directory.path() / "leader";
     std::filesystem::path grandchildFile = directory.path() / "grandchild";
-    std::vector<DWORD> seen {};
+    std::vector<vtpty::UniqueHandle> seen {}; ///< What awaitPid() learned of, open to be ended.
 
     HeldTree() { std::filesystem::create_directories(work); }
     HeldTree(HeldTree const&) = delete;
@@ -1193,7 +1189,8 @@ struct HeldTree
                        "600000" });
     }
 
-    /// @return The pid the probe wrote to @p file, once it has; remembered, to be ended on the way out.
+    /// @return The pid the probe wrote to @p file, once it has; its process opened, to be ended on the way
+    /// out.
     [[nodiscard]] DWORD awaitPid(std::filesystem::path const& file)
     {
         auto const read = [&file] {
@@ -1210,15 +1207,18 @@ struct HeldTree
             pid = read();
         }
         REQUIRE(pid != 0);
-        seen.push_back(pid);
+        // Null for one that is gone already, with nothing left to end.
+        if (auto process = vtpty::UniqueHandle { OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid) };
+            process.valid())
+            seen.push_back(std::move(process));
         return pid;
     }
 
-    /// Ends every process whose pid it learned.
+    /// Ends every process whose pid it learned, and lets go of it.
     void endAll()
     {
-        for (auto const pid: std::exchange(seen, {}))
-            endPid(pid);
+        for (auto const& process: std::exchange(seen, {}))
+            endProcess(process.get());
     }
 
   private:
@@ -1303,8 +1303,73 @@ TEST_CASE("ConPty.closingAHeldDirectoryChildsConsoleEndsADetachedGrandchild", "[
     process->close();
     auto const freeing = std::chrono::steady_clock::now();
     process.reset();
-    CHECK(std::chrono::steady_clock::now() - freeing < ConsoleCloseGrace);
-    CHECK(isDead(grandchild, ConsoleCloseGrace + std::chrono::seconds { 5 }));
+    CHECK(std::chrono::steady_clock::now() - freeing < vtpty::ConsoleCloseGrace);
+    CHECK(isDead(grandchild, vtpty::ConsoleCloseGrace + std::chrono::seconds { 5 }));
+}
+
+// What ~Process leaves behind for a leader still running on its closed console: its job, closed once the
+// grace has passed. A leader that stays -- one that ignores the close, or here one whose console is still
+// open -- keeps its tree for the grace, and no longer.
+TEST_CASE("ConPty.aDeferredJobCloseGivesALeaderThatStaysTheGrace", "[vtpty][conpty][held]")
+{
+    auto tree = HeldTree {};
+    auto process = tree.startDetachedTree();
+    auto child = std::optional<vtpty::AdoptedChild> {};
+    auto const cleanup = gsl::finally([&] {
+        if (child)
+            vtpty::releaseUnadopted(*child);
+        tree.endAll();
+    });
+    auto const grandchild = tree.awaitPid(tree.grandchildFile);
+    auto const leader = tree.awaitPid(tree.leaderFile);
+    child = process->releaseChild();
+    REQUIRE(child.has_value());
+    REQUIRE_FALSE(child->job.isNone());
+
+    constexpr auto Grace = std::chrono::seconds { 2 };
+    auto const deferred = std::chrono::steady_clock::now();
+    vtpty::closeJobAfter(vtpty::UniqueHandle { std::exchange(child->job, {}).native() },
+                         vtpty::UniqueHandle { std::exchange(child->processHandle, {}).native() },
+                         Grace);
+
+    std::this_thread::sleep_until(deferred + Grace / 2);
+    CHECK(isAlive(leader));
+    CHECK(isAlive(grandchild));
+    CHECK(isDead(grandchild, Grace + std::chrono::seconds { 5 }));
+    CHECK(isDead(leader));
+    CHECK(std::chrono::steady_clock::now() - deferred >= Grace - std::chrono::milliseconds { 50 });
+}
+
+// A leader that exits ends the wait at once: what it left behind ends with its job then, not at the grace.
+TEST_CASE("ConPty.aDeferredJobCloseEndsTheTreeOnceItsLeaderExits", "[vtpty][conpty][held]")
+{
+    auto tree = HeldTree {};
+    auto process = tree.start({ "spawn-detached",
+                                core::pathToUtf8(tree.grandchildFile),
+                                "sleep",
+                                "600000",
+                                "--",
+                                "pid",
+                                core::pathToUtf8(tree.leaderFile) });
+    auto child = std::optional<vtpty::AdoptedChild> {};
+    auto const cleanup = gsl::finally([&] {
+        if (child)
+            vtpty::releaseUnadopted(*child);
+        tree.endAll();
+    });
+    auto const grandchild = tree.awaitPid(tree.grandchildFile);
+    auto const leader = tree.awaitPid(tree.leaderFile);
+    REQUIRE(isDead(leader));
+    child = process->releaseChild();
+    REQUIRE(child.has_value());
+    REQUIRE_FALSE(child->job.isNone());
+    REQUIRE(isAlive(grandchild));
+
+    constexpr auto Grace = std::chrono::minutes { 10 };
+    vtpty::closeJobAfter(vtpty::UniqueHandle { std::exchange(child->job, {}).native() },
+                         vtpty::UniqueHandle { std::exchange(child->processHandle, {}).native() },
+                         Grace);
+    CHECK(isDead(grandchild));
 }
 
 // The daemon dying in any way closes every handle it held: the job's last among them, which ends the tree.
@@ -1563,6 +1628,17 @@ TEST_CASE("ConPty.adoptedInASecondProcessResizesAndCloses", "[vtpty][conpty][han
                                          vtpty::SandboxEscape::Contained,
                                          std::make_shared<vtpty::NoPlacement>());
     REQUIRE(process->start().has_value());
+    // The program, and the process adopting it, are ended on the way out, whatever the test did: a failed run
+    // would otherwise leave either running -- and the program would hold up ~Process, which waits for it.
+    auto const started = process->handoverChild();
+    REQUIRE(started.has_value());
+    auto const program = ownHandleTo(started->processHandle.native());
+    auto adopter = vtpty::UniqueHandle {};
+    auto const endProbes = gsl::finally([&] {
+        for (auto const* const probe: std::array<vtpty::UniqueHandle const*, 2> { &adopter, &program })
+            if (probe->valid())
+                TerminateProcess(probe->get(), 1);
+    });
     auto& pty = static_cast<ConPty&>(process->pty());
     REQUIRE(pty.consoleHost() == vtpty::ConsoleHost::Bundled);
     REQUIRE(awaitOutput(*process, "ready"));
@@ -1582,20 +1658,12 @@ TEST_CASE("ConPty.adoptedInASecondProcessResizesAndCloses", "[vtpty][conpty][han
     for (auto const handle: handles->handles())
         commandLine += std::format(L" {}", handle.value);
     commandLine += std::format(L" {} {} 80 25", child->pid, child->processHandle.value);
-    auto* const adopter = spawnInheriting(std::move(commandLine), inherited);
-    REQUIRE(adopter != nullptr);
+    adopter = vtpty::UniqueHandle { spawnInheriting(std::move(commandLine), inherited) };
+    REQUIRE(adopter.valid());
 
     // This process's own handles go, as the old daemon's go with it: the adopter's are the last.
     auto released = process->releaseChild();
     REQUIRE(released.has_value());
-    auto programProcess = HANDLE {};
-    DuplicateHandle(GetCurrentProcess(),
-                    released->processHandle.native(),
-                    GetCurrentProcess(),
-                    &programProcess,
-                    SYNCHRONIZE,
-                    FALSE,
-                    0);
     CloseHandle(released->processHandle.native());
     auto const ownHandles = pty.releaseHandover();
     REQUIRE(ownHandles.has_value());
@@ -1604,14 +1672,14 @@ TEST_CASE("ConPty.adoptedInASecondProcessResizesAndCloses", "[vtpty][conpty][han
         CloseHandle(handle.native());
     process.reset();
 
-    REQUIRE(WaitForSingleObject(adopter, 30'000) == WAIT_OBJECT_0);
+    // Well past the adopter's own wait for the program's output (vtpty::testing::DefaultReadTimeout), so that
+    // an adopter that gives up says why before the test does.
+    REQUIRE(WaitForSingleObject(adopter.get(), 90'000) == WAIT_OBJECT_0);
     auto exitCode = DWORD {};
-    GetExitCodeProcess(adopter, &exitCode);
-    CloseHandle(adopter);
+    GetExitCodeProcess(adopter.get(), &exitCode);
     // The probe says on stderr what failed; its exit code names the step.
     CHECK(exitCode == 0);
-    CHECK(WaitForSingleObject(programProcess, 10'000) == WAIT_OBJECT_0);
-    CloseHandle(programProcess);
+    CHECK(WaitForSingleObject(program.get(), 10'000) == WAIT_OBJECT_0);
 }
 
 // A live upgrade stops each session's pump, which may be writing to a program that reads nothing: once the
