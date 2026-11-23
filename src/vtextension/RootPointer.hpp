@@ -29,7 +29,9 @@ enum class RootPointerError : uint8_t
     NotAString, ///< What the pointer reaches is not text.
     StarOverNonList, ///< A `*` meets something other than a list.
     BadPointer,      ///< The pointer is empty, or has an empty component.
-    NotAbsolute,     ///< A directory is neither absolute nor `~` or `~/…` (`~user` is not expanded).
+    NotAbsolute,     ///< A directory is neither absolute nor `~` or `~/…` (`~user` is not expanded); on
+                     ///< Windows `~\…` is accepted too, and a drive-relative `C:x`, a rooted `\x` without a
+                     ///< drive and a UNC path without a share are refused.
     EqualRoots,      ///< Two directories of the roots resolve to the same one.
     NoHome,          ///< A directory is `~` or `~/…`, and the user's home directory is not known.
     DevicePath,      ///< A directory is a Win32 device or verbatim path: `\\?\`, `\\.\`, `\??\`.

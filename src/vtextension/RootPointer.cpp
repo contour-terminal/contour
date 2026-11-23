@@ -120,11 +120,10 @@ namespace
     }
 
     /// @return @p spelled, if the comparison rule takes it for a normalised absolute Windows path;
-    /// `NotAbsolute`
-    ///         otherwise. The backstop of windowsSpellingOf(): its grammar cannot drift from the rule every
-    ///         root is later judged by (RootPathSyntax), and a spelling longer than MaxPathArgumentBytes,
-    ///         which no path could be judged beneath, is refused here rather than admitted as an unusable
-    ///         root.
+    ///         `NotAbsolute` otherwise. The backstop of windowsSpellingOf(): its grammar cannot drift from
+    ///         the rule every root is later judged by (RootPathSyntax), and a spelling longer than
+    ///         MaxPathArgumentBytes, which no path could be judged beneath, is refused here rather than
+    ///         admitted as an unusable root.
     [[nodiscard]] std::expected<std::string, RootPointerError> comparableWindowsSpelling(std::string spelled)
     {
         if (!isNormalisedAbsolutePath(spelled, vtpty::PathStyle::Windows))

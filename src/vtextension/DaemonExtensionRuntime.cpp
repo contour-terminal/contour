@@ -55,12 +55,11 @@ namespace
             .error = RootPointerError::NoHome,
             .text = "a root's directory starts with ~, and the home directory is unknown" },
         ErrorText<RootPointerError> { .error = RootPointerError::DevicePath,
-                                      .text = R"(a root's directory is a device path (\\?\ or \\.\))" },
+                                      .text = R"(a root's directory is a device path (\\?\, \\.\ or \??\))" },
         ErrorText<RootPointerError> {
             .error = RootPointerError::NotPlainName,
-            .text =
-                "a root's directory has a component Windows spells otherwise (.., a stream, a device name, "
-                "a trailing dot or space)" },
+            .text = R"(a root's directory has a component Windows spells otherwise (.., an empty one as in )"
+                    R"(C:\a\\b, a stream, a device name, a trailing dot or space))" },
     };
 
     inline constexpr auto RootErrorTexts = std::array {
