@@ -19,6 +19,8 @@
 #include <core/WideString.hpp>
 #include <core/platform/NativeFileSystem.hpp>
 
+#include <gsl/gsl>
+
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -124,6 +126,15 @@ namespace
             startupInfoEx.lpAttributeList = nullptr;
         }
         return hr;
+    }
+
+    /// @return What @p result says, in words: a Win32 error's own message for one that wraps a Win32 error
+    ///         (HRESULT_FROM_WIN32), the system's message for the HRESULT otherwise.
+    [[nodiscard]] std::string hresultMessage(HRESULT result)
+    {
+        auto const code = static_cast<DWORD>(result);
+        return core::systemErrorMessage(HRESULT_FACILITY(result) == FACILITY_WIN32 ? HRESULT_CODE(result)
+                                                                                   : code);
     }
 
     /// The exit code a terminated held-directory child's tree is given.
@@ -326,10 +337,17 @@ StartResult Process::Private::startInHeldDirectory(Process& self)
 
     if (auto started = pty->start(); !started)
         return started;
+    // Closed again unless the child runs on it: a started pseudoconsole with no program reads nothing
+    // forever, and no exit watcher would ever close it -- its pane would stay open, and empty.
+    auto running = false;
+    auto const closeUnlessRunning = gsl::finally([this, &running] {
+        if (!running)
+            pty->close();
+    });
     if (auto const attached = initializeStartupInfoAttachedToPTY(startupInfo, static_cast<ConPty&>(*pty));
         FAILED(attached))
-        return spawnFailed(std::format("Could not attach it to its pseudoconsole: {}",
-                                       std::system_category().message(attached)));
+        return spawnFailed(
+            std::format("Could not attach it to its pseudoconsole: {}", hresultMessage(attached)));
 
     // Nothing inherited: with bInheritHandles FALSE no handle of this process reaches the child, whatever is
     // inheritable here, and its console comes from the pseudoconsole attribute.
@@ -368,6 +386,7 @@ StartResult Process::Private::startInHeldDirectory(Process& self)
     job = std::move(*newJob);
     heldDirectory = std::move(*entry);
     watchExit(self);
+    running = true;
     return StartOutcome {};
 }
 

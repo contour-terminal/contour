@@ -957,6 +957,27 @@ TEST_CASE("ConPty.aMissingProgramInAHeldDirectoryDoesNotFallBack", "[vtpty][conp
     CHECK(refusedStart(exec) == R"(The program "contour-no-such-program" was not found.)");
 }
 
+// A program found but not created -- here no image Windows can load -- fails the spawn after its
+// pseudoconsole was started: that is closed with it, for a started one with no program on it would read
+// nothing forever, and nothing would ever close it, leaving its pane open and empty.
+TEST_CASE("ConPty.aProgramNotCreatedInAHeldDirectoryClosesItsPseudoconsole", "[vtpty][conpty][held]")
+{
+    auto const fixture = HeldProbe {};
+    {
+        auto image = std::ofstream { fixture.bin / "tool.exe", std::ios::binary };
+        image << "MZ";
+    }
+    auto exec = heldExec(fixture.probe, fixture.work);
+    exec.program = "tool";
+
+    auto process = vtpty::testing::unplacedProcess(exec, pageSize(80, 24));
+    auto const started = process.start();
+    REQUIRE_FALSE(started.has_value());
+    CHECK(started.error().error == vtpty::StartError::SpawnFailed);
+    CHECK(started.error().detail.starts_with("Could not create process."));
+    CHECK(process.pty().isClosed());
+}
+
 // CreateProcessW takes the directory by path: a held directory renamed away, and another put at its name, is
 // refused rather than the other entered.
 TEST_CASE("ConPty.aHeldDirectoryReplacedAtItsNameStartsNothing", "[vtpty][conpty][held]")
