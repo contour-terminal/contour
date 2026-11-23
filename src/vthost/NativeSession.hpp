@@ -78,6 +78,7 @@
 #include <vthost/ObjectRegistry.hpp>
 #include <vthost/PduPump.hpp>
 #include <vthost/SessionHost.hpp>
+#include <vthost/proto/ControlVersions.hpp>
 #include <vthost/proto/Negotiation.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vthost/proto/Unsupported.hpp>
@@ -121,6 +122,9 @@ struct HandshakePolicy
     std::optional<core::platform::SteadyTimePoint> authDeadline = std::nullopt;
     /// The protocol versions this endpoint speaks; the highest one shared with the client is agreed.
     proto::VersionRange versions = proto::SupportedVersions;
+    /// The protocol versions a Control-role hello is negotiated over instead of @ref versions: a control
+    /// connection's few PDUs change more rarely than an attach's, so it reaches back further.
+    proto::VersionRange controlVersions = proto::ControlVersions;
     /// The optional features this endpoint offers on top of the agreed version.
     proto::CapabilitySet capabilities = proto::CapabilitySet::of({ proto::Capability::ExtensionPermissions,
                                                                    proto::Capability::InitialClientArea,

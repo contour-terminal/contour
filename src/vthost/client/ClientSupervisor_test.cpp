@@ -182,6 +182,7 @@ struct Daemon
 {
     auto services = vthost::NativeSessionServices {};
     services.handshake.versions = proto::VersionRange { .min = 6, .max = 8 };
+    services.handshake.controlVersions = services.handshake.versions;
     return services;
 }
 

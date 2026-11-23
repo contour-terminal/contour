@@ -392,7 +392,9 @@ TEST_CASE("a version refusal is reported verbatim", "[vthost][client][control]")
     auto const theirs = proto::VersionRange { .min = proto::SupportedVersions.max + 1,
                                               .max = proto::SupportedVersions.max + 1 };
     auto h = ControlClientHarness { vthost::HandshakePolicy {
-        .versions = theirs, .capabilities = proto::CapabilitySet::of({ proto::Capability::ControlApi }) } };
+        .versions = theirs,
+        .controlVersions = theirs,
+        .capabilities = proto::CapabilitySet::of({ proto::Capability::ControlApi }) } };
     auto outcome = std::expected<void, ControlClientError> {};
     h.run(handshakeOnly(&h, &outcome));
     REQUIRE_FALSE(outcome);

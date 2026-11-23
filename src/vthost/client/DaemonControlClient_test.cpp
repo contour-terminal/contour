@@ -167,8 +167,10 @@ struct ControlHarness
             vthost::ConnectionId { .endpoint = "native", .index = ++connections },
             std::move(pair.first),
             vthost::NativeSession::DefaultWriteQueueBytes,
-            vthost::NativeSessionServices {
-                .handshake = { .versions = versions, .capabilities = capabilities }, .daemon = daemon }));
+            vthost::NativeSessionServices { .handshake = { .versions = versions,
+                                                           .controlVersions = versions,
+                                                           .capabilities = capabilities },
+                                            .daemon = daemon }));
         loop.spawn(runAndHangUpWhenGone(sessions.back().get(), serverEnd));
         co_return std::move(pair.second);
     }
