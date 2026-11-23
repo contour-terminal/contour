@@ -150,7 +150,7 @@ std::vector<std::pair<std::string, std::string>> paneEnvironment(std::span<Envir
 std::expected<std::unique_ptr<DeclaredPanes>, RootError> DeclaredPanes::create(
     DeclaredPanesConfig config, vtpty::IDirectoryOpener& directories, IPaneHost& host)
 {
-    if (auto const distinct = checkRootsDistinct(config.roots); !distinct)
+    if (auto const distinct = checkRootsDistinct(config.roots, directories.pathStyle()); !distinct)
         return std::unexpected(distinct.error());
     auto const resolved = [&](std::string_view label) {
         return std::ranges::contains(config.roots, label, &ResolvedRoot::label);

@@ -128,7 +128,7 @@ std::expected<FileContent, FileError> FileReadService::read(std::string_view roo
         // A root nested inside this one keeps its files to itself, as it keeps the commands of this one out:
         // by its spelling here, and by its identity in the walk (a case-insensitive name spells it
         // otherwise).
-        if (mostSpecificRoot(_roots, pathBeneath(directory, *components)) != root)
+        if (mostSpecificRoot(_roots, pathBeneath(directory, *components), _directories.pathStyle()) != root)
             return std::unexpected(FileError::NotGranted);
         answer = readIn(root, directory, *components);
         if (answer || answer.error() != FileError::DirectoryGone)

@@ -196,7 +196,7 @@ struct DeclaredProcesses::State
 std::expected<std::unique_ptr<DeclaredProcesses>, RootError> DeclaredProcesses::create(
     DeclaredProcessesConfig config, DeclaredProcessesServices services)
 {
-    if (auto const distinct = checkRootsDistinct(config.roots); !distinct)
+    if (auto const distinct = checkRootsDistinct(config.roots, services.directories.pathStyle()); !distinct)
         return std::unexpected(distinct.error());
     auto const resolved = [&](std::string_view label) {
         return std::ranges::contains(config.roots, label, &ResolvedRoot::label);

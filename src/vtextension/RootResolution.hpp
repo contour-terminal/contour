@@ -7,6 +7,7 @@
 #pragma once
 
 #include <vtpty/DirectoryHandle.hpp>
+#include <vtpty/PathStyle.hpp>
 
 #include <array>
 #include <cstdint>
@@ -74,10 +75,13 @@ static_assert(CwdRefusalOfRootError.size() == std::to_underlying(RootError::Unre
 /// Finds the root a resolved path belongs to.
 /// @param roots The declared roots, resolved.
 /// @param resolvedPath An absolute, normalised path, symlinks resolved.
-/// @return The label of the most specific root holding @p resolvedPath (component-wise prefix, the root's own
-///         directory included); std::nullopt when none holds it.
+/// @param style The grammar the roots and @p resolvedPath are spelled in.
+/// @return The label of the most specific root holding @p resolvedPath (component-wise prefix by
+///         RootPathSyntax's isAtOrBeneath(), the root's own directory included); std::nullopt when none holds
+///         it.
 [[nodiscard]] std::optional<std::string_view> mostSpecificRoot(std::span<ResolvedRoot const> roots,
-                                                               std::string_view resolvedPath);
+                                                               std::string_view resolvedPath,
+                                                               vtpty::PathStyle style);
 
 /// Creates a missing `create` root, unless its path lies inside another declared root; an existing one is
 /// used wherever it lies. The missing directories are created one component at a time beneath a handle on
@@ -136,7 +140,9 @@ static_assert(CwdRefusalOfRootError.size() == std::to_underlying(RootError::Unre
 /// Checks that no two declared directories are the same, which would leave a directory with two most
 /// specific roots.
 /// @param roots The declared roots, resolved.
-/// @return Nothing; `EqualRoots` when two paths are equal.
-[[nodiscard]] std::expected<void, RootError> checkRootsDistinct(std::span<ResolvedRoot const> roots);
+/// @param style The grammar the roots are spelled in.
+/// @return Nothing; `EqualRoots` when two paths are equal by samePath()'s rule (Windows: ASCII case folded).
+[[nodiscard]] std::expected<void, RootError> checkRootsDistinct(std::span<ResolvedRoot const> roots,
+                                                                vtpty::PathStyle style);
 
 } // namespace vtextension

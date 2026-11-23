@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtextension/RootResolution.hpp>
 
-#include <vtpty/PathContainment.hpp>
-
-#include <core/Utf8Path.hpp>
-
 #include <algorithm>
 #include <cstddef>
 #include <expected>
@@ -23,17 +19,6 @@ namespace vtextension
 
 namespace
 {
-    /// Whether @p path is @p directory or lies beneath it, by vtpty::isAtOrBeneath()'s rule: whole
-    /// components, the platform's case rule. A spelling that names no path (not UTF-8, on Windows) lies
-    /// inside nothing.
-    [[nodiscard]] bool isInside(std::string_view directory, std::string_view path)
-    {
-        auto const directoryPath = core::pathFromUtf8(directory);
-        auto const judgedPath = core::pathFromUtf8(path);
-        return directoryPath && judgedPath
-               && vtpty::isAtOrBeneath(*judgedPath, *directoryPath, vtpty::NativePathCase);
-    }
-
     [[nodiscard]] ResolvedRoot const* rootNamed(std::span<ResolvedRoot const> roots,
                                                 std::string_view label) noexcept
     {
@@ -69,6 +54,7 @@ namespace
     {
         vtpty::DirectoryHandle handle;
         std::vector<std::string> missing; ///< Top-down.
+        vtpty::PathStyle style;           ///< The grammar of the opener it was opened with.
 
         /// @return The path the whole would have: the handle's resolved path, the missing components
         /// appended.
@@ -76,7 +62,7 @@ namespace
         {
             auto path = handle.resolvedPath();
             for (auto const& component: missing)
-                path += (path == "/" ? "" : "/") + component;
+                path = childPath(path, component, style);
             return path;
         }
     };
@@ -85,6 +71,7 @@ namespace
     [[nodiscard]] std::expected<ExistingAncestor, RootError> openExistingAncestor(
         vtpty::IDirectoryOpener& opener, std::string_view path)
     {
+        auto const style = opener.pathStyle();
         auto existing = std::string(path);
         auto missing = std::vector<std::string> {};
         while (true)
@@ -93,15 +80,18 @@ namespace
             if (opened)
             {
                 std::ranges::reverse(missing);
-                return ExistingAncestor { .handle = std::move(*opened), .missing = std::move(missing) };
+                return ExistingAncestor { .handle = std::move(*opened),
+                                          .missing = std::move(missing),
+                                          .style = style };
             }
             if (opened.error() != vtpty::DirectoryError::Missing)
                 return std::unexpected(rootErrorOf(opened.error()));
-            if (existing == "/")
+            // A volume root has no parent to look in.
+            auto const split = parentAndLeaf(existing, style);
+            if (!split)
                 return std::unexpected(RootError::Missing);
-            auto const slash = existing.rfind('/');
-            missing.emplace_back(existing.substr(slash + 1));
-            existing.resize(slash == 0 ? 1 : slash);
+            missing.emplace_back(split->second);
+            existing.resize(split->first.size());
         }
     }
 
@@ -121,14 +111,15 @@ namespace
         return directory;
     }
 
-    /// Whether @p path lies inside a root other than @p root.
+    /// Whether @p path lies inside a root other than @p root, by isAtOrBeneath() in @p style.
     [[nodiscard]] bool insideAnotherRoot(std::span<ResolvedRoot const> roots,
                                          std::string_view root,
-                                         std::string_view path)
+                                         std::string_view path,
+                                         vtpty::PathStyle style)
     {
         return std::ranges::any_of(roots, [&](ResolvedRoot const& other) {
             return other.label != root && std::ranges::any_of(other.paths, [&](std::string const& otherPath) {
-                       return isInside(otherPath, path);
+                       return isAtOrBeneath(path, otherPath, style);
                    });
         });
     }
@@ -136,9 +127,10 @@ namespace
     /// Judges a resolved path: inside @p root, and @p root its most specific root.
     [[nodiscard]] std::expected<void, RootError> judge(std::span<ResolvedRoot const> roots,
                                                        std::string_view root,
-                                                       std::string_view resolvedPath)
+                                                       std::string_view resolvedPath,
+                                                       vtpty::PathStyle style)
     {
-        auto const owner = mostSpecificRoot(roots, resolvedPath);
+        auto const owner = mostSpecificRoot(roots, resolvedPath, style);
         if (!owner)
             return std::unexpected(RootError::OutsideRoots);
         if (*owner != root)
@@ -148,13 +140,14 @@ namespace
 } // namespace
 
 std::optional<std::string_view> mostSpecificRoot(std::span<ResolvedRoot const> roots,
-                                                 std::string_view resolvedPath)
+                                                 std::string_view resolvedPath,
+                                                 vtpty::PathStyle style)
 {
     auto best = std::optional<std::string_view> {};
     auto bestLength = std::size_t { 0 };
     for (auto const& root: roots)
         for (auto const& path: root.paths)
-            if (isInside(path, resolvedPath) && (!best || path.size() > bestLength))
+            if (isAtOrBeneath(resolvedPath, path, style) && (!best || path.size() > bestLength))
             {
                 best = root.label;
                 bestLength = path.size();
@@ -176,7 +169,7 @@ std::expected<void, RootError> ensureRoot(vtpty::IDirectoryOpener& opener,
             return std::unexpected(ancestor.error());
         if (ancestor->missing.empty())
             continue;
-        if (insideAnotherRoot(roots, root, ancestor->resolvedPath()))
+        if (insideAnotherRoot(roots, root, ancestor->resolvedPath(), opener.pathStyle()))
             return std::unexpected(RootError::CreateInsideRoot);
         if (auto const created = createBeneath(opener, std::move(ancestor->handle), ancestor->missing);
             !created)
@@ -195,7 +188,7 @@ std::expected<vtpty::DirectoryHandle, RootError> openInRoot(vtpty::IDirectoryOpe
     auto directory = opener.open(path);
     if (!directory)
         return std::unexpected(rootErrorOf(directory.error()));
-    if (auto const judged = judge(roots, root, directory->resolvedPath()); !judged)
+    if (auto const judged = judge(roots, root, directory->resolvedPath(), opener.pathStyle()); !judged)
         return std::unexpected(judged.error());
     return std::move(*directory);
 }
@@ -209,16 +202,19 @@ namespace
         std::string_view root,
         std::string_view value)
     {
-        if (auto const syntax = checkSyntax(value, opener.pathStyle()); !syntax)
+        auto const style = opener.pathStyle();
+        if (auto const syntax = checkSyntax(value, style); !syntax)
             return std::unexpected(syntax.error());
         auto ancestor = openExistingAncestor(opener, value);
         if (!ancestor)
             return std::unexpected(ancestor.error());
         auto const resolved = ancestor->resolvedPath();
-        if (auto const judged = judge(roots, root, resolved); !judged)
+        if (auto const judged = judge(roots, root, resolved, style); !judged)
             return std::unexpected(judged.error());
-        if (std::ranges::contains(rootNamed(roots, root)->paths, resolved))
-            return std::unexpected(RootError::OutsideRoots); // The root itself is not below it.
+        // The root itself, in whatever case it is spelled, is not below it.
+        if (std::ranges::any_of(rootNamed(roots, root)->paths,
+                                [&](std::string const& path) { return samePath(path, resolved, style); }))
+            return std::unexpected(RootError::OutsideRoots);
         return ancestor;
     }
 } // namespace
@@ -247,17 +243,17 @@ std::expected<std::string, RootError> createPathParents(vtpty::IDirectoryOpener&
     auto const parent = createBeneath(opener, std::move(ancestor->handle), above);
     if (!parent)
         return std::unexpected(parent.error());
-    auto const& leaf = ancestor->missing.back();
-    return parent->resolvedPath() == "/" ? "/" + leaf : parent->resolvedPath() + "/" + leaf;
+    return childPath(parent->resolvedPath(), ancestor->missing.back(), ancestor->style);
 }
 
-std::expected<void, RootError> checkRootsDistinct(std::span<ResolvedRoot const> roots)
+std::expected<void, RootError> checkRootsDistinct(std::span<ResolvedRoot const> roots, vtpty::PathStyle style)
 {
-    auto paths = std::vector<std::string_view> {};
+    auto keys = std::vector<std::string> {};
     for (auto const& root: roots)
-        paths.insert(paths.end(), root.paths.begin(), root.paths.end());
-    std::ranges::sort(paths);
-    if (std::ranges::adjacent_find(paths) != paths.end())
+        for (auto const& path: root.paths)
+            keys.push_back(comparisonKeyOf(path, style));
+    std::ranges::sort(keys);
+    if (std::ranges::adjacent_find(keys) != keys.end())
         return std::unexpected(RootError::EqualRoots);
     return {};
 }

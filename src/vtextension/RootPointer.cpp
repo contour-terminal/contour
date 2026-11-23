@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtextension/RootPointer.hpp>
 
+#include <vtpty/PathStyle.hpp>
+
 #include <core/Sha256.hpp>
 #include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
@@ -131,7 +133,7 @@ std::expected<std::vector<ResolvedRoot>, RootPointerError> resolveRoots(
         }
         roots.push_back(std::move(root));
     }
-    if (!checkRootsDistinct(roots))
+    if (!checkRootsDistinct(roots, vtpty::NativePathStyle))
         return std::unexpected(RootPointerError::EqualRoots);
     return roots;
 }
