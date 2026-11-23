@@ -91,6 +91,10 @@ namespace
                   .hasRoot = hasWindowsRoot,
                   .volumeRootLength = windowsVolumeRootLength,
                   .isPlain = vtpty::isPlainWindowsName,
+                  // ASCII letters only: `C:\wt\Ä` and `C:\wt\ä` are two paths here, so a root nested in
+                  // another across a non-ASCII case difference is not seen as nested (a create root is then
+                  // made beside it, and judged by its handle), and a path is refused rather than admitted by
+                  // a folding NTFS may not share.
                   .fold = asciiLower },
     };
 

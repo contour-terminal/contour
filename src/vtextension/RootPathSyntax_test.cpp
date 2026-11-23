@@ -108,6 +108,16 @@ constexpr auto ContainmentRows = std::to_array<ContainmentRow>({
       .directory = "C:\\\xc3\xa4", // C:\ä
       .style = PathStyle::Windows,
       .expected = Verdict::Refused },
+    // A root nested in another: an ASCII case variant is inside it; a non-ASCII one is not (only ASCII
+    // folds).
+    { .path = R"(C:\WT\INNER\x)",
+      .directory = R"(C:\wt\inner)",
+      .style = PathStyle::Windows,
+      .expected = Verdict::Accepted },
+    { .path = "C:\\wt\\\xc3\xa4\\x",   // C:\wt\ä\x
+      .directory = "C:\\wt\\\xc3\x84", // C:\wt\Ä
+      .style = PathStyle::Windows,
+      .expected = Verdict::Refused },
     failsClosedBeneathW(R"(C:\w\x.)"),
     failsClosedBeneathW(R"(C:\w\x )"),
     failsClosedBeneathW(R"(C:\w\con)"),

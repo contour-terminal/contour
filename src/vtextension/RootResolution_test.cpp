@@ -133,6 +133,39 @@ TEST_CASE("RootResolution: Windows most specific root, case-insensitively", "[da
     }
 }
 
+TEST_CASE("RootResolution: a Windows create root nested in another across case", "[daemon][processes]")
+{
+    // A root not created yet keeps the case the user wrote, so two of them can nest in different cases.
+    struct Row
+    {
+        std::string_view outer;
+        std::string_view inner;
+        std::expected<void, RootError> created; ///< What creating the inner one answers.
+    };
+    for (auto const& row: std::array {
+             Row { .outer = R"(C:\wt\Inner)",
+                   .inner = R"(C:\wt\inner\x)",
+                   .created = std::unexpected(RootError::CreateInsideRoot) },
+             Row { .outer = R"(C:\wt\inner)",
+                   .inner = R"(C:\WT\INNER\x)",
+                   .created = std::unexpected(RootError::CreateInsideRoot) },
+             // Only ASCII letters fold (RootPathSyntax's samePath()): `Ä` and `ä` are two directories here,
+             // although NTFS may call them one. The inner root is created, and what runs in it is judged by
+             // the path its handle reads back, which names whichever directory NTFS made of it.
+             Row { .outer = "C:\\wt\\\xc3\x84", .inner = "C:\\wt\\\xc3\xa4\\x", .created = {} },
+         })
+    {
+        INFO(row.inner);
+        auto const roots = std::vector<ResolvedRoot> {
+            { .label = "outer", .paths = { std::string { row.outer } } },
+            { .label = "inner", .paths = { std::string { row.inner } } },
+        };
+        auto opener = FakeDirectoryOpener { PathStyle::Windows };
+        opener.add(R"(C:\wt)");
+        CHECK(vtextension::ensureRoot(opener, roots, "inner") == row.created);
+    }
+}
+
 TEST_CASE("RootResolution: Windows roots equal but for case are refused", "[daemon][processes]")
 {
     auto const windows = std::vector<ResolvedRoot> {
