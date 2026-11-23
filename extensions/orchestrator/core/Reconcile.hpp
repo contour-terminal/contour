@@ -165,11 +165,14 @@ struct WorktreeEntry
 /// @param entries worktreeEntries() of the repository.
 /// @param listedMonoMs When @p entries were asked for, in the engine's monotonic milliseconds; 0 when not
 ///        known, which no finished run is older than.
+/// @param style How the host spells its paths (Config::pathStyle()). On Windows, git spells a listed path
+///        `C:/…` and the host `C:\…`: paths are compared by sameHostPath()'s rule.
 /// @return The orphans, in listing order.
 [[nodiscard]] std::vector<WorktreeEntry> orphans(std::span<Run const> runs,
                                                  std::string_view worktreeRoot,
                                                  std::span<WorktreeEntry const> entries,
-                                                 uint64_t listedMonoMs);
+                                                 uint64_t listedMonoMs,
+                                                 PathStyle style);
 
 /// @param run A run.
 /// @param listedMonoMs When a worktree listing was asked for (see orphans()).

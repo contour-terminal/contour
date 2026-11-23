@@ -201,10 +201,13 @@ namespace
         return finished == nullptr || finished->fate == Fate::Kept;
     }
 
-    [[nodiscard]] bool accountsFor(Run const& run, WorktreeEntry const& entry, uint64_t listedMonoMs)
+    [[nodiscard]] bool accountsFor(Run const& run,
+                                   WorktreeEntry const& entry,
+                                   uint64_t listedMonoMs,
+                                   PathStyle style)
     {
         return (holdsWorktree(run) || finishedSince(run, listedMonoMs))
-               && (entry.path == run.worktree || entry.branch == run.branch);
+               && (sameHostPath(entry.path, run.worktree, style) || entry.branch == run.branch);
     }
 
     [[nodiscard]] bool isAgentBranch(std::optional<std::string> const& branch) noexcept
@@ -212,14 +215,19 @@ namespace
         return branch && branch->size() > BranchPrefix.size() && branch->starts_with(BranchPrefix);
     }
 
-    /// Whether @p path lies below @p root, which is compared as text, any trailing '/' aside.
-    [[nodiscard]] bool isUnder(std::string_view path, std::string_view root) noexcept
+    /// Whether @p path lies below @p root, which is compared by sameHostPath()'s rule, any trailing separator
+    /// aside: byte for byte on Posix; on Windows ASCII letters folded and `/` and `\` both separators, as
+    /// git spells a Windows path `C:/…`.
+    [[nodiscard]] bool isUnder(std::string_view path, std::string_view root, PathStyle style) noexcept
     {
         if (root.empty())
             return false;
-        auto const last = root.find_last_not_of('/');
+        auto const separators =
+            style == PathStyle::Windows ? std::string_view { "/\\" } : std::string_view { "/" };
+        auto const last = root.find_last_not_of(separators);
         auto const base = last == std::string_view::npos ? std::string_view {} : root.substr(0, last + 1);
-        return path.size() > base.size() + 1 && path.starts_with(base) && path[base.size()] == '/';
+        auto const rest = afterHostPath(path, base, style);
+        return rest && rest->size() > 1 && separators.contains(rest->front());
     }
 
     // }}}
@@ -331,14 +339,16 @@ bool finishedSince(Run const& run, uint64_t listedMonoMs) noexcept
 std::vector<WorktreeEntry> orphans(std::span<Run const> runs,
                                    std::string_view worktreeRoot,
                                    std::span<WorktreeEntry const> entries,
-                                   uint64_t listedMonoMs)
+                                   uint64_t listedMonoMs,
+                                   PathStyle style)
 {
     auto found = std::vector<WorktreeEntry> {};
     for (auto const& entry: entries | std::views::drop(1))
     {
-        if (!isAgentBranch(entry.branch) && !isUnder(entry.path, worktreeRoot))
+        if (!isAgentBranch(entry.branch) && !isUnder(entry.path, worktreeRoot, style))
             continue;
-        if (std::ranges::any_of(runs, [&](Run const& run) { return accountsFor(run, entry, listedMonoMs); }))
+        if (std::ranges::any_of(runs,
+                                [&](Run const& run) { return accountsFor(run, entry, listedMonoMs, style); }))
             continue;
         found.push_back(entry);
     }

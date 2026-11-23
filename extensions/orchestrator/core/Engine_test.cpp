@@ -344,7 +344,7 @@ class Harness
         // its .git file is read intact again.
         if (command == "git-common-dir"
             && (outcome.exitCode != 0 || outcome.extent != OutputExtent::Whole
-                || !commonDirIsMain(outcome.stdoutText, mainOf(found->cwd))))
+                || !commonDirIsMain(outcome.stdoutText, mainOf(found->cwd), styleOf(found->cwd))))
             _tainted.insert(found->cwd);
         // A submodule in the index keeps it too: git status would enter the submodule's own repository.
         if (command == "git-index-flags" && outcome.stdoutText.contains(" 160000 "))
@@ -381,7 +381,8 @@ class Harness
         {
             auto const worktree = file.path.substr(0, file.path.size() - 5);
             auto const id = worktree.substr(worktree.rfind('/') + 1);
-            auto const intact = content && gitFileIsIntact(*content, mainOf(file.path), worktree);
+            auto const intact =
+                content && gitFileIsIntact(*content, mainOf(file.path), worktree, styleOf(worktree));
             if (intact)
                 _tainted.erase(worktree);
             else if (content)

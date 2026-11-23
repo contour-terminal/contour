@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -37,6 +38,7 @@ using orchestrator::FixtureRoot;
 using orchestrator::PaneFact;
 using orchestrator::PaneListing;
 using orchestrator::PaneWentAway;
+using orchestrator::PathStyle;
 using orchestrator::PrepareStep;
 using orchestrator::Preparing;
 using orchestrator::ProgramLiveness;
@@ -860,7 +862,7 @@ TEST_CASE("Reconcile.orphans", "[orchestrator][reconcile]")
     {
         CAPTURE(row.name, row.root);
         auto const runs = orphanRuns(row);
-        auto const found = orchestrator::orphans(runs, row.root, entries, 0);
+        auto const found = orchestrator::orphans(runs, row.root, entries, 0, PathStyle::Posix);
         auto paths = std::vector<std::string_view> {};
         for (auto const& orphan: found)
             paths.emplace_back(orphan.path);
@@ -879,10 +881,10 @@ TEST_CASE("Reconcile.orphans.edges", "[orchestrator][reconcile]")
         checkout("/elsewhere/c", "agent/"),
         checkout("/home/u/worktrees", "feature"),
     };
-    auto const found = orchestrator::orphans({}, WorktreeRoot, entries, 0);
+    auto const found = orchestrator::orphans({}, WorktreeRoot, entries, 0, PathStyle::Posix);
     REQUIRE(found.size() == 1);
     CHECK(found.front().path == "/elsewhere/a");
-    CHECK(orchestrator::orphans({}, WorktreeRoot, {}, 0).empty());
+    CHECK(orchestrator::orphans({}, WorktreeRoot, {}, 0, PathStyle::Posix).empty());
 }
 
 TEST_CASE("Reconcile.orphans.listedBeforeTheRunFinished", "[orchestrator][reconcile]")
@@ -895,7 +897,9 @@ TEST_CASE("Reconcile.orphans.listedBeforeTheRunFinished", "[orchestrator][reconc
     runs.front().changedMonoMs = 500;
     auto const isOrphan = [&](uint64_t listedMonoMs) {
         return std::ranges::contains(
-            orchestrator::orphans(runs, WorktreeRoot, entries, listedMonoMs), PrPath, &WorktreeEntry::path);
+            orchestrator::orphans(runs, WorktreeRoot, entries, listedMonoMs, PathStyle::Posix),
+            PrPath,
+            &WorktreeEntry::path);
     };
 
     CHECK_FALSE(isOrphan(400));
@@ -903,6 +907,57 @@ TEST_CASE("Reconcile.orphans.listedBeforeTheRunFinished", "[orchestrator][reconc
     CHECK(isOrphan(600));
     CHECK(orchestrator::finishedSince(runs.front(), 400));
     CHECK_FALSE(orchestrator::finishedSince(runs.front(), 500));
+}
+
+TEST_CASE("reconcile: a Windows listing matches its runs", "[orchestrator][reconcile]")
+{
+    // Recorded with git 2.55.0.windows.3, the user directory scrubbed to C:/Users/u: git spells every path
+    // with forward slashes after the drive, the host with backslashes.
+    constexpr auto Root = R"(C:\Users\u\wt)"sv;
+    constexpr auto Pr = "C:/Users/u/wt/contour/pr-1-20261113-150847"sv;
+    constexpr auto Issue = "C:/Users/u/wt/contour/issue-2-20261113-150847"sv;
+    auto const entries = orchestrator::worktreeEntries(
+        readFixture(FixtureRoot::Testdata, "git/worktree-list-windows.porcelain-z"));
+    REQUIRE(entries
+            == std::vector {
+                checkout("C:/Users/u/src/contour", "master"),
+                checkout("C:/Users/u/elsewhere/contour-feature", "feature/x"),
+                checkout(Issue, "agent/issue-2-20261113-150847"),
+                checkout(Pr, "agent/pr-1-20261113-150847"),
+            });
+    CHECK(orchestrator::mainCheckout(entries) == "C:/Users/u/src/contour"sv);
+
+    auto const orphanPaths = [&](std::span<Run const> runs, std::span<WorktreeEntry const> listed) {
+        auto paths = std::vector<std::string> {};
+        for (auto const& orphan: orchestrator::orphans(runs, Root, listed, 0, PathStyle::Windows))
+            paths.push_back(orphan.path);
+        return paths;
+    };
+
+    // With no run, both agent worktrees are orphans; the checkout elsewhere on another branch is left alone.
+    CHECK(orphanPaths({}, entries) == std::vector<std::string> { std::string(Issue), std::string(Pr) });
+
+    // A run accounts for its worktree by the host's spelling of its path, in any ASCII case; its branch
+    // was renamed, so only the path can match.
+    for (auto const worktree: { R"(C:\Users\u\wt\contour\pr-1-20261113-150847)"sv,
+                                R"(c:\users\U\WT\contour\pr-1-20261113-150847)"sv })
+    {
+        CAPTURE(worktree);
+        auto run = makeRun("pr-1-20261113-150847", orchestrator::Running {}, AgentStatus::Working);
+        run.worktree = std::string(worktree);
+        run.branch = "agent/renamed";
+        CHECK(orphanPaths(std::array { run }, entries) == std::vector<std::string> { std::string(Issue) });
+    }
+
+    // Under the root in git's spelling, whatever the case, even off an agent branch; a sibling sharing the
+    // root's prefix is not under it.
+    auto const offBranch = std::vector {
+        checkout("C:/Users/u/src/contour", "master"),
+        checkout("C:/Users/u/WT/contour/detached", std::nullopt),
+        checkout("C:/Users/u/wt-other/contour", "feature/y"),
+        checkout("D:/Users/u/wt/contour", "feature/z"),
+    };
+    CHECK(orphanPaths({}, offBranch) == std::vector<std::string> { "C:/Users/u/WT/contour/detached" });
 }
 
 // }}}

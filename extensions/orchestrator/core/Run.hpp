@@ -12,6 +12,7 @@
 #include <vector>
 
 #include <orchestrator/core/Commands.hpp>
+#include <orchestrator/core/HostPaths.hpp>
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Permissions.hpp>
 #include <orchestrator/core/Provider.hpp>
@@ -477,22 +478,33 @@ enum class BeginError : uint8_t
 /// @return Running for Idle and Working, Blocked for Blocked and Error, Done for Done.
 [[nodiscard]] RunState stateFor(AgentStatus status) noexcept;
 
+/// How the host spells a run's paths, read from its worktree's spelling.
+/// @param run The run.
+/// @return pathStyleOf() its worktree; Posix when that names no style.
+[[nodiscard]] PathStyle worktreeStyle(Run const& run) noexcept;
+
 /// Whether a worktree's `.git` file still points to where git put it.
 /// @param content The file's content.
 /// @param mainCheckout The repository's main checkout.
 /// @param worktree The worktree's directory.
+/// @param style How the host spells @p worktree. On Windows, git spells the paths it writes with `/`
+///        (`C:/…`) and the host with `\`: they are compared by sameHostPath()'s rule.
 /// @return Whether @p content is `gitdir: <mainCheckout>/.git/worktrees/<last component of worktree>`,
 ///         optionally followed by one line end, and nothing else.
 [[nodiscard]] bool gitFileIsIntact(std::string_view content,
                                    std::string_view mainCheckout,
-                                   std::string_view worktree) noexcept;
+                                   std::string_view worktree,
+                                   PathStyle style) noexcept;
 
 /// Whether git, run inside a worktree, uses its repository's own directory: a redirected `commondir` link
 /// would make it read another directory's configuration and attributes.
 /// @param output What `git rev-parse --path-format=absolute --git-common-dir` printed there.
 /// @param mainCheckout The repository's main checkout.
+/// @param style How the host spells its paths; compared as gitFileIsIntact() compares.
 /// @return Whether @p output is `<mainCheckout>/.git`, optionally followed by one line end, and nothing else.
-[[nodiscard]] bool commonDirIsMain(std::string_view output, std::string_view mainCheckout) noexcept;
+[[nodiscard]] bool commonDirIsMain(std::string_view output,
+                                   std::string_view mainCheckout,
+                                   PathStyle style) noexcept;
 
 /// Whether a run fits the store: every field holds what its kind accepts, and the free text is bounded so
 /// that toJson() stays within MaxStoredRunBytes however it escapes. The prompt is Text with no control

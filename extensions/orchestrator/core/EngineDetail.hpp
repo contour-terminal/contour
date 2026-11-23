@@ -77,7 +77,7 @@ struct Judgement
 /// @return Its path, such as `/home/u/wt/contour/<id>/STATUS.md` or `C:\wt\contour\<id>\STATUS.md`.
 [[nodiscard]] inline std::string inWorktree(Run const& run, std::string_view name)
 {
-    return joinPath(run.worktree, name, pathStyleOf(run.worktree).value_or(PathStyle::Posix));
+    return joinPath(run.worktree, name, worktreeStyle(run));
 }
 
 /// The suffix of the tag a status board is read with until one is found (the threshold read).

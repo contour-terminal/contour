@@ -21,6 +21,7 @@
 #include <glaze/glaze.hpp>
 #include <orchestrator/core/ArgumentKinds.hpp>
 #include <orchestrator/core/Commands.hpp>
+#include <orchestrator/core/HostPaths.hpp>
 #include <orchestrator/core/Json.hpp>
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Naming.hpp>
@@ -484,7 +485,7 @@ namespace
         }
         if (!context.mainCheckout)
             return withoutCheckout(run, context, ending);
-        if (!gitFileIsIntact(*read.content, *context.mainCheckout, run.worktree))
+        if (!gitFileIsIntact(*read.content, *context.mainCheckout, run.worktree, worktreeStyle(run)))
             return keep(run, context, ending, AlteredGitFile);
         // The `.git` file is not the only link: git follows the `commondir` file beside the worktree's
         // directory, which the file check cannot read. Before anything else runs there, git says where it
@@ -597,7 +598,7 @@ namespace
             case EndStep::CommonDir:
                 if (!context.mainCheckout)
                     return withoutCheckout(run, context, ending);
-                if (!commonDirIsMain(output, *context.mainCheckout))
+                if (!commonDirIsMain(output, *context.mainCheckout, worktreeStyle(run)))
                     return keep(run, context, ending, RedirectedCommonDir);
                 return enterCommand(
                     run, context, nextStep(std::move(ending), EndStep::IndexFlags), "git-index-flags", {});
@@ -887,31 +888,45 @@ RunState stateFor(AgentStatus status) noexcept
     return Running {};
 }
 
-bool commonDirIsMain(std::string_view output, std::string_view mainCheckout) noexcept
+PathStyle worktreeStyle(Run const& run) noexcept
 {
-    if (mainCheckout.empty() || !output.starts_with(mainCheckout))
+    return pathStyleOf(run.worktree).value_or(PathStyle::Posix);
+}
+
+namespace
+{
+    /// @return @p text without one line end at its end.
+    [[nodiscard]] std::string_view withoutLineEnd(std::string_view text) noexcept
+    {
+        if (text.ends_with('\n'))
+            text.remove_suffix(1);
+        return text;
+    }
+} // namespace
+
+bool commonDirIsMain(std::string_view output, std::string_view mainCheckout, PathStyle style) noexcept
+{
+    if (mainCheckout.empty())
         return false;
-    auto const rest = output.substr(mainCheckout.size());
-    return rest == "/.git" || rest == "/.git\n";
+    auto const rest = afterHostPath(withoutLineEnd(output), mainCheckout, style);
+    return rest && sameHostPath(*rest, "/.git", style);
 }
 
 bool gitFileIsIntact(std::string_view content,
                      std::string_view mainCheckout,
-                     std::string_view worktree) noexcept
+                     std::string_view worktree,
+                     PathStyle style) noexcept
 {
-    auto const slash = worktree.rfind('/');
-    auto const name = slash == std::string_view::npos ? worktree : worktree.substr(slash + 1);
-    if (name.empty() || mainCheckout.empty())
+    constexpr auto Prefix = std::string_view { "gitdir: " };
+    auto const name = lastComponent(worktree, style);
+    auto const line = withoutLineEnd(content);
+    if (name.empty() || mainCheckout.empty() || !line.starts_with(Prefix))
         return false;
-    auto rest = content;
-    auto const consume = [&rest](std::string_view part) {
-        if (!rest.starts_with(part))
-            return false;
-        rest.remove_prefix(part.size());
-        return true;
-    };
-    return consume("gitdir: ") && consume(mainCheckout) && consume("/.git/worktrees/") && consume(name)
-           && (rest.empty() || rest == "\n");
+    auto const rest = afterHostPath(line.substr(Prefix.size()), mainCheckout, style)
+                          .and_then([style](std::string_view tail) {
+                              return afterHostPath(tail, "/.git/worktrees/", style);
+                          });
+    return rest && sameHostPath(*rest, name, style);
 }
 
 // {{{ storage bounds

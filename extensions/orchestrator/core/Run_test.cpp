@@ -57,6 +57,7 @@ using orchestrator::OpenAgentPane;
 using orchestrator::PaneGone;
 using orchestrator::PaneOpened;
 using orchestrator::PaneOpenFailed;
+using orchestrator::PathStyle;
 using orchestrator::Persist;
 using orchestrator::PrepareStep;
 using orchestrator::Preparing;
@@ -1802,11 +1803,73 @@ TEST_CASE("gitFileIsIntact", "[orchestrator][run]")
     for (auto const& row: Rows)
     {
         CAPTURE(row.name);
-        CHECK(orchestrator::gitFileIsIntact(row.content, "/r/contour", Worktree)
+        CHECK(orchestrator::gitFileIsIntact(row.content, "/r/contour", Worktree, PathStyle::Posix)
               == (row.intact == Expect::Yes));
     }
+    CHECK_FALSE(orchestrator::gitFileIsIntact(
+        "gitdir: /r/contour/.git/worktrees/\n", "/r/contour", "/w/contour/", PathStyle::Posix));
+}
+
+TEST_CASE("gitFileIsIntact: a Windows worktree's .git names its main checkout with forward slashes",
+          "[orchestrator][run]")
+{
+    // Measured with git 2.55.0.windows.3: `git worktree add` writes the .git file in git's spelling, forward
+    // slashes after the drive and one line end; the host spells the same directories with backslashes.
+    struct Row
+    {
+        std::string_view name;
+        std::string_view content;
+        std::string_view mainCheckout;
+        Expect intact;
+    };
+    constexpr auto Worktree = R"(C:\Users\u\wt\contour\pr-1-20261113-150847)"sv;
+    constexpr auto Main = R"(C:\Users\u\src\contour)"sv;
+    constexpr auto Rows = std::array {
+        Row { .name = "git's spelling",
+              .content = "gitdir: C:/Users/u/src/contour/.git/worktrees/pr-1-20261113-150847\n",
+              .mainCheckout = Main,
+              .intact = Expect::Yes },
+        Row { .name = "the checkout in another case",
+              .content = "gitdir: C:/Users/u/src/contour/.git/worktrees/pr-1-20261113-150847\n",
+              .mainCheckout = R"(c:\users\u\src\contour)",
+              .intact = Expect::Yes },
+        Row { .name = "the host's spelling",
+              .content = R"(gitdir: C:\Users\u\src\contour\.git\worktrees\pr-1-20261113-150847)",
+              .mainCheckout = Main,
+              .intact = Expect::Yes },
+        Row { .name = "a sibling sharing the prefix",
+              .content = "gitdir: C:/Users/u/src/contour-evil/.git/worktrees/pr-1-20261113-150847\n",
+              .mainCheckout = Main,
+              .intact = Expect::No },
+        Row { .name = "another drive",
+              .content = "gitdir: D:/Users/u/src/contour/.git/worktrees/pr-1-20261113-150847\n",
+              .mainCheckout = Main,
+              .intact = Expect::No },
+        Row { .name = "carriage return",
+              .content = "gitdir: C:/Users/u/src/contour/.git/worktrees/pr-1-20261113-150847\r\n",
+              .mainCheckout = Main,
+              .intact = Expect::No },
+        Row { .name = "other name",
+              .content = "gitdir: C:/Users/u/src/contour/.git/worktrees/pr-2-20261113-150847\n",
+              .mainCheckout = Main,
+              .intact = Expect::No },
+        Row { .name = "nested",
+              .content = "gitdir: C:/Users/u/src/contour/.git/worktrees/x/pr-1-20261113-150847\n",
+              .mainCheckout = Main,
+              .intact = Expect::No },
+    };
+    for (auto const& row: Rows)
+    {
+        CAPTURE(row.name);
+        CHECK(orchestrator::gitFileIsIntact(row.content, row.mainCheckout, Worktree, PathStyle::Windows)
+              == (row.intact == Expect::Yes));
+    }
+    // Read by the POSIX rule, git's spelling does not name the host's.
     CHECK_FALSE(
-        orchestrator::gitFileIsIntact("gitdir: /r/contour/.git/worktrees/\n", "/r/contour", "/w/contour/"));
+        orchestrator::gitFileIsIntact("gitdir: C:/Users/u/src/contour/.git/worktrees/pr-1-20261113-150847\n",
+                                      Main,
+                                      Worktree,
+                                      PathStyle::Posix));
 }
 
 TEST_CASE("commonDirIsMain", "[orchestrator][run]")
@@ -1836,9 +1899,65 @@ TEST_CASE("commonDirIsMain", "[orchestrator][run]")
     for (auto const& row: Rows)
     {
         CAPTURE(row.name);
-        CHECK(orchestrator::commonDirIsMain(row.output, "/r/contour") == (row.main == Expect::Yes));
+        CHECK(orchestrator::commonDirIsMain(row.output, "/r/contour", PathStyle::Posix)
+              == (row.main == Expect::Yes));
     }
-    CHECK_FALSE(orchestrator::commonDirIsMain("/.git\n", ""));
+    CHECK_FALSE(orchestrator::commonDirIsMain("/.git\n", "", PathStyle::Posix));
+}
+
+TEST_CASE("commonDirIsMain: git's Windows spelling", "[orchestrator][run]")
+{
+    // Measured with git 2.55.0.windows.3: `git rev-parse --path-format=absolute --git-common-dir` prints
+    // forward slashes after the drive, and one line end.
+    struct Row
+    {
+        std::string_view name;
+        std::string_view output;
+        Expect main;
+    };
+    constexpr auto Main = R"(C:\Users\u\src\contour)"sv;
+    constexpr auto Rows = std::array {
+        Row { .name = "git's spelling", .output = "C:/Users/u/src/contour/.git\n", .main = Expect::Yes },
+        Row {
+            .name = "the host's spelling", .output = R"(C:\Users\u\src\contour\.git)", .main = Expect::Yes },
+        Row { .name = "another case", .output = "c:/users/U/SRC/contour/.git\n", .main = Expect::Yes },
+        Row { .name = "another repository", .output = "C:/Users/u/src/other/.git\n", .main = Expect::No },
+        Row { .name = "a sibling sharing the prefix",
+              .output = "C:/Users/u/src/contour-evil/.git\n",
+              .main = Expect::No },
+        Row { .name = "carriage return", .output = "C:/Users/u/src/contour/.git\r\n", .main = Expect::No },
+        Row { .name = "a trailing slash", .output = "C:/Users/u/src/contour/.git/\n", .main = Expect::No },
+        Row { .name = "another drive", .output = "D:/Users/u/src/contour/.git\n", .main = Expect::No },
+        Row { .name = "empty", .output = "", .main = Expect::No },
+    };
+    for (auto const& row: Rows)
+    {
+        CAPTURE(row.name);
+        CHECK(orchestrator::commonDirIsMain(row.output, Main, PathStyle::Windows)
+              == (row.main == Expect::Yes));
+    }
+    // Read by the POSIX rule, git's spelling does not name the host's.
+    CHECK_FALSE(orchestrator::commonDirIsMain("C:/Users/u/src/contour/.git\n", Main, PathStyle::Posix));
+}
+
+TEST_CASE("a Windows run's checks read git's spelling of its paths", "[orchestrator][run]")
+{
+    // The host spells the worktree with backslashes; git spells the main checkout (its worktree listing), the
+    // .git file and the common directory with forward slashes. The run's checks go on past both.
+    auto run = makeRun(Item::Pr, Running {});
+    run.repoPath = R"(C:\Users\u\src\contour)";
+    run.worktree = R"(C:\Users\u\wt\contour\pr-2334-20261113-150847)";
+    run.pane = "pane-7";
+    auto const context = StepContext { .mainCheckout = "C:/Users/u/src/contour"sv, .wallMs = NowMs };
+    CHECK(describe(orchestrator::advance(run, PaneGone {}, context)) == "persist, read-git-file");
+    CHECK(describe(orchestrator::advance(
+              run,
+              GitFileRead { .content =
+                                "gitdir: C:/Users/u/src/contour/.git/worktrees/pr-2334-20261113-150847\n" },
+              context))
+          == "persist, run git-common-dir");
+    CHECK(describe(orchestrator::advance(run, CommandOk { "C:/Users/u/src/contour/.git\n" }, context))
+          == "persist, run git-index-flags");
 }
 
 // }}}

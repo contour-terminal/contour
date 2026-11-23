@@ -267,10 +267,12 @@ void Engine::refreshOrphans()
 {
     for (auto& repo: _repos)
     {
-        auto found = repo.worktrees.empty() || !_config
-                         ? std::vector<WorktreeEntry> {}
-                         : orchestrator::orphans(
-                               _runs, _config->worktreeRoot(), repo.worktrees, repo.worktreesListedMonoMs);
+        auto found = repo.worktrees.empty() || !_config ? std::vector<WorktreeEntry> {}
+                                                        : orchestrator::orphans(_runs,
+                                                                                _config->worktreeRoot(),
+                                                                                repo.worktrees,
+                                                                                repo.worktreesListedMonoMs,
+                                                                                _config->pathStyle());
         // The dashboard lists them: a change is drawn.
         if (found != repo.orphans)
         {
