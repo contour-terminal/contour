@@ -156,8 +156,9 @@ if(UNIX)
     list(APPEND vtpty_SOURCES ProcessCgroup.cpp ScopeRequestEncoding.cpp SystemdScopePlacement.cpp UnixPty.cpp UnixUtils.cpp)
     list(APPEND vtpty_SOURCES ProcessCgroup.hpp PosixSpawn.hpp ScopeRequestEncoding.hpp SystemdScopePlacement.hpp UnixPty.hpp UnixUtils.hpp)
 else()
-    list(APPEND vtpty_SOURCES ConPty.cpp OverlappedPipe_win32.cpp UniqueHandle.cpp Win32OpenBeneath.cpp)
-    list(APPEND vtpty_HEADERS ConPty.hpp OverlappedPipe.hpp Win32OpenBeneath.hpp)
+    list(APPEND vtpty_SOURCES ConPty.cpp OverlappedPipe_win32.cpp UniqueHandle.cpp Win32BeneathSystem.cpp
+        Win32OpenBeneath.cpp)
+    list(APPEND vtpty_HEADERS ConPty.hpp OverlappedPipe.hpp Win32BeneathRead.hpp Win32OpenBeneath.hpp)
     #TODO: list(APPEND vtpty_SOURCES WinPty.cpp)
 endif()
 
@@ -235,7 +236,8 @@ if(VTPTY_TESTING)
     )
     if(WIN32)
         # ConPty is the Windows-only PTY backend.
-        target_sources(vtpty_test PRIVATE ConPty_test.cpp ProcessRunner_win32_test.cpp testing/Junction.hpp)
+        target_sources(vtpty_test PRIVATE ConPty_test.cpp ProcessRunner_win32_test.cpp Win32BeneathSystem_test.cpp
+            testing/Junction.hpp)
 
         # The child half of the ConPty tests that run a program: a console program printing the arguments
         # it received, then writing OSC 133 marks the way a shell integration does, then a sentinel, so a

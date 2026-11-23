@@ -50,20 +50,22 @@ enum class FileKind : uint8_t
 /// Which inode an entry is: what tells two spellings of one directory apart from two directories.
 struct FileIdentity
 {
-    uint64_t device = 0; ///< The device it lives on (`st_dev`).
-    uint64_t inode = 0;  ///< Its inode on that device (`st_ino`).
+    uint64_t device = 0;    ///< The device it lives on (`st_dev`; Windows: the volume serial number).
+    uint64_t inode = 0;     ///< Its inode on that device (`st_ino`; Windows: the file id's lower half).
+    uint64_t inodeHigh = 0; ///< The upper half of a 128-bit file id (Windows ReFS); 0 on POSIX and NTFS.
 
     [[nodiscard]] bool operator==(FileIdentity const&) const = default;
 };
 
-/// What `fstat` tells of an entry, as far as a read beneath a directory needs it.
+/// What `fstat` (Windows: a handle's file information) tells of an entry, as far as a read beneath a
+/// directory needs it.
 struct FileStatus
 {
     FileKind kind = FileKind::Other; ///< What it is.
     FileIdentity identity {};        ///< Which inode it is.
-    uint64_t links = 0;              ///< How many names it has (`st_nlink`).
-    uint64_t sizeBytes = 0;          ///< Its size when asked (`st_size`): a hint, never a bound.
-    uint64_t modifiedUnixMs = 0;     ///< When it was last modified, in milliseconds since the Unix epoch.
+    uint64_t links = 0;     ///< How many names it has (`st_nlink`; Windows: 0 once its deletion is pending).
+    uint64_t sizeBytes = 0; ///< Its size when asked (`st_size`; Windows: EndOfFile): a hint, never a bound.
+    uint64_t modifiedUnixMs = 0; ///< When it was last modified, in milliseconds since the Unix epoch.
 };
 
 /// What an entry beneath a directory is opened as.

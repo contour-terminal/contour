@@ -24,11 +24,14 @@ namespace vtpty
 inline constexpr DWORD HeldDirectoryAccess =
     FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE;
 
-/// What openBeneath() opens. Phase C adds the entries a read needs.
+/// What openBeneath() opens. None is opened as FILE_NON_DIRECTORY_FILE: its STATUS_FILE_IS_A_DIRECTORY maps
+/// to ERROR_ACCESS_DENIED, which could not be told from a real denial.
 enum class BeneathEntry : uint8_t
 {
-    DirectoryCreatedIfMissing = 0,    ///< A directory, created when nothing has the name.
-    Last = DirectoryCreatedIfMissing, ///< The last enumerator: what the table of entries is checked against.
+    DirectoryCreatedIfMissing = 0, ///< A directory, created when nothing has the name.
+    Directory = 1, ///< An existing directory, to walk through: FILE_OPEN, FILE_DIRECTORY_FILE.
+    Entry = 2,     ///< Any existing entry, looked at: FILE_OPEN, as a directory or not, whichever it is.
+    Last = Entry,  ///< The last enumerator: what the table of entries is checked against.
 };
 
 /// Opens one entry beneath an open directory, relative to its handle (NtCreateFile with a RootDirectory),
@@ -47,6 +50,16 @@ enum class BeneathEntry : uint8_t
                                                              std::wstring_view name,
                                                              BeneathEntry entry,
                                                              DWORD access);
+
+/// Re-opens the object @p held refers to by its handle, resolving no name: NtCreateFile relative to it with
+/// an empty name, as ReOpenFile() does, so what is opened is what @p held looked at whatever its name is now.
+/// Opened itself (FILE_OPEN_REPARSE_POINT), recalling no data from remote storage (FILE_OPEN_NO_RECALL, which
+/// ReOpenFile() refuses as ERROR_INVALID_PARAMETER), sequentially, synchronously, shared for read, write and
+/// delete, not inheritable.
+/// @param held An open file. A null one is refused, before anything is opened.
+/// @param access The access the new handle is opened with; SYNCHRONIZE is always added.
+/// @return The new handle; ERROR_ACCESS_DENIED for a null @p held; or the Win32 error the NTSTATUS maps to.
+[[nodiscard]] std::expected<UniqueHandle, DWORD> reopenHeld(HANDLE held, DWORD access);
 
 /// @return Whether @p handle is a name-surrogate reparse point (junction, symlink, mount point):
 ///         GetFileInformationByHandleEx(FileAttributeTagInfo); an unanswerable query counts as one.
