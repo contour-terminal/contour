@@ -150,6 +150,8 @@ add_library(orchestrator_view STATIC
     view/BoardMarkdown.hpp
     view/StatusBoard.cpp
     view/StatusBoard.hpp
+    view/TextEdit.cpp
+    view/TextEdit.hpp
     view/Theme.cpp
     view/Theme.hpp
     view/Transcript.cpp
@@ -216,6 +218,7 @@ if(ORCHESTRATOR_TESTING)
         view/Sections_test.cpp
         view/BoardMarkdown_test.cpp
         view/StatusBoard_test.cpp
+        view/TextEdit_test.cpp
         view/Transcript_test.cpp
         view/ViewFixtures.cpp
         view/ViewFixtures.hpp

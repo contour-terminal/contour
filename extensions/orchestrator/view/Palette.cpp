@@ -21,6 +21,7 @@
 #include <orchestrator/core/Timeline.hpp>
 #include <orchestrator/core/Utf8.hpp>
 #include <orchestrator/view/Actions.hpp>
+#include <orchestrator/view/TextEdit.hpp>
 #include <orchestrator/view/Theme.hpp>
 
 using namespace std::string_view_literals;
@@ -110,6 +111,12 @@ std::optional<UiAction> applyPaletteKey(core::tui::KeyEvent const& key,
     using core::tui::KeyCode;
     using core::tui::Modifier;
     auto& palette = *interaction.palette;
+    if (auto const edit = textEditOf(key))
+    {
+        applyTextEdit(palette.query, *edit);
+        palette.highlighted = 0;
+        return std::nullopt;
+    }
     // esc closes it and keeps the query; so does a key with Alt, which is how an esc reads when the next key
     // follows it in the same read.
     if (key.key == KeyCode::Escape || core::tui::hasModifier(key.modifiers, Modifier::Alt))
@@ -131,10 +138,6 @@ std::optional<UiAction> applyPaletteKey(core::tui::KeyEvent const& key,
                                                              : (palette.highlighted + 1) % count;
             return std::nullopt;
         }
-        case KeyCode::Backspace:
-            dropLastCodepoint(palette.query);
-            palette.highlighted = 0;
-            return std::nullopt;
         case KeyCode::Enter: {
             auto const entries = paletteEntries(context.selected, context.engine);
             auto const matches = paletteMatches(entries, palette.query);
