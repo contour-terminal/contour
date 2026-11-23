@@ -4,7 +4,8 @@
 /// @file
 /// What every Windows spawn of a program into a held directory shares beyond the directory's own check
 /// (Win32HeldDirectory.hpp): the test that a candidate program is a file to run, and the kill-on-close job
-/// the child's tree runs in. PipedProcessRunner and Process::start both spawn that way.
+/// the child's tree runs in -- and how a pseudoconsole child's job is closed once its console was.
+/// PipedProcessRunner and Process::start both spawn that way.
 
 #ifdef _WIN32
 
@@ -14,6 +15,7 @@
     #include <core/Utf8Path.hpp>
     #include <core/platform/NativeFileSystem.hpp>
 
+    #include <chrono>
     #include <expected>
     #include <string>
     #include <system_error>
@@ -56,6 +58,23 @@ inline constexpr auto KillOnCloseJobLimits =
         return std::unexpected(lastError());
     return setJobLimits(job.get(), KillOnCloseJobLimits).transform([&job] { return std::move(job); });
 }
+
+/// How long a held-directory child's tree outlives its closed console before its job is closed: the time
+/// Windows gives a console process to handle CTRL_CLOSE_EVENT.
+inline constexpr auto ConsoleCloseGrace = std::chrono::seconds { 5 };
+
+/// Closes @p job once @p process has exited or @p grace has passed, whichever is first, on the thread pool
+/// (CreateThreadpoolWait; the callback closes the job and then its own wait object). Owns both handles; where
+/// the wait cannot be made, the job is closed at once.
+///
+/// It outlives whoever called it, on purpose: a Process is freed without waiting for its child (~Process),
+/// and the child's console having been closed, its leader is owed the grace to handle that before what it
+/// started is ended. Nothing is lost should this process exit first: its exit closes the job's handle all the
+/// same, which ends the tree at once.
+/// @param job The job to close: a kill-on-close one, so that closing its last handle ends its tree.
+/// @param process Its leader, open for SYNCHRONIZE.
+/// @param grace How long the leader is given to exit by itself: ConsoleCloseGrace, but for a test.
+void closeJobAfter(UniqueHandle job, UniqueHandle process, std::chrono::milliseconds grace);
 
 } // namespace vtpty
 

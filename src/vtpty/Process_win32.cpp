@@ -78,6 +78,28 @@ namespace
         return entries;
     }
 
+    /// The environment a child is given, and the PATH in it.
+    struct ChildEnvironment
+    {
+        std::vector<std::string> entries; ///< "NAME=VALUE", UTF-8: inherited, less what is removed, plus env.
+        std::string searchPath; ///< The value of its PATH, its name read as Windows reads it; or empty.
+    };
+
+    /// @return The environment @p exec's child is given -- this process's own, less exec.removedEnvironment,
+    ///         plus exec.env, names compared as Windows compares them -- and the PATH a program is found on.
+    [[nodiscard]] ChildEnvironment childEnvironmentOf(Process::ExecInfo const& exec)
+    {
+        auto const inherited = inheritedEnvironment();
+        auto entries =
+            buildWindowsEnvironment(std::vector<std::string_view> { inherited.begin(), inherited.end() },
+                                    exec.env,
+                                    exec.removedEnvironment);
+        auto searchPath = std::string {
+            environmentValue(entries, "PATH", EnvironmentNames::CaseInsensitive).value_or(std::string_view {})
+        };
+        return ChildEnvironment { .entries = std::move(entries), .searchPath = std::move(searchPath) };
+    }
+
     HRESULT initializeStartupInfoAttachedToPTY(STARTUPINFOEXW& startupInfoEx, ConPty& pty)
     {
         // Initializes the specified startup info struct with the required properties and
@@ -178,10 +200,6 @@ namespace
             StartFailure { .error = StartError::SpawnFailed, .detail = std::move(detail) });
     }
 
-    /// How long a held-directory child's tree outlives its closed console before its job is closed: the time
-    /// Windows gives a console process to handle CTRL_CLOSE_EVENT.
-    constexpr auto ConsoleCloseGrace = std::chrono::seconds { 5 };
-
     /// What a deferred close of a job owns until it runs: the job, and the process whose exit ends the wait.
     struct DeferredJobClose
     {
@@ -204,41 +222,33 @@ namespace
         CloseThreadpoolWait(wait);
     }
 
-    /// Closes @p job once @p process has exited or @p grace has passed, whichever is first, on the thread
-    /// pool (CreateThreadpoolWait; the callback closes the job and then its own wait object). Owns both
-    /// handles.
-    ///
-    /// It outlives the Process that called it, on purpose: a Process is freed without waiting for its child
-    /// (~Process), and the child's console having been closed, its leader is owed the grace to handle that
-    /// before what it started is ended. Nothing is lost should this process exit first: its exit closes the
-    /// job's handle all the same, which ends the tree at once.
-    /// @param job The job to close: a kill-on-close one, so that closing its last handle ends its tree.
-    /// @param process Its leader, open for SYNCHRONIZE.
-    /// @param grace How long the leader is given to exit by itself.
-    void closeJobAfter(UniqueHandle job, UniqueHandle process, std::chrono::milliseconds grace)
-    {
-        auto pending = std::make_unique<DeferredJobClose>(std::move(job), std::move(process));
-        auto* const wait = CreateThreadpoolWait(&closeDeferredJob, pending.get(), nullptr);
-        if (wait == nullptr)
-        {
-            ptyLog()("Could not defer closing a job; it is closed now: {}",
-                     core::systemErrorMessage(GetLastError()));
-            return; // pending goes, and the job with it
-        }
-        // Relative, in 100 ns units: a negative due time.
-        using FileTimeTicks = std::chrono::duration<std::int64_t, std::ratio<1, 10'000'000>>;
-        auto const due =
-            static_cast<std::uint64_t>(-std::chrono::duration_cast<FileTimeTicks>(grace).count());
-        auto dueTime = FILETIME { .dwLowDateTime = static_cast<DWORD>(due & 0xFFFF'FFFFU),
-                                  .dwHighDateTime = static_cast<DWORD>(due >> 32U) };
-        SetThreadpoolWait(wait, pending->process.get(), &dueTime);
-        std::ignore = pending.release(); // the callback's from here on
-    }
 } // anonymous namespace
+
+void closeJobAfter(UniqueHandle job, UniqueHandle process, std::chrono::milliseconds grace)
+{
+    auto pending = std::make_unique<DeferredJobClose>(std::move(job), std::move(process));
+    auto* const wait = CreateThreadpoolWait(&closeDeferredJob, pending.get(), nullptr);
+    if (wait == nullptr)
+    {
+        ptyLog()("Could not defer closing a job; it is closed now: {}",
+                 core::systemErrorMessage(GetLastError()));
+        return; // pending goes, and the job with it
+    }
+    // Relative, in 100 ns units: a negative due time.
+    using FileTimeTicks = std::chrono::duration<std::int64_t, std::ratio<1, 10'000'000>>;
+    auto const due = static_cast<std::uint64_t>(-std::chrono::duration_cast<FileTimeTicks>(grace).count());
+    auto dueTime = FILETIME { .dwLowDateTime = static_cast<DWORD>(due & 0xFFFF'FFFFU),
+                              .dwHighDateTime = static_cast<DWORD>(due >> 32U) };
+    SetThreadpoolWait(wait, pending->process.get(), &dueTime);
+    std::ignore = pending.release(); // the callback's from here on
+}
 
 struct Process::Private
 {
-    // Declared first, so destroyed last: the guard outlives the job, whose closing ends the tree it guards.
+    // Declared first, so destroyed last: the guard outlives the job held here, whose closing ends the tree it
+    // guards. Not every job, though: one handed to closeJobAfter() by ~Process, or given up by
+    // releaseChild(), outlives the guard, which then stays only as long as the child keeps the directory as
+    // its current one.
 
     /// A held-directory child's directory, guarded so that no other directory takes the name it was started
     /// at (see HeldDirectoryEntry): released once the child has ended. None for a child started otherwise.
@@ -304,19 +314,13 @@ StartResult Process::Private::startInHeldDirectory(Process& self)
     if (!entry)
         return spawnFailed(heldEntryDetail(entry.error(), held.resolvedPath()));
 
-    // The environment the child is given, and the program found on its PATH, names read as Windows reads
-    // them.
-    auto const inherited = inheritedEnvironment();
-    auto const environment =
-        buildWindowsEnvironment(std::vector<std::string_view> { inherited.begin(), inherited.end() },
-                                exec.env,
-                                exec.removedEnvironment);
-    auto environmentBlock = windowsEnvironmentBlock(environment);
+    // The environment the child is given, and the program found on its PATH.
+    auto const environment = childEnvironmentOf(exec);
+    auto environmentBlock = windowsEnvironmentBlock(environment.entries);
     if (!environmentBlock)
         return spawnFailed("The environment configured for it is not UTF-8.");
-    auto const searchPath = environmentValue(environment, "PATH", EnvironmentNames::CaseInsensitive)
-                                .value_or(std::string_view {});
-    auto const program = findWindowsHeldDirectoryProgram(exec.program, searchPath, isExecutableProgram);
+    auto const program =
+        findWindowsHeldDirectoryProgram(exec.program, environment.searchPath, isExecutableProgram);
     if (!program)
         return spawnFailed(std::format(R"(The program "{}" was not found.)", exec.program));
 
@@ -422,14 +426,7 @@ HeldDirectorySpawn Process::heldDirectorySpawn(SandboxEscape /*escape*/)
 bool Process::findsProgram(ExecInfo const& exec)
 {
     // The child's PATH as start() assembles it; a relative path names a file in this process's directory.
-    auto const inherited = inheritedEnvironment();
-    auto const environment =
-        buildWindowsEnvironment(std::vector<std::string_view> { inherited.begin(), inherited.end() },
-                                exec.env,
-                                exec.removedEnvironment);
-    auto const searchPath = std::string {
-        environmentValue(environment, "PATH", EnvironmentNames::CaseInsensitive).value_or(std::string_view {})
-    };
+    auto const searchPath = childEnvironmentOf(exec).searchPath;
     // A held directory's program is looked up as startInHeldDirectory() looks it up: an .exe on an absolute
     // entry of that PATH, or nothing -- so a program its spawn would refuse is named missing beforehand.
     if (exec.directory)
@@ -459,12 +456,8 @@ StartResult Process::start()
     // The child's environment is handed to it, as on POSIX, rather than set in this process's own for the
     // child to inherit: any other thread reading that meanwhile -- the daemon, a second tab spawning, a log
     // sink -- would read the child's values.
-    auto const inherited = inheritedEnvironment();
-    auto const environment =
-        buildWindowsEnvironment(std::vector<std::string_view> { inherited.begin(), inherited.end() },
-                                _d->exec.env,
-                                _d->exec.removedEnvironment);
-    auto environmentBlock = windowsEnvironmentBlock(environment);
+    auto const environment = childEnvironmentOf(_d->exec);
+    auto environmentBlock = windowsEnvironmentBlock(environment.entries);
     if (!environmentBlock)
         return std::unexpected(StartFailure { .error = StartError::SpawnFailed,
                                               .detail = "The environment configured for it is not UTF-8." });
@@ -473,10 +466,7 @@ StartResult Process::start()
     // ("wsl.exe -d Ubuntu"), the command line it spells -- looked up on the PATH the child is given. A
     // relative path names a file in this process's directory, not the child's: CreateProcess finds the
     // program before the child has a directory of its own.
-    auto const searchPath = std::string {
-        environmentValue(environment, "PATH", EnvironmentNames::CaseInsensitive).value_or(std::string_view {})
-    };
-    auto const search = ProgramSearch { .path = searchPath,
+    auto const search = ProgramSearch { .path = environment.searchPath,
                                         .workingDirectory = {},
                                         .fileSystem = core::platform::NativeFileSystem::instance() };
     auto invocation = invocationToRun(_d->exec.program, _d->exec.arguments, programsIn(search));
@@ -588,8 +578,9 @@ std::expected<std::unique_ptr<Process>, AdoptError> Process::adopt(AdoptedChild 
     process->_d->processInfo.hProcess = handle;
     process->_d->processInfo.dwProcessId = static_cast<DWORD>(child.pid);
     // Its tree's job, where it runs in one: this Process ends it, as the one that started the child did. No
-    // guard of its directory comes with it, nor is one needed: by now the child's loader has long made the
-    // directory its current one, which Windows holds against a rename as the guard did.
+    // guard of its directory comes with it: by now the child's loader has long made the directory its current
+    // one, which Windows holds against a rename as the guard did -- while the child keeps that directory as
+    // its current directory. One that changed it has no claim on the name left, nor did it ask for one.
     if (!child.job.isNone())
     {
         auto* const job = child.job.native();
@@ -636,7 +627,8 @@ std::optional<AdoptedChild> Process::releaseChild()
     }
     // The guard of its directory stays here until this Process goes. It ends nothing -- it only keeps the
     // directory's name -- and cannot cross: by the time a child is given up, its loader has long made the
-    // directory its current one, which Windows holds against a rename as the guard does.
+    // directory its current one, which Windows holds against a rename as the guard does, while the child
+    // keeps that directory as its current directory.
     return child;
 }
 

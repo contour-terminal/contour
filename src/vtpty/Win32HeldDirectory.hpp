@@ -23,12 +23,14 @@ namespace vtpty
 /// Why a held directory cannot be a child's current directory.
 enum class HeldDirectoryEntryError : uint8_t
 {
-    Unbacked = 0,       ///< The handle holds no directory (DirectoryHandle::unbacked).
-    Removed = 1,        ///< The directory was removed while held.
-    Replaced = 2,       ///< Its resolved path names another directory now (or nothing).
-    TooLong = 3,        ///< Its resolved path is longer than MaxWindowsCurrentDirectoryUnits.
-    NotUtf8 = 4,        ///< Its resolved path is not UTF-8.
-    Unguardable = 5,    ///< Another handle open on it may delete or rename it, so it cannot be guarded.
+    Unbacked = 0, ///< The handle holds no directory (DirectoryHandle::unbacked).
+    Removed = 1,  ///< The directory was removed while held.
+    Replaced = 2, ///< Its resolved path names another directory now (or nothing).
+    TooLong = 3,  ///< Its resolved path is longer than MaxWindowsCurrentDirectoryUnits.
+    NotUtf8 = 4,  ///< Its resolved path is not UTF-8.
+    /// Another handle open on it holds DELETE access, or does not share reading (the guard lists it), so it
+    /// cannot be guarded.
+    Unguardable = 5,
     Last = Unguardable, ///< The last enumerator: what tables of it are checked against.
 };
 
@@ -46,8 +48,11 @@ enum class HeldDirectoryEntryError : uint8_t
 /// releases it once the child has been reaped (PipedProcessRunner does; Process::start must too).
 ///
 /// Residual: the path's drive letter, a DOS device name, may be redefined (DefineDosDevice, `subst`) in the
-/// same logon session between the check and the child's loader; and on a remote file system the share modes
-/// are the server's to enforce.
+/// same logon session between the check and the child's loader; on a remote file system the share modes are
+/// the server's to enforce; and a volume mounted on a folder of the path breaks the ancestors' hold at that
+/// folder: what is open beneath it is on another volume, so the mount-point folder itself can be renamed. (A
+/// held directory that is the root of a folder-mounted volume is refused as Replaced: its path names the
+/// mount-point folder, which is not followed.)
 struct HeldDirectoryEntry
 {
     std::wstring path;     ///< resolvedPath(), UTF-16: what CreateProcessW is given.
@@ -63,8 +68,8 @@ struct HeldDirectoryEntry
 /// leads back to it: the name itself is opened, and a junction may be retargeted once it was checked.
 /// @param held The directory, held open.
 /// @return What to pass to CreateProcessW, and to keep while the child runs; or why it cannot be.
-///         Unguardable where another handle open on the directory may delete it (it holds DELETE access, or
-///         shares no writing).
+///         Unguardable where another handle open on the directory holds DELETE access, or does not share
+///         reading: the guard needs FILE_LIST_DIRECTORY.
 [[nodiscard]] std::expected<HeldDirectoryEntry, HeldDirectoryEntryError> prepareHeldDirectoryEntry(
     DirectoryHandle const& held);
 
