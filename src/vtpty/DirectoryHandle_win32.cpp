@@ -73,7 +73,8 @@ namespace
     /// Opens what @p path names, following every link on the way; a directory as well as a file.
     /// @param path The path, UTF-8; relative to the current directory, or absolute, of any length.
     /// @param access The access the handle is opened with.
-    /// @return The handle, shared for read, write and delete, not inheritable; or why it could not be opened.
+    /// @return The handle, shared for read, write and delete, not inheritable; NotADirectory, before anything
+    ///         is opened, where @p path names a device (isFileSystemPath()); or why it could not be opened.
     [[nodiscard]] std::expected<UniqueHandle, DirectoryError> openFollowing(std::string_view path,
                                                                             DWORD access)
     {
@@ -83,7 +84,12 @@ namespace
         auto const full = fullPathOf(wide->native());
         if (full.empty())
             return std::unexpected(directoryError(GetLastError()));
-        auto const verbatim = core::pathFromTrustedUtf8(verbatimPathOf(core::pathToUtf8(full)));
+        auto const fullUtf8 = core::pathToUtf8(full);
+        // A device is never opened: opening one (a serial port, the console) can block or act. Checked on
+        // the full path, which spells a bare `NUL` or `COM1` as `\\.\NUL`, `\\.\COM1`.
+        if (!isFileSystemPath(fullUtf8))
+            return std::unexpected(DirectoryError::NotADirectory);
+        auto const verbatim = core::pathFromTrustedUtf8(verbatimPathOf(fullUtf8));
         auto handle = UniqueHandle { CreateFileW(verbatim.c_str(),
                                                  access,
                                                  ShareAll,
@@ -182,7 +188,14 @@ namespace
                                      BeneathEntry::DirectoryCreatedIfMissing,
                                      HeldDirectoryAccess);
             if (!child)
-                return std::unexpected(directoryError(child.error()));
+            {
+                // In a removed parent NTFS answers STATUS_DELETE_PENDING, an access error; mkdirat() in a
+                // removed directory is ENOENT on POSIX, so Missing.
+                auto const meaning = directoryError(child.error());
+                if (meaning == DirectoryError::AccessDenied && isRemovedHandle(parent.nativeHandle()))
+                    return std::unexpected(DirectoryError::Missing);
+                return std::unexpected(meaning);
+            }
             // A junction, symlink or mount point in the name's place was opened itself: refused, as a
             // symlink is on POSIX, so that nothing is ever made in its target.
             if (isNameSurrogate(child->get()))

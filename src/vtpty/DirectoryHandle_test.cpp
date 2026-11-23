@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/DirectoryHandle.hpp>
 #include <vtpty/ProcessRunner.hpp>
+#ifdef _WIN32
+    #include <vtpty/Win32OpenBeneath.hpp>
+#endif
 
 #include <core/Utf8Path.hpp>
 #include <core/platform/Clock.hpp>
@@ -186,11 +189,12 @@ struct MountPointHeader
 };
 
 /// Makes @p link a junction to the directory @p target: a redirection any user may create, unlike a symlink.
-/// @return Whether it was made.
-[[nodiscard]] bool createJunction(std::filesystem::path const& link, std::filesystem::path const& target)
+/// @return Nothing once it is made; or the Win32 error that stopped it.
+[[nodiscard]] std::expected<void, DWORD> createJunction(std::filesystem::path const& link,
+                                                        std::filesystem::path const& target)
 {
     if (CreateDirectoryW(link.c_str(), nullptr) == FALSE)
-        return false;
+        return std::unexpected(GetLastError());
     auto const handle = CreateFileW(link.c_str(),
                                     GENERIC_WRITE,
                                     0,
@@ -199,7 +203,7 @@ struct MountPointHeader
                                     FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
                                     nullptr);
     if (handle == INVALID_HANDLE_VALUE)
-        return false;
+        return std::unexpected(GetLastError());
 
     auto const printName = std::filesystem::absolute(target).native();
     auto const substituteName = L"\\??\\" + printName;
@@ -232,8 +236,11 @@ struct MountPointHeader
                                      0,
                                      &returned,
                                      nullptr);
+    auto const error = GetLastError();
     CloseHandle(handle);
-    return set != FALSE;
+    if (set == FALSE)
+        return std::unexpected(error);
+    return {};
 }
 
 /// @return @p p's canonical path, in UTF-8: what a directory handle's resolvedPath() is compared with.
@@ -270,7 +277,7 @@ TEST_CASE("DirectoryHandle: open reads the canonical path from the handle", "[pr
     CHECK_FALSE(opened->resolvedPath().starts_with(R"(\\?\)"));
 
     auto const junction = directory.path() / "j";
-    REQUIRE(createJunction(junction, real));
+    REQUIRE(createJunction(junction, real).has_value());
     auto const viaJunction = opener.open(pathToUtf8(junction));
     REQUIRE(viaJunction.has_value());
     CHECK(viaJunction->resolvedPath() == canonicalOf(real));
@@ -394,7 +401,7 @@ TEST_CASE("DirectoryHandle: createBeneath refuses what stands in the way", "[pro
     auto const& dir = directory.path();
     std::ofstream { dir / "file" } << "x";
     std::filesystem::create_directory(dir / "elsewhere");
-    REQUIRE(createJunction(dir / "junction", dir / "elsewhere"));
+    REQUIRE(createJunction(dir / "junction", dir / "elsewhere").has_value());
     auto& opener = vtpty::nativeDirectoryOpener();
     auto const parent = opener.open(pathToUtf8(dir));
     REQUIRE(parent.has_value());
@@ -466,13 +473,87 @@ TEST_CASE("DirectoryHandle: createBeneath follows the held parent, not its name"
     REQUIRE(parent.has_value());
 
     std::filesystem::rename(dir / "a", dir / "a.old");
-    REQUIRE(createJunction(dir / "a", dir / "elsewhere"));
+    REQUIRE(createJunction(dir / "a", dir / "elsewhere").has_value());
     auto const created = opener.createBeneath(*parent, "child");
 
     REQUIRE(created.has_value());
     CHECK(std::filesystem::is_directory(dir / "a.old" / "child"));
     CHECK(std::filesystem::is_empty(dir / "elsewhere"));
     CHECK(created->resolvedPath() == canonicalOf(dir / "a.old") + "\\child");
+}
+
+TEST_CASE("DirectoryHandle: openBeneath refuses what is not one component beneath a directory",
+          "[processrunner]")
+{
+    using namespace std::string_view_literals;
+    auto const directory = core::testing::ScopedTempDir { "contour-directoryhandle" };
+    auto const& dir = directory.path();
+    auto const parent = vtpty::nativeDirectoryOpener().open(pathToUtf8(dir));
+    REQUIRE(parent.has_value());
+
+    for (auto const name: { L""sv, L"a\\b"sv, L"a/b"sv })
+    {
+        auto const opened = vtpty::openBeneath(parent->nativeHandle(),
+                                               name,
+                                               vtpty::BeneathEntry::DirectoryCreatedIfMissing,
+                                               vtpty::HeldDirectoryAccess);
+        REQUIRE_FALSE(opened.has_value());
+        CHECK(opened.error() == DWORD { ERROR_ACCESS_DENIED });
+    }
+    auto const unparented = vtpty::openBeneath(
+        nullptr, L"x", vtpty::BeneathEntry::DirectoryCreatedIfMissing, vtpty::HeldDirectoryAccess);
+    REQUIRE_FALSE(unparented.has_value());
+    CHECK(unparented.error() == DWORD { ERROR_ACCESS_DENIED });
+    CHECK(std::filesystem::is_empty(dir));
+}
+
+TEST_CASE("DirectoryHandle: createBeneath in a removed directory is Missing", "[processrunner]")
+{
+    auto const directory = core::testing::ScopedTempDir { "contour-directoryhandle" };
+    auto const a = directory.path() / "a";
+    std::filesystem::create_directory(a);
+    auto& opener = vtpty::nativeDirectoryOpener();
+    auto const parent = opener.open(pathToUtf8(a));
+    REQUIRE(parent.has_value());
+    REQUIRE(std::filesystem::remove(a));
+    REQUIRE(parent->isRemoved());
+
+    // As mkdirat() in a removed directory is ENOENT on POSIX.
+    CHECK(refusalOf(opener.createBeneath(*parent, "child")) == vtpty::DirectoryError::Missing);
+}
+
+TEST_CASE("DirectoryHandle: open refuses the device namespace", "[processrunner]")
+{
+    auto& opener = vtpty::nativeDirectoryOpener();
+    for (auto const* const path: { "NUL", "COM1", "CON", R"(\\.\COM1)", R"(\\?\GLOBALROOT\Device)" })
+    {
+        CAPTURE(path);
+        CHECK(refusalOf(opener.open(path)) == vtpty::DirectoryError::NotADirectory);
+    }
+}
+
+TEST_CASE("DirectoryHandle: a held directory's parent may be removed, but not renamed", "[processrunner]")
+{
+    auto const directory = core::testing::ScopedTempDir { "contour-directoryhandle" };
+    auto const& dir = directory.path();
+    std::filesystem::create_directories(dir / "a" / "b");
+    auto const held = vtpty::nativeDirectoryOpener().open(pathToUtf8(dir / "a" / "b"));
+    REQUIRE(held.has_value());
+
+    // NTFS refuses to rename a directory while anything beneath it is open, whatever that was shared for;
+    // POSIX allows it. A known Windows difference (the roadmap's "Known Windows differences").
+    auto renamed = std::error_code {};
+    std::filesystem::rename(dir / "a", dir / "a2", renamed);
+    CHECK(renamed.value() == ERROR_ACCESS_DENIED);
+    CHECK(std::filesystem::is_directory(dir / "a" / "b"));
+
+    // Removing the tree, as `git worktree remove` does, succeeds: the held directory goes with it.
+    auto removed = std::error_code {};
+    std::filesystem::remove_all(dir / "a", removed);
+    CHECK_FALSE(removed);
+    CHECK_FALSE(std::filesystem::exists(dir / "a"));
+    CHECK_FALSE(std::filesystem::exists(dir / "a" / "b"));
+    CHECK(held->isRemoved());
 }
 
 TEST_CASE("DirectoryHandle: an unbacked handle holds no HANDLE", "[processrunner]")

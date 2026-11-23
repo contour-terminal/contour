@@ -28,4 +28,11 @@ namespace vtpty
 ///         `\\s\sh\a` → `\\?\UNC\s\sh\a`; a path already starting `\\?\` or `\\.\` unchanged.
 [[nodiscard]] std::string verbatimPathOf(std::string_view fullPath);
 
+/// @param fullPath An absolute path as GetFullPathNameW spells it, UTF-8.
+/// @return Whether @p fullPath names an entry of a file system rather than a device: a drive path
+///         (`C:\a`), a UNC path (`\\s\sh\a`), or the verbatim form of either (`\\?\C:\a`, `\\?\UNC\s\sh\a`).
+///         Every other path in the `\\.\` or `\\?\` namespace (`\\.\COM1`, `\\?\GLOBALROOT\Device`,
+///         `\\?\C:`, the volume itself) is not.
+[[nodiscard]] bool isFileSystemPath(std::string_view fullPath) noexcept;
+
 } // namespace vtpty

@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/Win32OpenBeneath.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <limits>
+#include <ranges>
 #include <string>
 #include <utility>
 
@@ -16,6 +19,7 @@ namespace
     /// How NtCreateFile opens one BeneathEntry.
     struct EntryRow
     {
+        BeneathEntry entry;
         ULONG disposition;
         ULONG options;
     };
@@ -23,10 +27,25 @@ namespace
     /// One row per BeneathEntry, in its order. Every row opens a reparse point itself
     /// (FILE_OPEN_REPARSE_POINT), never what it names.
     constexpr auto EntryRows = std::to_array<EntryRow>({
-        // BeneathEntry::DirectoryCreatedIfMissing
-        { .disposition = FILE_OPEN_IF,
+        { .entry = BeneathEntry::DirectoryCreatedIfMissing,
+          .disposition = FILE_OPEN_IF,
           .options = FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT },
     });
+    // A row per enumerator, each at its enumerator's index: a new BeneathEntry is a new row, here.
+    static_assert(EntryRows.size() == std::to_underlying(BeneathEntry::Last) + std::size_t { 1 });
+    static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, EntryRows.size()),
+                                      [](std::size_t index) {
+                                          return std::to_underlying(EntryRows.at(index).entry) == index;
+                                      }),
+                  "EntryRows is in BeneathEntry order");
+
+    /// @param name What openBeneath() was asked to open.
+    /// @return Whether @p name is one component: not empty, and no separator, so that NtCreateFile neither
+    ///         reopens the parent itself nor walks into a subdirectory.
+    [[nodiscard]] bool isOneComponent(std::wstring_view name) noexcept
+    {
+        return !name.empty() && !name.contains(L'\\') && !name.contains(L'/');
+    }
 
     /// The ntdll functions openBeneath() calls, looked up once.
     struct NtFunctions
@@ -51,6 +70,8 @@ std::expected<UniqueHandle, DWORD> openBeneath(HANDLE parent,
                                                BeneathEntry entry,
                                                DWORD access)
 {
+    if (parent == nullptr || !isOneComponent(name))
+        return std::unexpected(DWORD { ERROR_ACCESS_DENIED });
     auto const& nt = ntFunctions();
     if (nt.createFile == nullptr || nt.statusToDosError == nullptr)
         return std::unexpected(DWORD { ERROR_CALL_NOT_IMPLEMENTED });
@@ -77,8 +98,9 @@ std::expected<UniqueHandle, DWORD> openBeneath(HANDLE parent,
     auto const& row = EntryRows.at(std::to_underlying(entry));
     auto status = IO_STATUS_BLOCK {};
     auto handle = HANDLE { nullptr };
+    // FILE_SYNCHRONOUS_IO_NONALERT requires SYNCHRONIZE.
     auto const result = nt.createFile(&handle,
-                                      access,
+                                      access | SYNCHRONIZE,
                                       &attributes,
                                       &status,
                                       nullptr,

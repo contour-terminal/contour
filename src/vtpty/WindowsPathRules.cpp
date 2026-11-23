@@ -82,4 +82,18 @@ std::string verbatimPathOf(std::string_view fullPath)
     return std::string(VerbatimPrefix) + std::string(fullPath);
 }
 
+bool isFileSystemPath(std::string_view fullPath) noexcept
+{
+    if (fullPath.starts_with(DevicePrefix))
+        return false;
+    if (fullPath.starts_with(VerbatimUncPrefix))
+        return true;
+    if (!fullPath.starts_with(VerbatimPrefix))
+        return true;
+    // `\\?\X:\`: a drive letter, a colon and the root. `\\?\X:` alone is the volume, not its root.
+    auto const rest = fullPath.substr(VerbatimPrefix.size());
+    return rest.size() >= 3 && asciiUpper(rest[0]) >= 'A' && asciiUpper(rest[0]) <= 'Z' && rest[1] == ':'
+           && rest[2] == '\\';
+}
+
 } // namespace vtpty

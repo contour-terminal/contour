@@ -81,3 +81,31 @@ TEST_CASE("verbatimPathOf adds the verbatim prefix", "[windowspathrules]")
     CHECK(vtpty::verbatimPathOf(R"(\\?\C:\a)") == R"(\\?\C:\a)");
     CHECK(vtpty::verbatimPathOf(R"(\\.\pipe\x)") == R"(\\.\pipe\x)");
 }
+
+TEST_CASE("isFileSystemPath accepts drive, UNC and their verbatim forms", "[windowspathrules]")
+{
+    for (auto const* const path:
+         { R"(C:\a)", R"(c:\)", R"(\\srv\share\a)", R"(\\?\C:\a)", R"(\\?\z:\)", R"(\\?\UNC\srv\share\a)" })
+    {
+        CAPTURE(path);
+        CHECK(vtpty::isFileSystemPath(path));
+    }
+}
+
+TEST_CASE("isFileSystemPath refuses the device namespace", "[windowspathrules]")
+{
+    for (auto const* const path: { R"(\\.\NUL)",
+                                   R"(\\.\COM1)",
+                                   R"(\\.\C:\a)",
+                                   R"(\\.\pipe\x)",
+                                   R"(\\?\GLOBALROOT\Device)",
+                                   R"(\\?\C:)",
+                                   R"(\\?\1:\a)",
+                                   R"(\\?\Volume{0}\a)",
+                                   R"(\\?\pipe\x)",
+                                   R"(\\?\)" })
+    {
+        CAPTURE(path);
+        CHECK_FALSE(vtpty::isFileSystemPath(path));
+    }
+}
