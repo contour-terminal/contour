@@ -476,8 +476,12 @@ A declared command runs only where its manifest binds it, and sees only what its
   the program's use of it. That is the residual, and it is confined to what is already writable inside the
   root.
 - **Environment.** Contour's own variables (`CONTOUR_*`), git's (`GIT_*`, but `GIT_SSH_COMMAND`, `GIT_SSH`
-  and `GIT_ASKPASS`) and gh's repository and host selection (`GH_REPO`, `GH_HOST`, `GH_ENTERPRISE_TOKEN`) are
-  withheld; everything the manifest declares is added, `command-env-for` replacing `command-env` by name.
+  and `GIT_ASKPASS`), gh's repository and host selection (`GH_REPO`, `GH_HOST`, `GH_ENTERPRISE_TOKEN`) and
+  glab's host, repository, group and remote selection (`GITLAB_HOST`, `GITLAB_URI`, `GL_HOST`,
+  `GITLAB_API_HOST`, `GITLAB_SSH_HOST`, `GITLAB_REPO`, `GITLAB_GROUP`, `GITLAB_HEAD_REPO`, `GLAB_REMOTE_ALIAS`,
+  `REMOTE_ALIAS`, `REMOTE_NICKNAME`) are withheld, so neither tool is steered to another instance or project
+  than the repository's remote names; `GH_TOKEN` and `GITLAB_TOKEN`, which log the tools in, are kept.
+  Everything the manifest declares is added, `command-env-for` replacing `command-env` by name.
 - **A missing program** is a refused start, never a vanished working directory.
 - **The program** is found before the spawn, on the PATH's absolute entries only, and that path is what
   runs -- for a command and an agent pane alike. An empty entry (the working directory, as `execvp()` reads
@@ -707,16 +711,25 @@ Key      | Meaning
 ---------|------------------------------------------------------------------------------------------------------
 `path`   | Required. The repository's checkout; `~` is the home directory.
 `name`   | What the dashboard calls it. Default: the name of its directory.
-`forge`  | Required. Where it lives: `github`, which the orchestrator reaches with `gh`.
+`forge`  | Required. Where it lives: `github`, which the orchestrator reaches with `gh`, or `gitlab`, which it reaches with `glab`.
 `remote` | The git remote that points at the forge. Default `origin`.
 `base`   | The branch an issue's worktree starts from. Default: the forge's default branch.
-`issues` | The searches that list the issues offered for work; none lists no issues. `{ source: forge, query: "<search>" }` searches the repository's forge, with `gh issue list --search`.
+`issues` | The searches that list the issues offered for work; none lists no issues. `{ source: forge, query: "<search>" }` searches the repository's forge, with `gh issue list --search`, or on GitLab the issues assigned to you, with `glab issue list --search`. `{ source: jira, jql: "<JQL>", site: "https://<site>" }` lists Jira's work items (below).
 
-**GitLab and Jira are enabled once their CLI output is recorded.** The orchestrator knows how to ask `glab`
-and Atlassian's `acli`, but it reads no tool's output that was never recorded from the real tool, so for now
-the configuration refuses `forge: gitlab` and an issue source `{ source: jira, jql: "<JQL>", site:
-"https://<site>" }`, with a line such as `repos[0].issues[0].source: is not yet supported: jira has no
-recorded fixture`.
+**GitLab.** The orchestrator asks `glab` for your open merge requests (`glab mr list --author=@me`), the
+project's default branch and, for a forge search, the issues assigned to you, each with `--output json` (on
+`glab issue list`, `-F` is `--output-format` and prints no JSON). It checks a merge request out with
+`glab mr checkout <n> --branch <branch>`. `glab`'s list carries no pipeline, so a merge request's CI state is
+what GitLab's `detailed_merge_status` says: `ci_still_running` is pending, `ci_must_pass` failing, anything
+else none, and no failing check is named. Log `glab` in for the host the remote names (`glab auth status`
+succeeds; `GITLAB_TOKEN` is passed through); the variables that would point it at another host or project are
+withheld (see [The daemon world](#the-daemon-world) above).
+
+**Jira.** An issue source `{ source: jira, jql: "<JQL>", site: "https://<site>" }` lists the work items its
+JQL finds, through Atlassian's `acli` (`acli jira workitem search --jql <JQL> --limit 100 --json`), which
+must be logged in (`acli jira auth status` succeeds). Both keys are required: `site` is an `https://` address
+with a host and no path, such as `https://example.atlassian.net`, and each item's link is built from it as
+`<site>/browse/<key>`.
 
 A `tasks` entry:
 
@@ -832,7 +845,6 @@ line the format does not know is counted and skipped, never fatal; the page says
   Windows packages do not carry the orchestrator.
 - **No agent tabs under Flatpak.** Where the shells run on the host, Contour cannot start a program in a
   directory it holds open, so the dashboard lists the work but cannot start an agent.
-- **GitHub only**, until GitLab's and Jira's command output is recorded (above).
 - **Claude Code only.** The agents are `claude`, and the transcript reads Claude Code's session log.
 
 ## Performance
