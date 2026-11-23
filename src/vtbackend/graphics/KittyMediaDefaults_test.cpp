@@ -72,7 +72,11 @@ TEST_CASE("KittyMediaDefaults.platformTemporaryRoots", "[kitty][media]")
     #else
     CHECK(holds(roots, "/tmp"));
     CHECK_FALSE(holds(roots, "/dev/shm"));
+        #ifdef __linux__
     CHECK(holds(platformTemporaryFileOnlyRoots(), "/dev/shm"));
+        #else
+    CHECK(platformTemporaryFileOnlyRoots().empty());
+        #endif
     #endif
 #endif
 }
@@ -136,7 +140,11 @@ TEST_CASE("KittyMediaDefaults.mediaPolicy_follows_the_settings", "[kitty][media]
         auto const settings = MediaSettings { .transmission = FileTransmission::Enabled,
                                               .allowList = { "/srv/pictures", "relative/dir" } };
         auto const policy = mediaPolicy(env, settings, "/home/nobody-here");
+    #ifdef VTBACKEND_KITTY_FILE_MEDIA
         CHECK(policy.transmission == FileTransmission::Enabled);
+    #else
+        CHECK(policy.transmission == FileTransmission::Disabled);
+    #endif
         CHECK(policy.allowedRoots == std::vector<std::filesystem::path> { "/srv/pictures" });
     }
     SECTION("an entry that opens the home directory is dropped")

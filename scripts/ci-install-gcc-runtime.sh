@@ -9,4 +9,4 @@ set -ex
 
 sudo "$(dirname "$0")/add-ppa.sh" ppa:ubuntu-toolchain-r/test
 sudo "$(dirname "$0")/apt-update.sh"
-sudo apt install -y libstdc++6
+sudo "$(dirname "$0")/apt-install.sh" libstdc++6
