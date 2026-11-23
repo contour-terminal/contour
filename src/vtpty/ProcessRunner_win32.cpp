@@ -3,6 +3,7 @@
 #include <vtpty/OverlappedPipe.hpp>
 #include <vtpty/ProcessRunner.hpp>
 #include <vtpty/Win32Handle.hpp>
+#include <vtpty/Win32HeldDirectory.hpp>
 #include <vtpty/WindowsCommandLine.hpp>
 #include <vtpty/WindowsProcessRules.hpp>
 
@@ -12,7 +13,6 @@
 
 #include <algorithm>
 #include <array>
-#include <bit>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -57,9 +57,6 @@ namespace
     /// The buffer of each output pipe.
     constexpr auto PipeBufferSize = std::uint32_t { 64 } * 1024;
 
-    /// The longest command line CreateProcessW() takes, in UTF-16 units, its terminating NUL not counted.
-    constexpr auto MaxCommandLine = std::size_t { 32766 };
-
     /// The completion key of wake()'s packets. Tokens, which key everything else, start at 1.
     constexpr auto WakeKey = ULONG_PTR { 0 };
 
@@ -97,6 +94,24 @@ namespace
         std::pair { DWORD { ERROR_EXE_MACHINE_TYPE_MISMATCH }, ProcessStartError::ProgramNotFound },
         std::pair { DWORD { ERROR_DIRECTORY }, ProcessStartError::DirectoryMissing },
     };
+
+    /// What a held working directory refused as a child's current directory means for the start: one row per
+    /// HeldDirectoryEntryError.
+    constexpr auto DirectoryErrors = std::array {
+        std::pair { HeldDirectoryEntryError::Unbacked, ProcessStartError::SpawnFailed },
+        std::pair { HeldDirectoryEntryError::Removed, ProcessStartError::DirectoryMissing },
+        std::pair { HeldDirectoryEntryError::Replaced, ProcessStartError::DirectoryMissing },
+        std::pair { HeldDirectoryEntryError::TooLong, ProcessStartError::SpawnFailed },
+        std::pair { HeldDirectoryEntryError::NotUtf8, ProcessStartError::SpawnFailed },
+    };
+
+    /// @return What @p error, a held working directory's refusal, means for the start.
+    [[nodiscard]] ProcessStartError directoryError(HeldDirectoryEntryError error) noexcept
+    {
+        auto const row = std::ranges::find(
+            DirectoryErrors, error, &std::pair<HeldDirectoryEntryError, ProcessStartError>::first);
+        return row == DirectoryErrors.end() ? ProcessStartError::SpawnFailed : row->second;
+    }
 
     /// @return What CreateProcessW()'s failure @p error means for the start.
     [[nodiscard]] ProcessStartError startError(DWORD error) noexcept
@@ -328,59 +343,6 @@ namespace
         }
     }
 
-    /// @return Which file @p handle is, by volume and file id; std::nullopt where neither can be read.
-    [[nodiscard]] std::optional<FILE_ID_INFO> fileIdOf(HANDLE handle) noexcept
-    {
-        auto id = FILE_ID_INFO {};
-        if (GetFileInformationByHandleEx(handle, FileIdInfo, &id, sizeof(id)) != FALSE)
-            return id;
-        // A file system without 128-bit ids (FAT) still has the 64-bit index.
-        auto info = BY_HANDLE_FILE_INFORMATION {};
-        if (GetFileInformationByHandle(handle, &info) == FALSE)
-            return std::nullopt;
-        id = FILE_ID_INFO {};
-        id.VolumeSerialNumber = info.dwVolumeSerialNumber;
-        auto const index = (static_cast<std::uint64_t>(info.nFileIndexHigh) << 32U) | info.nFileIndexLow;
-        id.FileId = std::bit_cast<FILE_ID_128>(std::array { index, std::uint64_t { 0 } });
-        return id;
-    }
-
-    /// Whether the directory at a held handle's path is the held one.
-    enum class DirectoryAtPath : uint8_t
-    {
-        Other = 0, ///< Another directory, or nothing, stands at its path.
-        Held,      ///< The held directory does.
-    };
-
-    /// Checks that @p directory's resolvedPath(), which is all CreateProcessW() takes, still names the
-    /// directory it holds open: the path is opened and its file id compared with the handle's. Run before
-    /// CreateProcessW() and again after it, while the child is still suspended, so that a directory swapped
-    /// in under the name at any time before the child could run is refused.
-    ///
-    /// Residual: a swap of the name to another directory and back again, both within the CreateProcessW()
-    /// call, goes unseen -- the child would run in the other directory. Only a handle-based process creation
-    /// could close that, and Win32 has none.
-    [[nodiscard]] DirectoryAtPath directoryAtPath(DirectoryHandle const& directory) noexcept
-    {
-        auto const path = core::toUtf16(directory.resolvedPath());
-        if (!path)
-            return DirectoryAtPath::Other;
-        auto const opened = UniqueHandle { CreateFileW(path->c_str(),
-                                                       FILE_READ_ATTRIBUTES,
-                                                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                                       nullptr,
-                                                       OPEN_EXISTING,
-                                                       FILE_FLAG_BACKUP_SEMANTICS,
-                                                       nullptr) };
-        if (!opened.valid())
-            return DirectoryAtPath::Other;
-        auto const held = fileIdOf(directory.nativeHandle());
-        auto const atPath = fileIdOf(opened.get());
-        auto const same = held && atPath && held->VolumeSerialNumber == atPath->VolumeSerialNumber
-                          && std::ranges::equal(held->FileId.Identifier, atPath->FileId.Identifier);
-        return same ? DirectoryAtPath::Held : DirectoryAtPath::Other;
-    }
-
     /// @return Whether @p candidate, absolute and UTF-8, names a file to run.
     [[nodiscard]] bool isExecutable(std::string const& candidate)
     {
@@ -447,7 +409,7 @@ namespace
         auto commandLine =
             core::toUtf16(buildWindowsCommandLine(spec.argv.front(), std::span { spec.argv }.subspan(1)));
         auto environment = windowsEnvironmentBlock(entries);
-        if (!wideProgram || !commandLine || commandLine->size() > MaxCommandLine || !environment)
+        if (!wideProgram || !commandLine || commandLine->size() > MaxWindowsCommandLineUnits || !environment)
             return std::unexpected(ProcessStartError::SpawnFailed);
         // An empty environment is still a block, never nullptr: that would hand over the daemon's.
         if (environment->size() < 2)
@@ -474,7 +436,7 @@ namespace
     /// handle of ours, and so hold a pipe of this child open.
     /// @return The process and its initial thread; or why it could not be started.
     [[nodiscard]] std::expected<PROCESS_INFORMATION, ProcessStartError> createSuspended(
-        Invocation& invocation, ChildEnds ends, std::optional<std::wstring> const& directory)
+        Invocation& invocation, ChildEnds ends, std::optional<HeldDirectoryEntry> const& directory)
     {
         auto inherited = std::array<HANDLE, 3> { ends.input.get(), ends.output.get(), ends.error.get() };
         auto attributes = AttributeList::create(1);
@@ -500,7 +462,7 @@ namespace
                                             TRUE,
                                             CreationFlags,
                                             invocation.environment.data(),
-                                            directory ? directory->c_str() : nullptr,
+                                            directory ? directory->path.c_str() : nullptr,
                                             &startup.StartupInfo,
                                             &info);
         auto const error = GetLastError();
@@ -731,18 +693,13 @@ std::expected<ProcessToken, ProcessStartError> PipedProcessRunner::start(Process
 {
     if (spec.argv.empty())
         return std::unexpected(ProcessStartError::ProgramNotFound);
-    auto directory = std::optional<std::wstring> {};
+    auto directory = std::optional<HeldDirectoryEntry> {};
     if (spec.workingDirectory)
     {
-        if (spec.workingDirectory->nativeHandle() == nullptr)
-            return std::unexpected(ProcessStartError::SpawnFailed);
-        if (spec.workingDirectory->isRemoved()
-            || directoryAtPath(*spec.workingDirectory) != DirectoryAtPath::Held)
-            return std::unexpected(ProcessStartError::DirectoryMissing);
-        auto wide = core::toUtf16(spec.workingDirectory->resolvedPath());
-        if (!wide)
-            return std::unexpected(ProcessStartError::SpawnFailed);
-        directory = std::move(*wide);
+        auto entry = prepareHeldDirectoryEntry(*spec.workingDirectory);
+        if (!entry)
+            return std::unexpected(directoryError(entry.error()));
+        directory = std::move(*entry);
     }
     auto invocation = invocationOf(spec);
     if (!invocation)
@@ -771,8 +728,13 @@ std::expected<ProcessToken, ProcessStartError> PipedProcessRunner::start(Process
         TerminateProcess(process.get(), 1);
         return std::unexpected(why);
     };
-    if (spec.workingDirectory && directoryAtPath(*spec.workingDirectory) != DirectoryAtPath::Held)
-        return kill(ProcessStartError::DirectoryMissing);
+    // Checked again with the child suspended: a directory swapped in under the name meanwhile is refused
+    // before the child could run in it (see prepareHeldDirectoryEntry()).
+    if (directory)
+    {
+        if (auto const confirmed = confirmHeldDirectoryEntry(*directory); !confirmed)
+            return kill(directoryError(confirmed.error()));
+    }
     if (AssignProcessToJobObject(job->get(), process.get()) == FALSE
         || ResumeThread(thread.get()) == static_cast<DWORD>(-1))
         return kill(ProcessStartError::SpawnFailed);

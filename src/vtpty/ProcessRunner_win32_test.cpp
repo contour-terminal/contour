@@ -17,8 +17,11 @@
 
     #include <vtpty/DirectoryHandle.hpp>
     #include <vtpty/ProcessRunner.hpp>
+    #include <vtpty/WindowsProcessRules.hpp>
+    #include <vtpty/testing/LongDirectory.hpp>
 
     #include <core/Utf8Path.hpp>
+    #include <core/WideString.hpp>
     #include <core/platform/Clock.hpp>
     #include <core/testing/EnvHelper.hpp>
     #include <core/testing/ScopedTempDir.hpp>
@@ -463,6 +466,24 @@ TEST_CASE("PipedProcessRunner: an unbacked working directory is refused", "[proc
     auto spec = fixture.spec({ "probe", "cwd" });
     spec.workingDirectory = vtpty::DirectoryHandle::unbacked(utf8(fixture.work));
     CHECK(fixture.refusal(std::move(spec)) == ProcessStartError::SpawnFailed);
+}
+
+TEST_CASE("PipedProcessRunner: a working directory too long to enter is refused", "[processrunner]")
+{
+    auto fixture = RunnerFixture {};
+    auto const base = core::toUtf16(fixture.spec({ "probe" }).workingDirectory->resolvedPath());
+    REQUIRE(base.has_value());
+    auto const chain =
+        vtpty::testing::LongDirectory::make(*base, vtpty::MaxWindowsCurrentDirectoryUnits + 1, L'x');
+    REQUIRE(chain.has_value());
+    auto opened = vtpty::nativeDirectoryOpener().open(utf8(chain->path()));
+    REQUIRE(opened.has_value());
+
+    auto const marker = fixture.directory.path() / "ran";
+    auto spec = fixture.spec({ "probe", "touch", utf8(marker) });
+    spec.workingDirectory = std::move(*opened);
+    CHECK(fixture.refusal(std::move(spec)) == ProcessStartError::SpawnFailed);
+    CHECK_FALSE(std::filesystem::exists(marker));
 }
 
 TEST_CASE("PipedProcessRunner: stdin is empty", "[processrunner]")

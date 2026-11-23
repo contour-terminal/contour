@@ -4,6 +4,7 @@
 #include <vtpty/ProgramLookup.hpp>
 
 #include <array>
+#include <cstddef>
 #include <optional>
 #include <span>
 #include <string>
@@ -17,6 +18,13 @@
 
 namespace vtpty
 {
+
+/// The longest command line CreateProcessW takes, in UTF-16 units.
+inline constexpr std::size_t MaxWindowsCommandLineUnits = 32'766;
+
+/// The longest current directory a Windows process may have, in UTF-16 units: MAX_PATH less the trailing `\`
+/// and the NUL.
+inline constexpr std::size_t MaxWindowsCurrentDirectoryUnits = 258;
 
 /// The extensions a program file may have to be started: one row, so that the rule is data.
 inline constexpr auto WindowsImageExtensions = std::array { std::string_view { ".exe" } };
