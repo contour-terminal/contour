@@ -2,6 +2,7 @@
 #include <vtpty/DirectoryHandle.hpp>
 #include <vtpty/ProcessRunner.hpp>
 
+#include <core/Utf8Path.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/testing/ScopedTempDir.hpp>
 
@@ -10,8 +11,6 @@
 #ifndef _WIN32
     #include <sys/stat.h>
 #else
-    #include <core/Utf8Path.hpp>
-
     #include <Windows.h>
     #include <winioctl.h>
 #endif
@@ -20,11 +19,13 @@
 #include <chrono>
 #include <cstddef>
 #include <cstring>
+#include <expected>
 #include <filesystem>
 #include <fstream>
 #include <optional>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -34,7 +35,7 @@ using namespace std::chrono_literals;
 TEST_CASE("DirectoryHandle: a missing directory", "[processrunner]")
 {
     auto const directory = core::testing::ScopedTempDir { "contour-directoryhandle" };
-    auto const opened = vtpty::nativeDirectoryOpener().open((directory.path() / "missing").string());
+    auto const opened = vtpty::nativeDirectoryOpener().open(core::pathToUtf8(directory.path() / "missing"));
     REQUIRE_FALSE(opened.has_value());
     CHECK(opened.error() == vtpty::DirectoryError::Missing);
 }
@@ -44,7 +45,7 @@ TEST_CASE("DirectoryHandle: a file", "[processrunner]")
     auto const directory = core::testing::ScopedTempDir { "contour-directoryhandle" };
     auto const file = directory.path() / "file";
     std::ofstream { file } << "x";
-    auto const opened = vtpty::nativeDirectoryOpener().open(file.string());
+    auto const opened = vtpty::nativeDirectoryOpener().open(core::pathToUtf8(file));
     REQUIRE_FALSE(opened.has_value());
     CHECK(opened.error() == vtpty::DirectoryError::NotADirectory);
 }
@@ -349,6 +350,129 @@ TEST_CASE("DirectoryHandle: a path longer than MAX_PATH", "[processrunner]")
     // ScopedTempDir removes by the plain spelling, which cannot reach this deep.
     auto error = std::error_code {};
     std::filesystem::remove_all(std::filesystem::path { L"\\\\?\\" + (base / component).native() }, error);
+}
+
+namespace
+{
+
+/// @return Why @p result is an error; none when it is a directory.
+[[nodiscard]] std::optional<vtpty::DirectoryError> refusalOf(
+    std::expected<vtpty::DirectoryHandle, vtpty::DirectoryError> const& result)
+{
+    if (result.has_value())
+        return std::nullopt;
+    return result.error();
+}
+
+} // namespace
+
+TEST_CASE("DirectoryHandle: createBeneath creates one directory, and opens one already there",
+          "[processrunner]")
+{
+    auto const directory = core::testing::ScopedTempDir { "contour-directoryhandle" };
+    auto const& dir = directory.path();
+    auto& opener = vtpty::nativeDirectoryOpener();
+    auto const parent = opener.open(pathToUtf8(dir));
+    REQUIRE(parent.has_value());
+
+    auto const created = opener.createBeneath(*parent, "x");
+    REQUIRE(created.has_value());
+    CHECK(created->nativeHandle() != nullptr);
+    CHECK(std::filesystem::is_directory(dir / "x"));
+    CHECK(created->resolvedPath() == canonicalOf(dir) + "\\x");
+    CHECK(opener.createBeneath(*parent, "x").has_value());
+    // Case-insensitive, as Win32 names are: "X" opens "x".
+    auto const upper = opener.createBeneath(*parent, "X");
+    REQUIRE(upper.has_value());
+    CHECK(upper->resolvedPath() == canonicalOf(dir) + "\\x");
+    CHECK(std::ranges::distance(std::filesystem::directory_iterator { dir }) == 1);
+}
+
+TEST_CASE("DirectoryHandle: createBeneath refuses what stands in the way", "[processrunner]")
+{
+    auto const directory = core::testing::ScopedTempDir { "contour-directoryhandle" };
+    auto const& dir = directory.path();
+    std::ofstream { dir / "file" } << "x";
+    std::filesystem::create_directory(dir / "elsewhere");
+    REQUIRE(createJunction(dir / "junction", dir / "elsewhere"));
+    auto& opener = vtpty::nativeDirectoryOpener();
+    auto const parent = opener.open(pathToUtf8(dir));
+    REQUIRE(parent.has_value());
+
+    CHECK(refusalOf(opener.createBeneath(*parent, "file")) == vtpty::DirectoryError::NotADirectory);
+    CHECK(refusalOf(opener.createBeneath(*parent, "junction")) == vtpty::DirectoryError::NotADirectory);
+    CHECK(std::filesystem::is_empty(dir / "elsewhere"));
+}
+
+TEST_CASE("DirectoryHandle: createBeneath refuses a directory symlink", "[processrunner]")
+{
+    auto const directory = core::testing::ScopedTempDir { "contour-directoryhandle" };
+    auto const& dir = directory.path();
+    std::filesystem::create_directory(dir / "elsewhere");
+    auto error = std::error_code {};
+    std::filesystem::create_directory_symlink(dir / "elsewhere", dir / "link", error);
+    if (error)
+        SKIP("no symlink privilege");
+    auto& opener = vtpty::nativeDirectoryOpener();
+    auto const parent = opener.open(pathToUtf8(dir));
+    REQUIRE(parent.has_value());
+
+    CHECK(refusalOf(opener.createBeneath(*parent, "link")) == vtpty::DirectoryError::NotADirectory);
+    CHECK(std::filesystem::is_empty(dir / "elsewhere"));
+}
+
+TEST_CASE("DirectoryHandle: createBeneath refuses names Win32 spells differently", "[processrunner]")
+{
+    using namespace std::string_view_literals;
+    auto const directory = core::testing::ScopedTempDir { "contour-directoryhandle" };
+    auto const& dir = directory.path();
+    auto& opener = vtpty::nativeDirectoryOpener();
+    auto const parent = opener.open(pathToUtf8(dir));
+    REQUIRE(parent.has_value());
+
+    for (auto const name: { ""sv,
+                            "."sv,
+                            ".."sv,
+                            "a/b"sv,
+                            "a\\b"sv,
+                            "x:stream"sv,
+                            "x::$INDEX_ALLOCATION"sv,
+                            "trail."sv,
+                            "trail "sv,
+                            "CON"sv,
+                            "nul.txt"sv,
+                            "COM1"sv,
+                            "a?b"sv,
+                            "a\0b"sv,
+                            "\xff"sv })
+    {
+        CAPTURE(name);
+        CHECK(refusalOf(opener.createBeneath(*parent, name)) == vtpty::DirectoryError::AccessDenied);
+    }
+    CHECK(std::filesystem::is_empty(dir));
+    CHECK(refusalOf(opener.createBeneath(vtpty::DirectoryHandle::unbacked(canonicalOf(dir)), "x"))
+          == vtpty::DirectoryError::AccessDenied);
+    CHECK(std::filesystem::is_empty(dir));
+}
+
+TEST_CASE("DirectoryHandle: createBeneath follows the held parent, not its name", "[processrunner]")
+{
+    auto const directory = core::testing::ScopedTempDir { "contour-directoryhandle" };
+    auto const& dir = directory.path();
+    std::filesystem::create_directory(dir / "a");
+    std::filesystem::create_directory(dir / "elsewhere");
+    auto& opener = vtpty::nativeDirectoryOpener();
+    auto const parent = opener.open(pathToUtf8(dir / "a"));
+    REQUIRE(parent.has_value());
+
+    std::filesystem::rename(dir / "a", dir / "a.old");
+    REQUIRE(createJunction(dir / "a", dir / "elsewhere"));
+    auto const created = opener.createBeneath(*parent, "child");
+
+    REQUIRE(created.has_value());
+    CHECK(std::filesystem::is_directory(dir / "a.old" / "child"));
+    CHECK(std::filesystem::is_empty(dir / "elsewhere"));
+    CHECK(created->resolvedPath() == canonicalOf(dir / "a.old") + "\\child");
 }
 
 TEST_CASE("DirectoryHandle: an unbacked handle holds no HANDLE", "[processrunner]")

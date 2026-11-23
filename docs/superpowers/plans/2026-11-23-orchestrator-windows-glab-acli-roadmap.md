@@ -37,6 +37,10 @@ Findings from the recording that shaped phase 1:
    POSIX) behind one type; `open` = `CreateFileW(FILE_FLAG_BACKUP_SEMANTICS)`, `canonical` =
    `GetFinalPathNameByHandleW`, `createBeneath` = `NtCreateFile` relative to the parent handle with
    `FILE_OPEN_REPARSE_POINT`, refusing reparse points. Port `DirectoryHandle_test`.
+   Gap left after it (plan `2026-11-23-orchestrator-windows-directory-handles.md`, "Out of scope"):
+   `vtextension`'s root grammar is POSIX-only (`RootPointer.cpp`, `RootResolution.cpp` refuse `C:\...` as
+   `NotAbsolute`), so `@repos`/`@worktrees` still do not resolve on Windows; a Windows path grammar in
+   `vtextension` needs its own phase before B–D are relied on for the orchestrator.
 3. **B — Windows process runner.** `CreateProcessW` suspended → Job Object (`KILL_ON_JOB_CLOSE`) → resume;
    overlapped pipes for stdout/stderr, pumped by `pump()` with the injected clock; PATH lookup over absolute
    entries with `PATHEXT` restricted to `.exe` (a `.cmd`/`.bat` is refused: no argument ever passes through
@@ -55,5 +59,5 @@ as regressions.
 
 - `vtextension_test` does not compile: `popen` at `src/vtextension/DaemonGuest_test.cpp:708`.
 - The `[consent]` case "DaemonExtensionRuntime: revoke…" fails.
-- `vthost_test`: `OwnedPanes_test.cpp:1171` ("pane-open is refused…") and `DaemonConsentKey_test.cpp:140` fail.
+- `vthost_test`: `DaemonConsentKey_test.cpp:140` fails.
 - `contour_e2e_daemon_live_upgrade` times out waiting for the daemons to bind (20 s).

@@ -16,12 +16,13 @@ namespace vtpty
 
 namespace
 {
-    /// Windows has no directory handles (nativeDirectoryOpener()): nothing is opened or looked at.
+    /// No Windows reader beneath a directory handle yet: nothing is opened or looked at.
     ///
-    /// The design a Windows reader is to follow, once directory handles exist there: each component opened
-    /// relative to its parent's handle (NtCreateFile with a RootDirectory) with FILE_FLAG_OPEN_REPARSE_POINT,
-    /// any reparse point refused, the file's nNumberOfLinks == 1, its volume serial equal to the root's, and
-    /// GetFileType() == FILE_TYPE_DISK.
+    /// The design a Windows reader is to follow: each component opened relative to its parent's handle by
+    /// openBeneath() (Win32OpenBeneath.hpp: NtCreateFile with a RootDirectory and FILE_OPEN_REPARSE_POINT),
+    /// a BeneathEntry added for each kind of entry a read opens; every name-surrogate reparse point
+    /// (isNameSurrogate(): junction, symlink, mount point) refused, as createBeneath() refuses it; the file's
+    /// nNumberOfLinks == 1, its volume serial equal to the root's, and GetFileType() == FILE_TYPE_DISK.
     class UnsupportedBeneathSystem final: public IBeneathSystem
     {
       public:

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/DirectoryHandle.hpp>
 #include <vtpty/UniqueHandle.hpp>
+#include <vtpty/Win32OpenBeneath.hpp>
 #include <vtpty/WindowsPathRules.hpp>
 
 #include <core/Utf8Path.hpp>
@@ -22,11 +23,6 @@ namespace vtpty
 
 namespace
 {
-    /// What a held directory is opened for: listing and entering it, reading its attributes, and waiting on
-    /// it.
-    constexpr DWORD HeldDirectoryAccess =
-        FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE;
-
     /// Every sharing mode: holding a directory stops nobody from reading, writing, renaming or removing it.
     constexpr DWORD ShareAll = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 
@@ -127,12 +123,19 @@ namespace
         return info;
     }
 
-    /// @param handle An open file or directory.
+    /// @param info A file's or directory's standard information.
     /// @return Whether it has been removed: its deletion is pending, or no name links to it any more.
+    [[nodiscard]] bool isRemoved(FILE_STANDARD_INFO const& info) noexcept
+    {
+        return info.DeletePending != FALSE || info.NumberOfLinks == 0;
+    }
+
+    /// @param handle An open file or directory.
+    /// @return Whether it has been removed (isRemoved()); false where that cannot be read.
     [[nodiscard]] bool isRemovedHandle(HANDLE handle) noexcept
     {
         auto const info = standardInfo(handle);
-        return info && (info->DeletePending != FALSE || info->NumberOfLinks == 0);
+        return info && isRemoved(*info);
     }
 
     /// Opens directories by HANDLE, reading each one's path back from the handle.
@@ -149,7 +152,7 @@ namespace
                 return std::unexpected(DirectoryError::AccessDenied);
             if (info->Directory == FALSE)
                 return std::unexpected(DirectoryError::NotADirectory);
-            if (info->DeletePending != FALSE || info->NumberOfLinks == 0)
+            if (isRemoved(*info))
                 return std::unexpected(DirectoryError::Missing);
             return finalPathOf(handle->get()).transform([&handle](std::string resolved) {
                 return DirectoryHandle { std::move(*handle), std::move(resolved) };
@@ -165,9 +168,28 @@ namespace
         }
 
         [[nodiscard]] std::expected<DirectoryHandle, DirectoryError> createBeneath(
-            DirectoryHandle const& /*parent*/, std::string_view /*name*/) override
+            DirectoryHandle const& parent, std::string_view name) override
         {
-            return std::unexpected(DirectoryError::Unsupported);
+            if (parent.nativeHandle() == nullptr || !isPlainWindowsName(name))
+                return std::unexpected(DirectoryError::AccessDenied);
+            auto const wide = core::pathFromUtf8(name);
+            if (!wide)
+                return std::unexpected(DirectoryError::AccessDenied);
+            // Relative to the held handle: the child is made in the directory held, whatever its name is now.
+            // A file in the way is STATUS_NOT_A_DIRECTORY, so ERROR_DIRECTORY, so NotADirectory.
+            auto child = openBeneath(parent.nativeHandle(),
+                                     wide->native(),
+                                     BeneathEntry::DirectoryCreatedIfMissing,
+                                     HeldDirectoryAccess);
+            if (!child)
+                return std::unexpected(directoryError(child.error()));
+            // A junction, symlink or mount point in the name's place was opened itself: refused, as a
+            // symlink is on POSIX, so that nothing is ever made in its target.
+            if (isNameSurrogate(child->get()))
+                return std::unexpected(DirectoryError::NotADirectory);
+            return finalPathOf(child->get()).transform([&child](std::string resolved) {
+                return DirectoryHandle { std::move(*child), std::move(resolved) };
+            });
         }
     };
 } // namespace

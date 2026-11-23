@@ -130,8 +130,9 @@ enum class DescriptorPaths : uint8_t
 ///         (DescriptorPaths::FromKernel). Windows: a directory is opened with backup semantics, shared for
 ///         read, write and delete so that holding it stops no rename or removal, not inheritable; its
 ///         resolved path is read from the handle (GetFinalPathNameByHandleW), in DOS form without the `\\?\`
-///         prefix; createBeneath() answers `Unsupported` there for now. A directory deleted by the time it is
-///         opened is `Missing`.
+///         prefix; createBeneath() opens the child relative to the parent's handle, refusing a junction,
+///         symlink or mount point in its place and any name Win32 spells differently (isPlainWindowsName()).
+///         A directory deleted by the time it is opened is `Missing`.
 [[nodiscard]] IDirectoryOpener& nativeDirectoryOpener() noexcept;
 
 } // namespace vtpty
