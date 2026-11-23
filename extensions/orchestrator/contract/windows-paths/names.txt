@@ -1,0 +1,79 @@
+# The Windows name grammar the host (vtpty::isPlainWindowsName) and the guest
+# (orchestrator::detail::isPlainWindowsName) both apply to one path component. Both test suites read this file,
+# so the two copies cannot drift apart.
+#
+# One row per line: the value, a TAB, and `accept` or `refuse`. A line starting with `#` is a comment, and an
+# empty line is skipped. In the value, `%XX` is the byte with that hexadecimal value, so a control character, a
+# TAB or a UTF-8 sequence can be written; `%25` is a `%` itself.
+
+# Plain names.
+a	accept
+repos	accept
+.git	accept
+a b	accept
+ a	accept
+a.b.c	accept
+a%7Fb	accept
+%C3%84	accept
+a%25b	accept
+PROGRA~1	accept
+
+# Empty and dot names, trailing dots and spaces.
+	refuse
+.	refuse
+..	refuse
+...	refuse
+a.	refuse
+a 	refuse
+a. 	refuse
+
+# A stream, the characters Win32 forbids, control characters.
+a:b	refuse
+a:	refuse
+a<b	refuse
+a>b	refuse
+a"b	refuse
+a|b	refuse
+a?b	refuse
+a*b	refuse
+a/b	refuse
+a\b	refuse
+a%00b	refuse
+a%01b	refuse
+a%09b	refuse
+a%1Fb	refuse
+
+# Device names, by their stem (up to the first dot, trailing spaces dropped), ASCII case folded.
+con	refuse
+CON	refuse
+Con	refuse
+con.txt	refuse
+CON.tar.gz	refuse
+con .txt	refuse
+cons	accept
+xcon	accept
+con_	accept
+PRN	refuse
+aux	refuse
+AUX.c	refuse
+nul	refuse
+Nul.txt	refuse
+COM0	refuse
+COM1	refuse
+com9	refuse
+COM10	accept
+COM	accept
+COM%C2%B9	refuse
+com%C2%B2.txt	refuse
+COM%C2%B3	refuse
+COM%C2%B4	accept
+LPT1	refuse
+lpt9.log	refuse
+LPT%C2%B3	refuse
+LPT	accept
+CONIN$	refuse
+conin$	refuse
+CONOUT$	refuse
+CONIN$.log	refuse
+CONIN	accept
+CONERR$	accept

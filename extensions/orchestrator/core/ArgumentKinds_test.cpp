@@ -1,12 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
+#include <ranges>
+#include <string>
 #include <string_view>
+#include <system_error>
+#include <vector>
 
 #include <orchestrator/core/ArgumentKinds.hpp>
+#include <orchestrator/core/Fixtures.hpp>
 
 using namespace std::string_view_literals;
 
@@ -172,6 +179,61 @@ static_assert(!argumentAccepts(ArgumentKind::Path, "/a/../b"));
 static_assert(argumentAccepts(ArgumentKind::Path, R"(C:\wt\contour\r1)"));
 static_assert(!argumentAccepts(ArgumentKind::Path, R"(C:\a\..\b)"));
 
+/// One row of a shared corpus in contract/windows-paths.
+struct CorpusRow
+{
+    std::string value; ///< The value, its `%XX` escapes decoded.
+    Verdict expected;  ///< Whether the grammar accepts it.
+};
+
+/// @return @p text with every `%XX` replaced by the byte it names.
+[[nodiscard]] std::string percentDecoded(std::string_view text)
+{
+    auto decoded = std::string {};
+    while (!text.empty())
+    {
+        if (text.front() != '%')
+        {
+            decoded += text.front();
+            text.remove_prefix(1);
+            continue;
+        }
+        REQUIRE(text.size() >= 3);
+        auto byte = 0U;
+        auto const parsed = std::from_chars(text.data() + 1, text.data() + 3, byte, 16);
+        REQUIRE((parsed.ec == std::errc {} && parsed.ptr == text.data() + 3));
+        decoded += static_cast<char>(byte);
+        text.remove_prefix(3);
+    }
+    return decoded;
+}
+
+/// Reads a corpus file Contour's host tests read too: one `value<TAB>verdict` row per line, `#` comments.
+/// @param file The file's name in contract/windows-paths.
+/// @return Its rows, in order.
+[[nodiscard]] std::vector<CorpusRow> windowsCorpus(std::string_view file)
+{
+    auto const text = orchestrator::readFixture(orchestrator::FixtureRoot::Contract,
+                                                "windows-paths/" + std::string { file });
+    auto rows = std::vector<CorpusRow> {};
+    for (auto const& range: std::views::split(text, '\n'))
+    {
+        auto line = std::string_view { range.begin(), range.end() };
+        if (line.ends_with('\r'))
+            line.remove_suffix(1);
+        if (line.empty() || line.starts_with('#'))
+            continue;
+        auto const tab = line.find('\t');
+        REQUIRE(tab != std::string_view::npos);
+        auto const verdict = line.substr(tab + 1);
+        REQUIRE((verdict == "accept" || verdict == "refuse"));
+        rows.push_back({ .value = percentDecoded(line.substr(0, tab)),
+                         .expected = verdict == "accept" ? Verdict::Accepted : Verdict::Refused });
+    }
+    REQUIRE_FALSE(rows.empty());
+    return rows;
+}
+
 } // namespace
 
 TEST_CASE("argumentAccepts judges every kind by its rule", "[orchestrator][arguments]")
@@ -181,5 +243,19 @@ TEST_CASE("argumentAccepts judges every kind by its rule", "[orchestrator][argum
         CAPTURE(row.kind, row.value, row.expected);
         auto const verdict = argumentAccepts(row.kind, row.value) ? Verdict::Accepted : Verdict::Refused;
         CHECK(verdict == row.expected);
+    }
+}
+
+TEST_CASE("the Windows grammar agrees with the host's corpus", "[orchestrator][arguments]")
+{
+    for (auto const& row: windowsCorpus("names.txt"))
+    {
+        CAPTURE(row.value);
+        CHECK(orchestrator::detail::isPlainWindowsName(row.value) == (row.expected == Verdict::Accepted));
+    }
+    for (auto const& row: windowsCorpus("paths.txt"))
+    {
+        CAPTURE(row.value);
+        CHECK(orchestrator::detail::isNormalisedAbsolute(row.value) == (row.expected == Verdict::Accepted));
     }
 }

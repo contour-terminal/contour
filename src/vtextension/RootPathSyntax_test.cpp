@@ -1,16 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/PathContainment.hpp>
 #include <vtpty/PathStyle.hpp>
+#include <vtpty/WindowsPathRules.hpp>
 
 #include <core/Utf8Path.hpp>
 
+#include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <charconv>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -109,6 +117,64 @@ constexpr auto ContainmentRows = std::to_array<ContainmentRow>({
     failsClosedBeneathW(R"(\\?\C:\w\x)"),
     failsClosedBeneathW(R"(C:\w\)"),
 });
+
+/// One row of a shared corpus in extensions/orchestrator/contract/windows-paths.
+struct CorpusRow
+{
+    std::string value; ///< The value, its `%XX` escapes decoded.
+    Verdict expected;  ///< Whether the grammar accepts it.
+};
+
+/// @return @p text with every `%XX` replaced by the byte it names.
+[[nodiscard]] std::string percentDecoded(std::string_view text)
+{
+    auto decoded = std::string {};
+    while (!text.empty())
+    {
+        if (text.front() != '%')
+        {
+            decoded += text.front();
+            text.remove_prefix(1);
+            continue;
+        }
+        REQUIRE(text.size() >= 3);
+        auto byte = 0U;
+        auto const parsed = std::from_chars(text.data() + 1, text.data() + 3, byte, 16);
+        REQUIRE((parsed.ec == std::errc {} && parsed.ptr == text.data() + 3));
+        decoded += static_cast<char>(byte);
+        text.remove_prefix(3);
+    }
+    return decoded;
+}
+
+/// Reads a corpus file the guest's tests read too: one `value<TAB>verdict` row per line, `#` comments.
+/// @param file The file's name in the corpus directory.
+/// @return Its rows, in order.
+[[nodiscard]] std::vector<CorpusRow> windowsCorpus(std::string_view file)
+{
+    auto stream = std::ifstream { std::filesystem::path { VTEXTENSION_WINDOWS_PATHS_CORPUS_DIR } / file,
+                                  std::ios::binary };
+    REQUIRE(stream.is_open());
+    auto const text =
+        std::string { std::istreambuf_iterator<char> { stream }, std::istreambuf_iterator<char> {} };
+    auto rows = std::vector<CorpusRow> {};
+    for (auto const& range: std::views::split(text, '\n'))
+    {
+        auto line = std::string_view { range.begin(), range.end() };
+        if (line.ends_with('\r'))
+            line.remove_suffix(1);
+        if (line.empty() || line.starts_with('#'))
+            continue;
+        auto const tab = line.find('\t');
+        REQUIRE(tab != std::string_view::npos);
+        auto const verdict = line.substr(tab + 1);
+        REQUIRE((verdict == "accept" || verdict == "refuse"));
+        rows.push_back({ .value = percentDecoded(line.substr(0, tab)),
+                         .expected = verdict == "accept" ? Verdict::Accepted : Verdict::Refused });
+    }
+    REQUIRE_FALSE(rows.empty());
+    return rows;
+}
 
 /// An absolute POSIX path of exactly @p bytes bytes: `/` and then `a`s.
 [[nodiscard]] std::string posixPathOf(std::size_t bytes)
@@ -272,4 +338,18 @@ TEST_CASE("RootPathSyntax: agrees with vtpty::isAtOrBeneath in the native gramma
         ++checked;
     }
     CHECK(checked > 0);
+}
+
+TEST_CASE("RootPathSyntax: the Windows grammar agrees with the guest's corpus", "[vtextension][roots]")
+{
+    for (auto const& row: windowsCorpus("names.txt"))
+    {
+        CAPTURE(row.value);
+        CHECK(vtpty::isPlainWindowsName(row.value) == (row.expected == Verdict::Accepted));
+    }
+    for (auto const& row: windowsCorpus("paths.txt"))
+    {
+        CAPTURE(row.value);
+        CHECK(isNormalisedAbsolutePath(row.value, PathStyle::Windows) == (row.expected == Verdict::Accepted));
+    }
 }

@@ -1,0 +1,85 @@
+# The Windows grammar of a normalised absolute path a guest hands the host (a `cwd`, a `path:<root>`
+# argument): the host's vtextension::isNormalisedAbsolutePath(…, PathStyle::Windows) and the guest's
+# orchestrator::detail::isNormalisedAbsolute both apply it. Both test suites read this file, so the two copies
+# cannot drift apart. The guest also accepts a POSIX host's paths, so no row starts with `/`.
+#
+# One row per line: the value, a TAB, and `accept` or `refuse`. A line starting with `#` is a comment, and an
+# empty line is skipped. In the value, `%XX` is the byte with that hexadecimal value, so a control character, a
+# TAB or a UTF-8 sequence can be written; `%25` is a `%` itself. The two longest rows are 4096 bytes (the most
+# a path may have) and 4097.
+
+# Drive-absolute.
+C:\	accept
+c:\	accept
+z:\a	accept
+C:\a	accept
+C:\a\b	accept
+C:\Users\me\wt\contour\0193	accept
+C:\PROGRA~1\x	accept
+C:\%C3%84	accept
+C:\a b\c	accept
+C:	refuse
+C:a	refuse
+1:\a	refuse
+\a	refuse
+	refuse
+
+# Trailing and empty components.
+C:\a\	refuse
+C:\\a	refuse
+C:\a\\b	refuse
+
+# Dot components.
+C:\.	refuse
+C:\..	refuse
+C:\a\.\b	refuse
+C:\a\..\b	refuse
+
+# Mixed separators.
+C:/a	refuse
+C:\a/b	refuse
+C:/a\b	refuse
+//srv/share	refuse
+\\srv/share	refuse
+
+# UNC.
+\\srv\share	accept
+\\srv\share\a	accept
+\\SRV\Share\a	accept
+\\srv	refuse
+\\srv\	refuse
+\\srv\share\	refuse
+\\srv\\share	refuse
+\\con\share	refuse
+\\srv\a:b	refuse
+
+# Device and verbatim prefixes.
+\\?\C:\a	refuse
+\\?\UNC\srv\share	refuse
+\\.\C:\a	refuse
+\\.\pipe\x	refuse
+\\.\COM1	refuse
+\??\C:\a	refuse
+
+# Names the name grammar refuses.
+C:\con	refuse
+C:\a\Nul.txt	refuse
+C:\CONIN$	refuse
+C:\LPT%C2%B9	refuse
+C:\console	accept
+C:\a.	refuse
+C:\a 	refuse
+C:\a:b	refuse
+C:\a<b	refuse
+C:\a>b	refuse
+C:\a"b	refuse
+C:\a|b	refuse
+C:\a?b	refuse
+C:\a*b	refuse
+C:\a%00b	refuse
+C:\a%01b	refuse
+C:\a%09b	refuse
+
+# Length.
+C:\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaa	accept
+C:\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaaa\aaaaaa	refuse
