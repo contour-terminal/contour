@@ -12,6 +12,7 @@
 
 #include <vtextension/DaemonWorld.hpp>
 #include <vtextension/Manifest.hpp>
+#include <vtextension/RootPathSyntax.hpp>
 #include <vtextension/RootPointer.hpp>
 
 #ifdef _WIN32
@@ -158,6 +159,13 @@ TEST_CASE("RootPointer: a configured Windows directory is spelled once", "[daemo
         { .raw = R"(C:\repos )", .spelled = std::unexpected(NotPlainName) },
         { .raw = R"(C:\con)", .spelled = std::unexpected(NotPlainName) },
         { .raw = R"(C:\a|b)", .spelled = std::unexpected(NotPlainName) },
+        { .raw = R"(\\\x)", .spelled = std::unexpected(NotAbsolute) },
+        { .raw = R"(\\srv\\x)", .spelled = std::unexpected(NotAbsolute) },
+        { .raw = R"(\\srv\share\)", .spelled = R"(\\srv\share)" },
+        { .raw = R"(C:\\)", .spelled = R"(C:\)" },
+        { .raw = R"(C:\a\\)", .spelled = R"(C:\a)" },
+        { .raw = R"(//./pipe/x)", .spelled = std::unexpected(DevicePath) },
+        { .raw = R"(/??/C:/x)", .spelled = std::unexpected(DevicePath) },
     });
     for (auto const& row: rows)
     {
@@ -165,6 +173,11 @@ TEST_CASE("RootPointer: a configured Windows directory is spelled once", "[daemo
         CHECK(rootSpellingOf(row.raw, R"(C:\Users\me)", Windows) == row.spelled);
     }
     CHECK(rootSpellingOf(R"(~\w)", "", Windows) == std::unexpected(NoHome));
+
+    // No longer than a root's paths are compared at: a spelling the comparison rule refuses is no root.
+    auto const longest = std::string(R"(C:\)") + std::string(vtextension::MaxPathArgumentBytes - 3, 'a');
+    CHECK(rootSpellingOf(longest, "", Windows) == longest);
+    CHECK(rootSpellingOf(longest + "a", "", Windows) == std::unexpected(NotAbsolute));
 }
 
 TEST_CASE("RootPointer: a configured POSIX directory is spelled as before", "[daemon][roots]")

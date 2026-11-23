@@ -52,8 +52,10 @@ enum class RootPointerError : uint8_t
 /// @param home The user's home directory.
 /// @param style The grammar @p raw is spelled in.
 /// @return The spelling; `NoHome` for `~…` while @p home is empty; `NotAbsolute` (`~user`, relative,
-///         drive-relative `C:x`, rooted without a drive `\x`, a UNC path without a share); `DevicePath`
-///         (`\\?\`, `\\.\`, `\??\`); `NotPlainName` (a component vtpty::isPlainWindowsName() refuses).
+///         drive-relative `C:x`, rooted without a drive `\x`, a UNC path without a share, and on Windows any
+///         spelling isNormalisedAbsolutePath() refuses, one longer than MaxPathArgumentBytes among them);
+///         `DevicePath` (`\\?\`, `\\.\`, `\??\`); `NotPlainName` (a component vtpty::isPlainWindowsName()
+///         refuses).
 [[nodiscard]] std::expected<std::string, RootPointerError> rootSpellingOf(std::string_view raw,
                                                                           std::string_view home,
                                                                           vtpty::PathStyle style);

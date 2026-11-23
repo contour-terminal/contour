@@ -16,6 +16,7 @@
 #include <utility>
 
 #include <glaze/json.hpp>
+#include <vtextension/RootPathSyntax.hpp>
 #include <vtextension/RootResolution.hpp>
 
 namespace vtextension
@@ -118,6 +119,19 @@ namespace
         return std::string(raw);
     }
 
+    /// @return @p spelled, if the comparison rule takes it for a normalised absolute Windows path;
+    /// `NotAbsolute`
+    ///         otherwise. The backstop of windowsSpellingOf(): its grammar cannot drift from the rule every
+    ///         root is later judged by (RootPathSyntax), and a spelling longer than MaxPathArgumentBytes,
+    ///         which no path could be judged beneath, is refused here rather than admitted as an unusable
+    ///         root.
+    [[nodiscard]] std::expected<std::string, RootPointerError> comparableWindowsSpelling(std::string spelled)
+    {
+        if (!isNormalisedAbsolutePath(spelled, vtpty::PathStyle::Windows))
+            return std::unexpected(RootPointerError::NotAbsolute);
+        return spelled;
+    }
+
     /// rootSpellingOf() for PathStyle::Windows: `X:\…` or `\\server\share…`, `\`-separated, every component
     /// plain, the drive letter upper-cased, no trailing separator but a drive root's own.
     [[nodiscard]] std::expected<std::string, RootPointerError> windowsSpellingOf(std::string_view raw,
@@ -144,7 +158,7 @@ namespace
             auto const path = withoutTrailing(spelled, "\\");
             if (!arePlainWindowsNames(path.substr(UncPrefix.size())))
                 return std::unexpected(RootPointerError::NotPlainName);
-            return std::string(path);
+            return comparableWindowsSpelling(std::string(path));
         }
 
         if (spelled.size() < 3 || !isAsciiLetter(spelled[0]) || spelled[1] != ':' || spelled[2] != '\\')
@@ -152,7 +166,7 @@ namespace
         auto const below = withoutTrailing(std::string_view { spelled }.substr(3), "\\");
         if (!below.empty() && !arePlainWindowsNames(below))
             return std::unexpected(RootPointerError::NotPlainName);
-        return std::format("{}:\\{}", asciiUpper(spelled[0]), below);
+        return comparableWindowsSpelling(std::format("{}:\\{}", asciiUpper(spelled[0]), below));
     }
 } // namespace
 
