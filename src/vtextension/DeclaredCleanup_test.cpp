@@ -5,6 +5,8 @@
 // The commands, their environment and their roots come from the orchestrator's manifest, run through
 // DeclaredProcesses on the native runner and directory opener exactly as the daemon runs them; git sees
 // none of the user's configuration (GitSandbox).
+#include <vtpty/PathStyle.hpp>
+
 #include <core/Environment.hpp>
 #include <core/platform/NativeFileSystem.hpp>
 
@@ -219,8 +221,11 @@ struct CommandResult
     auto const config = std::format(R"({{"worktree_root":"{}","repos":[{{"path":"{}"}}]}})",
                                     worktreeRoot.string(),
                                     sandbox.repository().string());
-    auto roots = resolveRoots(
-        manifest, config, (sandbox.root() / "home").string(), core::platform::NativeFileSystem::instance());
+    auto roots = resolveRoots(manifest,
+                              config,
+                              (sandbox.root() / "home").string(),
+                              core::platform::NativeFileSystem::instance(),
+                              vtpty::NativePathStyle);
     REQUIRE(roots.has_value());
     return std::move(*roots);
 }

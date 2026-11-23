@@ -54,6 +54,13 @@ namespace
         ErrorText<RootPointerError> {
             .error = RootPointerError::NoHome,
             .text = "a root's directory starts with ~, and the home directory is unknown" },
+        ErrorText<RootPointerError> { .error = RootPointerError::DevicePath,
+                                      .text = R"(a root's directory is a device path (\\?\ or \\.\))" },
+        ErrorText<RootPointerError> {
+            .error = RootPointerError::NotPlainName,
+            .text =
+                "a root's directory has a component Windows spells otherwise (.., a stream, a device name, "
+                "a trailing dot or space)" },
     };
 
     inline constexpr auto RootErrorTexts = std::array {
@@ -229,7 +236,8 @@ std::expected<std::unique_ptr<DaemonExtensionRuntime::Extension>, DeclarationPro
             std::format("`{}` is a status-line extension: configure it under a profile's `extensions`",
                         name)));
 
-    auto roots = resolveRoots(*manifest, declaration.configJson, _home, _services.fileSystem);
+    auto roots = resolveRoots(
+        *manifest, declaration.configJson, _home, _services.fileSystem, _services.directories.pathStyle());
     if (!roots)
         return std::unexpected(problemOf(
             name, DaemonExtensionProblem::RootUnresolvable, textOf(RootPointerErrorTexts, roots.error())));
