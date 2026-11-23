@@ -840,6 +840,35 @@ TEST_CASE("ConPty.unknownProgramFallsBackToTheLoginShell", "[vtpty][conpty]")
     std::ignore = process.wait();
 }
 
+// A console has no foreground process group: the command the shell runs stands in for it, as the pane
+// header, the close confirmation and the kitty file-media gate ask.
+TEST_CASE("ConPty.foregroundProcessName", "[vtpty][conpty]")
+{
+    auto process = vtpty::testing::unplacedProcess(
+        execInfo("cmd.exe", { "/d", "/c", "ping", "-n", "30", "127.0.0.1" }), pageSize(80, 24));
+    auto const started = process.start();
+    auto const endChild =
+        gsl::finally([&process] { process.terminate(vtpty::Process::TerminationHint::Normal); });
+    REQUIRE(started.has_value());
+    REQUIRE(started->diagnostic.empty());
+
+    // ping names its target once it runs, in any language.
+    std::ignore = vtpty::testing::readUntilAnswering(
+        process, [](std::string_view text) { return text.contains("127.0.0.1"); });
+    auto const isPing = [](std::optional<std::string> const& name) {
+        return name && core::toLower(std::string_view { *name }) == "ping.exe";
+    };
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds { 10 };
+    auto name = process.foregroundProcessName();
+    while (!isPing(name) && std::chrono::steady_clock::now() < deadline)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds { 20 });
+        name = process.foregroundProcessName();
+    }
+    INFO(name.value_or("(none)"));
+    CHECK(isPing(name));
+}
+
 // Whether an OSC 133 mark a console program writes reaches the terminal on the far side of the
 // pseudoconsole -- a shell integration on Windows, PowerShell's, depends on it. ConPTY stands
 // between the two: it parses what the child writes into a console buffer of its own, and a sequence

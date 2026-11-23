@@ -4,6 +4,8 @@
 #include <contour/window/ChromeFocus.hpp>
 #include <contour/window/ProgramName.hpp>
 
+#include <vtpty/ProgramName.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -240,7 +242,8 @@ enum class PaneActivity : uint8_t
 /// Classifies a pane from its foreground process.
 /// @param shellProgram The profile's shell program: a path or a name, possibly with arguments ("bash -l").
 /// @param foreground The pane's foreground process name; nullopt when it cannot be known.
-/// @return Unknown without a name, Idle when it is the shell (base name, login '-' removed), else Running.
+/// @return Unknown without a name, Idle when it is the shell (base name, login '-' removed, compared as
+///         vtpty::isSameProgram() does: `pwsh` is `pwsh.exe`), else Running.
 [[nodiscard]] inline PaneActivity paneActivityOf(std::string_view shellProgram,
                                                  std::optional<std::string> const& foreground)
 {
@@ -250,8 +253,10 @@ enum class PaneActivity : uint8_t
     // The whole string first: a path may hold a space ("C:/Program Files/Git/bin/bash.exe"). Then its first
     // word, for a program written with its arguments.
     auto const program = shellProgram.substr(0, shellProgram.find(' '));
-    return name == programBaseName(shellProgram) || name == programBaseName(program) ? PaneActivity::Idle
-                                                                                     : PaneActivity::Running;
+    return vtpty::isSameProgram(name, programBaseName(shellProgram))
+                   || vtpty::isSameProgram(name, programBaseName(program))
+               ? PaneActivity::Idle
+               : PaneActivity::Running;
 }
 
 /// The program in front of a pane's shell, named by its base name.

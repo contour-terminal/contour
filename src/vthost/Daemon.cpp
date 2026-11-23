@@ -1628,8 +1628,7 @@ namespace
 vtbackend::kitty_graphics::MediaPolicy kittyMediaPolicyOf(core::Environment const& env,
                                                           DaemonConfig const& config)
 {
-    return vtbackend::kitty_graphics::mediaPolicy(
-        env, config.kittyMedia, config.homeDirectory, vtbackend::kitty_graphics::currentUserId());
+    return vtbackend::kitty_graphics::mediaPolicy(env, config.kittyMedia, config.homeDirectory);
 }
 
 std::optional<std::pair<std::string, std::uint16_t>> parseHostPort(std::string_view spec)

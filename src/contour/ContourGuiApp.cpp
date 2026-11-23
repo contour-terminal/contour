@@ -675,15 +675,12 @@ std::optional<vtbackend::GitHeadServices> ContourGuiApp::gitHeadServices() noexc
 vtbackend::kitty_graphics::KittyMediumServices ContourGuiApp::kittyMediumServices() const
 {
     // From the configuration as it is now, so an edit reaches the sessions started after it; the app's own
-    // environment (its `$TMPDIR`), home and user complete it.
+    // environment (its `$TMPDIR`) and home complete it; the source reads as the app's own user.
     auto const home = fs::path { QDir::homePath().toStdU16String() };
     return vtbackend::kitty_graphics::KittyMediumServices {
         .source = *_kittyMediumSource,
-        .policy =
-            vtbackend::kitty_graphics::mediaPolicy(processEnvironment(),
-                                                   config::kittyMediaSettings(_config.images.value(), home),
-                                                   home,
-                                                   vtbackend::kitty_graphics::currentUserId())
+        .policy = vtbackend::kitty_graphics::mediaPolicy(
+            processEnvironment(), config::kittyMediaSettings(_config.images.value(), home), home)
     };
 }
 

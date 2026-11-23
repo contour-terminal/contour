@@ -7711,8 +7711,9 @@ TEST_CASE("TerminalSessionManager: kitty file media are read for a local process
     auto const root = std::filesystem::canonical(temp.path());
     auto const file = root / "tty-graphics-protocol-probe.rgba";
     std::ofstream { file, std::ios::binary } << std::string_view { "\x01\x02\x03\xFF", 4 };
+    // The path as a command names it, UTF-8 on every platform.
     auto const probe =
-        std::format("\033_Ga=q,i=31,s=1,v=1,t=f,f=32;{}\033\\", core::base64::encode(file.native()));
+        std::format("\033_Ga=q,i=31,s=1,v=1,t=f,f=32;{}\033\\", core::base64::encode(core::pathToUtf8(file)));
     static constexpr auto Read = std::string_view { "\033_Gi=31;OK\033\\" };
     static constexpr auto Refused = std::string_view { "\033_Gi=31;EBADF:file not readable\033\\" };
 
@@ -7737,7 +7738,10 @@ TEST_CASE("TerminalSessionManager: kitty file media are read for a local process
                                  nullptr,
                                  contour::test::TestApp::testHostIdentity(),
                                  nullptr,
-                                 contour::test::TestEnvironment::Overrides { { "TMPDIR", root.string() } } };
+                                 // `$TMPDIR` names the temp directory on POSIX, `%TMP%` on Windows.
+                                 contour::test::TestEnvironment::Overrides {
+                                     { "TMPDIR", core::pathToUtf8(root) },
+                                     { "TMP", core::pathToUtf8(root) } } };
 
     auto& manager = app.manager();
     contour::test::ScopedController const window { manager };

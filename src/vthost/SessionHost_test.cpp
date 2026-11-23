@@ -6141,8 +6141,8 @@ TEST_CASE("a hosted session reads kitty file media with the host's own services"
                     .temporaryRoots = { "/tmp" },
                     .temporaryFileOnlyRoots = {},
                     .allowedRoots = {},
-                    .userId = 0,
-                    .sizeLimit = 1024 }
+                    .sizeLimit = 1024,
+                    .pathCase = vtbackend::kitty_graphics::PathCase::Sensitive }
     };
     auto config =
         vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
@@ -6231,8 +6231,8 @@ TEST_CASE("a hosted session decodes PNG images with the host's decoder", "[vthos
                             .temporaryRoots = { "/tmp" },
                             .temporaryFileOnlyRoots = {},
                             .allowedRoots = {},
-                            .userId = 0,
-                            .sizeLimit = 1024 } },
+                            .sizeLimit = 1024,
+                            .pathCase = vtbackend::kitty_graphics::PathCase::Sensitive } },
         .imageDecoder = given ? decoder.decoder() : vtbackend::ImageDecoder {}
     };
     auto const backend = core::net::makeDefaultBackend();

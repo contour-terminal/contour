@@ -17,15 +17,15 @@ for rendering Sixel graphics.
 
 Whether the kitty graphics protocol may read image files that a local program names (`t=f`, and `t=t`
 for temporary files), as Claude Code's pictures do. It applies only to sessions whose output comes from
-this machine: never over SSH, in tmux panes, or for a daemon's remote clients. It is off on Windows and the BSDs for now.
+this machine: never over SSH, in tmux panes, or for a daemon's remote clients. It is off on the BSDs for now.
 
     kitty_file_transmission: true
 
 ### Kitty file allow-list
 
 Directories, besides the temporary directories, below which `t=f` may read files. A leading `~/` is your
-home directory. An entry that would open your whole home directory (or `/`), a relative entry, and a
-`~name` entry are ignored, each with a logged warning.
+home directory (`%USERPROFILE%` on Windows). An entry that would open your whole home directory (or `/`,
+or a drive's root), a relative entry, and a `~name` entry are ignored, each with a logged warning.
 
     kitty_file_allow_list: ['~/.claude/plugins/data']
 
