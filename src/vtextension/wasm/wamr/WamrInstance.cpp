@@ -57,6 +57,13 @@ namespace
         Requested,
     };
 
+    /// How a call nested in a host function call ended.
+    enum class NestedCallOutcome : uint8_t
+    {
+        Returned, ///< It returned.
+        Failed,   ///< It failed, and left its exception on the instance.
+    };
+
     /// @return WAMR's cap on the pages of an instance's memory under @p limits; 0 if not even one page
     ///         fits (which WAMR cannot express: to it, 0 means no cap).
     [[nodiscard]] uint32_t capPagesOf(RuntimeLimits const& limits) noexcept
@@ -146,9 +153,12 @@ namespace
             auto const returned =
                 wasm_runtime_call_wasm(_execEnv.get(), entry.function, entry.parameterCount, argv.data());
             --_callDepth;
-            if (returned)
-                return {};
-            return std::unexpected(failure());
+            auto const failed = returned ? std::nullopt : std::optional { failure() };
+            if (_callDepth > 0)
+                endNestedCall(failed.has_value() ? NestedCallOutcome::Failed : NestedCallOutcome::Returned);
+            if (failed)
+                return std::unexpected(*failed);
+            return {};
         }
 
         [[nodiscard]] std::optional<std::span<std::byte>> memory(uint32_t address, uint32_t size) override
@@ -195,6 +205,22 @@ namespace
         {
             if (!_fault || fault == CallFailure::HostFailure)
                 _fault = fault;
+        }
+
+        /// Leaves the call a nested call returns into as it was: the nested call reports what it recorded
+        /// through its own result, and the host function that made it decides what becomes of it. WAMR
+        /// keeps a failure's exception on the instance, where it would stop the outer call as soon as the
+        /// host function returns: it is cleared, unless it is an interrupt's, which stays final.
+        /// @param outcome How the nested call ended.
+        void endNestedCall(NestedCallOutcome outcome) noexcept
+        {
+            _fault = std::nullopt;
+            if (outcome == NestedCallOutcome::Returned)
+                return;
+            wasm_runtime_clear_exception(_instance.get());
+            // An interrupt that landed before the exception was cleared is set again.
+            if (_interruption.load(std::memory_order_acquire) == Interruption::Requested)
+                wasm_runtime_terminate(_instance.get());
         }
 
         /// @return Why the call that just failed did.

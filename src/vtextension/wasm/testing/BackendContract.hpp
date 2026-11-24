@@ -336,6 +336,26 @@ inline constexpr auto InstanceModule = std::to_array<uint8_t>({
     0x01, 0x0b, 0x0b, 0x0b, 0x01, 0x00, 0x41, 0x10, 0x0b, 0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f,
 });
 
+/// What the nested-call case runs: `fail` calls `ping(1)`; `absorb` calls `ping(0)`, then returns 7;
+/// `absorb-then-trap` calls `ping(0)`, then traps on its own.
+///
+///     (module
+///       (import "contract:test/host@0" "ping" (func $ping (param i32)))
+///       (func (export "fail") (call $ping (i32.const 1)))
+///       (func (export "absorb") (result i32) (call $ping (i32.const 0)) (i32.const 7))
+///       (func (export "absorb-then-trap") (call $ping (i32.const 0)) unreachable))
+inline constexpr auto NestedCallModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x0c, 0x03, 0x60, 0x01, 0x7f, 0x00, 0x60,
+    0x00, 0x00, 0x60, 0x00, 0x01, 0x7f, 0x02, 0x1d, 0x01, 0x14, 0x63, 0x6f, 0x6e, 0x74, 0x72, 0x61,
+    0x63, 0x74, 0x3a, 0x74, 0x65, 0x73, 0x74, 0x2f, 0x68, 0x6f, 0x73, 0x74, 0x40, 0x30, 0x04, 0x70,
+    0x69, 0x6e, 0x67, 0x00, 0x00, 0x03, 0x04, 0x03, 0x01, 0x02, 0x01, 0x07, 0x24, 0x03, 0x04, 0x66,
+    0x61, 0x69, 0x6c, 0x00, 0x01, 0x06, 0x61, 0x62, 0x73, 0x6f, 0x72, 0x62, 0x00, 0x02, 0x10, 0x61,
+    0x62, 0x73, 0x6f, 0x72, 0x62, 0x2d, 0x74, 0x68, 0x65, 0x6e, 0x2d, 0x74, 0x72, 0x61, 0x70, 0x00,
+    0x03, 0x0a, 0x19, 0x03, 0x06, 0x00, 0x41, 0x01, 0x10, 0x00, 0x0b, 0x08, 0x00, 0x41, 0x00, 0x10,
+    0x00, 0x41, 0x07, 0x0b, 0x07, 0x00, 0x41, 0x00, 0x10, 0x00, 0x00, 0x0b, 0x00, 0x0e, 0x04, 0x6e,
+    0x61, 0x6d, 0x65, 0x01, 0x07, 0x01, 0x00, 0x04, 0x70, 0x69, 0x6e, 0x67,
+});
+
 /// Passes its two parameters on to the two-parameter host function, in order.
 ///
 ///     (module
@@ -390,6 +410,38 @@ class RecordingHostContext final: public IHostContext
   private:
     std::expected<void, ExtensionError> _answer;
     std::vector<HostCall> _calls;
+};
+
+/// A host context for NestedCallModule: `ping(0)` calls the instance's `fail` back and absorbs its
+/// failure, as a host function may when it can do without what it asked the guest for; `ping` with any
+/// other argument fails.
+class AbsorbingHostContext final: public IHostContext
+{
+  public:
+    /// Names the instance `ping(0)` calls back into: the instance is created with this context, so the
+    /// two are wired after both exist.
+    /// @param instance The instance; outlives every call made through this context.
+    void attach(IWasmInstance& instance) noexcept { _instance = &instance; }
+
+    [[nodiscard]] std::expected<void, ExtensionError> callHost(
+        std::size_t /*functionIndex*/, std::span<uint32_t const> arguments) noexcept override
+    {
+        if (arguments.front() != 0)
+            return std::unexpected(ExtensionError::PermissionDenied);
+        if (auto const fail = _instance->function("fail"))
+            _nested = _instance->call(*fail, {});
+        return {};
+    }
+
+    /// @return What the latest call back into the instance returned; nothing before the first.
+    [[nodiscard]] std::optional<std::expected<void, CallFailure>> const& nested() const noexcept
+    {
+        return _nested;
+    }
+
+  private:
+    IWasmInstance* _instance = nullptr;
+    std::optional<std::expected<void, CallFailure>> _nested;
 };
 
 /// Runs @p body on a thread of its own and hands back what it returned. Catch2's assertions are not
@@ -899,6 +951,33 @@ void hostCallbackErrorFails()
     CHECK(wordAt(*instance, 0) == 0);
 }
 
+/// A host function's failure fails the call it was made from, and no other: a host function that called
+/// back into its instance and absorbed that call's failure leaves the outer call to end as the guest
+/// makes it end, returning or trapping on its own.
+template <typename T>
+void nestedHostFailureStaysNested()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, NestedCallModule);
+    auto context = AbsorbingHostContext {};
+    auto const instance = instantiate(*module, context);
+    context.attach(*instance);
+    auto const nestedFailure = std::expected<void, CallFailure> { std::unexpected(CallFailure::HostFailure) };
+
+    auto const trapped = instance->call(functionOf(*instance, "absorb-then-trap"), {});
+    CHECK(context.nested() == nestedFailure);
+    REQUIRE_FALSE(trapped.has_value());
+    CHECK(trapped.error() == CallFailure::Trap);
+
+    auto result = std::array<uint32_t, 1> {};
+    auto const returned = instance->call(functionOf(*instance, "absorb"), result);
+    CHECK(context.nested() == nestedFailure);
+    REQUIRE(returned.has_value());
+    CHECK(result[0] == 7);
+}
+
 /// Which of two runtimes alive at once goes first.
 enum class FirstToGo : uint8_t
 {
@@ -1257,6 +1336,7 @@ void wasiStdioGoesNowhere()
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArguments)        \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArgumentsInOrder) \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackErrorFails)               \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, nestedHostFailureStaysNested)         \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoRuntimesShareHostImports)          \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, olderRuntimeOutlivesNewer)            \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesGrowth)               \

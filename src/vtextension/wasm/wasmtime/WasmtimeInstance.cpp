@@ -151,8 +151,13 @@ namespace
                                                                         &rawTrap) };
             --_callDepth;
             auto const trap = detail::TrapHandle { rawTrap };
-            if (error || trap)
-                return std::unexpected(failure(trap.get()));
+            auto const failed = error || trap ? std::optional { failure(trap.get()) } : std::nullopt;
+            // A nested call reports its host failure through its own result: the host function that made
+            // it decides what becomes of it, and the call it is nested in must not report it again.
+            if (_callDepth > 0)
+                _data->hostFailure = std::nullopt;
+            if (failed)
+                return std::unexpected(*failed);
 
             std::ranges::transform(results, argv.begin(), [](wasmtime_val_t const& result) {
                 return static_cast<uint32_t>(result.of.i32);
