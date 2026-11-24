@@ -15,6 +15,9 @@
 #include <vtbackend/screen/GutterSettings.hpp>
 
 #include <vtpty/ImageSize.hpp>
+#ifdef _WIN32
+    #include <vtpty/WindowsProcessRules.hpp>
+#endif
 
 #include <text_shaper/Font.hpp>
 
@@ -4020,12 +4023,25 @@ std::vector<DaemonExtensionProgram> YAMLConfigReader::readDaemonExtensionProgram
         {
             errorLog()(
                 "Skipping program '{}' of extension '{}' of {}: its executable must be an absolute path "
-                "or start with '~/'.",
+                "or start with '~/' (or '~\\' on Windows).",
                 program,
                 name,
                 keyPath);
             continue;
         }
+#ifdef _WIN32
+        // The host runs only an .exe for an extension (vtpty::windowsImageName, the rule it refuses by): a
+        // script such as npm's claude.cmd would be refused only when the extension first runs it.
+        if (!vtpty::windowsImageName(core::pathToUtf8(path.filename())))
+            errorLog()(
+                "Program '{}' of extension '{}' of {}: '{}' is not an .exe, and Windows runs only an .exe "
+                "for an extension, so it will be refused when run. Point it at the program's .exe (Claude "
+                "Code's native installer provides claude.exe).",
+                program,
+                name,
+                keyPath,
+                core::pathToUtf8(path));
+#endif
         result.push_back(
             DaemonExtensionProgram { .name = std::move(program), .path = path.lexically_normal() });
     }

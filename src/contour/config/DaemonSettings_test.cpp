@@ -4,6 +4,8 @@
 #include <contour/config/DaemonExtensionConfig.hpp>
 #include <contour/test/CoreFixtures.hpp>
 
+#include <core/log/LogSink.hpp>
+
 #include <yaml-cpp/yaml.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -284,18 +286,34 @@ TEST_CASE("daemon.extensions: an entry's defaults", "[config][daemon]")
     CHECK(config.daemon.value().extensions[1].path.is_absolute());
 }
 
+namespace
+{
+#ifdef _WIN32
+/// An absolute path on this platform: POSIX ones are not absolute on Windows.
+constexpr auto AbsoluteClaudeDir = "C:/opt/claude";
+constexpr auto AbsoluteOtherDir = "C:/opt/other";
+#else
+/// An absolute path on this platform.
+constexpr auto AbsoluteClaudeDir = "/opt/claude";
+constexpr auto AbsoluteOtherDir = "/opt/other";
+#endif
+} // namespace
+
 TEST_CASE("daemon.extensions: programs name the executables an extension runs", "[config][daemon]")
 {
-    auto const config = loadConfigFromYaml("daemon:\n"
-                                           "  extensions:\n"
-                                           "    orchestrator:\n"
-                                           "      programs:\n"
-                                           "        claude: /opt/claude/bin/claude\n"
-                                           "        gh: ~/bin/gh\n");
+    auto const config = loadConfigFromYaml(std::format("daemon:\n"
+                                                       "  extensions:\n"
+                                                       "    orchestrator:\n"
+                                                       "      programs:\n"
+                                                       "        claude: {}/bin/claude\n"
+                                                       "        gh: ~/bin/gh\n",
+                                                       AbsoluteClaudeDir));
     REQUIRE(config.daemon.value().extensions.size() == 1);
     auto const& programs = config.daemon.value().extensions.front().programs;
     REQUIRE(programs.size() == 2);
-    CHECK(programs[0] == DaemonExtensionProgram { .name = "claude", .path = "/opt/claude/bin/claude" });
+    CHECK(programs[0]
+          == DaemonExtensionProgram { .name = "claude",
+                                      .path = std::format("{}/bin/claude", AbsoluteClaudeDir) });
     CHECK(programs[1].name == "gh");
     // `~/` is the home directory: absolute, and no longer spelled with a tilde.
     CHECK(programs[1].path.is_absolute());
@@ -311,22 +329,25 @@ TEST_CASE("daemon.extensions: programs name the executables an extension runs", 
 
 TEST_CASE("daemon.extensions: a program that names no executable costs only itself", "[config][daemon]")
 {
-    auto const config = loadConfigFromYaml("daemon:\n"
-                                           "  extensions:\n"
-                                           "    orchestrator:\n"
-                                           "      autostart: true\n"
-                                           "      programs:\n"
-                                           "        bin/claude: /opt/claude\n" // a path, not a program name
-                                           "        relative: bin/claude\n" // found on the PATH it bypasses
-                                           "        empty: ''\n"
-                                           "        listed: [/a, /b]\n"
-                                           "        claude: /opt/claude\n"
-                                           "        claude: /opt/other\n"); // the first one stands
+    auto const config =
+        loadConfigFromYaml(std::format("daemon:\n"
+                                       "  extensions:\n"
+                                       "    orchestrator:\n"
+                                       "      autostart: true\n"
+                                       "      programs:\n"
+                                       "        bin/claude: {0}\n"      // a path, not a program name
+                                       "        relative: bin/claude\n" // found on the PATH it bypasses
+                                       "        empty: ''\n"
+                                       "        listed: [/a, /b]\n"
+                                       "        claude: {0}\n"
+                                       "        claude: {1}\n", // the first one stands
+                                       AbsoluteClaudeDir,
+                                       AbsoluteOtherDir));
     REQUIRE(config.daemon.value().extensions.size() == 1);
     auto const& orchestrator = config.daemon.value().extensions.front();
     CHECK(orchestrator.autostart == DaemonExtensionAutostart::AtDaemonStart);
     CHECK(orchestrator.programs
-          == std::vector { DaemonExtensionProgram { .name = "claude", .path = "/opt/claude" } });
+          == std::vector { DaemonExtensionProgram { .name = "claude", .path = AbsoluteClaudeDir } });
 
     SECTION("a programs that is no map is ignored, the entry kept")
     {
@@ -390,3 +411,37 @@ TEST_CASE("yamlToJson", "[config][daemon]")
     CHECK(contour::config::yamlToJson(nested(16)).has_value());
     CHECK(contour::config::yamlToJson(nested(17)) == std::unexpected(YamlToJsonError::TooDeep));
 }
+
+#ifdef _WIN32
+TEST_CASE("daemon.extensions: a program that is no .exe is kept, and warned about, on Windows",
+          "[config][daemon]")
+{
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config =
+        loadConfigFromYaml("daemon:\n"
+                           "  extensions:\n"
+                           "    orchestrator:\n"
+                           "      programs:\n"
+                           "        claude: 'C:\\Users\\me\\AppData\\Roaming\\npm\\claude.cmd'\n"
+                           "        gh: 'C:\\Program Files\\GitHub CLI\\gh.exe'\n"
+                           "        git: 'C:/Program Files/Git/cmd/git'\n");
+    REQUIRE(config.daemon.value().extensions.size() == 1);
+    CHECK(config.daemon.value().extensions.front().programs.size()
+          == 3); // kept: the host refuses it at start
+    auto const& log = capture.text();
+    CHECK(log.contains("Program 'claude' of extension 'orchestrator'"));
+    CHECK(log.contains("only an .exe"));
+    CHECK_FALSE(log.contains("'gh'"));  // an .exe
+    CHECK_FALSE(log.contains("'git'")); // no extension: .exe is appended
+}
+
+TEST_CASE("daemon.extensions: a program may start with ~\\ on Windows", "[config][daemon]")
+{
+    auto const config = loadConfigFromYaml(
+        "daemon:\n  extensions:\n    orchestrator:\n      programs:\n        gh: '~\\bin\\gh.exe'\n");
+    auto const& programs = config.daemon.value().extensions.front().programs;
+    REQUIRE(programs.size() == 1);
+    CHECK(programs.front().path.is_absolute());
+    CHECK(programs.front().path.filename() == "gh.exe");
+}
+#endif
