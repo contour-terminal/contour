@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>install - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="..">
+<link rel="icon" href="../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../assets/theme/site.css">
+<script type="module" src="../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../assets/contour-logo.png" alt=""><span id="cw-title">install</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href=".." aria-current="true"><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../configuration/"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../vt-sequence/"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour">
+<a class="tab" data-group="" href="..">home</a>
+<a class="tab" data-group="" href="./" aria-current="page">install</a>
+<a class="tab" data-group="" href="../features/">features</a>
+<a class="tab" data-group="" href="../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure" hidden>
+<a class="tab" data-group="" href="../configuration/">config file</a>
+<a class="tab" data-group="" href="../configuration/profiles/">profiles</a>
+<a class="tab" data-group="" href="../configuration/settings/">settings window</a>
+<a class="tab" data-group="" href="../configuration/colors/">colors</a>
+<a class="tab" data-group="" href="../configuration/key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../configuration/layouts/">layouts</a>
+<a class="tab" data-group="more" href="../configuration/links/">links</a>
+<a class="tab" data-group="more" href="../configuration/hosts/">hosts</a>
+<a class="tab" data-group="more" href="../configuration/indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../configuration/paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference" hidden>
+<a class="tab" data-group="" href="../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../vt-extensions/synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/kitty-graphics/">kitty graphics placeholders</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>install</summary>
+  <div class="tabsel-list">
+<a href="..">home</a>
+<a href="./" aria-current="page">install</a>
+<a href="../features/">features</a>
+<a href="../release-notes/">release notes</a>
+<a href="../persistent-sessions/">persistent sessions</a>
+<a href="../sidebar/">workspace sidebar</a>
+<a href="../remote-hosts/">remote hosts</a>
+<a href="../control-api/">control api</a>
+<a href="../demo/command-blocks/">command blocks</a>
+<a href="../demo/hint-mode/">hint mode</a>
+<a href="../input-modes/">input modes</a>
+<a href="../demo/drag-and-drop/">drag and drop</a>
+<a href="../extensions/">status-line extensions</a>
+<a href="../quick-terminal/">quick terminal</a>
+<a href="../accessibility/">accessibility</a>
+<a href="../secure-input/">secure input</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="install">Install<a class="headerlink" href="#install" title="Permanent link">#</a></h1>
+<p>Contour is packaged for most systems; pick yours below, or take a build from the <a href="https://github.com/contour-terminal/contour/releases/latest/">release page</a>.</p>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:4"><input checked id="__tabbed_1_1" name="__tabbed_1" type="radio"><input id="__tabbed_1_2" name="__tabbed_1" type="radio"><input id="__tabbed_1_3" name="__tabbed_1" type="radio"><input id="__tabbed_1_4" name="__tabbed_1" type="radio"><div class="tabbed-labels"><label for="__tabbed_1_1">Linux</label><label for="__tabbed_1_2">macOS</label><label for="__tabbed_1_3">Windows</label><label for="__tabbed_1_4">Source</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<h2 id="fedora-linux">Fedora Linux<a class="headerlink" href="#fedora-linux" title="Permanent link">#</a></h2>
+<p>Use the official <a href="https://packages.fedoraproject.org/pkgs/contour-terminal/contour-terminal/">package</a>.</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>sudo<span class="w"> </span>dnf<span class="w"> </span>install<span class="w"> </span>contour-terminal
+</span></code></pre></div>
+<h2 id="arch-linux">Arch Linux<a class="headerlink" href="#arch-linux" title="Permanent link">#</a></h2>
+<p>Use the official <a href="https://archlinux.org/packages/extra/x86_64/contour/">package</a>.</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sudo<span class="w"> </span>pacman<span class="w"> </span>-S<span class="w"> </span>contour
+</span></code></pre></div>
+<h2 id="ubuntu-linux">Ubuntu Linux<a class="headerlink" href="#ubuntu-linux" title="Permanent link">#</a></h2>
+<p>Download the <code>.deb</code> file for your Ubuntu version from the <a href="https://github.com/contour-terminal/contour/releases">release page</a>, then install it:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sudo<span class="w"> </span>dpkg<span class="w"> </span>-i<span class="w"> </span>~/Downloads/contour-0.3.12.262-UBUNTU_VERSION-ARCH.deb
+</span></code></pre></div>
+<h2 id="flatpak">Flatpak<a class="headerlink" href="#flatpak" title="Permanent link">#</a></h2>
+<p>Contour is available at the Flathub store.</p>
+<p><a href="https://flathub.org/apps/details/org.contourterminal.Contour"><img alt="Get it on Flathub" src="https://raw.githubusercontent.com/flatpak-design-team/flathub-mockups/master/assets/download-button/download.svg?sanitize=true"></a></p>
+<h2 id="appimage">AppImage<a class="headerlink" href="#appimage" title="Permanent link">#</a></h2>
+<p>Every release also carries <code>contour-VERSION-x86_64.AppImage</code>, a single file that bundles Qt 6.11 (which
+Debian and Ubuntu do not ship) and everything else Contour needs but the C library. Make it executable
+and run it:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>chmod<span class="w"> </span>+x<span class="w"> </span>contour-VERSION-x86_64.AppImage
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>./contour-VERSION-x86_64.AppImage
+</span></code></pre></div>
+<p>It runs on distributions with a glibc at least as new as Ubuntu 24.04's. Without FUSE, run it with
+<code>--appimage-extract-and-run</code>.</p>
+<details class="note">
+<summary>Building the AppImage yourself</summary>
+<p>To build it yourself, on the oldest distribution you want it to run on, install the build dependencies
+(<code>scripts/install-deps.sh</code>), Qt 6.11 with the <code>qtmultimedia</code>, <code>qtshadertools</code> and <code>qtspeech</code>
+modules (for instance through <a href="https://github.com/miurahr/aqtinstall">aqtinstall</a>), a C++23 compiler and
+<code>scripts/install-rust-wasm.sh</code>, then:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nv">QT_ROOT_DIR</span><span class="o">=</span>/path/to/Qt/6.11.1/gcc_64<span class="w"> </span><span class="nv">CXX</span><span class="o">=</span>g++-15<span class="w"> </span><span class="nv">VERSION_STRING</span><span class="o">=</span>dev<span class="w"> </span>./scripts/build-appimage.sh
+</span></code></pre></div>
+<p>The script builds Contour, installs it into an <code>AppDir</code> and packs it with
+<a href="https://github.com/linuxdeploy/linuxdeploy">linuxdeploy</a> and its Qt plugin, which scans the QML files
+for the modules to bundle. The result is <code>contour-dev-x86_64.AppImage</code> in the current directory.</p>
+</details>
+<p>The Qt-free <code>contour-daemon</code> package for machines without a display is described in <a href="../persistent-sessions/#contour-daemon-on-a-server">Contour daemon on a server</a>.</p>
+</div>
+<div class="tabbed-block">
+<h2 id="homebrew">Homebrew<a class="headerlink" href="#homebrew" title="Permanent link">#</a></h2>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>brew<span class="w"> </span>install<span class="w"> </span>contour
+</span></code></pre></div>
+</div>
+<div class="tabbed-block">
+<h2 id="installers-windows-10-or-newer">Installers (Windows 10 or newer)<a class="headerlink" href="#installers-windows-10-or-newer" title="Permanent link">#</a></h2>
+<p>Download Contour for Windows from the <a href="https://github.com/contour-terminal/contour/releases/latest/">release page</a> and double click the installer (an <code>.msi</code> file). There are two installers, and you need one of them:</p>
+<table>
+<thead>
+<tr>
+<th>Installer</th>
+<th>Installs for</th>
+<th>Default folder</th>
+<th>Needs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>contour-&lt;version&gt;-win64.msi</code></td>
+<td>everyone on the computer</td>
+<td><code>C:\Program Files\Contour\</code></td>
+<td>an administrator's approval</td>
+</tr>
+<tr>
+<td><code>contour-&lt;version&gt;-win64-user.msi</code></td>
+<td>you only</td>
+<td><code>%LOCALAPPDATA%\Programs\Contour\</code></td>
+<td>nothing</td>
+</tr>
+</tbody>
+</table>
+<p>Pick the per-user installer when you cannot or do not want to elevate. Both add Contour to the Start menu
+and, unless you deselect their features in the installer, to your <code>PATH</code> and your desktop. There is also a <code>contour-&lt;version&gt;-win64.zip</code>
+that needs no installation at all: unpack it anywhere and run <code>bin\contour.exe</code>.</p>
+<p>With the Windows Package Manager:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>winget<span class="w"> </span>install<span class="w"> </span>--id<span class="w"> </span>contour-terminal.Contour<span class="w"> </span>--silent<span class="w"> </span>--scope<span class="w"> </span>machine
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>winget<span class="w"> </span>install<span class="w"> </span>--id<span class="w"> </span>contour-terminal.Contour<span class="w"> </span>--silent<span class="w"> </span>--scope<span class="w"> </span>user
+</span></code></pre></div>
+<details class="note">
+<summary>Upgrades and running instances</summary>
+<ul>
+<li><strong>The two installers are separate products.</strong> Both can be installed on one computer, and neither ever
+  upgrades or removes the other. When a command name is found in both, the per-machine <code>PATH</code> comes first.</li>
+<li><strong>An installer upgrades in place.</strong> Run any later build over an earlier one, or over a release, without
+  uninstalling first; an older build of the same release also installs over a newer one. An upgrade keeps the
+  folder Contour is in, even a folder you chose; the one exception is an old release's folder with its version
+  in the name (<code>Contour Terminal Emulator 0.8</code>), which moves to a folder named <code>Contour</code> once. Installations
+  of Contour 0.6.1 and earlier have to be uninstalled first.</li>
+<li><strong>A running Contour is closed and opened again.</strong> Windows Installer closes the Contour window it finds
+  running and starts it again, with the arguments it had, once the files are replaced. A window whose
+  sessions run in its own process (<code>daemon.mode: in_process</code>, or the fallback when no daemon could be
+  started) loses them. Sessions a daemon hosts keep running: the installer moves a daemon started by hand out
+  of the way first, and does not end one. What it leaves is described in
+  <a href="../persistent-sessions/#installing-a-new-contour-on-windows">Installing a new Contour on Windows</a>.</li>
+</ul>
+</details>
+<details class="note">
+<summary>Unattended installation, installer properties and winget</summary>
+<p>Run an installer without a dialog from a command prompt or a deployment tool:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>msiexec<span class="w"> </span>/i<span class="w"> </span>contour-&lt;version&gt;-win64.msi<span class="w"> </span>/qn<span class="w"> </span>/norestart<span class="w"> </span>/l*v<span class="w"> </span>contour-install.log
+</span></code></pre></div>
+<p>Three properties change what it installs. Give them on the command line after the file name
+(<code>INSTALL_ROOT</code> is older than the other two):</p>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Default</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>INSTALL_ROOT=&lt;folder&gt;</code></td>
+<td>the installer's default folder (table above); on an upgrade, the folder Contour is in</td>
+<td>where Contour goes. A folder given here wins over the installed one, which moves the installation.</td>
+</tr>
+<tr>
+<td><code>ADD_TO_PATH=0</code></td>
+<td><code>1</code></td>
+<td>does not add Contour's <code>bin</code> folder to <code>PATH</code></td>
+</tr>
+<tr>
+<td><code>DESKTOP_SHORTCUT=0</code></td>
+<td><code>1</code></td>
+<td>does not put a shortcut on the desktop</td>
+</tr>
+</tbody>
+</table>
+<p>On an upgrade, <code>ADD_TO_PATH=0</code> and <code>DESKTOP_SHORTCUT=0</code> remove the entry or the shortcut the earlier
+installation made, and a later install with the default does not bring it back: name the feature again with
+<code>ADDLOCAL=CM_C_contour_path</code> (the <code>PATH</code> entry) or <code>ADDLOCAL=ContourDesktopShortcutFeature</code> (the shortcut).</p>
+<p><code>msiexec</code> reports through its exit code: <code>0</code> success; <code>3010</code> success, but a restart is needed; <code>1602</code> the
+installation was cancelled; <code>1603</code> a fatal error (also what an installer says when a later version of
+Contour is already installed: "A later version of Contour is already installed"); <code>1618</code> another installation
+is already running; <code>1638</code> another build of the same product is already installed with the same product code: this
+happens only between builds made before Contour 0.9, which all builds of one release shared; uninstall it
+first. Builds of 0.9 and later each have a product code of their own, and upgrade each other. The log named by <code>/l*v</code> has the detail.</p>
+<p>With winget (commands above):</p>
+<p><code>--scope machine</code> installs the per-machine installer, <code>--scope user</code> the per-user one. Without <code>--scope</code>, winget
+prefers the per-user installer unless your winget settings say otherwise (<code>installBehavior.preferences.scope</code>):
+a plain <code>winget install contour-terminal.Contour</code> needs no administrator and installs into your profile. Name
+<code>--scope machine</code> for an installation for every user. <code>winget upgrade</code> keeps the scope Contour was installed in.
+The portable package (the ZIP, without installer) is available as <code>winget install --id contour-terminal.Contour
+--installer-type portable</code>, and <code>winget upgrade</code> keeps an installation made that way portable. Installations of
+Contour 0.6.1 and earlier have to be uninstalled first, also when winget offers the upgrade.</p>
+<div class="admonition note">
+<p class="admonition-title">Installing as SYSTEM</p>
+<p>A deployment tool that installs as the SYSTEM account cannot reach your daemon. Contour is still
+installed, but a daemon that you started by hand keeps running from the old folder until it next
+restarts. Deployment tools pass <code>--scope machine</code> to <code>winget install</code>: without it winget prefers the
+per-user installer, which would install into the profile of the SYSTEM account. See <a href="../persistent-sessions/#installing-a-new-contour-on-windows">Installing a new Contour on Windows</a>.</p>
+</div>
+</details>
+</div>
+<div class="tabbed-block">
+<h2 id="installing-from-source">Installing from source<a class="headerlink" href="#installing-from-source" title="Permanent link">#</a></h2>
+<p>Contour is best installed from supported package managers, but you can build
+from source by following the instructions below.</p>
+<h3 id="unix-like-systems-linux-freebsd-macos">UNIX-like systems (Linux, FreeBSD, macOS)<a class="headerlink" href="#unix-like-systems-linux-freebsd-macos" title="Permanent link">#</a></h3>
+<h4 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">#</a></h4>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>./scripts/install-deps.sh
+</span></code></pre></div>
+<p>This script <em>might</em> ask you for the administrator password if a package dependency
+can be installed via the system package manager.</p>
+<h4 id="compile">Compile<a class="headerlink" href="#compile" title="Permanent link">#</a></h4>
+<p>You can use cmake presets to compile contour. The full list of available presets can be seen using <code>cmake --list-presets</code>. To compile release build for linux <code>clang-release</code> or <code>gcc-release</code>, or <code>appleclang-release</code> on macOS accordingly. <code>gcc-release</code>, <code>msvc-release</code> and <code>macos-package</code> build as the packages are built (link-time optimization, so a slower link) and <code>clang-release</code> stays the fast developer build; <code>-DCONTOUR_PRODUCTION_BUILD=ON</code> turns the packages' flags on anywhere (see <a href="https://github.com/contour-terminal/contour/blob/master/docs/internals/release-builds.md">release builds</a>).</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>cmake<span class="w"> </span>--preset<span class="w"> </span>clang-release
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>cmake<span class="w"> </span>--build<span class="w"> </span>--preset<span class="w"> </span>clang-release
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1"># Optionally, if you want to install from source</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>cmake<span class="w"> </span>--build<span class="w"> </span>--preset<span class="w"> </span>clang-release<span class="w"> </span>--target<span class="w"> </span>install
+</span></code></pre></div>
+<p>Please note, if you want to install into a system root, e.g. <code>/usr/local</code>, you may need to prefix
+the install command with <code>sudo</code>.</p>
+<p>Also, ensure that the terminfo file is correctly resolved, as the terminfo library
+is very limited in locating  the correct terminfo files (e.g. it does not search in <code>/usr/local</code>),
+you can symlink into <code>~/.terminfo</code> however.</p>
+<h3 id="windows-10-or-newer">Windows 10 or newer<a class="headerlink" href="#windows-10-or-newer" title="Permanent link">#</a></h3>
+<h4 id="prerequisites_1">Prerequisites<a class="headerlink" href="#prerequisites_1" title="Permanent link">#</a></h4>
+<p>For Windows, you must have Windows 10, 2018 Fall Creators Update, and Visual Studio 2019, installed.
+It will neither build nor run on any prior Windows OS, due to libterminal making use of <a href="https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/">ConPTY API</a>.</p>
+<ol>
+<li>Set up <a href="https://vcpkg.io/en/getting-started.html">vcpkg</a>, preferably somewhere high up in the folder hierarchy, and add the folder to your <code>PATH</code>.</li>
+</ol>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>cd C:\
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>git clone https://github.com/Microsoft/vcpkg.git
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>.\vcpkg\bootstrap-vcpkg.bat
+</span></code></pre></div>
+<ol>
+<li>Install Visual Studio Build Tools (make sure to select the CLI tools for
+   C++, which you might need to do in the separate components tab).</li>
+<li>Install Qt6 (i.e. to C:\Qt)</li>
+<li>Open the <em>developer</em> version of Powershell.</li>
+<li>In the <code>contour</code> source folder execute <code>.\scripts\install-deps.ps1</code>. This step may take a <em>very</em> long time.</li>
+</ol>
+<h4 id="compile_1">Compile<a class="headerlink" href="#compile_1" title="Permanent link">#</a></h4>
+<p>In the <em>developer</em> version of Powershell:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a># change paths accordingly if you installed QT and vcpkg to somewhere else
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake -DCMAKE_PREFIX_PATH=C:\Qt\6.5.0\msvc2019_64\lib\cmake
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>cmake --build build/
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a># Optionally, if you want to install from source
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>cmake --build build/ --target install
+</span></code></pre></div>
+</div>
+</div>
+</div></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/install.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">contour › <b>install</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

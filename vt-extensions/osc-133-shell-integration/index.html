@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>shell integration - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="../..">
+<link rel="icon" href="../../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../../assets/theme/site.css">
+<script type="module" src="../../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../../assets/contour-logo.png" alt=""><span id="cw-title">shell integration</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href="../.."><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../../configuration/"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../../vt-sequence/" aria-current="true"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour" hidden>
+<a class="tab" data-group="" href="../..">home</a>
+<a class="tab" data-group="" href="../../install/">install</a>
+<a class="tab" data-group="" href="../../features/">features</a>
+<a class="tab" data-group="" href="../../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure" hidden>
+<a class="tab" data-group="" href="../../configuration/">config file</a>
+<a class="tab" data-group="" href="../../configuration/profiles/">profiles</a>
+<a class="tab" data-group="" href="../../configuration/settings/">settings window</a>
+<a class="tab" data-group="" href="../../configuration/colors/">colors</a>
+<a class="tab" data-group="" href="../../configuration/key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../../configuration/layouts/">layouts</a>
+<a class="tab" data-group="more" href="../../configuration/links/">links</a>
+<a class="tab" data-group="more" href="../../configuration/hosts/">hosts</a>
+<a class="tab" data-group="more" href="../../configuration/indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../../configuration/paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference">
+<a class="tab" data-group="" href="../../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="./" aria-current="page">shell integration</a>
+<a class="tab" data-group="extensions" href="../clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../kitty-graphics/">kitty graphics placeholders</a>
+<a class="tab" data-group="extensions" href="../line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>shell integration</summary>
+  <div class="tabsel-list">
+<a href="../../vt-sequence/">vt sequences</a>
+<a href="../../demo/regis-graphics/">regis graphics</a>
+<a href="../synchronized-output/">synchronized output</a>
+<a href="./" aria-current="page">shell integration</a>
+<a href="../clickable-links/">clickable links</a>
+<a href="../buffer-capture/">buffer capture</a>
+<a href="../program-status/">program status</a>
+<a href="../semantic-block-query/">semantic block query</a>
+<a href="../osc-9-4-progress/">progress (osc 9;4)</a>
+<a href="../osc-3008-context/">context (osc 3008)</a>
+<a href="../vertical-line-marks/">vertical line marks</a>
+<a href="../color-palette-update-notifications/">palette notifications</a>
+<a href="../font-settings/">font settings</a>
+<a href="../kitty-graphics/">kitty graphics placeholders</a>
+<a href="../line-reflow-mode/">line reflow mode</a>
+<a href="../private-use-glyphs/">private-use glyphs</a>
+<a href="../save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a href="../unicode-core/">unicode core</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="osc-133-shell-integration">OSC 133 - Shell Integration<a class="headerlink" href="#osc-133-shell-integration" title="Permanent link">#</a></h1>
+<p>This documentation describes the OSC 133 sequence used for shell integration, inspired by FinalTerm.</p>
+<h2 id="installing-contours-shell-integration">Installing Contour's shell integration<a class="headerlink" href="#installing-contours-shell-integration" title="Permanent link">#</a></h2>
+<p>Contour ships a script for bash, zsh, fish, tcsh and PowerShell. Write it out once with
+<code>contour generate integration shell &lt;SHELL&gt; to &lt;FILE&gt;</code>, then load it from your shell's start-up file:</p>
+<table>
+<thead>
+<tr>
+<th>Shell</th>
+<th>Write the script</th>
+<th>Load it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>bash</td>
+<td><code>contour generate integration shell bash to ~/.config/contour/shell-integration.bash</code></td>
+<td>at the <strong>end</strong> of <code>~/.bashrc</code>: <code>source ~/.config/contour/shell-integration.bash</code></td>
+</tr>
+<tr>
+<td>zsh</td>
+<td><code>contour generate integration shell zsh to ~/.config/contour/shell-integration.zsh</code></td>
+<td>in <code>~/.zshrc</code>: <code>source ~/.config/contour/shell-integration.zsh</code></td>
+</tr>
+<tr>
+<td>fish</td>
+<td><code>contour generate integration shell fish to ~/.config/fish/conf.d/contour.fish</code></td>
+<td>nothing to do: fish reads <code>conf.d/</code> by itself</td>
+</tr>
+<tr>
+<td>tcsh</td>
+<td><code>contour generate integration shell tcsh to ~/.config/contour/shell-integration.tcsh</code></td>
+<td>in <code>~/.tcshrc</code>, after setting <code>prompt</code>: <code>source ~/.config/contour/shell-integration.tcsh</code></td>
+</tr>
+<tr>
+<td>PowerShell 7 and Windows PowerShell 5.1</td>
+<td><code>contour generate integration shell pwsh to "$(Split-Path $PROFILE)/contour-integration.ps1"</code></td>
+<td>in your <code>$PROFILE</code>, after anything that sets up the prompt: <code>. "$(Split-Path $PROFILE)/contour-integration.ps1"</code></td>
+</tr>
+</tbody>
+</table>
+<p>The same <code>pwsh</code> script serves both PowerShell 7 and Windows PowerShell 5.1; there is no separate <code>powershell</code> name.
+Contour can also install it for you: see
+<a href="#installing-powershells-integration-from-contour">Installing PowerShell's integration from Contour</a>.</p>
+<p>Every script marks the start of the prompt (<code>A</code>), its end (<code>B</code>), the start of the command's output (<code>C</code>)
+and the end of the command with its exit status (<code>D</code>), and reports the working directory with OSC 7. What
+differs is the command line:</p>
+<table>
+<thead>
+<tr>
+<th>Shell</th>
+<th>Command line</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>bash, zsh, fish, PowerShell</td>
+<td>sent with <code>C</code> as <code>cmdline_url</code></td>
+</tr>
+<tr>
+<td>tcsh</td>
+<td>not sent, as no tcsh hook sees it: Contour reads it off the screen instead (see <a href="#c-command-output-start"><code>C</code></a>)</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>bash:</strong> the script carries its own copy of <a href="https://github.com/rcaloras/bash-preexec">bash-preexec</a>,
+  which installs itself by appending to <code>PROMPT_COMMAND</code>. A later <code>PROMPT_COMMAND=...</code> throws that away, and
+  then no marks are sent at all, without an error: that is why the script belongs at the end of <code>~/.bashrc</code>,
+  after anything that sets <code>PROMPT_COMMAND</code>. bash hands over a command line only once its history has
+  recorded it, so a command kept out of the history (<code>HISTIGNORE</code>, <code>HISTCONTROL</code>, <code>set +o history</code>) is read
+  off the screen instead.</li>
+<li><strong>tcsh:</strong> the script extends <code>prompt</code> once, so it is sourced after <code>prompt</code> is set.</li>
+<li><strong>PowerShell:</strong> the script runs in PowerShell 7 and in Windows PowerShell 5.1, and needs PSReadLine. Like VS Code's
+  integration, it wraps <code>PSConsoleHostReadLine</code>, so the command line is reported when PSReadLine hands it
+  back — after the newline, before the command runs — rather than from a key handler. Without PSReadLine
+  there is no <code>C</code>, and so no <code>D</code> either.</li>
+</ul>
+<h3 id="installing-powershells-integration-from-contour">Installing PowerShell's integration from Contour<a class="headerlink" href="#installing-powershells-integration-from-contour" title="Permanent link">#</a></h3>
+<p>Instead of editing your profile by hand, install it from <strong>Settings › Shell Integration</strong> (the rows
+"PowerShell", and on Windows "Windows PowerShell"), or from the pane's "Turn on command blocks" card, which
+appears after three commands without prompt marks. The confirm step shows the exact line and the profile file
+before anything is written. The line is</p>
+<div class="language-powershell highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">if</span> <span class="p">(</span><span class="nv">$env:TERM_PROGRAM</span> <span class="o">-eq</span> <span class="s1">'contour'</span><span class="p">)</span> <span class="p">{</span> <span class="p">.</span> <span class="p">(</span><span class="no">[scriptblock]</span><span class="p">::</span><span class="n">Create</span><span class="p">((&amp;</span> <span class="s1">'&lt;contour binary&gt;'</span> <span class="n">generate</span> <span class="n">integration</span> <span class="n">shell</span> <span class="n">pwsh</span> <span class="n">to</span> <span class="p">-</span> <span class="p">|</span> <span class="nb">Out-String</span><span class="p">)))</span> <span class="p">}</span> <span class="c"># Contour shell integration</span>
+</span></code></pre></div>
+<p>It runs only inside Contour, and regenerates the script from the running Contour at every start. A manual
+install that dot-sources <code>contour-integration.ps1</code>, <code>shell-integration.ps1</code> or <code>shell-integration.pwsh</code> counts
+as installed. Writing the script to a <code>.ps1</code> and dot-sourcing it, as in the table above, stays an alternative.</p>
+<p>The line goes into the profile of the shell:</p>
+<table>
+<thead>
+<tr>
+<th>Shell</th>
+<th>Profile</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PowerShell 7, Windows</td>
+<td><code>&lt;Documents&gt;\PowerShell\Microsoft.PowerShell_profile.ps1</code></td>
+</tr>
+<tr>
+<td>Windows PowerShell 5.1</td>
+<td><code>&lt;Documents&gt;\WindowsPowerShell\Microsoft.PowerShell_profile.ps1</code></td>
+</tr>
+<tr>
+<td>PowerShell 7, Linux and macOS</td>
+<td><code>$XDG_CONFIG_HOME/powershell/Microsoft.PowerShell_profile.ps1</code>, else <code>~/.config/powershell/Microsoft.PowerShell_profile.ps1</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>&lt;Documents&gt;</code> is the Documents known folder, so a OneDrive-redirected Documents is followed.</p>
+<ul>
+<li><strong>Encoding:</strong> a profile in UTF-8 (with or without a BOM) or UTF-16LE, the encoding Windows PowerShell 5.1's
+  <code>&gt;</code> and <code>Out-File</code> write, is read and appended to in its own encoding. A new profile is created as UTF-8 with
+  a BOM. A Contour path with non-ASCII characters is refused for a Windows PowerShell profile without a BOM,
+  which 5.1 would misread; a UTF-16BE or UTF-32 profile is refused.</li>
+<li><strong>Execution policy (Windows):</strong> Contour reads the policy each shell would apply, the way the shell does.
+  Windows PowerShell 5.1: Group Policy (machine, then user), then the user's and the machine's
+  <code>ShellIds\Microsoft.PowerShell</code> setting in the registry, else Restricted (RemoteSigned on Windows Server).
+  PowerShell 7: its own Group Policy (<code>Policies\Microsoft\PowerShellCore</code>), then
+  <code>"Microsoft.PowerShell:ExecutionPolicy"</code> in the user's <code>&lt;Documents&gt;\PowerShell\powershell.config.json</code>, then
+  in the <code>powershell.config.json</code> beside the installed PowerShell 7, else RemoteSigned. A configuration file
+  that is not a JSON object sets no policy.</li>
+<li><strong>Fixing the policy:</strong> when the effective policy is Restricted (or none is set and the default is), which is
+  Windows PowerShell 5.1's default on Windows 10 and 11 clients, the confirm step also offers "Allow Scripts and
+  Add Line": it sets your user's policy to RemoteSigned, as <code>Set-ExecutionPolicy -Scope CurrentUser
+  RemoteSigned</code> does, before adding the line. For Windows PowerShell 5.1 that is the user's registry setting;
+  for PowerShell 7 it is that key in the user's <code>powershell.config.json</code>, created if missing, with every other
+  key kept. A <code>powershell.config.json</code> that does not parse is never overwritten: the install is refused, and
+  the profile stays as it was. If the line cannot be added after the policy was set, the policy stays set (you
+  agreed to it), and trying again only adds the line. A policy enforced by Group Policy, or AllSigned, blocks
+  the install, and the dialog says why. PowerShell 7's default, RemoteSigned, needs no change.</li>
+<li><strong>Installed, but the policy stops it:</strong> a profile that already loads Contour under a policy that keeps it from
+  running is listed in Settings as "Installed in …, but PowerShell's script policy stops it from running", with
+  Install… offering "Allow Scripts": the same per-user fix, adding no line. Under Group Policy or AllSigned the
+  row says why instead, and offers nothing. The pane's card does not offer this: it offers only where the line is
+  missing.</li>
+<li><strong>Which shell a pane runs:</strong> on Windows, Contour cannot see which program runs in a pane, so the card
+  assumes the shell the pane's profile starts (and none for SSH profiles).</li>
+</ul>
+<h3 id="shells-that-speak-osc-133-themselves">Shells that speak OSC 133 themselves<a class="headerlink" href="#shells-that-speak-osc-133-themselves" title="Permanent link">#</a></h3>
+<ul>
+<li><strong>fish 4.0</strong> and later mark their prompts natively: <code>A</code>, <code>C</code> and <code>D</code> from fish 4.0.0, the command line
+  (<code>cmdline_url</code> on <code>C</code>) from 4.0.1, and <code>B</code> from 4.3.0; <code>set -Ua fish_features no-mark-prompt</code> (fish 4.0.6
+  and later) turns fish's own marks off. Contour's fish script detects which marks your fish sends and adds
+  only those it leaves out, so no mark is sent twice.</li>
+<li><strong>Nushell 0.111</strong> and later integrate natively and need no script: make sure
+  <code>$env.config.shell_integration.osc133</code> is <code>true</code> (the default); <code>contour generate integration shell nu</code>
+  says so too. Nushell never sends the command line (<code>cmdline_url</code>), so Contour reads it off the screen
+  (see <a href="#c-command-output-start"><code>C</code></a>). Nushell marks every continuation line of a multi-line
+  command with <code>133;A;k=s</code> and a <code>133;B</code> after its indicator; Contour reads an <code>A</code> with <code>k=s</code> as part of
+  the prompt in progress, not as a new command block (see <a href="#a-prompt-start"><code>A</code></a>). Older Nushell already
+  marks its prompts and commands with plain <code>A</code>, <code>B</code>, <code>C</code> and <code>D</code>, but leaves the prompt indicator and the
+  continuation lines unmarked.</li>
+</ul>
+<h3 id="windows">Windows<a class="headerlink" href="#windows" title="Permanent link">#</a></h3>
+<p>PowerShell's marks reach Contour through the Windows console layer (ConPTY) like any other output: the
+ConPTY that Contour ships passes them through unchanged, so the PowerShell integration works on Windows as
+it does elsewhere. <code>cmd.exe</code> has no prompt hook to integrate with; there, Contour behaves as it does without
+shell integration.</p>
+<h3 id="what-contour-builds-on-these-marks">What Contour builds on these marks<a class="headerlink" href="#what-contour-builds-on-these-marks" title="Permanent link">#</a></h3>
+<p>Folding, the gutter's block column, scrollbar marks, the sticky command header, finish notifications,
+copying a command's output and prompt-to-prompt navigation all read these marks —
+see <a href="../../demo/command-blocks/">Command blocks</a>. A shell that sends none of them loses nothing it had:
+Contour then behaves as a terminal without shell integration always has.</p>
+<h2 id="sequence-specification">Sequence Specification<a class="headerlink" href="#sequence-specification" title="Permanent link">#</a></h2>
+<p><strong>Format:</strong> <code>OSC 133 ; &lt;Command&gt; [; &lt;Parameters&gt;...] ST</code></p>
+<p>Where:</p>
+<ul>
+<li><code>OSC</code> is <code>\033]</code>.</li>
+<li><code>ST</code> (String Terminator) is <code>\033\</code> (or BEL <code>\007</code>).</li>
+<li><code>&lt;Command&gt;</code> is a single character identifier (A, N, B, I, P, C, D, L).</li>
+</ul>
+<h3 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">#</a></h3>
+<h4 id="a-prompt-start">A - Prompt Start<a class="headerlink" href="#a-prompt-start" title="Permanent link">#</a></h4>
+<p>Sent before the shell prompt starts printing.</p>
+<p><strong>Format:</strong> <code>OSC 133 ; A [; &lt;Key&gt;=&lt;Value&gt;...] ST</code></p>
+<p><strong>Parameters:</strong></p>
+<ul>
+<li><code>click_events=1</code>: Optional. Accepted for compatibility and currently ignored: Contour does not yet move the cursor on a click inside the prompt.</li>
+<li><code>redraw=0</code>: Optional, as kitty reads it. The shell does not redraw this prompt when the window is resized,
+  so Contour re-wraps it like any other text (see below). Each prompt says it for itself; any other value,
+  or none, means the shell redraws it.</li>
+<li><code>k=&lt;Kind&gt;</code>: Optional. <code>i</code>, or none, is the prompt itself. <code>c</code> and <code>s</code> start a further line of the prompt in
+  progress — a continuation prompt such as bash's <code>PS2</code>; Nushell sends <code>k=s</code> before each — and <code>r</code> a
+  right-hand prompt. An <code>A</code> (or <code>N</code>) of one of those three kinds starts no new prompt and no command block:
+  it is read as <code>P</code> with the same kind. A kind Contour does not know counts as <code>i</code>.</li>
+</ul>
+<p><strong>Behavior:</strong></p>
+<ul>
+<li>Marks the current line as a prompt line (conceptually similar to setting a "mark").</li>
+<li>Notifies the terminal that the prompt is beginning. A command still running has ended.</li>
+<li>Does no <em>fresh-line</em> (see <code>L</code>), though the semantic-prompts proposal asks for one: kitty, foot and Konsole
+  do none either, and a line break the shell did not print would change what it drew.</li>
+</ul>
+<p><strong>Resizing at the prompt:</strong> a shell redraws its prompt when the window's width changes, moving up as many rows
+as it drew the prompt and its input on. Re-wrapped under it as well, the prompt would span other rows than the
+shell counts, so Contour leaves the <em>live</em> prompt as the shell drew it, as kitty does and the semantic-prompts
+proposal recommends:</p>
+<ul>
+<li>The live prompt is the rows from the line the last <code>A</code> marked down to the bottom of the page, while the
+  cursor stands in it and no <code>C</code> has followed.</li>
+<li>Each of those rows is cut at the new width or padded to it and stays a row of its own. The cursor keeps its
+  row; the rows above re-wrap as ever. The columns <code>B</code>, <code>D</code> and <code>P;k=r</code> marked move with the cells they name, so
+  the input is found where it stands until the shell's redraw marks it afresh.</li>
+<li>A prompt sent with <code>redraw=0</code> is re-wrapped like any other text, and so is one that began above the page,
+  or that shares its line with output that did not end in a newline.</li>
+</ul>
+<h4 id="n-new-command">N - New Command<a class="headerlink" href="#n-new-command" title="Permanent link">#</a></h4>
+<p><strong>Format:</strong> <code>OSC 133 ; N [; &lt;Key&gt;=&lt;Value&gt;...] ST</code></p>
+<p><strong>Behavior:</strong> As <code>A</code>. The proposal's "may first end the command before" is what <code>A</code> does already.</p>
+<h4 id="b-prompt-end">B - Prompt End<a class="headerlink" href="#b-prompt-end" title="Permanent link">#</a></h4>
+<p>Sent after the shell prompt has finished printing and before user input begins.</p>
+<p><strong>Format:</strong> <code>OSC 133 ; B ST</code></p>
+<p><strong>Behavior:</strong></p>
+<ul>
+<li>Notifies the terminal that the prompt has ended.</li>
+<li>Marks the logical line the prompt ended on, together with the column the cursor stood at — the border
+  between what the shell painted and what the user is about to type.</li>
+</ul>
+<p>This border cannot be recovered after the fact: once the user starts typing, the prompt and the input are
+one run of cells. It is what lets Contour tell an accessibility client where the <em>prompt area</em> is (see
+<a href="../../accessibility/">Accessibility</a>), and it is recorded whether or not
+<a href="../semantic-block-query/">DEC mode 2034</a> is enabled — the line marks are terminal memory, not part of the
+semantic-block reader protocol.</p>
+<p>The column is counted across the whole <em>logical</em> line, so a window resize that re-wraps the line into
+different physical rows does not move it.</p>
+<p>Contour's bundled integrations send <code>;B</code> at the very end of the prompt. The border is also what lets Contour
+read a command line that was never reported off the screen (see <a href="#c-command-output-start"><code>C</code></a>).</p>
+<h4 id="i-prompt-end-input-to-the-end-of-the-line">I - Prompt End, Input to the End of the Line<a class="headerlink" href="#i-prompt-end-input-to-the-end-of-the-line" title="Permanent link">#</a></h4>
+<p><strong>Format:</strong> <code>OSC 133 ; I ST</code></p>
+<p><strong>Behavior:</strong> As <code>B</code>, but the user's input ends with the line it begins on: a command line Contour reads off
+the screen (see <code>C</code>) is that line's text alone. Where both <code>B</code> and <code>I</code> are sent on one line, the later counts.</p>
+<h4 id="p-prompt-part-start">P - Prompt Part Start<a class="headerlink" href="#p-prompt-part-start" title="Permanent link">#</a></h4>
+<p>Sent where a further part of the prompt in progress starts, such as a right-aligned prompt.</p>
+<p><strong>Format:</strong> <code>OSC 133 ; P [; k=&lt;Kind&gt;] ST</code></p>
+<p><strong>Parameters:</strong></p>
+<ul>
+<li><code>k=r</code>: a right prompt, drawn beside the input (Nushell sends it). Other kinds (<code>i</code>, <code>c</code>, <code>s</code>) are
+  accepted and change nothing.</li>
+</ul>
+<p><strong>Behavior:</strong></p>
+<ul>
+<li>Starts no new prompt and no command block.</li>
+<li>With <code>k=r</code>, Contour remembers where on its line the right prompt begins, so that the command line it reads
+  off the screen when the shell does not report one (see <code>C</code>) leaves the right prompt out. Should the command
+  later be drawn over the right prompt, as zsh does once the command reaches it, the mark no longer counts.
+  On a line <code>B</code> marked and no <code>P;k=r</code> did, a run of text that ends at the right margin, or one column short of
+  it, and stands at least two blanks clear of the command is taken for a right prompt.</li>
+</ul>
+<h4 id="c-command-output-start">C - Command Output Start<a class="headerlink" href="#c-command-output-start" title="Permanent link">#</a></h4>
+<p>Sent after the user has finished typing the command (usually on Enter press) and before the command output begins.</p>
+<p><strong>Format:</strong> <code>OSC 133 ; C [; &lt;Key&gt;=&lt;Value&gt;...] ST</code></p>
+<p><strong>Parameters:</strong></p>
+<ul>
+<li><code>cmdline_url=&lt;EncodedURL&gt;</code>: Optional. The command line being executed, percent-encoded (kitty's
+  convention). Contour's bash, zsh, fish and PowerShell integrations send it. Its value runs to the end of
+  the sequence, as kitty reads it: a <code>;</code> in it belongs to the command, encoded or not.</li>
+<li><code>cmdline=&lt;Quoted&gt;</code>: Optional. The command line quoted for a shell, as kitty's bash and zsh integrations
+  send it (<code>printf %q</code>), and read as kitty reads it: the first word of the quoted text, with backslash
+  escapes, single and double quotes, and <code>$'...'</code> ANSI-C quoting. Its value runs to the end of the
+  sequence: a <code>;</code> in it belongs to the command.</li>
+</ul>
+<p><strong>Behavior:</strong></p>
+<ul>
+<li>Notifies the terminal that command execution is starting and output will follow.</li>
+<li>The <code>cmdline_url</code> and <code>cmdline</code> parameters tell the terminal exactly what command is being run. The first
+  of them in the sequence is the one read, and as its value runs to the end of the sequence, a parameter
+  after it is part of the command line: <code>OSC 133 ; C ; cmdline_url=;cmdline=ls ST</code> reports the command line
+  <code>;cmdline=ls</code>. An empty one, or a <code>cmdline=</code> whose quoting is broken, counts as none.</li>
+<li>Contour records the command line with the <a href="../../demo/command-blocks/">command block</a>: the gutter's block
+  tooltip, finish notifications and the sticky header of a command whose prompt has left the history show
+  it, and <code>CopyCommandLine</code> copies it. Without one — tcsh, Nushell,
+  or a hand-written prompt — Contour reads it off the screen when the prompt's end was marked with <code>B</code> (or
+  <code>I</code>): from the <code>;B</code> column to the start of the output, leaving a right prompt out. So <code>;B</code> is worth
+  sending even where the command line is not.</li>
+<li>A command line is untrusted input: anything that writes to the terminal can send one. Contour keeps
+  at most 4 KiB of it, shows it with control and bidirectional-override characters replaced by a
+  visible placeholder, and removes escape and other control characters (but tab and newline) from the
+  copy <code>CopyCommandLine</code> puts on the clipboard.</li>
+</ul>
+<h4 id="d-command-finished">D - Command Finished<a class="headerlink" href="#d-command-finished" title="Permanent link">#</a></h4>
+<p>Sent after the command has finished executing and before the next prompt starts.</p>
+<p><strong>Format:</strong> <code>OSC 133 ; D [; &lt;ExitCode&gt;] ST</code></p>
+<p><strong>Parameters:</strong></p>
+<ul>
+<li><code>&lt;ExitCode&gt;</code>: The integer exit code of the command (e.g., <code>0</code> for success). A missing or non-numeric one
+  reads as <code>0</code>.</li>
+</ul>
+<p><strong>Behavior:</strong></p>
+<ul>
+<li>Notifies the terminal that the command has finished.</li>
+<li>Reports the exit code of the command.</li>
+<li>Contour records the exit status with the command block: it colors the block's marks in the gutter and
+  on the scrollbar, labels the sticky header, and decides whether a finish notification set to
+  <code>outcome: failure</code> is sent.</li>
+</ul>
+<h4 id="l-fresh-line">L - Fresh Line<a class="headerlink" href="#l-fresh-line" title="Permanent link">#</a></h4>
+<p><strong>Format:</strong> <code>OSC 133 ; L ST</code></p>
+<p><strong>Behavior:</strong> Moves the cursor to the start of the next line, as <code>\r\n</code> does, unless it already stands at the
+start of a line -- where a carriage return would leave it.</p>
+<hr>
+<h2 id="example-flow">Example Flow<a class="headerlink" href="#example-flow" title="Permanent link">#</a></h2>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Prompt Start</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nb">printf</span><span class="w"> </span><span class="s2">"\033]133;A\033\\"</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># ... print prompt ...</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="nb">printf</span><span class="w"> </span><span class="s2">"user@host:~</span>$<span class="s2"> "</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Prompt End</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="nb">printf</span><span class="w"> </span><span class="s2">"\033]133;B\033\\"</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1"># ... user types command (e.g., 'ls') ...</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="c1"># Command Output Start</span>
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="nb">printf</span><span class="w"> </span><span class="s2">"\033]133;C\033\\"</span>
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="c1"># ... command output ...</span>
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>ls
+</span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>
+</span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="c1"># Command Finished (exit code 0)</span>
+</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="nb">printf</span><span class="w"> </span><span class="s2">"\033]133;D;0\033\\"</span>
+</span></code></pre></div>
+<h2 id="related-extensions">Related Extensions<a class="headerlink" href="#related-extensions" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>SETMARK (<code>CSI &gt; M</code>)</strong>: a Contour-only extension that marked the current line, equivalent to
+<code>OSC 133 ; A</code>. Deprecated in favour of OSC 133 and <strong>removed in 0.8.0</strong> — use <code>OSC 133 ; A</code>.</li>
+</ul></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="installing-contours-shell-integration" href="#installing-contours-shell-integration">Installing Contour's shell integration</a><a data-head="sequence-specification" href="#sequence-specification">Sequence Specification</a><a data-head="example-flow" href="#example-flow">Example Flow</a><a data-head="related-extensions" href="#related-extensions">Related Extensions</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/vt-extensions/osc-133-shell-integration.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">reference › <b>shell integration</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

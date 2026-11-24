@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>regis graphics - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="../..">
+<link rel="icon" href="../../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../../assets/theme/site.css">
+<script type="module" src="../../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../../assets/contour-logo.png" alt=""><span id="cw-title">regis graphics</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href="../.."><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../../configuration/"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../../vt-sequence/" aria-current="true"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour" hidden>
+<a class="tab" data-group="" href="../..">home</a>
+<a class="tab" data-group="" href="../../install/">install</a>
+<a class="tab" data-group="" href="../../features/">features</a>
+<a class="tab" data-group="" href="../../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure" hidden>
+<a class="tab" data-group="" href="../../configuration/">config file</a>
+<a class="tab" data-group="" href="../../configuration/profiles/">profiles</a>
+<a class="tab" data-group="" href="../../configuration/settings/">settings window</a>
+<a class="tab" data-group="" href="../../configuration/colors/">colors</a>
+<a class="tab" data-group="" href="../../configuration/key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../../configuration/layouts/">layouts</a>
+<a class="tab" data-group="more" href="../../configuration/links/">links</a>
+<a class="tab" data-group="more" href="../../configuration/hosts/">hosts</a>
+<a class="tab" data-group="more" href="../../configuration/indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../../configuration/paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference">
+<a class="tab" data-group="" href="../../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="./" aria-current="page">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../../vt-extensions/synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/kitty-graphics/">kitty graphics placeholders</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>regis graphics</summary>
+  <div class="tabsel-list">
+<a href="../../vt-sequence/">vt sequences</a>
+<a href="./" aria-current="page">regis graphics</a>
+<a href="../../vt-extensions/synchronized-output/">synchronized output</a>
+<a href="../../vt-extensions/osc-133-shell-integration/">shell integration</a>
+<a href="../../vt-extensions/clickable-links/">clickable links</a>
+<a href="../../vt-extensions/buffer-capture/">buffer capture</a>
+<a href="../../vt-extensions/program-status/">program status</a>
+<a href="../../vt-extensions/semantic-block-query/">semantic block query</a>
+<a href="../../vt-extensions/osc-9-4-progress/">progress (osc 9;4)</a>
+<a href="../../vt-extensions/osc-3008-context/">context (osc 3008)</a>
+<a href="../../vt-extensions/vertical-line-marks/">vertical line marks</a>
+<a href="../../vt-extensions/color-palette-update-notifications/">palette notifications</a>
+<a href="../../vt-extensions/font-settings/">font settings</a>
+<a href="../../vt-extensions/kitty-graphics/">kitty graphics placeholders</a>
+<a href="../../vt-extensions/line-reflow-mode/">line reflow mode</a>
+<a href="../../vt-extensions/private-use-glyphs/">private-use glyphs</a>
+<a href="../../vt-extensions/save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a href="../../vt-extensions/unicode-core/">unicode core</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="regis-vector-graphics">ReGIS Vector Graphics<a class="headerlink" href="#regis-vector-graphics" title="Permanent link">#</a></h1>
+<p>Contour implements <strong>ReGIS</strong> (Remote Graphics Instruction Set), DEC's vector-graphics language
+introduced with the VT330/VT340 terminals. Where <a href="../../features/#images">Sixel</a> transmits a raster (a grid of
+pixels), ReGIS transmits <em>drawing instructions</em> — lines, circles, arcs, curves, filled polygons and
+text — which the terminal rasterises. This makes ReGIS compact and resolution-independent: a circle
+is a few bytes, not a bitmap.</p>
+<p>This page is a practical reference for people who script and program terminals. It matches Contour's
+implementation; where Contour deviates from the VT340 it is called out explicitly.</p>
+<div class="admonition note">
+<p class="admonition-title">Authoritative reference</p>
+<p>The behaviour here follows the <a href="https://vt100.net/docs/vt3xx-gp/contents.html">VT330/VT340 Programmer Reference Manual, Volume 2: Graphics
+Programming</a>. That manual is the ground truth for
+ReGIS semantics.</p>
+</div>
+<h2 id="entering-and-leaving-regis">Entering and leaving ReGIS<a class="headerlink" href="#entering-and-leaving-regis" title="Permanent link">#</a></h2>
+<p>ReGIS is carried inside a <strong>DCS</strong> (Device Control String):</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ESC P p  &lt;ReGIS commands&gt;  ESC \
+</span></code></pre></div>
+<p><code>ESC P</code> (0x1B 0x50) is the DCS introducer, the letter <code>p</code> selects ReGIS, and <code>ESC \</code> (String
+Terminator) ends it. An optional numeric parameter before <code>p</code> controls state carry-over:</p>
+<table>
+<thead>
+<tr>
+<th>Introducer</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ESC P p</code> or <code>ESC P 0 p</code></td>
+<td>Resume: position, colours, write controls and the addressing window carry over from the previous ReGIS string.</td>
+</tr>
+<tr>
+<td><code>ESC P 1 p</code> / <code>ESC P 3 p</code></td>
+<td>Reset the graphics state and clear the canvas before drawing.</td>
+</tr>
+</tbody>
+</table>
+<p>From a shell you can emit ReGIS with <code>printf</code>:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Draw a diagonal line from the top-left toward the middle of the screen.</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033PpP[100,100]V[400,300]\033\\'</span>
+</span></code></pre></div>
+<h3 id="detecting-regis-support">Detecting ReGIS support<a class="headerlink" href="#detecting-regis-support" title="Permanent link">#</a></h3>
+<p>ReGIS-capable terminals advertise feature <strong>3</strong> in their primary Device Attributes reply. Send
+<code>CSI c</code> (<code>ESC [ c</code>) and look for <code>;3</code> in the response:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033[c'</span><span class="w">    </span><span class="c1"># Contour replies e.g. ESC [ ? 65 ; ... ; 3 ; 4 ; ... c   (3 = ReGIS, 4 = Sixel)</span>
+</span></code></pre></div>
+<p>You can also query the ReGIS graphics geometry with XTSMGRAPHICS (<code>CSI ? 3 ; 1 S</code>); Contour reports
+the fixed VT340 addressing area of <code>800 x 480</code>.</p>
+<h2 id="the-coordinate-system">The coordinate system<a class="headerlink" href="#the-coordinate-system" title="Permanent link">#</a></h2>
+<p>ReGIS addresses an <strong>800 × 480</strong> pixel screen. The origin <code>[0,0]</code> is the <strong>top-left</strong> corner and <strong>Y
+increases downward</strong>, so <code>[799,479]</code> is the bottom-right. Contour rasterises the ReGIS canvas and
+scales it across the terminal window, drawing it above the text so that painted pixels overlay the
+cells and untouched areas remain transparent.</p>
+<p>Coordinates are written in brackets, <code>[x,y]</code>. Each axis is independent and may be:</p>
+<table>
+<thead>
+<tr>
+<th>Form</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[100,50]</code></td>
+<td>Absolute position.</td>
+</tr>
+<tr>
+<td><code>[+30,-10]</code></td>
+<td>Relative to the current position (signed).</td>
+</tr>
+<tr>
+<td><code>[100]</code></td>
+<td>X only; Y unchanged.</td>
+</tr>
+<tr>
+<td><code>[,50]</code></td>
+<td>Y only; X unchanged.</td>
+</tr>
+<tr>
+<td><code>[]</code></td>
+<td>The current position (used by <code>V</code> to plot a dot).</td>
+</tr>
+</tbody>
+</table>
+<h3 id="pixel-vectors">Pixel vectors<a class="headerlink" href="#pixel-vectors" title="Permanent link">#</a></h3>
+<p>Outside brackets, a run of the digits <strong>0–7</strong> moves in one of eight compass directions, each step
+scaled by the <em>pixel-vector multiplier</em> <code>W(M...)</code>:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>    3   2   1
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>      \ | /
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>   4 -- + -- 0
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>      / | \
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    5   6   7
+</span></code></pre></div>
+<p><code>0</code> = right, <code>2</code> = up, <code>4</code> = left, <code>6</code> = down, and the odd digits are the diagonals. For example
+<code>V0000</code> draws a line four pixels to the right.</p>
+<h2 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">#</a></h2>
+<p>Every ReGIS command is a single, case-insensitive letter, optionally followed by parenthesised
+<em>options</em> <code>( ... )</code>, bracketed <em>coordinates</em> <code>[ ... ]</code>, pixel-vector digits, and quoted strings. A
+<code>;</code> ends a command. Whitespace is ignored between tokens.</p>
+<h3 id="p-position"><code>P</code> — Position<a class="headerlink" href="#p-position" title="Permanent link">#</a></h3>
+<p>Moves the graphics cursor without drawing.</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033PpP[400,240]\033\\'</span><span class="w">     </span><span class="c1"># move to the centre</span>
+</span></code></pre></div>
+<ul>
+<li><code>[x,y]</code> or pixel-vector digits move the cursor.</li>
+<li><code>(B)</code> / <code>(S)</code> begin a bounded / unbounded position stack, <code>(E)</code> ends it.</li>
+<li><code>(W...)</code> applies temporary write controls (see <code>W</code>).</li>
+</ul>
+<h3 id="v-vector"><code>V</code> — Vector<a class="headerlink" href="#v-vector" title="Permanent link">#</a></h3>
+<p>Draws straight lines from the current position, honouring the current colour, line pattern and
+width.</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033PpP[100,100]V[400,100]V[400,300]V[100,300]V[100,100]\033\\'</span><span class="w">   </span><span class="c1"># a rectangle</span>
+</span></code></pre></div>
+<ul>
+<li><code>[x,y]</code> draws a line to that point and moves there.</li>
+<li><code>[]</code> plots a single dot at the current position.</li>
+<li>Pixel-vector digits draw along each step.</li>
+</ul>
+<h3 id="c-curve"><code>C</code> — Curve<a class="headerlink" href="#c-curve" title="Permanent link">#</a></h3>
+<p>Circles, arcs and interpolated curves.</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033PpP[400,240]C[500,240]\033\\'</span><span class="w">      </span><span class="c1"># circle of radius 100, centred at the cursor</span>
+</span></code></pre></div>
+<ul>
+<li><code>C[x,y]</code> — a <strong>circle</strong> whose centre is the current position and whose radius reaches <code>[x,y]</code>.</li>
+<li><code>C(C)[x,y]</code> — the bracket is the <strong>centre</strong>; the current position lies on the circumference.</li>
+<li><code>C(A&lt;degrees&gt;)[x,y]</code> — an <strong>arc</strong>; a positive angle sweeps counter-clockwise, negative clockwise.</li>
+<li><code>C(S)[...]...(E)</code> — an <strong>open</strong> interpolated curve through the listed points.</li>
+<li><code>C(B)[...]...(E)</code> — a <strong>closed</strong> interpolated curve (the cursor returns to the start).</li>
+</ul>
+<h3 id="w-write-controls"><code>W</code> — Write controls<a class="headerlink" href="#w-write-controls" title="Permanent link">#</a></h3>
+<p>Sets the state that governs all drawing. Options combine inside one <code>W( ... )</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>I&lt;n&gt;</code> / <code>I(&lt;spec&gt;)</code></td>
+<td>Foreground colour: a register index, or a colour spec (see <a href="#colour">Colour</a>).</td>
+</tr>
+<tr>
+<td><code>V</code> <code>R</code> <code>C</code> <code>E</code></td>
+<td>Writing mode: <strong>V</strong> overlay (default), <strong>R</strong> replace, <strong>C</strong> complement, <strong>E</strong> erase.</td>
+</tr>
+<tr>
+<td><code>P&lt;n&gt;</code></td>
+<td>Line pattern 0–9 (see <a href="#patterns">Patterns</a>); <code>P(M&lt;n&gt;)</code> sets the pattern multiplier.</td>
+</tr>
+<tr>
+<td><code>M&lt;n&gt;</code></td>
+<td>Pixel-vector multiplier (pixels per PV step).</td>
+</tr>
+<tr>
+<td><code>L&lt;n&gt;</code></td>
+<td>Line width in pixels.</td>
+</tr>
+<tr>
+<td><code>N&lt;0/1&gt;</code></td>
+<td>Invert (negate) the line pattern.</td>
+</tr>
+<tr>
+<td><code>S...</code></td>
+<td>Shading (see <a href="#shading">Shading</a>).</td>
+</tr>
+</tbody>
+</table>
+<p>When written inside another command as <code>(W...)</code>, the controls apply only to that command.</p>
+<h3 id="t-text"><code>T</code> — Text<a class="headerlink" href="#t-text" title="Permanent link">#</a></h3>
+<p>Draws text with anti-aliased glyphs. In the GUI, ReGIS text is shaped by the same font engine as
+normal terminal text; the terminal engine itself ships a self-contained bitmap font as a fallback
+(headless use, or before a font is configured). An injected interface keeps the terminal engine free
+of any font-stack dependency.</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nb">printf</span><span class="w"> </span><span class="s2">"\033PpP[100,100]T(S2)'Hello, ReGIS'\033\\"</span>
+</span></code></pre></div>
+<ul>
+<li><code>'text'</code> or <code>"text"</code> — the string to draw at the current position.</li>
+<li><code>(S&lt;0-16&gt;)</code> — a standard cell size (0 = 9×10, up to 16 = 144×240); <code>(S[w,h])</code> a custom cell.</li>
+<li><code>(M[wf,hf])</code> — width/height multipliers; <code>(H&lt;n&gt;)</code> a height multiplier.</li>
+<li><code>(D&lt;degrees&gt;)</code> — writing direction in 45° steps (0 = rightward, 90 = up).</li>
+<li><code>(I&lt;degrees&gt;)</code> — italic slant.</li>
+</ul>
+<h3 id="s-screen"><code>S</code> — Screen<a class="headerlink" href="#s-screen" title="Permanent link">#</a></h3>
+<p>Screen-wide operations.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>(E)</code></td>
+<td>Erase the canvas to the background.</td>
+</tr>
+<tr>
+<td><code>(A[ul][lr])</code></td>
+<td>Set the addressing window (defaults to <code>[0,0][799,479]</code>).</td>
+</tr>
+<tr>
+<td><code>(I&lt;n&gt;)</code> / <code>(I(&lt;spec&gt;))</code></td>
+<td>Background colour.</td>
+</tr>
+<tr>
+<td><code>(M&lt;i&gt;(&lt;spec&gt;)...)</code></td>
+<td>Program colour registers (the colour map).</td>
+</tr>
+</tbody>
+</table>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033PpS(E)S(A[0,0][799,479])\033\\'</span><span class="w">    </span><span class="c1"># clear and reset the coordinate window</span>
+</span></code></pre></div>
+<p>Page selection, scrolling, output scaling, hardcopy and time-delay sub-options are accepted but have
+no effect in Contour (they describe hardware Contour does not emulate).</p>
+<h3 id="f-polygon-fill"><code>F</code> — Polygon fill<a class="headerlink" href="#f-polygon-fill" title="Permanent link">#</a></h3>
+<p>Fills the region enclosed by a set of vectors or a curve.</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033PpP[300,100]F(V[500,100][400,280])\033\\'</span><span class="w">   </span><span class="c1"># a filled triangle</span>
+</span></code></pre></div>
+<ul>
+<li><code>F(V...)</code> fills the polygon traced by the vector operations (the current position is the first
+  vertex).</li>
+<li><code>F(C...)</code> fills a curved region.</li>
+</ul>
+<h3 id="r-report"><code>R</code> — Report<a class="headerlink" href="#r-report" title="Permanent link">#</a></h3>
+<p>Queries state and sends a reply to the host application.</p>
+<table>
+<thead>
+<tr>
+<th>Request</th>
+<th>Reply</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>R(P)</code></td>
+<td>The graphics cursor position, as <code>[x,y]</code>.</td>
+</tr>
+<tr>
+<td><code>R(P(I))</code></td>
+<td>The interactive locator (mouse) position, as <code>&lt;button&gt;[x,y]</code>. Contour reports it immediately rather than blocking.</td>
+</tr>
+<tr>
+<td><code>R(E)</code></td>
+<td>The last error code (<code>0</code> = none).</td>
+</tr>
+<tr>
+<td><code>R(L)</code></td>
+<td>The current alphabet.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="macrographs"><code>@</code> — Macrographs<a class="headerlink" href="#macrographs" title="Permanent link">#</a></h3>
+<p>Stores and replays command strings.</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Define macro A as a box, then invoke it twice at different positions.</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033Pp@:AV[+100,0]V[0,+100]V[-100,0]V[0,-100]@;P[100,100]@AP[300,100]@A\033\\'</span>
+</span></code></pre></div>
+<ul>
+<li><code>@:X ... @;</code> defines macro <code>X</code>.</li>
+<li><code>@X</code> invokes macro <code>X</code> (expanded recursively; Contour bounds the depth and output size).</li>
+<li><code>@.</code> clears all macros.</li>
+</ul>
+<h3 id="l-load-character-set"><code>L</code> — Load character set<a class="headerlink" href="#l-load-character-set" title="Permanent link">#</a></h3>
+<p>Down-loadable custom character sets are recognised but not rendered in Contour (as in several other
+ReGIS implementations); text uses the built-in font.</p>
+<h2 id="colour">Colour<a class="headerlink" href="#colour" title="Permanent link">#</a></h2>
+<p>Contour keeps 16 colour registers, initialised to the VT340 default palette. A colour is named in
+three ways:</p>
+<ul>
+<li><strong>Register index</strong> — <code>W(I5)</code> selects register 5.</li>
+<li><strong>Named colour</strong> — <code>W(I(R))</code>, where <code>D</code>=dark, <code>R</code>=red, <code>G</code>=green, <code>B</code>=blue, <code>C</code>=cyan, <code>Y</code>=yellow,
+  <code>M</code>=magenta, <code>W</code>=white.</li>
+<li><strong>HLS or RGB spec</strong> — <code>W(I(H&lt;0-360&gt;L&lt;0-100&gt;S&lt;0-100&gt;))</code> for hue/lightness/saturation, or
+  <code>W(I(R&lt;0-100&gt;G&lt;0-100&gt;B&lt;0-100&gt;))</code>. On the DEC hue wheel <code>0°</code> is blue, <code>120°</code> red, <code>180°</code> yellow,
+  <code>240°</code> green.</li>
+</ul>
+<p>Registers are reprogrammed with <code>S(M&lt;index&gt;(&lt;spec&gt;))</code>, e.g. <code>S(M1(H240L50S100))</code> makes register 1
+green.</p>
+<h2 id="patterns">Patterns<a class="headerlink" href="#patterns" title="Permanent link">#</a></h2>
+<p><code>W(P&lt;n&gt;)</code> selects one of ten standard line patterns:</p>
+<table>
+<thead>
+<tr>
+<th>n</th>
+<th>Pattern</th>
+<th>n</th>
+<th>Pattern</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>(none)</td>
+<td>5</td>
+<td>dash-dot-dot</td>
+</tr>
+<tr>
+<td>1</td>
+<td>solid (default)</td>
+<td>6</td>
+<td>sparse dot</td>
+</tr>
+<tr>
+<td>2</td>
+<td>dash</td>
+<td>7</td>
+<td>asymmetric sparse dot</td>
+</tr>
+<tr>
+<td>3</td>
+<td>dash-dot</td>
+<td>8</td>
+<td>sparse dash-dot</td>
+</tr>
+<tr>
+<td>4</td>
+<td>dot</td>
+<td>9</td>
+<td>sparse dot-dash</td>
+</tr>
+</tbody>
+</table>
+<p>A custom pattern is a bit string, e.g. <code>W(P11110000)</code>.</p>
+<h2 id="shading">Shading<a class="headerlink" href="#shading" title="Permanent link">#</a></h2>
+<p>Shading fills the area between a drawn primitive and a reference line:</p>
+<ul>
+<li><code>W(S1)</code> turns shading on (reference defaults to the cursor's current Y); <code>W(S0)</code> turns it off.</li>
+<li><code>W(S[,Y])</code> sets a horizontal reference at <code>Y</code>; <code>W(S(X)[X])</code> a vertical reference at <code>X</code>.</li>
+</ul>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Shade the area under a line down to y=300.</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033PpW(S[,300])P[100,100]V[400,200]\033\\'</span>
+</span></code></pre></div>
+<h2 id="example-programs">Example programs<a class="headerlink" href="#example-programs" title="Permanent link">#</a></h2>
+<p>Contour ships four ReGIS demos under
+<a href="https://github.com/contour-terminal/contour/tree/master/examples"><code>examples/</code></a>:</p>
+<ul>
+<li><strong><code>regis-primitives.cpp</code></strong> — a static showcase of every primitive (lines, circles, arcs, curves,
+  fills, patterns, colours and text). A good visual conformance check.</li>
+<li><strong><code>regis-plot2d.cpp</code></strong> — a labelled 2D plot of a mathematical function with axes and a grid.</li>
+<li><strong><code>regis-animation.cpp</code></strong> — an animated analog clock, redrawing each frame with <code>S(E)</code> + redraw.</li>
+<li><strong><code>regis-plot3d.cpp</code></strong> — an <strong>interactive</strong> 3D plot of the complex function <code>|z² − 1|</code>; drag with
+  the mouse to rotate it (horizontal = yaw, vertical = pitch), press <code>q</code> to quit.</li>
+</ul>
+<p>Build them with the test build enabled and run them inside Contour:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>cmake<span class="w"> </span>--build<span class="w"> </span>--preset<span class="w"> </span>clang-release<span class="w"> </span>--target<span class="w"> </span>regis-primitives<span class="w"> </span>regis-plot3d
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>./out/clang-release/examples/regis-primitives
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>./out/clang-release/examples/regis-plot3d<span class="w">      </span><span class="c1"># then drag with the mouse</span>
+</span></code></pre></div></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="entering-and-leaving-regis" href="#entering-and-leaving-regis">Entering and leaving ReGIS</a><a data-head="the-coordinate-system" href="#the-coordinate-system">The coordinate system</a><a data-head="commands" href="#commands">Commands</a><a data-head="colour" href="#colour">Colour</a><a data-head="patterns" href="#patterns">Patterns</a><a data-head="shading" href="#shading">Shading</a><a data-head="example-programs" href="#example-programs">Example programs</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/demo/regis-graphics.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">reference › <b>regis graphics</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

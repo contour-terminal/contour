@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>links - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="../..">
+<link rel="icon" href="../../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../../assets/theme/site.css">
+<script type="module" src="../../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../../assets/contour-logo.png" alt=""><span id="cw-title">links</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href="../.."><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../" aria-current="true"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../../vt-sequence/"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour" hidden>
+<a class="tab" data-group="" href="../..">home</a>
+<a class="tab" data-group="" href="../../install/">install</a>
+<a class="tab" data-group="" href="../../features/">features</a>
+<a class="tab" data-group="" href="../../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure">
+<a class="tab" data-group="" href="../">config file</a>
+<a class="tab" data-group="" href="../profiles/">profiles</a>
+<a class="tab" data-group="" href="../settings/">settings window</a>
+<a class="tab" data-group="" href="../colors/">colors</a>
+<a class="tab" data-group="" href="../key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../layouts/">layouts</a>
+<a class="tab" data-group="more" href="./" aria-current="page">links</a>
+<a class="tab" data-group="more" href="../hosts/">hosts</a>
+<a class="tab" data-group="more" href="../indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference" hidden>
+<a class="tab" data-group="" href="../../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../../vt-extensions/synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/kitty-graphics/">kitty graphics placeholders</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>links</summary>
+  <div class="tabsel-list">
+<a href="../">config file</a>
+<a href="../profiles/">profiles</a>
+<a href="../settings/">settings window</a>
+<a href="../colors/">colors</a>
+<a href="../key-mapping/">key mapping</a>
+<a href="../layouts/">layouts</a>
+<a href="./" aria-current="page">links</a>
+<a href="../hosts/">hosts</a>
+<a href="../indicator-statusline/">status line</a>
+<a href="../paths/">paths</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="links-in-terminal-output">Links in Terminal Output<a class="headerlink" href="#links-in-terminal-output" title="Permanent link">#</a></h1>
+<p>Contour underlines URLs, file paths and patterns you define in the output of your
+programs, the way it shows <a href="../../vt-extensions/clickable-links/">OSC 8 hyperlinks</a>,
+about 100 ms after the output goes quiet. <kbd>Ctrl</kbd>+click opens them.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">main</span><span class="p">:</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nt">hyperlink_decoration</span><span class="p">:</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">      </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">always</span><span class="w">              </span><span class="c1"># always | hover | modifier | never</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">      </span><span class="nt">normal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dotted-underline</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">      </span><span class="nt">hover</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">underline</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="nt">link_detection</span><span class="p">:</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">      </span><span class="nt">primary_screen</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> urls</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="nt"> file_paths</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">      </span><span class="nt">other_screens</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt"> urls</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="nt"> file_paths</span><span class="p">:</span><span class="w"> </span><span class="nv">false</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">    </span><span class="nt">file_opener</span><span class="p">:</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="s">'code</span><span class="nv"> </span><span class="s">--goto</span><span class="nv"> </span><span class="s">{path}:{line}:{column}'</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">      </span><span class="nt">placement</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">detached</span><span class="w">       </span><span class="c1"># detached | split | tab</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">    </span><span class="nt">hint_patterns</span><span class="p">:</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">url</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">        </span><span class="nt">clickable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">        </span><span class="c1"># stops underlining URLs: a built-in, changed by its name alone</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">jira</span>
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">        </span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="s">'\b[A-Z][A-Z0-9]+-\d+\b'</span>
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">        </span><span class="nt">clickable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">        </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="s">'https://jira.example.com/browse/{0}'</span>
+</span></code></pre></div>
+<p>Everything here has a default, so a configuration without any of these keys
+detects links as described below.</p>
+<h2 id="what-is-detected">What is detected<a class="headerlink" href="#what-is-detected" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>URLs</strong> with the schemes <code>http</code>, <code>https</code>, <code>ftp</code>, <code>file</code> and <code>mailto</code>.
+  Trailing punctuation is left out of the link, so the full stop after a URL at
+  the end of a sentence is not part of it; a closing bracket the URL opened
+  itself is kept, as in <code>https://en.wikipedia.org/wiki/Foo_(bar)</code>. A <code>file://</code>
+  URL is the file it names, and is a path in all that follows: underlined only
+  once it is found on this machine, and opened as a file is. Contour never runs
+  it; without a <code>file_opener</code> it goes to the application your system associates
+  with it, which on Windows and macOS may run a program.</li>
+<li><strong>File paths</strong>: absolute (<code>/usr/include/stdio.h</code>, <code>C:\Users\me\notes.txt</code>),
+  relative (<code>src/main.cpp</code>, <code>../build/log.txt</code>), home-relative (<code>~/notes.md</code>),
+  and bare file names (<code>Makefile</code>, <code>main.cpp</code>). A location printed after a path,
+  <code>:line[:column]</code> or <code>(line[,column])</code> as compilers print them, is kept and
+  passed on when the file is opened.</li>
+<li><strong>Patterns of your own</strong>, see <a href="#your-own-clickable-patterns">below</a>.</li>
+</ul>
+<p>A path is underlined only once Contour has checked that it exists on this
+machine. A relative path is resolved against the directory of the command that
+printed it, which the shell reports through
+<a href="../../vt-extensions/osc-133-shell-integration/">shell integration</a> (OSC 133 and
+OSC 7), so a <code>cd</code> since then does not change what an earlier command's output
+names. A path printed by a command that ran on another machine, over <code>ssh</code> or in
+a container, names a file there and is never underlined, once Contour can tell:
+the remote shell reports the directory it runs in, with its host, through its own
+shell integration (OSC 7). Without that, everything an <code>ssh</code> session prints
+belongs to the local <code>ssh</code> command, and its paths are looked up on this machine.</p>
+<h2 id="where-links-are-detected">Where links are detected<a class="headerlink" href="#where-links-are-detected" title="Permanent link">#</a></h2>
+<p><code>link_detection</code> switches the automatic detection per screen. OSC 8 hyperlinks
+are always links, and hint mode always offers everything; only the underlining
+of text found by scanning is affected.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>primary_screen.urls</code></td>
+<td><code>true</code></td>
+<td>URLs and your own patterns on the shell screen</td>
+</tr>
+<tr>
+<td><code>primary_screen.file_paths</code></td>
+<td><code>true</code></td>
+<td>file paths on the shell screen</td>
+</tr>
+<tr>
+<td><code>other_screens.urls</code></td>
+<td><code>true</code></td>
+<td>URLs and patterns on the alternate screen</td>
+</tr>
+<tr>
+<td><code>other_screens.file_paths</code></td>
+<td><code>false</code></td>
+<td>file paths on the alternate screen</td>
+</tr>
+</tbody>
+</table>
+<p><code>other_screens</code> covers the alternate screen (vim, less, htop, ...) and every
+further page. A key you leave out keeps its default, or the value it inherits
+from a parent profile.</p>
+<p>Your own patterns follow the <code>urls</code> switch, unless they open a <code>file:</code> URL,
+which follows the <code>file_paths</code> switch.</p>
+<h2 id="when-links-are-shown">When links are shown<a class="headerlink" href="#when-links-are-shown" title="Permanent link">#</a></h2>
+<p><code>hyperlink_decoration</code> decides when links are decorated, for OSC 8 hyperlinks
+and detected links alike:</p>
+<table>
+<thead>
+<tr>
+<th><code>mode</code></th>
+<th>Links are decorated</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>always</code></td>
+<td>always (the default)</td>
+</tr>
+<tr>
+<td><code>hover</code></td>
+<td>only the one under the mouse pointer</td>
+</tr>
+<tr>
+<td><code>modifier</code></td>
+<td>all of them while the modifier of Ctrl+click is held</td>
+</tr>
+<tr>
+<td><code>never</code></td>
+<td>never; Ctrl+click still opens them</td>
+</tr>
+</tbody>
+</table>
+<p><code>normal</code> is the decoration of a link at rest and <code>hover</code> the one of the link
+under the pointer. Each is one of <code>underline</code>, <code>dotted-underline</code>,
+<code>double-underline</code>, <code>curly-underline</code>, <code>dashed-underline</code>, <code>overline</code>,
+<code>crossed-out</code>, <code>framed</code> and <code>encircle</code>. The colours of both live in the colour
+scheme, see <a href="../colors/#hyperlink_decoration"><code>hyperlink_decoration</code></a>.</p>
+<h2 id="opening-links">Opening links<a class="headerlink" href="#opening-links" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>Ctrl+click</strong>: the <code>FollowHyperlink</code> mouse binding. Inside an application
+  that uses the mouse itself, such as <code>vim</code> or <code>tmux</code> with mouse support, add the
+  global <code>bypass_mouse_protocol_modifier</code> (Shift by default): Shift+Ctrl+click.</li>
+<li><strong>The context menu</strong>: right-click a link for <strong>Open Link</strong> and <strong>Copy Link
+  Address</strong>.</li>
+<li><strong>Vi normal mode</strong>: <code>gx</code> opens the link under the cursor, and <code>]x</code> / <code>[x</code> move
+  the cursor to the next / previous link (see <a href="../../input-modes/">Input Modes</a>).</li>
+<li><strong>Hint mode</strong>: <code>gH</code> in vi normal mode, or a <code>HintMode</code> binding with
+  <code>hint_action: Open</code> (see <a href="../../demo/hint-mode/">Hint Mode</a>).</li>
+</ul>
+<p>A web URL opens in your browser. A path, or a <code>file://</code> URL, opens as what it
+names: a directory in your file manager, and a file with <code>file_opener</code>, or with
+the application your system associates with it. That application is the
+system's choice: on Windows and macOS, a program it is handed may run.</p>
+<h2 id="file_opener"><code>file_opener</code><a class="headerlink" href="#file_opener" title="Permanent link">#</a></h2>
+<p><code>file_opener</code> says how a detected file opens. The string form is the command
+alone; the map form adds where it runs:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">main</span><span class="p">:</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">file_opener</span><span class="p">:</span><span class="w"> </span><span class="s">'code</span><span class="nv"> </span><span class="s">--goto</span><span class="nv"> </span><span class="s">{path}:{line}:{column}'</span>
+</span></code></pre></div>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">main</span><span class="p">:</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">file_opener</span><span class="p">:</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="s">'nvim</span><span class="nv"> </span><span class="s">+{line}</span><span class="nv"> </span><span class="s">{path}'</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">      </span><span class="nt">placement</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">split</span><span class="w">    </span><span class="c1"># detached (the default), split or tab</span>
+</span></code></pre></div>
+<ul>
+<li><code>{path}</code> is the file's absolute path, <code>{line}</code> and <code>{column}</code> the location
+  printed after it, <code>1</code> where none was printed.</li>
+<li>No shell is involved: the command line is split into arguments once, and each
+  placeholder is filled in inside its own argument, so a file name with spaces
+  or quotes in it stays one argument and cannot run anything.</li>
+<li><code>placement: detached</code> starts the command as a program of its own; <code>split</code> and
+  <code>tab</code> run it in a new Contour pane, in the directory a relative path was
+  resolved against or, for an absolute path, the file's own directory.</li>
+<li>A directory always opens in the file manager. Without <code>file_opener</code>, a file
+  opens with the system's default application.</li>
+<li>Write the program out, without a placeholder. A program path with a space in
+  it is read as one program where that path exists on this machine; where it does
+  not, or under flatpak with <code>escape_sandbox</code>, it is split at the space. Use a
+  wrapper script on a path without spaces in that case.</li>
+<li>On Windows, name an <code>.exe</code> as the program. A <code>.cmd</code> or <code>.bat</code> file is run by
+  <code>cmd.exe</code>, which parses its command line again, so a file name could change
+  what it runs.</li>
+</ul>
+<h2 id="your-own-clickable-patterns">Your own clickable patterns<a class="headerlink" href="#your-own-clickable-patterns" title="Permanent link">#</a></h2>
+<p>The patterns of <a href="../../demo/hint-mode/#custom-patterns">hint mode</a>,
+<code>hint_patterns</code>, are detected in output too when you say so:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">main</span><span class="p">:</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">hint_patterns</span><span class="p">:</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">jira</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">        </span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="s">'\b[A-Z][A-Z0-9]+-\d+\b'</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">        </span><span class="nt">clickable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">        </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="s">'https://jira.example.com/browse/{0}'</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">commit</span>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">        </span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="s">'\b[0-9a-f]{7,40}\b'</span>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">        </span><span class="nt">clickable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">        </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="s">'https://github.com/contour-terminal/contour/commit/{0}'</span>
+</span></code></pre></div>
+<ul>
+<li><code>clickable: true</code> detects the pattern in output, decorates it and opens it with
+  Ctrl+click. Your own patterns are hint-mode-only unless they say so.</li>
+<li><code>url</code> is what is opened: <code>{0}</code> is the whole match, <code>{1}</code> to <code>{9}</code> its capture
+  groups. Without it, the match is opened as printed. A <code>url</code> naming a group the
+  regex does not have is reported when the configuration is loaded and disables
+  the pattern.</li>
+<li>Where the printed text chooses the scheme, there is a link only for a scheme
+  Contour opens in URLs it finds itself: <code>http</code>, <code>https</code>, <code>ftp</code>, <code>mailto</code> or
+  <code>file</code>. That is so without a <code>url</code>, and with a <code>url</code> that does not start with
+  a scheme of its own, such as <code>{0}</code> or <code>{1}:{2}</code>. Printed text cannot open a
+  <code>smb:</code> share or a <code>ms-msdt:</code> handler. A <code>url</code> that writes its scheme itself,
+  as <code>https://jira.example.com/browse/{0}</code> does, may open any scheme: you chose
+  it. Hint mode still offers such a match, to copy, and opens nothing.</li>
+<li>A group is percent-encoded only where a URL cannot hold a character: spaces,
+  control characters and <code>"#&lt;&gt;[\]^`{|}</code>. <code>/ ? &amp; = + @ : %</code> pass through, so a
+  group placed in a query can add parameters, and one placed before the host can
+  change it. Write the scheme and the host in the template, groups after them.</li>
+<li>An entry named like a built-in (<code>url</code>, <code>filepath</code>, <code>githash</code>, <code>ipv4</code>, <code>ipv6</code>)
+  changes only the keys it gives, and may leave out its <code>regex</code>. A built-in takes
+  no <code>url</code>; a <code>url</code> given to one is reported and ignored.</li>
+</ul>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">main</span><span class="p">:</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="nt">hint_patterns</span><span class="p">:</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">filepath</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">        </span><span class="nt">clickable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">   </span><span class="c1"># stop underlining paths; hint mode still offers them</span>
+</span></code></pre></div>
+<p>A regex that overrides <code>filepath</code> names the path with capture group 1, and its
+location with groups 2 and 3 (<code>:line[:column]</code>) and 4 and 5 (<code>(line[,column])</code>).</p>
+<p>Patterns are ECMAScript regular expressions, with these limits:</p>
+<ul>
+<li>Back-references (<code>\1</code> to <code>\9</code>) are not supported: a pattern using one is
+  reported when the configuration is loaded and disabled, on every platform.</li>
+<li>A non-ASCII character inside <code>[…]</code> matches byte by byte, not as one character;
+  such a pattern is reported with a warning.</li>
+<li>On Linux, Contour is built with libstdc++, whose matcher runs breadth-first:
+  where one alternative's match is a prefix of another's at the same place, as in
+  <code>foo|foobar</code>, it takes the longer one, and lazy quantifiers may stop elsewhere,
+  where macOS (libc++) and Windows take the first alternative ECMAScript names.
+  Write patterns whose result does not depend on which alternative or which
+  repetition count wins.</li>
+<li>A clickable pattern must not match the empty string; one that can is disabled.</li>
+</ul>
+<h2 id="the-settings-page">The settings page<a class="headerlink" href="#the-settings-page" title="Permanent link">#</a></h2>
+<p>Under <strong>Profiles</strong>, the <strong>Links</strong> group holds <strong>Show links</strong>
+(<code>hyperlink_decoration.mode</code>), <strong>Normal style</strong>, <strong>Hover style</strong>, <strong>Open files
+with</strong> (<code>file_opener.command</code>) and <strong>Open in</strong> (<code>file_opener.placement</code>). The
+<strong>Links: opening and patterns</strong> section names the gesture that opens links and
+lists the patterns: the built-ins, whose Clickable switch you can change, and the
+profile's own, which you can add, edit and remove. Below the list, a sample text
+shows what the selected pattern finds, checked and matched as the terminal does;
+a problem with a pattern is shown under it.</p>
+<h2 id="performance">Performance<a class="headerlink" href="#performance" title="Permanent link">#</a></h2>
+<p>Detection stays off the path the terminal reads output on:</p>
+<ul>
+<li>The output is scanned once it has gone quiet, at most once a second under
+  continuous output, on a background thread. The parser never runs a pattern.</li>
+<li>Whether a path exists is checked on a thread of its own, so a slow network
+  mount delays the underlines and nothing else.</li>
+</ul></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="what-is-detected" href="#what-is-detected">What is detected</a><a data-head="where-links-are-detected" href="#where-links-are-detected">Where links are detected</a><a data-head="when-links-are-shown" href="#when-links-are-shown">When links are shown</a><a data-head="opening-links" href="#opening-links">Opening links</a><a data-head="file_opener" href="#file_opener">file_opener</a><a data-head="your-own-clickable-patterns" href="#your-own-clickable-patterns">Your own clickable patterns</a><a data-head="the-settings-page" href="#the-settings-page">The settings page</a><a data-head="performance" href="#performance">Performance</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/configuration/links.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">configure › <b>links</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

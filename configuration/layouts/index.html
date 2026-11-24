@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>layouts - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="../..">
+<link rel="icon" href="../../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../../assets/theme/site.css">
+<script type="module" src="../../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../../assets/contour-logo.png" alt=""><span id="cw-title">layouts</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href="../.."><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../" aria-current="true"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../../vt-sequence/"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour" hidden>
+<a class="tab" data-group="" href="../..">home</a>
+<a class="tab" data-group="" href="../../install/">install</a>
+<a class="tab" data-group="" href="../../features/">features</a>
+<a class="tab" data-group="" href="../../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure">
+<a class="tab" data-group="" href="../">config file</a>
+<a class="tab" data-group="" href="../profiles/">profiles</a>
+<a class="tab" data-group="" href="../settings/">settings window</a>
+<a class="tab" data-group="" href="../colors/">colors</a>
+<a class="tab" data-group="" href="../key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="./" aria-current="page">layouts</a>
+<a class="tab" data-group="more" href="../links/">links</a>
+<a class="tab" data-group="more" href="../hosts/">hosts</a>
+<a class="tab" data-group="more" href="../indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference" hidden>
+<a class="tab" data-group="" href="../../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../../vt-extensions/synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/kitty-graphics/">kitty graphics placeholders</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>layouts</summary>
+  <div class="tabsel-list">
+<a href="../">config file</a>
+<a href="../profiles/">profiles</a>
+<a href="../settings/">settings window</a>
+<a href="../colors/">colors</a>
+<a href="../key-mapping/">key mapping</a>
+<a href="./" aria-current="page">layouts</a>
+<a href="../links/">links</a>
+<a href="../hosts/">hosts</a>
+<a href="../indicator-statusline/">status line</a>
+<a href="../paths/">paths</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="layouts">Layouts<a class="headerlink" href="#layouts" title="Permanent link">#</a></h1>
+<p>A layout is a named set of tabs that are opened together. Each tab can change into a
+directory, run a specific command instead of your shell, carry a name and a color, and
+optionally be split into a tree of panes. Layouts let you reproduce a working set of
+tabs — for example an editor, a chat/agent tool, and a couple of monitoring panes — with
+a single action instead of opening and arranging them by hand every time.</p>
+<h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">#</a></h2>
+<p>Layouts are configured under the top-level <code>layouts</code> entry, a map of layout name to its
+list of <code>tabs</code>. An optional top-level <code>default_layout</code> names a layout to open
+automatically at startup instead of the usual single default tab.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">layouts</span><span class="p">:</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">work</span><span class="p">:</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nt">tabs</span><span class="p">:</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"editor"</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">        </span><span class="nt">color</span><span class="p">:</span><span class="w"> </span><span class="s">"#d75f00"</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">        </span><span class="nt">directory</span><span class="p">:</span><span class="w"> </span><span class="s">"~/proj/foo"</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">        </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="s">"nvim"</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">        </span><span class="nt">arguments</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"."</span><span class="p p-Indicator">]</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">        </span><span class="nt">profile</span><span class="p">:</span><span class="w"> </span><span class="s">"dark-big"</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"claude"</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">        </span><span class="nt">color</span><span class="p">:</span><span class="w"> </span><span class="s">"#00af5f"</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">        </span><span class="nt">directory</span><span class="p">:</span><span class="w"> </span><span class="s">"~/proj/foo"</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">        </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="s">"claude"</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"servers"</span>
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">        </span><span class="nt">split</span><span class="p">:</span>
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">          </span><span class="nt">orientation</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vertical</span>
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">          </span><span class="nt">panes</span><span class="p">:</span>
+</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> command</span><span class="p">:</span><span class="w"> </span><span class="s">"npm</span><span class="nv"> </span><span class="s">run</span><span class="nv"> </span><span class="s">dev"</span><span class="p p-Indicator">,</span><span class="nt"> directory</span><span class="p">:</span><span class="w"> </span><span class="s">"~/proj/foo"</span><span class="p p-Indicator">,</span><span class="nt"> ratio</span><span class="p">:</span><span class="w"> </span><span class="nv">0.6</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">split</span><span class="p">:</span>
+</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="w">                </span><span class="nt">orientation</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">horizontal</span>
+</span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="w">                </span><span class="nt">panes</span><span class="p">:</span>
+</span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="w">                  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> command</span><span class="p">:</span><span class="w"> </span><span class="s">"htop"</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-0-25"><a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="w">                  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> command</span><span class="p">:</span><span class="w"> </span><span class="s">"journalctl</span><span class="nv"> </span><span class="s">-f"</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-0-26"><a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>
+</span><span id="__span-0-27"><a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a><span class="w">  </span><span class="nt">dev</span><span class="p">:</span>
+</span><span id="__span-0-28"><a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a><span class="w">    </span><span class="nt">tabs</span><span class="p">:</span>
+</span><span id="__span-0-29"><a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"shell"</span>
+</span><span id="__span-0-30"><a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a><span class="w">        </span><span class="nt">directory</span><span class="p">:</span><span class="w"> </span><span class="s">"~/proj/bar"</span>
+</span><span id="__span-0-31"><a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>
+</span><span id="__span-0-32"><a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="nt">default_layout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">work</span>
+</span></code></pre></div>
+<h3 id="tab-options">Tab options<a class="headerlink" href="#tab-options" title="Permanent link">#</a></h3>
+<p>Each entry under <code>tabs</code> describes either a single-pane tab (leaf fields) or a split
+tab (a <code>split</code> node). A tab uses leaf fields <em>or</em> <code>split</code>, not both.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>Optional. The tab's name, as <strong>Rename…</strong> sets it. Until 0.9.0 the older key <code>title</code> is read as <code>name</code>, with a warning.</td>
+</tr>
+<tr>
+<td><code>color</code></td>
+<td>Optional. Hex in <code>'#RRGGBB'</code> form (e.g. <code>'#d75f00'</code>); sets the tab's user color.</td>
+</tr>
+<tr>
+<td><code>directory</code></td>
+<td>Optional working directory for the tab. Falls back to the profile's configured directory when omitted.</td>
+</tr>
+<tr>
+<td><code>command</code></td>
+<td>Optional. Replaces the shell — the program to run in the pane. May be a full command line (see <a href="#command-lines">Command lines</a> below). When omitted, the effective profile's <code>shell</code> is used.</td>
+</tr>
+<tr>
+<td><code>arguments</code></td>
+<td>Optional list of extra arguments, appended after any arguments already given in <code>command</code>.</td>
+</tr>
+<tr>
+<td><code>profile</code></td>
+<td>Optional per-tab profile override (see <a href="#per-tab-profile">Per-tab profile</a> below).</td>
+</tr>
+<tr>
+<td><code>split</code></td>
+<td>Optional. Turns the tab into a split node instead of a single pane; see <a href="#split-panes">Split panes</a>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="command-lines">Command lines<a class="headerlink" href="#command-lines" title="Permanent link">#</a></h3>
+<p><code>command</code> may be written as a full command line. It is kept as written and read when the pane starts, the
+way a profile's <code>shell</code> is read: when it names a program to run — a file at that path, or a name found on
+<code>PATH</code> — it runs as it is, spaces and all; otherwise its first word is the program and the rest are its
+arguments. So both of these are equivalent:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="s">"emacs</span><span class="nv"> </span><span class="s">-nw"</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># is the same as</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="s">"emacs"</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">arguments</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"-nw"</span><span class="p p-Indicator">]</span>
+</span></code></pre></div>
+<p>How the words are read depends on the platform:</p>
+<ul>
+<li>On Linux, macOS and FreeBSD, as a POSIX shell reads them: whitespace separates words; double quotes
+  (<code>"..."</code>, allowing <code>\"</code> and <code>\\</code>) or single quotes (<code>'...'</code>, literal) keep spaces inside one word; a
+  backslash outside quotes escapes the next character.</li>
+<li>On Windows, as <code>CreateProcess</code> reads a command line: the program runs up to the first space at which what
+  precedes it names a program — so <code>C:\Program Files\Git\bin\bash.exe --login</code> runs <code>bash.exe</code> — or up to
+  its closing double quote, and a backslash separates directories. What follows the program is handed to it
+  as written, for it to split itself: <code>cmd.exe /s /c ""C:\Tools x\app.exe" --flag"</code> reaches <code>cmd.exe</code>
+  unchanged.</li>
+<li>A program path with spaces in it that names no file is split like any other command line; quote it to
+  keep it whole — e.g. <code>command: '"/opt/My App/bin/foo" --flag'</code>.</li>
+<li>In the Flatpak build, where a pane runs on the host, Contour cannot see the host's files: a <code>command</code>
+  holding whitespace is always read as a command line there, so quote a program path with spaces in it.</li>
+<li>Any entries in a separate <code>arguments:</code> list are passed <strong>after</strong> the words of <code>command</code>.</li>
+<li><code>${NAME}</code> inside <code>command</code> or <code>arguments</code> expands to the environment variable <code>NAME</code>. To pass a literal
+  <code>${...}</code> through to the program (e.g. for template tooling), escape it as <code>$${...}</code>.</li>
+</ul>
+<p><code>SaveLayout</code> (below) writes <code>command:</code> back as the pane was started with it, and <code>arguments:</code> after it —
+escaping any literal <code>${</code> — so everything round-trips.</p>
+<h3 id="split-panes">Split panes<a class="headerlink" href="#split-panes" title="Permanent link">#</a></h3>
+<p>A <code>split</code> node replaces the leaf fields (<code>command</code>, <code>directory</code>, ...) with:</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>orientation</code></td>
+<td><code>vertical</code> or <code>horizontal</code> (case-insensitive). <code>vertical</code> arranges panes side by side; <code>horizontal</code> stacks them.</td>
+</tr>
+<tr>
+<td><code>panes</code></td>
+<td>A list of child panes. Each child is either a leaf (with <code>command</code>, <code>directory</code>, <code>arguments</code>, <code>profile</code>, <code>ratio</code>) or another <code>split</code> node, nested recursively.</td>
+</tr>
+<tr>
+<td><code>ratio</code></td>
+<td>Optional, set on a child pane/split. The fraction of the parent split's space (between 0 and 1) that child occupies; children without a <code>ratio</code> share the remaining space equally. In the example above, <code>ratio: 0.6</code> gives the first pane 60% and leaves 40% for its unspecified sibling.</td>
+</tr>
+</tbody>
+</table>
+<p>Splits can be nested arbitrarily deep, as shown in the <code>servers</code> tab of the example
+above: a vertical split whose second pane is itself a horizontal split.</p>
+<h3 id="per-tab-profile">Per-tab profile<a class="headerlink" href="#per-tab-profile" title="Permanent link">#</a></h3>
+<p>A tab (or an individual pane) may set <code>profile</code> to use a different profile than the
+window's own profile for that tab/pane. The override is <strong>terminal-level only</strong> — it
+affects things like the shell, fonts, colors, and scrollback of that pane. Window-level
+settings (window size, decorations, and similar) always come from the profile that
+launched the window itself.</p>
+<h2 id="opening-a-layout">Opening a layout<a class="headerlink" href="#opening-a-layout" title="Permanent link">#</a></h2>
+<p>There are four ways to open a layout:</p>
+<h3 id="at-startup">At startup<a class="headerlink" href="#at-startup" title="Permanent link">#</a></h3>
+<p>Set <code>default_layout</code> to a layout name; it opens automatically when Contour starts,
+replacing the usual single default tab.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">default_layout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">work</span>
+</span></code></pre></div>
+<h3 id="from-the-command-line">From the command line<a class="headerlink" href="#from-the-command-line" title="Permanent link">#</a></h3>
+<p>Pass <code>--layout NAME</code> to open a layout in the newly launched window:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>contour<span class="w"> </span>terminal<span class="w"> </span>--layout<span class="w"> </span>work
+</span></code></pre></div>
+<h3 id="from-a-keybinding">From a keybinding<a class="headerlink" href="#from-a-keybinding" title="Permanent link">#</a></h3>
+<p>Bind the <code>LaunchLayout</code> action to a key, passing the layout's <code>name</code>:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">input_mapping</span><span class="p">:</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> mods</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Control</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Shift</span><span class="p p-Indicator">],</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">L</span><span class="p p-Indicator">,</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">LaunchLayout</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">work</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span></code></pre></div>
+<p>Unlike the startup and CLI cases, <code>LaunchLayout</code> <strong>appends</strong> the layout's tabs to the
+current window rather than opening a new one.</p>
+<h3 id="from-the-command-palette">From the command palette<a class="headerlink" href="#from-the-command-palette" title="Permanent link">#</a></h3>
+<p>Open the command palette (<code>Ctrl+Shift+P</code> by default) and pick the <strong>Launch Layout: <em>name</em></strong>
+entry — one is listed for every saved layout, so no keybinding is required. Picking one
+appends that layout's tabs to the current window, exactly like the <code>LaunchLayout</code> action.</p>
+<h2 id="saving-the-current-window-as-a-layout">Saving the current window as a layout<a class="headerlink" href="#saving-the-current-window-as-a-layout" title="Permanent link">#</a></h2>
+<p>The <code>SaveLayout</code> action captures the active window's current tabs and panes — their
+directories, the command each pane was started with, names, colors, and split
+structure — and writes them out as a named layout.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">input_mapping</span><span class="p">:</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> mods</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Control</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Shift</span><span class="p p-Indicator">],</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">S</span><span class="p p-Indicator">,</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">SaveLayout</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">work</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span></code></pre></div>
+<p><code>SaveLayout</code> never modifies your hand-written configuration file. Instead it writes a
+machine-managed <code>layouts.yml</code> file next to your main configuration file, in the same
+directory. Layouts from <code>layouts.yml</code> are merged with any <code>layouts</code> defined inline in
+your main configuration; if a name exists in both, the <code>layouts.yml</code> version wins, since
+it reflects the most recently saved state.</p>
+<p>You don't need a keybinding to save: open the command palette (<code>Ctrl+Shift+P</code>) and pick
+<strong>Save Layout</strong>. Because saving needs a name, that entry opens a small prompt for you to
+type one in, then saves exactly as the <code>SaveLayout</code> action does. A key bound to
+<code>SaveLayout</code> with no <code>name</code> opens the same prompt.</p>
+<h2 id="tab-colors">Tab colors<a class="headerlink" href="#tab-colors" title="Permanent link">#</a></h2>
+<p>A tab's color is what makes it findable in a long tab bar. A new tab takes the <code>tab_color</code> of the profile
+it starts with:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">main</span><span class="p">:</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="nt">tab_color</span><span class="p">:</span><span class="w"> </span><span class="s">'#2E3440'</span>
+</span></code></pre></div>
+<p>Like a layout's <code>color</code>, <code>tab_color</code> is a hex <code>'#RRGGBB'</code> value; <code>null</code>, the default, means no color. A color
+from a layout, one an application sets for its own tab, or one you pick from the tab's context menu takes
+precedence over the profile's, and clearing it brings the profile's color back. A split tab keeps the color of
+the profile that created it.</p></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="configuration" href="#configuration">Configuration</a><a data-head="opening-a-layout" href="#opening-a-layout">Opening a layout</a><a data-head="saving-the-current-window-as-a-layout" href="#saving-the-current-window-as-a-layout">Saving the current window as a layout</a><a data-head="tab-colors" href="#tab-colors">Tab colors</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/configuration/layouts.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">configure › <b>layouts</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

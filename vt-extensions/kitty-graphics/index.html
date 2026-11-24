@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>kitty graphics placeholders - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="../..">
+<link rel="icon" href="../../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../../assets/theme/site.css">
+<script type="module" src="../../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../../assets/contour-logo.png" alt=""><span id="cw-title">kitty graphics placeholders</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href="../.."><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../../configuration/"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../../vt-sequence/" aria-current="true"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour" hidden>
+<a class="tab" data-group="" href="../..">home</a>
+<a class="tab" data-group="" href="../../install/">install</a>
+<a class="tab" data-group="" href="../../features/">features</a>
+<a class="tab" data-group="" href="../../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure" hidden>
+<a class="tab" data-group="" href="../../configuration/">config file</a>
+<a class="tab" data-group="" href="../../configuration/profiles/">profiles</a>
+<a class="tab" data-group="" href="../../configuration/settings/">settings window</a>
+<a class="tab" data-group="" href="../../configuration/colors/">colors</a>
+<a class="tab" data-group="" href="../../configuration/key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../../configuration/layouts/">layouts</a>
+<a class="tab" data-group="more" href="../../configuration/links/">links</a>
+<a class="tab" data-group="more" href="../../configuration/hosts/">hosts</a>
+<a class="tab" data-group="more" href="../../configuration/indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../../configuration/paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference">
+<a class="tab" data-group="" href="../../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="./" aria-current="page">kitty graphics placeholders</a>
+<a class="tab" data-group="extensions" href="../line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>kitty graphics placeholders</summary>
+  <div class="tabsel-list">
+<a href="../../vt-sequence/">vt sequences</a>
+<a href="../../demo/regis-graphics/">regis graphics</a>
+<a href="../synchronized-output/">synchronized output</a>
+<a href="../osc-133-shell-integration/">shell integration</a>
+<a href="../clickable-links/">clickable links</a>
+<a href="../buffer-capture/">buffer capture</a>
+<a href="../program-status/">program status</a>
+<a href="../semantic-block-query/">semantic block query</a>
+<a href="../osc-9-4-progress/">progress (osc 9;4)</a>
+<a href="../osc-3008-context/">context (osc 3008)</a>
+<a href="../vertical-line-marks/">vertical line marks</a>
+<a href="../color-palette-update-notifications/">palette notifications</a>
+<a href="../font-settings/">font settings</a>
+<a href="./" aria-current="page">kitty graphics placeholders</a>
+<a href="../line-reflow-mode/">line reflow mode</a>
+<a href="../private-use-glyphs/">private-use glyphs</a>
+<a href="../save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a href="../unicode-core/">unicode core</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="kitty-graphics-unicode-placeholders-and-file-media">Kitty graphics: Unicode placeholders and file media<a class="headerlink" href="#kitty-graphics-unicode-placeholders-and-file-media" title="Permanent link">#</a></h1>
+<p>Contour speaks the <a href="https://sw.kovidgoyal.net/kitty/graphics-protocol/">kitty graphics protocol</a>:
+images transmitted with <code>APC G … ST</code>, placed at the cursor, animated, and deleted again. This page
+describes the two parts of it that let a program draw a picture <em>as text</em>: <strong>Unicode placeholders</strong>,
+and the <strong>file media</strong> such programs send their pictures with. Together they are what Claude Code
+needs to show a Mermaid diagram as a picture rather than as source.</p>
+<h2 id="unicode-placeholders">Unicode placeholders<a class="headerlink" href="#unicode-placeholders" title="Permanent link">#</a></h2>
+<p>A normal kitty placement draws an image at the cursor, and the image then lives beside the text
+rather than in it. A placeholder placement turns that around: the program prints ordinary
+characters, and the terminal draws a piece of the image in each of their cells. Because the
+picture is text, it scrolls, wraps, clears and survives an application that only knows how to print
+— which is why tmux-aware programs and full-screen UIs prefer it.</p>
+<h3 id="a-virtual-placement">A virtual placement<a class="headerlink" href="#a-virtual-placement" title="Permanent link">#</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ESC _G a=T,U=1,i=&lt;id&gt;,c=&lt;columns&gt;,r=&lt;rows&gt;,f=100;&lt;payload&gt; ESC \
+</span></code></pre></div>
+<p><code>U=1</code> on <code>a=T</code> (transmit and place) or <code>a=p</code> (place) creates a <strong>virtual placement</strong>: it writes no
+cell and leaves the cursor where it was. It names the image (<code>i=</code>), an optional placement id (<code>p=</code>),
+and the span in cells (<code>c=</code>, <code>r=</code>; without them, the image's size in cells, rounded up). An image may
+have several virtual placements. A virtual placement can have no parent: <code>U=1</code> with <code>P=</code> is refused
+with <code>EINVAL</code>, as in kitty. The refusal changes nothing: unlike kitty, an <code>a=T</code> refused so does not
+store its image either, and the placement the same <code>i=</code>/<code>p=</code> names stays.</p>
+<p>As in kitty, a virtual placement always fits the <strong>whole image</strong> into its span, keeping its aspect
+ratio and centring it; the source rectangle keys <code>x=</code>, <code>y=</code>, <code>w=</code> and <code>h=</code> are ignored. Where the
+image does not fill the span, the cell's own background shows.</p>
+<h3 id="the-placeholder-cells">The placeholder cells<a class="headerlink" href="#the-placeholder-cells" title="Permanent link">#</a></h3>
+<p>Each cell of the picture is the character <code>U+10EEEE</code>, followed by combining marks from kitty's
+<a href="https://sw.kovidgoyal.net/kitty/_downloads/f0a0de9ec8d9ff4456206db8e0814937/rowcolumn-diacritics.txt">row/column diacritic table</a>:</p>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>Says</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>foreground colour</td>
+<td>the image id: an indexed colour <code>38;5;&lt;n&gt;</code> is id <code>n</code>, a true colour <code>38;2;r;g;b</code> is <code>r&lt;&lt;16 \| g&lt;&lt;8 \| b</code>, the default colour is id 0</td>
+</tr>
+<tr>
+<td>first diacritic</td>
+<td>the row of the image this cell shows</td>
+</tr>
+<tr>
+<td>second diacritic</td>
+<td>the column</td>
+</tr>
+<tr>
+<td>third diacritic</td>
+<td>the image id's most significant byte (for ids above 2²⁴)</td>
+</tr>
+<tr>
+<td>underline colour</td>
+<td>the placement id; absent or 0 means the image's first virtual placement</td>
+</tr>
+</tbody>
+</table>
+<p>Diacritics may be left out, and Contour infers them as kitty does: a cell without a column continues
+its left neighbour's row and column, and one without a row takes its left neighbour's row. A
+placeholder cell is always one column wide.</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># A 2x4 image 42 drawn at the cursor: one virtual placement, then two rows of placeholder cells.</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033_Ga=T,U=1,i=42,c=4,r=2,f=100,q=2;%s\033\\'</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>base64<span class="w"> </span>-w0<span class="w"> </span>picture.png<span class="k">)</span><span class="s2">"</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033[38;5;42m\U10EEEE̅̅\U10EEEE̅̍\U10EEEE̅̎\U10EEEE̅̐\033[m\n'</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'\033[38;5;42m\U10EEEE̍̅\U10EEEE̍̍\U10EEEE̍̎\U10EEEE̍̐\033[m\n'</span>
+</span></code></pre></div>
+<p>The cells are resolved at the end of each read from the program, a whole line at a time, so a cell
+whose diacritics arrive in a later read still shows its piece; a cell printed before its image or
+placement exists is resolved once they arrive. A cell that names no image shows nothing. The
+<code>U+10EEEE</code> characters are never drawn as glyphs, while the grid keeps them as received: copying,
+reflow and <code>DECRQCRA</code> see what the program wrote. Writing over a placeholder cell removes its piece of
+the picture. A rectangular copy (<code>DECCRA</code>) of placeholder cells shows the picture where it lands, as
+printing the cells there would; on another page it shows that page's placement of the image.</p>
+<h3 id="deleting">Deleting<a class="headerlink" href="#deleting" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Delete</th>
+<th>Reaches virtual placements</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>d=i</code> / <code>d=I</code> with <code>i=</code> (and <code>p=</code>)</td>
+<td>yes: the image's placements of both kinds; upper case frees the image once none remains</td>
+</tr>
+<tr>
+<td><code>d=n</code> / <code>d=N</code> with <code>I=</code> (image number)</td>
+<td>yes, as <code>d=i</code>/<code>d=I</code> for the newest image of that number</td>
+</tr>
+<tr>
+<td><code>d=r</code> / <code>d=R</code> with <code>x=</code>, <code>y=</code> (an id range)</td>
+<td>yes, as <code>d=i</code>/<code>d=I</code> for every id in the range</td>
+</tr>
+<tr>
+<td><code>d=a</code> / <code>d=A</code></td>
+<td>no: placeholder cells stay; <code>d=A</code> frees only the images whose placements it removed, and none a virtual placement still holds</td>
+</tr>
+<tr>
+<td>positional targets (<code>c</code>, <code>p</code>, <code>q</code>, <code>x</code>, <code>y</code>, <code>z</code>)</td>
+<td>not supported (<code>ENOTSUP</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>Image numbers (<code>I=</code>) are supported: transmitting with <code>I=</code> and no <code>i=</code> picks a free id and replies
+<code>i=&lt;id&gt;,I=&lt;number&gt;</code>. A put, frame, playback or composition command (<code>a=p</code>, <code>a=f</code>, <code>a=a</code>, <code>a=c</code>) with
+<code>I=</code> reaches the newest image of that number, and a re-transmission with <code>i=</code> alone takes the replaced
+image's number away, as in kitty.</p>
+<h3 id="querying-support">Querying support<a class="headerlink" href="#querying-support" title="Permanent link">#</a></h3>
+<p>kitty's feature query tells a program whether placeholders are understood:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>ESC _G a=q,i=31,e=T,U=1 ESC \      →      ESC _G i=31,e=T,U=1;OK ESC \
+</span></code></pre></div>
+<p>The reply echoes the keys Contour supports for the queried action (<code>e=</code>), so one that is missing is
+one Contour does not support. A query without <code>i=</code> gets no reply, as in kitty.</p>
+<h2 id="file-media">File media<a class="headerlink" href="#file-media" title="Permanent link">#</a></h2>
+<p>Besides direct transmission (<code>t=d</code>, the payload in the sequence itself), a program may name a file
+for the terminal to read:</p>
+<table>
+<thead>
+<tr>
+<th>Medium</th>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>t=d</code></td>
+<td>direct</td>
+<td>always</td>
+</tr>
+<tr>
+<td><code>t=f</code></td>
+<td>a file</td>
+<td>read under the policy below</td>
+</tr>
+<tr>
+<td><code>t=t</code></td>
+<td>a temporary file</td>
+<td>as <code>t=f</code>, and deleted after it is read when its full path contains <code>tty-graphics-protocol</code>, as kitty requires</td>
+</tr>
+<tr>
+<td><code>t=s</code></td>
+<td>POSIX shared memory</td>
+<td><strong>not supported</strong>: it would let any program writing to the terminal unlink any shared memory object the user owns</td>
+</tr>
+</tbody>
+</table>
+<p>A file is read, and a <code>t=t</code> file deleted, only when every one of these holds:</p>
+<ul>
+<li>it lies below one of the <strong>roots</strong>: the temp directories (<code>$TMPDIR</code> and <code>/tmp</code> on Linux; <code>$TMPDIR</code>,
+  <code>/private/tmp</code> and the per-user temp directory on macOS; <code>/dev/shm</code> too, for <code>t=t</code> only, on Linux;
+  <code>%TMP%</code>, <code>%TEMP%</code> and <code>%LOCALAPPDATA%\Temp</code> on Windows, each as spelled -- often in short 8.3 names --
+  and in long names), or a directory of <code>images.kitty_file_allow_list</code>. Only temporary files are
+  deleted, only below a temp directory, and only when their path carries the <code>tty-graphics-protocol</code>
+  marker; one without it is read and kept;</li>
+<li>no component of the path below that root is hidden (starts with <code>.</code>), and no symbolic link below
+  the root is followed;</li>
+<li>it is a regular file, owned by the user Contour runs as, with a single link (so that a hard link
+  cannot reach a file elsewhere), and no larger than one direct transmission may be;</li>
+<li>it is not below <code>/proc</code>, <code>/sys</code> or <code>/dev</code> (except <code>/dev/shm</code> as above);</li>
+<li>its path is at most 4095 bytes long.</li>
+</ul>
+<p>On Windows, besides:</p>
+<ul>
+<li>the path is drive-absolute (<code>C:\...</code> or <code>C:/...</code>), on a fixed or RAM disk. A share (<code>\\server\...</code>),
+  the device and NT namespaces (<code>\\?\</code>, <code>\\.\</code>, <code>\??\</code>), a network, removable or optical drive are
+  refused, and so is a POSIX path a WSL or MSYS program names (<code>/tmp/...</code>, <code>/mnt/c/...</code>): it is not
+  mapped to a Windows one;</li>
+<li>no component is one Windows reads as something else: an alternate data stream (<code>a.png:x</code>), a device
+  name (<code>CON</code>, <code>NUL</code>, <code>COM1</code>, ... with any extension), <code>.</code> or <code>..</code>, a wildcard, or a trailing dot or
+  space;</li>
+<li>no reparse point below the root is followed -- a junction no more than a symbolic link -- and no
+  entry below the root is hidden or system by its attributes, nor offline or fetched on access (a
+  cloud placeholder);</li>
+<li>the file is opened shared for reading only, so nobody writes, renames or deletes it while it is read,
+  and the path Windows reports for it must be the one walked: a short 8.3 alias of a long name is
+  refused;</li>
+<li>its owner is the user Contour runs as or, for an elevated Contour, the Administrators group that owns
+  what it creates; who else may write it (its ACL) is not judged, as POSIX judges no mode bits;</li>
+<li>a <code>t=t</code> file is deleted through the handle it was read with; one whose directory forbids deleting is
+  read and kept. Root and path are compared ignoring the case of ASCII letters.</li>
+</ul>
+<p>Every refusal, whatever its reason — missing, outside the roots, the wrong kind of file, too large,
+undecodable, or a medium not supported — is the same reply, so that a program learns nothing about a
+file it may not read:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ESC _G i=&lt;id&gt;;EBADF:file not readable ESC \
+</span></code></pre></div>
+<h3 id="who-may-read">Who may read<a class="headerlink" href="#who-may-read" title="Permanent link">#</a></h3>
+<p>A file is read where the program that named it runs, so file media are granted only to output that
+comes from a local program. They are refused:</p>
+<ul>
+<li>in a session started from an SSH profile;</li>
+<li>in a tmux control-mode pane;</li>
+<li>in a daemon's replica of a session, and for bytes a client injects into a session;</li>
+<li>while the terminal's context (OSC 3008) says the output comes from another host;</li>
+<li>while the foreground process relays output from elsewhere: a remote shell client (<code>ssh</code>, <code>mosh</code>,
+  <code>et</code>, <code>telnet</code>, PuTTY's <code>plink</code> and the like), a terminal multiplexer's client (<code>tmux</code>, <code>screen</code>,
+  <code>zellij</code>), or a container's or a VM's front end (<code>docker</code>, <code>podman</code>, <code>kubectl</code>, <code>incus</code>, <code>lxc</code>,
+  <code>distrobox-enter</code>, <code>toolbox</code>, <code>vagrant</code>, <code>multipass</code>, <code>wsl</code>, <code>wslhost</code>, Hyper-V's <code>hvc</code>); or while
+  the terminal cannot tell which process that is. On Windows <code>ssh.exe</code>, <code>SSH.EXE</code> and <code>ssh</code> are all
+  <code>ssh</code>.</li>
+</ul>
+<p>This last rule is a list of known programs, so a relay it does not name passes as local. What such a
+program could then learn is limited to whether a decodable image exists at a path it names inside the
+roots, and a <code>t=t</code> name it gives could delete one of the user's own temporary files carrying the
+<code>tty-graphics-protocol</code> marker. Turn <code>images.kitty_file_transmission</code> off where that matters.</p>
+<p>The foreground process is looked at when the command is parsed, so a relay that exits right after
+sending one can race the check; and only the process-group leader is named, so <code>sudo ssh …</code> passes as
+local. A Windows console has no process group: the command the shell runs stands in for its leader --
+below the session's shell, and any shell it starts in turn, the newest child that is not itself a
+shell -- so an <code>ssh</code> running a <code>ProxyCommand</code> is still <code>ssh</code>. A relay that is not a process of the
+session at all -- PowerShell remoting (<code>Enter-PSSession</code>), which runs in the shell's own process -- is
+not seen: its output passes as local.</p>
+<p>With <code>contour daemon</code>, the daemon reads the files: its own configuration decides, and a client can
+neither widen nor narrow what a daemon reads. A daemon on another machine reads that machine's files,
+which is where a program running there wrote them.</p>
+<p>On the BSDs, file media are refused for now: a file is judged by the path its open descriptor names,
+which only Linux, macOS and Windows report (issue #2423).</p>
+<h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">#</a></h2>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">images</span><span class="p">:</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">    </span><span class="c1"># Whether kitty graphics may read files a local program names (t=f, t=t).</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="nt">kitty_file_transmission</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span><span class="c1"># Directories, besides the temp directories, that t=f may read files below. A leading ~/ is your</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">    </span><span class="c1"># home directory; a directory that would open all of it (/, ~ or above), a relative one and a ~name</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">    </span><span class="c1"># one are ignored.</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">    </span><span class="nt">kitty_file_allow_list</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">'~/.claude/plugins/data'</span><span class="p p-Indicator">]</span>
+</span></code></pre></div>
+<p>The default allow-list is where Claude Code's plugins keep what they render (<code>%USERPROFILE%\.claude\plugins\data</code>
+on Windows). The window reads its
+configuration as each session starts, so an edit reaches the sessions opened after it; a daemon reads
+its configuration once, when it starts.</p>
+<h2 id="claude-code">Claude Code<a class="headerlink" href="#claude-code" title="Permanent link">#</a></h2>
+<p>Claude Code shows pictures — Mermaid diagrams via the rich-terminal plugin, and anything a plugin
+draws with its <code>&lt;Image&gt;</code> element — in terminals it knows to speak placeholders. Until Contour is on its
+list, set <code>CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1</code> in the environment of the session.</p>
+<h2 id="not-yet-supported">Not yet supported<a class="headerlink" href="#not-yet-supported" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>tmux control mode.</strong> Placeholders reach a tmux pane through tmux's passthrough, and a file named
+  there would be read on the machine running Contour while the tmux server may be elsewhere; such panes
+  refuse file media until this is designed.</li>
+<li><strong><code>S=</code> and <code>O=</code> for file media.</strong> A file is always read whole; a raw image at an offset inside a
+  larger file is refused.</li>
+<li><strong>Reading off the parser thread.</strong> A file is read while the terminal holds its state lock, so a file
+  on a slow filesystem (NFS, FUSE) inside an allow-listed directory stalls drawing until it is read.</li>
+</ul></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="unicode-placeholders" href="#unicode-placeholders">Unicode placeholders</a><a data-head="file-media" href="#file-media">File media</a><a data-head="configuration" href="#configuration">Configuration</a><a data-head="claude-code" href="#claude-code">Claude Code</a><a data-head="not-yet-supported" href="#not-yet-supported">Not yet supported</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/vt-extensions/kitty-graphics.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">reference › <b>kitty graphics placeholders</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

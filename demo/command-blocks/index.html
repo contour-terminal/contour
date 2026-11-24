@@ -1,0 +1,607 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>command blocks - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="../..">
+<link rel="icon" href="../../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../../assets/theme/site.css">
+<script type="module" src="../../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../../assets/contour-logo.png" alt=""><span id="cw-title">command blocks</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href="../.." aria-current="true"><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../../configuration/"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../../vt-sequence/"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour">
+<a class="tab" data-group="" href="../..">home</a>
+<a class="tab" data-group="" href="../../install/">install</a>
+<a class="tab" data-group="" href="../../features/">features</a>
+<a class="tab" data-group="" href="../../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../../control-api/">control api</a>
+<a class="tab" data-group="guides" href="./" aria-current="page">command blocks</a>
+<a class="tab" data-group="guides" href="../hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure" hidden>
+<a class="tab" data-group="" href="../../configuration/">config file</a>
+<a class="tab" data-group="" href="../../configuration/profiles/">profiles</a>
+<a class="tab" data-group="" href="../../configuration/settings/">settings window</a>
+<a class="tab" data-group="" href="../../configuration/colors/">colors</a>
+<a class="tab" data-group="" href="../../configuration/key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../../configuration/layouts/">layouts</a>
+<a class="tab" data-group="more" href="../../configuration/links/">links</a>
+<a class="tab" data-group="more" href="../../configuration/hosts/">hosts</a>
+<a class="tab" data-group="more" href="../../configuration/indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../../configuration/paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference" hidden>
+<a class="tab" data-group="" href="../../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../../vt-extensions/synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/kitty-graphics/">kitty graphics placeholders</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>command blocks</summary>
+  <div class="tabsel-list">
+<a href="../..">home</a>
+<a href="../../install/">install</a>
+<a href="../../features/">features</a>
+<a href="../../release-notes/">release notes</a>
+<a href="../../persistent-sessions/">persistent sessions</a>
+<a href="../../sidebar/">workspace sidebar</a>
+<a href="../../remote-hosts/">remote hosts</a>
+<a href="../../control-api/">control api</a>
+<a href="./" aria-current="page">command blocks</a>
+<a href="../hint-mode/">hint mode</a>
+<a href="../../input-modes/">input modes</a>
+<a href="../drag-and-drop/">drag and drop</a>
+<a href="../../extensions/">status-line extensions</a>
+<a href="../../quick-terminal/">quick terminal</a>
+<a href="../../accessibility/">accessibility</a>
+<a href="../../secure-input/">secure input</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="command-blocks">Command blocks<a class="headerlink" href="#command-blocks" title="Permanent link">#</a></h1>
+<p>With <a href="../../vt-extensions/osc-133-shell-integration/">shell integration</a> installed, every command you
+run becomes a <strong>command block</strong>: the prompt you typed it at and the output it printed. For each block
+Contour remembers the command line, how it ended, when it started, how long it took and the directory
+it ran in — for the last 1000 commands by default (<code>command_blocks.max_records</code>), even after their
+output has scrolled out of the history.</p>
+<p>Most of this page is built on those records. Without shell integration — and without
+<a href="../../vt-extensions/osc-3008-context/">OSC 3008</a>, which systemd 258 and later send on their own — there
+are no command blocks: no block marks in the gutter or on the scrollbar, no sticky header and no finish
+notifications. Line numbers, timestamps and user marks work either way.</p>
+<h2 id="the-gutter">The gutter<a class="headerlink" href="#the-gutter" title="Permanent link">#</a></h2>
+<p>The strip left of the grid holds up to three columns, each switched on by configuration. Its width
+depends only on the configuration, never on what is on screen — a gutter that grew would resize the
+page mid-command. On the alternate screen of a full-screen program such as vim, less or htop it keeps
+its width and stays empty.</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Shows</th>
+<th>Configured by</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Timestamps</td>
+<td>when each line was first reached</td>
+<td><code>gutter.timestamps</code>, <code>gutter.timestamp_format</code></td>
+<td>off</td>
+</tr>
+<tr>
+<td>Line numbers</td>
+<td>absolute, relative or hybrid numbers</td>
+<td><code>gutter.line_numbers</code>, <code>gutter.line_number_width</code></td>
+<td>off</td>
+</tr>
+<tr>
+<td>Block column</td>
+<td>fold controls, exit status, user marks</td>
+<td><code>folding.show_markers</code>, <code>gutter.exit_status</code>, <code>gutter.user_marks</code></td>
+<td>on</td>
+</tr>
+</tbody>
+</table>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">gutter</span><span class="p">:</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">exit_status</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">user_marks</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">line_numbers</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">hybrid</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span><span class="nt">line_number_width</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">6</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span><span class="nt">timestamps</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="nt">timestamp_format</span><span class="p">:</span><span class="w"> </span><span class="s">"%H:%M:%S"</span>
+</span></code></pre></div>
+<h3 id="the-block-column">The block column<a class="headerlink" href="#the-block-column" title="Permanent link">#</a></h3>
+<p>One cell per line, beside the grid, showing the first of these that applies:</p>
+<table>
+<thead>
+<tr>
+<th>Mark</th>
+<th>Where</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>boxed minus / boxed plus</td>
+<td>a prompt line</td>
+<td>the block's output is shown / collapsed; click to toggle</td>
+</tr>
+<tr>
+<td>◆</td>
+<td>any other line</td>
+<td>a user mark (<code>mm</code> in Vi normal mode)</td>
+</tr>
+<tr>
+<td><code>│</code>, <code>┕</code></td>
+<td>the output</td>
+<td>the extent of the block</td>
+</tr>
+<tr>
+<td>▸</td>
+<td>a prompt line</td>
+<td>the command is still running</td>
+</tr>
+<tr>
+<td>●</td>
+<td>a prompt line</td>
+<td>the command finished without output to fold — or, with <code>folding.show_markers: false</code>, finished at all</td>
+</tr>
+</tbody>
+</table>
+<p>A block's marks take the color of how its command ended, from the color scheme's
+<a href="../../configuration/colors/#block_status"><code>block_status</code></a> colors: neutral for success, red for a
+failure, yellow while it runs. With <code>gutter.exit_status: false</code> the column keeps the plain fold-marker
+color and draws neither ▸ nor ●; with <code>gutter.user_marks: false</code> it draws no ◆. The column is there while
+any of the three is on.</p>
+<p>Hover the block column to see the block's exit code (and the signal that ended it, named by
+<a href="../../vt-extensions/osc-3008-context/">OSC 3008</a> or by a 128 + n exit status), its duration, start time,
+directory and command line.</p>
+<h3 id="line-numbers">Line numbers<a class="headerlink" href="#line-numbers" title="Permanent link">#</a></h3>
+<p><code>gutter.line_numbers</code> works like vim's <code>number</code> and <code>relativenumber</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>vim</th>
+<th>Cursor line</th>
+<th>Other lines</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>off</code></td>
+<td><code>nonu nornu</code></td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>absolute</code></td>
+<td><code>nu</code></td>
+<td>its number</td>
+<td>their numbers</td>
+</tr>
+<tr>
+<td><code>relative</code></td>
+<td><code>rnu</code></td>
+<td><code>0</code></td>
+<td>distance from the cursor line</td>
+</tr>
+<tr>
+<td><code>hybrid</code></td>
+<td><code>nu rnu</code></td>
+<td>its number</td>
+<td>distance from the cursor line</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>An absolute number counts rows from the first row of the session, including rows that have since left
+  the history, so a row keeps its number while the history scrolls away. Resizing the window re-wraps the
+  lines and renumbers the rows below the top.</li>
+<li>A relative distance counts the rows you see: a collapsed block counts as one row, exactly as <code>j</code> and <code>k</code>
+  do, so <code>12k</code> lands on the row labeled 12.</li>
+<li>The cursor is the Vi-mode cursor while Vi mode is on, and the terminal's cursor otherwise.</li>
+<li><code>gutter.line_number_width</code> (3 to 10, default 6) is the column count; a longer number shows its last
+  digits after <code>…</code>.</li>
+</ul>
+<h3 id="timestamps">Timestamps<a class="headerlink" href="#timestamps" title="Permanent link">#</a></h3>
+<p><code>gutter.timestamps: true</code> shows beside each line the local time output first reached it.
+<code>gutter.timestamp_format</code> is a <a href="https://en.cppreference.com/w/cpp/chrono/system_clock/formatter"><code>std::format</code> chrono format</a>
+such as <code>%H:%M:%S</code> (the default) or <code>%H:%M</code>. It must begin with a <code>%</code> conversion, and every character it
+spells must take exactly one column; a format that cannot be used is reported when the configuration loads,
+and the default is kept. A line shows its time only where it differs from the line above, so a burst of
+output does not repeat the same second all the way down. Recording the time costs no memory per line.</p>
+<h3 id="folding">Folding<a class="headerlink" href="#folding" title="Permanent link">#</a></h3>
+<p>A finished command's output can be collapsed to its prompt line (see
+<a href="../../configuration/#folding"><code>folding</code></a>): click its fold control in the block column, or use the
+<code>ToggleFold</code>, <code>ToggleLastFold</code>, <code>CollapseLastFold</code>, <code>CollapseAllFolds</code> and <code>ExpandAllFolds</code> actions. A
+collapsed block says how much it hides — <code>1,234 lines hidden ⌄</code> — after its prompt; that chip is drawn over
+the page and is never selected or copied. In Vi normal mode, vim's fold keys work:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>za</code></td>
+<td>toggle the block under the cursor</td>
+</tr>
+<tr>
+<td><code>zo</code></td>
+<td>open it</td>
+</tr>
+<tr>
+<td><code>zc</code></td>
+<td>close it</td>
+</tr>
+<tr>
+<td><code>zM</code></td>
+<td>close every block</td>
+</tr>
+<tr>
+<td><code>zR</code></td>
+<td>open every block</td>
+</tr>
+</tbody>
+</table>
+<p>Unlike vim's, these know one fold level only, take no count, and work in normal mode alone; <code>zn</code>, <code>zN</code> and
+<code>zi</code> do not exist. With <code>folding.enabled: false</code>, <code>za</code>, <code>zc</code> and <code>zM</code> do nothing, while <code>zo</code> and <code>zR</code> still
+open what is collapsed.</p>
+<h2 id="the-rail-the-chip-and-the-block-menu">The rail, the chip and the block menu<a class="headerlink" href="#the-rail-the-chip-and-the-block-menu" title="Permanent link">#</a></h2>
+<p>On the native chrome styles each block gets a <strong>rail</strong>: a thin strip after the line numbers and timestamps,
+beside the block's rows. It is neutral for a success (a ✓ appears while the pointer is over the block), red
+with a ✗ for a failure, and the accent colour with a ▸ while the command runs. The strip has a fixed width,
+so the page never changes size when a block starts or ends. The <code>ui_style: terminal</code> row keeps the block
+column described above.</p>
+<ul>
+<li><strong>The chip.</strong> Right of a finished command's prompt, in cells that are blank, a small pill says how it
+  went — <code>Failed · exit 1 · 0.0 s</code> — and a running command's pill ticks. The pill is placed only where it
+  covers nothing: a prompt with an RPROMPT keeps it, and a prompt filling the whole row shows the rail's
+  mark alone, with the details in the block menu and read out by screen readers. A folded block's chip
+  says <code>80 lines hidden ⌄</code>; clicking it expands the block.</li>
+<li><strong>The menu.</strong> A ⋯ button beside the block, or a right-click on it, opens a native menu whose header names
+  the command and how it ended, above <em>Copy Output</em>, <em>Copy Command</em>, <em>Rerun</em>, <em>Open in Pager</em> and
+  <em>Collapse Output</em>. The block's tooltip is gone; the header carries what it said.</li>
+<li><strong>Keyboard.</strong> <code>Cmd+Up</code> and <code>Cmd+Down</code> (macOS) step through the blocks and announce each one;
+  <code>Shift+Cmd+Up</code> and <code>Shift+Cmd+Down</code> also select its output. <code>Ctrl+Enter</code> or <code>Shift+F10</code> opens the
+  focused block's menu, <code>Enter</code> toggles its fold, <code>Escape</code> leaves the block, and typing reaches the shell
+  again. The actions are <code>FocusPreviousCommand</code>, <code>FocusNextCommand</code>, <code>SelectPreviousCommandOutput</code>,
+  <code>SelectNextCommandOutput</code>, <code>OpenBlockMenu</code>, <code>ClearCommandBlockFocus</code> and <code>ToggleCommandFold</code>, and the
+  keys are free to rebind; while a block holds the focus the input mode <code>BlockFocus</code> is on.</li>
+<li><strong>Ending a session</strong> with a command still running closes its block as abandoned: no ▸, no tick and no
+  finish notification stay behind, and a restarted pane starts with no blocks.</li>
+</ul>
+<h2 id="scrollbar-marks">Scrollbar marks<a class="headerlink" href="#scrollbar-marks" title="Permanent link">#</a></h2>
+<p>The scrollbar marks where commands are, so a failure far up the history is one glance — and one
+click — away. Clicking a mark scrolls its line to the top, opening its block if that was collapsed.
+Marks that fall on the same pixel merge, the most important winning: a failure, then a running command,
+then a user mark, then any other command. A failure is a solid tick, a running command a hollow one, and
+a search match (<code>search_matches</code>) a yellow one. A command's mark takes its
+<a href="../../configuration/colors/#block_status"><code>block_status</code></a> color.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">main</span><span class="p">:</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">scrollbar</span><span class="p">:</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">      </span><span class="nt">marks</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">failures</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">commands</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">user_marks</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">running</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">search_matches</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># [] turns the marks off</span>
+</span></code></pre></div>
+<p>The scrollbar is shown on the right by default, so the marks are there from the start. It floats over the
+edge of the terminal without taking a column away, and appears only once there is history to scroll
+through.</p>
+<p>That default applies to new configurations. Contour writes out its full default configuration on first
+run, so a <code>contour.yml</code> written by an earlier version still says <code>position: Hidden</code> and shows neither the
+scrollbar nor its marks. Set <code>position: Right</code> to see them, or pick <em>right</em> for <em>Scrollbar position</em> on
+the settings page:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">main</span><span class="p">:</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">scrollbar</span><span class="p">:</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">      </span><span class="nt">position</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Right</span><span class="w">      </span><span class="c1"># Left | Right (the default) | Hidden</span>
+</span></code></pre></div>
+<p>The marks hide whenever the scrollbar does: on the alternate screen (<code>hide_in_alt_screen</code>, on by
+default), and with <code>position: Hidden</code>, or <em>hidden</em> on the settings page.</p>
+<h2 id="sticky-command-header">Sticky command header<a class="headerlink" href="#sticky-command-header" title="Permanent link">#</a></h2>
+<p>Scrolled back into a long output, the command that produced it stays pinned above it — in the pane
+header of a split, in the title band of a single pane, and in the grid's own band under
+<code>show_title_bar: true</code> — with its exit status and duration — or <code>running 12s</code> while it runs. Click the header to jump to the command.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">main</span><span class="p">:</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">sticky_header</span><span class="p">:</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">      </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">scrolled</span><span class="w">       </span><span class="c1"># never | scrolled | always</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">      </span><span class="nt">show_evicted</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span></code></pre></div>
+<ul>
+<li><code>scrolled</code> (the default) shows the header only while you are scrolled back into the history;
+  <code>always</code> also shows it while following live output, so a running <code>make</code> stays labeled above its
+  own output; <code>never</code> turns it off. It never shows on the alternate screen.</li>
+<li>The header needs prompt marks (<code>OSC 133 ; A</code>): a shell that marks only where its commands run gets none.</li>
+<li>When a command's own line has already been evicted from the history, the header names the command
+  instead — <code>⋯ make -j8 — earlier output evicted</code> — so its remaining output still says where it came
+  from. It does so wherever the header would show, and at the very top of the history even with
+  <code>mode: never</code>; <code>show_evicted: false</code> turns it off.</li>
+</ul>
+<p>The header is drawn over the page: selection, copying and screen readers see only the page.
+Its colors: <a href="../../configuration/colors/#sticky_header"><code>sticky_header</code></a>.</p>
+<h2 id="acting-on-a-block">Acting on a block<a class="headerlink" href="#acting-on-a-block" title="Permanent link">#</a></h2>
+<table>
+<thead>
+<tr>
+<th>To</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>select a command's output</td>
+<td><kbd>Ctrl</kbd> + triple-click on it, or <code>SelectCommandBlock</code></td>
+</tr>
+<tr>
+<td>copy part of a command block — its output, its input line, or both — as plain text</td>
+<td><code>CopyCommandBlock</code></td>
+</tr>
+<tr>
+<td>copy a command line, safe to paste</td>
+<td><code>CopyCommandLine</code></td>
+</tr>
+<tr>
+<td>open the last command's output in a pager</td>
+<td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd>, or <code>OpenCommandOutput</code></td>
+</tr>
+<tr>
+<td>select, copy or page the block under the pointer</td>
+<td>the context menu</td>
+</tr>
+<tr>
+<td>clear everything above the current prompt</td>
+<td><code>ClearToPrompt</code></td>
+</tr>
+<tr>
+<td>copy the last command's output when nothing is selected</td>
+<td><code>CopySelection</code> with <code>fallback: last_command_output</code></td>
+</tr>
+</tbody>
+</table>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">input_mapping</span><span class="p">:</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="c1"># Ctrl+triple-click: select the clicked command's output (built in; a row like this replaces it)</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> mods</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Control</span><span class="p p-Indicator">],</span><span class="nt"> mouse</span><span class="p">:</span><span class="w"> </span><span class="nv">Left</span><span class="p p-Indicator">,</span><span class="nt"> clicks</span><span class="p">:</span><span class="w"> </span><span class="nv">3</span><span class="p p-Indicator">,</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">SelectCommandBlock</span><span class="p p-Indicator">,</span><span class="nt"> part</span><span class="p">:</span><span class="w"> </span><span class="nv">output</span><span class="p p-Indicator">,</span><span class="nt"> target</span><span class="p">:</span><span class="w"> </span><span class="nv">pointer</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="c1"># Ctrl+Shift+G: the last command's output in the pager (built in; command_blocks.pager)</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> mods</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Control</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Shift</span><span class="p p-Indicator">],</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">G</span><span class="p p-Indicator">,</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">OpenCommandOutput</span><span class="p p-Indicator">,</span><span class="nt"> target</span><span class="p">:</span><span class="w"> </span><span class="nv">last</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">  </span><span class="c1"># Copy the last command's output, or its command line, without selecting anything</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> mods</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Control</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Alt</span><span class="p p-Indicator">],</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">C</span><span class="p p-Indicator">,</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">CopyCommandBlock</span><span class="p p-Indicator">,</span><span class="nt"> target</span><span class="p">:</span><span class="w"> </span><span class="nv">last</span><span class="p p-Indicator">,</span><span class="nt"> part</span><span class="p">:</span><span class="w"> </span><span class="nv">output</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> mods</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Control</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Alt</span><span class="p p-Indicator">],</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">P</span><span class="p p-Indicator">,</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">CopyCommandLine</span><span class="p p-Indicator">,</span><span class="nt"> target</span><span class="p">:</span><span class="w"> </span><span class="nv">last</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">  </span><span class="c1"># Copy the selection -- or, with nothing selected, the last command's output</span>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> mods</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Control</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Shift</span><span class="p p-Indicator">],</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">C</span><span class="p p-Indicator">,</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">CopySelection</span><span class="p p-Indicator">,</span><span class="nt"> fallback</span><span class="p">:</span><span class="w"> </span><span class="nv">last_command_output</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span></code></pre></div>
+<ul>
+<li><code>SelectCommandBlock</code> takes <code>part</code> — <code>output</code>, <code>input</code> (the prompt with the command typed at it) or <code>all</code> —
+  and <code>target</code>: <code>pointer</code> (the block under the mouse), <code>cursor</code> (the block holding the cursor, the Vi-mode
+  cursor in Vi mode) or <code>last</code> (the newest finished one).</li>
+<li><code>CopyCommandBlock</code> takes the same <code>part</code> and <code>target</code> as <code>SelectCommandBlock</code> and copies that part
+  into the clipboard as plain text. <code>CopyCommandLine</code> takes a <code>target</code> and copies that block's command
+  line with the control characters that would be unsafe to paste removed, so an embedded end-of-paste
+  sequence cannot make a shell run the rest.</li>
+<li><code>OpenCommandOutput</code> takes the same <code>target</code>, plus a <code>program</code> that defaults to <code>command_blocks.pager</code>
+  (<code>less -R</code>, or <code>more</code> on Windows). Its <code>placement</code> is <code>split</code> (a new pane below, the default), <code>tab</code>, or
+  <code>detached</code>, which pipes the output into the program as plain text and opens no pane; for a pane, the
+  output goes to a private file that is deleted when the pane closes. Its <code>format</code> is <code>sgr</code>, which keeps the
+  colors, or <code>plain</code>, which drops them; without one, the configured pager gets
+  <code>command_blocks.pager_format</code> (<code>sgr</code> by default) and a <code>program</code> the binding names gets <code>sgr</code>.</li>
+<li><code>CopySelection</code>'s fallback is off unless you ask for it, so copying with nothing selected never
+  replaces your clipboard with a build log by accident.</li>
+<li>The context menu's <em>Select Output</em>, <em>Copy Output</em>, <em>Copy Command</em> and <em>Open Output in Pager</em> act on the
+  block under the pointer.</li>
+<li>Relative file paths in a command's output — <kbd>Ctrl</kbd>+clicked, or picked in
+  <a href="../hint-mode/#path-resolution">hint mode</a> — resolve against the directory that command ran in, not the
+  shell's current one. Paths from a command that ran in a container or over ssh are not opened locally.</li>
+</ul>
+<div class="admonition note">
+<p class="admonition-title">New bindings and an existing <code>input_mapping</code></p>
+<p>Defining <code>input_mapping</code> replaces the default bindings (see <a href="../../configuration/key-mapping/">Key mapping</a>).
+That costs you nothing here: <kbd>Ctrl</kbd>+triple-click and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd>
+are built-in fallbacks, not defaults, so they work whatever your <code>input_mapping</code> says — unless it
+binds the same chord itself, in which case your binding wins. <code>CopyCommandBlock</code>, <code>CopyCommandLine</code>
+and <code>ClearToPrompt</code> have no chord at all: add the bindings you want to your <code>input_mapping</code>.</p>
+</div>
+<h2 id="finish-notifications">Finish notifications<a class="headerlink" href="#finish-notifications" title="Permanent link">#</a></h2>
+<p>When a command that took a while finishes somewhere you are not looking, Contour posts a desktop
+notification — <code>✓ make finished</code>, <code>✗ make failed (exit 2)</code> or <code>✗ make killed (SIGSEGV)</code> — with how long it
+took, where it ran and which tab it is in. Clicking it brings that pane forward where the desktop reports
+clicks, and a newer notification from the same pane replaces the older one.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">main</span><span class="p">:</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">notify_on_command_finish</span><span class="p">:</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">      </span><span class="nt">when</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unfocused</span><span class="w">      </span><span class="c1"># never | unfocused | hidden | always</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">      </span><span class="nt">min_duration</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span><span class="w">     </span><span class="c1"># seconds; quicker commands never notify</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">      </span><span class="nt">outcome</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">any</span><span class="w">         </span><span class="c1"># any | failure</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">      </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">notify</span><span class="w">       </span><span class="c1"># notify | bell | notify_bell</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">      </span><span class="nt">clear_on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">focus</span><span class="w">      </span><span class="c1"># focus | next | never</span>
+</span></code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>when</code></td>
+<td><code>unfocused</code>: unless the pane is the focused one of the active window (the default); <code>hidden</code>: only while the pane is off screen (another tab, a zoomed sibling, a minimized window); <code>always</code>; <code>never</code></td>
+</tr>
+<tr>
+<td><code>min_duration</code></td>
+<td>commands quicker than this many seconds never notify (default 10)</td>
+</tr>
+<tr>
+<td><code>outcome</code></td>
+<td>notify for <code>any</code> command, or only for a <code>failure</code> (a non-zero exit or a signal)</td>
+</tr>
+<tr>
+<td><code>action</code></td>
+<td>a desktop notification (<code>notify</code>), the profile's bell (<code>bell</code>), or both (<code>notify_bell</code>)</td>
+</tr>
+<tr>
+<td><code>clear_on</code></td>
+<td>withdraw the notification when you focus the pane (<code>focus</code>), when the next command there starts (<code>next</code>), or <code>never</code>. Only a desktop notification can be withdrawn (Linux); a tray message elsewhere stays until it times out</td>
+</tr>
+</tbody>
+</table>
+<p>It is on by default because the case it serves — a build in a background tab — is exactly when nobody
+thinks to turn it on; the 10-second floor keeps ordinary commands quiet.</p>
+<h2 id="user-marks">User marks<a class="headerlink" href="#user-marks" title="Permanent link">#</a></h2>
+<p><code>mm</code> in Vi normal mode marks the cursor line, and clears the mark again. A user mark is drawn as ◆ in
+the gutter and as a tick on the scrollbar, and <code>[m</code> / <code>]m</code> jump between marks of both kinds. Unlike a
+prompt, it never starts a command block: folding and block-wise history eviction ignore it. See
+<a href="../../input-modes/#bookmarking-a-line-in-vi-normal-mode">Line marks</a>.</p>
+<h2 id="daemon-sessions">Daemon sessions<a class="headerlink" href="#daemon-sessions" title="Permanent link">#</a></h2>
+<p>All of this works in a <a href="../../persistent-sessions/"><code>contour client</code></a> session attached to a daemon: the
+daemon sends the block records along with the screen. Reattaching does not replay notifications for
+commands that finished while you were away. <code>OpenCommandOutput</code> opens no pane there — the pane would run
+on the daemon's side, which never sees the file — so bind it with <code>placement: detached</code> instead.</p>
+<h2 id="restored-sessions">Restored sessions<a class="headerlink" href="#restored-sessions" title="Permanent link">#</a></h2>
+<p>When the daemon brings a workspace back after a restart, each pane's history comes back above a dimmed
+"Restored · session ended hh:mm" row, which names the day too when it is not today. A command that was still
+running when the snapshot was taken is shown as abandoned: its chip stops counting, since the program it
+belonged to is gone. The first window to attach also shows one toast, such as "Restored 2 windows, 7 tabs".</p>
+<h2 id="installing-shell-integration">Installing shell integration<a class="headerlink" href="#installing-shell-integration" title="Permanent link">#</a></h2>
+<p>Contour offers to turn shell integration on when a bash, zsh or fish session needs it. After you have entered
+three commands in a pane whose shell writes no prompt marks, a card appears in the pane's bottom rows: <em>Turn on
+command blocks</em>, with <em>Install</em> and <em>Not Now</em>. <em>Install</em> shows the one line it would add to the shell's startup
+file (<code>~/.zshrc</code>, <code>~/.bashrc</code> or <code>~/.bash_profile</code> on macOS, or <code>~/.config/fish/config.fish</code>) and nothing is
+written yet. <em>Add Line</em> appends it and says so in a toast; new sessions of that shell then show command blocks.
+<em>Cancel</em> hides the card for this run, and <em>Not Now</em> is remembered for that shell, in <code>gui-state.yml</code> beside
+<code>contour.yml</code>.</p>
+<p>The line runs <code>contour generate integration shell &lt;shell&gt;</code> from the binary that is running, and only in a shell
+Contour started (<code>TERM_PROGRAM</code> is <code>contour</code>). Contour only ever appends: it never rewrites or replaces the
+file, a file that is a symlink is appended through, and the line is not added twice. It adds nothing when
+Contour runs as root, when the file changed while it was being read, or when an earlier append was cut short
+and left half a Contour line at the end of the file: delete that line, then install again. The card is not
+offered in a window attached to another host.</p>
+<p><em>Shell Integration</em> on the settings page starts with an <em>Install</em> group: one row per shell, saying <em>Installed
+in ~/.zshrc</em>, <em>Not installed</em> or why the file cannot be read. <em>Install…</em> asks the same question, with the same
+line, and adds it the same way, also for a shell you declined at the card. A row whose file ends in a
+cut-short Contour line shows that exact line to delete.</p>
+<h2 id="settings-page">Settings page<a class="headerlink" href="#settings-page" title="Permanent link">#</a></h2>
+<p>Every setting above but the key bindings can also be changed on the settings page:</p>
+<ul>
+<li><em>Global settings</em> has the rows named <em>Gutter: …</em>, <em>Command blocks: …</em> and <em>Folding: …</em>
+  (<a href="../../configuration/">configuration</a>). Each saves the one key it edits to <code>settings.yml</code>, and the
+  rest of its section keeps what <code>contour.yml</code> says. <em>Command blocks: pager format</em> picks <code>sgr</code> or <code>plain</code>.
+  <em>Command blocks: pager</em> cannot be left blank; <em>Reset</em> goes back to the pager <code>contour.yml</code> names.</li>
+<li>A profile's page has a <em>Command blocks</em> group (<a href="../../configuration/profiles/">profiles</a>): the three
+  <em>Scrollbar marks: …</em> rows, <em>Sticky command header</em>, <em>Name evicted commands</em>, <em>Notify on finish</em> and the
+  <em>Notify: …</em> rows. <em>Scrollbar position</em> is under <em>History &amp; scrollbar</em>. A profile defined in <code>contour.yml</code>
+  is read-only there; <em>Save As</em> makes an editable copy.</li>
+<li>A color scheme's page has the swatches <em>Block status: success</em>, <em>failure</em> and <em>running</em>, <em>Gutter text</em>,
+  and <em>Sticky header: background</em> and <em>separator</em> (<a href="../../configuration/colors/">colors</a>). A swatch the
+  scheme leaves unset says that it follows the scheme's other colors, and shows the color they give it.
+  Typing a new color pins the swatch, and so does <kbd>Enter</kbd> in its field, which keeps the color it
+  shows now; tabbing through the field pins nothing. Each of these swatches that the scheme sets has a ↺
+  button, which makes it follow the other colors again.</li>
+<li><em>Keybindings</em> lists the bindings without editing them: the <code>input_mapping</code> of <code>contour.yml</code>, then the
+  built-in bindings none of its rows takes, such as <kbd>Ctrl</kbd>+triple-click and
+  <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd>, marked <em>built-in</em>. A binding that runs several actions
+  names them all.</li>
+</ul>
+<p>When the page refuses a value, a message above the rows says why, and screen readers announce it. The
+message goes away with the next change that goes through, or when you open another page.</p>
+<h2 id="configuration-reference">Configuration reference<a class="headerlink" href="#configuration-reference" title="Permanent link">#</a></h2>
+<ul>
+<li>Global: <a href="../../configuration/#gutter"><code>gutter</code></a>, <a href="../../configuration/#command_blocks"><code>command_blocks</code></a>, <a href="../../configuration/#folding"><code>folding</code></a></li>
+<li>Profile: <a href="../../configuration/profiles/#scrollbar"><code>scrollbar</code></a>, <a href="../../configuration/profiles/#sticky_header"><code>sticky_header</code></a>, <a href="../../configuration/profiles/#notify_on_command_finish"><code>notify_on_command_finish</code></a></li>
+<li>Color scheme: <a href="../../configuration/colors/#block_status"><code>block_status</code></a>, <a href="../../configuration/colors/#gutter_text"><code>gutter_text</code></a>, <a href="../../configuration/colors/#sticky_header"><code>sticky_header</code></a></li>
+<li>Actions and bindings: <a href="../../configuration/key-mapping/">Key mapping</a></li>
+</ul></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="the-gutter" href="#the-gutter">The gutter</a><a data-head="the-rail-the-chip-and-the-block-menu" href="#the-rail-the-chip-and-the-block-menu">The rail, the chip and the block menu</a><a data-head="scrollbar-marks" href="#scrollbar-marks">Scrollbar marks</a><a data-head="sticky-command-header" href="#sticky-command-header">Sticky command header</a><a data-head="acting-on-a-block" href="#acting-on-a-block">Acting on a block</a><a data-head="finish-notifications" href="#finish-notifications">Finish notifications</a><a data-head="user-marks" href="#user-marks">User marks</a><a data-head="daemon-sessions" href="#daemon-sessions">Daemon sessions</a><a data-head="restored-sessions" href="#restored-sessions">Restored sessions</a><a data-head="installing-shell-integration" href="#installing-shell-integration">Installing shell integration</a><a data-head="settings-page" href="#settings-page">Settings page</a><a data-head="configuration-reference" href="#configuration-reference">Configuration reference</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/demo/command-blocks.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">contour › <b>command blocks</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

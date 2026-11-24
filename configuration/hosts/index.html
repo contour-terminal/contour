@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>hosts - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="../..">
+<link rel="icon" href="../../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../../assets/theme/site.css">
+<script type="module" src="../../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../../assets/contour-logo.png" alt=""><span id="cw-title">hosts</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href="../.."><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../" aria-current="true"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../../vt-sequence/"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour" hidden>
+<a class="tab" data-group="" href="../..">home</a>
+<a class="tab" data-group="" href="../../install/">install</a>
+<a class="tab" data-group="" href="../../features/">features</a>
+<a class="tab" data-group="" href="../../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure">
+<a class="tab" data-group="" href="../">config file</a>
+<a class="tab" data-group="" href="../profiles/">profiles</a>
+<a class="tab" data-group="" href="../settings/">settings window</a>
+<a class="tab" data-group="" href="../colors/">colors</a>
+<a class="tab" data-group="" href="../key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../layouts/">layouts</a>
+<a class="tab" data-group="more" href="../links/">links</a>
+<a class="tab" data-group="more" href="./" aria-current="page">hosts</a>
+<a class="tab" data-group="more" href="../indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference" hidden>
+<a class="tab" data-group="" href="../../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../../vt-extensions/synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/kitty-graphics/">kitty graphics placeholders</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>hosts</summary>
+  <div class="tabsel-list">
+<a href="../">config file</a>
+<a href="../profiles/">profiles</a>
+<a href="../settings/">settings window</a>
+<a href="../colors/">colors</a>
+<a href="../key-mapping/">key mapping</a>
+<a href="../layouts/">layouts</a>
+<a href="../links/">links</a>
+<a href="./" aria-current="page">hosts</a>
+<a href="../indicator-statusline/">status line</a>
+<a href="../paths/">paths</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="hosts">Hosts<a class="headerlink" href="#hosts" title="Permanent link">#</a></h1>
+<p>A saved host is a remote machine whose daemon Contour can attach to by name: "Attach to Host"
+lists them, and <code>contour client --host NAME</code> attaches to one. How remote attach works, and how
+to set the far side up (including over Tailscale), is described in
+<a href="../../remote-hosts/">Remote hosts</a>.</p>
+<h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">#</a></h2>
+<p>A profile's <code>ssh:</code> block instead opens a remote login shell through Contour's built-in SSH client; it
+does not require Contour on the server. Contour chooses the first nonempty value from the profile's
+<code>environment.TERM</code>, the top-level <code>ssh_default_term</code>, and the Contour process's <code>TERM</code> environment
+variable. If none is set, Windows uses <code>xterm-256color</code>. Other platforms send an empty terminal type.
+Choose a terminal type whose terminfo entry is installed on the server.</p>
+<p>In Settings, edit <strong>Default SSH terminal type</strong> under <strong>General → Advanced</strong> and <strong>Environment
+variables</strong> under the profile's <strong>Shell</strong> group. Settings can edit profiles it manages. For a
+profile defined in <code>contour.yml</code>, edit the file or duplicate the profile in Settings.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">ssh_default_term</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">xterm-256color</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">remote-shell</span><span class="p">:</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="nt">ssh</span><span class="p">:</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">      </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">homepc</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">      </span><span class="nt">user</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">me</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="nt">environment</span><span class="p">:</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">      </span><span class="nt">TERM</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">contour</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">      </span><span class="nt">COLORTERM</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">truecolor</span>
+</span></code></pre></div>
+<p>The profile's <code>environment:</code> values go to the shell the profile opens. A local shell receives them
+directly. For built-in SSH, <code>TERM</code> travels in the PTY request. Other entries, such as <code>COLORTERM</code>,
+are sent as SSH environment requests and may require server permission (for example, OpenSSH's
+<code>AcceptEnv</code>). Review values in existing profiles before using them with a remote host.</p>
+<h3 id="connect-timeout">Connect timeout<a class="headerlink" href="#connect-timeout" title="Permanent link">#</a></h3>
+<p><code>ssh.connect_timeout</code> limits, in seconds, how long a built-in SSH connection may take to come up: from
+the TCP connect through the handshake, authentication and the terminfo installation below to the
+started shell. Time spent waiting for you (confirming a new host key, typing a key's passphrase or a
+password) does not count. It defaults to <code>30</code>; <code>0</code> means no limit, and more than <code>86400</code> (24 hours)
+is taken as <code>86400</code>. A connection that runs out of time ends with an error naming the step it was in,
+the host and <code>ssh.connect_timeout</code>. Once the shell runs, no limit applies. Resolving the host name is
+left to the system resolver and its own timeouts.</p>
+<p>Authenticating through an SSH agent does not count toward <code>ssh.connect_timeout</code> either: an agent may
+ask you to approve each use of a key (1Password, Secretive, <code>ssh-add -c</code>, a FIDO key waiting for a
+touch, gpg-agent asking for its PIN), and Contour cannot tell that wait apart from the host's. The
+agent step has its own allowance of 2 minutes (or <code>connect_timeout</code>, if that is longer), for all of
+the agent's keys together; when it runs out, the connection ends with an error saying the agent did
+not finish in time. On Linux, macOS and other Unix systems this also cuts off an agent that never
+answers, or an approval left pending. On Windows it does not: there the allowance takes effect only
+once the agent has answered, so an agent that never replies, or an approval left pending, is not cut
+off. With <code>connect_timeout: 0</code> the agent step has no limit either.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">remote-shell</span><span class="p">:</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">ssh</span><span class="p">:</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">      </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">homepc</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">      </span><span class="nt">connect_timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
+</span></code></pre></div>
+<h3 id="terminfo-installation">Terminfo installation<a class="headerlink" href="#terminfo-installation" title="Permanent link">#</a></h3>
+<p>When a built-in SSH profile connects, Contour first runs a one-off command on a second SSH channel
+that compiles Contour's terminfo entry with the remote <code>tic</code> and installs it into the remote user's
+<code>~/.terminfo</code> (<code>c/contour</code>, or <code>63/contour</code> where the remote's <code>tic</code> uses hex-named directories, as
+on macOS). The entry stays there; every later connect reinstalls it, which also updates it after a
+Contour upgrade. When the install succeeds, the shell starts with <code>TERM=contour</code>.</p>
+<p>If the remote has no <code>tic</code> (for example Alpine without ncurses, or BusyBox), the home directory is
+not writable, or anything else fails, the connection proceeds with the terminal type chosen above;
+the details go to the SSH log only. The step is bounded by 3 seconds, and never by more than what
+is left of <code>ssh.connect_timeout</code>. When it times out and the connection is still usable, one line is
+shown in the terminal and the shell starts. When the install
+leaves the connection unable to open the shell's channel (the host stopped answering while the install
+channel was being opened, or while a request was still being sent), the connection ends with an error
+that names <code>ssh.install_terminfo: false</code>. A host whose install failed, timed out or ended the
+connection is skipped for the rest of that Contour run, so connecting again works.</p>
+<p>A profile <code>environment.TERM</code> set to anything other than <code>contour</code> skips the install. To turn it off
+for a profile, set <code>install_terminfo: false</code> (default <code>true</code>); the error message names it as
+<code>ssh.install_terminfo: false</code>:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">profiles</span><span class="p">:</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">remote-shell</span><span class="p">:</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">ssh</span><span class="p">:</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">      </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">homepc</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">      </span><span class="nt">install_terminfo</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span></code></pre></div>
+<p>Two kinds of hosts need care:</p>
+<ul>
+<li>Hosts that allow only one session per connection, or that drop the connection after a command, can
+  fail to open the shell after the attempt. The error message then says to set
+  <code>ssh.install_terminfo: false</code>.</li>
+<li>Hosts with a forced command (<code>ForceCommand</code>, or <code>command=</code> in <code>authorized_keys</code>) run that command
+  once more on the first connect of a Contour run instead of the install; the install then fails and
+  the host is skipped from then on. If that forced command prompts (for example for MFA), turn the
+  option off for that profile.</li>
+</ul>
+<p>The installed file is a regular terminfo entry; removing <code>~/.terminfo/*/contour</code> on the remote undoes it.</p>
+<h3 id="saved-hosts">Saved hosts<a class="headerlink" href="#saved-hosts" title="Permanent link">#</a></h3>
+<p>Hosts are configured under the top-level <code>hosts</code> entry, a map of host name to its settings.
+Listings are sorted by name.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">hosts</span><span class="p">:</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">home</span><span class="p">:</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="s">"ssh://me@homepc"</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="nt">remote_command</span><span class="p">:</span><span class="w"> </span><span class="s">"/opt/contour/bin/contour</span><span class="nv"> </span><span class="s">daemon</span><span class="nv"> </span><span class="s">--stdio"</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="nt">profile</span><span class="p">:</span><span class="w"> </span><span class="s">"remote"</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">  </span><span class="nt">studio</span><span class="p">:</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="s">"tls://studio.tailnet.ts.net:7297"</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">    </span><span class="nt">token_file</span><span class="p">:</span><span class="w"> </span><span class="s">"~/.config/contour/studio.token"</span>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">    </span><span class="nt">tls_ca</span><span class="p">:</span><span class="w"> </span><span class="s">"~/.config/contour/studio-ca.pem"</span>
+</span></code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>url</code></td>
+<td>Where the host is: <code>ssh://[user@]host[:port]</code> or <code>tls://host:port</code>. Required.</td>
+</tr>
+<tr>
+<td><code>token_file</code></td>
+<td>The file holding the remote daemon's token (<code>tls://</code>). Not needed when an SSH key signs in.</td>
+</tr>
+<tr>
+<td><code>tls_ca</code></td>
+<td>A CA certificate to verify the daemon's TLS certificate against (<code>tls://</code>). Without it the daemon is pinned on first use, as ssh does for a host: its certificate's fingerprint is kept in <code>known_daemons</code>, and a daemon that presents another one is refused.</td>
+</tr>
+<tr>
+<td><code>identity_file</code></td>
+<td>The SSH private key that signs in to a <code>tls://</code> daemon, instead of the keys of your SSH agent.</td>
+</tr>
+<tr>
+<td><code>remote_command</code></td>
+<td>Replaces the <strong>whole</strong> command run on the remote side of <code>ssh://</code> (default: <code>contour daemon --stdio</code>). Use it when <code>contour</code> is not on the remote non-interactive <code>PATH</code>. It reaches the remote shell verbatim, so quote a path with spaces inside the YAML string yourself (<code>"'/opt/my apps/contour' daemon --stdio"</code>).</td>
+</tr>
+<tr>
+<td><code>profile</code></td>
+<td>The profile the remote sessions are created with; empty selects the default one.</td>
+</tr>
+</tbody>
+</table>
+<p>Paths in <code>token_file</code>, <code>tls_ca</code> and <code>identity_file</code> expand <code>~</code> and <code>${VAR}</code>, as every path in the configuration does.</p>
+<h2 id="key-binding">Key binding<a class="headerlink" href="#key-binding" title="Permanent link">#</a></h2>
+<p>The <code>AttachToHost</code> action opens a new window attached to the saved host its <code>name</code> names, as the
+"Attach to Host" entries do; a binding without <code>name</code> is skipped.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">input_mapping</span><span class="p">:</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> mods</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Control</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Shift</span><span class="p p-Indicator">],</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">H</span><span class="p p-Indicator">,</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">AttachToHost</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">home</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span></code></pre></div>
+<p>A host is attached like a launch against its daemon: one window, which shows the first workspace of the daemon
+no window shows (else a new one) and switches between the daemon's other workspaces in place. <code>contour client --host
+NAME --workspace W</code> shows the workspace <code>W</code> first. A window that is already open can move to a saved host
+with the <code>SwitchToDaemon</code> and <code>OpenDaemon</code> actions, which take <code>host: NAME</code>; see
+<a href="../key-mapping/#switching-daemons-and-workspaces">Key Mapping</a>.</p>
+<h2 id="ssh"><code>ssh://</code><a class="headerlink" href="#ssh" title="Permanent link">#</a></h2>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">hosts</span><span class="p">:</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">home</span><span class="p">:</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="s">"ssh://me@homepc:2222"</span>
+</span></code></pre></div>
+<p>Contour runs <code>ssh &lt;target&gt; contour daemon --stdio</code>; ssh does the authentication, with keys or an
+agent only (no password or host-key prompt is answered from the GUI). The user and the port are
+optional; ssh's own configuration (<code>~/.ssh/config</code>) applies as usual. A host or user that begins
+with <code>-</code> is refused.</p>
+<h2 id="tls"><code>tls://</code><a class="headerlink" href="#tls" title="Permanent link">#</a></h2>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">hosts</span><span class="p">:</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">studio</span><span class="p">:</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="s">"tls://studio.tailnet.ts.net:7297"</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="nt">token_file</span><span class="p">:</span><span class="w"> </span><span class="s">"~/.config/contour/studio.token"</span>
+</span></code></pre></div>
+<p>A <code>tls://</code> host needs nothing beyond its <code>url</code>: it signs in with the keys of your SSH agent, or with its
+<code>identity_file</code> (best loaded into the agent with <code>ssh-add</code> when it has a passphrase, as the daemon waits only 20
+seconds for the sign-in), when the daemon authorizes keys, and with its <code>token_file</code> otherwise. The first time a
+daemon without a <code>tls_ca</code> is met, a dialog (a question on the terminal, for the control commands) shows its
+fingerprint to compare with what <code>contour daemon status</code> prints on that machine, and asks whether to trust
+it; where nobody can be asked, it is refused unless the fingerprint is given (<code>--daemon-fingerprint</code>). A trusted
+daemon is pinned, and one that later presents another certificate is refused, never asked about. After a daemon was reinstalled,
+<code>contour daemon forget-pin HOST:PORT</code> forgets the old pin. The port is required, and a <code>tls://</code> URL
+takes no user.</p>
+<p>An entry that cannot be used — no <code>url</code>, or a malformed one — is
+reported in the log and skipped; the other hosts still load.</p></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="configuration" href="#configuration">Configuration</a><a data-head="key-binding" href="#key-binding">Key binding</a><a data-head="ssh" href="#ssh">ssh://</a><a data-head="tls" href="#tls">tls://</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/configuration/hosts.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">configure › <b>hosts</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

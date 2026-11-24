@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>status line - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="../..">
+<link rel="icon" href="../../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../../assets/theme/site.css">
+<script type="module" src="../../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../../assets/contour-logo.png" alt=""><span id="cw-title">status line</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href="../.."><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../" aria-current="true"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../../vt-sequence/"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour" hidden>
+<a class="tab" data-group="" href="../..">home</a>
+<a class="tab" data-group="" href="../../install/">install</a>
+<a class="tab" data-group="" href="../../features/">features</a>
+<a class="tab" data-group="" href="../../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="../../remote-hosts/">remote hosts</a>
+<a class="tab" data-group="guides" href="../../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure">
+<a class="tab" data-group="" href="../">config file</a>
+<a class="tab" data-group="" href="../profiles/">profiles</a>
+<a class="tab" data-group="" href="../settings/">settings window</a>
+<a class="tab" data-group="" href="../colors/">colors</a>
+<a class="tab" data-group="" href="../key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../layouts/">layouts</a>
+<a class="tab" data-group="more" href="../links/">links</a>
+<a class="tab" data-group="more" href="../hosts/">hosts</a>
+<a class="tab" data-group="more" href="./" aria-current="page">status line</a>
+<a class="tab" data-group="more" href="../paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference" hidden>
+<a class="tab" data-group="" href="../../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../../vt-extensions/synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/kitty-graphics/">kitty graphics placeholders</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../../vt-extensions/unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>status line</summary>
+  <div class="tabsel-list">
+<a href="../">config file</a>
+<a href="../profiles/">profiles</a>
+<a href="../settings/">settings window</a>
+<a href="../colors/">colors</a>
+<a href="../key-mapping/">key mapping</a>
+<a href="../layouts/">layouts</a>
+<a href="../links/">links</a>
+<a href="../hosts/">hosts</a>
+<a href="./" aria-current="page">status line</a>
+<a href="../paths/">paths</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="indicator-statusline">Indicator Statusline<a class="headerlink" href="#indicator-statusline" title="Permanent link">#</a></h1>
+<p>The indicator statusline used to be a feature, from the old DEC VT level 4 terminals.
+Contour revives this feature to prominently show the terminal status.</p>
+<h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">#</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>profiles:
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    your_profile:
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>        status_line:
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>            indicator:
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>                left: "{InputMode:Bold,Left= ,Right= ,Chip,Hide=Insert}{Context:Left= }{Cwd:Color=success,Left= }{Git:Left=  }"
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>                middle: "{LastCommand}{Selection:Left=  }{SearchPrompt:Color=warning,Left=  }"
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>                right: "{Progress:Color=accent,Right=  }{Scroll:Right=  }{Clock:Faint,Right= }"
+</span></code></pre></div>
+<p>This is the default of a configuration with <code>defaults_edition: native2026</code>: the vi mode as a chip
+(hidden while typing), the directory and Git branch, how the last command went, the selection and
+search, and the scroll position and clock. Its colours are roles, so it follows the color scheme.</p>
+<p>A configuration with <code>defaults_edition: classic</code> (one written before the redesign) keeps the earlier
+default, with the tabs, the title and fixed colors:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>profiles:
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    your_profile:
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>        status_line:
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>            indicator:
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>                left: " {InputMode:Bold,Color=#FFFF00}{TraceMode:Bold,Color=#FFFF00,Left= │ }{Tabs:ActiveColor=#FFFF00,Left= │ }{ProtectedMode:Bold,Left= │ }{Context:Left= │ }"
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>                middle: "« {Title} »"
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>                right: "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}"
+</span></code></pre></div>
+<p>Each segment, <code>left</code>, <code>middle</code>, and <code>right</code> may contain text to be displayed in the
+left, middle, or right segment of the indicator statusline.</p>
+<p>This text may contain placeholders to be replaced by their respective dynamic content.</p>
+<h2 id="variables">Variables<a class="headerlink" href="#variables" title="Permanent link">#</a></h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>{Clock}</code></td>
+<td>current clock in HH:MM format</td>
+</tr>
+<tr>
+<td><code>{Cwd}</code></td>
+<td>the working directory the shell reports, with the home directory as <code>~</code> when it is on this machine; at most <code>MaxWidth=</code> columns (default <code>40</code>), eliding the middle directories (<code>/…/d59</code>)</td>
+</tr>
+<tr>
+<td><code>{Command}</code></td>
+<td>yields the output of the given command, as specified via parameter <code>Program=...</code> (or the <code>{Command:&lt;command&gt;}</code> shorthand), re-run every <code>Interval=...</code> seconds</td>
+</tr>
+<tr>
+<td><code>{Extension}</code></td>
+<td>what the <a href="../../extensions/">status-line extension</a> named by parameter <code>Name=...</code> (or the <code>{Extension:&lt;name&gt;}</code> shorthand) draws</td>
+</tr>
+<tr>
+<td><code>{UserVar}</code></td>
+<td>the value a program last set for the user variable named by parameter <code>Name=...</code> (or the <code>{UserVar:&lt;name&gt;}</code> shorthand) with <code>OSC 1337 ; SetUserVar=&lt;name&gt;=&lt;base64 value&gt;</code>, as iTerm2 and WezTerm do; empty while it is unset. At most 64 variables of at most 4096 bytes each are kept per session, and they survive a terminal reset</td>
+</tr>
+<tr>
+<td><code>{Git}</code></td>
+<td>the branch of the Git repository the shell's directory is in (a ref outside <code>refs/heads/</code> as <code>remotes/origin/x</code>, a detached HEAD as its first 7 hex digits in parentheses, <code>(a1b2c3d)</code>), read from <code>.git/HEAD</code> or a worktree's <code>.git</code> file; empty outside a repository or in a directory on another machine. It is looked up in the background, so it shows a moment after the directory does, and again only after a command ends or the shell reports its directory, never per frame. As git does by default, the search for the repository stops at a filesystem boundary. The directory is walked as the shell reports it: in a symlink to a directory inside a repository, no branch shows. A repository using the reftable ref backend (<code>git init --ref-format=reftable</code>) shows no branch for now.</td>
+</tr>
+<tr>
+<td><code>{HistoryLineCount}</code></td>
+<td>number of lines in history (only available in primary screen)</td>
+</tr>
+<tr>
+<td><code>{Hyperlink}</code></td>
+<td>reveals the hyperlink at the given mouse location</td>
+</tr>
+<tr>
+<td><code>{LastCommand}</code></td>
+<td>how the last command went, from the shell integration's command blocks (OSC 133): <code>✓ make · 4ms</code> after a success, <code>✗ exit 8 ctest · 12s</code> after a failure; the status drawn in the <code>success</code> or <code>danger</code> role and the duration in <code>muted</code>, unless the item names a <code>Color=</code> of its own. Empty while a command runs, and when a newer prompt ended one that reported no exit status. A multi-line command's line breaks and tabs read as spaces. The command text is at most <code>MaxWidth=</code> columns (default <code>32</code>), cut at its end with <code>…</code></td>
+</tr>
+<tr>
+<td><code>{InputMode}</code></td>
+<td>current input mode (e.g. INSERT, NORMAL, VISUAL); see <code>Hide=</code> and <code>Chip</code> below</td>
+</tr>
+<tr>
+<td><code>{ProtectedMode}</code></td>
+<td>indicates protected mode, if currently enabled</td>
+</tr>
+<tr>
+<td><code>{Scroll}</code></td>
+<td>how far the view is scrolled back into the history, out of how far it can be: <code>↑ 1 240 / 10 000</code>, thousands grouped by a space. Empty at the bottom, and while the view cannot scroll (the alternate screen)</td>
+</tr>
+<tr>
+<td><code>{SearchMode}</code></td>
+<td>indicates search highlight mode, if currently active</td>
+</tr>
+<tr>
+<td><code>{SearchPrompt}</code></td>
+<td>the active search pattern, if any (read-only; search is typed into the find bar)</td>
+</tr>
+<tr>
+<td><code>{Selection}</code></td>
+<td>how much the selection holds, as <code>y</code> would copy it: <code>12 lines · 418 chars</code>, thousands grouped by a space (<code>1 240</code>). Empty without a selection. The characters are those a copy yields: each row up to its last non-blank cell, the spaces between words included, a wide character once. They are counted only while the selection spans fewer than 10 000 cells (its rows at the page's width, or at a rectangle's own width); a larger one shows its lines alone, <code>1 240 lines</code></td>
+</tr>
+<tr>
+<td><code>{Tabs}</code></td>
+<td>indicates active tabs</td>
+</tr>
+<tr>
+<td><code>{Text}</code></td>
+<td>given text (makes only sense when customized with flags)</td>
+</tr>
+<tr>
+<td><code>{Title}</code></td>
+<td>current window title</td>
+</tr>
+<tr>
+<td><code>{VTType}</code></td>
+<td>currently active VT emulation type</td>
+</tr>
+</tbody>
+</table>
+<h2 id="formatting-styles">Formatting Styles<a class="headerlink" href="#formatting-styles" title="Permanent link">#</a></h2>
+<p>Each Variable, as specified above, can be parametrized for customizing the look of it.
+The common syntax to these variables and their parameters looks as follows:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>{VariableName:SomeFlag,SomeKey=SomeValue}
+</span></code></pre></div>
+<p>So parameters can be specified after a colon (<code>:</code>) as a comma separated list of flags and key/value pairs.
+A key/value pair is further split by equal sign (<code>=</code>).</p>
+<p>The following list of formatting styles are supported:</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Left=TEXT</code></td>
+<td>text to show on the left side, if the variable is to be shown</td>
+</tr>
+<tr>
+<td><code>Right=TEXT</code></td>
+<td>text to show on the right side, if the variable is to be shown</td>
+</tr>
+<tr>
+<td><code>Color=COLOR</code></td>
+<td>text color: <code>#RRGGBB</code>, or one of the roles <code>accent</code>, <code>success</code>, <code>danger</code>, <code>warning</code>, <code>muted</code></td>
+</tr>
+<tr>
+<td><code>BackgroundColor=COLOR</code></td>
+<td>background color: <code>#RRGGBB</code>, or one of the roles <code>accent</code>, <code>success</code>, <code>danger</code>, <code>warning</code>, <code>muted</code></td>
+</tr>
+<tr>
+<td><code>Bold</code></td>
+<td>text in bold font face</td>
+</tr>
+<tr>
+<td><code>Italic</code></td>
+<td>text in italic font face</td>
+</tr>
+<tr>
+<td><code>Underline</code></td>
+<td>underline text (only one underline style can be active)</td>
+</tr>
+<tr>
+<td><code>CurlyUnderline</code></td>
+<td>curly underline text (only one underline style can be active)</td>
+</tr>
+<tr>
+<td><code>DoubleUnderline</code></td>
+<td>double underline text (only one underline style can be active)</td>
+</tr>
+<tr>
+<td><code>DottedUnderline</code></td>
+<td>dotted underline text (only one underline style can be active)</td>
+</tr>
+<tr>
+<td><code>DashedUnderline</code></td>
+<td>dashed underline text (only one underline style can be active)</td>
+</tr>
+<tr>
+<td><code>Blinking</code></td>
+<td>blinking text</td>
+</tr>
+<tr>
+<td><code>RapidBlinking</code></td>
+<td>rapid blinking text</td>
+</tr>
+<tr>
+<td><code>Overline</code></td>
+<td>overline text</td>
+</tr>
+<tr>
+<td><code>Inverse</code></td>
+<td>inversed text/background coloring</td>
+</tr>
+</tbody>
+</table>
+<p>These parameters apply to all variables above.</p>
+<p><code>{Cwd}</code>, <code>{Context}</code>, <code>{LastCommand}</code> and <code>{UserVar}</code> additionally take this attribute:</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>MaxWidth=N</code></td>
+<td>the widest the item may draw, in columns; beyond it the middle is elided and both ends kept. Default <code>40</code> for <code>{Cwd}</code>, <code>32</code> for <code>{Context}</code> and for <code>{LastCommand}</code>'s command text, which is cut at its end instead, as is <code>{UserVar}</code>'s value (default <code>40</code>); a value that is not a number <code>&gt; 0</code> keeps the default.</td>
+</tr>
+</tbody>
+</table>
+<p>A role names a color by what it means rather than by its value, and takes it from the active color
+scheme when the line is drawn, so it follows a scheme change: <code>accent</code> is palette color 4 (blue),
+<code>success</code> 2 (green), <code>danger</code> 1 (red), <code>warning</code> 3 (yellow) and <code>muted</code> 8 (bright black). The scheme
+is the configured one: a program changing the palette (OSC 4) recolours its own text, not the status
+line. Where a role's color would not read on the bar it is drawn on (at 4.5:1; <code>muted</code>, secondary text, at 3:1), the role's text takes
+the bar's legible ink instead -- the scheme's foreground or background, bright white, then black or
+white -- so it stays readable in every input mode and scheme; a <code>#RRGGBB</code> color is drawn as written. Roles are
+read in any case and written lowercase. A value that is neither a role nor a color leaves the color
+unset. The same values are accepted by the <code>Tabs</code> attributes <code>ActiveColor</code> and <code>ActiveBackground</code>.</p>
+<p>The <code>InputMode</code> variable additionally takes these attributes:</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Hide=&lt;mode&gt;</code></td>
+<td>shows nothing, <code>Left=</code>/<code>Right=</code> included, while the terminal is in that mode: <code>Normal</code>, <code>Insert</code>, <code>Visual</code>, <code>VisualLine</code>, <code>VisualBlock</code> or <code>Hint</code>, read in any case. An unknown mode hides the item in none.</td>
+</tr>
+<tr>
+<td><code>Chip</code></td>
+<td>draws the item, <code>Left=</code> and <code>Right=</code> included, as a chip filled with its mode's colors (<code>indicatorStatusLine*Mode</code> of the color scheme), while the rest of the line keeps the idle (Insert) colors in every mode. The chip's text takes the fill's legible ink where the scheme's own would not read at 4.5:1. Only the focused pane's chip is colored, and an item naming <code>Color=</code> or <code>BackgroundColor=</code> takes those instead. Without <code>Chip</code>, the whole line takes the mode's colors.</td>
+</tr>
+</tbody>
+</table>
+<p>They are written after the other attributes:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>{InputMode:Bold,Left= ,Right= ,Chip,Hide=Insert}
+</span></code></pre></div>
+<p>The <code>Command</code> variable additionally takes these attributes:</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Program</code></td>
+<td>the command to execute (required, unless the shorthand below is used)</td>
+</tr>
+<tr>
+<td><code>Interval</code></td>
+<td>seconds between runs; default <code>10</code>. An invalid value or one <code>&lt;= 0</code> selects the default.</td>
+</tr>
+</tbody>
+</table>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>{Command:Program=git rev-parse --abbrev-ref HEAD,Interval=30,Bold}
+</span></code></pre></div>
+<p><strong>Shorthand.</strong> <code>{Command:&lt;command&gt;}</code> takes everything after <code>Command:</code> verbatim as the command, so it
+may contain commas and <code>=</code>, but no styling and no <code>Interval=</code>: <code>{Command:git log -1 --format=%h,%s}</code>.
+A template naming <code>Program=</code> or <code>Interval=</code> is read in the attribute form instead; anything else
+is the shorthand, so <code>{Command:Bold}</code> runs a program named <code>Bold</code> (a style flag needs <code>Program=</code>). A command cannot contain <code>}</code>.</p>
+<p><strong>Execution.</strong> Commands run asynchronously in the background, so they never slow down rendering
+and, on Windows, never open a console window. The item shows the output of the previous run until a
+new one arrives, and is empty before the first run completes. A command that is still running after
+5 seconds (or after its <code>Interval</code>, if that is shorter) is killed together with its child processes,
+and the previous output is kept.</p>
+<p>Only the first line of the command's standard output is shown. Standard error and the exit status are
+ignored, and a command that cannot be started shows the operating system's error message.</p>
+<p>Unlike <code>popen</code>, background processes a command leaves behind are killed as soon as the command
+finishes, even when it succeeds (the process group on Unix, the job object on Windows): a command like
+<code>start notepad</code> starts nothing that outlives it.</p>
+<h3 id="tabs-formatting-extensions">Tabs formatting extensions<a class="headerlink" href="#tabs-formatting-extensions" title="Permanent link">#</a></h3>
+<p>The <code>Tabs</code> key allows additional styling through the following attributes:</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ActiveColor</code></td>
+<td>color of the active tab</td>
+</tr>
+<tr>
+<td><code>ActiveBackground</code></td>
+<td>background color of the active tab</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="admonition-title"><code>{Tabs}</code> versus the GUI tab bar</p>
+<p>The indicator status line belongs to a <em>pane</em>, so with split panes a window draws one <code>{Tabs}</code>
+list per pane rather than one per window — several tab lists side by side, each describing the
+same tabs.</p>
+<p>If what you want is the terminal look rather than the placement, set the global
+<a href="../#ui_style"><code>ui_style</code></a> to <code>terminal</code>. That keeps the single window-level tab bar and
+every one of its affordances (drag to reorder, tear off, rename, close, context menu) but draws
+it cell-quantized, in the terminal font, with square corners and box-drawing separators.</p>
+<p><code>{Tabs}</code> remains fully supported, and the two can be used together.</p>
+</div>
+<h2 id="host-programmable-status-line">Host-programmable status line<a class="headerlink" href="#host-programmable-status-line" title="Permanent link">#</a></h2>
+<p>The status line in Contour is an implementation of the
+<a href="https://www.vt100.net/docs/vt320-uu/appendixe.html">DEC VT320 status line feature</a>.
+Besides the indicator status line described on this page, a second one can be displayed
+alternatively, which can be written to and fully controlled like the main display.</p>
+<p>There are not many applications yet doing so, but any application that has fast output but a
+rarely updating status line, maybe even tmux or screen, could make use of it to trivialize
+the common use-case.</p>
+<p>If you consider playing around with it, have a look at the VT sequences</p>
+<ul>
+<li><code>DECSASD</code> - Select Active Status Display</li>
+<li><code>DECSSDT</code> - Select Status Display (Line) Type</li>
+</ul>
+<p>The indicator status line itself can be toggled via configuration, e.g.:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">input_mapping</span><span class="p">:</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> mods</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Control</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Alt</span><span class="p p-Indicator">],</span><span class="nt">   key</span><span class="p">:</span><span class="w"> </span><span class="s">'.'</span><span class="p p-Indicator">,</span><span class="nt">           action</span><span class="p">:</span><span class="w"> </span><span class="nv">ToggleStatusLine</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span></code></pre></div></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="configuration" href="#configuration">Configuration</a><a data-head="variables" href="#variables">Variables</a><a data-head="formatting-styles" href="#formatting-styles">Formatting Styles</a><a data-head="host-programmable-status-line" href="#host-programmable-status-line">Host-programmable status line</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/configuration/indicator-statusline.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">configure › <b>status line</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>

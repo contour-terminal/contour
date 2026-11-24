@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>remote hosts - Contour Terminal Emulator</title>
+<meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+<meta name="site-root" content="..">
+<link rel="icon" href="../assets/contour-logo.png">
+<script>
+try {
+  var root = document.documentElement;
+  root.className = root.className.replace("no-js", "js");
+  var theme = localStorage.getItem("contour-site.theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  if (localStorage.getItem("contour-site.maximized") === "1") root.setAttribute("data-max", "");
+  if (localStorage.getItem("contour-site.single-keys") === "0") root.setAttribute("data-nokeys", "");
+} catch (e) {}
+</script>
+<link rel="preload" href="../assets/theme/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../assets/theme/site.css">
+<script type="module" src="../assets/theme/js/main.js"></script>
+</head>
+<body>
+<button id="cw-launcher" class="launcher needs-js" title="Open Contour"><img src="../assets/contour-logo.png" alt=""><span>contour</span></button>
+<div class="window" id="cw-window">
+  <div class="titlebar" id="cw-titlebar">
+    <div class="wc needs-js"><button class="close needs-js" id="cw-wc-close" title="Close" aria-label="Close window"></button><button class="min needs-js" id="cw-wc-min" title="Minimize" aria-label="Minimize window"></button><button class="max needs-js" id="cw-wc-max" title="Maximize" aria-label="Maximize window"></button></div>
+    <div class="title"><img src="../assets/contour-logo.png" alt=""><span id="cw-title">remote hosts</span></div>
+    <div class="wc-spacer"></div>
+  </div>
+  <div class="strip" id="cw-strip">
+  <a class="ws" data-ws="contour" href=".." aria-current="true"><b>1</b>:contour</a>
+  <a class="ws" data-ws="configure" href="../configuration/"><b>2</b>:configure</a>
+  <a class="ws" data-ws="reference" href="../vt-sequence/"><b>3</b>:reference</a>
+  <span class="grow"></span>
+  <button class="tool needs-js" id="cw-search" title="Search"><span>search</span></button>
+  <a class="tool" href="https://github.com/contour-terminal/contour/" target="_blank" rel="noopener"><span>github ↗</span></a>
+</div>
+  <div class="panes">
+    
+<nav class="tabs" id="cw-tabs" aria-label="Pages">
+  <div class="tablist" data-ws="contour">
+<a class="tab" data-group="" href="..">home</a>
+<a class="tab" data-group="" href="../install/">install</a>
+<a class="tab" data-group="" href="../features/">features</a>
+<a class="tab" data-group="" href="../release-notes/">release notes</a>
+<div class="sep">── guides ──────────────</div>
+<a class="tab" data-group="guides" href="../persistent-sessions/">persistent sessions</a>
+<a class="tab" data-group="guides" href="../sidebar/">workspace sidebar</a>
+<a class="tab" data-group="guides" href="./" aria-current="page">remote hosts</a>
+<a class="tab" data-group="guides" href="../control-api/">control api</a>
+<a class="tab" data-group="guides" href="../demo/command-blocks/">command blocks</a>
+<a class="tab" data-group="guides" href="../demo/hint-mode/">hint mode</a>
+<a class="tab" data-group="guides" href="../input-modes/">input modes</a>
+<a class="tab" data-group="guides" href="../demo/drag-and-drop/">drag and drop</a>
+<a class="tab" data-group="guides" href="../extensions/">status-line extensions</a>
+<a class="tab" data-group="guides" href="../quick-terminal/">quick terminal</a>
+<a class="tab" data-group="guides" href="../accessibility/">accessibility</a>
+<a class="tab" data-group="guides" href="../secure-input/">secure input</a>
+  </div>
+  <div class="tablist" data-ws="configure" hidden>
+<a class="tab" data-group="" href="../configuration/">config file</a>
+<a class="tab" data-group="" href="../configuration/profiles/">profiles</a>
+<a class="tab" data-group="" href="../configuration/settings/">settings window</a>
+<a class="tab" data-group="" href="../configuration/colors/">colors</a>
+<a class="tab" data-group="" href="../configuration/key-mapping/">key mapping</a>
+<div class="sep">── more ──────────────</div>
+<a class="tab" data-group="more" href="../configuration/layouts/">layouts</a>
+<a class="tab" data-group="more" href="../configuration/links/">links</a>
+<a class="tab" data-group="more" href="../configuration/hosts/">hosts</a>
+<a class="tab" data-group="more" href="../configuration/indicator-statusline/">status line</a>
+<a class="tab" data-group="more" href="../configuration/paths/">paths</a>
+  </div>
+  <div class="tablist" data-ws="reference" hidden>
+<a class="tab" data-group="" href="../vt-sequence/">vt sequences</a>
+<a class="tab" data-group="" href="../demo/regis-graphics/">regis graphics</a>
+<div class="sep">── extensions ──────────────</div>
+<a class="tab" data-group="extensions" href="../vt-extensions/synchronized-output/">synchronized output</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-133-shell-integration/">shell integration</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/clickable-links/">clickable links</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/buffer-capture/">buffer capture</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/program-status/">program status</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/semantic-block-query/">semantic block query</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-9-4-progress/">progress (osc 9;4)</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/osc-3008-context/">context (osc 3008)</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/vertical-line-marks/">vertical line marks</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/color-palette-update-notifications/">palette notifications</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/font-settings/">font settings</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/kitty-graphics/">kitty graphics placeholders</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/line-reflow-mode/">line reflow mode</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/private-use-glyphs/">private-use glyphs</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/save-and-restore-sgr-attributes/">save and restore sgr</a>
+<a class="tab" data-group="extensions" href="../vt-extensions/unicode-core/">unicode core</a>
+  </div>
+</nav>
+<details class="tabsel" id="cw-tabsel">
+  <summary>remote hosts</summary>
+  <div class="tabsel-list">
+<a href="..">home</a>
+<a href="../install/">install</a>
+<a href="../features/">features</a>
+<a href="../release-notes/">release notes</a>
+<a href="../persistent-sessions/">persistent sessions</a>
+<a href="../sidebar/">workspace sidebar</a>
+<a href="./" aria-current="page">remote hosts</a>
+<a href="../control-api/">control api</a>
+<a href="../demo/command-blocks/">command blocks</a>
+<a href="../demo/hint-mode/">hint mode</a>
+<a href="../input-modes/">input modes</a>
+<a href="../demo/drag-and-drop/">drag and drop</a>
+<a href="../extensions/">status-line extensions</a>
+<a href="../quick-terminal/">quick terminal</a>
+<a href="../accessibility/">accessibility</a>
+<a href="../secure-input/">secure input</a>
+  </div>
+</details>
+    <main class="page" id="cw-page" tabindex="-1" autofocus>
+      <div><h1 id="remote-hosts">Remote hosts<a class="headerlink" href="#remote-hosts" title="Permanent link">#</a></h1>
+<p>A Contour window can show the sessions of a daemon running on <strong>another machine</strong>: your home PC from
+the office, a build server, a workstation under your desk. The sessions keep running there; the window
+here is a client of that daemon, exactly as it is of a local one (see
+<a href="../persistent-sessions/">Persistent sessions</a>).</p>
+<p>There are two ways to reach a remote daemon:</p>
+<table>
+<thead>
+<tr>
+<th>Transport</th>
+<th>What it needs</th>
+<th>Authentication</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>ssh</strong> (<code>ssh://</code>)</td>
+<td>An OpenSSH client here, Contour on the remote machine. Nothing listens on the network besides sshd.</td>
+<td>ssh's own: keys or an agent.</td>
+</tr>
+<tr>
+<td><strong>TLS</strong> (<code>tls://</code>)</td>
+<td>A daemon on the remote machine started with <code>--listen-tcp</code>.</td>
+<td>A token, over TLS.</td>
+</tr>
+</tbody>
+</table>
+<p>If you can already <code>ssh</code> to the machine, use ssh: it needs no open port, no token and no certificate.</p>
+<h2 id="saved-hosts">Saved hosts<a class="headerlink" href="#saved-hosts" title="Permanent link">#</a></h2>
+<p>Hosts you attach to often are saved in the configuration under <code>hosts:</code>, by name
+(<a href="../configuration/hosts/">reference</a>):</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">hosts</span><span class="p">:</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">home</span><span class="p">:</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="s">"ssh://me@homepc"</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">studio</span><span class="p">:</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="s">"tls://studio.tailnet.ts.net:7297"</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="nt">token_file</span><span class="p">:</span><span class="w"> </span><span class="s">"~/.config/contour/studio.token"</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="nt">tls_ca</span><span class="p">:</span><span class="w"> </span><span class="s">"~/.config/contour/studio-ca.pem"</span>
+</span></code></pre></div>
+<p>Hosts can also be added in <strong>Settings › Hosts</strong>, without editing the file: each one is written to
+<code>hosts/&lt;name&gt;.yml</code> beside <code>contour.yml</code>, with the same keys as an entry of <code>hosts:</code>. Its page shows the SSH
+or TLS fields its address calls for, says under a field what would keep the host from loading, and saves
+nothing until it is fixed; <strong>Attach</strong> opens a window attached to it. Hosts written in <code>contour.yml</code> are
+listed there too, read-only, with <strong>Duplicate to Edit</strong>.</p>
+<p>Then attach in any of these ways:</p>
+<ul>
+<li><strong>"Attach to Host"</strong> in the command palette lists the saved hosts; pick one.</li>
+<li>The same list is in the terminal's <strong>context menu</strong> and the <strong>title-bar menu</strong>.</li>
+<li>From a shell:</li>
+</ul>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>contour<span class="w"> </span>client<span class="w"> </span>--host<span class="w"> </span>home<span class="w">                     </span><span class="c1"># a saved host, by name</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>contour<span class="w"> </span>client<span class="w"> </span>--host<span class="w"> </span>ssh://me@homepc:2222<span class="w">     </span><span class="c1"># an ssh URL that is not saved</span>
+</span></code></pre></div>
+<p>An ad-hoc <code>tls://</code> URL works the same way. The first time, a daemon without a CA is pinned
+  <a href="#the-first-contact-pinning-the-daemon">after you trust its fingerprint in a dialog</a>; <code>--daemon-fingerprint SHA256:…</code>
+  settles it beforehand.</p>
+<p>Attaching to a host works like launching Contour against that daemon: the window selects the first
+workspace of the daemon that no window shows, or a new one (see
+<a href="../persistent-sessions/#shown-and-hidden-workspaces">shown and hidden workspaces</a>). Attaching from a second
+machine never mirrors what a window shows already.
+To look at one particular workspace, name it:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>contour<span class="w"> </span>client<span class="w"> </span>--host<span class="w"> </span>home<span class="w"> </span>--workspace<span class="w"> </span>018f3c2a<span class="w">   </span><span class="c1"># only that workspace of home</span>
+</span></code></pre></div>
+<p>Naming a workspace asks the daemon for its list first. If the daemon is met for the first time, the dialog that
+asks whether to trust its fingerprint appears once the window is up, and the list is asked once you have
+answered; declining ends the launch.</p>
+<p>A window can also move to another host, or back to a local daemon, without closing: see
+<a href="../persistent-sessions/#switching-a-window">Switching a window</a>.</p>
+<p>A window attached to a remote host says so in its chrome, so it is never mistaken for a local one: its
+title reads <code>home — &lt;session title&gt;</code>, and the tab strip starts with the host's name.</p>
+<h2 id="choosing-where-a-window-lives-the-connect-picker">Choosing where a window lives: the Connect picker<a class="headerlink" href="#choosing-where-a-window-lives-the-connect-picker" title="Permanent link">#</a></h2>
+<p>The <strong>Connect picker</strong> is one question before a window opens: where do its sessions live? It lists</p>
+<ul>
+<li><strong>This computer</strong>: <em>Persistent sessions</em>, the local daemon, with its state (<code>running · 3 sessions</code>, or
+  <code>not running · starts on connect</code>), and <em>This window only</em>, with no daemon: its shells end when the window
+  closes (<code>daemon.mode: in_process</code>);</li>
+<li><strong>Saved hosts</strong>: each host of <a href="../configuration/hosts/"><code>hosts:</code></a>, tagged SSH or TLS;</li>
+<li>and, while you type an <code>ssh://</code> or <code>tls://</code> address in the field, a leading <strong>Connect to ADDRESS</strong> row for
+  it. The address is not saved.</li>
+</ul>
+<p>Open it from <strong>File › New Window to…</strong> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd>, <kbd>⇧⌘K</kbd> on
+macOS; the <code>NewWindowTo</code> action), from <code>contour connect</code> with no target, from the launchers below, or at
+every plain start, with <strong>Ask every time Contour starts</strong> (<code>connect_picker_on_start</code>, also in Settings ›
+General). A launch with command-line arguments never shows it.</p>
+<p>The field has the focus. Type to filter by name or address; <kbd>↑</kbd> and <kbd>↓</kbd> move, <kbd>Return</kbd>
+connects and <kbd>Esc</kbd> cancels, which quits when no other window is open. Every row shows a key,
+<kbd>Alt</kbd>+<kbd>1</kbd> to <kbd>9</kbd> (<kbd>⌘1</kbd> to <kbd>⌘9</kbd> on macOS), that connects to it at
+once; plain digits stay typable, for addresses and ports. Filtering renumbers the rows, so <code>star</code> then
+<kbd>Alt</kbd>+<kbd>1</kbd> reaches a host named <code>starfive</code>. <kbd>Ctrl</kbd>+<kbd>L</kbd> (<kbd>⌘L</kbd>)
+puts the caret back in the field. The selection starts on the target you used last, which Contour remembers
+in <code>gui-state.yml</code>, not in <code>contour.yml</code>.</p>
+<p>A host that cannot be reached stays in the picker: the reason is shown under its row, in the words Attach to
+Host uses (an unknown host key, an authentication failure, Contour missing on the host, an unreachable
+host), with <strong>Retry</strong> and <strong>Edit Host…</strong>, which opens Settings › Hosts on it. <strong>Manage Hosts…</strong> opens
+Settings › Hosts.</p>
+<h3 id="contour-connect"><code>contour connect</code><a class="headerlink" href="#contour-connect" title="Permanent link">#</a></h3>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>contour<span class="w"> </span>connect<span class="w">                     </span><span class="c1"># the picker</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>contour<span class="w"> </span>connect<span class="w"> </span>daemon<span class="w">              </span><span class="c1"># this computer's daemon; daemon:NAME for another one</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>contour<span class="w"> </span>connect<span class="w"> </span><span class="nb">local</span><span class="w">               </span><span class="c1"># this window only, no daemon</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>contour<span class="w"> </span>connect<span class="w"> </span>starfive<span class="w">            </span><span class="c1"># a saved host, by name</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>contour<span class="w"> </span>connect<span class="w"> </span>ssh://me@pi4.lan<span class="w">    </span><span class="c1"># an ssh:// or tls:// address</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>contour<span class="w"> </span>connect<span class="w"> </span>--list<span class="w"> </span><span class="o">[</span>--json<span class="o">]</span><span class="w">     </span><span class="c1"># the targets the picker would show</span>
+</span></code></pre></div>
+<p>A target opens the window as <code>contour client</code> does (<code>--daemon</code>, <code>--host</code>), or <code>contour terminal --daemon-mode
+in_process</code> for <code>local</code>; no target shows the picker. <code>--config FILE</code> names the configuration that holds the
+hosts. <code>--list</code> prints each target, as <code>contour connect</code> reads it, with its detail, or a JSON array with
+<code>--json</code>. An ad-hoc <code>tls://</code> address is refused, as for <code>contour client --host</code>: a TLS host needs its token
+file, so save it first.</p>
+<h3 id="from-the-launchers">From the launchers<a class="headerlink" href="#from-the-launchers" title="Permanent link">#</a></h3>
+<ul>
+<li><strong>Linux</strong>: the desktop entry has a <strong>Connect…</strong> action (<code>contour connect</code>) beside <em>Open a New Window</em>, and
+  <code>org.contourterminal.Contour.Connect.desktop</code> is a launcher of its own, "Contour — Connect…", for menus that
+  show no actions.</li>
+<li><strong>macOS</strong>: the Dock menu has <strong>New Window to…</strong> and each saved host.</li>
+<li><strong>Windows</strong>: the jump list has the task <strong>Connect…</strong> and one per saved host, and the installer adds a
+  <strong>Contour (Connect…)</strong> Start menu shortcut.</li>
+</ul>
+<h2 id="over-ssh">Over SSH<a class="headerlink" href="#over-ssh" title="Permanent link">#</a></h2>
+<p>Contour runs, for every attach and every reconnect:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>ssh<span class="w"> </span>-T<span class="w"> </span>-o<span class="w"> </span><span class="nv">ConnectTimeout</span><span class="o">=</span><span class="m">10</span><span class="w"> </span>-o<span class="w"> </span><span class="nv">ServerAliveInterval</span><span class="o">=</span><span class="m">15</span><span class="w"> </span>-o<span class="w"> </span><span class="nv">ServerAliveCountMax</span><span class="o">=</span><span class="m">3</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">    </span><span class="o">[</span>-p<span class="w"> </span>PORT<span class="o">]</span><span class="w"> </span>--<span class="w"> </span><span class="o">[</span>USER@<span class="o">]</span>HOST<span class="w"> </span>contour<span class="w"> </span>daemon<span class="w"> </span>--stdio
+</span></code></pre></div>
+<p>with <code>SSH_ASKPASS</code> set to Contour itself, so that anything ssh needs to ask you is asked in a dialog of the
+window you attach from.</p>
+<p>On the remote side, <code>contour daemon --stdio</code> reaches your daemon there — starting it if none runs, the
+same way a local <code>contour client</code> does — and relays the session between it and ssh.</p>
+<h3 id="requirements">Requirements<a class="headerlink" href="#requirements" title="Permanent link">#</a></h3>
+<ul>
+<li><strong>An OpenSSH client</strong> on this machine (<code>ssh</code> on <code>PATH</code>). On Windows, the built-in OpenSSH client
+  ("OpenSSH Client" optional feature) works.</li>
+<li><strong>Contour on the remote machine</strong>, findable by a <em>non-interactive</em> login — which often has a shorter
+  <code>PATH</code> than your interactive shell. Check with:</li>
+</ul>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>ssh<span class="w"> </span>me@homepc<span class="w"> </span>contour<span class="w"> </span>version
+</span></code></pre></div>
+<p>If that says <code>command not found</code>, give the full path in the saved host:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">hosts</span><span class="p">:</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">home</span><span class="p">:</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="s">"ssh://me@homepc"</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="nt">remote_command</span><span class="p">:</span><span class="w"> </span><span class="s">"/opt/contour/bin/contour</span><span class="nv"> </span><span class="s">daemon</span><span class="nv"> </span><span class="s">--stdio"</span>
+</span></code></pre></div>
+<ul>
+<li><strong>OpenSSH 8.4 or newer</strong>, which is what lets ssh hand its questions to Contour. Every login method
+  OpenSSH has then works: a key or the agent, a password, a key's passphrase, a second factor
+  (keyboard-interactive), a security key's touch, and the first-time host-key question. Each one appears as
+  a dialog in the window that started the attach (the first attach of <code>contour client --host</code>, which runs
+  before its window opens, asks in a small window of its own); a password or passphrase is typed into a masked field,
+  and a host key's fingerprint is shown exactly as ssh words it, with No as the default answer. Nothing you
+  type is stored by Contour. Cancelling a dialog ends the attempt as "Cancelled".
+  Windows 10's built-in OpenSSH is older than that (8.1): install the current
+  <a href="https://github.com/PowerShell/Win32-OpenSSH/releases">Win32-OpenSSH</a> release, or keep to a key without a
+  passphrase, which also works there.</li>
+</ul>
+<p>Your <code>~/.ssh/config</code> applies as usual: host aliases, <code>User</code>, <code>Port</code>, <code>ProxyJump</code> and <code>IdentityFile</code> all
+work, so <code>url: "ssh://homepc"</code> can rely on what that file says about <code>homepc</code>.</p>
+<h3 id="when-it-does-not-connect">When it does not connect<a class="headerlink" href="#when-it-does-not-connect" title="Permanent link">#</a></h3>
+<p>Contour reads what ssh reports and says what to do. The messages, and the fix for each:</p>
+<table>
+<thead>
+<tr>
+<th>Message (abridged)</th>
+<th>Cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>The host key of ssh://me@homepc was not accepted: …</code></td>
+<td>You answered No to the host-key question, or dismissed it.</td>
+<td>Attach again, compare the fingerprint with the one the machine's owner gives you, and answer Yes only if it matches.</td>
+</tr>
+<tr>
+<td><code>ssh could not log in to ssh://me@homepc: …</code></td>
+<td>The login was refused: a wrong password, or no key, passphrase or second factor ssh accepted. ssh's own words follow.</td>
+<td>Attach again and answer the dialog; for a key login, check <code>ssh-add -l</code> and that the key is in the remote <code>authorized_keys</code>.</td>
+</tr>
+<tr>
+<td><code>The ssh login to ssh://me@homepc was cancelled.</code></td>
+<td>You dismissed a dialog of the login: the password, a question, a security key's notice.</td>
+<td>Attach again and answer it.</td>
+</tr>
+<tr>
+<td><code>ssh could not log in to ssh://me@homepc without a prompt … Contour can only ask for passwords with OpenSSH 8.4 or newer (found …)</code></td>
+<td>The ssh on this machine is older than 8.4, so Contour cannot answer its prompts and ssh runs in batch mode: only a key or the agent can log in.</td>
+<td>Upgrade OpenSSH (on Windows, install the current Win32-OpenSSH release), or load a key into the agent (<code>ssh-add</code>).</td>
+</tr>
+<tr>
+<td><code>The host key of ssh://me@homepc has changed …</code></td>
+<td>The remote machine's key differs from the one in <code>~/.ssh/known_hosts</code>: a reinstalled machine, or someone in between.</td>
+<td>If you expected it, remove the old key with <code>ssh-keygen -R homepc</code>, attach again, and answer the host-key question. If you did not, do not connect.</td>
+</tr>
+<tr>
+<td><code>ssh could not reach ssh://me@homepc: …</code></td>
+<td>The name does not resolve, nothing answers on the port, or there is no route. ssh's own words follow.</td>
+<td>Check the name, the port and the network (VPN, Tailscale). Contour retries this on its own while a window waits.</td>
+</tr>
+<tr>
+<td><code>Contour was not found on ssh://me@homepc by a non-interactive ssh login …</code></td>
+<td><code>contour</code> is not installed there, or not on the non-interactive <code>PATH</code>.</td>
+<td>Install it, or set <code>remote_command:</code> to its full path (see above).</td>
+</tr>
+<tr>
+<td><code>Contour on ssh://me@homepc is too old for ssh attach …</code></td>
+<td>The remote Contour has no <code>contour daemon --stdio</code>.</td>
+<td>Upgrade Contour on the remote machine.</td>
+</tr>
+<tr>
+<td><code>ssh://me@homepc: daemon did not start within 5 seconds.</code> (or another reason)</td>
+<td>The remote relay ran, but could not reach or start the daemon there.</td>
+<td>Run <code>ssh me@homepc contour daemon --stdio</code> in a terminal and read what it says; check the daemon's log on that machine.</td>
+</tr>
+<tr>
+<td><code>ssh://me@homepc printed more than 64 KiB before Contour answered …</code></td>
+<td>A login script on the remote machine prints output on non-interactive logins.</td>
+<td>Make <code>.bashrc</code> / profile scripts quiet when not interactive (e.g. wrap output in <code>[[ $- == *i* ]] &amp;&amp; …</code>). A short banner is skipped; only a long one fails.</td>
+</tr>
+<tr>
+<td><code>ssh to ssh://me@homepc ended before Contour answered (exit code N): …</code></td>
+<td>ssh ended for a reason Contour does not recognize.</td>
+<td>Run <code>ssh me@homepc contour daemon --stdio</code> in a terminal to see the whole output. Contour retries this one too.</td>
+</tr>
+<tr>
+<td><code>ssh://me@homepc did not answer within 30 seconds</code></td>
+<td>The connection hangs (a firewall that drops packets, a stuck login).</td>
+<td>As for "could not reach".</td>
+</tr>
+<tr>
+<td><code>ssh was not found on PATH; install the OpenSSH client</code></td>
+<td>No ssh client on this machine.</td>
+<td>Install OpenSSH.</td>
+</tr>
+</tbody>
+</table>
+<p>A connection that drops mid-session — the laptop sleeps, the Wi-Fi changes — is reconnected with a
+fresh ssh, while the window shows that it is reconnecting. A reconnect always goes on, in the background: a host that logs in with a key or the agent
+needs nobody. If the login asks you something again (a password that is not in the agent) and the window
+that attached is not on screen -- minimised or hidden -- the question waits instead of being put to a
+window nobody sees, and the window says "Reconnecting needs your attention"; it is shown once the window
+is. Contour never raises or focuses a window by itself for this. A failure that retrying cannot fix (a refused
+login, a host key, a missing Contour) ends the attempt with its message instead of repeating it.</p>
+<h2 id="over-tls">Over TLS<a class="headerlink" href="#over-tls" title="Permanent link">#</a></h2>
+<p>The daemon on the remote machine listens on a TCP port itself. Every connection is TLS 1.3-encrypted with
+the daemon's own identity, a key and certificate it makes on first start and keeps, and clients sign in with
+an SSH key you authorize, as for ssh itself, or with a token.</p>
+<h3 id="keys-authorized_keys">Keys: <code>authorized_keys</code><a class="headerlink" href="#keys-authorized_keys" title="Permanent link">#</a></h3>
+<p>On the remote machine, list the public keys that may log in in <code>authorized_keys</code> in Contour's
+configuration directory, in OpenSSH's format (<code>ssh-ed25519</code>, <code>ecdsa-sha2-nistp256</code> and their <code>sk-</code>
+variants; <code>grants="LIST"</code> is the only option read, and narrows what the key may do, as an
+<a href="../persistent-sessions/#narrower-tokens-for-scripts">access file</a> does for a token), and start the daemon
+for keys alone. A line with any other option (<code>from=</code>, <code>no-pty</code>, <code>command=</code>, ...) is <strong>skipped whole</strong>, with
+its number and the reason in the daemon's log, so lines copied from <code>~/.ssh/authorized_keys</code> may need their
+options removed to work here:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>cat<span class="w"> </span>~/.ssh/id_ed25519.pub<span class="w"> </span>&gt;&gt;<span class="w"> </span>~/.config/contour/authorized_keys
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>contour<span class="w"> </span>daemon<span class="w"> </span>--background<span class="w"> </span>--listen-tcp<span class="w"> </span><span class="m">192</span>.0.2.10:7297<span class="w"> </span>--auth<span class="w"> </span>keys
+</span></code></pre></div>
+<p><code>--auth keys</code> takes no token and refuses <code>--token</code>, <code>--token-file</code> and <code>--access-file</code>; the default,
+<code>--auth any</code>, accepts a token as well. <code>--authorized-keys FILE</code> names another file.</p>
+<p>On the machine you sit at, save the host with nothing but its address:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">hosts</span><span class="p">:</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">studio</span><span class="p">:</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="s">"tls://studio.example.net:7297"</span>
+</span></code></pre></div>
+<p>The client signs the daemon's challenge with a key of your SSH agent, bound to this very TLS connection so
+that nobody in between can pass it on. To use one key file instead, name it:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">hosts</span><span class="p">:</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="nt">studio</span><span class="p">:</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="s">"tls://studio.example.net:7297"</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="nt">identity_file</span><span class="p">:</span><span class="w"> </span><span class="s">"~/.ssh/id_ed25519_studio"</span>
+</span></code></pre></div>
+<p>A key with a passphrase that is <strong>not</strong> in the agent is asked for when it is used, in a dialog of the window.
+Contour itself waits for your answer as long as the dialog is open, but the daemon gives a connection 20
+seconds from when it connects to sign in: answer within that, or the daemon closes the connection and the
+passphrase is asked for again on a new one. Better, load the key into the agent first with <code>ssh-add</code>, which is
+what to recommend for any key that has a passphrase. The <code>contour</code>
+control commands cannot ask for a passphrase at all: load such a key with <code>ssh-add</code>.</p>
+<h3 id="the-first-contact-pinning-the-daemon">The first contact: pinning the daemon<a class="headerlink" href="#the-first-contact-pinning-the-daemon" title="Permanent link">#</a></h3>
+<p>Without a CA to check its certificate against, a daemon is trusted on first use, as ssh trusts a new host. The
+first time Contour meets a daemon it shows the daemon's address and its fingerprint, <code>SHA256:</code> and a
+base64 text, and asks whether to trust it. In a window that is a dialog, whose Cancel is the default, with the fingerprint selectable. For the <code>contour</code>
+control commands it is a question on the terminal, <code>Trust this daemon? [y/N]</code>, asked only when both standard
+input and standard error are a terminal (a console, on Windows); anything but <code>y</code> or <code>yes</code> declines. <code>contour client --workspace</code> asks in the dialog,
+once its window is up. Compare the fingerprint with what
+<code>contour daemon status</code> prints on that machine, which is also in its log, and trust it only when they are
+the same. The fingerprint is then kept in <code>known_daemons</code>, in Contour's configuration directory
+(<code>~/.config/contour</code>, <code>%LOCALAPPDATA%\contour</code> on Windows) beside <code>contour.yml</code>, one line per <code>HOST:PORT</code>
+(an IPv6 address in brackets, <code>[::1]:7297</code>). A <code>known_daemons</code> that cannot be read refuses every daemon
+until it is repaired or removed: a pin that cannot be checked is never taken for no pin.</p>
+<p>Where nobody can be asked (a script, or a command whose input is not a terminal), pass the fingerprint
+beforehand: <code>--daemon-fingerprint SHA256:...</code> pins it on first contact and refuses a daemon that presents any
+other.</p>
+<p>A daemon that presents another certificate than the pinned one is <strong>refused</strong>, with both fingerprints, and
+never asked about: that is a reinstalled daemon, or someone in between, and only you can tell which. After a
+reinstallation, forget the old pin and meet the daemon again:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>contour<span class="w"> </span>daemon<span class="w"> </span>forget-pin<span class="w"> </span>studio.example.net:7297
+</span></code></pre></div>
+<h3 id="a-certificate-of-your-own-tls_ca">A certificate of your own: <code>tls_ca</code><a class="headerlink" href="#a-certificate-of-your-own-tls_ca" title="Permanent link">#</a></h3>
+<p>Pinning needs no certificate authority. To have the client verify the daemon the way a browser does instead,
+give the daemon a certificate issued by a CA of your own, for the name you connect to, and name that CA on
+the client:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Once, anywhere: a CA of your own.</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>openssl<span class="w"> </span>req<span class="w"> </span>-x509<span class="w"> </span>-newkey<span class="w"> </span>ec<span class="w"> </span>-pkeyopt<span class="w"> </span>ec_paramgen_curve:P-256<span class="w"> </span>-nodes<span class="w"> </span>-days<span class="w"> </span><span class="m">3650</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">    </span>-subj<span class="w"> </span><span class="s2">"/CN=My Contour CA"</span><span class="w"> </span>-keyout<span class="w"> </span>ca.key<span class="w"> </span>-out<span class="w"> </span>ca.pem
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="c1"># For the remote machine: a certificate for the name the client connects to.</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>openssl<span class="w"> </span>req<span class="w"> </span>-newkey<span class="w"> </span>ec<span class="w"> </span>-pkeyopt<span class="w"> </span>ec_paramgen_curve:P-256<span class="w"> </span>-nodes<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="w">    </span>-subj<span class="w"> </span><span class="s2">"/CN=studio.example.net"</span><span class="w"> </span>-keyout<span class="w"> </span>daemon.key<span class="w"> </span>-out<span class="w"> </span>daemon.csr
+</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'subjectAltName=DNS:studio.example.net\n'</span><span class="w"> </span>&gt;<span class="w"> </span>daemon.ext
+</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>openssl<span class="w"> </span>x509<span class="w"> </span>-req<span class="w"> </span>-in<span class="w"> </span>daemon.csr<span class="w"> </span>-CA<span class="w"> </span>ca.pem<span class="w"> </span>-CAkey<span class="w"> </span>ca.key<span class="w"> </span>-CAcreateserial<span class="w"> </span>-days<span class="w"> </span><span class="m">825</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="w">    </span>-extfile<span class="w"> </span>daemon.ext<span class="w"> </span>-out<span class="w"> </span>daemon.pem
+</span></code></pre></div>
+<p>Start the daemon with <code>--tls-cert daemon.pem --tls-key daemon.key</code>, copy <code>ca.pem</code> (never <code>ca.key</code>) to
+the client, and add <code>tls_ca: "~/.config/contour/studio-ca.pem"</code> to the saved host. The certificate must
+name the host in the <code>url</code>: one merely signed by the CA, for another name, is refused.</p>
+<p>A daemon verified by <code>tls_ca</code> is never asked about, and the control commands accept it like any other.</p>
+<h3 id="a-token">A token<a class="headerlink" href="#a-token" title="Permanent link">#</a></h3>
+<p>A host with <code>token_file</code> signs in with a token instead of a key, and a daemon started with <code>--token-file</code>
+accepts one:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nb">umask</span><span class="w"> </span><span class="m">077</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>openssl<span class="w"> </span>rand<span class="w"> </span>-base64<span class="w"> </span><span class="m">32</span><span class="w"> </span>&gt;<span class="w"> </span>~/.config/contour/daemon.token
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>contour<span class="w"> </span>daemon<span class="w"> </span>--background<span class="w"> </span>--listen-tcp<span class="w"> </span><span class="m">192</span>.0.2.10:7297<span class="w"> </span>--token-file<span class="w"> </span>~/.config/contour/daemon.token
+</span></code></pre></div>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nt">hosts</span><span class="p">:</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="nt">studio</span><span class="p">:</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="s">"tls://studio.example.net:7297"</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">    </span><span class="nt">token_file</span><span class="p">:</span><span class="w"> </span><span class="s">"~/.config/contour/studio.token"</span>
+</span></code></pre></div>
+<p>Copy the token file to the machine you sit at (for example with <code>scp</code>), keeping it private (<code>chmod 600</code>).
+The daemon is pinned on first use here as well, and the token is sent only to a daemon that was trusted.</p>
+<h2 id="reaching-a-home-pc-from-the-office-with-tailscale">Reaching a home PC from the office with Tailscale<a class="headerlink" href="#reaching-a-home-pc-from-the-office-with-tailscale" title="Permanent link">#</a></h2>
+<p><a href="https://tailscale.com">Tailscale</a> puts your machines on a private network (a <em>tailnet</em>) wherever they
+are, without opening ports on your router. Contour does not bundle Tailscale or talk to it; it simply
+connects to an address on the tailnet like any other.</p>
+<ol>
+<li><strong>Install Tailscale on both machines</strong> from <a href="https://tailscale.com/download">https://tailscale.com/download</a> and log in to the same
+   tailnet on each.</li>
+<li><strong>Find the home PC's tailnet address</strong> — on the home PC:</li>
+</ol>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>tailscale<span class="w"> </span>ip<span class="w"> </span>-4<span class="w">          </span><span class="c1"># e.g. 100.101.102.103</span>
+</span></code></pre></div>
+<p>With MagicDNS on (the default), the machine is also reachable as
+   <code>&lt;machine&gt;.&lt;tailnet&gt;.ts.net</code>, e.g. <code>homepc.tail1234.ts.net</code>; the admin console shows the exact name.</p>
+<ol>
+<li><strong>The simplest way is ssh over the tailnet.</strong> If the home PC runs sshd, nothing else is needed:</li>
+</ol>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nt">hosts</span><span class="p">:</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w">  </span><span class="nt">home</span><span class="p">:</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="s">"ssh://me@homepc.tail1234.ts.net"</span>
+</span></code></pre></div>
+<ol>
+<li><strong>Or listen with TLS on the tailnet address only</strong> — on the home PC:</li>
+</ol>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="nb">umask</span><span class="w"> </span><span class="m">077</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>openssl<span class="w"> </span>rand<span class="w"> </span>-base64<span class="w"> </span><span class="m">32</span><span class="w"> </span>&gt;<span class="w"> </span>~/.config/contour/daemon.token
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>contour<span class="w"> </span>daemon<span class="w"> </span>--background<span class="w"> </span>--listen-tcp<span class="w"> </span><span class="m">100</span>.101.102.103:7297<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">    </span>--token-file<span class="w"> </span>~/.config/contour/daemon.token
+</span></code></pre></div>
+<p>Binding to the <code>100.x.y.z</code> address, not to <code>0.0.0.0</code>, keeps the port off every other network the PC
+   is on. <code>contour daemon-service install</code> does not record <code>--listen-tcp</code>, so start this listener
+   yourself (or from your login scripts). Then, at the office, with the token file copied over:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="nt">hosts</span><span class="p">:</span>
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">  </span><span class="nt">home</span><span class="p">:</span>
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="s">"tls://homepc.tail1234.ts.net:7297"</span>
+</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="w">    </span><span class="nt">token_file</span><span class="p">:</span><span class="w"> </span><span class="s">"~/.config/contour/home.token"</span>
+</span></code></pre></div>
+<p>Tailscale already encrypts and authenticates the traffic between your machines, which is what makes
+   unverified TLS a reasonable choice here. For the control commands, or for defense in depth, add
+   <code>tls_ca</code> as <a href="#a-certificate-of-your-own-tls_ca">above</a>, with the certificate issued for
+   <code>homepc.tail1234.ts.net</code>.</p>
+<ol>
+<li><strong>Attach</strong>: "Attach to Host" → <code>home</code>, or <code>contour client --host home</code>.</li>
+</ol>
+<h2 id="foreign-paths">Foreign paths<a class="headerlink" href="#foreign-paths" title="Permanent link">#</a></h2>
+<p>The sessions of a remote host run on that machine, so the directories and files they report — the
+current directory a shell announces (OSC 7), a command block's working directory, a link to a file —
+are <strong>that machine's</strong> paths. A window attached to a remote host shows them, but never opens them here:
+it does not open such a file, start a program in such a directory, or offer "open folder" for it, since
+on this machine the path names nothing, or something else.</p></div>
+    </main>
+    <aside class="aside" id="cw-aside" aria-label="On this page">
+  <div class="blk"><div class="sep">── on this page ──────────────</div><a data-head="saved-hosts" href="#saved-hosts">Saved hosts</a><a data-head="choosing-where-a-window-lives-the-connect-picker" href="#choosing-where-a-window-lives-the-connect-picker">Choosing where a window lives: the Connect picker</a><a data-head="over-ssh" href="#over-ssh">Over SSH</a><a data-head="over-tls" href="#over-tls">Over TLS</a><a data-head="reaching-a-home-pc-from-the-office-with-tailscale" href="#reaching-a-home-pc-from-the-office-with-tailscale">Reaching a home PC from the office with Tailscale</a><a data-head="foreign-paths" href="#foreign-paths">Foreign paths</a>
+  </div>
+  <div class="blk"><div class="sep">── source ──────────────</div><a href="https://github.com/contour-terminal/contour/edit/master/docs/remote-hosts.md" target="_blank" rel="noopener">edit on github ↗</a>
+  </div>
+</aside>
+  </div>
+  <div class="status" id="cw-status">
+  <span class="mode" id="cw-mode">NORMAL</span>
+  <span class="loc" id="cw-loc">contour › <b>remote hosts</b></span>
+  <span class="flash" id="cw-flash" role="status"></span>
+  <span class="grow"></span>
+  <span class="needs-js" id="cw-hints"></span>
+  <button class="needs-js" id="cw-outline-toggle" title="Show the page outline">≡ outline</button>
+  <button class="needs-js" id="cw-theme" title="Toggle light/dark">◐ theme</button>
+  <span id="cw-clock"></span>
+</div>
+  <div class="overlay needs-js" id="cw-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="in"><span>:</span><input id="cw-palette-input" placeholder="go to a page, a heading, or run an action" autocomplete="off" spellcheck="false" aria-label="Command palette" role="combobox" aria-expanded="false" aria-controls="cw-palette-list" aria-autocomplete="list"></div>
+    <div class="list" id="cw-palette-list" role="listbox" aria-label="Results"></div>
+    <div class="none" id="cw-palette-notice" role="status"></div>
+  </div>
+</div>
+<div class="overlay needs-js" id="cw-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="help">
+    <h3>── keys ──</h3>
+    <div id="cw-help-list"></div>
+  </div>
+</div>
+</div>
+</body>
+</html>
