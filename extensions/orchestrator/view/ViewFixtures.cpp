@@ -80,7 +80,13 @@ namespace
     [[nodiscard]] ProcessOutcome answerFor(World const& world, RunCommand const& command)
     {
         if (command.command == "agent-setup-check")
-            return ok(readFixture(FixtureRoot::Testdata, world.hooks));
+        {
+            auto const set = std::ranges::find(command.arguments, EnvSetArgument, &Argument::name);
+            auto const own =
+                set != command.arguments.end() ? world.hooksBySet.find(set->value) : world.hooksBySet.end();
+            return ok(readFixture(FixtureRoot::Testdata,
+                                  own != world.hooksBySet.end() ? own->second : world.hooks));
+        }
         if (command.command == "claude-plugins")
             return ok(readFixture(FixtureRoot::Testdata, world.plugins));
         if (command.command == "git-worktree-list")

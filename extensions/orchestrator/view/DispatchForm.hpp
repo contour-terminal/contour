@@ -35,10 +35,10 @@ struct DispatchAction
 /// The form's field that ←/→ and typed text go to.
 enum class FormField : uint8_t
 {
-    Task = 0, ///< ←/→ cycle the tasks that apply to the item.
-    Model,    ///< ←/→ cycle the configured models.
-    Note,     ///< An item's note: a text field.
-    Repo,     ///< A topic form's: ←/→ cycle the configured repositories.
+    Task = 0,    ///< ←/→ cycle the tasks that apply to the item.
+    Model,       ///< ←/→ cycle the configured models.
+    Note,        ///< An item's note: a text field.
+    Repo,        ///< A topic form's: ←/→ cycle the configured repositories.
     Permissions, ///< ←/→ cycle the permission profiles.
 };
 
@@ -53,12 +53,12 @@ enum class HooksWarning : uint8_t
 /// An open dispatch form: what it dispatches, and where the user is in it.
 struct DispatchFormState
 {
-    std::string repo = {};    ///< The repository's configured name.
-    ItemRef item = {};        ///< The item.
-    std::string url = {};     ///< The item's web page, as last listed.
-    std::string title = {};   ///< The item's title, as last listed, sanitised.
-    std::size_t task = 0;     ///< The task: an index into Config::tasks(), one that applies to the item.
-    std::size_t model = 0;    ///< The model: an index into Config::models().
+    std::string repo = {};       ///< The repository's configured name.
+    ItemRef item = {};           ///< The item.
+    std::string url = {};        ///< The item's web page, as last listed.
+    std::string title = {};      ///< The item's title, as last listed, sanitised.
+    std::size_t task = 0;        ///< The task: an index into Config::tasks(), one that applies to the item.
+    std::size_t model = 0;       ///< The model: an index into Config::models().
     std::size_t permissions = 0; ///< The permission profile: an index into Config::profiles().
     std::string note = {};       ///< An item's note, added to its prompt; empty: none.
     std::string topic = {};      ///< A topic's text; empty for an item.
@@ -80,11 +80,16 @@ inline constexpr std::string_view HooksMissingWarning =
 ///         arguments (the board's instruction, the settings) left as their placeholders.
 [[nodiscard]] std::optional<std::vector<std::string>> commandShown(Run const& run);
 
+/// @param form An open form.
 /// @param engine The engine.
-/// @return Whether the agents' setup lacks something a run needs: the status hooks, or a plugin. A dispatch
-/// then
-///         asks for a second Enter.
-[[nodiscard]] bool isSetupIncomplete(Engine const& engine) noexcept;
+/// @return The worker the form's task runs on; nullptr while the engine has no configuration.
+[[nodiscard]] WorkerDef const* workerOf(DispatchFormState const& form, Engine const& engine) noexcept;
+
+/// @param engine The engine.
+/// @param worker The worker a dispatch runs on.
+/// @return Whether @p worker's setup lacks something a run needs: the status hooks of its set, or a plugin.
+///         A dispatch then asks for a second Enter. An agent that reads no Claude Code state lacks nothing.
+[[nodiscard]] bool isSetupIncomplete(Engine const& engine, WorkerDef const& worker) noexcept;
 
 /// @param text Text that names a previewed run's id, such as its worktree.
 /// @param run The previewed run.
@@ -96,8 +101,10 @@ inline constexpr std::string_view HooksMissingWarning =
 [[nodiscard]] std::string checkoutText(Run const& run);
 
 /// @param engine The engine.
-/// @return What the agents' setup lacks, one line each: the status hooks, and each missing plugin.
-[[nodiscard]] std::vector<std::string> setupWarnings(Engine const& engine);
+/// @param worker The worker a dispatch runs on.
+/// @return What @p worker's setup lacks, one line each: its set's status hooks, and each plugin its set
+///         lacks; none for an agent that reads no Claude Code state.
+[[nodiscard]] std::vector<std::string> setupWarnings(Engine const& engine, WorkerDef const& worker);
 
 /// Opens a form on an item the engine lists.
 /// @param engine The engine: its configuration, its lists and whether the hooks are installed.

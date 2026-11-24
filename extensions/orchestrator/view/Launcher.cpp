@@ -9,6 +9,7 @@
 #include <array>
 #include <expected>
 #include <format>
+#include <iterator>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -18,6 +19,7 @@
 #include <variant>
 #include <vector>
 
+#include <orchestrator/core/Agents.hpp>
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Permissions.hpp>
 #include <orchestrator/core/Utf8.hpp>
@@ -135,11 +137,35 @@ namespace
     constexpr auto TopicSettings =
         std::array { FormField::Repo, FormField::Task, FormField::Model, FormField::Permissions };
 
-    [[nodiscard]] std::span<FormField const> settingsOf(DispatchFormState const& form) noexcept
+    /// @return The settings Tab moves through on @p form: without the permission profile when the worker
+    ///         of its task takes none, so that no choice is offered and then dropped.
+    [[nodiscard]] std::vector<FormField> settingsOf(DispatchFormState const& form, Engine const& engine)
     {
-        if (std::holds_alternative<TopicRef>(form.item))
-            return TopicSettings;
-        return ItemSettings;
+        auto const fields = std::holds_alternative<TopicRef>(form.item)
+                                ? std::span<FormField const> { TopicSettings }
+                                : std::span<FormField const> { ItemSettings };
+        auto const* const worker = workerOf(form, engine);
+        auto const takesProfile =
+            worker == nullptr || agentRowOf(worker->agent).settings == SettingsProfile::Taken;
+        auto shown = std::vector<FormField> {};
+        std::ranges::copy_if(fields, std::back_inserter(shown), [&](FormField field) {
+            return field != FormField::Permissions || takesProfile;
+        });
+        return shown;
+    }
+
+    /// @return Whether the worker of the launcher's form lacks something a run needs; false without a form.
+    [[nodiscard]] bool isFormIncomplete(LauncherState const& state, Engine const& engine) noexcept
+    {
+        auto const* const worker = state.form ? workerOf(*state.form, engine) : nullptr;
+        return worker != nullptr && isSetupIncomplete(engine, *worker);
+    }
+
+    /// @return What the worker of the launcher's form lacks, one line each; none without a form.
+    [[nodiscard]] std::vector<std::string> setupWarningsOf(LauncherState const& state, Engine const& engine)
+    {
+        auto const* const worker = state.form ? workerOf(*state.form, engine) : nullptr;
+        return worker != nullptr ? setupWarnings(engine, *worker) : std::vector<std::string> {};
     }
 
     /// Builds the choices for the highlighted one of @p candidates afresh: they follow the row, and only a
@@ -178,7 +204,7 @@ namespace
                     : std::nullopt;
         }
         if (state.form)
-            state.setting = settingsOf(*state.form).front();
+            state.setting = settingsOf(*state.form, engine).front();
     }
 
     /// Re-lists for the query, highlights its first row and builds its choices, the keys back on the list.
@@ -204,7 +230,7 @@ namespace
     {
         if (!state.form || !canConfirm(*state.form, engine))
             return std::nullopt;
-        if (isSetupIncomplete(engine))
+        if (isFormIncomplete(state, engine))
         {
             // The first Enter confirms the warning; only an Enter of a later input dispatches, so a paste or
             // a held key cannot click through it.
@@ -257,11 +283,9 @@ std::optional<LauncherState> openLauncher(Engine const& engine,
     if (!std::ranges::contains(engine.repositories(), scope.repo))
         scope.repo.clear();
     auto state =
-        LauncherState { .query = std::move(query),
-                        .session = std::move(session),
-                        .hooks = isSetupIncomplete(engine) ? HooksWarning::Shown : HooksWarning::None,
-                        .scope = std::move(scope) };
+        LauncherState { .query = std::move(query), .session = std::move(session), .scope = std::move(scope) };
     requery(state, engine);
+    state.hooks = isFormIncomplete(state, engine) ? HooksWarning::Shown : HooksWarning::None;
     return state;
 }
 
@@ -276,10 +300,7 @@ std::expected<LauncherState, LauncherRefusal> openLauncherOn(Engine const& engin
         return std::unexpected(LauncherRefusal::NotConfigured);
     if (config->firstTaskFor(appliesToOf(item)) == nullptr)
         return std::unexpected(LauncherRefusal::NoTask);
-    auto state =
-        LauncherState { .query = itemLabel(item),
-                        .session = std::move(session),
-                        .hooks = isSetupIncomplete(engine) ? HooksWarning::Shown : HooksWarning::None };
+    auto state = LauncherState { .query = itemLabel(item), .session = std::move(session) };
     // The label names the item exactly, so it stands first; another repository's item of the same number
     // stands beside it.
     auto const candidates = candidatesOf(engine, state.query, state.scope);
@@ -290,6 +311,7 @@ std::expected<LauncherState, LauncherRefusal> openLauncherOn(Engine const& engin
         return std::unexpected(LauncherRefusal::NotListed);
     state.highlighted = static_cast<std::size_t>(std::ranges::distance(candidates.begin(), at));
     reform(state, engine, candidates, task);
+    state.hooks = isFormIncomplete(state, engine) ? HooksWarning::Shown : HooksWarning::None;
     return state;
 }
 
@@ -404,7 +426,7 @@ std::optional<DispatchAction> applyLauncherKey(core::tui::KeyEvent const& key,
         case KeyCode::Tab: {
             if (!state.form)
                 return std::nullopt;
-            auto const order = settingsOf(*state.form);
+            auto const order = settingsOf(*state.form, engine);
             auto const back = core::tui::hasModifier(key.modifiers, Modifier::Shift);
             if (state.focus == LauncherFocus::List)
             {
@@ -665,7 +687,7 @@ namespace
         auto const between = [](std::string_view value) {
             return std::format("‹ {} ›", value);
         };
-        for (auto const field: settingsOf(form))
+        for (auto const field: settingsOf(form, engine))
             switch (field)
             {
                 case FormField::Repo: add("repo", field, between(form.repo)); break;
@@ -904,7 +926,7 @@ namespace
         }
         else if (!candidates.empty())
             appendValue(tail, "refused", "no task applies to it", Role::Failing, width);
-        auto const warnings = setupWarnings(engine);
+        auto const warnings = setupWarningsOf(state, engine);
         for (auto const& warning: warnings)
             for (auto const& part: wrap(warning, width, width))
                 tail.push_back(Line { .left = { { .text = part, .role = Role::Warning } } });

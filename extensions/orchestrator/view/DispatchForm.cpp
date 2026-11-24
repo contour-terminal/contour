@@ -15,6 +15,7 @@
 #include <variant>
 #include <vector>
 
+#include <orchestrator/core/Agents.hpp>
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Naming.hpp>
 #include <orchestrator/core/Permissions.hpp>
@@ -271,11 +272,21 @@ std::optional<std::vector<std::string>> commandShown(Run const& run)
     return shown ? std::optional { std::move(*shown) } : std::nullopt;
 }
 
-/// @return Whether the agents' setup lacks something a run needs: the status hooks, or a plugin. The form
-///         then says so, and asks for a second Enter.
-bool isSetupIncomplete(Engine const& engine) noexcept
+WorkerDef const* workerOf(DispatchFormState const& form, Engine const& engine) noexcept
 {
-    return engine.hooks() == HooksState::Missing || !engine.missingPlugins().empty();
+    auto const* const config = engine.config();
+    if (config == nullptr)
+        return nullptr;
+    auto const tasks = config->tasks();
+    return &config->workerFor(form.task < tasks.size() ? std::string_view { tasks[form.task].id } : ""sv);
+}
+
+bool isSetupIncomplete(Engine const& engine, WorkerDef const& worker) noexcept
+{
+    if (agentRowOf(worker.agent).claudeState == ClaudeState::None)
+        return false;
+    return engine.hooksFor(worker.envSet) == HooksState::Missing
+           || !engine.missingPluginsFor(worker.envSet).empty();
 }
 
 /// @return @p text with the run's stamp, which is known only once the form is confirmed, shown as `…`.
@@ -297,12 +308,14 @@ std::string checkoutText(Run const& run)
     return std::format("new branch {}", branch);
 }
 
-std::vector<std::string> setupWarnings(Engine const& engine)
+std::vector<std::string> setupWarnings(Engine const& engine, WorkerDef const& worker)
 {
     auto warnings = std::vector<std::string> {};
-    if (engine.hooks() == HooksState::Missing)
+    if (agentRowOf(worker.agent).claudeState == ClaudeState::None)
+        return warnings;
+    if (engine.hooksFor(worker.envSet) == HooksState::Missing)
         warnings.emplace_back(HooksMissingWarning);
-    for (auto const& plugin: engine.missingPlugins())
+    for (auto const& plugin: engine.missingPluginsFor(worker.envSet))
         warnings.push_back(
             std::format("Claude Code lacks the plugin {}: a prompt naming its skills fails (^K "
                         "on the dashboard installs it)",

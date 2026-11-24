@@ -59,7 +59,9 @@ struct World
     ListAnswer issues = { "github/issues-open.json" };                    ///< What `gh-issues` prints.
     std::vector<Run> stored = {}; ///< The runs in the store; the active ones have a live tab listed.
     std::string hooks =
-        "contour/setup-hooks-present.json";          ///< What `agent-setup-check` prints, under testdata.
+        "contour/setup-hooks-present.json"; ///< What `agent-setup-check` prints, under testdata.
+    std::map<std::string, std::string, std::less<>>
+        hooksBySet = {}; ///< By variable set: what its `agent-setup-check` prints instead of @ref hooks.
     std::string plugins = "claude/plugin-list.json"; ///< What `claude-plugins` prints, under testdata.
     std::vector<WorktreeEntry> worktrees = {};       ///< Listed in the contour repository after its checkout.
     std::vector<std::string> held = {}; ///< Commands left unanswered until DashboardFixture::answerHeld().

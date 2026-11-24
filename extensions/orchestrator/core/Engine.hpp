@@ -534,6 +534,11 @@ class Engine
     /// @param envSet A variable set's name; "" for the workers without one.
     /// @return Whether Claude Code's status hooks are installed for that set; Unknown before its check.
     [[nodiscard]] HooksState hooksFor(std::string_view envSet) const noexcept;
+    /// @param envSet A variable set's name; "" for the workers without one.
+    /// @return The plugins that set's Claude Code lacks, as last checked; empty before its check, or when
+    ///         none is missing.
+    [[nodiscard]] std::span<PluginRequirement const> missingPluginsFor(
+        std::string_view envSet) const noexcept;
     /// @return The Claude Code plugins the agents need (`plugins`) and the `claude` the panes run lacks, as
     ///         last checked, over the sets of the workers that read Claude Code's state: each plugin once, in
     ///         the order of `plugins`; empty while not known, or when none is missing.

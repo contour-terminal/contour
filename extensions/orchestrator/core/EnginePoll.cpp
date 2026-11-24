@@ -564,6 +564,13 @@ HooksState Engine::hooksFor(std::string_view envSet) const noexcept
     return found != _hooks.end() ? found->second : HooksState::Unknown;
 }
 
+std::span<PluginRequirement const> Engine::missingPluginsFor(std::string_view envSet) const noexcept
+{
+    auto const found = _missingPluginsBySet.find(envSet);
+    return found != _missingPluginsBySet.end() ? std::span<PluginRequirement const> { found->second }
+                                               : std::span<PluginRequirement const> {};
+}
+
 HooksState Engine::hooks() const noexcept
 {
     if (!_config)

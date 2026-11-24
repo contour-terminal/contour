@@ -330,6 +330,80 @@ TEST_CASE("the launcher refuses an item an agent works on, and asks twice while 
 
 namespace
 {
+/// Three workers: two Claude workers on their own sets, one of which lacks its hooks, and a Copilot one;
+/// a pull-request task on each.
+constexpr auto WorkersConfig = R"({ "worktree_root": "~/worktrees", "models": ["opus", "sonnet"],
+  "workers": [ { "id": "complete", "agent": "claude", "env_set": "complete" },
+               { "id": "lacking", "agent": "claude", "env_set": "lacking" },
+               { "id": "pilot", "agent": "copilot" } ],
+  "repos": [ { "name": "contour", "path": "~/projects/contour", "forge": "github", "issues": [] } ],
+  "tasks": [
+    { "id": "fix_ci", "key": "f", "label": "fix CI", "applies_to": "pr", "model": "sonnet",
+      "worker": "complete", "prompt": "/contour-workflows:fix-ci {url}" },
+    { "id": "review", "key": "v", "label": "review", "applies_to": "pr", "model": "sonnet",
+      "worker": "lacking", "prompt": "/contour-workflows:review {url}" },
+    { "id": "pilot", "key": "y", "label": "pilot", "applies_to": "pr", "model": "sonnet",
+      "worker": "pilot", "prompt": "fix the CI of {url}" } ] })"sv;
+} // namespace
+
+TEST_CASE("the launcher warns only of the setup of the task's own worker",
+          "[orchestrator][view][launcher][workers]")
+{
+    using core::tui::KeyCode;
+    auto const engine =
+        bootEngine(World { .configJson = std::string { WorkersConfig },
+                           .hooksBySet = { { "lacking", "contour/setup-hooks-missing.json" } } });
+    REQUIRE(engine.config() != nullptr);
+    REQUIRE(engine.hooks() == HooksState::Missing);
+
+    for (auto const task: { "fix_ci"sv, "pilot"sv })
+    {
+        CAPTURE(task);
+        auto launcher = openedOn(engine, ChangeRequestRef { 2375 }, task);
+        REQUIRE(launcher.has_value());
+        REQUIRE(launcher->form.has_value());
+        CHECK(launcher->hooks == HooksWarning::None);
+        auto const* const worker = workerOf(*launcher->form, engine);
+        REQUIRE(worker != nullptr);
+        CHECK(setupWarnings(engine, *worker).empty());
+        CHECK(press(launcher, engine, KeyCode::Enter).has_value());
+    }
+
+    auto launcher = openedOn(engine, ChangeRequestRef { 2375 }, "review");
+    REQUIRE(launcher.has_value());
+    REQUIRE(launcher->form.has_value());
+    CHECK(launcher->hooks == HooksWarning::Shown);
+    CHECK(setupWarnings(engine, *workerOf(*launcher->form, engine))
+          == std::vector { std::string { HooksMissingWarning } });
+    CHECK_FALSE(press(launcher, engine, KeyCode::Enter, HooksWarning::Shown));
+    CHECK(press(launcher, engine, KeyCode::Enter, HooksWarning::Confirmed).has_value());
+}
+
+TEST_CASE("a Copilot task's launcher offers no permission profile", "[orchestrator][view][launcher][workers]")
+{
+    using core::tui::KeyCode;
+    auto const engine = bootEngine(World { .configJson = std::string { WorkersConfig } });
+    // The settings Tab visits from the list, in order, until it is back on the list.
+    auto const visited = [&](std::string_view task) {
+        auto launcher = openedOn(engine, ChangeRequestRef { 2375 }, task);
+        auto fields = std::vector<FormField> {};
+        REQUIRE(launcher.has_value());
+        CHECK_FALSE(press(launcher, engine, KeyCode::Tab));
+        while (launcher->focus == LauncherFocus::Settings && fields.size() < 8)
+        {
+            fields.push_back(launcher->setting);
+            CHECK_FALSE(press(launcher, engine, KeyCode::Tab));
+        }
+        return fields;
+    };
+    CHECK(std::ranges::contains(visited("fix_ci"), FormField::Permissions));
+    auto const copilot = visited("pilot");
+    CHECK_FALSE(copilot.empty());
+    CHECK_FALSE(std::ranges::contains(copilot, FormField::Permissions));
+}
+
+namespace
+{
 /// Two repositories, each listing the same recorded pull requests and issues.
 [[nodiscard]] World twoRepositories()
 {
