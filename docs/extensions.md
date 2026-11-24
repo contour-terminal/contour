@@ -422,8 +422,8 @@ again in a later callback", which starts with a fresh budget, not "the store is 
   opens beside the served tab `near` names, else where the window focused last looks, without taking the
   focus, and is listed from then on until its session ends. `panes` answers `limit` until the daemon has
   restored its sessions; at most 32 panes per extension. `pane-open` answers `not-supported-yet` where
-  Contour cannot start a program in a directory it holds open (a Flatpak whose shells run on the host, and
-  Windows), and `gone` for a worktree removed since it was opened;
+  Contour cannot start a program in a directory it holds open (a Flatpak whose shells run on the host), and
+  `gone` for a worktree removed since it was opened;
 - `tab-open`, `tab-close`, `tab-reveal`, `tabs`, `tab-read`, `tab-write`: tabs it serves;
 - `actions-take`, `summary-set`: its command-palette actions and its summary;
 - `pane-reveal`: brings one of its agent panes in front of the window an action came from (its `origin`):
@@ -517,11 +517,56 @@ A declared command runs only where its manifest binds it, and sees only what its
   a file in it is `escapes`, as a mount would be.
 - **At most 64 KiB** is returned: a file is read up to one byte past that, and one that holds more is
   `too-large`, whatever size it claimed when it was opened.
-- On Windows, `file-read` answers `not-supported-yet`.
+- On Windows the same walk is made beneath the root's directory handle; see [Daemon extensions on
+  Windows](#daemon-extensions-on-windows).
 
 An import Contour does not serve yet answers `not-supported-yet`, which an extension treats as a
-capability it lacks, not a fault. Today that is `file-read` on Windows, and `pane-open` where Contour cannot
-start a program in a directory it holds open (a Flatpak whose shells run on the host, and Windows).
+capability it lacks, not a fault. Today that is `pane-open` where Contour cannot start a program in a
+directory it holds open: a Flatpak whose shells run on the host.
+
+### Daemon extensions on Windows
+
+A daemon extension runs on Windows as on Linux and macOS, with these differences.
+
+- **Roots.** A root's directory is drive-absolute (`C:\Users\me\repos` or `C:/Users/me/repos`), a UNC path
+  (`\\server\share\repos` or `//server/share/repos`), `~`, or `~\…`/`~/…`. It is normalised to backslashes, an
+  upper-case drive letter and no trailing separator. A drive-relative path (`C:repos`), a path rooted without a
+  drive (`\repos`), a UNC path without a share, `~user`, a device or verbatim path (`\\?\…`, `\\.\…`, `\??\…`), and
+  a component that is empty, `.` or `..` (refused, not collapsed), holds a stream (`a:b`), is a reserved device name
+  (`CON`, `NUL`, …) or ends in a dot or a space are refused. The directory is resolved once -- junctions, symbolic
+  links, mapped and `subst` drives and 8.3 short names followed -- and that spelling (on-disk case, long names) is
+  what the consent dialog shows, what the grant is recorded for, and what the extension is told; re-spelling the
+  same directory in the configuration does not ask again. Paths compare ignoring the case of ASCII letters.
+- **Environment.** Variable names compare ignoring case, so `Git_Dir`, `contour_pane` or `gh_repo` are withheld
+  exactly as `GIT_DIR`, `CONTOUR_PANE` and `GH_REPO` are. An inherited variable whose name holds a non-ASCII
+  character is not passed to a declared command. Where `command-env`/`command-env-for` set a name that differs from
+  an inherited one only in case, the declared spelling and value replace it.
+- **`path:` arguments and working directories** are spelled with backslashes only, as the host's roots are; a
+  forward slash is refused.
+- **Programs.** A command or an agent pane runs only a program whose file name ends in `.exe`, looked up on the
+  absolute entries of its `PATH` (relative entries, the current directory and `PATHEXT` are ignored), so that no
+  argument ever passes through `cmd.exe`. A batch file such as npm's `claude.cmd` is refused as not installed, and
+  a `programs` entry naming one is warned about when the configuration is read.
+- **Ending a command.** A command that times out or is cancelled is ended at once together with every process it
+  started: Windows has no `SIGTERM` that lets a program clean up first. A `git` command cut off this way can leave
+  `.git/index.lock` behind; remove it if a later `git` reports that another git process seems to be running.
+- **Agent panes.** The agent starts in its worktree by path, checked against the granted directory by file
+  identity before and after the process is created: a worktree renamed or replaced since the extension opened it
+  is refused (`… is no longer the one that was opened.`), and so is a path longer than 258 characters, never cut
+  short. While the agent runs, the worktree -- and every directory above it -- cannot be renamed, and it cannot be
+  removed. The agent and everything it starts, detached helpers and a browser it launches fresh included, run in
+  one kill-on-close job: the whole tree ends when the pane is closed or terminated, when the daemon dies, or 5 s
+  after its console closes (sooner if the agent exits). A live upgrade carries each agent's job to the new daemon,
+  so agents keep running. A user's own shell runs outside any job, so something like `code .` outlives its tab.
+- **`file-read`** walks beneath the root's directory handle one component at a time. A junction, symbolic link or
+  mount point anywhere on the path, a file with a second name (a hard link), a file on another volume, a
+  cloud-files placeholder whose contents are not on this disk (it is never downloaded), or any other special entry
+  is refused. Names compare as Windows compares them -- ignoring case, and an 8.3 short name reaches the same
+  entry -- and fenced directories are matched by file identity, so no spelling reaches one; a stream (`a:b`), a
+  reserved device name or a name ending in a dot or a space is a bad argument. A file another process holds open
+  without read sharing is unreadable; one open for writing elsewhere is read, and a read never stops a file from
+  being renamed or deleted. A share whose server reports no file identities (some SMB servers) cannot be read
+  from, and a stalled share can hold a read: reads are bounded by size, not time.
 
 ### Daemon extensions: granting
 
@@ -640,7 +685,8 @@ confirmation: the orchestrator makes a git worktree on a branch of its own, open
 it, and removes the worktree when the run ends, unless it still holds work. From the same tab you read what an agent
 reports on its board and page through its transcript, also after the run has finished.
 
-Contour's `.deb`, `.rpm`, AppImage and macOS `.dmg` packages carry it as a bundled extension,
+Contour's `.deb`, `.rpm`, AppImage and macOS `.dmg` packages, and the Windows installers and zip (so also
+winget), carry it as a bundled extension,
 `orchestrator.wasm`; the Flatpak build does not include it. Being installed
 runs nothing: the daemon loads it only for a `daemon.extensions.orchestrator` entry, and runs it only once a
 window has [granted it](#daemon-extensions-granting). A build from source includes it with
@@ -679,8 +725,14 @@ Key         | Meaning
 ------------|------------------------------------------------------------------------------------------------
 `path`      | The module to load; without it, the bundled orchestrator.
 `autostart` | `true`: start it as the daemon starts. Otherwise it starts when something asks for it, such as its command-palette row.
-`programs`  | A map from a program its commands and agent panes run, such as `claude` or `gh`, to the executable to run for it: an absolute path, or one starting with `~/`. Without an entry a program is looked up on the daemon's `PATH`, and a daemon started by systemd or launchd often has one without the user's own bin directories (`~/.local/bin`, a version manager's shims): the orchestrator then reports that `claude` is not installed.
+`programs`  | A map from a program its commands and agent panes run, such as `claude` or `gh`, to the executable to run for it: an absolute path, or one starting with `~/` (on Windows also `C:\…`, `\\server\share\…` or `~\…`, and an `.exe`). Without an entry a program is looked up on the daemon's `PATH`, and a daemon started by systemd or launchd often has one without the user's own bin directories (`~/.local/bin`, a version manager's shims): the orchestrator then reports that `claude` is not installed.
 `config`    | The orchestrator's configuration, below. One that does not parse is shown on its tab, one line naming the key, and nothing is read or started until it is fixed.
+
+**On Windows**, write a path in single quotes or unquoted -- `claude: 'C:\Users\me\.local\bin\claude.exe'` -- or
+with forward slashes: in double quotes YAML reads `\U` (as in `"C:\Users"`) as an escape and the file does not
+load. Claude Code must be its native `claude.exe`: one installed with `npm` is a `claude.cmd` script, which the
+host refuses (see [Daemon extensions on Windows](#daemon-extensions-on-windows)). A worktree cannot be removed or
+renamed while its agent's tab is open, so ending a run closes the tab first.
 
 Its `config`:
 
@@ -845,11 +897,11 @@ line the format does not know is counted and skipped, never fatal; the page says
 
 ### Limitations
 
-- **Linux and macOS.** On Windows the daemon opens no agent tab and reads no file for an extension, and the
-  Windows packages do not carry the orchestrator.
 - **No agent tabs under Flatpak.** Where the shells run on the host, Contour cannot start a program in a
   directory it holds open, so the dashboard lists the work but cannot start an agent.
 - **Claude Code only.** The agents are `claude`, and the transcript reads Claude Code's session log.
+- **A worktree stays while its agent runs, on Windows.** It cannot be removed or renamed until the agent's tab is
+  closed.
 
 ## Performance
 
