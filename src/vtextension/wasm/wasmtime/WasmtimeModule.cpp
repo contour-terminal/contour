@@ -19,6 +19,7 @@
 #include <wasmtime.h>
 
 #include <vtextension/wasm/WasiAllowList.hpp>
+#include <vtextension/wasm/WasmBinary.hpp>
 #include <vtextension/wasm/wasi/Preview1Signatures.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeRuntime.hpp>
@@ -258,20 +259,27 @@ std::expected<std::shared_ptr<IWasmModule>, ExtensionError> loadModule(
         return std::unexpected(ExtensionError::InvalidComponent);
     auto imports = describeImports(module.get(), *runtime);
     auto exports = describeExports(module.get());
-    if (!imports || !exports)
+    // Wasmtime's C API describes no memory a module does not export; its bytes do.
+    auto const largestInitialPages = binary::largestInitialMemoryPages(bytes);
+    if (!imports || !exports || !largestInitialPages)
         return std::unexpected(ExtensionError::InvalidComponent);
-    return std::make_shared<WasmtimeModule>(
-        std::move(runtime), std::move(module), std::move(*imports), std::move(*exports));
+    return std::make_shared<WasmtimeModule>(std::move(runtime),
+                                            std::move(module),
+                                            std::move(*imports),
+                                            std::move(*exports),
+                                            *largestInitialPages);
 }
 
 WasmtimeModule::WasmtimeModule(std::shared_ptr<WasmtimeRuntime> runtime,
                                detail::ModuleHandle module,
                                std::vector<ImportDescription> imports,
-                               std::vector<ExportDescription> exports) noexcept:
+                               std::vector<ExportDescription> exports,
+                               uint32_t largestInitialPages) noexcept:
     _runtime { std::move(runtime) },
     _module { std::move(module) },
     _imports { std::move(imports) },
-    _exports { std::move(exports) }
+    _exports { std::move(exports) },
+    _largestInitialPages { largestInitialPages }
 {
 }
 

@@ -81,6 +81,7 @@ namespace
             WasmtimeRuntime const& runtime,
             wasmtime_module_t const* module,
             std::span<ExportDescription const> exports,
+            uint32_t largestInitialPages,
             IHostContext& context);
 
         /// Use create(); public only so that std::make_unique can reach it.
@@ -218,13 +219,13 @@ namespace
         WasmtimeRuntime const& runtime,
         wasmtime_module_t const* module,
         std::span<ExportDescription const> exports,
+        uint32_t largestInitialPages,
         IHostContext& context)
     {
+        // Checked before instantiating, exported memories and others alike: the limiter's refusal would
+        // fail the instantiation as an error indistinguishable from any other.
         auto const capBytes = runtime.limits().memoryBytes;
-        auto const exceedsCap = [&](ExportDescription const& entry) {
-            return entry.kind == ExternKind::Memory && entry.initialPages * PageBytes > capBytes;
-        };
-        if (std::ranges::any_of(exports, exceedsCap))
+        if (largestInitialPages * PageBytes > capBytes)
             return std::unexpected(ExtensionError::OutOfMemory);
 
         auto data = std::make_unique<StoreData>(StoreData {
@@ -233,8 +234,7 @@ namespace
         if (!store)
             return std::unexpected(ExtensionError::RuntimeUnavailable);
         // Memory grows up to the cap and no further (memory.grow returns -1); one instance and one memory
-        // per store. A memory the exports did not show and whose initial size exceeds the cap fails the
-        // instantiation below.
+        // per store.
         auto const memoryCap = static_cast<int64_t>(
             std::min<uint64_t>(capBytes, static_cast<uint64_t>(std::numeric_limits<int64_t>::max())));
         wasmtime_store_limiter(store.get(), memoryCap, -1, 1, -1, 1);
@@ -287,7 +287,8 @@ std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> WasmtimeModule::in
     IHostContext& context)
 {
     // The guest's `_initialize` is never run here: it stays an ordinary export, the caller's to call.
-    return WasmtimeInstance::create(shared_from_this(), *_runtime, _module.get(), _exports, context);
+    return WasmtimeInstance::create(
+        shared_from_this(), *_runtime, _module.get(), _exports, _largestInitialPages, context);
 }
 
 } // namespace vtextension::wasm::wasmtime

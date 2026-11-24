@@ -336,6 +336,25 @@ inline constexpr auto InstanceModule = std::to_array<uint8_t>({
     0x01, 0x0b, 0x0b, 0x0b, 0x01, 0x00, 0x41, 0x10, 0x0b, 0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f,
 });
 
+/// Defines a memory of one page and exports nothing: no export shows its size.
+///
+///     (module (memory 1))
+inline constexpr auto UnexportedMemoryModule = std::to_array<uint8_t>({
+    0x00,
+    0x61,
+    0x73,
+    0x6d,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x05,
+    0x03,
+    0x01,
+    0x00,
+    0x01,
+});
+
 /// What the nested-call case runs: `fail` calls `ping(1)`; `absorb` calls `ping(0)`, then returns 7;
 /// `absorb-then-trap` calls `ping(0)`, then traps on its own.
 ///
@@ -1082,6 +1101,21 @@ void memoryCapRefusesInitialSize()
     CHECK(instance.error() == ExtensionError::OutOfMemory);
 }
 
+/// A memory whose initial size exceeds the runtime's cap is not instantiated, though no export shows it.
+template <typename T>
+void memoryCapRefusesUnexportedInitialSize()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(
+        *backend, RuntimeLimits { .memoryBytes = PageBytes / 2, .stackBytes = Limits.stackBytes });
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, UnexportedMemoryModule);
+    auto context = RecordingHostContext {};
+    auto const instance = module->instantiate(context);
+    REQUIRE_FALSE(instance.has_value());
+    CHECK(instance.error() == ExtensionError::OutOfMemory);
+}
+
 /// Unbounded recursion runs into the stack cap and traps.
 template <typename T>
 void unboundedRecursionTraps()
@@ -1315,35 +1349,36 @@ void wasiStdioGoesNowhere()
     }
 
 /// Instantiates the whole contract suite against the backend @p Traits::make() creates.
-#define CONTOUR_WASM_BACKEND_CONTRACT(Traits)                                        \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, loadRejectsNonModule)                 \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, refusesDisabledFeatures)              \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, acceptsEnabledFeatures)               \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, describesImportsAndExports)           \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unknownImportIsUnsatisfied)           \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureImportIsUnsatisfied)    \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureWasiIsUnsatisfied)      \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, allowListedWasiIsSatisfied)           \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, everyAllowedWasiFunctionWorks)        \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNeedsARuntime)             \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNests)                     \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, generationFollowsBringUp)             \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoBackendsAgree)                     \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, moduleCrossesThreads)                 \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callsExport)                          \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instantiateLeavesReactorToCaller)     \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryViewIsBoundsChecked)            \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArguments)        \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArgumentsInOrder) \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackErrorFails)               \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, nestedHostFailureStaysNested)         \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoRuntimesShareHostImports)          \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, olderRuntimeOutlivesNewer)            \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesGrowth)               \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callAfterTrapRuns)                    \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesInitialSize)          \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unboundedRecursionTraps)              \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptStopsLoop)                   \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptIsFinal)                     \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instanceCrossesThreads)               \
+#define CONTOUR_WASM_BACKEND_CONTRACT(Traits)                                         \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, loadRejectsNonModule)                  \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, refusesDisabledFeatures)               \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, acceptsEnabledFeatures)                \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, describesImportsAndExports)            \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unknownImportIsUnsatisfied)            \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureImportIsUnsatisfied)     \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureWasiIsUnsatisfied)       \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, allowListedWasiIsSatisfied)            \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, everyAllowedWasiFunctionWorks)         \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNeedsARuntime)              \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNests)                      \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, generationFollowsBringUp)              \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoBackendsAgree)                      \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, moduleCrossesThreads)                  \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callsExport)                           \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instantiateLeavesReactorToCaller)      \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryViewIsBoundsChecked)             \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArguments)         \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArgumentsInOrder)  \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackErrorFails)                \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, nestedHostFailureStaysNested)          \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoRuntimesShareHostImports)           \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, olderRuntimeOutlivesNewer)             \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesGrowth)                \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callAfterTrapRuns)                     \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesInitialSize)           \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesUnexportedInitialSize) \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unboundedRecursionTraps)               \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptStopsLoop)                    \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptIsFinal)                      \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instanceCrossesThreads)                \
     CONTOUR_WASM_BACKEND_CONTRACT_POSIX(Traits)

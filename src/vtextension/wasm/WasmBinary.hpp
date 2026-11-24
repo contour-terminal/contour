@@ -33,6 +33,9 @@ inline constexpr auto ModuleHeader =
 /// The id of a custom section, the only kind that carries a name.
 inline constexpr auto CustomSectionId = uint8_t { 0 };
 
+/// The id of the memory section, which declares the memories a module defines.
+inline constexpr auto MemorySectionId = uint8_t { 5 };
+
 /// The id of the export section.
 inline constexpr auto ExportSectionId = uint8_t { 7 };
 
@@ -157,6 +160,49 @@ struct Section
         result.push_back(Section { .id = *id, .content = *content, .offset = offset });
     }
     return result;
+}
+
+/// The largest initial size of the memories a module defines, whether it exports them or not.
+/// @param module A WebAssembly core module's bytes.
+/// @return The largest initial size, in 64 KiB pages; 0 if the module defines no memory. `Malformed` for a
+///         memory whose limits are not those of a 32-bit memory with the default page size: no engine of
+///         the host accepts another (EngineFeatures.hpp), so the host need not read one.
+[[nodiscard]] inline std::expected<uint32_t, BinaryError> largestInitialMemoryPages(
+    std::span<std::byte const> module)
+{
+    // Of a memory's limits flags, only these two: whether a maximum follows, and whether it is shared.
+    constexpr auto HasMaximum = uint8_t { 0b0000'0001 };
+    constexpr auto KnownFlags = uint8_t { 0b0000'0011 };
+    return sections(module).and_then(
+        [](std::vector<Section> const& all) -> std::expected<uint32_t, BinaryError> {
+            auto largest = uint32_t { 0 };
+            for (auto const& section:
+                 all | std::views::filter([](Section const& entry) { return entry.id == MemorySectionId; }))
+            {
+                auto reader = Reader { section.content, section.offset };
+                auto const count = reader.u32();
+                if (!count)
+                    return std::unexpected(count.error());
+                for ([[maybe_unused]] auto const index: std::views::iota(uint32_t { 0 }, *count))
+                {
+                    auto const flags = reader.byte();
+                    if (!flags)
+                        return std::unexpected(flags.error());
+                    if ((*flags & static_cast<uint8_t>(~KnownFlags)) != 0)
+                        return std::unexpected(BinaryError::Malformed);
+                    auto const initial = reader.u32();
+                    if (!initial)
+                        return std::unexpected(initial.error());
+                    if ((*flags & HasMaximum) != 0)
+                    {
+                        if (auto const maximum = reader.u32(); !maximum)
+                            return std::unexpected(maximum.error());
+                    }
+                    largest = std::max(largest, *initial);
+                }
+            }
+            return largest;
+        });
 }
 
 } // namespace vtextension::wasm::binary

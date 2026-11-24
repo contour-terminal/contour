@@ -15,6 +15,7 @@
 #include <vtextension/wasm/WasmBinary.hpp>
 
 using vtextension::wasm::binary::BinaryError;
+using vtextension::wasm::binary::largestInitialMemoryPages;
 using vtextension::wasm::binary::Reader;
 using vtextension::wasm::binary::sections;
 
@@ -120,4 +121,48 @@ TEST_CASE("WasmBinary.sections", "[vtextension]")
             module.push_back(static_cast<std::byte>(value));
         CHECK(sections(module) == std::unexpected(BinaryError::Truncated));
     }
+}
+
+TEST_CASE("WasmBinary.largestInitialMemoryPages", "[vtextension]")
+{
+    struct Case
+    {
+        std::string_view description;
+        std::vector<std::byte> sections; ///< What follows the module header.
+        std::expected<uint32_t, BinaryError> pages;
+    };
+    auto const cases = std::vector<Case> {
+        { .description = "no memory", .sections = {}, .pages = 0 },
+        { .description = "one memory", .sections = raw({ 0x05, 0x03, 0x01, 0x00, 0x02 }), .pages = 2 },
+        { .description = "the largest of two, one with a maximum",
+          .sections = raw({ 0x05, 0x06, 0x02, 0x01, 0x03, 0x04, 0x00, 0x01 }),
+          .pages = 3 },
+        { .description = "a shared one, with its maximum",
+          .sections = raw({ 0x05, 0x04, 0x01, 0x03, 0x05, 0x06 }),
+          .pages = 5 },
+        { .description = "a multi-byte initial size",
+          .sections = raw({ 0x05, 0x04, 0x01, 0x00, 0x80, 0x02 }),
+          .pages = 256 },
+        { .description = "other sections are not read",
+          .sections = raw({ 0x01, 0x02, 0x05, 0x05, 0x05, 0x03, 0x01, 0x00, 0x07 }),
+          .pages = 7 },
+        { .description = "a 64-bit memory",
+          .sections = raw({ 0x05, 0x03, 0x01, 0x04, 0x01 }),
+          .pages = std::unexpected(BinaryError::Malformed) },
+        { .description = "a memory cut short",
+          .sections = raw({ 0x05, 0x03, 0x02, 0x00, 0x01 }),
+          .pages = std::unexpected(BinaryError::Truncated) },
+        { .description = "a maximum cut short",
+          .sections = raw({ 0x05, 0x03, 0x01, 0x01, 0x01 }),
+          .pages = std::unexpected(BinaryError::Truncated) },
+    };
+    auto const header = raw({ 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 });
+    for (auto const& [description, body, pages]: cases)
+    {
+        INFO(description);
+        auto module = header;
+        module.insert(module.end(), body.begin(), body.end());
+        CHECK(largestInitialMemoryPages(module) == pages);
+    }
+    CHECK(largestInitialMemoryPages({}) == std::unexpected(BinaryError::NotAModule));
 }
