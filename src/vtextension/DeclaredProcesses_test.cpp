@@ -40,6 +40,7 @@
 #include <vtextension/ProcessService.hpp>
 #include <vtextension/RootResolution.hpp>
 #include <vtextension/SelfPrograms.hpp>
+#include <vtextension/UserSettableEnvironment.hpp>
 #include <vtextension/testing/FakeDirectoryOpener.hpp>
 #include <vtextension/testing/FakeGrantStore.hpp>
 #include <vtextension/testing/FakeProcessRunner.hpp>
@@ -85,13 +86,18 @@ constexpr std::size_t MiB = KiB * KiB;
 /// One DeclaredProcesses over fakes, granted, with `/w`, `/w/contour`, `/w/contour/pr-1` and `/r/contour`.
 struct Fixture
 {
-    explicit Fixture(std::vector<ResolvedRoot> roots = defaultRoots(), ProcessLimits limits = {})
+    explicit Fixture(std::vector<ResolvedRoot> roots = defaultRoots(), ProcessLimits limits = {}):
+        Fixture { configWith(std::move(roots), limits) }
+    {
+    }
+
+    explicit Fixture(DeclaredProcessesConfig config)
     {
         for (auto const* path: { "/w", "/w/contour", "/w/contour/pr-1", "/r/contour" })
             directories.add(path);
         grants.record(HostId, GrantDigest, GrantState::Granted);
         auto created = DeclaredProcesses::create(
-            configWith(std::move(roots), limits),
+            std::move(config),
             DeclaredProcessesServices {
                 .runner = runner, .directories = directories, .grants = grants, .onFinished = [this] {
                     ++finished;
@@ -829,4 +835,107 @@ TEST_CASE("DeclaredProcesses: a refused start creates nothing", "[daemon][proces
     REQUIRE(fixture.start("git-worktree-add", arguments, "/r/contour").has_value());
     CHECK(fixture.directories.created == std::vector<std::string> { "/w", "/w/contour" });
     CHECK(fixture.runner.started().back().spec.argv.at(4) == "/w/contour/pr-1-20261115-120000");
+}
+
+namespace
+{
+
+/// A command `who` that takes CLAUDE_CONFIG_DIR and NO_PROXY from the set its `env-set` argument names, and a
+/// command `plain` that takes no set.
+constexpr auto SetsManifest = "name = sets\n"
+                              "version = 2\n"
+                              "root worktrees = config:worktree_root\n"
+                              "arg env-set = name\n"
+                              "arg model = name\n"
+                              "command who short @worktrees = claude --model {model}\n"
+                              "command plain short @worktrees = claude --model {model}\n"
+                              "command-env-set who {env-set} = CLAUDE_CONFIG_DIR NO_PROXY\n"sv;
+
+/// The user's sets: `work`, which holds an unlisted COPILOT_HOME and no NO_PROXY, and `broken`, whose value
+/// fails its shape (as a set that bypassed checkEnvironmentSets() would).
+[[nodiscard]] std::vector<EnvironmentSet> userSets()
+{
+    return { EnvironmentSet { .name = "work",
+                              .variables = { { .name = "CLAUDE_CONFIG_DIR", .value = "/home/u/.claude-work" },
+                                             { .name = "COPILOT_HOME", .value = "/home/u/.copilot" } } },
+             EnvironmentSet { .name = "broken",
+                              .variables = { { .name = "CLAUDE_CONFIG_DIR", .value = "relative" } } } };
+}
+
+/// A Fixture over SetsManifest and userSets(), with NO_PROXY inherited from the daemon.
+[[nodiscard]] std::unique_ptr<Fixture> setsFixture()
+{
+    auto manifest = parseManifestText(SetsManifest);
+    REQUIRE(manifest.has_value());
+    auto config = configWith(defaultRoots());
+    config.manifest = std::move(*manifest);
+    config.inheritedEnvironment = { "PATH=/usr/bin", "NO_PROXY=corp.example.com" };
+    config.environmentSets = userSets();
+    return std::make_unique<Fixture>(std::move(config));
+}
+
+} // namespace
+
+TEST_CASE("DeclaredProcesses: start applies the listed variables of the set the call names",
+          "[daemon][processes][sets]")
+{
+    auto const f = setsFixture();
+    REQUIRE(f->start("who", { { "model", "opus" }, { "env-set", "work" } }, "/w/contour").has_value());
+
+    REQUIRE(f->runner.started().size() == 1);
+    auto const& spec = f->runner.started().front().spec;
+    // The set argument is no placeholder: it chooses the set, and the argv does not see it.
+    CHECK(spec.argv == std::vector<std::string> { "claude", "--model", "opus" });
+    CHECK(valuesOf(spec.environment, "CLAUDE_CONFIG_DIR") == std::vector { "/home/u/.claude-work"sv });
+    // Held by the set, but not listed by the command's binding.
+    CHECK(valuesOf(spec.environment, "COPILOT_HOME").empty());
+    // Listed, but not held by the set: inherited from the daemon as any other variable.
+    CHECK(valuesOf(spec.environment, "NO_PROXY") == std::vector { "corp.example.com"sv });
+}
+
+TEST_CASE("DeclaredProcesses: start without a set argument applies no set", "[daemon][processes][sets]")
+{
+    auto const f = setsFixture();
+    REQUIRE(f->start("who", { { "model", "opus" } }, "/w/contour").has_value());
+
+    REQUIRE(f->runner.started().size() == 1);
+    auto const& spec = f->runner.started().front().spec;
+    CHECK(spec.argv == std::vector<std::string> { "claude", "--model", "opus" });
+    CHECK(valuesOf(spec.environment, "CLAUDE_CONFIG_DIR").empty());
+    CHECK(valuesOf(spec.environment, "NO_PROXY") == std::vector { "corp.example.com"sv });
+}
+
+TEST_CASE("DeclaredProcesses: start refuses a set it cannot apply", "[daemon][processes][sets]")
+{
+    struct Row
+    {
+        std::string_view what;
+        std::string_view command;
+        ConfigMap arguments;
+    };
+    auto const rows = std::vector<Row> {
+        { .what = "no such set",
+          .command = "who",
+          .arguments = { { "model", "opus" }, { "env-set", "gone" } } },
+        { .what = "not a name",
+          .command = "who",
+          .arguments = { { "model", "opus" }, { "env-set", "bad name" } } },
+        { .what = "a value failing its shape",
+          .command = "who",
+          .arguments = { { "model", "opus" }, { "env-set", "broken" } } },
+        { .what = "a command without a binding",
+          .command = "plain",
+          .arguments = { { "model", "opus" }, { "env-set", "work" } } },
+        { .what = "the set argument twice",
+          .command = "who",
+          .arguments = { { "model", "opus" }, { "env-set", "work" }, { "env-set", "work" } } },
+    };
+    for (auto const& row: rows)
+    {
+        INFO(row.what);
+        auto const f = setsFixture();
+        CHECK(f->start(row.command, row.arguments, "/w/contour")
+              == std::unexpected(ProcessError::ArgumentRejected));
+        CHECK(f->runner.started().empty());
+    }
 }

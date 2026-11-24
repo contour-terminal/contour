@@ -19,6 +19,7 @@ set(vtextension_SOURCES
     DeclaredPanes.cpp
     DeclaredProcesses.cpp
     Engine.cpp
+    EnvironmentSets.cpp
     EventQueue.cpp
     ExtensionComposition.cpp
     ExtensionConsent.cpp
@@ -69,6 +70,7 @@ set(vtextension_HEADERS
     DeclaredPanes.hpp
     DeclaredProcesses.hpp
     Engine.hpp
+    EnvironmentSets.hpp
     Event.hpp
     EventQueue.hpp
     ExtensionAutostart.hpp

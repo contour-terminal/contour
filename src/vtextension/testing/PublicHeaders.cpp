@@ -23,6 +23,7 @@
 #include <vtextension/DeclaredPanes.hpp>
 #include <vtextension/DeclaredProcesses.hpp>
 #include <vtextension/Engine.hpp>
+#include <vtextension/EnvironmentSets.hpp>
 #include <vtextension/Event.hpp>
 #include <vtextension/EventQueue.hpp>
 #include <vtextension/ExtensionAutostart.hpp>

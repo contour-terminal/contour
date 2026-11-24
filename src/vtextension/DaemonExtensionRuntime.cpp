@@ -22,6 +22,7 @@
 #include <vtextension/Logging.hpp>
 #include <vtextension/Manifest.hpp>
 #include <vtextension/RootPointer.hpp>
+#include <vtextension/UserSettableEnvironment.hpp>
 #include <vtextension/World.hpp>
 
 namespace vtextension
@@ -135,7 +136,8 @@ struct DaemonExtensionRuntime::Extension
     std::string hostId;      ///< What the grants are keyed on: the configuration key and the module.
     std::string grantDigest; ///< What a grant must be recorded for: the manifest and the resolved roots.
     std::vector<ResolvedRoot> roots;
-    ConsentQuestion question; ///< What the user is asked for its grant.
+    std::vector<EnvironmentSet> environmentSets; ///< The user's sets, checked: what its calls may name.
+    ConsentQuestion question;                    ///< What the user is asked for its grant.
     ConsentWait consent = ConsentWait::NotWaiting;
     std::vector<std::byte> module; ///< Its bytes, until it is loaded: only a granted extension is.
     std::string problem; ///< Why it could not run when it was last started, neutralized; empty if it could.
@@ -260,6 +262,15 @@ std::expected<std::unique_ptr<DaemonExtensionRuntime::Extension>, DeclarationPro
     extension->hostId = extensionHostId(name, *path);
     extension->grantDigest = grantDigestOf(manifest->digest, *roots);
     extension->roots = *roots;
+    auto checkedSets =
+        checkEnvironmentSets(declaration.environmentSets, _home, _services.directories.pathStyle());
+    for (auto const& problem: checkedSets.problems)
+        errorLog()("daemon.extensions.{}.env_sets.{}.{} {}; the set is kept without it.",
+                   name,
+                   problem.set,
+                   problem.variable,
+                   userValueFaultText(problem.fault));
+    extension->environmentSets = std::move(checkedSets.sets);
     extension->question =
         daemonConsentQuestion(DaemonConsentRequest { .hostId = extension->hostId,
                                                      .manifest = *manifest,
@@ -275,7 +286,8 @@ std::expected<std::unique_ptr<DaemonExtensionRuntime::Extension>, DeclarationPro
                                   .hostId = extension->hostId,
                                   .grantDigest = extension->grantDigest,
                                   .selfPrograms = config.selfPrograms,
-                                  .programs = programTableOf(declaration.programs, config.selfPrograms) };
+                                  .programs = programTableOf(declaration.programs, config.selfPrograms),
+                                  .environmentSets = extension->environmentSets };
     auto const& declared = extension->processesConfig.manifest;
     auto const owner = ServedTabOwner { .extension = extension->name,
                                         .title = displayTitleOf(declared),
@@ -319,7 +331,8 @@ std::expected<void, RootError> DaemonExtensionRuntime::makePanes(Extension& exte
         DeclaredPanesConfig { .manifest = extension.processesConfig.manifest,
                               .roots = extension.roots,
                               .inheritedEnvironment = extension.processesConfig.inheritedEnvironment,
-                              .programs = extension.processesConfig.programs },
+                              .programs = extension.processesConfig.programs,
+                              .environmentSets = extension.environmentSets },
         _services.directories,
         *extension.paneHost);
     if (!panes)

@@ -23,6 +23,7 @@
 #include <vtextension/ProcessService.hpp>
 #include <vtextension/RootResolution.hpp>
 #include <vtextension/SelfPrograms.hpp>
+#include <vtextension/UserSettableEnvironment.hpp>
 
 namespace vtextension
 {
@@ -60,6 +61,7 @@ struct DeclaredProcessesConfig
     std::vector<SelfProgram> selfPrograms = {};
     /// The programs a command runs from a given executable (programTableOf()), not from its PATH.
     std::vector<ProgramPath> programs = {};
+    std::vector<EnvironmentSet> environmentSets = {}; ///< The user's sets, checked (checkEnvironmentSets()).
 };
 
 /// What a DeclaredProcesses reaches the world through; each must outlive it.

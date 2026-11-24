@@ -550,6 +550,23 @@ TEST_CASE("DaemonExtensionRuntime: a consent wait or a denial is no error", "[da
     CHECK(errors.lines.empty());
 }
 
+TEST_CASE("DaemonExtensionRuntime: a set's dropped variable is logged and the set kept",
+          "[daemon][runtime][sets]")
+{
+    auto errors = ErrorCapture {};
+    auto fixture = Fixture {};
+    auto declaration = declared("good", "/ext/good.wasm", ExtensionAutostart::OnDemand);
+    declaration.environmentSets = { EnvironmentSet {
+        .name = "work",
+        .variables = { { .name = "CLAUDE_CONFIG_DIR", .value = "relative" },
+                       { .name = "NO_PROXY", .value = "localhost" } } } };
+
+    CHECK(fixture.create({ std::move(declaration) }).empty());
+    REQUIRE(errors.lines.size() == 1);
+    CHECK(errors.lines.front().contains("daemon.extensions.good.env_sets.work.CLAUDE_CONFIG_DIR"));
+    CHECK(errors.lines.front().contains("kept without it"));
+}
+
 TEST_CASE("DaemonExtensionRuntime: entries say where each extension stands", "[daemon][runtime][consent]")
 {
     auto fixture = Fixture {};
@@ -782,7 +799,8 @@ TEST_CASE("DaemonExtensionRuntime: a Windows root is shown and granted by its re
     std::filesystem::create_directories(top / "ext");
     {
         auto moduleFile = std::ofstream { top / "ext" / "good.wasm", std::ios::binary };
-        moduleFile << textOf(testing::withManifest(testing::toModule(testing::DaemonProbeModule), WorkManifest));
+        moduleFile << textOf(
+            testing::withManifest(testing::toModule(testing::DaemonProbeModule), WorkManifest));
     }
     auto& directories = vtpty::nativeDirectoryOpener();
     auto const opened = directories.open(core::pathToUtf8(top / "Repos"));

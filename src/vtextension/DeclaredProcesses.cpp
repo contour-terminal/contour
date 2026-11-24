@@ -21,6 +21,7 @@
 #include <vtextension/ArgumentKind.hpp>
 #include <vtextension/ChildEnvironment.hpp>
 #include <vtextension/DeclaredArguments.hpp>
+#include <vtextension/EnvironmentSets.hpp>
 #include <vtextension/RootResolution.hpp>
 #include <vtextension/SelfPrograms.hpp>
 
@@ -285,8 +286,12 @@ std::expected<ProcessHandle, ProcessError> DeclaredProcesses::start(std::string_
         case GrantState::Granted: break;
     }
 
-    auto argv =
-        substituteDeclared(declared->argvTemplate, _config.manifest, arguments, _directories, _config.roots);
+    auto const selection = selectEnvironmentSet(
+        declared->environmentSet, arguments, _config.environmentSets, _directories.pathStyle());
+    if (!selection)
+        return std::unexpected(ProcessError::ArgumentRejected);
+    auto argv = substituteDeclared(
+        declared->argvTemplate, _config.manifest, selection->arguments, _directories, _config.roots);
     if (!argv)
         return std::unexpected(ProcessError::ArgumentRejected);
 
@@ -333,7 +338,7 @@ std::expected<ProcessHandle, ProcessError> DeclaredProcesses::start(std::string_
         .workingDirectory = std::move(*directory),
         .environment = childEnvironment(_config.inheritedEnvironment,
                                         _config.manifest.commandEnvironment,
-                                        declared->environment,
+                                        withSetEnvironment(declared->environment, selection->environment),
                                         NativeEnvironmentNameCase),
         .timeout = declared->timeout == CommandTimeout::Short ? _config.timeouts.shortClass
                                                               : _config.timeouts.longClass,

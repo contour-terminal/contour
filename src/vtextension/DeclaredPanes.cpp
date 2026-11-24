@@ -18,6 +18,7 @@
 #include <vtextension/ArgumentKind.hpp>
 #include <vtextension/ChildEnvironment.hpp>
 #include <vtextension/DeclaredArguments.hpp>
+#include <vtextension/EnvironmentSets.hpp>
 #include <vtextension/Utf8.hpp>
 
 using namespace std::string_view_literals;
@@ -193,8 +194,12 @@ std::expected<std::string, PaneError> DeclaredPanes::open(std::string_view paneT
     if (!detail::isWord(tag, MaxPaneTagBytes, "._-"))
         return std::unexpected(PaneError::BadTag);
 
-    auto argv =
-        substituteDeclared(declared->argvTemplate, _config.manifest, args, _directories, _config.roots);
+    auto const selection = selectEnvironmentSet(
+        declared->environmentSet, args, _config.environmentSets, _directories.pathStyle());
+    if (!selection)
+        return std::unexpected(PaneError::ArgumentRejected);
+    auto argv = substituteDeclared(
+        declared->argvTemplate, _config.manifest, selection->arguments, _directories, _config.roots);
     if (!argv)
         return std::unexpected(PaneError::ArgumentRejected);
 
@@ -207,7 +212,8 @@ std::expected<std::string, PaneError> DeclaredPanes::open(std::string_view paneT
 
     return _host.open(PaneSpawn {
         .argv = std::move(*argv),
-        .environment = paneEnvironment(declared->environment, _config.inheritedEnvironment),
+        .environment = paneEnvironment(withSetEnvironment(declared->environment, selection->environment),
+                                       _config.inheritedEnvironment),
         .removedEnvironment = _withheld,
         .directory = std::make_shared<vtpty::DirectoryHandle const>(std::move(*directory)),
         .cwd = std::move(resolvedCwd),

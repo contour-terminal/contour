@@ -21,6 +21,7 @@
 #include <vtextension/DeclaredPanes.hpp>
 #include <vtextension/PaneService.hpp>
 #include <vtextension/ProcessService.hpp>
+#include <vtextension/UserSettableEnvironment.hpp>
 #include <vtextension/testing/FakeDirectoryOpener.hpp>
 #include <vtextension/testing/OrchestratorManifest.hpp>
 
@@ -75,7 +76,10 @@ class RecordingPaneHost final: public IPaneHost
 struct Fixture
 {
     explicit Fixture(std::vector<std::string> inherited = { "PATH=/usr/bin" },
-                     std::vector<ProgramPath> programs = {})
+                     std::vector<ProgramPath> programs = {},
+                     Manifest declared = orchestratorManifest(),
+                     std::vector<EnvironmentSet> sets = {}):
+        manifest { std::move(declared) }
     {
         for (auto const* path: { "/w", "/w/run-1", "/r", "/r/repo" })
             directories.add(path);
@@ -84,7 +88,8 @@ struct Fixture
                                   .roots = { { .label = "worktrees", .paths = { "/w" } },
                                              { .label = "repos", .paths = { "/r" } } },
                                   .inheritedEnvironment = std::move(inherited),
-                                  .programs = std::move(programs) },
+                                  .programs = std::move(programs),
+                                  .environmentSets = std::move(sets) },
             directories,
             host);
         REQUIRE(created.has_value());
@@ -101,7 +106,7 @@ struct Fixture
         return panes->open(paneTemplate, args, cwd, title, tag, std::nullopt);
     }
 
-    Manifest manifest = orchestratorManifest();
+    Manifest manifest;
     FakeDirectoryOpener directories;
     RecordingPaneHost host;
     std::unique_ptr<DeclaredPanes> panes;
@@ -448,4 +453,106 @@ TEST_CASE("every pane key has its own bytes", "[vtextension][panes]")
         CHECK_FALSE(std::ranges::contains(seen, bytes));
         seen.push_back(bytes);
     }
+}
+
+namespace
+{
+
+/// A pane `agent` that takes CLAUDE_CONFIG_DIR and NO_PROXY from the set its `env-set` argument names, and a
+/// pane `plain` that takes no set.
+constexpr auto SetsManifest = "name = sets\n"
+                              "version = 2\n"
+                              "root worktrees = config:worktree_root\n"
+                              "root repos = config:repo_root\n"
+                              "arg env-set = name\n"
+                              "arg model = name\n"
+                              "pane agent @worktrees = claude --model {model}\n"
+                              "pane plain @worktrees = claude --model {model}\n"
+                              "pane-env-set agent {env-set} = CLAUDE_CONFIG_DIR NO_PROXY\n"sv;
+
+/// The user's sets: `work`, which holds an unlisted COPILOT_HOME and no NO_PROXY, and `broken`, whose value
+/// fails its shape (as a set that bypassed checkEnvironmentSets() would).
+[[nodiscard]] std::vector<EnvironmentSet> userSets()
+{
+    return { EnvironmentSet { .name = "work",
+                              .variables = { { .name = "CLAUDE_CONFIG_DIR", .value = "/home/u/.claude-work" },
+                                             { .name = "COPILOT_HOME", .value = "/home/u/.copilot" } } },
+             EnvironmentSet { .name = "broken",
+                              .variables = { { .name = "CLAUDE_CONFIG_DIR", .value = "relative" } } } };
+}
+
+/// A Fixture over SetsManifest and userSets(), with NO_PROXY inherited from the daemon.
+[[nodiscard]] std::unique_ptr<Fixture> setsFixture()
+{
+    auto manifest = parseManifestText(SetsManifest);
+    REQUIRE(manifest.has_value());
+    return std::make_unique<Fixture>(
+        std::vector<std::string> { "PATH=/usr/bin", "NO_PROXY=corp.example.com" },
+        std::vector<ProgramPath> {},
+        std::move(*manifest),
+        userSets());
+}
+
+} // namespace
+
+TEST_CASE("pane-open applies the listed variables of the set the call names", "[vtextension][panes][sets]")
+{
+    auto const f = setsFixture();
+    REQUIRE(f->open({ { "model", "opus" }, { "env-set", "work" } }).has_value());
+
+    REQUIRE(f->host.spawns.size() == 1);
+    auto const& spawn = f->host.spawns.front();
+    // The set argument is no placeholder: it chooses the set, and the argv does not see it.
+    CHECK(spawn.argv == std::vector<std::string> { "claude", "--model", "opus" });
+    CHECK(valueOf(spawn.environment, "CLAUDE_CONFIG_DIR") == "/home/u/.claude-work");
+    // Held by the set, but not listed by the binding.
+    CHECK_FALSE(valueOf(spawn.environment, "COPILOT_HOME").has_value());
+    // Listed, but not held by the set: inherited from the daemon as any other variable, neither set nor
+    // withheld.
+    CHECK_FALSE(valueOf(spawn.environment, "NO_PROXY").has_value());
+    CHECK_FALSE(std::ranges::contains(spawn.removedEnvironment, "NO_PROXY"));
+}
+
+TEST_CASE("pane-open without a set argument applies no set", "[vtextension][panes][sets]")
+{
+    auto const f = setsFixture();
+    REQUIRE(f->open({ { "model", "opus" } }).has_value());
+
+    REQUIRE(f->host.spawns.size() == 1);
+    auto const& spawn = f->host.spawns.front();
+    CHECK(spawn.argv == std::vector<std::string> { "claude", "--model", "opus" });
+    CHECK_FALSE(valueOf(spawn.environment, "CLAUDE_CONFIG_DIR").has_value());
+    CHECK_FALSE(valueOf(spawn.environment, "COPILOT_HOME").has_value());
+}
+
+TEST_CASE("pane-open refuses a set it cannot apply", "[vtextension][panes][sets]")
+{
+    struct Row
+    {
+        std::string_view what;
+        std::string_view paneTemplate;
+        ConfigMap args;
+    };
+    auto const row =
+        GENERATE(Row { .what = "no such set",
+                       .paneTemplate = "agent",
+                       .args = { { "model", "opus" }, { "env-set", "gone" } } },
+                 Row { .what = "not a name",
+                       .paneTemplate = "agent",
+                       .args = { { "model", "opus" }, { "env-set", "bad name" } } },
+                 Row { .what = "a value failing its shape",
+                       .paneTemplate = "agent",
+                       .args = { { "model", "opus" }, { "env-set", "broken" } } },
+                 Row { .what = "a template without a binding",
+                       .paneTemplate = "plain",
+                       .args = { { "model", "opus" }, { "env-set", "work" } } },
+                 Row { .what = "the set argument twice",
+                       .paneTemplate = "agent",
+                       .args = { { "model", "opus" }, { "env-set", "work" }, { "env-set", "work" } } });
+    INFO(row.what);
+    auto const f = setsFixture();
+
+    CHECK(f->open(row.args, "/w/run-1", "run-1", "run-1", row.paneTemplate)
+          == std::unexpected(PaneError::ArgumentRejected));
+    CHECK(f->host.spawns.empty());
 }

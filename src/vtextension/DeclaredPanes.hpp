@@ -23,6 +23,7 @@
 #include <vtextension/PaneService.hpp>
 #include <vtextension/RootResolution.hpp>
 #include <vtextension/SelfPrograms.hpp>
+#include <vtextension/UserSettableEnvironment.hpp>
 
 namespace vtextension
 {
@@ -90,6 +91,7 @@ struct DeclaredPanesConfig
     /// The programs run from a given executable (programTableOf()): a template whose program is one runs that
     /// executable, not what the pane's PATH finds.
     std::vector<ProgramPath> programs = {};
+    std::vector<EnvironmentSet> environmentSets = {}; ///< The user's sets, checked (checkEnvironmentSets()).
 };
 
 /// One extension's agent panes. open() checks, in this order: the template is declared; the title and the
