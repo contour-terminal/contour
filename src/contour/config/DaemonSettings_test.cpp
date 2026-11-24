@@ -22,6 +22,7 @@
 
 #include <vthost/SessionSettings.hpp>
 
+using contour::config::DaemonEnvironmentSet;
 using contour::config::DaemonExtensionAutostart;
 using contour::config::DaemonExtensionProgram;
 using contour::config::DaemonMode;
@@ -355,6 +356,57 @@ TEST_CASE("daemon.extensions: a program that names no executable costs only itse
             loadConfigFromYaml("daemon:\n  extensions:\n    orchestrator:\n      programs: [claude]\n");
         REQUIRE(list.daemon.value().extensions.size() == 1);
         CHECK(list.daemon.value().extensions.front().programs.empty());
+    }
+}
+
+TEST_CASE("daemon.extensions: env_sets name the variables a worker runs with", "[config][daemon]")
+{
+    auto const config =
+        loadConfigFromYaml("daemon:\n"
+                           "  extensions:\n"
+                           "    orchestrator:\n"
+                           "      env_sets:\n"
+                           "        claude-work: { CLAUDE_CONFIG_DIR: '~/.claude-work', HTTPS_PROXY: "
+                           "'http://proxy.example.com:3128' }\n"
+                           "        claude-personal: { CLAUDE_CONFIG_DIR: '~/.claude-personal' }\n");
+    auto const& sets = config.daemon.value().extensions.front().environmentSets;
+    REQUIRE(sets.size() == 2);
+    CHECK(sets[0]
+          == DaemonEnvironmentSet { .name = "claude-work",
+                                    .variables = { { "CLAUDE_CONFIG_DIR", "~/.claude-work" },
+                                                   { "HTTPS_PROXY", "http://proxy.example.com:3128" } } });
+    CHECK(sets[1].name == "claude-personal");
+
+    SECTION("and through the writer")
+    {
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+        CHECK(loadConfigFromYaml(written).daemon.value().extensions == config.daemon.value().extensions);
+    }
+}
+
+TEST_CASE("daemon.extensions: a malformed set or variable costs only itself", "[config][daemon]")
+{
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config =
+        loadConfigFromYaml("daemon:\n"
+                           "  extensions:\n"
+                           "    orchestrator:\n"
+                           "      env_sets:\n"
+                           "        'bad name': { CLAUDE_CONFIG_DIR: /x }\n"
+                           "        listed: [a, b]\n"
+                           "        ok: { 'not-a-var': x, NESTED: { a: b }, CLAUDE_CONFIG_DIR: /x }\n");
+    auto const& sets = config.daemon.value().extensions.front().environmentSets;
+    REQUIRE(sets.size() == 1);
+    CHECK(sets[0] == DaemonEnvironmentSet { .name = "ok", .variables = { { "CLAUDE_CONFIG_DIR", "/x" } } });
+    CHECK(capture.text().contains("set 'ok'"));
+    CHECK(capture.text().contains("kept without it"));
+
+    SECTION("an env_sets that is no map is ignored, the entry kept")
+    {
+        auto const list =
+            loadConfigFromYaml("daemon:\n  extensions:\n    orchestrator:\n      env_sets: [a]\n");
+        REQUIRE(list.daemon.value().extensions.size() == 1);
+        CHECK(list.daemon.value().extensions.front().environmentSets.empty());
     }
 }
 

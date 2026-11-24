@@ -3980,6 +3980,8 @@ std::optional<DaemonExtensionConfig> YAMLConfigReader::readDaemonExtension(std::
 
     if (auto const programs = settings["programs"]; programs && !programs.IsNull())
         extension.programs = readDaemonExtensionPrograms(programs, extension.name, keyPath);
+    if (auto const sets = settings["env_sets"]; sets && !sets.IsNull())
+        extension.environmentSets = readDaemonExtensionEnvironmentSets(sets, extension.name, keyPath);
     return extension;
 }
 
@@ -4046,6 +4048,128 @@ std::vector<DaemonExtensionProgram> YAMLConfigReader::readDaemonExtensionProgram
 #endif
         result.push_back(
             DaemonExtensionProgram { .name = std::move(program), .path = path.lexically_normal() });
+    }
+    return result;
+}
+
+namespace
+{
+    /// Whether @p c is an ASCII letter or digit.
+    [[nodiscard]] constexpr bool isAsciiAlnum(char c) noexcept
+    {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+    }
+
+    /// Whether @p name is a set name of `env_sets`: `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`.
+    [[nodiscard]] bool isDaemonEnvironmentSetName(std::string_view name) noexcept
+    {
+        if (name.empty() || name.size() > 64 || !isAsciiAlnum(name.front()))
+            return false;
+        for (auto const c: name)
+            if (!isAsciiAlnum(c) && c != '.' && c != '_' && c != '-')
+                return false;
+        return true;
+    }
+
+    /// Whether @p name is a variable name of an `env_sets` set: `[A-Za-z_][A-Za-z0-9_]*`.
+    [[nodiscard]] bool isDaemonEnvironmentVariableName(std::string_view name) noexcept
+    {
+        if (name.empty()
+            || !(name.front() == '_' || (name.front() >= 'A' && name.front() <= 'Z')
+                 || (name.front() >= 'a' && name.front() <= 'z')))
+            return false;
+        for (auto const c: name)
+            if (!isAsciiAlnum(c) && c != '_')
+                return false;
+        return true;
+    }
+} // namespace
+
+std::vector<DaemonEnvironmentSet> YAMLConfigReader::readDaemonExtensionEnvironmentSets(
+    YAML::Node const& sets, std::string_view name, std::string_view keyPath) const
+{
+    auto result = std::vector<DaemonEnvironmentSet> {};
+    if (!sets.IsMap())
+    {
+        errorLog()("Ignoring the 'env_sets' of extension '{}' of {}: expected a map from a set's name to its "
+                   "variables.",
+                   name,
+                   keyPath);
+        return result;
+    }
+    for (auto const& item: sets)
+    {
+        auto set = item.first.IsScalar() ? item.first.as<std::string>() : std::string {};
+        if (!isDaemonEnvironmentSetName(set))
+        {
+            errorLog()(
+                "Skipping an env set of extension '{}' of {}: its name must start with a letter or digit, "
+                "then hold only letters, digits, '.', '_' or '-', and be at most 64 characters.",
+                name,
+                keyPath);
+            continue;
+        }
+        if (std::ranges::contains(result, set, &DaemonEnvironmentSet::name))
+        {
+            errorLog()(
+                "Skipping env set '{}' of extension '{}' of {}: it is given twice; the first one stands.",
+                set,
+                name,
+                keyPath);
+            continue;
+        }
+        if (!item.second.IsMap())
+        {
+            errorLog()(
+                "Skipping env set '{}' of extension '{}' of {}: expected a map from a variable's name to "
+                "its value.",
+                set,
+                name,
+                keyPath);
+            continue;
+        }
+        auto variables = std::vector<DaemonEnvironmentVariable> {};
+        for (auto const& variable: item.second)
+        {
+            auto const variableName =
+                variable.first.IsScalar() ? variable.first.as<std::string>() : std::string {};
+            if (!isDaemonEnvironmentVariableName(variableName))
+            {
+                errorLog()(
+                    "Skipping variable '{}' of set '{}' of extension '{}' of {}: its name must start with a "
+                    "letter or '_', then hold only letters, digits or '_'; the set is kept without it.",
+                    variableName,
+                    set,
+                    name,
+                    keyPath);
+                continue;
+            }
+            if (!variable.second.IsScalar())
+            {
+                errorLog()(
+                    "Skipping variable '{}' of set '{}' of extension '{}' of {}: its value is not a text; "
+                    "the set is kept without it.",
+                    variableName,
+                    set,
+                    name,
+                    keyPath);
+                continue;
+            }
+            if (std::ranges::contains(variables, variableName, &DaemonEnvironmentVariable::name))
+            {
+                errorLog()("Skipping variable '{}' of set '{}' of extension '{}' of {}: it is given twice; "
+                           "the first "
+                           "one stands.",
+                           variableName,
+                           set,
+                           name,
+                           keyPath);
+                continue;
+            }
+            variables.push_back(DaemonEnvironmentVariable { .name = variableName,
+                                                            .value = variable.second.as<std::string>() });
+        }
+        result.push_back(DaemonEnvironmentSet { .name = std::move(set), .variables = std::move(variables) });
     }
     return result;
 }

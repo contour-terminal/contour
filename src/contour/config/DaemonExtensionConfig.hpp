@@ -29,6 +29,25 @@ struct DaemonExtensionProgram
     bool operator==(DaemonExtensionProgram const&) const = default;
 };
 
+/// One entry of `daemon.extensions.<name>.env_sets.<set>.<variable>`: a variable a set sets, as written.
+struct DaemonEnvironmentVariable
+{
+    std::string name;  ///< The variable's name, such as `CLAUDE_CONFIG_DIR`.
+    std::string value; ///< Its value as written: `~` is expanded by the host, not here.
+
+    bool operator==(DaemonEnvironmentVariable const&) const = default;
+};
+
+/// One entry of `daemon.extensions.<name>.env_sets`: a named set of variables the extension's workers run
+/// with.
+struct DaemonEnvironmentSet
+{
+    std::string name; ///< The set's name: `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`.
+    std::vector<DaemonEnvironmentVariable> variables = {}; ///< In the configuration's order.
+
+    bool operator==(DaemonEnvironmentSet const&) const = default;
+};
+
 /// One entry of `daemon.extensions`: a WebAssembly extension the daemon runs with no window attached.
 ///
 /// `autostart` is a YAML boolean, converted to DaemonExtensionAutostart here and nowhere further in: the
@@ -40,6 +59,8 @@ struct DaemonExtensionConfig
     DaemonExtensionAutostart autostart = DaemonExtensionAutostart::OnDemand; ///< When it starts.
     std::string configJson = "{}"; ///< Its `config` subtree, as JSON: what the extension is loaded with.
     std::vector<DaemonExtensionProgram> programs {}; ///< Its `programs`, in the configuration's order.
+    std::vector<DaemonEnvironmentSet>
+        environmentSets {}; ///< Its `env_sets`, in the configuration's order; values as written.
 
     bool operator==(DaemonExtensionConfig const&) const = default;
 };

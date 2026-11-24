@@ -523,6 +523,16 @@ struct YAMLConfigReader
                                                                                  std::string_view name,
                                                                                  std::string_view keyPath) const;
 
+    /// Reads the `env_sets` map of an entry of `daemon.extensions:`. A set whose name is not a set name, or whose
+    /// value is no map, is skipped; a variable whose name is not a variable name, or whose value is no scalar, is
+    /// dropped from its set. Each skip is reported. The values are kept as written.
+    /// @param sets The map.
+    /// @param name The extension's key, for the diagnostics.
+    /// @param keyPath Where the extension is declared, for the diagnostics.
+    /// @return The sets that stand, in the map's order; the first of a name given twice.
+    [[nodiscard]] std::vector<DaemonEnvironmentSet> readDaemonExtensionEnvironmentSets(
+        YAML::Node const& sets, std::string_view name, std::string_view keyPath) const;
+
     /// Reads the module `path` of an entry of `extensions:` or `daemon.extensions:`, relative to the directory of
     /// the file that declares it.
     /// @param settings The entry's map.
@@ -986,6 +996,17 @@ struct Writer
                 result += std::format("                {}: {}\n",
                                       SingleQuoted { program.name },
                                       SingleQuoted { core::pathToUtf8(program.path) });
+            if (!extension.environmentSets.empty())
+                result += "            env_sets:\n";
+            for (auto const& set: extension.environmentSets)
+            {
+                result += std::format("                {}:", SingleQuoted { set.name });
+                result += set.variables.empty() ? " {}\n" : "\n";
+                for (auto const& variable: set.variables)
+                    result += std::format("                    {}: {}\n",
+                                          SingleQuoted { variable.name },
+                                          SingleQuoted { variable.value });
+            }
             result += std::format("            config: {}\n", extension.configJson);
         }
         return result;

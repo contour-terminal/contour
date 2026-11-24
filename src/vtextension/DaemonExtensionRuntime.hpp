@@ -38,6 +38,7 @@
 #include <vtextension/RootResolution.hpp>
 #include <vtextension/SelfPrograms.hpp>
 #include <vtextension/ServedTabService.hpp>
+#include <vtextension/UserSettableEnvironment.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 
 namespace vtextension
@@ -97,6 +98,9 @@ struct DaemonExtensionDeclaration
     /// The programs its commands and pane templates run from a given executable (`programs`), not from the
     /// daemon's PATH.
     std::vector<ProgramPath> programs = {};
+    /// The user's variable sets (`env_sets`), as configured: checked and normalised when the extension
+    /// composes.
+    std::vector<EnvironmentSet> environmentSets = {};
 };
 
 /// Why one declaration does not run.

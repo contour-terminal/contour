@@ -1880,6 +1880,8 @@ constexpr StringLiteral DaemonConfig {
     "    {comment} executable to run for it, rather than the one the daemon's PATH finds; config holds the\n"
     "    {comment} extension's own settings. Read when the daemon starts: a change takes effect at its next "
     "start.\n"
+    "    {comment} env_sets names sets of variables (CLAUDE_CONFIG_DIR, ...) the extension's workers run "
+    "with.\n"
     "    {comment} extensions:\n"
     "    {comment}     orchestrator:\n"
     "    {comment}         autostart: true\n"

@@ -90,12 +90,23 @@ vtextension::DaemonExtensionDeclaration daemonExtensionDeclarationOf(DaemonExten
             return vtextension::ProgramPath { .name = program.name, .path = core::pathToUtf8(program.path) };
         })
         | std::ranges::to<std::vector>();
+    auto environmentSets =
+        extension.environmentSets | std::views::transform([](DaemonEnvironmentSet const& set) {
+            auto variables =
+                set.variables | std::views::transform([](DaemonEnvironmentVariable const& variable) {
+                    return vtextension::EnvironmentEntry { .name = variable.name, .value = variable.value };
+                })
+                | std::ranges::to<std::vector>();
+            return vtextension::EnvironmentSet { .name = set.name, .variables = std::move(variables) };
+        })
+        | std::ranges::to<std::vector>();
     return vtextension::DaemonExtensionDeclaration { .name = extension.name,
                                                      .modulePath = extension.path,
                                                      .autostart = toExtensionAutostart(extension.autostart),
                                                      .configJson = extension.configJson,
                                                      .storeDirectory = std::move(storeDirectory),
-                                                     .programs = std::move(programs) };
+                                                     .programs = std::move(programs),
+                                                     .environmentSets = std::move(environmentSets) };
 }
 
 } // namespace contour::config
