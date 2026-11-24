@@ -9,11 +9,28 @@
 #include <string_view>
 #include <vector>
 
+#include <vtextension/SettableEnvironment.hpp>
 #include <vtextension/UserSettableEnvironment.hpp>
 
 using vtextension::CheckedEnvironmentSets;
 using vtextension::EnvironmentSet;
 using vtextension::UserValueFault;
+
+TEST_CASE("UserSettableEnvironment: no user-settable variable is one a manifest may set",
+          "[vtextension][settable][user]")
+{
+    // withSetEnvironment() appends a set's entries to a template's own, and nothing decides between two
+    // entries of one name: the tables being disjoint is what keeps that from arising.
+    for (auto const& user: vtextension::UserSettableVariables)
+        for (auto const& literal: vtextension::SettableVariables)
+        {
+            CAPTURE(user.name, literal.name);
+            auto const sameName = literal.shape == vtextension::SettableName::Exact
+                                      ? user.name == literal.name
+                                      : user.name.starts_with(literal.name);
+            CHECK_FALSE(sameName);
+        }
+}
 
 TEST_CASE("UserSettableEnvironment: values are normalised or refused by their row's shape",
           "[vtextension][settable][user]")
@@ -123,8 +140,11 @@ TEST_CASE("UserSettableEnvironment: a set keeps what may be set and reports the 
         EnvironmentSet { .name = "work",
                          .variables = { { "CLAUDE_CONFIG_DIR", "~/.claude-work" }, { "PATH", "/bin" } } },
         EnvironmentSet { .name = "empty", .variables = { { "HTTPS_PROXY", "nope" } } },
+        EnvironmentSet { .name = "bad\tname", .variables = { { "CLAUDE_CONFIG_DIR", "~/.claude-bad" } } },
     };
     auto const checked = vtextension::checkEnvironmentSets(sets, "/home/u", vtpty::PathStyle::Posix);
+    // A name that is no ArgumentKind::Name would break the grant digest's framing: the set is dropped.
+    CHECK(checked.refusedSets == std::vector { std::string { "bad\tname" } });
     REQUIRE(checked.sets.size() == 2);
     CHECK(checked.sets[0]
           == EnvironmentSet { .name = "work",

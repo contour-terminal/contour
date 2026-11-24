@@ -44,8 +44,10 @@ struct SetSelection
     std::span<EnvironmentSet const> sets,
     vtpty::PathStyle style);
 
-/// A pane's or command's own environment layer followed by what its call's set gives, which comes later and
-/// so wins over a name both hold.
+/// A pane's or command's own environment layer followed by what its call's set gives. The two never hold the
+/// same name: a template's layer holds only SettableVariables, a set only UserSettableVariables, and the two
+/// tables are disjoint (a `[settable]` test pins it). Which entry a consumer keeps for a shared name is so
+/// never asked.
 /// @param declared The template's own `pane-env` or `command-env-for` values.
 /// @param selected SetSelection::environment.
 /// @return @p declared, then @p selected.

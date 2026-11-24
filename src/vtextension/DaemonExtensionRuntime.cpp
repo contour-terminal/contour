@@ -269,6 +269,17 @@ std::expected<std::unique_ptr<DaemonExtensionRuntime::Extension>, DeclarationPro
                    problem.set,
                    problem.variable,
                    userValueFaultText(problem.fault));
+    for (auto const& refused: checkedSets.refusedSets)
+    {
+        // The name is the configuration's own, but it may hold what a log line should not: show it printable.
+        auto shown = refused;
+        std::ranges::replace_if(
+            shown, [](char c) { return static_cast<unsigned char>(c) < 0x20 || c == 0x7F; }, '?');
+        errorLog()("daemon.extensions.{}.env_sets: the set '{}' is dropped: its name is not letters and "
+                   "digits, with '.', '_' and '-' after the first.",
+                   name,
+                   shown);
+    }
     extension->environmentSets = std::move(checkedSets.sets);
     // The sets as checked: what is granted is what the calls apply, so a changed set asks again.
     extension->grantDigest = grantDigestOf(manifest->digest, *roots, extension->environmentSets);

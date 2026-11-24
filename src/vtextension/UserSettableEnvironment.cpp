@@ -103,8 +103,7 @@ namespace
     }
 
     /// @return The value unchanged where it is an https:// URL, or an http:// one to the loopback host with
-    /// an
-    ///         optional port; NotAllowedUrl otherwise.
+    ///         an optional port; NotAllowedUrl otherwise.
     [[nodiscard]] std::expected<std::string, UserValueFault> localOrSecureUrl(std::string_view value)
     {
         auto const parts = urlPartsOf(value);
@@ -134,8 +133,7 @@ namespace
     }
 
     /// @return The value, bounded and free of control bytes, spelled as rootSpellingOf() spells it;
-    /// NotAbsolutePath
-    ///         where it is too long, has a control byte, or is not an absolute path.
+    ///         NotAbsolutePath where it is too long, has a control byte, or is not an absolute path.
     [[nodiscard]] std::expected<std::string, UserValueFault> absolutePath(std::string_view value,
                                                                           std::string_view home,
                                                                           vtpty::PathStyle style)
@@ -154,8 +152,8 @@ namespace
         if (value.empty() || value.size() > MaxUserValueBytes)
             return std::unexpected(UserValueFault::NotHostList);
         auto items = std::views::split(value, ',') | std::views::transform([](auto part) {
-                               return trimmedSpaces(std::string_view(part.begin(), part.end()));
-                           });
+                         return trimmedSpaces(std::string_view(part.begin(), part.end()));
+                     });
         for (auto const item: items)
             if (item.empty() || (item != "*" && !std::ranges::all_of(item, isHostListChar)))
                 return std::unexpected(UserValueFault::NotHostList);
@@ -207,6 +205,11 @@ CheckedEnvironmentSets checkEnvironmentSets(std::span<EnvironmentSet const> sets
     auto checked = CheckedEnvironmentSets {};
     for (auto const& set: sets)
     {
+        if (!argumentAccepts(ArgumentKind::Name, set.name, style))
+        {
+            checked.refusedSets.push_back(set.name);
+            continue;
+        }
         auto& kept = checked.sets.emplace_back(EnvironmentSet { .name = set.name, .variables = {} });
         for (auto const& entry: set.variables)
         {

@@ -117,6 +117,7 @@ struct CheckedEnvironmentSets
 {
     std::vector<EnvironmentSet> sets;            ///< Every set, in order, with its normalised variables.
     std::vector<EnvironmentSetProblem> problems; ///< One per variable dropped.
+    std::vector<std::string> refusedSets; ///< The sets dropped whole: each name is no ArgumentKind::Name.
 };
 
 /// Finds the row of UserSettableVariables that @p name matches.
@@ -154,7 +155,9 @@ struct CheckedEnvironmentSets
 /// @param home The user's home directory.
 /// @param style The path grammar AbsolutePath values are spelled in.
 /// @return The sets with each variable normalised, and the variables refused, one problem each. A set left
-///         empty is kept.
+///         empty is kept; a set whose name is no ArgumentKind::Name is dropped whole and named in
+///         CheckedEnvironmentSets::refusedSets, so that the grant digest's `set\t<name>\n` framing never
+///         rests on the configuration reader's check alone.
 [[nodiscard]] CheckedEnvironmentSets checkEnvironmentSets(std::span<EnvironmentSet const> sets,
                                                           std::string_view home,
                                                           vtpty::PathStyle style);
