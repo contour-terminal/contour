@@ -65,6 +65,8 @@ struct CommandDecl
     /// Whether it is declared in the manifest: an Unmeasured command is not, so the host refuses to run it.
     Verification verification = Verification::Recorded;
     OutputUse output = OutputUse::Read; ///< Whether its output is read at all.
+    /// What it may take from the set the call names; empty: no binding.
+    std::span<std::string_view const> setVariables = {};
 };
 
 /// A program the extension may put in a tab.
@@ -74,6 +76,8 @@ struct PaneDecl
     Root root;                                        ///< The root its working directory must lie in.
     std::span<std::string_view const> argv;           ///< Its words; a whole-word `{name}` is an argument.
     std::span<EnvironmentVariable const> environment; ///< Its fixed environment.
+    /// What it may take from the set the call names; empty: no binding.
+    std::span<std::string_view const> setVariables = {};
 };
 
 /// A value a call passes for a placeholder.
@@ -130,6 +134,12 @@ enum class SubstituteError : uint8_t
 /// The pane template an agent runs in, its system prompt asking for a status board.
 inline constexpr std::string_view AgentPaneTemplate = "agent";
 
+/// The argument whose value names the user's variable set a call takes (`pane-env-set`, `command-env-set`).
+inline constexpr std::string_view EnvSetArgument = "env-set";
+
+/// The pane template a Copilot worker runs in.
+inline constexpr std::string_view CopilotPaneTemplate = "copilot";
+
 /// The pane template an agent runs in when no board is asked for (`status_board: off`).
 inline constexpr std::string_view AgentPlainPaneTemplate = "agent-plain";
 
@@ -179,7 +189,8 @@ struct ActionDecl
 [[nodiscard]] std::string shellQuoted(std::span<std::string const> argv);
 
 /// The manifest lines the tables declare: every root, read, arg, command-env, command, command-env-for,
-/// pane, pane-env, serve and action line, in that order and each kind in table order. A command whose
+/// command-env-set, pane, pane-env, pane-env-set, serve and action line, in that order and each kind in table
+/// order. A command whose
 /// verification is Unmeasured is left out, and so is an argument that no command left in and no pane names.
 /// The manifest is these lines after its fixed `name`, `version`, `title` and `placement` lines.
 /// @return One string per line, without line ends.

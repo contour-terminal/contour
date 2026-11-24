@@ -692,13 +692,18 @@ TEST_CASE("Manifest v2: the orchestrator's manifest", "[vtextension][manifest][c
         EnvironmentEntry { .name = "GIT_ATTR_SOURCE", .value = "4b825dc642cb6eb9a060e54bf8d69288fbee4904" }));
 
     // The agent's tab, and the same without the status board's instruction.
-    REQUIRE(manifest.panes.size() == 2);
-    for (auto const& pane: manifest.panes)
+    REQUIRE(manifest.panes.size() == 3);
+    for (auto const& pane: manifest.panes | std::views::take(2))
     {
         CHECK(pane.root == "worktrees");
         CHECK(pane.argvTemplate.front() == "claude");
         CHECK(pane.environment.size() == 5);
     }
+    // The Copilot worker's tab, which runs the Copilot CLI in the same worktrees with the same git setup.
+    CHECK(manifest.panes[2].name == "copilot");
+    CHECK(manifest.panes[2].root == "worktrees");
+    CHECK(manifest.panes[2].argvTemplate.front() == "copilot");
+    CHECK(manifest.panes[2].environment.size() == 5);
     CHECK(manifest.panes[0].name == "agent");
     CHECK(std::ranges::contains(manifest.panes[0].argvTemplate, "{board}"));
     CHECK(manifest.panes[1].name == "agent-plain");

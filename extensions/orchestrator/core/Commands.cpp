@@ -43,6 +43,7 @@ namespace
         ArgumentDecl { .name = "record", .kind = ArgumentKind::Text, .root = std::nullopt },
         // A Jira query: Text, so one that starts with '-' is refused before it could read as an option.
         ArgumentDecl { .name = "jql", .kind = ArgumentKind::Text, .root = std::nullopt },
+        ArgumentDecl { .name = EnvSetArgument, .kind = ArgumentKind::Name, .root = std::nullopt },
     };
 
     // }}}
@@ -149,6 +150,21 @@ namespace
         EnvironmentVariable { .name = "GIT_CONFIG_VALUE_0", .value = "upstream" },
         EnvironmentVariable { .name = "GIT_CONFIG_KEY_1", .value = "push.autoSetupRemote" },
         EnvironmentVariable { .name = "GIT_CONFIG_VALUE_1", .value = "true" },
+    };
+
+    // }}}
+    // {{{ variable sets
+
+    /// What a Claude worker's set may hold: where its state and its network come from.
+    constexpr auto ClaudeSetVariables = std::array {
+        "CLAUDE_CONFIG_DIR"sv, "ANTHROPIC_BASE_URL"sv, "HTTPS_PROXY"sv, "HTTP_PROXY"sv, "NO_PROXY"sv,
+    };
+    /// What a Copilot worker's set may hold: its state directory and the network.
+    constexpr auto CopilotSetVariables = std::array {
+        "COPILOT_HOME"sv,
+        "HTTPS_PROXY"sv,
+        "HTTP_PROXY"sv,
+        "NO_PROXY"sv,
     };
 
     // }}}
@@ -363,13 +379,15 @@ namespace
                       .timeout = Timeout::Short,
                       .root = Root::Worktrees,
                       .argv = AgentSetupCheckArgv,
-                      .environment = {} },
+                      .environment = {},
+                      .setVariables = ClaudeSetVariables },
         // In the worktree root, as the hooks check.
         CommandDecl { .name = "claude-plugins",
                       .timeout = Timeout::Short,
                       .root = Root::Worktrees,
                       .argv = ClaudePluginsArgv,
-                      .environment = {} },
+                      .environment = {},
+                      .setVariables = ClaudeSetVariables },
         // Their exit status is all that is read: what they print is Claude Code's to word.
         CommandDecl { .name = "claude-marketplace-add",
                       .timeout = Timeout::Long,
@@ -377,20 +395,23 @@ namespace
                       .argv = ClaudeMarketplaceAddArgv,
                       .environment = {},
                       .verification = Verification::Recorded,
-                      .output = OutputUse::ExitStatusOnly },
+                      .output = OutputUse::ExitStatusOnly,
+                      .setVariables = ClaudeSetVariables },
         CommandDecl { .name = "claude-plugin-install",
                       .timeout = Timeout::Long,
                       .root = Root::Worktrees,
                       .argv = ClaudePluginInstallArgv,
                       .environment = {},
                       .verification = Verification::Recorded,
-                      .output = OutputUse::ExitStatusOnly },
+                      .output = OutputUse::ExitStatusOnly,
+                      .setVariables = ClaudeSetVariables },
         // In the worktree root too: a Finished run's worktree is usually gone, its transcript is not.
         CommandDecl { .name = "agent-transcript",
                       .timeout = Timeout::Short,
                       .root = Root::Worktrees,
                       .argv = AgentTranscriptArgv,
-                      .environment = {} },
+                      .environment = {},
+                      .setVariables = ClaudeSetVariables },
         // Appends to a file in contour's state directory; it runs in the worktree root, which always exists.
         CommandDecl { .name = "agent-record",
                       .timeout = Timeout::Short,
@@ -402,7 +423,8 @@ namespace
                       .timeout = Timeout::Short,
                       .root = Root::Worktrees,
                       .argv = AgentStatsArgv,
-                      .environment = {} },
+                      .environment = {},
+                      .setVariables = ClaudeSetVariables },
         CommandDecl { .name = "glab-auth",
                       .timeout = Timeout::Short,
                       .root = Root::Repos,
@@ -465,15 +487,26 @@ namespace
         "{session}"sv, "--settings"sv, "{settings}"sv, "{prompt}"sv,
     };
 
+    /// The Copilot CLI, asked for the model and the prompt, in its interactive mode.
+    constexpr auto CopilotPaneArgv =
+        std::array { "copilot"sv, "--model"sv, "{model}"sv, "-i"sv, "{prompt}"sv };
+
     constexpr auto PaneTable = std::array {
         PaneDecl { .name = AgentPaneTemplate,
                    .root = Root::Worktrees,
                    .argv = AgentPaneArgv,
-                   .environment = AgentPaneEnvironment },
+                   .environment = AgentPaneEnvironment,
+                   .setVariables = ClaudeSetVariables },
         PaneDecl { .name = AgentPlainPaneTemplate,
                    .root = Root::Worktrees,
                    .argv = AgentPlainPaneArgv,
-                   .environment = AgentPaneEnvironment },
+                   .environment = AgentPaneEnvironment,
+                   .setVariables = ClaudeSetVariables },
+        PaneDecl { .name = CopilotPaneTemplate,
+                   .root = Root::Worktrees,
+                   .argv = CopilotPaneArgv,
+                   .environment = AgentPaneEnvironment,
+                   .setVariables = CopilotSetVariables },
     };
 
     // }}}
@@ -497,10 +530,23 @@ namespace
         return decl.verification == Verification::Recorded;
     }
 
+    /// @return Whether a declared command or a pane binds a variable set, which puts the env-set argument in
+    ///         the manifest.
+    [[nodiscard]] bool bindsSet() noexcept
+    {
+        return std::ranges::any_of(
+                   CommandTable,
+                   [](CommandDecl const& decl) { return isDeclared(decl) && !decl.setVariables.empty(); })
+               || std::ranges::any_of(PaneTable,
+                                      [](PaneDecl const& decl) { return !decl.setVariables.empty(); });
+    }
+
     /// @return Whether a declared command or a pane names the argument @p name: an argument nothing in the
-    ///         manifest uses is left out of it.
+    ///         manifest uses is left out of it. A binding uses the set argument.
     [[nodiscard]] bool isNamedInManifest(std::string_view name) noexcept
     {
+        if (name == EnvSetArgument && bindsSet())
+            return true;
         auto const names = [&](std::span<std::string_view const> argv) {
             return std::ranges::any_of(argv,
                                        [&](std::string_view word) { return placeholderName(word) == name; });
@@ -518,6 +564,19 @@ namespace
         for (auto const part: parts)
             text += part;
         return text;
+    }
+
+    /// A `pane-env-set` or `command-env-set` line.
+    /// @param keyword The line's keyword, with its trailing space.
+    /// @param target The pane or command the binding is for.
+    /// @param variables What the target may take from the set.
+    /// @return The line, without its line end.
+    [[nodiscard]] std::string setLine(std::string_view keyword,
+                                      std::string_view target,
+                                      std::span<std::string_view const> variables)
+    {
+        auto const words = joined(variables);
+        return concat({ keyword, target, " {", EnvSetArgument, "} = ", words });
     }
 
     /// The manifest's spelling of @p decl's kind: `path:<root>` for a Path.
@@ -670,12 +729,18 @@ std::vector<std::string> manifestLines()
         for (auto const& variable: decl.environment)
             lines.push_back(
                 concat({ "command-env-for ", decl.name, " ", variable.name, " = ", variable.value }));
+    for (auto const& decl: declared)
+        if (!decl.setVariables.empty())
+            lines.push_back(setLine("command-env-set ", decl.name, decl.setVariables));
     for (auto const& decl: PaneTable)
         lines.push_back(
             concat({ "pane ", decl.name, " @", manifestLabel(decl.root), " = ", joined(decl.argv) }));
     for (auto const& decl: PaneTable)
         for (auto const& variable: decl.environment)
             lines.push_back(concat({ "pane-env ", decl.name, " ", variable.name, " = ", variable.value }));
+    for (auto const& decl: PaneTable)
+        if (!decl.setVariables.empty())
+            lines.push_back(setLine("pane-env-set ", decl.name, decl.setVariables));
     // The `m` line types what the user wrote into an agent's tab: nothing else is ever typed there.
     lines.emplace_back("pane-input");
     lines.push_back(concat({ "serve ", ServedScheme }));

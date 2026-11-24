@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <format>
 #include <iterator>
 #include <map>
 #include <optional>
@@ -1036,7 +1037,8 @@ TEST_CASE("names are unique and every placeholder is a declared argument", "[orc
     for (auto const& decl: argumentDecls())
     {
         CAPTURE(decl.name);
-        CHECK(used.contains(decl.name));
+        // The set argument is used by the bindings (`pane-env-set`, `command-env-set`), not by an argv.
+        CHECK((used.contains(decl.name) || decl.name == EnvSetArgument));
         CHECK(decl.root.has_value() == (decl.kind == ArgumentKind::Path));
     }
 }
@@ -1085,6 +1087,30 @@ TEST_CASE("manifestLines spells the declared tables", "[orchestrator][commands][
         CAPTURE(line);
         CHECK(std::ranges::contains(lines, line));
     }
+}
+
+TEST_CASE("manifestText binds the Claude commands and panes to a worker's set",
+          "[orchestrator][commands][manifest]")
+{
+    auto const lines = manifestLines();
+    auto const has = [&](std::string_view line) {
+        return std::ranges::contains(lines, std::string(line));
+    };
+    CHECK(has("arg env-set = name"));
+    for (auto const name: { "agent-setup-check"sv,
+                            "claude-plugins"sv,
+                            "claude-marketplace-add"sv,
+                            "claude-plugin-install"sv,
+                            "agent-transcript"sv,
+                            "agent-stats"sv })
+        CHECK(has(std::format("command-env-set {} {{env-set}} = CLAUDE_CONFIG_DIR ANTHROPIC_BASE_URL "
+                              "HTTPS_PROXY HTTP_PROXY NO_PROXY",
+                              name)));
+    CHECK_FALSE(std::ranges::any_of(
+        lines, [](std::string const& line) { return line.starts_with("command-env-set agent-record "); }));
+    CHECK(has("pane copilot @worktrees = copilot --model {model} -i {prompt}"));
+    CHECK(has("pane-env-set copilot {env-set} = COPILOT_HOME HTTPS_PROXY HTTP_PROXY NO_PROXY"));
+    CHECK(findPaneTemplate(CopilotPaneTemplate) != nullptr);
 }
 
 TEST_CASE("agent-transcript runs in the worktree root", "[orchestrator][commands][transcript]")

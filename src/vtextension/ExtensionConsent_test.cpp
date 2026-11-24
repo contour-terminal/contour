@@ -455,8 +455,12 @@ TEST_CASE("ExtensionConsent: the daemon question shows every variable a command 
     };
     // What a granted program runs with is part of what is granted: every entry, one line each.
     auto const& shown = question.lines;
-    auto const environmentLines = static_cast<std::size_t>(std::ranges::count_if(
-        shown, [](vtextension::ConsentLine const& line) { return line.text.starts_with("  "); }));
+    // A binding's `From the variable set` line is indented too, but names what the set may hold, not an
+    // entry.
+    auto const environmentLines =
+        static_cast<std::size_t>(std::ranges::count_if(shown, [](vtextension::ConsentLine const& line) {
+            return line.text.starts_with("  ") && !line.text.starts_with("  From the variable set ");
+        }));
     auto declared = manifest.commandEnvironment.size();
     for (auto const& command: manifest.commands)
         declared += command.environment.size();
