@@ -166,6 +166,18 @@ std::vector<std::string> linesOf(std::string_view text)
            | std::views::transform([](auto const& line) { return std::string { std::string_view { line } }; })
            | std::ranges::to<std::vector>();
 }
+
+/// Checks the probe's report of an agent started in @p worktree: its directory first, GIT_DIR and GH_REPO
+/// withheld, GIT_SSH_COMMAND kept.
+void checkAgentReport(HeldWorktree const& worktree, std::string_view report)
+{
+    auto const lines = linesOf(report);
+    REQUIRE_FALSE(lines.empty());
+    CHECK(lines.front() == worktree.handle->resolvedPath());
+    CHECK(std::ranges::none_of(lines, [](std::string_view line) { return line.starts_with("GIT_DIR="); }));
+    CHECK(std::ranges::none_of(lines, [](std::string_view line) { return line.starts_with("GH_REPO="); }));
+    CHECK(std::ranges::contains(lines, std::string { "GIT_SSH_COMMAND=ssh -i kept" }));
+}
     #endif
 #endif
 
@@ -275,12 +287,24 @@ TEST_CASE("a host without profiles spawns an agent in the handle's directory, on
         { .commandOverride = agentOverride(worktree), .startDirectory = vthost::StartDirectory::Required });
     REQUIRE(tab != nullptr);
 
-    auto const lines = linesOf(awaitFile(worktree.report(), [&] { h.turn(); }));
-    REQUIRE_FALSE(lines.empty());
-    CHECK(lines.front() == worktree.handle->resolvedPath());
-    CHECK(std::ranges::none_of(lines, [](std::string_view line) { return line.starts_with("GIT_DIR="); }));
-    CHECK(std::ranges::none_of(lines, [](std::string_view line) { return line.starts_with("GH_REPO="); }));
-    CHECK(std::ranges::contains(lines, std::string { "GIT_SSH_COMMAND=ssh -i kept" }));
+    checkAgentReport(worktree, awaitFile(worktree.report(), [&] { h.turn(); }));
+}
+
+TEST_CASE("a profile's spawn starts an agent in the handle's directory, on Windows",
+          "[vthost][spawn][profiles]")
+{
+    auto const worktree = HeldWorktree {};
+    auto const inherited = InheritedRepositorySelection {};
+    auto shell = vthost::testing::fakeProfile(DefaultShell, vtbackend::LineCount(100));
+    shell.sandbox = vthost::SandboxEscape::Contained;
+    auto h = SpawningHost { std::make_shared<vthost::testing::FakeProfileCatalog>(
+        std::map<std::string, vthost::ResolvedProfile> { { "main", std::move(shell) } }, "main") };
+
+    auto const* tab = h.host.createTab(
+        { .commandOverride = agentOverride(worktree), .startDirectory = vthost::StartDirectory::Required });
+    REQUIRE(tab != nullptr);
+
+    checkAgentReport(worktree, awaitFile(worktree.report(), [&] { h.turn(); }));
 }
 
 // CreateProcessW takes the directory by path: a worktree renamed away, and another put at its name, is
