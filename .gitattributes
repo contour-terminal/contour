@@ -28,3 +28,7 @@ src/vtbackend/state/golden/*.bin binary
 # manifest corpus pins its own line ends (contract/manifest-v2/.gitattributes) and binary fixtures are detected.
 # A fixture whose line ends are data (a recorded CRLF, say) gets a `-text` rule of its own.
 extensions/orchestrator/** text=auto eol=lf
+
+# The agent transcript fixtures are read byte for byte and the rendered page is compared with page-1.txt; a CRLF
+# checkout puts a CR into every recorded line and every expected one, so they stay LF in every working tree.
+src/contour/cli/testdata/agent-transcript/** text eol=lf
