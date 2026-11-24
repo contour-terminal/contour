@@ -64,6 +64,7 @@ set(vtextension_HEADERS
     wasm/WasiAllowList.hpp
     wasm/WasmBinary.hpp
     wasm/WasmRuntime.hpp
+    wasm/wasi/Preview1Signatures.hpp
 )
 
 add_library(vtextension STATIC ${vtextension_SOURCES} ${vtextension_HEADERS})
@@ -172,5 +173,10 @@ endif()
 # name everything that composes a program links: the GUI, contour_cli (`contour daemon`), bench-headless and the
 # test executables. vtextension and vthost do not. Its target defines vtextension::wasm::makeDefaultBackend().
 add_subdirectory(wasm/${CONTOUR_WASM_RUNTIME})
+if(CONTOUR_HAVE_WASMTIME AND NOT CONTOUR_WASM_RUNTIME STREQUAL "wasmtime")
+    # Wasmtime's backend, beside the selected one: built and tested wherever Wasmtime was found, while no
+    # program links it yet.
+    add_subdirectory(wasm/wasmtime)
+endif()
 add_library(vtextension_runtime INTERFACE)
 target_link_libraries(vtextension_runtime INTERFACE vtextension_${CONTOUR_WASM_RUNTIME})

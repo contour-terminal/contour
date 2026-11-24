@@ -1,0 +1,29 @@
+# vtextension_wasmtime: the Wasmtime backend of the WebAssembly runtime interface (../WasmRuntime.hpp). The only
+# target that links Wasmtime, and built only where CONTOUR_HAVE_WASMTIME is ON. It is not the default backend
+# yet: nothing but its own tests links it. scripts/check-wasm-runtime-containment.py keeps it contained.
+
+add_library(vtextension_wasmtime STATIC
+    WasmtimeBackend.cpp
+    WasmtimeModule.cpp
+    WasmtimeBackend.hpp
+    WasmtimeHandles.hpp
+    WasmtimeRuntime.hpp
+)
+target_link_libraries(vtextension_wasmtime PUBLIC vtextension PRIVATE contour::wasmtime)
+
+if(VTEXTENSION_TESTING)
+    # The backend's own suite: the contract, and what is Wasmtime's alone, which drives its C API directly.
+    # PreparedGeneration.cpp defines the probe runtime-agnostic tests read (../testing/PreparedGeneration.hpp).
+    add_executable(vtextension_wasmtime_test
+        ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+        PreparedGeneration.cpp
+        WasmtimeBackend_test.cpp
+    )
+    target_link_libraries(vtextension_wasmtime_test PRIVATE
+        vtextension vtextension_wasmtime contour::wasmtime core::testing Catch2::Catch2 contour_test_trace)
+    add_test(NAME vtextension_wasmtime_test COMMAND vtextension_wasmtime_test)
+    if(NOT WIN32)
+        # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+        target_compile_options(vtextension_wasmtime_test PRIVATE -Wno-c2y-extensions)
+    endif()
+endif()
