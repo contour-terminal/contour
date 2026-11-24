@@ -37,6 +37,7 @@
 #include <core/net/ISocket.hpp>
 #include <core/net/KeepAlive.hpp>
 #include <core/net/NetError.hpp>
+#include <core/net/NetExport.hpp>
 #include <core/net/SocketBuffers.hpp>
 
 #include <chrono>
@@ -128,6 +129,7 @@ class IConnector
 /// @param resolver The name-resolution seam. Not owned; it must outlive the connector. A caller
 ///        with none of its own passes @c defaultAsyncResolver().
 /// @return The connector.
-[[nodiscard]] std::unique_ptr<IConnector> makeConnector(EventLoop& loop, IAsyncAddressResolver& resolver);
+[[nodiscard]] CORE_NET_API std::unique_ptr<IConnector> makeConnector(EventLoop& loop,
+                                                                     IAsyncAddressResolver& resolver);
 
 } // namespace core::net

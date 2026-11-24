@@ -12,6 +12,8 @@
 /// Ported from fastcached's `Async/ReactorWorkerIdentity.hpp` at `0708dd54`. Origin:
 /// [fastcached#668](https://github.com/LASTRADA-Software/fastcached/issues/668).
 
+#include <core/net/NetExport.hpp>
+
 #include <atomic>
 #include <thread>
 
@@ -23,7 +25,7 @@ namespace core::net::detail
 /// **Two variables rather than one**, and that is not redundancy: a default-constructed
 /// `std::thread::id` is a legal value to compare against, so a single id field cannot tell
 /// "nobody is running" from "some thread whose id happens to compare equal to the empty one".
-class WorkerIdentity
+class CORE_NET_API WorkerIdentity
 {
   public:
     /// Marks the calling thread as this loop's worker for the scope of one drive.

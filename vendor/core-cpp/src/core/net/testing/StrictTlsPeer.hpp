@@ -18,6 +18,7 @@
 
 #include <core/async/Task.hpp>
 #include <core/net/ISocket.hpp>
+#include <core/net/NetTlsExport.hpp>
 #include <core/net/Tls.hpp>
 
 #include <cstddef>
@@ -39,7 +40,7 @@ enum class StreamEnd : std::uint8_t
 };
 
 /// One TLS endpoint over the far end of a socket pair, pumped by hand.
-class StrictTlsPeer
+class CORE_NET_TLS_API StrictTlsPeer
 {
   public:
     /// A client that verifies nothing (the cases check identity by asking, not by failing).
@@ -120,20 +121,20 @@ class StrictTlsPeer
 
 /// @param certPem A PEM certificate.
 /// @return Its subject's common name, or empty.
-[[nodiscard]] std::string certificateCommonName(std::string_view certPem);
+[[nodiscard]] CORE_NET_TLS_API std::string certificateCommonName(std::string_view certPem);
 
 /// @param certPem A PEM certificate.
 /// @param host A DNS name.
 /// @return Whether a client checking @p host would accept the certificate for it.
-[[nodiscard]] bool certificateMatchesHost(std::string_view certPem, std::string_view host);
+[[nodiscard]] CORE_NET_TLS_API bool certificateMatchesHost(std::string_view certPem, std::string_view host);
 
 /// @param certPem A PEM certificate.
 /// @param address An IP address literal.
 /// @return Whether a client checking @p address would accept the certificate for it.
-[[nodiscard]] bool certificateMatchesIp(std::string_view certPem, std::string_view address);
+[[nodiscard]] CORE_NET_TLS_API bool certificateMatchesIp(std::string_view certPem, std::string_view address);
 
 /// Leaves an error on the calling thread's OpenSSL error queue, as another connection on the same
 /// loop thread might.
-void leaveStaleOpensslError();
+CORE_NET_TLS_API void leaveStaleOpensslError();
 
 } // namespace core::net::testing

@@ -52,6 +52,8 @@ core_cpp_add_module(base KIND STATIC
         WideString.hpp
         "${CORE_CPP_GENERATED_INCLUDE_DIR}/core/Config.hpp"
     SOURCES
+        Assert.cpp
+        Clock.cpp
         Environment.cpp
         Random.cpp
         SystemRandomSource.hpp

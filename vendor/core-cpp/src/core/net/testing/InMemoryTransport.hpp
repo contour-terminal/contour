@@ -16,6 +16,7 @@
 #include <core/net/EventLoop.hpp>
 #include <core/net/ISocket.hpp>
 #include <core/net/IoResult.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <expected>
 #include <memory>
@@ -35,6 +36,6 @@ struct SocketPair
 /// @param loop The loop whose reactor drives readiness (not owned).
 /// @return The connected pair, or a @c NetError if the underlying pair could not
 ///         be created.
-[[nodiscard]] std::expected<SocketPair, NetError> makeSocketPair(EventLoop& loop);
+[[nodiscard]] CORE_NET_API std::expected<SocketPair, NetError> makeSocketPair(EventLoop& loop);
 
 } // namespace core::net::testing

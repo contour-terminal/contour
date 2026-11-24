@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/tui/TuiCoreExport.hpp>
+
 #include <cstdint>
 #include <functional>
 #include <span>
@@ -35,7 +37,7 @@ struct CommandEntry
 ///
 /// Provides a data-driven, centralized store of palette commands. Commands
 /// can be added and removed dynamically, and filtered by context (Shell/Agent/Both).
-class CommandRegistry
+class CORE_TUI_CORE_API CommandRegistry
 {
   public:
     CommandRegistry() = default;

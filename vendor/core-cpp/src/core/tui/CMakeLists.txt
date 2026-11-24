@@ -44,6 +44,9 @@ core_cpp_add_module(tui_output KIND STATIC
 if(CORE_CPP_TESTING AND NOT CORE_CPP_PLATFORM_PORTABLE AND TARGET core-cpp-tui_output)
     add_library(core-cpp-tui_output-portable-check OBJECT portable/TerminalOutput.cpp)
     target_link_libraries(core-cpp-tui_output-portable-check PRIVATE core::base)
+    # Compiled as core::tui_output's own code, so its export macro exports: MSVC refuses a definition
+    # of a function it reads as imported.
+    target_compile_definitions(core-cpp-tui_output-portable-check PRIVATE CORE_TUI_OUTPUT_API_BUILDING)
     core_cpp_apply_toolchain(core-cpp-tui_output-portable-check)
 endif()
 

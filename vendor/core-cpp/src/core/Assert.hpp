@@ -9,6 +9,8 @@
 /// defines as macros of its own. The checks that report through core::log, fatal() and
 /// SoftRequire(), are in `<core/log/Assert.hpp>`.
 
+#include <core/BaseExport.hpp>
+
 #include <cstdlib>
 #include <format>
 #include <functional>
@@ -31,11 +33,10 @@ using FailHandler = std::function<void(std::string_view, std::string_view, std::
 
 namespace detail
 {
-    inline FailHandler& failHandler() noexcept
-    {
-        static FailHandler storage {};
-        return storage;
-    }
+    /// The process-wide handler, defined in the library so that every image linking core-cpp
+    /// shares one: a handler set in an executable has to reach a check compiled into a DLL.
+    /// @return The handler slot; empty when none is set.
+    CORE_BASE_API FailHandler& failHandler() noexcept;
 
     [[noreturn]] inline void fail(std::string_view text,
                                   std::string_view message,

@@ -8,6 +8,7 @@
 /// short for the datagram is a path no legal datagram can reach once the buffer is sized by family,
 /// so without it the truncation check on either platform could only be read, never run.
 
+#include <core/net/NetExport.hpp>
 #include <core/net/UdpSocket.hpp>
 #include <core/net/detail/DatagramAddressing.hpp>
 
@@ -36,11 +37,11 @@ namespace core::net::detail
 /// @param receiveBuffer The receive buffer's length, or `std::nullopt` for @c receiveBufferFor the
 ///        family that bound. Only a test passes a length.
 /// @return The socket, or why it could not be bound.
-[[nodiscard]] std::expected<std::unique_ptr<IDatagramSocket>, NetError> openUdpSocketWithReceiveBuffer(
-    std::string_view bindAddress,
-    std::uint16_t port,
-    BroadcastMode broadcast,
-    PortSharing sharing,
-    std::optional<std::size_t> receiveBuffer);
+[[nodiscard]] CORE_NET_API std::expected<std::unique_ptr<IDatagramSocket>, NetError>
+openUdpSocketWithReceiveBuffer(std::string_view bindAddress,
+                               std::uint16_t port,
+                               BroadcastMode broadcast,
+                               PortSharing sharing,
+                               std::optional<std::size_t> receiveBuffer);
 
 } // namespace core::net::detail

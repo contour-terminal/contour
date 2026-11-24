@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/platform/FileSystem.hpp>
+#include <core/platform/PlatformExport.hpp>
 
 #include <algorithm>
 #include <cerrno>
@@ -32,8 +33,8 @@ struct CorePmu
 /// @param fs Where sysfs is read from.
 /// @param sysRoot The sysfs mount point, "/sys" on a running system.
 /// @return The core PMUs, by name; empty when none is found or readable.
-[[nodiscard]] std::vector<CorePmu> discoverCorePmus(FileSystem const& fs,
-                                                    std::filesystem::path const& sysRoot);
+[[nodiscard]] CORE_PLATFORM_API std::vector<CorePmu> discoverCorePmus(FileSystem const& fs,
+                                                                      std::filesystem::path const& sysRoot);
 
 /// The perf_event_attr config that selects a hardware event on a core PMU.
 /// With one PMU that is the plain event (pre-6.6 arm64 rejects the extended type); with several it is the
@@ -41,9 +42,9 @@ struct CorePmu
 /// @param event The PERF_COUNT_HW_* value.
 /// @param pmu The PMU to count on.
 /// @param pmuCount How many core PMUs the machine has.
-[[nodiscard]] std::uint64_t hardwareConfig(std::uint64_t event,
-                                           CorePmu const& pmu,
-                                           std::size_t pmuCount) noexcept;
+[[nodiscard]] CORE_PLATFORM_API std::uint64_t hardwareConfig(std::uint64_t event,
+                                                             CorePmu const& pmu,
+                                                             std::size_t pmuCount) noexcept;
 
 /// What one perf event file descriptor reports.
 struct PmuReading
@@ -63,8 +64,8 @@ struct PmuReading
 /// @return The sum of the current values (cumulative, so deltas of consecutive results are counts); nothing
 ///         if there are no readings, the sizes differ, a reading went backwards, or the interval's running
 ///         times fall short of its smallest enabled time by more than 1 %.
-[[nodiscard]] std::optional<std::uint64_t> combinePmuReadings(std::span<PmuReading const> previous,
-                                                              std::span<PmuReading const> current) noexcept;
+[[nodiscard]] CORE_PLATFORM_API std::optional<std::uint64_t> combinePmuReadings(
+    std::span<PmuReading const> previous, std::span<PmuReading const> current) noexcept;
 
 /// The result of opening one measure on one PMU.
 struct OpenOutcome
@@ -76,7 +77,8 @@ struct OpenOutcome
 /// @param fs Where the file is read from.
 /// @param path The perf_event_paranoid file, /proc/sys/kernel/perf_event_paranoid on a running system.
 /// @return The level, or nothing if the file is unreadable or not a number.
-[[nodiscard]] std::optional<int> readParanoidLevel(FileSystem const& fs, std::filesystem::path const& path);
+[[nodiscard]] CORE_PLATFORM_API std::optional<int> readParanoidLevel(FileSystem const& fs,
+                                                                     std::filesystem::path const& path);
 
 /// Whether a perf event inherits to the children of a thread, or only to its threads.
 enum class InheritMode : std::uint8_t
@@ -105,9 +107,9 @@ struct MeasureOpening
 /// @param pmuCount How many core PMUs the machine has.
 /// @param paranoidLevel The paranoid level, if it could be read.
 /// @return Empty when every open succeeded.
-[[nodiscard]] std::string decideMeasure(std::span<OpenOutcome const> outcomes,
-                                        std::size_t pmuCount,
-                                        std::optional<int> paranoidLevel);
+[[nodiscard]] CORE_PLATFORM_API std::string decideMeasure(std::span<OpenOutcome const> outcomes,
+                                                          std::size_t pmuCount,
+                                                          std::optional<int> paranoidLevel);
 
 /// Opens one measure on every core PMU, in one inheritance mode throughout.
 /// Opens in @p preferred. If that mode is ThreadsOnly and any open fails with EINVAL (kernel < 5.13), the
@@ -164,6 +166,7 @@ template <typename Fd>
 /// Phrases why perf_event_open() failed.
 /// @param error The errno.
 /// @param paranoidLevel The value of /proc/sys/kernel/perf_event_paranoid, if it could be read.
-[[nodiscard]] std::string perfOpenFailureReason(int error, std::optional<int> paranoidLevel);
+[[nodiscard]] CORE_PLATFORM_API std::string perfOpenFailureReason(int error,
+                                                                  std::optional<int> paranoidLevel);
 
 } // namespace core::platform::detail

@@ -14,6 +14,7 @@
 
 #include <core/async/Task.hpp>
 #include <core/net/ISocket.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -43,10 +44,10 @@ namespace core::net
 ///        can run to minutes.
 /// @param ioTimeout How long each later send or receive may block; non-positive leaves it unbounded.
 /// @return The connected socket, or why the attempt did not succeed.
-[[nodiscard]] async::Task<SocketResult> connectTcp(std::string host,
-                                                   std::uint16_t port,
-                                                   std::chrono::milliseconds connectTimeout,
-                                                   std::chrono::milliseconds ioTimeout);
+[[nodiscard]] CORE_NET_API async::Task<SocketResult> connectTcp(std::string host,
+                                                                std::uint16_t port,
+                                                                std::chrono::milliseconds connectTimeout,
+                                                                std::chrono::milliseconds ioTimeout);
 
 /// Writes every byte of @p bytes, looping over partial writes.
 ///
@@ -58,7 +59,7 @@ namespace core::net
 ///        must not be a reference: the frame outlives the call expression.
 /// @param bytes The payload; must outlive the task, which is the socket contract's rule.
 /// @return True when every byte was written; false on any error, or on a write that took nothing.
-[[nodiscard]] async::Task<bool> sendAll(ISocket* socket, std::span<std::byte const> bytes);
+[[nodiscard]] CORE_NET_API async::Task<bool> sendAll(ISocket* socket, std::span<std::byte const> bytes);
 
 /// Reads exactly @p count bytes, looping over partial reads.
 /// @param socket The connected socket; must not be null.
@@ -66,7 +67,7 @@ namespace core::net
 ///        socket: a zero-length read would answer `0`, which on this interface means the peer
 ///        finished sending, so a zero-length payload would read as a peer that closed.
 /// @return The bytes, or nullopt if the peer closed or failed before they all arrived.
-[[nodiscard]] async::Task<std::optional<std::vector<std::byte>>> receiveExactly(ISocket* socket,
-                                                                                std::size_t count);
+[[nodiscard]] CORE_NET_API async::Task<std::optional<std::vector<std::byte>>> receiveExactly(
+    ISocket* socket, std::size_t count);
 
 } // namespace core::net

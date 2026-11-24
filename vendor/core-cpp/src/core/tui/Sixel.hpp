@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/tui/Error.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <cstdint>
 #include <span>
@@ -27,6 +28,7 @@ struct ImageData
 /// @param image The source image data (RGBA, 4 bytes per pixel).
 /// @param maxColors Maximum number of colors in the palette (1-256, default 256).
 /// @return The sixel-encoded string, or an error.
-[[nodiscard]] auto encodeSixel(ImageData const& image, int maxColors = 256) -> Result<std::string>;
+[[nodiscard]] CORE_TUI_CORE_API auto encodeSixel(ImageData const& image, int maxColors = 256)
+    -> Result<std::string>;
 
 } // namespace core::tui

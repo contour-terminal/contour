@@ -30,6 +30,7 @@
 #include <core/net/ISocket.hpp>
 #include <core/net/IoAwaitable.hpp>
 #include <core/net/NetError.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <coroutine>
 #include <cstddef>
@@ -51,7 +52,7 @@ namespace core::net::testing
 /// **It records facts and wakes whoever waits on them; it decides nothing.** What a write meets
 /// after the reading end has gone is the socket's decision (@c InMemorySocket), made from what the
 /// pipe records here, the way a TCP stack decides it from its own state.
-class InMemoryPipe
+class CORE_NET_API InMemoryPipe
 {
   public:
     /// What the pipe calls when something one of its ends waits on has changed.
@@ -192,7 +193,7 @@ class InMemoryPipe
 /// (@c contract::claimReadSlot, @c contract::claimWriteSlot). A double that let two writes
 /// interleave would be more permissive than the transport it stands for — the exact divergence
 /// this type is pinned against.
-class InMemorySocket final: public ISocket
+class CORE_NET_API InMemorySocket final: public ISocket
 {
   public:
     /// @param inbound The pipe this end reads from — the peer's outbound.
@@ -351,7 +352,7 @@ class InMemorySocket final: public ISocket
 };
 
 /// Two @c InMemorySocket ends over a pair of pipes.
-struct InMemorySocketPair
+struct CORE_NET_API InMemorySocketPair
 {
     std::unique_ptr<InMemorySocket> client; ///< The dialling end.
     std::unique_ptr<InMemorySocket> server; ///< The accepted end.
@@ -369,7 +370,7 @@ struct InMemorySocketPair
 /// A pending @c accept resolves to the next connection, or with @c NetErrorCode::Cancelled once
 /// the listener is closed. Connections queued before the close are still handed out, so a server
 /// under test finishes what it already accepted before it observes the shutdown.
-class InMemoryListener final: public IListener
+class CORE_NET_API InMemoryListener final: public IListener
 {
   public:
     InMemoryListener() = default;

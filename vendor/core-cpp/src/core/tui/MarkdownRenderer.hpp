@@ -4,6 +4,7 @@
 #include <core/tui/GenericSyntaxHighlighter.hpp>
 #include <core/tui/MarkdownHtml.hpp>
 #include <core/tui/TerminalOutput.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <cstdint>
 #include <functional>
@@ -57,7 +58,7 @@ struct MarkdownTheme
 /// rendering for incremental token output (e.g. from an LLM). Handles headings,
 /// code blocks, inline code, bold, italic, links, lists, blockquotes, and
 /// <think>...</think> blocks.
-class MarkdownRenderer
+class CORE_TUI_CORE_API MarkdownRenderer
 {
   public:
     /// @brief Constructs a renderer targeting the given terminal output.

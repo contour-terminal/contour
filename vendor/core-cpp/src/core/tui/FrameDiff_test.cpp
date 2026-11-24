@@ -105,7 +105,7 @@ TEST_CASE("diffFrames: two narrow characters replacing a wide one are both writt
     auto const previous = frame(1, 6, "\xE4\xB8\xAD");
     auto const next = frame(1, 6, "ab");
 
-    CHECK(diffFrames(previous, next) == "\033[1;1Ha\033[m\033[1;2Hb\033[m");
+    CHECK(diffFrames(previous, next) == "\033[1;1Ha\033[mb\033[m");
 }
 
 TEST_CASE("diffFrames: a style change alone repaints the cell with its SGR")
@@ -113,7 +113,7 @@ TEST_CASE("diffFrames: a style change alone repaints the cell with its SGR")
     auto const previous = frame(1, 4, "ab");
     auto const next = frame(1, 4, "ab", bold());
 
-    CHECK(diffFrames(previous, next) == "\033[1;1H\033[1ma\033[m\033[1;2H\033[1mb\033[m");
+    CHECK(diffFrames(previous, next) == "\033[1;1H\033[1ma\033[m\033[1mb\033[m");
 }
 
 TEST_CASE("diffFrames: a full-screen change matches the recorded golden")
@@ -125,14 +125,43 @@ TEST_CASE("diffFrames: a full-screen change matches the recorded golden")
     next.putString(0, 0, "XYZ", foreground(1));
     next.putString(1, 0, "\xE4\xB8\xADQ", inverse());
 
-    // Recorded from this implementation and read cell by cell: every cell moves and writes, the
-    // wide character's continuation is skipped, and each write carries its own SGR and reset.
+    // Recorded from this implementation and read cell by cell: a run of ASCII cells is reached by one
+    // move, a new row and the cell after a wide character each by their own, the wide character's
+    // continuation is skipped, and each write carries its own SGR and reset.
     auto const golden = std::string { "\033[1;1H\033[38;5;1mX\033[m"
-                                      "\033[1;2H\033[38;5;1mY\033[m"
-                                      "\033[1;3H\033[38;5;1mZ\033[m"
+                                      "\033[38;5;1mY\033[m"
+                                      "\033[38;5;1mZ\033[m"
                                       "\033[2;1H\033[7m\xE4\xB8\xAD\033[m"
                                       "\033[2;3H\033[7mQ\033[m" };
     CHECK(diffFrames(previous, next) == golden);
+}
+
+TEST_CASE("diffFrames: an unchanged cell between two changed ones is moved over")
+{
+    auto const previous = frame(1, 4, "abc");
+    auto const next = frame(1, 4, "XbZ");
+
+    CHECK(diffFrames(previous, next) == "\033[1;1HX\033[m\033[1;3HZ\033[m");
+}
+
+TEST_CASE("diffFrames: a cell after a non-ASCII narrow grapheme is reached by an absolute move")
+{
+    // A terminal may disagree about a non-ASCII grapheme's width, so the cursor is not trusted after one.
+    auto const previous = frame(1, 4);
+    auto const next = frame(1, 4, "\xC3\xA9x");
+
+    CHECK(diffFrames(previous, next) == "\033[1;1H\xC3\xA9\033[m\033[1;2Hx\033[m");
+}
+
+TEST_CASE("diffFrames: the last column's write is not trusted to leave the cursor on the row")
+{
+    // A terminal holds the cursor on the last column with a wrap pending; the next row is moved to.
+    auto const previous = Buffer { 2, 2 };
+    auto next = Buffer { 2, 2 };
+    next.putString(0, 0, "ab", {});
+    next.putString(1, 0, "cd", {});
+
+    CHECK(diffFrames(previous, next) == "\033[1;1Ha\033[mb\033[m\033[2;1Hc\033[md\033[m");
 }
 
 TEST_CASE("diffFrames: DiffRepaint::All writes every cell of identical frames")
@@ -140,7 +169,7 @@ TEST_CASE("diffFrames: DiffRepaint::All writes every cell of identical frames")
     auto const previous = frame(1, 2, "ok");
 
     CHECK(diffFrames(previous, previous, DiffOptions { .repaint = DiffRepaint::All })
-          == "\033[1;1Ho\033[m\033[1;2Hk\033[m");
+          == "\033[1;1Ho\033[mk\033[m");
 }
 
 TEST_CASE("diffFrames: the area bounds what is written")
@@ -222,8 +251,8 @@ TEST_CASE("diffFrames: a changed cell is preceded by the row mark governing it")
     // The marks changed, so the row repaints whole; the mark goes out at its own column, once, before
     // the first cell of its segment.
     auto const bytes = diffFrames(previous, next, DiffOptions { .rowMarks = DiffRowMarks::Emit });
-    CHECK(bytes.starts_with("\033[1;1H \033[m\033[1;2H \033[m\033[1;3H<M> \033[m"));
-    CHECK(bytes.ends_with("\033[1;5Hz\033[m\033[1;6H \033[m"));
+    CHECK(bytes.starts_with("\033[1;1H \033[m \033[m<M> \033[m"));
+    CHECK(bytes.ends_with("z\033[m \033[m"));
     CHECK_FALSE(diffFrames(previous, next).contains("<M>"));
 }
 

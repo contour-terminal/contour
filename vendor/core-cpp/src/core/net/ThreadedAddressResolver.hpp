@@ -9,6 +9,7 @@
 /// `0708dd54dc7ee72622c8c0783c2bd4a06f0e9b21`.
 
 #include <core/net/IAsyncAddressResolver.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -61,7 +62,7 @@ struct ThreadedResolverOptions
 /// stall this class exists to remove — so over-depth returns @c NetErrorCode::WouldBlock
 /// immediately. `WouldBlock` and not `SystemError`, because a caller can retry the first and can
 /// do nothing at all with the second.
-class ThreadedAddressResolver final: public IAsyncAddressResolver
+class CORE_NET_API ThreadedAddressResolver final: public IAsyncAddressResolver
 {
   public:
     /// @param inner The blocking resolver to delegate to. Must outlive this.
@@ -120,6 +121,6 @@ class ThreadedAddressResolver final: public IAsyncAddressResolver
 ///
 /// **Its pool starts on first use and never on a literal**, so a process that only dials
 /// literals creates no thread at all.
-[[nodiscard]] ThreadedAddressResolver& defaultAsyncResolver();
+[[nodiscard]] CORE_NET_API ThreadedAddressResolver& defaultAsyncResolver();
 
 } // namespace core::net

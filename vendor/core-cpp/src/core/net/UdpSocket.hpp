@@ -14,6 +14,7 @@
 /// (`0708dd54dc7ee72622c8c0783c2bd4a06f0e9b21`).
 
 #include <core/net/IDatagramSocket.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -87,7 +88,7 @@ inline constexpr std::size_t MaxIpv6DatagramPayload = 65527;
 ///        that is what a socket expecting to be answered needs and sharing is the exception a
 ///        caller states on purpose.
 /// @return The socket, or why it could not be bound.
-[[nodiscard]] std::expected<std::unique_ptr<IDatagramSocket>, NetError> openUdpSocket(
+[[nodiscard]] CORE_NET_API std::expected<std::unique_ptr<IDatagramSocket>, NetError> openUdpSocket(
     std::string_view bindAddress,
     std::uint16_t port,
     BroadcastMode broadcast,

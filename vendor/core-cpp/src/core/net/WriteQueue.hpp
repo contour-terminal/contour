@@ -26,6 +26,7 @@
 #include <core/net/EventLoop.hpp>
 #include <core/net/ISocket.hpp>
 #include <core/net/IoResult.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -55,7 +56,7 @@ namespace core::net
 /// the socket object. On a stopping loop that settling cannot happen -- every
 /// wait throws -- so a drain whose stop token is requested starts no further
 /// write, and the owner may drop the socket as it unwinds.
-class WriteQueue
+class CORE_NET_API WriteQueue
 {
   public:
     /// @param loop The loop the drain coroutine runs on (not owned).
@@ -184,7 +185,7 @@ class WriteQueue
 
     /// The queue state, shared between the WriteQueue handle and the drain
     /// coroutine so neither dangles if the other finishes first.
-    struct State
+    struct CORE_NET_API State
     {
         State(ISocket* socketArg, std::size_t maxQueuedBytesArg) noexcept:
             socket(socketArg), maxQueuedBytes(maxQueuedBytesArg)

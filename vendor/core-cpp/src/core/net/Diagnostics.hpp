@@ -13,6 +13,8 @@
 /// projects unchanged. The default sink discards, so a caller that never sets one
 /// pays only a null check.
 
+#include <core/net/NetExport.hpp>
+
 #include <functional>
 #include <string_view>
 
@@ -42,15 +44,15 @@ using DiagnosticSink = std::function<void(std::string_view message)>;
 /// is held only while reading or writing the pointer, never across the invocation,
 /// so a slow sink does not serialize reporting threads.
 /// @param sink The sink to install; an empty target restores the discarding default.
-void setDiagnosticSink(DiagnosticSink sink);
+CORE_NET_API void setDiagnosticSink(DiagnosticSink sink);
 
 /// Reports a diagnostic to the installed sink.
 /// @param message The message; formatted by the caller, since the default sink
 ///        discards it and most callers never fire.
-void reportDiagnostic(std::string_view message);
+CORE_NET_API void reportDiagnostic(std::string_view message);
 
 /// @return True if a non-discarding sink is installed. Check this before doing
 ///         formatting work whose only purpose is the message.
-[[nodiscard]] bool hasDiagnosticSink() noexcept;
+[[nodiscard]] CORE_NET_API bool hasDiagnosticSink() noexcept;
 
 } // namespace core::net

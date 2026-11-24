@@ -243,8 +243,9 @@ core_cpp_module(NAME codec KIND STATIC DEPS base PLATFORMS any)
 # log to apply the LOG filter.
 core_cpp_module(NAME testing KIND STATIC DEPS base log PLATFORMS any)
 
-# Header-only, and needing nothing but the standard library.
-core_cpp_module(NAME async KIND INTERFACE PLATFORMS any)
+# Header-only but for the thread-local state its headers share (src/core/async/CMakeLists.txt), and
+# needing nothing but the standard library.
+core_cpp_module(NAME async KIND STATIC PLATFORMS any)
 
 # Under single-threaded Emscripten only Types, PlatformError, Clock, StringUtils, PathUtils,
 # GlobMatch, FileUri and the POSIX providers build: see its SOURCES_EMSCRIPTEN.

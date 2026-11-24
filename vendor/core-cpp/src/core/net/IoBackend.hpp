@@ -24,6 +24,7 @@
 #include <core/net/ICompletionPort.hpp>
 #include <core/net/IHostScheduler.hpp>
 #include <core/net/NetError.hpp>
+#include <core/net/NetExport.hpp>
 #include <core/net/detail/ReadinessSlot.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/platform/Types.hpp>
@@ -493,7 +494,7 @@ class IoBackend
 
 /// @return The kind @c makeDefaultBackend() prefers on this platform, whether or not
 ///         constructing it would succeed.
-[[nodiscard]] BackendKind preferredBackendKind() noexcept;
+[[nodiscard]] CORE_NET_API BackendKind preferredBackendKind() noexcept;
 
 /// Creates the best backend available on this platform.
 ///
@@ -505,7 +506,7 @@ class IoBackend
 /// @throws std::runtime_error if no backend could create its wakeup channel, which
 ///         is descriptor or handle exhaustion and not a condition a caller recovers
 ///         from — a loop that cannot be woken across threads deadlocks on shutdown.
-[[nodiscard]] std::unique_ptr<IoBackend> makeDefaultBackend();
+[[nodiscard]] CORE_NET_API std::unique_ptr<IoBackend> makeDefaultBackend();
 
 /// Creates a backend of a specific kind — for a test that must exercise one in
 /// particular rather than whatever this platform prefers.
@@ -513,6 +514,6 @@ class IoBackend
 /// @return The backend, or nullptr if @p kind is not built on this platform or its
 ///         kernel object could not be created.
 /// @throws std::runtime_error as @c makeDefaultBackend does.
-[[nodiscard]] std::unique_ptr<IoBackend> makeBackend(BackendKind kind);
+[[nodiscard]] CORE_NET_API std::unique_ptr<IoBackend> makeBackend(BackendKind kind);
 
 } // namespace core::net

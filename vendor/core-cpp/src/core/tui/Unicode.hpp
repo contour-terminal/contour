@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/tui/TuiCoreExport.hpp>
+
 #include <libunicode/codepoint_properties.h>
 #include <libunicode/width.h>
 
@@ -52,6 +54,6 @@ inline int graphemeClusterWidth(std::u32string_view cluster) noexcept
 /// @brief Calculates the display width of a UTF-8 string in terminal columns.
 /// @param text UTF-8 encoded text.
 /// @return Total display width in columns.
-int stringWidth(std::string_view text) noexcept;
+CORE_TUI_CORE_API int stringWidth(std::string_view text) noexcept;
 
 } // namespace core::tui

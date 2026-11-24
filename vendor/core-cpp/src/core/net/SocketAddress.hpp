@@ -14,6 +14,8 @@
 /// own their bind sequence, so `BindAndListen`, `BoundPortOf` and `ReusePort` are deliberately
 /// not here.
 
+#include <core/net/NetExport.hpp>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -72,7 +74,7 @@ class IAddressResolver
 };
 
 /// The `getaddrinfo`-backed resolver: the one place in this library that issues the lookup.
-class SystemAddressResolver final: public IAddressResolver
+class CORE_NET_API SystemAddressResolver final: public IAddressResolver
 {
   public:
     /// @copydoc IAddressResolver::resolve
@@ -85,7 +87,7 @@ class SystemAddressResolver final: public IAddressResolver
 /// An ambient resource with a name, in the shape this tree already uses for
 /// @c platform::defaultSteadyClock: a default argument a caller can replace, rather than a
 /// hard-coded call nobody can reach past.
-[[nodiscard]] IAddressResolver& defaultAddressResolver() noexcept;
+[[nodiscard]] CORE_NET_API IAddressResolver& defaultAddressResolver() noexcept;
 
 /// Formats the address held in @p endpoint as a printable host string — an IPv4 dotted-quad
 /// ("203.0.113.7") or an IPv6 textual address ("::1").
@@ -94,7 +96,7 @@ class SystemAddressResolver final: public IAddressResolver
 /// address, and that is how the accept path already formats it.
 /// @param endpoint The endpoint whose stored sockaddr is rendered.
 /// @return The printable host, or "" for an empty or unknown-family endpoint.
-[[nodiscard]] std::string formatPeerAddress(ResolvedEndpoint const& endpoint);
+[[nodiscard]] CORE_NET_API std::string formatPeerAddress(ResolvedEndpoint const& endpoint);
 
 namespace detail
 {
@@ -113,7 +115,7 @@ namespace detail
     /// address and could not resolve at all.
     /// @param host Host text, unbracketed.
     /// @return True when @p host parses as an IPv4 or IPv6 literal.
-    [[nodiscard]] bool isNumericHost(std::string_view host) noexcept;
+    [[nodiscard]] CORE_NET_API bool isNumericHost(std::string_view host) noexcept;
 
     /// Copies a raw sockaddr into a platform-free @c ResolvedEndpoint, reading the family from
     /// the sockaddr itself.
@@ -121,7 +123,8 @@ namespace detail
     /// @param length Valid byte count (a `socklen_t` value).
     /// @return The captured endpoint; an all-zero endpoint when @p length is 0 or exceeds
     ///         @c ResolvedEndpoint::StorageSize.
-    [[nodiscard]] ResolvedEndpoint endpointFromSockaddr(void const* sockaddr, std::uint32_t length) noexcept;
+    [[nodiscard]] CORE_NET_API ResolvedEndpoint endpointFromSockaddr(void const* sockaddr,
+                                                                     std::uint32_t length) noexcept;
 
     /// Reads the port out of a raw sockaddr.
     ///
@@ -131,7 +134,8 @@ namespace detail
     /// @param sockaddr Pointer to a `sockaddr` / `sockaddr_in` / `sockaddr_in6`.
     /// @param length Valid byte count (a `socklen_t` value).
     /// @return The port in host byte order, or 0 for a family that has none.
-    [[nodiscard]] std::uint16_t portOfSockaddr(void const* sockaddr, std::uint32_t length) noexcept;
+    [[nodiscard]] CORE_NET_API std::uint16_t portOfSockaddr(void const* sockaddr,
+                                                            std::uint32_t length) noexcept;
 
 } // namespace detail
 

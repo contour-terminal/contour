@@ -48,6 +48,12 @@ option(CORE_CPP_CLANG_TIDY
 set(CORE_CPP_SANITIZERS "" CACHE STRING
     "Sanitizers for core-cpp's targets, a list of address, undefined, thread and leak (top-level builds only)")
 option(CORE_CPP_COVERAGE "Instrument core-cpp's targets for coverage" OFF)
+# core-cpp's own switch rather than BUILD_SHARED_LIBS: that variable is the parent's, and a parent that
+# sets it for its own libraries (or for a fetched dependency) would otherwise change what every
+# consumer of core-cpp gets, with no way to say otherwise. Static stays the default.
+option(CORE_CPP_BUILD_SHARED
+       "Build core-cpp's compiled modules as shared libraries (DLL/.so) instead of static ones, so that a DLL consumer and its executable share one copy of core-cpp's process and thread state"
+       OFF)
 option(CORE_CPP_MSVC_STATIC_RUNTIME_VARIANTS
        "With an MSVC-ABI compiler, also declare a static-CRT twin core::<name>_mt of every compiled module" OFF)
 
@@ -113,4 +119,17 @@ if(CORE_CPP_PLATFORM_WASI)
         endif()
         set(${_coreCppWasiOff} OFF)
     endforeach()
+endif()
+
+# A shared core-cpp needs a dynamic loader and a symbol table to export from: Emscripten and WASI
+# have neither, so the request is refused rather than ignored.
+if(CORE_CPP_BUILD_SHARED AND (EMSCRIPTEN OR CORE_CPP_PLATFORM_WASI))
+    message(FATAL_ERROR "[core-cpp] CORE_CPP_BUILD_SHARED is not available under Emscripten or WASI: "
+                        "WebAssembly guests link core-cpp statically.")
+endif()
+# A static-CRT twin compiles the module's sources again into a static library, but a shared build's
+# headers say the module's symbols are imported from a DLL, so the twin would not link.
+if(CORE_CPP_BUILD_SHARED AND CORE_CPP_MSVC_STATIC_RUNTIME_VARIANTS AND (MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC"))
+    message(FATAL_ERROR "[core-cpp] CORE_CPP_BUILD_SHARED and CORE_CPP_MSVC_STATIC_RUNTIME_VARIANTS exclude each "
+                        "other: a static-CRT twin is a static copy of a module, which a shared build does not have.")
 endif()

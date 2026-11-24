@@ -7,6 +7,56 @@ release may break the API; every break is listed under **Breaking** with a migra
 release tag `vX.Y.Z` equals the version in `project(core-cpp VERSION X.Y.Z)`, and the release
 workflow refuses one without a section here.
 
+## [0.23.0] - 2026-11-24
+
+### Changed
+
+- **`writeFrameDiff` reaches a run of changed cells with one cursor move** (#104), not one per cell: with
+  absolute addressing it skips the move to a cell the cursor already stands on, after a single printable
+  ASCII character short of the last column. After a wider or non-ASCII grapheme the move stays, so a
+  terminal that disagrees about a width cannot shift the cells after it. `TerminalOutput`'s cursor motions
+  (`moveTo`, `moveUp`/`Down`/`Left`/`Right`) and `deleteLines` format their counts with `std::to_chars`
+  instead of parsing a `std::format` string per call. A full 120x40 repaint costs about half as many
+  instructions, which a guest drawing its TUI under a WebAssembly interpreter feels most. The bytes a diff
+  writes change: a consumer that compares them byte for byte sees fewer `CUP` sequences, for the same
+  screen.
+
+## [0.22.0] - 2026-11-16
+
+### Added
+
+- **`CORE_CPP_BUILD_SHARED`** (OFF) builds core-cpp's compiled modules as shared libraries (`.so`,
+  `.dylib`, DLL), so a consumer that is itself a DLL and the executable that loads it share one core-cpp:
+  one log registry, fail handler, default clock, readiness-dispatch counter and, per thread, one
+  current-executor chain. A static core-cpp linked into both has a copy per image, and a scope stated in
+  one image is invisible to an awaitable compiled into the other. The libraries are compiled with hidden
+  visibility and export what a generated per-library macro marks (`CORE_BASE_API`, `CORE_LOG_API`,
+  `CORE_CLI_API`, `CORE_CODEC_API`, `CORE_ASYNC_API`, `CORE_PLATFORM_API`, `CORE_NET_API`,
+  `CORE_NET_TLS_API`, `CORE_TUI_OUTPUT_API`, `CORE_TUI_CORE_API`, `CORE_TUI_API`; each in a generated
+  `<Name>Export.hpp` that is part of the library's installed headers), so a missing mark fails to link on
+  Linux as it does on Windows. `core::testing` and `core::testing_main` stay static. The installed package
+  of a shared build is shared. Static remains the default. The option is refused under Emscripten and
+  WASI, and together with `CORE_CPP_MSVC_STATIC_RUNTIME_VARIANTS`. It is not `BUILD_SHARED_LIBS`, which is
+  the parent's. New presets `clang-debug-shared` and `cl-release-shared` run it in CI.
+- `core-cpp.shared-state` (a shared build only): proves, across a shared-library boundary that is
+  compiled apart with hidden visibility, that each piece of state moved below is one object in both
+  images.
+
+### Changed
+
+- **`core::async` is a compiled library** (one `.cpp` for the current-executor slot, one for `Strand`'s
+  per-thread slots) instead of an `INTERFACE` target. Consumers link it as before; `core::async`'s
+  headers are unchanged but for `detail::innermostExecutorScope()`, `detail::buryDeadPump()` and
+  `detail::FreeingAbandoned`'s slot, which are now declared exported and defined in the library, so
+  that one image owns each thread's slot. A static build pays one call (not inlined across a library
+  boundary without LTO) where it read a `constinit thread_local` directly.
+- State a header used to define inline is defined in its module's library: `core::detail::failHandler()`
+  and `core::defaultSteadyClock()` (base), `core::platform::defaultSystemWallClock()` (platform),
+  `core::log::get()` and the `error` and `fatal` categories (log; `core::log::errorLog` is now a
+  `Category&` bound to the library's one), `core::cli::about::store()` (cli) and
+  `core::net::detail::readinessDispatchDepth()` (net). Source compatible; a static build is unchanged in
+  behaviour.
+
 ## [0.21.0] - 2026-11-16
 
 ### Breaking

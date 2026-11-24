@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/Utf8Path.hpp>
+#include <core/platform/PlatformExport.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -152,7 +153,7 @@ inline constexpr bool FilesystemCaseInsensitive =
 ///
 /// @param p The path to canonicalize.
 /// @return The path with on-disk capitalization and forward slashes.
-[[nodiscard]] auto canonicalCasePath(std::filesystem::path const& p) -> std::string;
+[[nodiscard]] CORE_PLATFORM_API auto canonicalCasePath(std::filesystem::path const& p) -> std::string;
 
 /// @brief Reduces a path to its canonical lexical spelling without a trailing separator.
 ///
@@ -168,7 +169,7 @@ inline constexpr bool FilesystemCaseInsensitive =
 ///
 /// @param path The path to reduce.
 /// @return The normalized path without a trailing separator.
-[[nodiscard]] std::string stripTrailingSeparator(std::filesystem::path const& path);
+[[nodiscard]] CORE_PLATFORM_API std::string stripTrailingSeparator(std::filesystem::path const& path);
 
 /// @brief Tests whether two paths name the same directory entry differing only in
 /// the lettercase of their final component.
@@ -188,7 +189,8 @@ inline constexpr bool FilesystemCaseInsensitive =
 /// @param from The source path.
 /// @param to The destination path.
 /// @return True if the rename only changes the lettercase of the final component.
-[[nodiscard]] bool isCaseOnlyRename(std::filesystem::path const& from, std::filesystem::path const& to);
+[[nodiscard]] CORE_PLATFORM_API bool isCaseOnlyRename(std::filesystem::path const& from,
+                                                      std::filesystem::path const& to);
 
 /// @brief Resolves POSIX-style device paths to their platform-native equivalent.
 ///

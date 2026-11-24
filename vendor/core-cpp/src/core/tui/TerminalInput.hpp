@@ -6,6 +6,7 @@
 #include <core/tui/Error.hpp>
 #include <core/tui/InputEvent.hpp>
 #include <core/tui/MouseTracking.hpp>
+#include <core/tui/TuiExport.hpp>
 #include <core/tui/VtParser.hpp>
 
 #include <iterator>
@@ -29,7 +30,7 @@ namespace core::tui
 /// and bracketed paste. Uses poll() for non-blocking reads with timeout.
 /// On POSIX, SIGWINCH is handled via a self-pipe pattern for thread-safe resize notification.
 /// On Windows, WINDOW_BUFFER_SIZE_EVENT is used for resize detection.
-class TerminalInput
+class CORE_TUI_API TerminalInput
 {
   public:
     TerminalInput();

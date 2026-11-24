@@ -6,6 +6,7 @@
 /// out.
 
 #include <core/tui/Rect.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 #include <core/tui/layout/Style.hpp>
 
 #include <vector>
@@ -33,6 +34,6 @@ namespace core::tui::layout
 ///        size are capped to `MaxCells` (a position to `-MaxCells` below), so the root's rectangle is
 ///        @p available only within those bounds.
 /// @return One rectangle per node, in depth-first pre-order: the root first, then each child's subtree.
-[[nodiscard]] std::vector<Rect> solve(Node const& root, Rect available);
+[[nodiscard]] CORE_TUI_CORE_API std::vector<Rect> solve(Node const& root, Rect available);
 
 } // namespace core::tui::layout

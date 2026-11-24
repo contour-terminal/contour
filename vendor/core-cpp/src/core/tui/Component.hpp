@@ -4,6 +4,7 @@
 #include <core/tui/CursorShape.hpp>
 #include <core/tui/InputEvent.hpp>
 #include <core/tui/Rect.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 #include <core/tui/layout/Style.hpp>
 
 #include <algorithm>
@@ -77,7 +78,7 @@ struct LayoutParams
 ///
 /// Subclasses must implement render() to draw themselves using a Canvas.
 /// They can optionally override event handling and focus-related methods.
-class Component
+class CORE_TUI_CORE_API Component
 {
   public:
     virtual ~Component();
@@ -290,7 +291,7 @@ class Component
 
 /// Implicit root component used by Screen.
 /// This is a simple container that renders all its children.
-class RootComponent final: public Component
+class CORE_TUI_CORE_API RootComponent final: public Component
 {
   public:
     void render(Canvas& canvas) override;
@@ -302,7 +303,7 @@ class RootComponent final: public Component
 /// The tree's inner nodes: a row of a list and its details, a column of panels and a key-hint line.
 /// Children are either owned, through add(), or borrowed, through addChild() with a
 /// @c LayoutParams::flex item; the box sets the areas of both on every resize.
-class FlexBox final: public Component
+class CORE_TUI_CORE_API FlexBox final: public Component
 {
   public:
     /// @param style How the children are placed: direction, wrap, justify, align and gap.

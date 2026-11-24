@@ -15,6 +15,8 @@
 ///
 /// In `core::net_tls`, because verification is OpenSSL's; no OpenSSL type appears here.
 
+#include <core/net/NetTlsExport.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -39,7 +41,7 @@ enum class SshKeyType : std::uint8_t
 /// The name OpenSSH spells @p type with, at the front of a `.pub` line and inside its blob.
 /// @param type The key type.
 /// @return E.g. `ssh-ed25519` or `sk-ecdsa-sha2-nistp256@openssh.com`.
-[[nodiscard]] std::string_view sshKeyTypeName(SshKeyType type) noexcept;
+[[nodiscard]] CORE_NET_TLS_API std::string_view sshKeyTypeName(SshKeyType type) noexcept;
 
 /// An OpenSSH public key.
 struct SshPublicKey
@@ -68,13 +70,15 @@ enum class SshKeyError : std::uint8_t
 /// @param line One line; surrounding whitespace and a trailing newline are ignored.
 /// @return The key, or why it is refused. The blob is checked field by field, and an ECDSA point
 ///         must lie on the curve.
-[[nodiscard]] std::expected<SshPublicKey, SshKeyError> parseSshPublicKey(std::string_view line);
+[[nodiscard]] CORE_NET_TLS_API std::expected<SshPublicKey, SshKeyError> parseSshPublicKey(
+    std::string_view line);
 
 /// Parses the wire encoding of a public key, as an agent or a certificate carries it.
 /// @param blob The key blob: `string type` and the fields that type defines, nothing after.
 /// @return The key, with an empty comment; @c SshKeyError::UnsupportedType for a type outside
 ///         @c SshKeyType, @c SshKeyError::Malformed for a short, oversized or invalid one.
-[[nodiscard]] std::expected<SshPublicKey, SshKeyError> parseSshPublicKeyBlob(std::span<std::byte const> blob);
+[[nodiscard]] CORE_NET_TLS_API std::expected<SshPublicKey, SshKeyError> parseSshPublicKeyBlob(
+    std::span<std::byte const> blob);
 
 /// One key line of an `authorized_keys` file.
 struct AuthorizedKeyLine
@@ -91,13 +95,13 @@ struct AuthorizedKeyLine
 /// quotes; a comma inside double quotes does not split it, and `\"` inside quotes is a quote.
 /// @param line One line, without or with its newline.
 /// @return @c std::nullopt for a blank line or a `#` comment, the key line, or why it is refused.
-[[nodiscard]] std::expected<std::optional<AuthorizedKeyLine>, SshKeyError> parseAuthorizedKeysLine(
-    std::string_view line);
+[[nodiscard]] CORE_NET_TLS_API std::expected<std::optional<AuthorizedKeyLine>, SshKeyError>
+parseAuthorizedKeysLine(std::string_view line);
 
 /// The fingerprint `ssh-keygen -l` prints for @p key.
 /// @param key The key.
 /// @return `SHA256:` and the unpadded base64 of the SHA-256 of its blob.
-[[nodiscard]] std::string sshFingerprintOf(SshPublicKey const& key);
+[[nodiscard]] CORE_NET_TLS_API std::string sshFingerprintOf(SshPublicKey const& key);
 
 /// Why an SSHSIG signature was refused.
 enum class SshSigError : std::uint8_t
@@ -120,25 +124,26 @@ enum class SshSigError : std::uint8_t
 /// @param message The signed message.
 /// @param sshsig The signature, armored (`-----BEGIN SSH SIGNATURE-----`) or as the raw blob.
 /// @return Nothing, or why the signature is refused.
-[[nodiscard]] std::expected<void, SshSigError> verifySshSignature(SshPublicKey const& key,
-                                                                  std::string_view nameSpace,
-                                                                  std::span<std::byte const> message,
-                                                                  std::string_view sshsig);
+[[nodiscard]] CORE_NET_TLS_API std::expected<void, SshSigError> verifySshSignature(
+    SshPublicKey const& key,
+    std::string_view nameSpace,
+    std::span<std::byte const> message,
+    std::string_view sshsig);
 
 /// The bytes an SSHSIG signature signs, with the `sha512` message hash: what to hand an agent.
 /// @param nameSpace The purpose, e.g. `contour-auth`.
 /// @param message The message.
 /// @return `"SSHSIG" ‖ string namespace ‖ string "" ‖ string "sha512" ‖ string SHA-512(message)`.
-[[nodiscard]] std::vector<std::byte> sshsigSignedData(std::string_view nameSpace,
-                                                      std::span<std::byte const> message);
+[[nodiscard]] CORE_NET_TLS_API std::vector<std::byte> sshsigSignedData(std::string_view nameSpace,
+                                                                       std::span<std::byte const> message);
 
 /// The raw SSHSIG blob wrapping a signature an agent made over @c sshsigSignedData.
 /// @param key The key that signed.
 /// @param nameSpace The purpose it was signed for.
 /// @param agentSignature The signature from `SSH2_AGENT_SIGN_RESPONSE`, in SSH signature encoding.
 /// @return The blob, as @c verifySshSignature accepts it unarmored (hash `sha512`).
-[[nodiscard]] std::string assembleSshsig(SshPublicKey const& key,
-                                         std::string_view nameSpace,
-                                         std::span<std::byte const> agentSignature);
+[[nodiscard]] CORE_NET_TLS_API std::string assembleSshsig(SshPublicKey const& key,
+                                                          std::string_view nameSpace,
+                                                          std::span<std::byte const> agentSignature);
 
 } // namespace core::net

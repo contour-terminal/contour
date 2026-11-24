@@ -6,6 +6,7 @@
 
 #include <core/tui/Buffer.hpp>
 #include <core/tui/Rect.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -94,10 +95,10 @@ struct DiffOptions
 /// @param previous The frame on the screen. Read only with @c DiffRepaint::Changed.
 /// @param next The frame to show.
 /// @param options What to cover and what to write besides cells.
-void writeFrameDiff(TerminalOutput& out,
-                    Buffer const& previous,
-                    Buffer const& next,
-                    DiffOptions const& options);
+CORE_TUI_CORE_API void writeFrameDiff(TerminalOutput& out,
+                                      Buffer const& previous,
+                                      Buffer const& next,
+                                      DiffOptions const& options);
 
 /// @brief Two buffers in, the bytes that turn the first into the second out; pure.
 ///
@@ -107,6 +108,8 @@ void writeFrameDiff(TerminalOutput& out,
 /// @param next The frame to show.
 /// @param options What to cover and what to write besides cells.
 /// @return The escape sequences and text, empty when there is nothing to change.
-[[nodiscard]] std::string diffFrames(Buffer const& previous, Buffer const& next, DiffOptions options = {});
+[[nodiscard]] CORE_TUI_CORE_API std::string diffFrames(Buffer const& previous,
+                                                       Buffer const& next,
+                                                       DiffOptions options = {});
 
 } // namespace core::tui

@@ -15,6 +15,7 @@
 #include <core/net/IoBackend.hpp>
 #include <core/net/KeepAlive.hpp>
 #include <core/net/NetError.hpp>
+#include <core/net/NetExport.hpp>
 #include <core/net/SocketAddress.hpp>
 #include <core/net/detail/StreamSocketOptions.hpp>
 #include <core/platform/Clock.hpp>
@@ -67,7 +68,8 @@ namespace detail
     /// dials and also spawns children would otherwise hand every child an open peer connection.
     /// @param endpoint The candidate being dialled; its family and protocol choose the socket.
     /// @return The handles, or why none could be made.
-    [[nodiscard]] std::expected<DialHandles, NetError> openDialSocket(ResolvedEndpoint const& endpoint);
+    [[nodiscard]] CORE_NET_API std::expected<DialHandles, NetError> openDialSocket(
+        ResolvedEndpoint const& endpoint);
 
     /// Closes what @c openDialSocket made, announcing the readiness handle to @p loop first.
     ///
@@ -76,14 +78,14 @@ namespace detail
     /// can report neither a closed descriptor nor its former waiters.
     /// @param loop The loop the readiness handle may be registered with; may be null.
     /// @param handles What to close; left invalid.
-    void closeDialSocket(EventLoop* loop, DialHandles& handles) noexcept;
+    CORE_NET_API void closeDialSocket(EventLoop* loop, DialHandles& handles) noexcept;
 
     /// Issues the non-blocking `::connect`.
     /// @param handles What @c openDialSocket produced.
     /// @param endpoint The address to dial.
     /// @return Whether it completed or is outstanding, or why it failed outright.
-    [[nodiscard]] std::expected<ConnectProgress, NetError> beginConnect(DialHandles const& handles,
-                                                                        ResolvedEndpoint const& endpoint);
+    [[nodiscard]] CORE_NET_API std::expected<ConnectProgress, NetError> beginConnect(
+        DialHandles const& handles, ResolvedEndpoint const& endpoint);
 
     /// Reads the socket's pending error — `getsockopt(SO_ERROR)` — which is the ONLY thing that
     /// says whether a dial resolved into a connection or into a refusal.
@@ -95,7 +97,7 @@ namespace detail
     /// socket whose first write fails.
     /// @param handles The dialling socket.
     /// @return Nothing when the connection is up, or the classified failure.
-    [[nodiscard]] std::expected<void, NetError> pendingSocketError(DialHandles const& handles);
+    [[nodiscard]] CORE_NET_API std::expected<void, NetError> pendingSocketError(DialHandles const& handles);
 
     /// Whether a dial on @p loop could hand out a socket at all, asked BEFORE anything is created:
     /// on Windows a loop whose backend lends no completion port cannot serve one, and a dial that
@@ -103,7 +105,7 @@ namespace detail
     /// reset. Everywhere else the answer is yes.
     /// @param loop The loop the dial would pin its socket to.
     /// @return Nothing, or @c NetErrorCode::Unsupported.
-    [[nodiscard]] std::expected<void, NetError> dialableOn(EventLoop& loop);
+    [[nodiscard]] CORE_NET_API std::expected<void, NetError> dialableOn(EventLoop& loop);
 
     /// Wraps the connected handle as the platform's @c ISocket, transferring ownership.
     /// @param loop The loop the socket is pinned to.
@@ -111,7 +113,9 @@ namespace detail
     /// @param peer The printable peer address to report from @c ISocket::peerAddress.
     /// @return The socket, or why the loop cannot serve one -- on Windows, a loop with no
     ///         completion port. The handle is closed on failure.
-    [[nodiscard]] SocketResult adoptDialled(EventLoop& loop, DialHandles& handles, std::string peer);
+    [[nodiscard]] CORE_NET_API SocketResult adoptDialled(EventLoop& loop,
+                                                         DialHandles& handles,
+                                                         std::string peer);
 
     /// Dials one candidate as ONE overlapped `ConnectEx` on @p loop's completion port — the
     /// completion-model counterpart of @c dialReadiness, and what a connector uses whenever
@@ -139,10 +143,10 @@ namespace detail
     ///        and keepalive, armed after it (@c applyStreamSocketOptions).
     /// @return The connected socket, or why this candidate did not produce one.
     /// @throws async::OperationCancelled when the awaiting flow's own token stops the dial.
-    [[nodiscard]] async::Task<SocketResult> dialCompletion(EventLoop* loop,
-                                                           ResolvedEndpoint endpoint,
-                                                           platform::SteadyTimePoint deadline,
-                                                           StreamSocketOptions options);
+    [[nodiscard]] CORE_NET_API async::Task<SocketResult> dialCompletion(EventLoop* loop,
+                                                                        ResolvedEndpoint endpoint,
+                                                                        platform::SteadyTimePoint deadline,
+                                                                        StreamSocketOptions options);
 
 } // namespace detail
 

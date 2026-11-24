@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/tui/TerminalOutput.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <algorithm>
 #include <array>
@@ -136,8 +137,8 @@ class SyntaxHighlighterRegistry;
 /// @param filePath The file path.
 /// @param registry Languages registered beside the built-in ones, or nullptr for built-ins only.
 /// @return The detected language, or LanguageId::None.
-[[nodiscard]] auto detectLanguageFromPath(std::string_view filePath,
-                                          SyntaxHighlighterRegistry const* registry = nullptr) -> LanguageId;
+[[nodiscard]] CORE_TUI_CORE_API auto detectLanguageFromPath(
+    std::string_view filePath, SyntaxHighlighterRegistry const* registry = nullptr) -> LanguageId;
 
 /// @brief Highlights a single line of source code.
 ///
@@ -150,17 +151,17 @@ class SyntaxHighlighterRegistry;
 /// @param state The current multi-line state (from previous line's output).
 /// @param registry Languages registered beside the built-in ones, or nullptr for built-ins only.
 /// @return A pair of (per-character highlight map, updated state for next line).
-[[nodiscard]] auto highlightLine(std::string_view line,
-                                 LanguageId language,
-                                 HighlightState state = HighlightState::Normal,
-                                 SyntaxHighlighterRegistry const* registry = nullptr)
+[[nodiscard]] CORE_TUI_CORE_API auto highlightLine(std::string_view line,
+                                                   LanguageId language,
+                                                   HighlightState state = HighlightState::Normal,
+                                                   SyntaxHighlighterRegistry const* registry = nullptr)
     -> std::pair<HighlightMap, HighlightState>;
 
 /// @brief Maps a highlight category to its color from the theme's syntax palette.
 /// @param cat The highlight category.
 /// @param theme The current theme.
 /// @return The RGB color for the category.
-[[nodiscard]] auto categoryColor(HighlightCategory cat, Theme const& theme) -> RgbColor;
+[[nodiscard]] CORE_TUI_CORE_API auto categoryColor(HighlightCategory cat, Theme const& theme) -> RgbColor;
 
 /// @brief Renders a syntax-highlighted line to the terminal.
 ///
@@ -172,11 +173,11 @@ class SyntaxHighlighterRegistry;
 /// @param highlights Per-character highlight categories (must be same length as text).
 /// @param baseStyle Base style to apply (highlight colors override the fg).
 /// @param theme The current theme for color lookup.
-void renderHighlightedLine(TerminalOutput& output,
-                           std::string_view text,
-                           HighlightMap const& highlights,
-                           Style baseStyle,
-                           Theme const& theme);
+CORE_TUI_CORE_API void renderHighlightedLine(TerminalOutput& output,
+                                             std::string_view text,
+                                             HighlightMap const& highlights,
+                                             Style baseStyle,
+                                             Theme const& theme);
 
 /// @brief Renders a syntax-highlighted line to a string with ANSI SGR color codes.
 ///
@@ -187,9 +188,9 @@ void renderHighlightedLine(TerminalOutput& output,
 /// @param highlights Per-character highlight categories (must be same length as text).
 /// @param theme The current theme for color lookup.
 /// @return A string containing the text with embedded ANSI color codes.
-[[nodiscard]] auto renderHighlightedLineToString(std::string_view text,
-                                                 HighlightMap const& highlights,
-                                                 Theme const& theme) -> std::string;
+[[nodiscard]] CORE_TUI_CORE_API auto renderHighlightedLineToString(std::string_view text,
+                                                                   HighlightMap const& highlights,
+                                                                   Theme const& theme) -> std::string;
 
 /// @brief Callback type for external language highlighters.
 using HighlightFunction =
@@ -240,7 +241,7 @@ struct LanguageRegistrationFailure
 /// @note Copyable and movable. A registered id belongs to the registry that issued it and must
 ///       not be passed to another one — see isRegisteredLanguage() for what that costs. Built-in
 ///       ids are portable everywhere.
-class SyntaxHighlighterRegistry
+class CORE_TUI_CORE_API SyntaxHighlighterRegistry
 {
   public:
     /// @brief Teaches this registry one language.

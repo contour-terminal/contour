@@ -4,7 +4,7 @@
 # testing/. Its row says PLATFORMS wasm-subset: under single-threaded Emscripten only the files in
 # the SOURCES_EMSCRIPTEN lists below build (Part I §1), which is why the subset's sources appear in
 # both lists.
-set(_coreCppPlatformSubset CpuCounters.cpp FileUri.cpp GlobMatch.cpp PathUtils.cpp)
+set(_coreCppPlatformSubset Clock.cpp CpuCounters.cpp FileUri.cpp GlobMatch.cpp PathUtils.cpp)
 set(_coreCppPlatformSubsetTests
     Clock_test.cpp
     CpuCounters_test.cpp

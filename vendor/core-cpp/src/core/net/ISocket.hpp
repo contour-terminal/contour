@@ -23,6 +23,7 @@
 #include <core/net/IoResult.hpp>
 #include <core/net/KeepAlive.hpp>
 #include <core/net/NetError.hpp>
+#include <core/net/NetExport.hpp>
 #include <core/net/SocketContract.hpp>
 
 #include <chrono>
@@ -49,7 +50,7 @@ struct ReadWithFd
 /// resumes.** The operation may park and resume on a later turn of the loop, and a completion-based
 /// backend writes into the buffer while it is parked — so it is a requirement rather than a
 /// convention, and it is IOCP that makes it one.
-class ISocket
+class CORE_NET_API ISocket
 {
   public:
     ISocket() = default;

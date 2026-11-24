@@ -53,6 +53,7 @@ set(_coreCppNetSubset
     detail/CompletionHook.hpp
     detail/ParkId.hpp
     detail/ParkTable.hpp
+    detail/ReadyBatch.cpp
     detail/ReadyBatch.hpp
     detail/RingQueue.hpp
     detail/ScopeGuard.hpp
@@ -103,6 +104,7 @@ endif()
 if(NOT _coreCppNetDefaultBackend STREQUAL "posix/DefaultBackend.cpp")
     core_cpp_add_unbuilt_source_check(net-default-backend
         SOURCES posix/DefaultBackend.cpp
+        PART_OF net
         USAGE core::net_types core::async core::platform)
 endif()
 
@@ -325,8 +327,10 @@ core_cpp_add_test(net NAME net_backend
 # What a drain-step callback costs in allocations: a binary of its own because it replaces the
 # global allocation functions, which would reach every case linked beside it. Not under a
 # sanitizer, whose runtime defines those functions itself (the link refuses a second definition)
-# and whose allocator is not the one a Release program counts against.
-if(NOT CORE_CPP_SANITIZERS)
+# and whose allocator is not the one a Release program counts against. Not against a Windows DLL
+# either: a program's replacement reaches only its own image there, so what core::net allocates
+# inside its DLL is never counted or refused. ELF binds every image's operator new to the program's.
+if(NOT CORE_CPP_SANITIZERS AND NOT (WIN32 AND CORE_CPP_BUILD_SHARED))
     core_cpp_add_test(net NAME net_alloc
         SOURCES CallbackAllocation_test.cpp ../testing/ReplacedGlobalAllocation.cpp
         SOURCES_EMSCRIPTEN CallbackAllocation_test.cpp ../testing/ReplacedGlobalAllocation.cpp)

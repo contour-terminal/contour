@@ -3,6 +3,7 @@
 
 #include <core/Environment.hpp>
 #include <core/platform/PlatformError.hpp>
+#include <core/platform/PlatformExport.hpp>
 
 #include <expected>
 #include <memory>
@@ -88,6 +89,6 @@ class ProcessEnvironment: public core::Environment
 /// makes a new one, and the variables one was told to set but not to export are its own.
 ///
 /// @return The process environment, owned by the caller.
-[[nodiscard]] std::unique_ptr<ProcessEnvironment> nativeProcessEnvironment();
+[[nodiscard]] CORE_PLATFORM_API std::unique_ptr<ProcessEnvironment> nativeProcessEnvironment();
 
 } // namespace core::platform

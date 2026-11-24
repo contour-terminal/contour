@@ -4,7 +4,9 @@
 # included: the Windows dialog suppression, a no-op everywhere else, the test doubles of
 # core::base's interfaces (Environment.hpp), and the scoped fixtures a test that needs the real
 # process state uses: a temporary directory, a working directory, an environment variable.
-core_cpp_add_module(testing KIND STATIC
+# Test support stays static in a shared build (ALWAYS_STATIC): it is linked into test executables, which
+# have no use for a DLL of it, and it carries no state a shared core-cpp must hold once.
+core_cpp_add_module(testing KIND STATIC ALWAYS_STATIC
     HEADERS
         EnvHelper.hpp
         Environment.hpp
@@ -26,7 +28,7 @@ core_cpp_add_module(testing_dialogs KIND OBJECT
 # declared, which a twin would not mirror -- its binaries would lack the dialog suppression and the
 # skip exit code -- and Catch2 and core::testing_dialogs are built /MD whatever it links.
 if(CORE_CPP_CATCH2_MAIN)
-    core_cpp_add_module(testing_main KIND STATIC NO_STATIC_RUNTIME_TWIN
+    core_cpp_add_module(testing_main KIND STATIC ALWAYS_STATIC NO_STATIC_RUNTIME_TWIN
         HEADERS ExitCode.hpp
         SOURCES CatchMain.cpp ExitCode.cpp
         PUBLIC_LIBS core::testing core::log Catch2::Catch2)

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/net/NetExport.hpp>
+
 /// @file
 /// `NtAssociateWaitCompletionPacket` — the kernel's own bridge from a waitable HANDLE
 /// to a completion port — behind a probe, because it is not a documented API.
@@ -32,7 +34,7 @@ namespace core::net::detail
 /// Resolved once, on the first call, and the answer never changes for the life of the
 /// process. Thread-safe: it is a function-local static.
 /// @return True when all three `Nt*WaitCompletionPacket` entry points were found.
-[[nodiscard]] bool waitCompletionPacketsAvailable() noexcept;
+[[nodiscard]] CORE_NET_API bool waitCompletionPacketsAvailable() noexcept;
 
 /// One reusable kernel object that posts a completion packet when a handle signals.
 ///

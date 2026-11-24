@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/platform/PlatformError.hpp>
+#include <core/platform/PlatformExport.hpp>
 
 #include <expected>
 #include <filesystem>
@@ -44,6 +45,6 @@ class WorkingDirectory
 /// process's working directory, which every instance shares.
 ///
 /// @return The working directory, owned by the caller.
-[[nodiscard]] std::unique_ptr<WorkingDirectory> nativeWorkingDirectory();
+[[nodiscard]] CORE_PLATFORM_API std::unique_ptr<WorkingDirectory> nativeWorkingDirectory();
 
 } // namespace core::platform

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/tui/TuiCoreExport.hpp>
+
 #include <string_view>
 
 namespace core::tui::completer
@@ -34,7 +36,7 @@ struct SmartCaseConfig
 ///   int score = SmartCaseMatch::adjustScore(100, "foobar", "foo");
 ///   // Returns 100 + caseExactPrefixBonus if case matches exactly
 /// @endcode
-struct SmartCaseMatch
+struct CORE_TUI_CORE_API SmartCaseMatch
 {
     /// @brief Checks if the string contains any uppercase ASCII letters.
     [[nodiscard]] static bool hasUppercase(std::string_view s) noexcept;

@@ -29,6 +29,7 @@
 /// Origin: fastcached `src/FastCache/Transport/AcceptPolicy.hpp`.
 
 #include <core/net/NetError.hpp>
+#include <core/net/NetExport.hpp>
 #include <core/platform/Clock.hpp>
 
 #include <array>
@@ -199,7 +200,7 @@ struct AcceptVerdict
 ///
 /// Pure with respect to time: the caller hands in the instant from its own clock -- a loop on an
 /// @c EventLoop reads the loop's -- so a test drives it with a @c platform::ManualClock.
-class AcceptErrorPolicy
+class CORE_NET_API AcceptErrorPolicy
 {
   public:
     /// The first backoff after an exhaustion, doubled on each one that follows.
@@ -271,36 +272,38 @@ class AcceptErrorPolicy
 /// @param verdict The policy's answer to it, carrying a warning.
 /// @return The line, for example `http: an accept failed (resource exhausted (accept) [errno 24]);
 ///         accepting again in 10 ms (3 more since the last warning)`.
-[[nodiscard]] std::string describeAcceptFailure(std::string_view surface,
-                                                NetError const& error,
-                                                AcceptVerdict const& verdict);
+[[nodiscard]] CORE_NET_API std::string describeAcceptFailure(std::string_view surface,
+                                                             NetError const& error,
+                                                             AcceptVerdict const& verdict);
 
 /// The line for an accept loop reported degraded (@c AcceptConditionChange::Degraded).
 /// @param surface What the loop serves.
 /// @param error What the last accept answered.
 /// @param streak The run.
 /// @return The line.
-[[nodiscard]] std::string describeAcceptDegraded(std::string_view surface,
-                                                 NetError const& error,
-                                                 AcceptStreak const& streak);
+[[nodiscard]] CORE_NET_API std::string describeAcceptDegraded(std::string_view surface,
+                                                              NetError const& error,
+                                                              AcceptStreak const& streak);
 
 /// The line for an accept loop that recovered (@c AcceptConditionChange::Recovered).
 /// @param surface What the loop serves.
 /// @param streak The run that ended.
 /// @return The line.
-[[nodiscard]] std::string describeAcceptRecovered(std::string_view surface, AcceptStreak const& streak);
+[[nodiscard]] CORE_NET_API std::string describeAcceptRecovered(std::string_view surface,
+                                                               AcceptStreak const& streak);
 
 /// The line for an accept loop that stopped -- its listener closed, or its flow cancelled -- while
 /// it was degraded.
 /// @param surface What the loop serves.
 /// @return The line.
-[[nodiscard]] std::string describeAcceptLoopStopped(std::string_view surface);
+[[nodiscard]] CORE_NET_API std::string describeAcceptLoopStopped(std::string_view surface);
 
 /// The line for an accept loop that gave up (@c AcceptAction::GiveUp).
 /// @param surface What the loop serves.
 /// @param error What the last accept answered.
 /// @return The line.
-[[nodiscard]] std::string describeAcceptLoopEnded(std::string_view surface, NetError const& error);
+[[nodiscard]] CORE_NET_API std::string describeAcceptLoopEnded(std::string_view surface,
+                                                               NetError const& error);
 
 /// What an accept loop reports, beside what it decides: the event a log line, a liveness registry
 /// (@c AcceptLoopHealth::record) or a test receives.
