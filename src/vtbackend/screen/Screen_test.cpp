@@ -4980,6 +4980,8 @@ TEST_CASE("Sixel.simple", "[screen]")
 
     mock.writeToScreen(ChessBoard);
 
+    // On the row the last sixel band starts in: ChessBoard ends in a Graphics New Line, which starts one
+    // at pixel 102, below the image.
     CHECK(mock.terminal.primaryScreen().cursor().position.column.value == ColumnOffset(0).value);
     CHECK(mock.terminal.primaryScreen().cursor().position.line.value == LineOffset(10).value);
 
@@ -5011,7 +5013,8 @@ TEST_CASE("Sixel.simple", "[screen]")
 
 TEST_CASE("Sixel.AutoScroll-1", "[screen]")
 {
-    // Create a 11x9x10 grid and render a 10x10 image causing a line-scroll by one.
+    // Create a 11x9x10 grid and render a 10x10 image causing a line-scroll by one, then one more for the
+    // band ChessBoard's trailing Graphics New Line starts below the image.
     auto const pageSize = PageSize { LineCount(9), ColumnCount(10) };
     auto mock = MockTerm { pageSize, LineCount(11) };
     mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(10) });
@@ -5022,22 +5025,24 @@ TEST_CASE("Sixel.AutoScroll-1", "[screen]")
     CHECK(mock.terminal.primaryScreen().cursor().position.column == ColumnOffset(0));
     CHECK(mock.terminal.primaryScreen().cursor().position.line == LineOffset(8));
 
-    for (auto line = LineOffset(-1); line < boxed_cast<LineOffset>(pageSize.lines); ++line)
+    auto constexpr Scrolled = 2;
+    for (auto line = LineOffset(-Scrolled); line < boxed_cast<LineOffset>(pageSize.lines); ++line)
     {
         INFO(std::format("line {}", line));
         for (auto column = ColumnOffset(0); column < boxed_cast<ColumnOffset>(pageSize.columns); ++column)
         {
             INFO(std::format("column {}", column));
             auto const& cell = mock.terminal.primaryScreen().at(line, column);
-            if (line <= LineOffset(9) && column <= ColumnOffset(9))
+            auto const imageRow = line + Scrolled;
+            if (imageRow <= LineOffset(9) && column <= ColumnOffset(9))
             {
                 auto fragment = cell.imageFragment();
                 REQUIRE(fragment);
-                if ((column.value + line.value) % 2)
-                    REQUIRE(fragment->data() == black10x10());
-                else
+                if ((column.value + imageRow.value) % 2)
                     REQUIRE(fragment->data() == white10x10());
-                CHECK(fragment->offset().line == line + 1);
+                else
+                    REQUIRE(fragment->data() == black10x10());
+                CHECK(fragment->offset().line == imageRow);
                 CHECK(fragment->offset().column == column);
                 CHECK(!fragment->data().empty());
             }
@@ -5062,22 +5067,25 @@ TEST_CASE("Sixel.status_line", "[screen]")
     CHECK(mock.terminal.primaryScreen().cursor().position.column.value == ColumnOffset(0).value);
     CHECK(mock.terminal.primaryScreen().cursor().position.line.value == LineOffset(3).value);
 
+    // Six lines scrolled for the image, and one more for the band its trailing Graphics New Line starts.
+    auto constexpr Scrolled = 7;
     auto const lastLine = boxed_cast<LineOffset>(pageSize.lines - mock.terminal.statusLineHeight());
-    for (auto line = LineOffset(-6); line < lastLine; ++line)
+    for (auto line = LineOffset(-Scrolled); line < lastLine; ++line)
     {
         for (auto column = ColumnOffset(0); column < boxed_cast<ColumnOffset>(pageSize.columns); ++column)
         {
             auto const& cell = mock.terminal.primaryScreen().at(line, column);
-            if (line <= LineOffset(9) && column <= ColumnOffset(9))
+            auto const imageRow = line + Scrolled;
+            if (imageRow <= LineOffset(9) && column <= ColumnOffset(9))
             {
                 auto fragment = cell.imageFragment();
                 REQUIRE(fragment);
-                if ((column.value + line.value) % 2)
+                if ((column.value + imageRow.value) % 2)
                     REQUIRE(fragment->data() == white10x10());
                 else
                     REQUIRE(fragment->data() == black10x10());
 
-                CHECK(fragment->offset().line == line + 6);
+                CHECK(fragment->offset().line == imageRow);
                 CHECK(fragment->offset().column == column);
                 CHECK(!fragment->data().empty());
             }
@@ -5086,6 +5094,145 @@ TEST_CASE("Sixel.status_line", "[screen]")
                 CHECK(cell.empty());
             }
         }
+    }
+}
+
+namespace
+{
+/// ChessBoard without its trailing Graphics New Line: its last band starts at pixel 96, inside the image.
+std::string chessBoardEndingInItsLastBand()
+{
+    auto sixel = std::string { ChessBoard };
+    sixel.erase(sixel.rfind("-\033\\"), 1);
+    return sixel;
+}
+
+/// Where the cursor is after @p sixel, written after @p prefix to a 20x20 page of @p cellSize cells.
+CellLocation cursorAfterSixel(ImageSize cellSize, std::string_view prefix, std::string_view sixel)
+{
+    auto mock = MockTerm { PageSize { LineCount(20), ColumnCount(20) }, LineCount(20) };
+    mock.terminal.setCellPixelSize(cellSize);
+    mock.writeToScreen(prefix);
+    mock.writeToScreen(sixel);
+    return mock.terminal.primaryScreen().cursor().position;
+}
+} // namespace
+
+TEST_CASE("Sixel.cursor_ends_on_the_row_of_the_last_band", "[screen][sixel]")
+{
+    // The text cursor goes to the sixel cursor's position (VT340 manual, vol. 2, §14.4.1,
+    // https://vt100.net/docs/vt3xx-gp/chapter14.html#S14.4.1): origin row + (top pixel of the final band)
+    // / cell height. The column, which the manual leaves open, is the image's first, as in Windows
+    // Terminal's SixelParser::_updateTextCursor. Every Graphics New Line starts a band, a trailing one
+    // included.
+    auto const lastBandAt96 = chessBoardEndingInItsLastBand();
+    auto const lastBandAt102 = ChessBoard;
+    auto const at = [](int line) {
+        return CellLocation { .line = LineOffset(2 + line), .column = ColumnOffset(3) };
+    };
+    auto constexpr Origin = "\033[3;4H"sv;
+    auto constexpr Cells10 = ImageSize { Width(10), Height(10) };
+    auto constexpr Cells18 = ImageSize { Width(10), Height(18) };
+    auto constexpr Cells20 = ImageSize { Width(10), Height(20) };
+
+    SECTION("cell height divides the image")
+    {
+        CHECK(cursorAfterSixel(Cells10, Origin, lastBandAt96) == at(9));
+        CHECK(cursorAfterSixel(Cells10, Origin, lastBandAt102) == at(10));
+    }
+    SECTION("cell height does not divide the image")
+    {
+        // Five rows of 20 pixels: pixel 96 is in the image's last row (not, as rounding the band up once
+        // did, the row below it), and pixel 102 in the row below.
+        CHECK(cursorAfterSixel(Cells20, Origin, lastBandAt96) == at(4));
+        CHECK(cursorAfterSixel(Cells20, Origin, lastBandAt102) == at(5));
+        // Six rows of 18 pixels: both are in the sixth.
+        CHECK(cursorAfterSixel(Cells18, Origin, lastBandAt96) == at(5));
+        CHECK(cursorAfterSixel(Cells18, Origin, lastBandAt102) == at(5));
+    }
+    SECTION("a declared raster height neither moves the cursor nor stops a band")
+    {
+        // One band in an image declared 100 pixels tall: the cursor stays on the image's first row.
+        CHECK(cursorAfterSixel(Cells10, Origin, "\033Pq\"1;1;10;100#0;2;0;0;0#0!10~\033\\"sv) == at(0));
+        // A Graphics New Line past a declared 6-pixel height still starts a band, on the row below.
+        CHECK(cursorAfterSixel(
+                  ImageSize { Width(10), Height(6) }, Origin, "\033Pq\"1;1;10;6#0;2;0;0;0#0!10~-\033\\"sv)
+              == at(1));
+    }
+    SECTION("DECRST 8452 changes nothing, as in xterm")
+    {
+        CHECK(cursorAfterSixel(Cells20, "\033[?8452l\033[3;4H"sv, lastBandAt96) == at(4));
+        CHECK(cursorAfterSixel(Cells20, "\033[?8452l\033[3;4H"sv, lastBandAt102) == at(5));
+    }
+    SECTION("DECSDM leaves the cursor where it was")
+    {
+        CHECK(cursorAfterSixel(Cells20, "\033[?80h\033[3;4H"sv, lastBandAt102) == at(0));
+    }
+}
+
+TEST_CASE("Sixel.large_image_is_followed_directly_by_text", "[screen][sixel]")
+{
+    // An image taller than the viewport, sent with sixel scrolling on and 8452 reset (bands separated,
+    // none trailing), then CR LF. The text that follows starts on the line right below the image, with
+    // no blank line between them.
+    auto mock = MockTerm { PageSize { LineCount(8), ColumnCount(12) }, LineCount(20) };
+    mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(10) });
+    mock.writeToScreen("\033[?80l\033[?8452l");
+    mock.writeToScreen(chessBoardEndingInItsLastBand());
+    mock.writeToScreen("\r\nX");
+    auto const& screen = mock.terminal.primaryScreen();
+    CHECK(screen.cursor().position.line == LineOffset(7));
+    CHECK(screen.at(LineOffset(7), ColumnOffset(0)).toUtf8() == "X");
+    CHECK(screen.at(LineOffset(6), ColumnOffset(0)).imageFragment()->offset().line == LineOffset(9));
+}
+
+TEST_CASE("Sixel.cursor_after_a_scrolling_image_is_on_its_last_band", "[screen][sixel]")
+{
+    // A 10-row image from line 5 of an 8-line page scrolls 7 lines; the band row is still found from the
+    // image's top, now above the page.
+    struct Outcome
+    {
+        CellLocation cursor;
+        std::optional<LineOffset> imageRowOnLine6;
+        std::optional<LineOffset> imageRowOnLine7;
+    };
+    auto const draw = [](std::string_view sixel) {
+        auto mock = MockTerm { PageSize { LineCount(8), ColumnCount(12) }, LineCount(20) };
+        mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(10) });
+        mock.writeToScreen("\033[6;1H");
+        mock.writeToScreen(sixel);
+        auto const& screen = mock.terminal.primaryScreen();
+        auto const imageRowOn = [&](int line) -> std::optional<LineOffset> {
+            if (auto const fragment = screen.at(LineOffset(line), ColumnOffset(0)).imageFragment())
+                return fragment->offset().line;
+            return std::nullopt;
+        };
+        return Outcome { .cursor = screen.cursor().position,
+                         .imageRowOnLine6 = imageRowOn(6),
+                         .imageRowOnLine7 = imageRowOn(7) };
+    };
+    auto constexpr BottomLeft = CellLocation { .line = LineOffset(7), .column = ColumnOffset(0) };
+
+    SECTION("last band inside the image")
+    {
+        auto const outcome = draw(chessBoardEndingInItsLastBand());
+        CHECK(outcome.cursor == BottomLeft);
+        CHECK(outcome.imageRowOnLine7 == LineOffset(9));
+    }
+    SECTION("a trailing Graphics New Line scrolls once more to start its band")
+    {
+        auto const outcome = draw(ChessBoard);
+        CHECK(outcome.cursor == BottomLeft);
+        CHECK(outcome.imageRowOnLine6 == LineOffset(9));
+        CHECK_FALSE(outcome.imageRowOnLine7.has_value());
+    }
+    SECTION("a last band scrolled off the top leaves the cursor on the page's first row")
+    {
+        // One band of data in an image declared 100 pixels tall: the band starts on the image's first
+        // row, which scrolling has moved two lines above the page.
+        auto const outcome = draw("\033Pq\"1;1;10;100#1~~~~~~~~~~\033\\"sv);
+        CHECK(outcome.cursor == CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
+        CHECK(outcome.imageRowOnLine7 == LineOffset(9));
     }
 }
 

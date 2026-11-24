@@ -506,6 +506,14 @@ class SixelImageBuilder: public SixelParser::Events
 
     [[nodiscard]] CellLocation const& sixelCursor() const noexcept { return _sixelCursor; }
 
+    /// The pixel row the last sixel band starts on: every Graphics New Line (`-`) adds one band, a
+    /// trailing one included, however tall the raster attributes declared the image -- Ph and Pv "do
+    /// not limit the size of the image defined by the sixel data" (VT340 manual, vol. 2, §14.3.2,
+    /// https://vt100.net/docs/vt3xx-gp/chapter14.html#S14.3.2). The text cursor is placed by it once
+    /// the image is done.
+    /// @return The band's top pixel row, at most the maximum image height.
+    [[nodiscard]] LineOffset bandTop() const noexcept { return _bandTop; }
+
   private:
     /// @return the height of one sixel band in pixel rows.
     ///
@@ -589,6 +597,9 @@ class SixelImageBuilder: public SixelParser::Events
     /// The background last passed to clear(); newly exposed storage is filled with it.
     RGBAColor _fillColor {};
     CellLocation _sixelCursor {};
+    /// The pixel row the current band starts on, advanced by every Graphics New Line. Unlike
+    /// _sixelCursor it is not held inside the canvas, and it stops only at the maximum image height.
+    LineOffset _bandTop {};
     unsigned _currentColor = 0;
     /// _colors->at(_currentColor), memoized. Stable while the palette only grows.
     RGBColor _currentColorValue {};

@@ -359,6 +359,7 @@ void SixelImageBuilder::fillRun(std::span<uint8_t> dst, RGBAColor color) noexcep
 void SixelImageBuilder::clear(RGBAColor fillColor)
 {
     _sixelCursor = {};
+    _bandTop = {};
     _finalized = false;
     // Memoized so storage grown later is background-filled rather than zero-filled.
     _fillColor = fillColor;
@@ -410,6 +411,8 @@ void SixelImageBuilder::newline()
     auto const bandHeight = sixelBandHeight();
     if (unbox<unsigned>(_sixelCursor.line) + bandHeight < unbox<unsigned>(canvasSize().height))
         _sixelCursor.line = LineOffset::cast_from(_sixelCursor.line.as<unsigned>() + bandHeight);
+    _bandTop = LineOffset::cast_from(
+        std::min(_bandTop.as<uint64_t>() + bandHeight, uint64_t { unbox<unsigned>(_maxSize.height) }));
 }
 
 namespace

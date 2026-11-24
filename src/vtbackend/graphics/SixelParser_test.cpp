@@ -538,6 +538,32 @@ TEST_CASE("SixelParser.vertical_cursor_advance", "[sixel]")
 
     REQUIRE(ib.size() == vtbackend::ImageSize { Width(1), Height(24) });
     REQUIRE(ib.sixelCursor() == CellLocation { LineOffset(24), ColumnOffset { 0 } });
+    CHECK(ib.bandTop() == LineOffset(24));
+}
+
+TEST_CASE("SixelParser.band_top_counts_every_graphics_new_line", "[sixel]")
+{
+    // A band is started by every '-', past a declared raster height too, since Ph and Pv do not limit
+    // the image (VT340 manual, vol. 2, §14.3.2), so the text cursor can follow it; only the maximum
+    // image height stops it.
+    SixelImageBuilder ib(
+        { Width(5), Height(30) }, {}, OpaqueBlack, std::make_shared<SixelColorPalette>(16, 256));
+    auto sp = SixelParser { ib };
+
+    SECTION("past a declared raster height")
+    {
+        sp.parseFragment("\"1;1;5;6~-~-");
+        sp.done();
+        CHECK(ib.size().height == Height(6));
+        CHECK(ib.sixelCursor().line == LineOffset(0)); // painting stays inside the declared canvas
+        CHECK(ib.bandTop() == LineOffset(12));
+    }
+    SECTION("stopping at the maximum image height")
+    {
+        sp.parseFragment("------");
+        sp.done();
+        CHECK(ib.bandTop() == LineOffset(30));
+    }
 }
 
 TEST_CASE("SixelParser.aspect_ratio_overflow", "[sixel]")

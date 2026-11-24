@@ -211,10 +211,9 @@ enum class ImageCursorPolicy : uint8_t
     Stay,
     /// The cursor moves to the image's left column, on the line below it (GIP `u`, iTerm2).
     BelowImage,
-    /// As BelowImage, with the line found the way a VT340 finds it: from the image's height in sixel
-    /// bands rather than from the rows it occupies (Sixel). Needs the cell's pixel size, and is
-    /// BelowImage until the display has reported one.
-    BelowSixelBands,
+    /// The cursor moves to the image's left column, on its last row; an image that scrolls leaves it on
+    /// the bottom margin (Sixel, whose handler then moves it up to the row its final band starts on).
+    OnLastImageRow,
     /// The cursor moves right past the image, on its last row (kitty without `C=1`), walking down by
     /// index so a DECSTBM region scrolls at its bottom margin. The right edge is the one text wraps at:
     /// the right margin inside a DECLRMM band, else the last page column. The spec leaves a cursor pushed
@@ -879,7 +878,13 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void singleShiftSelect(CharsetTable table);
     void requestPixelSize(RequestPixelSize area);
     void requestCharacterSize(RequestPixelSize area);
-    void sixelImage(ImageSize pixelSize, Image::Data&& rgbaData);
+    /// Places a finished sixel image at the cursor and moves the text cursor to the row of the final sixel
+    /// band, as the VT340 manual defines (vol. 2, §14.4,
+    /// https://vt100.net/docs/vt3xx-gp/chapter14.html#S14.4).
+    /// @param pixelSize The image's size in pixels.
+    /// @param lastBandTop The pixel row the final sixel band starts on (SixelImageBuilder::bandTop()).
+    /// @param rgbaData The image's pixels.
+    void sixelImage(ImageSize pixelSize, LineOffset lastBandTop, Image::Data&& rgbaData);
 
     /// Logs, the first time only, that an image was dropped because the cell size in pixels is unknown. In a
     /// daemon session it never is: the daemon's terminal is not told the client's cell size.
