@@ -28,7 +28,9 @@ interface types {
     record root {
         /// The label the extension's manifest declares the root under.
         label: string,
-        /// The root's directories: absolute, normalised, symlinks resolved.
+        /// The root's directories: absolute, normalised, symlinks resolved, in the host's native spelling
+        /// (`/home/me/repos`; on Windows `C:\Users\me\repos` or `\\server\share\repos`, backslashes,
+        /// an upper-case drive letter, on-disk case and long names).
         paths: list<string>,
     }
 
@@ -250,7 +252,8 @@ interface host {
     wake: func(after-ms: u32);
     /// Reads the host's clocks.
     now: func() -> clock-reading;
-    /// Starts a declared command, with its declared arguments, in a directory inside one of its roots.
+    /// Starts a declared command, with its declared arguments, in a directory inside one of its roots. `cwd`,
+    /// and a `path:` argument, are spelled as the root they lie in is.
     proc-start: func(command: string, args: list<tuple<string, string>>, cwd: string, tag: string) -> result<proc-handle, host-error>;
     /// Lists the processes the extension started and has not released, running and finished.
     procs: func() -> result<list<proc-info>, host-error>;
@@ -281,7 +284,8 @@ interface host {
     /// Lists the store's keys that start with a prefix, sorted. Any prefix is accepted; one no key of the
     /// grammar of `store-get` can start with lists nothing.
     store-keys: func(prefix: string) -> result<list<string>, host-error>;
-    /// Opens a pane from a declared template; `near` names a served tab whose workspace it opens in.
+    /// Opens a pane from a declared template; `near` names a served tab whose workspace it opens in. `cwd`,
+    /// and a `path:` argument, are spelled as the root they lie in is.
     pane-open: func(template: string, args: list<tuple<string, string>>, cwd: string, title: string, tag: string, near: option<string>) -> result<string, host-error>;
     /// Closes a pane the extension owns.
     pane-close: func(pane: string) -> result<_, host-error>;
@@ -322,7 +326,8 @@ interface host {
     /// `gone`, and raises and activates nothing; so is a pane it closed, until its session ended
     /// (`not-owned` after).
     pane-reveal: func(pane: string, origin: origin) -> result<_, host-error>;
-    /// Reads a regular file inside a root declared readable.
+    /// Reads a regular file inside a root declared readable. `path` is relative and `/`-separated on every
+    /// platform.
     file-read: func(root: string, path: string) -> result<file-content, file-error>;
     /// Types text the user wrote into a pane the extension owns, its manifest declaring `pane-input`: as one
     /// bracketed paste, then Enter, so that a multi-line text is one message. Text that is not UTF-8, that

@@ -404,7 +404,9 @@ typedef uint8_t terminal_extensions_daemon_types_hint_t;
 typedef struct terminal_extensions_daemon_types_root_t {
   // The label the extension's manifest declares the root under.
   daemon_string_t   label;
-  // The root's directories: absolute, normalised, symlinks resolved.
+  // The root's directories: absolute, normalised, symlinks resolved, in the host's native spelling
+  // (`/home/me/repos`; on Windows `C:\Users\me\repos` or `\\server\share\repos`, backslashes,
+  // an upper-case drive letter, on-disk case and long names).
   daemon_list_string_t   paths;
 } terminal_extensions_daemon_types_root_t;
 
@@ -450,7 +452,8 @@ extern void terminal_extensions_daemon_host_log(terminal_extensions_daemon_host_
 extern void terminal_extensions_daemon_host_wake(uint32_t after_ms);
 // Reads the host's clocks.
 extern void terminal_extensions_daemon_host_now(terminal_extensions_daemon_host_clock_reading_t *ret);
-// Starts a declared command, with its declared arguments, in a directory inside one of its roots.
+// Starts a declared command, with its declared arguments, in a directory inside one of its roots. `cwd`,
+// and a `path:` argument, are spelled as the root they lie in is.
 extern bool terminal_extensions_daemon_host_proc_start(daemon_string_t *command, daemon_list_tuple2_string_string_t *args, daemon_string_t *cwd, daemon_string_t *tag, terminal_extensions_daemon_host_proc_handle_t *ret, terminal_extensions_daemon_host_host_error_t *err);
 // Lists the processes the extension started and has not released, running and finished.
 extern bool terminal_extensions_daemon_host_procs(terminal_extensions_daemon_host_list_proc_info_t *ret, terminal_extensions_daemon_host_host_error_t *err);
@@ -481,7 +484,8 @@ extern bool terminal_extensions_daemon_host_store_remove(daemon_string_t *key, t
 // Lists the store's keys that start with a prefix, sorted. Any prefix is accepted; one no key of the
 // grammar of `store-get` can start with lists nothing.
 extern bool terminal_extensions_daemon_host_store_keys(daemon_string_t *prefix, daemon_list_string_t *ret, terminal_extensions_daemon_host_host_error_t *err);
-// Opens a pane from a declared template; `near` names a served tab whose workspace it opens in.
+// Opens a pane from a declared template; `near` names a served tab whose workspace it opens in. `cwd`,
+// and a `path:` argument, are spelled as the root they lie in is.
 extern bool terminal_extensions_daemon_host_pane_open(daemon_string_t *template_, daemon_list_tuple2_string_string_t *args, daemon_string_t *cwd, daemon_string_t *title, daemon_string_t *tag, daemon_string_t *maybe_near, daemon_string_t *ret, terminal_extensions_daemon_host_host_error_t *err);
 // Closes a pane the extension owns.
 extern bool terminal_extensions_daemon_host_pane_close(daemon_string_t *pane, terminal_extensions_daemon_host_host_error_t *err);
@@ -522,7 +526,8 @@ extern bool terminal_extensions_daemon_host_summary_set(daemon_string_t *short_,
 // `gone`, and raises and activates nothing; so is a pane it closed, until its session ended
 // (`not-owned` after).
 extern bool terminal_extensions_daemon_host_pane_reveal(daemon_string_t *pane, terminal_extensions_daemon_host_origin_t origin, terminal_extensions_daemon_host_host_error_t *err);
-// Reads a regular file inside a root declared readable.
+// Reads a regular file inside a root declared readable. `path` is relative and `/`-separated on every
+// platform.
 extern bool terminal_extensions_daemon_host_file_read(daemon_string_t *root, daemon_string_t *path, terminal_extensions_daemon_host_file_content_t *ret, terminal_extensions_daemon_host_file_error_t *err);
 // Types text the user wrote into a pane the extension owns, its manifest declaring `pane-input`: as one
 // bracketed paste, then Enter, so that a multi-line text is one message. Text that is not UTF-8, that
