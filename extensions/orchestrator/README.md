@@ -38,7 +38,8 @@ The host hands the orchestrator `worktree_root` and each `repos[].path` in their
 style or that Win32 cannot address, and compares roots ignoring ASCII case. It builds worktree paths with `\`
 (`C:\…\wt\<repo>\<run>`) and reads git's forward-slash output against them; the paths it passes to `file-read`
 stay `/`-separated and relative to the worktree root. A command that fails with a negative exit code — an
-NTSTATUS — is shown in hex (`it exited with 0xC0000005`).
+NTSTATUS — is shown in hex (`it exited with 0xC0000005`) when its code is what is shown: a command that wrote
+nothing to stderr.
 
 ## The dashboard
 

@@ -406,7 +406,7 @@ typedef struct terminal_extensions_daemon_types_root_t {
   daemon_string_t   label;
   // The root's directories: absolute, normalised, symlinks resolved, in the host's native spelling
   // (`/home/me/repos`; on Windows `C:\Users\me\repos` or `\\server\share\repos`, backslashes,
-  // an upper-case drive letter, on-disk case and long names).
+  // an upper-case drive letter, on-disk case and long names as far as the path exists).
   daemon_list_string_t   paths;
 } terminal_extensions_daemon_types_root_t;
 

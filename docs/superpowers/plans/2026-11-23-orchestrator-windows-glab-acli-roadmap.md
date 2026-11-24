@@ -21,7 +21,7 @@ the end-to-end run's manual rows are with the user (see "End-to-end run" below).
 | B | `vtpty::PipedProcessRunner` (`ProcessRunner_win32.cpp`) | **done** (plan `2026-11-23-orchestrator-windows-process-runner.md`): the rules a Windows spawn obeys as a pure unit, `.exe` programs run in a kill-on-close job each with both streams captured, timeout and cancel end the whole tree at once, background processes outlive a command that exits by itself (`6791c56fb^..aed9fbf41`) | — |
 | C | `file-read` beneath a root (`BeneathRead_win32.cpp`) | **done** (plan `2026-11-23-orchestrator-windows-file-read.md`): what a Windows entry is to a read as a pure rule, the Win32 calls a read beneath a held directory makes, `file-read` on Windows through the native reader, a delete-pending directory is `Missing`, a removed root's handle let go of before it is opened again (`93561a1ff^..3d63d4b4b`) | — |
 | D | `pane-open` in a held directory | **done** (plan `2026-11-23-orchestrator-windows-pane-open.md`): one check that a held directory can be a child's cwd, its name guarded until the child ended, one kill-on-close job for every held spawn, a pseudoconsole child started in a held directory, the agent's tree ends with its pane and survives an upgrade, a failed start closes its pseudoconsole (`18be32883^..d8f9c9cad`) | — |
-| E | Packaging and docs | **done**: the MSI, per-user MSI and zip carry `share/contour/extensions/orchestrator.wasm` (plan `2026-11-24-orchestrator-windows-packaging-and-docs.md`): a warning when a program is no `.exe`, an NTSTATUS exit code shown in hex, the profile route and pseudoconsole-close fixes, the Windows CI wiring, the WIT, README and `docs/extensions.md` on Windows, a smoke script (`4e6cb637b^..be9c48b84`, plus this roadmap's own commits). The CI wiring (`beb16d479`) has **not run in CI yet**: nothing is pushed | — |
+| E | Packaging and docs | **done**: the MSI, per-user MSI and zip carry `share/contour/extensions/orchestrator.wasm` (plan `2026-11-24-orchestrator-windows-packaging-and-docs.md`): a warning when a program is no `.exe`, an NTSTATUS exit code shown in hex, the profile route and pseudoconsole-close fixes, the Windows CI wiring, the WIT, README and `docs/extensions.md` on Windows, a smoke script (`4e6cb637b^..51fc045b1`, plus this roadmap's own commits). The CI wiring (`beb16d479`) has **not run in CI yet**: nothing is pushed | — |
 
 Findings from the recording that shaped phase 1:
 
@@ -130,11 +130,11 @@ Each is described for users in `docs/extensions.md`, section
 
 ## End-to-end run (2026-11-24)
 
-The smoke check is `scripts/smoke-orchestrator-windows.ps1` (`be9c48b84`). It installs the build into its own
-`-Root`, starts a daemon of its own there (socket pinned under `-Root`, `LOCALAPPDATA` overridden), and never
-touches the user's daemon or configuration. The daemon is reached with `--socket <Root>\daemon.sock`
-(`--daemon NAME` names a saved host, not a daemon). The topic task's key is `s`: `t` is reserved by the
-dashboard.
+The smoke check is `scripts/smoke-orchestrator-windows.ps1` (`be9c48b84`, `51fc045b1`). It installs the build
+into its own `-Root`, starts a daemon of its own there (socket pinned under `-Root`, `LOCALAPPDATA` overridden),
+and never touches the user's daemon or configuration. `daemon stop` takes `--socket <Root>\daemon.sock`; the
+client verbs take `--daemon <socket path>` (`--daemon NAME` names a saved host, not a daemon). The topic task's
+key is `s`: `t` is reserved by the dashboard.
 
 The run made: build `clangcl-release` (guest on), then the Offline tier unattended —
 
