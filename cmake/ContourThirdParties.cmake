@@ -403,9 +403,9 @@ if(CONTOUR_EXTENSIONS)
         endif()
     endforeach()
 
-    add_library(contour_wasmtime INTERFACE)
-    add_library(contour::wasmtime ALIAS contour_wasmtime)
-
+    # contour::wasmtime is created only once a Wasmtime is resolved, so that a target linking it without
+    # CONTOUR_HAVE_WASMTIME fails to configure rather than linking nothing.
+    set(_wasmtime_reason "")
     if(CONTOUR_USE_CPM AND _wasmtime_archive)
         message(STATUS "Using CPM to fetch Wasmtime ${WASMTIME_VERSION} (${_wasmtime_archive})")
         CPMAddPackage(
@@ -415,26 +415,36 @@ if(CONTOUR_EXTENSIONS)
             URL_HASH SHA256=${_wasmtime_sha256}
             DOWNLOAD_ONLY YES
         )
-        target_include_directories(contour_wasmtime SYSTEM INTERFACE "${wasmtime_SOURCE_DIR}/include")
-        if(WIN32)
-            target_link_libraries(contour_wasmtime INTERFACE
-                "${wasmtime_SOURCE_DIR}/lib/wasmtime.lib"
-                ws2_32 advapi32 userenv ntdll shell32 ole32 bcrypt)
-            # wasm.h and wasi.h mark the API __declspec(dllimport) on Windows unless told otherwise, which is
-            # right only for wasmtime.dll; this one is linked statically.
-            target_compile_definitions(contour_wasmtime INTERFACE LIBWASM_STATIC WASI_API_EXTERN=)
-        else()
-            target_link_libraries(contour_wasmtime INTERFACE "${wasmtime_SOURCE_DIR}/lib/libwasmtime.a")
-            if(LINUX)
-                target_link_libraries(contour_wasmtime INTERFACE pthread dl m)
+        if(wasmtime_SOURCE_DIR)
+            add_library(contour_wasmtime INTERFACE)
+            add_library(contour::wasmtime ALIAS contour_wasmtime)
+            target_include_directories(contour_wasmtime SYSTEM INTERFACE "${wasmtime_SOURCE_DIR}/include")
+            if(WIN32)
+                target_link_libraries(contour_wasmtime INTERFACE
+                    "${wasmtime_SOURCE_DIR}/lib/wasmtime.lib"
+                    ws2_32 advapi32 userenv ntdll shell32 ole32 bcrypt)
+                # wasm.h and wasi.h mark the API __declspec(dllimport) on Windows unless told otherwise, which
+                # is right only for wasmtime.dll; this one is linked statically.
+                target_compile_definitions(contour_wasmtime INTERFACE LIBWASM_STATIC WASI_API_EXTERN=)
+            else()
+                target_link_libraries(contour_wasmtime INTERFACE "${wasmtime_SOURCE_DIR}/lib/libwasmtime.a")
+                if(LINUX)
+                    target_link_libraries(contour_wasmtime INTERFACE pthread dl m)
+                endif()
             endif()
+            set(CONTOUR_HAVE_WASMTIME ON)
+            set(CONTOUR_EXTENSION_HOST_ENGINE_STRING "Wasmtime ${WASMTIME_VERSION}")
+            set(THIRDPARTY_BUILTIN_wasmtime "CPM (Wasmtime ${WASMTIME_VERSION}, prebuilt, static)")
+        else()
+            # CPM_USE_LOCAL_PACKAGES or CPM_LOCAL_PACKAGES_ONLY resolved the package without the archive, so
+            # there is no archive to take the headers and library from.
+            set(_wasmtime_reason "CPM resolved Wasmtime ${WASMTIME_VERSION} without fetching its archive")
         endif()
-        set(CONTOUR_HAVE_WASMTIME ON)
-        set(CONTOUR_EXTENSION_HOST_ENGINE_STRING "Wasmtime ${WASMTIME_VERSION}")
-        set(THIRDPARTY_BUILTIN_wasmtime "CPM (Wasmtime ${WASMTIME_VERSION}, prebuilt, static)")
     else()
         find_package(wasmtime ${_wasmtime_major} QUIET)
         if(TARGET wasmtime::wasmtime)
+            add_library(contour_wasmtime INTERFACE)
+            add_library(contour::wasmtime ALIAS contour_wasmtime)
             target_link_libraries(contour_wasmtime INTERFACE wasmtime::wasmtime)
             set(CONTOUR_HAVE_WASMTIME ON)
             set(CONTOUR_EXTENSION_HOST_ENGINE_STRING "Wasmtime ${wasmtime_VERSION}")
