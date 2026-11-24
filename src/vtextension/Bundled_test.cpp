@@ -93,7 +93,14 @@ struct BundledExtension
                         "claude-plugin-install",
                         "agent-transcript",
                         "agent-record",
-                        "agent-stats" } },
+                        "agent-stats",
+                        "glab-auth",
+                        "glab-default-branch",
+                        "glab-mrs",
+                        "glab-issues",
+                        "glab-mr-checkout",
+                        "acli-auth",
+                        "acli-issues" } },
 #endif
     };
 }

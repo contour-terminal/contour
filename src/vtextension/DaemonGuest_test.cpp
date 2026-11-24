@@ -841,7 +841,16 @@ class RepaintRig
     }
 
     /// Runs one `update(hint)` untimed.
-    void update(DaemonHint hint) { REQUIRE(_instance->update(hint).has_value()); }
+    void update(DaemonHint hint)
+    {
+        auto const started = std::chrono::steady_clock::now();
+        auto const updated = _instance->update(hint);
+        auto const elapsed = std::chrono::steady_clock::now() - started;
+        CAPTURE(hint,
+                std::chrono::duration_cast<std::chrono::milliseconds>(elapsed),
+                updated ? std::string_view { "ok" } : errorText(updated.error()));
+        REQUIRE(updated.has_value());
+    }
 
     /// @return How many transcript pages the guest asked for.
     [[nodiscard]] std::size_t transcriptReads() const noexcept { return _services.transcriptReads(); }
