@@ -116,6 +116,11 @@ struct ControllerOptions
     /// What it does when the workspace it selects holds no tab; it waits, as a window switching there does.
     contour::remote::NativeController::EmptyWorkspace emptyWorkspace =
         contour::remote::NativeController::EmptyWorkspace::Wait;
+    /// This machine's home, what a directory on the daemon's machine shortens to `~` against when that
+    /// machine is this one; empty by default.
+    std::string homeDirectory = {};
+    /// This machine, as the daemon's stated one is compared with; the default proves no machine.
+    vtbackend::HostIdentity localIdentity = {};
 };
 
 /// A TLS transport to @p endpoint, trusting what the endpoint's expected fingerprint says and keeping its
@@ -163,6 +168,8 @@ struct ControllerOptions
         .backoff = options.backoff,
         .switchRequests = options.switchRequests,
         .emptyWorkspace = options.emptyWorkspace,
+        .homeDirectory = std::move(options.homeDirectory),
+        .localIdentity = std::move(options.localIdentity),
     };
 }
 
@@ -588,6 +595,9 @@ struct DaemonFixture
     vtworkspace::Layout startupLayout;
     /// How the host resolves one client area from several clients' reports.
     vthost::ClientSizePolicy sizePolicy = vthost::ClientSizePolicy::Latest;
+    /// The machine the daemon states in its ServerHello, taken by the next makeHost() (restartHost()); the
+    /// default proves no machine.
+    vtbackend::HostIdentity identity {};
 
     /// @return A host of the fixture's run @c instance, serving MockPty sessions.
     [[nodiscard]] std::unique_ptr<vthost::SessionHost> makeHost()
@@ -602,6 +612,7 @@ struct DaemonFixture
             vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
                                         .sizePolicy = sizePolicy,
                                         .startupLayout = startupLayout,
+                                        .identity = identity,
                                         .extensions = extensions,
                                         .profiles = profiles,
                                         .instance = instance,

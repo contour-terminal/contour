@@ -26,6 +26,7 @@
 #include <contour/session/SessionFactory.hpp>
 #include <contour/window/WorkspaceDirectory.hpp>
 
+#include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/screen/Settings.hpp>
 
 #include <vtpty/ChannelPty.hpp>
@@ -204,6 +205,13 @@ class NativeController final: public QObject, public contour::session::SessionFa
         SwitchRequests switchRequests = SwitchRequests::Answered;
         /// What the first connection does about a selected workspace that holds no tab.
         EmptyWorkspace emptyWorkspace = EmptyWorkspace::Wait;
+        /// This machine's home: what a directory on the daemon's machine shortens to `~` against, as the
+        /// sidebar lists it, when that machine is this one (@ref localIdentity).
+        std::string homeDirectory = {};
+        /// This machine, compared with the machine the daemon states (vthost::daemonMachineOf) as a mirrored
+        /// pane's header judges it, however the daemon is reached: an ssh-forwarded socket is not this
+        /// machine's daemon. The default proves no machine, so nothing is abbreviated.
+        vtbackend::HostIdentity localIdentity = {};
     };
 
     /// @param config What the controller is built with.
@@ -1042,6 +1050,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
     SwitchRequests _switchRequests;          ///< @see Config::switchRequests
     std::string _profileName;                ///< Stated in every ClientHello.
     std::filesystem::path _workingDirectory; ///< Stated in the first connection's ClientHello only.
+    std::string _homeDirectory;              ///< @see Config::homeDirectory
+    vtbackend::HostIdentity _localIdentity;  ///< @see Config::localIdentity
     /// This client's profile as stated in the ClientHello; the daemon applies it to the sessions this
     /// connection creates. Under _mutex: restateSessionSettings() replaces it on the GUI thread, and
     /// makeClient() reads it on the reactor.

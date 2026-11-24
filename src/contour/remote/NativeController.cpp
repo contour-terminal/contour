@@ -5,6 +5,9 @@
 #include <contour/remote/NativeController.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 
+#include <vtbackend/core/WorkingDirectory.hpp>
+#include <vtbackend/shell/CommandLineSanitizer.hpp>
+
 #include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 #include <core/net/Sockets.hpp>
@@ -15,6 +18,7 @@
 #include <ranges>
 #include <utility>
 
+#include <vthost/CommandBlockWire.hpp>
 #include <vthost/HostIdentity.hpp>
 #include <vthost/InputEchoWire.hpp>
 #include <vthost/SessionSettings.hpp>
@@ -156,6 +160,8 @@ NativeController::NativeController(Config config):
     _switchRequests(config.switchRequests),
     _profileName(std::move(config.profileName)),
     _workingDirectory(std::move(config.workingDirectory)),
+    _homeDirectory(std::move(config.homeDirectory)),
+    _localIdentity(std::move(config.localIdentity)),
     _attachSettings(std::move(config.attachSettings)),
     _sessionSettings(std::move(config.sessionSettings)),
     _colorPreference(std::move(config.colorPreference)),
@@ -1188,6 +1194,21 @@ window::WorkspaceDirectory NativeController::directory() const
                                         _selected != 0 ? std::optional { _selected } : std::nullopt);
 }
 
+namespace
+{
+    /// @return @p directory as the sidebar lists it, by the pane header's rule: home-abbreviated only when it
+    ///         is on the daemon's machine and that machine is this one (@p home empty otherwise), made safe
+    ///         to show.
+    [[nodiscard]] std::string shownDirectoryOf(vthost::proto::WireDirectory const& directory,
+                                               std::string_view home)
+    {
+        auto const locality =
+            vthost::contextLocalityOf(directory.locality).value_or(vtbackend::ContextLocality::Unknown);
+        return vtbackend::sanitizeCommandLine(vtbackend::homeAbbreviatedPath(directory.path, locality, home),
+                                              vtbackend::SanitizePurpose::Display);
+    }
+} // namespace
+
 void NativeController::onPaneSummary(vthost::proto::PaneSummary const& summary)
 {
     auto const lock = std::lock_guard { _mutex };
@@ -1197,7 +1218,13 @@ void NativeController::onPaneSummary(vthost::proto::PaneSummary const& summary)
     if (summary.title)
         status.title = *summary.title;
     if (summary.cwd)
-        status.cwd = summary.cwd->path;
+    {
+        // Whose "local" the daemon's verdict is: judged as a mirrored pane's header judges it, by the machine
+        // the daemon states, not by how it is reached.
+        auto const sameMachine = vthost::daemonMachineOf(_client->daemonIdentity(), _localIdentity.view())
+                                 == vthost::DaemonMachine::Same;
+        status.cwd = shownDirectoryOf(*summary.cwd, sameMachine ? std::string_view { _homeDirectory } : "");
+    }
     // Each occurrence takes the next serial, so a window that acknowledged the old one still sees the new.
     if (summary.activity == vthost::proto::OutputActivity::Output)
     {
