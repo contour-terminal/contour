@@ -38,17 +38,27 @@ struct DurableBudget
     std::chrono::milliseconds maxTime { 2000 }; ///< Time one callback may spend in them.
 };
 
-/// @return The daemon world's limits: the status line's, but with a call deadline of 200 ms of CPU time, a
-/// load
-///         deadline of 500 ms, each allowed ten times as long in real time while the daemon's machine is busy
-///         (the agents an extension starts compile on it), and a per-call argument budget that fits one full
-///         store value under its longest key (64 KiB + 128 B), so that the store's own limits are what a
-///         guest reaches first.
+/// How many times slower the WebAssembly interpreter runs a guest in this build than in a clang or GCC one.
+/// WAMR's interpreter is C compiled by the same compiler as the host. MSVC cannot use its labels-as-values
+/// dispatch (WAMR's config.h needs `__GNUC__` for it) and optimizes its switch dispatch poorly: the
+/// orchestrator's full repaint, about 30 ms under clang, takes about 275 ms there, past the 200 ms deadline,
+/// and the daemon then stops the extension after repeated faults. A clang-cl build keeps the deadlines.
+#if defined(_MSC_VER) && !defined(__clang__)
+inline constexpr auto InterpreterSlowdown = 5;
+#else
+inline constexpr auto InterpreterSlowdown = 1;
+#endif
+
+/// @return The daemon world's limits: the status line's, but with a call deadline of 200 ms of CPU time and a
+///         load deadline of 500 ms (both times InterpreterSlowdown), each allowed ten times as long in real
+///         time while the daemon's machine is busy (the agents an extension starts compile on it), and a
+///         per-call argument budget that fits one full store value under its longest key (64 KiB + 128 B),
+///         so that the store's own limits are what a guest reaches first.
 [[nodiscard]] constexpr ExtensionLimits daemonWorldLimits() noexcept
 {
     auto limits = ExtensionLimits {};
-    limits.callDeadline = std::chrono::milliseconds { 200 };
-    limits.loadDeadline = std::chrono::milliseconds { 500 };
+    limits.callDeadline = std::chrono::milliseconds { 200 } * InterpreterSlowdown;
+    limits.loadDeadline = std::chrono::milliseconds { 500 } * InterpreterSlowdown;
     limits.deadlineRealTimeFactor = 10;
     limits.maxHostCallBytes = StoreLimits {}.maxValueBytes + StoreLimits {}.maxKeyBytes;
     return limits;
