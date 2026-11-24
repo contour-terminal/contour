@@ -171,17 +171,21 @@ Task<void> grantAndLeave(core::net::EventLoop* loop, DaemonWorldHarness* h, Conn
     window->client->detach();
 }
 
-/// The later client's part: waits until it mirrors the indicator row @p row, and leaves.
-Task<void> mirrorAndLeave(core::net::EventLoop* loop, Connection* later, std::string row)
+/// @return Whether @p later mirrors the indicator row holding the summary the extension reports now.
+[[nodiscard]] bool mirrorsSummary(DaemonWorldHarness& h, Connection const& later)
+{
+    auto const row = std::format("[{}]", h.status().summary);
+    return std::ranges::any_of(later.client->screens(),
+                               [&row](auto const& entry) { return indicatorRowOf(entry.second) == row; });
+}
+
+/// The later client's part: waits until it mirrors the row holding the current summary, and leaves. The
+/// current one, not one read earlier: the guest goes on publishing after its first poll (`⬢ agents 0/4`
+/// becomes `⬢ agents 0/4 · ✗2`), and with a fast interpreter does so before this client attaches.
+Task<void> mirrorAndLeave(core::net::EventLoop* loop, DaemonWorldHarness* h, Connection* later)
 {
     std::ignore = co_await core::net::testing::waitUntil(
-        loop,
-        [later, &row] {
-            return std::ranges::any_of(later->client->screens(), [&row](auto const& entry) {
-                return indicatorRowOf(entry.second) == row;
-            });
-        },
-        WaitTicks);
+        loop, [h, later] { return mirrorsSummary(*h, *later); }, WaitTicks);
     later->client->detach();
 }
 
@@ -231,12 +235,9 @@ TEST_CASE("DaemonWorld: a window grants, every window closes, the summary stays"
 
     // A client attaching afterwards -- one that answers nothing -- mirrors the row holding the summary.
     auto later = h.connect(ClientKind::Cli);
-    auto const row = std::format("[{}]", status.summary);
     h.loop.blockOn(core::net::testing::allOf(
-        later->server->run(), later->client->run(), mirrorAndLeave(&h.loop, later.get(), row)));
-    auto const mirrored = std::ranges::any_of(
-        later->client->screens(), [&row](auto const& entry) { return indicatorRowOf(entry.second) == row; });
-    CHECK(mirrored);
+        later->server->run(), later->client->run(), mirrorAndLeave(&h.loop, &h, later.get())));
+    CHECK(mirrorsSummary(h, *later));
     CHECK(later->log.requests.empty());
 }
 
