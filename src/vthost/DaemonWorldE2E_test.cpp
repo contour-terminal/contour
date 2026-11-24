@@ -17,7 +17,6 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
-#include <chrono>
 #include <expected>
 #include <format>
 #include <memory>
@@ -206,14 +205,15 @@ TEST_CASE("DaemonWorld: a window grants, every window closes, the summary stays"
     window.reset();
 
     // No window is left. Within one poll -- every command it runs started once and answered -- it reports
-    // running, with the run list it published.
-    for ([[maybe_unused]] auto const _: std::views::iota(0, WaitTicks))
-    {
-        std::ignore = h.loop.runOnce(std::chrono::milliseconds { 1 });
-        std::ignore = h.services.processRunner.answerWaiting();
-        if (h.services.pollDone() && h.status().summary.starts_with("⬢ agents"))
-            break;
-    }
+    // running, with the run list it published. Waited for one 1 ms delay at a time: a turn of a loop that
+    // nothing is parked on returns at once, so counting turns would not wait for the guest's lane at all.
+    std::ignore = h.loop.blockOn(core::net::testing::waitUntil(
+        &h.loop,
+        [&h] {
+            std::ignore = h.services.processRunner.answerWaiting();
+            return h.services.pollDone() && h.status().summary.starts_with("⬢ agents");
+        },
+        WaitTicks));
     for (auto const& answer: vtextension::testing::OrchestratorFixtureAnswers)
     {
         CAPTURE(answer.program, answer.verb);
