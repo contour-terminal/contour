@@ -131,6 +131,121 @@ inline constexpr auto ExtendedConstModule = std::to_array<std::uint8_t>({
     0x01, 0x7f, 0x00, 0x41, 0x01, 0x41, 0x02, 0x6a, 0x0b,
 });
 
+/// Declares a struct type, which needs garbage collection, which extensions may not use.
+///
+///     (module (type (struct)))
+inline constexpr auto GcModule = std::to_array<std::uint8_t>({
+    0x00,
+    0x61,
+    0x73,
+    0x6d,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x03,
+    0x01,
+    0x5f,
+    0x00,
+});
+
+/// Declares an exception tag, which extensions may not.
+///
+///     (module (tag))
+inline constexpr auto ExceptionsModule = std::to_array<std::uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x04,
+    0x01, 0x60, 0x00, 0x00, 0x0d, 0x03, 0x01, 0x00, 0x00,
+});
+
+/// Declares a 64-bit memory, which extensions may not.
+///
+///     (module (memory i64 1))
+inline constexpr auto Memory64Module = std::to_array<std::uint8_t>({
+    0x00,
+    0x61,
+    0x73,
+    0x6d,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x05,
+    0x03,
+    0x01,
+    0x04,
+    0x01,
+});
+
+/// Takes a typed function reference, which extensions may not.
+///
+///     (module (type $t (func)) (func (param (ref null $t))))
+inline constexpr auto FunctionReferencesModule = std::to_array<std::uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x09, 0x02, 0x60, 0x00, 0x00, 0x60,
+    0x01, 0x63, 0x00, 0x00, 0x03, 0x02, 0x01, 0x01, 0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b,
+});
+
+/// Adds two 128-bit integers, which extensions may not.
+///
+///     (module (func (param i64 i64 i64 i64) (result i64 i64)
+///       (i64.add128 (local.get 0) (local.get 1) (local.get 2) (local.get 3))))
+inline constexpr auto WideArithmeticModule = std::to_array<std::uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x0a, 0x01, 0x60, 0x04, 0x7e,
+    0x7e, 0x7e, 0x7e, 0x02, 0x7e, 0x7e, 0x03, 0x02, 0x01, 0x00, 0x0a, 0x0e, 0x01, 0x0c,
+    0x00, 0x20, 0x00, 0x20, 0x01, 0x20, 0x02, 0x20, 0x03, 0xfc, 0x13, 0x0b,
+});
+
+/// Declares a memory with one-byte pages, which extensions may not.
+///
+///     (module (memory 1 (pagesize 1)))
+inline constexpr auto CustomPageSizesModule = std::to_array<std::uint8_t>({
+    0x00,
+    0x61,
+    0x73,
+    0x6d,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x05,
+    0x04,
+    0x01,
+    0x08,
+    0x01,
+    0x00,
+});
+
+/// Declares a continuation type, which needs stack switching, which extensions may not use.
+///
+///     (module (type $f (func)) (type (cont $f)))
+inline constexpr auto StackSwitchingModule = std::to_array<std::uint8_t>({
+    0x00,
+    0x61,
+    0x73,
+    0x6d,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x06,
+    0x02,
+    0x60,
+    0x00,
+    0x00,
+    0x5d,
+    0x00,
+});
+
+/// Uses a relaxed SIMD instruction, which extensions may not. An engine refusing SIMD refuses it as well;
+/// the module is here so that one accepting SIMD would still have to refuse it.
+///
+///     (module (func (param v128) (result v128) (i32x4.relaxed_trunc_f32x4_s (local.get 0))))
+inline constexpr auto RelaxedSimdModule = std::to_array<std::uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x06, 0x01, 0x60, 0x01, 0x7b, 0x01, 0x7b,
+    0x03, 0x02, 0x01, 0x00, 0x0a, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0xfd, 0x81, 0x02, 0x0b,
+});
+
 /// A module using one feature beyond the MVP, and no other.
 struct FeatureModule
 {
@@ -139,7 +254,9 @@ struct FeatureModule
 };
 
 /// One module per feature the contract checks: each engine accepts exactly those whose feature is On in
-/// EngineFeatures, and refuses the others.
+/// EngineFeatures, and refuses the others. The features without a module are none a core module can be
+/// refused for: the component-model rows concern components, relaxed-simd-deterministic is a behaviour,
+/// and branch hints are a custom section, which an engine ignores whether it reads them or not.
 inline constexpr auto FeatureModules = std::array {
     FeatureModule { .feature = EngineFeature::BulkMemory, .bytes = BulkMemoryModule },
     FeatureModule { .feature = EngineFeature::SignExtension, .bytes = SignExtensionModule },
@@ -152,6 +269,14 @@ inline constexpr auto FeatureModules = std::array {
     FeatureModule { .feature = EngineFeature::Threads, .bytes = ThreadsModule },
     FeatureModule { .feature = EngineFeature::TailCalls, .bytes = TailCallModule },
     FeatureModule { .feature = EngineFeature::MultiMemory, .bytes = MultiMemoryModule },
+    FeatureModule { .feature = EngineFeature::Gc, .bytes = GcModule },
+    FeatureModule { .feature = EngineFeature::Exceptions, .bytes = ExceptionsModule },
+    FeatureModule { .feature = EngineFeature::Memory64, .bytes = Memory64Module },
+    FeatureModule { .feature = EngineFeature::FunctionReferences, .bytes = FunctionReferencesModule },
+    FeatureModule { .feature = EngineFeature::WideArithmetic, .bytes = WideArithmeticModule },
+    FeatureModule { .feature = EngineFeature::CustomPageSizes, .bytes = CustomPageSizesModule },
+    FeatureModule { .feature = EngineFeature::StackSwitching, .bytes = StackSwitchingModule },
+    FeatureModule { .feature = EngineFeature::RelaxedSimd, .bytes = RelaxedSimdModule },
 };
 
 } // namespace vtextension::wasm::testing
