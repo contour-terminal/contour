@@ -2342,10 +2342,20 @@ int ContourApp::agentSetupAction()
     auto exeText = std::string {};
     if (hookAction == HookAction::Install)
     {
-        auto const exe = hookExecutable(env, [] {
-            return vtpty::currentExecutablePath().transform_error(
-                [](auto const& error) { return error.message(); });
-        });
+        // A daemon runs from a staged copy of its install (Windows, a macOS bundle, an AppImage), and so does
+        // the setup it runs to check the hooks: both name the installation, which outlives every copy.
+        auto const& files = core::platform::NativeFileSystem::instance();
+        auto const images = vthost::NativeDaemonImages::ofThisProcess(env, files, CONTOUR_VERSION_STRING);
+        auto const installationOf = [&](std::filesystem::path const& binary) {
+            return images ? (*images)->store().installationOf(files.weaklyCanonical(binary)) : std::nullopt;
+        };
+        auto const exe = hookExecutable(
+            env,
+            [] {
+                return vtpty::currentExecutablePath().transform_error(
+                    [](auto const& error) { return error.message(); });
+            },
+            installationOf);
         if (!exe)
         {
             cerr << "Error: cannot tell where the contour binary is: " << exe.error() << '\n';

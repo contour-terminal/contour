@@ -184,13 +184,22 @@ enum class OutcomeFormat : uint8_t
 /// @return The names, without empty entries.
 [[nodiscard]] std::vector<std::string> parseAgentList(std::string_view commaList);
 
+/// Maps a binary to the installed one it is a staged copy of: nullopt for a binary that is no staged copy,
+/// or whose installation is unknown or gone (vthost::DaemonImageStore::installationOf()).
+using InstallationOf = std::function<std::optional<std::filesystem::path>(std::filesystem::path const&)>;
+
 /// @param env Where `$APPIMAGE` is read.
 /// @param runningBinary The path of the running `contour` binary, asked only when it is needed.
-/// @return The binary the hooks are to run: under an AppImage the AppImage file, since the binary inside it
-///         lives in a mount that vanishes on exit; else the running binary. Or why that is unknown.
+/// @param installationOf Maps a staged copy to its installation.
+/// @return The binary the hooks are to run: the binary launched -- under an AppImage the AppImage file,
+///         since the binary inside it lives in a mount that vanishes on exit; else the running binary --
+///         or, where that is a daemon's staged copy, the installation it was copied from, so that the
+///         hooks a staged daemon checks for are the ones a setup from the installation writes, and survive
+///         the upgrade that replaces the copy. Or why the running binary is unknown.
 [[nodiscard]] std::expected<std::filesystem::path, std::string> hookExecutable(
     core::Environment const& env,
-    std::function<std::expected<std::filesystem::path, std::string>()> const& runningBinary);
+    std::function<std::expected<std::filesystem::path, std::string>()> const& runningBinary,
+    InstallationOf const& installationOf);
 
 /// Writes the skill, and installs or removes the hooks, of each requested agent. Text files it replaces --
 /// a skill, an agent's settings -- are replaced durably, and through a symlink to them (a dotfiles

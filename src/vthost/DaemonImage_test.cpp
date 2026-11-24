@@ -586,6 +586,130 @@ TEST_CASE("the store knows what lies under it", "[vthost][image]")
     CHECK(store.leaseFileOf("/state/bin/0.8.1-01234567") == fs::path { "/state/bin/0.8.1-01234567.lease" });
 }
 
+namespace
+{
+/// The executable of a Windows install every installation case below stages.
+constexpr auto InstalledExe = std::string_view { "/opt/Contour/bin/contour.exe" };
+
+/// @return The store staging the Windows install at InstalledExe into /state/bin, as @p release.
+vthost::DaemonImageStoreConfig installTreeStoreConfig(std::string release)
+{
+    return vthost::DaemonImageStoreConfig { .imagesRoot = "/state/bin",
+                                            .releaseVersion = std::move(release),
+                                            .inputs = { .platform = HostPlatform::Windows,
+                                                        .executable = fs::path { InstalledExe } },
+                                            .processId = 9 };
+}
+} // namespace
+
+TEST_CASE("a staged file names the installation it was copied from", "[vthost][image][installation]")
+{
+    auto files = StagingFileSystem {};
+    std::ignore = files.writeFile(InstalledExe, "MZ");
+    std::ignore = files.writeFile("/opt/Contour/bin/Qt6Core.dll", "DLL");
+    auto leases = FakeImageLeases {};
+    auto const links = FakeSymbolicLinks {};
+    auto store = vthost::DaemonImageStore { installTreeStoreConfig("0.8.1"), files, leases, links };
+    auto const staged = store.stage();
+    REQUIRE(staged.has_value());
+    auto const image = store.imageDirectoryOf(staged->executable);
+
+    CHECK(store.installationOf(staged->executable) == fs::path { InstalledExe });
+    CHECK(store.installationOf(image / "bin" / "Qt6Core.dll") == fs::path { "/opt/Contour/bin/Qt6Core.dll" });
+    // Nothing outside an image, and not the image itself, has an installation.
+    CHECK_FALSE(store.installationOf(fs::path { InstalledExe }).has_value());
+    CHECK_FALSE(store.installationOf(image).has_value());
+    CHECK_FALSE(store.installationOf("/state/bin/0.0.0-00000000/bin/contour.exe").has_value());
+
+    // An install that is gone names nothing: the caller falls back to the copy it runs.
+    std::ignore = files.remove(fs::path { InstalledExe });
+    CHECK_FALSE(store.installationOf(staged->executable).has_value());
+}
+
+TEST_CASE("every upgrade's image names the one installation", "[vthost][image][installation]")
+{
+    // An in-place upgrade (MSI, winget) replaces the install's files, and the next daemon runs from a new
+    // image: a path named after the image changes with it, the installation does not.
+    auto files = StagingFileSystem {};
+    std::ignore = files.writeFile(InstalledExe, "MZ");
+    auto leases = FakeImageLeases {};
+    auto const links = FakeSymbolicLinks {};
+    auto before = vthost::DaemonImageStore { installTreeStoreConfig("0.8.1"), files, leases, links };
+    auto const old = before.stage();
+    REQUIRE(old.has_value());
+
+    std::ignore = files.writeFile(InstalledExe, "MZ upgraded");
+    auto after = vthost::DaemonImageStore { installTreeStoreConfig("0.9.0"), files, leases, links };
+    auto const upgraded = after.stage();
+    REQUIRE(upgraded.has_value());
+
+    CHECK(upgraded->executable != old->executable);
+    CHECK(after.installationOf(upgraded->executable) == fs::path { InstalledExe });
+    CHECK(after.installationOf(old->executable) == fs::path { InstalledExe });
+}
+
+TEST_CASE("an AppImage's image names the AppImage it was copied from", "[vthost][image][installation]")
+{
+    auto files = StagingFileSystem {};
+    std::ignore = files.writeFile(AppImagePath, AppImageContent);
+    auto leases = FakeImageLeases {};
+    auto const links = FakeSymbolicLinks {};
+    auto store =
+        vthost::DaemonImageStore { appImageStoreConfig("/state/bin", "0.8.1"), files, leases, links };
+    auto const staged = store.stage();
+    REQUIRE(staged.has_value());
+    CHECK(store.installationOf(staged->executable) == fs::path { AppImagePath });
+}
+
+TEST_CASE("an image that records no usable installation names none", "[vthost][image][installation]")
+{
+    auto files = StagingFileSystem {};
+    std::ignore = files.writeFile(InstalledExe, "MZ");
+    auto leases = FakeImageLeases {};
+    auto const links = FakeSymbolicLinks {};
+    auto const store = vthost::DaemonImageStore { installTreeStoreConfig("0.8.1"), files, leases, links };
+    auto const image = fs::path { "/state/bin/0.8.0-aaaaaaaa" };
+    std::ignore = files.writeFile(image / "bin" / "contour.exe", "MZ");
+
+    SECTION("staged before images recorded one")
+    {
+        std::ignore = files.writeFile(image / ".complete", "0.8.0");
+    }
+    SECTION("incomplete")
+    {
+        std::ignore = files.writeFile(image / ".installation", "/opt/Contour");
+    }
+    SECTION("a relative path")
+    {
+        std::ignore = files.writeFile(image / ".installation", "opt/Contour");
+        std::ignore = files.writeFile(image / ".complete", "0.8.0");
+    }
+    SECTION("another image of the store")
+    {
+        std::ignore = files.writeFile("/state/bin/0.7.0-bbbbbbbb/bin/contour.exe", "MZ");
+        std::ignore = files.writeFile(image / ".installation", "/state/bin/0.7.0-bbbbbbbb");
+        std::ignore = files.writeFile(image / ".complete", "0.8.0");
+    }
+    CHECK_FALSE(store.installationOf(image / "bin" / "contour.exe").has_value());
+}
+
+TEST_CASE("a store that stages nothing names no installation", "[vthost][image][installation]")
+{
+    // A temporary fallback state directory is one other local users can plant an image in.
+    auto files = StagingFileSystem {};
+    std::ignore = files.writeFile(InstalledExe, "MZ");
+    std::ignore = files.writeFile("/tmp/state/bin/0.8.0-aaaaaaaa/bin/contour.exe", "PLANTED");
+    std::ignore = files.writeFile("/tmp/state/bin/0.8.0-aaaaaaaa/.installation", "/opt/Contour");
+    std::ignore = files.writeFile("/tmp/state/bin/0.8.0-aaaaaaaa/.complete", "0.8.0");
+    auto leases = FakeImageLeases {};
+    auto const links = FakeSymbolicLinks {};
+    auto config = installTreeStoreConfig("0.8.1");
+    config.imagesRoot = "/tmp/state/bin";
+    config.stateOrigin = vthost::StateDirectoryOrigin::TemporaryFallback;
+    auto const store = vthost::DaemonImageStore { std::move(config), files, leases, links };
+    CHECK_FALSE(store.installationOf("/tmp/state/bin/0.8.0-aaaaaaaa/bin/contour.exe").has_value());
+}
+
 // Portable: what follows runs against each platform's own lease backend, flock or share modes.
 TEST_CASE("a native lease survives its image's publish and ends with its holder",
           "[vthost][image][native-lease]")

@@ -25,6 +25,10 @@ namespace
     /// The file an image holds once, and only once, it is complete. Written last, before the rename.
     constexpr auto CompletionMarker = std::string_view { ".complete" };
 
+    /// The file naming, in UTF-8, the install root an image was copied from (StagingPlan::sourceRoot).
+    /// Written before the completion marker.
+    constexpr auto InstallationRecord = std::string_view { ".installation" };
+
     /// What separates an image's name from the staging process's id in a partial copy's name.
     constexpr auto PartialInfix = std::string_view { ".partial-" };
 
@@ -327,6 +331,31 @@ fs::path DaemonImageStore::imageDirectoryOf(fs::path const& executable) const
     return _config.imagesRoot / *relative.begin();
 }
 
+std::optional<fs::path> DaemonImageStore::installationOf(fs::path const& staged) const
+{
+    // A store that stages nothing -- a temporary fallback state directory among them, which other users
+    // can plant files in -- names no installation.
+    if (_plan.layout == StagingLayout::InPlace)
+        return std::nullopt;
+    auto const imageDir = imageDirectoryOf(staged);
+    if (imageDir.empty() || imageDir.filename().string().contains(PartialInfix) || !isComplete(imageDir))
+        return std::nullopt;
+    auto const relative = staged.lexically_normal().lexically_relative(imageDir.lexically_normal());
+    if (relative.empty() || relative == ".")
+        return std::nullopt;
+    auto const record = _fs.readFile(imageDir / InstallationRecord);
+    if (!record || record->empty())
+        return std::nullopt;
+    auto const root = core::pathFromUtf8(*record);
+    if (!root || !root->has_root_directory())
+        return std::nullopt;
+    auto installed = *root / relative;
+    // An install is never an image of this store, and must still hold the file.
+    if (contains(installed) || !_fs.isRegularFile(installed))
+        return std::nullopt;
+    return installed;
+}
+
 fs::path DaemonImageStore::leaseFileOf(fs::path const& imageDir) const
 {
     return suffixed(imageDir, LeaseExtension);
@@ -375,6 +404,8 @@ std::expected<void, StagingError> DaemonImageStore::copyInto(fs::path const& par
     return _fs.permissions(executable)
         .and_then(
             [&](fs::perms perms) { return _fs.setPermissions(executable, perms | fs::perms::owner_exec); })
+        .and_then(
+            [&] { return _fs.writeFile(partial / InstallationRecord, core::pathToUtf8(_plan.sourceRoot)); })
         .and_then([&] { return _fs.writeFile(partial / CompletionMarker, _config.releaseVersion); })
         .transform_error(copyFailed);
 }

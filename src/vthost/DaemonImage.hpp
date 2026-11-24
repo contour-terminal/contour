@@ -341,6 +341,19 @@ class DaemonImageStore
     /// @return The image directory holding it, or empty when it lies elsewhere.
     [[nodiscard]] std::filesystem::path imageDirectoryOf(std::filesystem::path const& executable) const;
 
+    /// Finds the installed file a file of an image was staged from: what is named to anything that must
+    /// outlive the image, such as an agent's hooks, which a staged path would break at the next upgrade.
+    ///
+    /// Staging records the install it copied from in the image (written before the image completes), so
+    /// a process running from the image -- a daemon, or a program it starts -- can name its installation
+    /// whichever launcher staged it.
+    /// @param staged A file in a complete image of this store, such as its executable.
+    /// @return The same file in the install the image was staged from, while it exists there; nullopt
+    ///         when @p staged lies in no complete image, the image records no install (staged before
+    ///         the record existed), the file is gone from it, or this layout stages nothing.
+    [[nodiscard]] std::optional<std::filesystem::path> installationOf(
+        std::filesystem::path const& staged) const;
+
     /// Finds a complete image of the store by its name, as a live upgrade's request names it: never a path,
     /// so nothing outside the images root can be named.
     /// @param imageId The image directory's name, `<release>-<fingerprint>` (imageDirectoryName()).

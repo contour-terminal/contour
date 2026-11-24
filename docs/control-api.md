@@ -376,7 +376,10 @@ the pane shows a working, blocked (waiting for you) or done status. The hooks ru
 gives up after two seconds (reading the payload included), ignores a payload larger than 1 MiB, and does nothing
 outside a pane of a Contour daemon (no `$CONTOUR_DAEMON` or `$CONTOUR_PANE`; a window running its sessions in
 process does not pass those on to its own shells). The `contour` binary is written into the hooks by its absolute path (under an AppImage, the
-AppImage's), so rerun `contour agent setup` after moving it.
+AppImage's), so rerun `contour agent setup` after moving it. A setup run from a daemon's per-version copy of
+the install (as the daemon's own hooks check is, on Windows, macOS and under an AppImage) names the installed
+binary that copy was made from, not the copy, so the hooks agree with a setup run from the install and survive
+the upgrades that replace the copy.
 
 | Agent | Hook file | What is installed |
 | --- | --- | --- |

@@ -347,12 +347,17 @@ std::vector<std::string> parseAgentList(std::string_view commaList)
 
 std::expected<std::filesystem::path, std::string> hookExecutable(
     core::Environment const& env,
-    std::function<std::expected<std::filesystem::path, std::string>()> const& runningBinary)
+    std::function<std::expected<std::filesystem::path, std::string>()> const& runningBinary,
+    InstallationOf const& installationOf)
 {
-    if (auto const appImage = env.get("APPIMAGE"); appImage && !appImage->empty())
-        if (auto path = core::pathFromUtf8(*appImage))
-            return *std::move(path);
-    return runningBinary();
+    auto const launched = [&]() -> std::expected<std::filesystem::path, std::string> {
+        if (auto const appImage = env.get("APPIMAGE"); appImage && !appImage->empty())
+            if (auto path = core::pathFromUtf8(*appImage))
+                return *std::move(path);
+        return runningBinary();
+    }();
+    return launched.transform(
+        [&](std::filesystem::path const& binary) { return installationOf(binary).value_or(binary); });
 }
 
 std::expected<std::vector<AgentOutcome>, std::string> setupAgentSkills(core::platform::FileSystem& fileSystem,

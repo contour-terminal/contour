@@ -17,6 +17,7 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -474,24 +475,63 @@ TEST_CASE("agentSetup.hookExecutablePrefersTheAppImage", "[contour][cli][agent]"
         ++asked;
         return std::filesystem::path { "/tmp/.mount_ContouXXXX/usr/bin/contour" };
     };
+    auto const notStaged = [](std::filesystem::path const&) -> std::optional<std::filesystem::path> {
+        return std::nullopt;
+    };
 
     // Under an AppImage the binary's mount vanishes on exit: the hook runs the AppImage itself.
     auto const appImage =
         core::testing::FakeEnvironment { { { "APPIMAGE", "/home/u/Apps/Contour-x86_64.AppImage" } } };
-    CHECK(contour::cli::hookExecutable(appImage, running)
+    CHECK(contour::cli::hookExecutable(appImage, running, notStaged)
           == std::filesystem::path { "/home/u/Apps/Contour-x86_64.AppImage" });
     CHECK(asked == 0);
 
-    CHECK(contour::cli::hookExecutable(core::testing::FakeEnvironment {}, running)
+    CHECK(contour::cli::hookExecutable(core::testing::FakeEnvironment {}, running, notStaged)
           == std::filesystem::path { "/tmp/.mount_ContouXXXX/usr/bin/contour" });
-    CHECK(contour::cli::hookExecutable(core::testing::FakeEnvironment { { { "APPIMAGE", "" } } }, running)
+    CHECK(contour::cli::hookExecutable(
+              core::testing::FakeEnvironment { { { "APPIMAGE", "" } } }, running, notStaged)
               .has_value());
     CHECK(asked == 2);
 
     auto const unknown = []() -> std::expected<std::filesystem::path, std::string> {
         return std::unexpected(std::string { "no /proc" });
     };
-    CHECK(contour::cli::hookExecutable(core::testing::FakeEnvironment {}, unknown).error() == "no /proc");
+    CHECK(contour::cli::hookExecutable(core::testing::FakeEnvironment {}, unknown, notStaged).error()
+          == "no /proc");
+}
+
+TEST_CASE("agentSetup.hookExecutableNamesTheInstallationOfAStagedCopy", "[contour][cli][agent]")
+{
+    // A daemon runs from a per-version copy of its install, and checks the hooks by running `agent setup
+    // --dry-run` from that copy: it must name the binary a setup from the install writes, which the next
+    // upgrade's copy names too.
+    auto const installed = std::filesystem::path { "C:/Programs/contour/bin/contour.exe" };
+    auto const installationOf =
+        [&](std::filesystem::path const& binary) -> std::optional<std::filesystem::path> {
+        if (binary.string().starts_with("C:/state/bin/"))
+            return installed;
+        return std::nullopt;
+    };
+    auto const runningFrom = [](std::filesystem::path binary) {
+        return [binary = std::move(binary)]() -> std::expected<std::filesystem::path, std::string> {
+            return binary;
+        };
+    };
+    auto const env = core::testing::FakeEnvironment {};
+
+    CHECK(contour::cli::hookExecutable(env, runningFrom(installed), installationOf) == installed);
+    CHECK(contour::cli::hookExecutable(
+              env, runningFrom("C:/state/bin/0.9.0-0db4dd48/bin/contour.exe"), installationOf)
+          == installed);
+    CHECK(contour::cli::hookExecutable(
+              env, runningFrom("C:/state/bin/0.9.1-1a2b3c4d/bin/contour.exe"), installationOf)
+          == installed);
+
+    // A staged AppImage is mapped as the AppImage, which is what is launched.
+    auto const appImage =
+        core::testing::FakeEnvironment { { { "APPIMAGE", "C:/state/bin/0.9.0-0db4dd48/Contour.AppImage" } } };
+    CHECK(contour::cli::hookExecutable(appImage, runningFrom("/tmp/.mount_x/usr/bin/contour"), installationOf)
+          == installed);
 }
 
 TEST_CASE("setup reports its outcomes as text and JSON", "[contour][cli][agent]")
