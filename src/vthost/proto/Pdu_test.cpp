@@ -2493,6 +2493,29 @@ TEST_CASE("PaneSummary decodes an unknown activity, refuses a truncated body, ig
         CHECK(decoded.session == 4);
         CHECK(decoded.title == std::optional<std::string> { "t" });
     }
+    SECTION("a directory without its locality, as a daemon before it sent one, is of unknown locality")
+    {
+        auto old = Writer {};
+        old.varint(4);
+        old.u8(0);
+        old.u8(0);
+        old.u8(0b0010); // a directory, and no locality bit
+        old.string("/srv");
+        auto const decoded = decodeAs<PaneSummary>(frameOf(PduType::PaneSummary, old.view()));
+        REQUIRE(decoded.cwd.has_value());
+        CHECK(decoded.cwd->path == "/srv");
+        CHECK(decoded.cwd->locality == 0); // Unknown
+    }
+    SECTION("a locality announced but cut short is malformed")
+    {
+        auto truncated = Writer {};
+        truncated.varint(4);
+        truncated.u8(0);
+        truncated.u8(0);
+        truncated.u8(0b1'0010); // a directory and its locality, which is not there
+        truncated.string("/srv");
+        CHECK_FALSE(decodePdu(frameOf(PduType::PaneSummary, truncated.view())).has_value());
+    }
     SECTION("a body cut short is malformed")
     {
         auto truncated = Writer {};
@@ -2529,7 +2552,12 @@ TEST_CASE("PaneSummary round-trips every combination of its optional fields",
         FinishedCommand { .exitCode = 2, .durationMs = 0, .commandLine = "false" },
     };
     auto const titles = std::vector<std::optional<std::string>> { std::nullopt, "build" };
-    auto const cwds = std::vector<std::optional<std::string>> { std::nullopt, "/srv" };
+    auto const cwds = std::vector<std::optional<WireDirectory>> {
+        std::nullopt,
+        WireDirectory { .path = "/srv", .locality = 1 }, // Local
+        WireDirectory { .path = "/srv", .locality = 2 }, // Foreign
+        WireDirectory { .path = "", .locality = 0xEE },  // a newer peer's
+    };
     // What a pane raised: nothing, a bell, notifications (an unknown occasion is carried as it is), or both.
     auto const raisedVariants = std::vector<std::pair<PaneBell, std::vector<PaneNotification>>> {
         { PaneBell::Silent, {} },

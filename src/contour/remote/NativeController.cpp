@@ -1197,7 +1197,7 @@ void NativeController::onPaneSummary(vthost::proto::PaneSummary const& summary)
     if (summary.title)
         status.title = *summary.title;
     if (summary.cwd)
-        status.cwd = *summary.cwd;
+        status.cwd = summary.cwd->path;
     // Each occurrence takes the next serial, so a window that acknowledged the old one still sees the new.
     if (summary.activity == vthost::proto::OutputActivity::Output)
     {
