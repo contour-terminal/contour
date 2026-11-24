@@ -1169,3 +1169,43 @@ daemon:
   (T8); hooks per set with worker-naming line, plugins per set (T9); Copilot runs, `Closed`, `t`, `.exe` warning
   (T10); dashboard worker (T11); README and docs/extensions.md via the index-only procedure (T12).
 - Not covered by design: Copilot status and transcripts (spec non-goal); per-repository workers (non-goal).
+
+## Amendment (2026-11-24): the user's tasks, `{key}`, and initialising a worker's Claude
+
+The user asked for four tasks that each start a skill, and for each worker's Claude to be set up with the same
+plugins as the main one.
+
+### Task 7b: `{key}` in a task's prompt — Haiku
+
+A skill such as `/example-plugin:ticket` takes a Jira key (`DEV-1234`, `[A-Z]+-\d+`), not a URL, and a task's
+prompt knows only `{url}` (and `{topic}`). Add `{key}`: an issue's key (Jira: the key; GitHub/GitLab: the number), a pull or merge
+request's number. Files: `extensions/orchestrator/core/Prompt.hpp` (`KeyPlaceholder = "{key}"`, beside
+`UrlPlaceholder`), where the prompt is filled, and `Config` (a prompt may use `{key}` wherever it may use `{url}`;
+a topic task may not). Tests: a Jira issue fills `DEV-1234`; a GitLab MR fills its number; `{key}` in a topic task
+is a configuration problem; a prompt without `{key}` is byte-identical to today's. README: one line beside `{url}`.
+
+### Task 13 additions
+
+- The user's tasks, one row each. No task builds a worker picker in the launcher, so a task runs on the worker it
+  names; a user who wants a task on several workers writes one task per worker. The defaults shown:
+
+  | id | key | applies_to | prompt | worker |
+  | --- | --- | --- | --- | --- |
+  | `work-on-issue` | `w` | `issue` | `/example-plugin:ticket {key}` | `worker-a` |
+  | `fix-ci` | `f` | `pr` | `/example-plugin:fix-ci {url}` | `worker-a` |
+  | `resolve-conflicts` | `r` | `pr` | `/contour-workflows:rebase` (no skill of the private plugin resolves conflicts) | `worker-a` |
+  | `address-review` | `a` | `pr` | `/example-plugin:address-review {url}` | `worker-a` |
+
+  Check each key against the dashboard's reserved keys (`DashboardKeys`) and pick the next free letter if taken.
+- `plugins:` lists exactly the main setup's enabled plugins, with their marketplaces:
+  `example-plugin@example-tools` (a private marketplace at
+  `https://gitlab.example.com/group/example-tools.git`), `contour-workflows@contour-terminal`
+  (`contour-terminal/claude-marketplace`), `superpowers@claude-plugins-official` (known already). The
+  orchestrator then checks and offers to install them for every Claude worker (Task 9).
+- **Initialise each new worker's Claude directory** (`worker-a`, `worker-b`, `worker-c`): with
+  `CLAUDE_CONFIG_DIR` set to that directory, run `claude plugin marketplace add` for each non-official marketplace
+  above and `claude plugin install` for each plugin, then `contour agent setup` (the status hooks). Read the main
+  setup's `enabledPlugins` and `extraKnownMarketplaces` from `<home>\.claude\settings.json` at run time and
+  install exactly those that are enabled, so a later change to the main setup is picked up by running the step
+  again. Copy no credentials, history or session files. Report what each directory still needs: a `claude`
+  login, run once by the user in that directory.
