@@ -20,6 +20,7 @@
 #include <vector>
 
 #include <vtextension/SettableEnvironment.hpp>
+#include <vtextension/UserSettableEnvironment.hpp>
 #include <vtextension/Utf8.hpp>
 #include <vtextension/wasm/WasmBinary.hpp>
 
@@ -565,6 +566,54 @@ namespace
         return addTargetEnvironment(state.manifest.panes, line);
     }
 
+    /// Binds a `command-env-set` or `pane-env-set` line's command or pane, which an earlier line declared, to
+    /// the user's set its `{argument}` names: an earlier `arg` of kind name. Each listed variable is an
+    /// environment name, listed once, and on UserSettableVariables.
+    template <typename Target>
+    [[nodiscard]] LineResult bindEnvironmentSet(std::vector<ArgumentDecl> const& arguments,
+                                                std::vector<Target>& targets,
+                                                Line const& line)
+    {
+        if (line.head.size() != 2)
+            return refuse(ManifestFault::UnknownLine);
+        auto const target = std::ranges::find(targets, line.head.front(), &Target::name);
+        if (target == targets.end())
+            return refuse(ManifestFault::EnvForUndeclared);
+        auto const argumentName = placeholderName(line.head.back());
+        if (!argumentName)
+            return refuse(ManifestFault::UnknownLine);
+        auto const argument = std::ranges::find(arguments, *argumentName, &ArgumentDecl::name);
+        if (argument == arguments.end())
+            return refuse(ManifestFault::UndeclaredPlaceholder);
+        if (argument->kind != ArgumentKind::Name)
+            return refuse(ManifestFault::EnvSetNotName);
+        if (target->environmentSet)
+            return refuse(ManifestFault::Duplicate);
+        auto binding = EnvironmentSetBinding { .argument = argument->name, .variables = {} };
+        for (auto const variable: exactWords(*line.value))
+        {
+            if (!isEnvironmentName(variable))
+                return refuse(ManifestFault::MalformedEnvironmentName);
+            if (std::ranges::contains(binding.variables, variable))
+                return refuse(ManifestFault::Duplicate);
+            if (userSettableRowOf(variable) == nullptr)
+                return refuse(ManifestFault::ForbiddenEnvironment);
+            binding.variables.emplace_back(variable);
+        }
+        target->environmentSet = std::move(binding);
+        return {};
+    }
+
+    [[nodiscard]] LineResult bindCommandEnvironmentSet(ParseState& state, Line const& line)
+    {
+        return bindEnvironmentSet(state.manifest.arguments, state.manifest.commands, line);
+    }
+
+    [[nodiscard]] LineResult bindPaneEnvironmentSet(ParseState& state, Line const& line)
+    {
+        return bindEnvironmentSet(state.manifest.arguments, state.manifest.panes, line);
+    }
+
     [[nodiscard]] LineResult addPane(ParseState& state, Line const& line)
     {
         auto const root = boundRoot(line, 1);
@@ -582,7 +631,8 @@ namespace
         state.manifest.panes.push_back(PaneTemplate { .name = std::string(line.head.front()),
                                                       .root = std::string(*root),
                                                       .argvTemplate = *std::move(argv),
-                                                      .environment = {} });
+                                                      .environment = {},
+                                                      .environmentSet = {} });
         return {};
     }
 
@@ -685,7 +735,15 @@ namespace
                    .since = 2,
                    .value = LineValue::Text,
                    .handler = &addCommandEnvironmentFor },
+        LineKind { .keyword = "command-env-set",
+                   .since = 2,
+                   .value = LineValue::Text,
+                   .handler = &bindCommandEnvironmentSet },
         LineKind { .keyword = "pane", .since = 2, .value = LineValue::Argv, .handler = &addPane },
+        LineKind { .keyword = "pane-env-set",
+                   .since = 2,
+                   .value = LineValue::Text,
+                   .handler = &bindPaneEnvironmentSet },
         LineKind {
             .keyword = "pane-env", .since = 2, .value = LineValue::Text, .handler = &addPaneEnvironment },
         LineKind { .keyword = "inbox", .since = 2, .value = LineValue::Text, .handler = &refuseReserved },

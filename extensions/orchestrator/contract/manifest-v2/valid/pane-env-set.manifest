@@ -1,0 +1,7 @@
+# A pane that takes variables from the user's set its env-set argument names.
+name = sets
+version = 2
+root worktrees = config:worktree_root
+arg env-set = name
+pane shell @worktrees = sh
+pane-env-set shell {env-set} = CLAUDE_CONFIG_DIR HTTPS_PROXY

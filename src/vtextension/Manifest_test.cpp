@@ -535,6 +535,12 @@ constexpr auto InvalidRows = std::array {
     InvalidRow { .file = "url-open-repeated", .fault = ManifestFault::Repeated },
     InvalidRow { .file = "title-bidi-override", .fault = ManifestFault::BadTitle },
     InvalidRow { .file = "action-title-too-long", .fault = ManifestFault::BadTitle },
+    InvalidRow { .file = "env-set-undeclared-target", .fault = ManifestFault::EnvForUndeclared },
+    InvalidRow { .file = "env-set-undeclared-argument", .fault = ManifestFault::UndeclaredPlaceholder },
+    InvalidRow { .file = "env-set-argument-not-name", .fault = ManifestFault::EnvSetNotName },
+    InvalidRow { .file = "env-set-forbidden-variable", .fault = ManifestFault::ForbiddenEnvironment },
+    InvalidRow { .file = "env-set-repeated", .fault = ManifestFault::Duplicate },
+    InvalidRow { .file = "env-set-without-placeholder", .fault = ManifestFault::UnknownLine },
 };
 
 [[nodiscard]] std::optional<ManifestFault> faultOf(std::string_view text)
@@ -584,6 +590,27 @@ TEST_CASE("Manifest v2: every corpus file under invalid/ is refused with its fau
     for (auto const& row: InvalidRows)
         rows.emplace(row.file);
     CHECK(corpusFiles("invalid") == rows);
+}
+
+TEST_CASE("Manifest v2: a pane and a command bound to a user's set", "[vtextension][manifest]")
+{
+    using vtextension::EnvironmentSetBinding;
+
+    auto const pane =
+        parseManifestText(readCorpusFile(corpusDirectory() / "valid" / "pane-env-set.manifest"));
+    REQUIRE(pane.has_value());
+    CHECK(pane->panes.front().environmentSet
+          == EnvironmentSetBinding { .argument = "env-set",
+                                     .variables = { "CLAUDE_CONFIG_DIR", "HTTPS_PROXY" } });
+    auto const command =
+        parseManifestText(readCorpusFile(corpusDirectory() / "valid" / "command-env-set.manifest"));
+    REQUIRE(command.has_value());
+    CHECK(command->commands.front().environmentSet->variables
+          == std::vector<std::string> { "CLAUDE_CONFIG_DIR", "NO_PROXY" });
+    CHECK_FALSE(command->panes.size());
+    // A version-1 manifest does not know the lines.
+    CHECK(faultOf("name = a\nversion = 1\ncommand x = id\npane-env-set x {a} = NO_PROXY\n")
+          == ManifestFault::Version2LineInVersion1);
 }
 
 TEST_CASE("Manifest v2: blanks around a line are refused, never trimmed", "[vtextension][manifest]")
@@ -695,6 +722,8 @@ TEST_CASE("Manifest v2: a version-2 line is refused under version 1", "[vtextens
                                "command-env-for c A = 1",
                                "pane p @r = sh",
                                "pane-env p A = 1",
+                               "pane-env-set p {a} = NO_PROXY",
+                               "command-env-set c {a} = NO_PROXY",
                                "inbox i = text",
                                "serve s",
                                "action a = Title",

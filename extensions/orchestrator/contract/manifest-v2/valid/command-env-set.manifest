@@ -1,0 +1,7 @@
+# A command that takes variables from the user's set its env-set argument names.
+name = sets
+version = 2
+root worktrees = config:worktree_root
+arg env-set = name
+command who short @worktrees = id
+command-env-set who {env-set} = CLAUDE_CONFIG_DIR NO_PROXY

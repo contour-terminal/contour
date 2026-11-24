@@ -1,0 +1,7 @@
+# A variable set's argument without the braces of a placeholder.
+name = sets
+version = 2
+root worktrees = config:worktree_root
+arg env-set = name
+pane shell @worktrees = sh
+pane-env-set shell env-set = CLAUDE_CONFIG_DIR HTTPS_PROXY

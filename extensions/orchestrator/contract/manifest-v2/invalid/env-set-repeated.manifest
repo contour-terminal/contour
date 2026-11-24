@@ -1,0 +1,8 @@
+# A pane bound to a variable set twice.
+name = sets
+version = 2
+root worktrees = config:worktree_root
+arg env-set = name
+pane shell @worktrees = sh
+pane-env-set shell {env-set} = CLAUDE_CONFIG_DIR HTTPS_PROXY
+pane-env-set shell {env-set} = CLAUDE_CONFIG_DIR HTTPS_PROXY

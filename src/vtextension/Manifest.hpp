@@ -73,6 +73,15 @@ struct ArgumentDecl
     std::string root;  ///< For a Path, the root it lies inside; empty for every other kind.
 };
 
+/// A pane or command that takes variables from a user's set (`pane-env-set`, `command-env-set`).
+struct EnvironmentSetBinding
+{
+    std::string argument;               ///< The `arg` (of kind name) whose value names the set.
+    std::vector<std::string> variables; ///< What it may take from the set, each on UserSettableVariables.
+
+    bool operator==(EnvironmentSetBinding const&) const = default; ///< Compares argument and variables.
+};
+
 /// One command an extension declares it may run.
 struct DeclaredCommand
 {
@@ -92,6 +101,9 @@ struct DeclaredCommand
     /// Its own environment (`command-env-for`), applied after Manifest::commandEnvironment, in declaration
     /// order.
     std::vector<EnvironmentEntry> environment {};
+
+    /// The variables it may take from a user's set (`command-env-set`), if any.
+    std::optional<EnvironmentSetBinding> environmentSet {};
 };
 
 /// A program the extension may put in a tab (`pane <name> @<root> = argv…`).
@@ -101,6 +113,9 @@ struct PaneTemplate
     std::string root;                          ///< The root its working directory lies inside.
     std::vector<std::string> argvTemplate;     ///< As DeclaredCommand::argvTemplate.
     std::vector<EnvironmentEntry> environment; ///< Its fixed environment (`pane-env`), in declaration order.
+
+    /// The variables it may take from a user's set (`pane-env-set`), if any.
+    std::optional<EnvironmentSetBinding> environmentSet {};
 };
 
 /// Whether an extension may type into its own agent panes (`pane-input`).
@@ -218,6 +233,7 @@ enum class ManifestFault : uint8_t
               ///< text.
     ForbiddenEnvironment, ///< An environment variable an extension may not set, or a value it may not take.
     ForbiddenGitConfig,   ///< A git configuration key an extension may not set, or a value it may not take.
+    EnvSetNotName,        ///< A pane-env-set or command-env-set whose argument is not of kind name.
 };
 
 /// The most characters (code points) a manifest's `title`, or an `action`'s title, may hold.
@@ -289,9 +305,11 @@ inline constexpr auto ManifestFaultTexts = std::array {
     ManifestFaultText { .fault = ManifestFault::ForbiddenGitConfig,
                         .text =
                             "a git configuration key an extension may not set, or a value it may not take" },
+    ManifestFaultText { .fault = ManifestFault::EnvSetNotName,
+                        .text = "a variable-set argument that is not of kind name" },
 };
 
-static_assert(ManifestFaultTexts.size() == std::to_underlying(ManifestFault::ForbiddenGitConfig) + 1U,
+static_assert(ManifestFaultTexts.size() == std::to_underlying(ManifestFault::EnvSetNotName) + 1U,
               "every ManifestFault has a row");
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ManifestFaultTexts.size()),
                                   [](std::size_t index) {
@@ -319,9 +337,12 @@ static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ManifestFa
 ///
 /// The `version` line is found first and every line is judged under it: version 1 knows `name`, `version`,
 /// `command <name> = argv…` and `control <permission>`, in any order; version 2 adds `placement`, `root`,
-/// `read`, `arg`, `command-env`, `command-env-for`, `pane`, `pane-env`, `serve`, `action` and `title` (and
-/// reserves `inbox`, which it refuses), binds every command to a timeout class and a root, wants `version`
-/// before every line but `name`, and a name declared before any line uses it.
+/// `read`, `arg`, `command-env`, `command-env-for`, `command-env-set`, `pane`, `pane-env`, `pane-env-set`,
+/// `serve`, `action` and `title` (and reserves `inbox`, which it refuses), binds every command to a timeout
+/// class and a root, wants `version` before every line but `name`, and a name declared before any line uses
+/// it. A `pane-env-set <pane> {<arg>} = <VAR>…` or `command-env-set <command> {<arg>} = <VAR>…` line binds
+/// an earlier pane or command, once, to the user's set an earlier `arg … = name` names, listing the
+/// variables it may take from it: each once, and each on UserSettableVariables.
 /// @param text The section's bytes.
 /// @return The manifest, its digest left empty; the first fault found otherwise.
 [[nodiscard]] std::expected<Manifest, ManifestFault> parseManifestText(std::string_view text);

@@ -289,6 +289,8 @@ enum class Fault : uint8_t
     UnsupportedLine,          ///< An `inbox` line: the kind is reserved, and no version supports it yet.
     BadTitle, ///< A `title` or `action` title longer than MaxTitleLength characters, or one that disguises
               ///< text.
+    EnvSetNotName,     ///< A `pane-env-set` or `command-env-set` whose argument is not of kind name.
+    ForbiddenVariable, ///< A `pane-env-set` or `command-env-set` variable a user's set may not hold.
 };
 
 enum class Valued : uint8_t
@@ -345,6 +347,18 @@ constexpr auto LineKinds = std::array {
     LineKind { .keyword = "pane-env",
                .headWords = 3,
                .keyWords = 3,
+               .valued = Valued::Yes,
+               .since = 2,
+               .rootAt = 0 },
+    LineKind { .keyword = "pane-env-set",
+               .headWords = 3,
+               .keyWords = 2,
+               .valued = Valued::Yes,
+               .since = 2,
+               .rootAt = 0 },
+    LineKind { .keyword = "command-env-set",
+               .headWords = 3,
+               .keyWords = 2,
                .valued = Valued::Yes,
                .since = 2,
                .rootAt = 0 },
@@ -424,6 +438,13 @@ constexpr auto DisguisingCodePoints = std::array {
 
 constexpr auto PlainKinds = std::array { "number"sv, "uuid"sv, "name"sv, "ref"sv, "text"sv };
 
+/// The variables a `pane-env-set` or `command-env-set` line may list: what a user's set may hold. The host
+/// keeps the same list (vtextension's UserSettableVariables).
+constexpr auto UserSettableVariables = std::array {
+    "CLAUDE_CONFIG_DIR"sv, "COPILOT_HOME"sv, "ANTHROPIC_BASE_URL"sv,
+    "HTTPS_PROXY"sv,       "HTTP_PROXY"sv,   "NO_PROXY"sv,
+};
+
 /// The one word a `root` line may carry after its label: the host creates the directory if it is missing.
 constexpr auto RootCreateWord = "create"sv;
 
@@ -471,8 +492,9 @@ constexpr auto RootCreateWord = "create"sv;
 /// What the lines read so far have declared.
 struct ManifestState
 {
-    std::set<std::string, std::less<>> declared; ///< "<keyword> <name>…" of every declaration.
-    unsigned version = 0;                        ///< 0 until a valid `version` line.
+    std::set<std::string, std::less<>> declared;      ///< "<keyword> <name>…" of every declaration.
+    std::set<std::string, std::less<>> nameArguments; ///< The `arg`s of kind `name`.
+    unsigned version = 0;                             ///< 0 until a valid `version` line.
 
     [[nodiscard]] bool isDeclared(std::string_view keyword, std::string_view name) const
     {
@@ -507,6 +529,35 @@ struct ManifestLine
     RootCreation creation; ///< Whether a `root` line said `create`.
 };
 
+/// Checks a `pane-env-set` or `command-env-set` line in the host's order: its target, its `{argument}` and
+/// that argument's kind, then each variable's shape, uniqueness and place on UserSettableVariables. A target
+/// bound twice is the generic duplicate check's, which checkLine() runs before this.
+[[nodiscard]] Fault checkEnvironmentSet(ManifestLine const& line, ManifestState const& state)
+{
+    auto const& head = line.head;
+    auto const targetKind = line.kind->keyword == "pane-env-set" ? "pane"sv : "command"sv;
+    if (!state.isDeclared(targetKind, head[1]))
+        return Fault::UndeclaredTarget;
+    auto const argument = placeholderName(head[2]);
+    if (!argument)
+        return Fault::UnknownLine;
+    if (!state.isDeclared("arg", *argument))
+        return Fault::UndeclaredPlaceholder;
+    if (!state.nameArguments.contains(*argument))
+        return Fault::EnvSetNotName;
+    auto seen = std::set<std::string_view> {};
+    for (auto const variable: wordsOf(line.value))
+    {
+        if (!isEnvironmentName(variable))
+            return Fault::MalformedEnvironmentName;
+        if (!seen.insert(variable).second)
+            return Fault::Duplicate;
+        if (!std::ranges::contains(UserSettableVariables, variable))
+            return Fault::ForbiddenVariable;
+    }
+    return Fault::None;
+}
+
 /// Checks what a line refers to: roots, arguments, commands, panes and kinds.
 [[nodiscard]] Fault checkReferences(ManifestLine const& line, ManifestState const& state)
 {
@@ -535,6 +586,8 @@ struct ManifestLine
         return Fault::UndeclaredTarget;
     if ((keyword == "title" || keyword == "action") && !isShownAsWritten(line.value))
         return Fault::BadTitle;
+    if (keyword == "pane-env-set" || keyword == "command-env-set")
+        return checkEnvironmentSet(line, state);
     if (keyword == "command" || keyword == "pane")
         return checkArgv(line.value, state.declared);
     return Fault::None;
@@ -598,7 +651,10 @@ struct ManifestLine
             state.version = 1U;
         return state.version == 0 ? Fault::VersionMismatch : Fault::None;
     }
-    return checkReferences(line, state);
+    auto const fault = checkReferences(line, state);
+    if (fault == Fault::None && keyword == "arg" && line.value == "name")
+        state.nameArguments.emplace(line.head[1]);
+    return fault;
 }
 
 /// The line-grammar half of manifest version 2, independent of the tables it is checked against: a carriage
@@ -641,10 +697,12 @@ constexpr auto CorpusRows = std::array {
     CorpusRow { .file = "valid/arg.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/command-env-for.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/command-env.manifest", .expected = Fault::None },
+    CorpusRow { .file = "valid/command-env-set.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/command.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/crlf.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/orchestrator.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/pane-env.manifest", .expected = Fault::None },
+    CorpusRow { .file = "valid/pane-env-set.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/pane-input.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/url-open.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/pane.manifest", .expected = Fault::None },
@@ -689,6 +747,13 @@ constexpr auto CorpusRows = std::array {
     CorpusRow { .file = "invalid/url-open-repeated.manifest", .expected = Fault::Duplicate },
     CorpusRow { .file = "invalid/title-bidi-override.manifest", .expected = Fault::BadTitle },
     CorpusRow { .file = "invalid/action-title-too-long.manifest", .expected = Fault::BadTitle },
+    CorpusRow { .file = "invalid/env-set-undeclared-target.manifest", .expected = Fault::UndeclaredTarget },
+    CorpusRow { .file = "invalid/env-set-undeclared-argument.manifest",
+                .expected = Fault::UndeclaredPlaceholder },
+    CorpusRow { .file = "invalid/env-set-argument-not-name.manifest", .expected = Fault::EnvSetNotName },
+    CorpusRow { .file = "invalid/env-set-forbidden-variable.manifest", .expected = Fault::ForbiddenVariable },
+    CorpusRow { .file = "invalid/env-set-repeated.manifest", .expected = Fault::Duplicate },
+    CorpusRow { .file = "invalid/env-set-without-placeholder.manifest", .expected = Fault::UnknownLine },
 };
 
 /// One manifest written inline and the verdict it pins: the boundaries and placements the corpus files leave

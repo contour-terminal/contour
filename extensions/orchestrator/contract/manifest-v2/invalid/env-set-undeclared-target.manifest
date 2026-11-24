@@ -1,0 +1,7 @@
+# A variable set for a pane that is not declared.
+name = sets
+version = 2
+root worktrees = config:worktree_root
+arg env-set = name
+pane shell @worktrees = sh
+pane-env-set other {env-set} = CLAUDE_CONFIG_DIR HTTPS_PROXY

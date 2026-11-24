@@ -58,3 +58,14 @@ zero-width character or line separator (`invalid/title-too-long.manifest`,
 `invalid/title-control-character.manifest`, `invalid/title-bidi-override.manifest`,
 `invalid/title-repeated.manifest`). An `action` line's title follows the same rules
 (`invalid/action-title-too-long.manifest`).
+
+A `pane-env-set <pane> {<arg>} = <VAR> <VAR> …` or `command-env-set <command> {<arg>} = <VAR> …` line
+(version 2) lets a declared pane or command take variables from one of the user's own variable sets:
+the call's `<arg>` names the set, and only the listed variables are taken from it. The argument must be a
+declared `arg <arg> = name` (`invalid/env-set-argument-not-name.manifest`,
+`invalid/env-set-undeclared-argument.manifest`), written as a whole-word `{<arg>}`
+(`invalid/env-set-without-placeholder.manifest`); the pane or command must be declared earlier
+(`invalid/env-set-undeclared-target.manifest`) and bound once (`invalid/env-set-repeated.manifest`); and
+every variable, listed once, must be on the host's user-settable list -- `CLAUDE_CONFIG_DIR`,
+`COPILOT_HOME`, `ANTHROPIC_BASE_URL`, `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`
+(`invalid/env-set-forbidden-variable.manifest`).

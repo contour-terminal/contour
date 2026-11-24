@@ -1,0 +1,7 @@
+# A variable a user's set may not hold.
+name = sets
+version = 2
+root worktrees = config:worktree_root
+arg env-set = name
+pane shell @worktrees = sh
+pane-env-set shell {env-set} = CLAUDE_CONFIG_DIR PATH
