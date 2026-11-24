@@ -40,15 +40,15 @@ runs:
         fi
         curl -fsSL --retry 5 --retry-all-errors --max-time 600 -o "$temp/$name.tar.gz" \
             "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/$name.tar.gz"
-        # sha256sum is on Linux and in Git Bash; macOS has shasum only.
-        if command -v sha256sum > /dev/null; then
-            echo "$WASI_SDK_SHA256  $temp/$name.tar.gz" | sha256sum --check --strict
-        else
+        # Chosen by the runner, not by what happens to be on PATH: macOS has shasum, Linux and Git Bash sha256sum.
+        if [[ "$RUNNER_OS" == macOS ]]; then
             echo "$WASI_SDK_SHA256  $temp/$name.tar.gz" | shasum -a 256 --check --strict
+        else
+            echo "$WASI_SDK_SHA256  $temp/$name.tar.gz" | sha256sum --check --strict
         fi
         if [[ "$RUNNER_OS" == Windows ]]; then
-            # Git Bash's GNU tar reads the "C:" of a Windows path as a remote host; CMake's tar does not, and
-            # is run from the directory anyway, so that it is handed no drive letter at all.
+            # CMake's tar: the extractor that unpacked this tarball locally (CPM). It is run from the directory,
+            # so that it is handed no drive letter at all.
             (cd "$temp" && cmake -E tar xzf "$name.tar.gz")
         else
             tar -xzf "$temp/$name.tar.gz" -C "$temp"

@@ -70,8 +70,8 @@ env:
   # together with PACE_VERSION: a digest that does not match makes the Windows job build without Pace.
   PACE_WINDOWS_ZIP_SHA256: "3c76e2771ff9aed970a57fbacdb2dbd15f05f0606599d9b899944212255277d5"
   # The wasi-sdk the C++ WebAssembly guests are built with (cmake/ContourWasiCxx.cmake), and the SHA-256 of
-  # its x86_64 Linux and arm64 macOS tarballs, the release assets' digests, checked before they are unpacked
-  # (.github/actions/wasi-sdk; the Fedora job hands them to its Dockerfile). Bumped together.
+  # its x86_64 Linux, arm64 macOS and x86_64 Windows tarballs, the release assets' digests, checked before they
+  # are unpacked (.github/actions/wasi-sdk; the Fedora job hands them to its Dockerfile). Bumped together.
   WASI_SDK_VERSION: "34"
   WASI_SDK_X86_64_LINUX_SHA256: "b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4"
   WASI_SDK_ARM64_MACOS_SHA256: "9c59398106b417f8f14913380fdf0097a8cc0ff4af9eb3ce0065a859e88d49e9"
