@@ -9106,18 +9106,21 @@ TEST_CASE("every pane's directory reaches the client as a PaneSummary, as its pa
     f.settle();
     auto const skip = client.received.size();
     auto const directoriesOf = [&](vtworkspace::SessionId session) {
-        auto found = std::vector<std::string> {};
+        auto found = std::vector<proto::WireDirectory> {};
         for (auto const& summary: SummaryFixture::summariesOf(client, session, skip))
             if (summary.cwd)
                 found.push_back(*summary.cwd);
         return found;
     };
+    constexpr auto Local = std::to_underlying(vtbackend::ContextLocality::Local);
+    constexpr auto Foreign = std::to_underlying(vtbackend::ContextLocality::Foreign);
+    using Shown = std::vector<proto::WireDirectory>;
 
     SECTION("a mirrored pane")
     {
         f.flush.h.host.terminal(f.inFirst)->writeToScreen("\033]7;file://other.host/tmp/x%20y\033\\");
         f.settle();
-        CHECK(directoriesOf(f.inFirst) == std::vector<std::string> { "/tmp/x y" });
+        CHECK(directoriesOf(f.inFirst) == Shown { { .path = "/tmp/x y", .locality = Foreign } });
         // Its title it says in its own stream.
         CHECK(std::ranges::none_of(
             SummaryFixture::summariesOf(client, f.inFirst, skip),
@@ -9127,7 +9130,7 @@ TEST_CASE("every pane's directory reaches the client as a PaneSummary, as its pa
     {
         f.flush.h.host.terminal(f.inSecond)->writeToScreen("\033]7;file://other.host/srv/app\033\\");
         f.settle();
-        CHECK(directoriesOf(f.inSecond) == std::vector<std::string> { "/srv/app" });
+        CHECK(directoriesOf(f.inSecond) == Shown { { .path = "/srv/app", .locality = Foreign } });
     }
     SECTION("a shell that reports only an OSC 3008 context")
     {
@@ -9135,7 +9138,8 @@ TEST_CASE("every pane's directory reaches the client as a PaneSummary, as its pa
         f.flush.h.host.terminal(f.inFirst)->writeToScreen(
             "\033]3008;start=shell-1;type=shell;cwd=/srv/ctx\033\\");
         f.settle();
-        CHECK(directoriesOf(f.inFirst) == std::vector<std::string> { "/srv/ctx" });
+        // A context that names no host says nothing of where it is: Unknown, which no client abbreviates.
+        CHECK(directoriesOf(f.inFirst) == Shown { { .path = "/srv/ctx", .locality = 0 } });
     }
     SECTION("a report that moves nothing is not told again")
     {
@@ -9146,7 +9150,9 @@ TEST_CASE("every pane's directory reaches the client as a PaneSummary, as its pa
         f.settle();
         terminal->writeToScreen("\033]7;file:///srv/lib\033\\");
         f.settle();
-        CHECK(directoriesOf(f.inSecond) == std::vector<std::string> { "/srv/app", "/srv/lib" });
+        CHECK(directoriesOf(f.inSecond)
+              == Shown { { .path = "/srv/app", .locality = Local },
+                         { .path = "/srv/lib", .locality = Local } });
     }
 }
 
@@ -9159,7 +9165,9 @@ TEST_CASE("a window that attaches is told a mirrored pane's directory",
     f.settle();
     auto const announced = SummaryFixture::summariesOf(client, f.inFirst);
     REQUIRE(announced.size() == 1);
-    CHECK(announced.front().cwd == std::optional<std::string> { "/home/user/src" });
+    CHECK(announced.front().cwd
+          == proto::WireDirectory { .path = "/home/user/src",
+                                    .locality = std::to_underlying(vtbackend::ContextLocality::Local) });
     CHECK_FALSE(announced.front().title.has_value()); // its stream says that
 }
 

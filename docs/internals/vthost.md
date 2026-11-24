@@ -441,7 +441,9 @@ publishes the control event `object.renamed`, for workspaces, tabs and panes ali
 the one daemon workspace the connection displays in full; `0` asks the daemon to create a workspace and select
 it. `ReportFocus` (client->server, same gate) states whether the window has the user's focus, and `NotifyRole`
 (server->client) tells it whether it is the raise holder (see above). `PaneSummary` (server->client) carries
-what changed about a pane of an unselected workspace -- and, for every pane, its working directory as shown --
+what changed about a pane of an unselected workspace -- and, for every pane, its working directory as shown,
+never home-abbreviated, with a locality byte (appended after the notifications, so an older client leaves it
+unread) saying whether the path is on the daemon's machine; a client on that machine abbreviates only those --
 and what it raised there: a bell mark and each desktop
 notification, which a connection that does not mirror the pane is sent in place of `SessionBell` and
 `SessionNotify`. The `LayoutBatchEnd` answering a `SelectWorkspace` names it as its `causeSerial`, so a client

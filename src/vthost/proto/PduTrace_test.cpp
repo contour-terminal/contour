@@ -363,10 +363,10 @@ TEST_CASE("the trace names the new PDUs without revealing a name", "[vthost][pro
     CHECK(summarize(DecodedPdu { PaneSummary {
               .session = 4,
               .title = "t",
-              .cwd = "/x",
+              .cwd = WireDirectory { .path = "/x", .locality = 2 },
               .activity = OutputActivity::Output,
               .finished = FinishedCommand { .exitCode = 1, .durationMs = 20, .commandLine = "ls" } } })
-          == "session=4 activity=output title=yes cwd=yes finished=exit:1,ms:20");
+          == "session=4 activity=output title=yes cwd=locality:2 finished=exit:1,ms:20");
     // What a pane raised is counted, never quoted.
     CHECK(summarize(DecodedPdu {
               PaneSummary { .session = 4,

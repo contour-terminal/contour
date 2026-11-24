@@ -197,11 +197,15 @@ ShownDirectory HostedSession::shownDirectory()
         auto const guard = std::lock_guard { _terminal };
         if (auto resolved = _terminal.resolveWorkingDirectory(vtbackend::CwdPurpose::Display))
             return ShownDirectory { .path = std::move(resolved->path),
-                                    .source = ShownDirectorySource::Reported };
+                                    .source = ShownDirectorySource::Reported,
+                                    .locality = resolved->locality };
     }
     auto directory = processDirectory();
-    auto const source = directory.empty() ? ShownDirectorySource::None : ShownDirectorySource::Process;
-    return ShownDirectory { .path = std::move(directory), .source = source };
+    if (directory.empty())
+        return ShownDirectory {};
+    return ShownDirectory { .path = std::move(directory),
+                            .source = ShownDirectorySource::Process,
+                            .locality = vtbackend::ContextLocality::Local };
 }
 
 HostedSession::~HostedSession()
@@ -2516,7 +2520,7 @@ std::optional<std::filesystem::path> SessionHost::workingDirectoryOf(SessionId s
     return std::nullopt;
 }
 
-std::optional<std::string> SessionHost::shownWorkingDirectoryOf(SessionId session) const
+std::optional<ShownDirectory> SessionHost::shownWorkingDirectoryOf(SessionId session) const
 {
     auto const it = _sessions.find(session.value);
     if (it == _sessions.end())
@@ -2524,7 +2528,7 @@ std::optional<std::string> SessionHost::shownWorkingDirectoryOf(SessionId sessio
     auto shown = it->second->shownDirectory();
     if (shown.source == ShownDirectorySource::None)
         return std::nullopt;
-    return std::move(shown.path);
+    return shown;
 }
 
 void SessionHost::tellDirectoryIfMoved(SessionId session)

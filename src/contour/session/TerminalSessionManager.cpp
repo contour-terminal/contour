@@ -82,7 +82,8 @@ namespace
                 return std::nullopt;
             auto status = window::PaneStatus {};
             status.title = session->resolvedWindowTitle();
-            status.cwd = session->displayWorkingDirectory();
+            // As the pane header shows it: home-abbreviated only when it is on this machine.
+            status.cwd = session->shownWorkingDirectory(_manager.homeDirectory());
             // The lock the parser thread holds while it changes the records.
             auto const& terminal = session->terminal();
             auto const _ = std::lock_guard { terminal };

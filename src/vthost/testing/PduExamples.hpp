@@ -234,7 +234,7 @@ namespace vthost::testing
           proto::DecodedPdu { proto::PaneSummary {
               .session = 4,
               .title = "build",
-              .cwd = "/home/user/secret",
+              .cwd = proto::WireDirectory { .path = "/home/user/secret", .locality = 1 },
               .activity = proto::OutputActivity::Output,
               .finished =
                   proto::FinishedCommand { .exitCode = 1, .durationMs = 250, .commandLine = "make secret" },
