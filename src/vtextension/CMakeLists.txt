@@ -60,6 +60,7 @@ set(vtextension_HEADERS
     Surface.hpp
     Utf8.hpp
     wasm/DefaultBackend.hpp
+    wasm/EngineFeatures.hpp
     wasm/WasiAllowList.hpp
     wasm/WasmBinary.hpp
     wasm/WasmRuntime.hpp

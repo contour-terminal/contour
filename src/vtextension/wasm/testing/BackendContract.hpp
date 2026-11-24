@@ -37,6 +37,7 @@
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/testing/StandardStreamsCapture.hpp>
 #include <vtextension/testing/TestModules.hpp>
+#include <vtextension/wasm/EngineFeatures.hpp>
 #include <vtextension/wasm/WasiAllowList.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 
@@ -212,6 +213,144 @@ inline constexpr auto PairModule = std::to_array<uint8_t>({
     0x0a, 0x0a, 0x01, 0x08, 0x00, 0x20, 0x00, 0x20, 0x01, 0x10, 0x00, 0x0b,
 });
 
+/// Uses SIMD, which extensions may not.
+///
+///     (module (func (drop (v128.const i64x2 0 0))))
+inline constexpr auto SimdModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03,
+    0x02, 0x01, 0x00, 0x0a, 0x17, 0x01, 0x15, 0x00, 0xfd, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1a, 0x0b,
+});
+
+/// Declares a shared memory, which needs threads, which extensions may not use.
+///
+///     (module (memory 1 1 shared))
+inline constexpr auto ThreadsModule = std::to_array<uint8_t>({
+    0x00,
+    0x61,
+    0x73,
+    0x6d,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x05,
+    0x04,
+    0x01,
+    0x03,
+    0x01,
+    0x01,
+});
+
+/// Makes a tail call, which extensions may not.
+///
+///     (module (func (return_call 0)))
+inline constexpr auto TailCallModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x04, 0x01, 0x60, 0x00,
+    0x00, 0x03, 0x02, 0x01, 0x00, 0x0a, 0x06, 0x01, 0x04, 0x00, 0x12, 0x00, 0x0b,
+});
+
+/// Declares two memories, which extensions may not.
+///
+///     (module (memory 1) (memory 1))
+inline constexpr auto MultiMemoryModule = std::to_array<uint8_t>({
+    0x00,
+    0x61,
+    0x73,
+    0x6d,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x05,
+    0x05,
+    0x02,
+    0x00,
+    0x01,
+    0x00,
+    0x01,
+});
+
+/// Fills memory with a bulk-memory instruction.
+///
+///     (module (memory 1) (func (memory.fill (i32.const 0) (i32.const 0) (i32.const 0))))
+inline constexpr auto BulkMemoryModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x04, 0x01, 0x60, 0x00,
+    0x00, 0x03, 0x02, 0x01, 0x00, 0x05, 0x03, 0x01, 0x00, 0x01, 0x0a, 0x0d, 0x01,
+    0x0b, 0x00, 0x41, 0x00, 0x41, 0x00, 0x41, 0x00, 0xfc, 0x0b, 0x00, 0x0b,
+});
+
+/// Sign-extends a byte.
+///
+///     (module (func (result i32) (i32.extend8_s (i32.const 1))))
+inline constexpr auto SignExtensionModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01,
+    0x7f, 0x03, 0x02, 0x01, 0x00, 0x0a, 0x07, 0x01, 0x05, 0x00, 0x41, 0x01, 0xc0, 0x0b,
+});
+
+/// Converts a float to an integer, saturating.
+///
+///     (module (func (result i32) (i32.trunc_sat_f32_s (f32.const 1))))
+inline constexpr auto SaturatingFloatToIntModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, 0x03,
+    0x02, 0x01, 0x00, 0x0a, 0x0b, 0x01, 0x09, 0x00, 0x43, 0x00, 0x00, 0x80, 0x3f, 0xfc, 0x00, 0x0b,
+});
+
+/// Exports a mutable global.
+///
+///     (module (global (export "g") (mut i32) (i32.const 0)))
+inline constexpr auto MutableGlobalsModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x06, 0x06, 0x01, 0x7f,
+    0x01, 0x41, 0x00, 0x0b, 0x07, 0x05, 0x01, 0x01, 0x67, 0x03, 0x00,
+});
+
+/// Returns two values.
+///
+///     (module (func (result i32 i32) (i32.const 1) (i32.const 2)))
+inline constexpr auto MultiValueModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x06, 0x01, 0x60, 0x00, 0x02, 0x7f,
+    0x7f, 0x03, 0x02, 0x01, 0x00, 0x0a, 0x08, 0x01, 0x06, 0x00, 0x41, 0x01, 0x41, 0x02, 0x0b,
+});
+
+/// Returns a null function reference.
+///
+///     (module (func (result funcref) (ref.null func)))
+inline constexpr auto ReferenceTypesModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01,
+    0x70, 0x03, 0x02, 0x01, 0x00, 0x0a, 0x06, 0x01, 0x04, 0x00, 0xd0, 0x70, 0x0b,
+});
+
+/// Initializes a global with an extended constant expression.
+///
+///     (module (global i32 (i32.add (i32.const 1) (i32.const 2))))
+inline constexpr auto ExtendedConstModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x06, 0x09,
+    0x01, 0x7f, 0x00, 0x41, 0x01, 0x41, 0x02, 0x6a, 0x0b,
+});
+
+/// A module using one feature beyond the MVP, and no other.
+struct FeatureModule
+{
+    EngineFeature feature {};       ///< The feature it uses.
+    std::span<uint8_t const> bytes; ///< The module.
+};
+
+/// One module per feature the contract checks: each engine accepts exactly those whose feature is On in
+/// EngineFeatures, and refuses the others.
+inline constexpr auto FeatureModules = std::array {
+    FeatureModule { .feature = EngineFeature::BulkMemory, .bytes = BulkMemoryModule },
+    FeatureModule { .feature = EngineFeature::SignExtension, .bytes = SignExtensionModule },
+    FeatureModule { .feature = EngineFeature::SaturatingFloatToInt, .bytes = SaturatingFloatToIntModule },
+    FeatureModule { .feature = EngineFeature::MutableGlobals, .bytes = MutableGlobalsModule },
+    FeatureModule { .feature = EngineFeature::MultiValue, .bytes = MultiValueModule },
+    FeatureModule { .feature = EngineFeature::ReferenceTypes, .bytes = ReferenceTypesModule },
+    FeatureModule { .feature = EngineFeature::ExtendedConst, .bytes = ExtendedConstModule },
+    FeatureModule { .feature = EngineFeature::Simd, .bytes = SimdModule },
+    FeatureModule { .feature = EngineFeature::Threads, .bytes = ThreadsModule },
+    FeatureModule { .feature = EngineFeature::TailCalls, .bytes = TailCallModule },
+    FeatureModule { .feature = EngineFeature::MultiMemory, .bytes = MultiMemoryModule },
+};
+
 /// The WebAssembly page size, in bytes.
 inline constexpr auto PageBytes = uint32_t { 64 } * 1024;
 
@@ -373,6 +512,49 @@ void loadRejectsNonModule()
     auto const loaded = runtime->load({ std::byte { 1 }, std::byte { 2 } });
     REQUIRE_FALSE(loaded.has_value());
     CHECK(loaded.error() == ExtensionError::InvalidComponent);
+}
+
+/// Loads each of FeatureModules whose feature is @p state in EngineFeatures, each in a section of its own
+/// named after the feature, and checks that it is accepted if the feature is On, refused if Off.
+template <typename T>
+void checkFeatureModules(FeatureState state)
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const guard = enterThread(*backend);
+    for (auto const& [feature, bytes]: FeatureModules)
+    {
+        auto const& row = featureRow(feature);
+        if (row.state != state)
+            continue;
+        DYNAMIC_SECTION(row.name)
+        {
+            INFO("feature: " << row.name);
+            auto const module = std::as_bytes(bytes);
+            auto const loaded = runtime->load({ module.begin(), module.end() });
+            if (state == FeatureState::On)
+                CHECK(loaded.has_value());
+            else
+            {
+                REQUIRE_FALSE(loaded.has_value());
+                CHECK(loaded.error() == ExtensionError::InvalidComponent);
+            }
+        }
+    }
+}
+
+/// A module using a feature extensions may not use is refused.
+template <typename T>
+void refusesDisabledFeatures()
+{
+    checkFeatureModules<T>(FeatureState::Off);
+}
+
+/// A module using a feature extensions may use is accepted.
+template <typename T>
+void acceptsEnabledFeatures()
+{
+    checkFeatureModules<T>(FeatureState::On);
 }
 
 /// A module's imports and exports are described as declared, with what the runtime provides.
@@ -974,6 +1156,8 @@ void wasiStdioGoesNowhere()
 /// Instantiates the whole contract suite against the backend @p Traits::make() creates.
 #define CONTOUR_WASM_BACKEND_CONTRACT(Traits)                                        \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, loadRejectsNonModule)                 \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, refusesDisabledFeatures)              \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, acceptsEnabledFeatures)               \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, describesImportsAndExports)           \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unknownImportIsUnsatisfied)           \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureImportIsUnsatisfied)    \

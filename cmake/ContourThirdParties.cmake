@@ -189,8 +189,9 @@ endif()
 # software instead. Waking blocked WASI calls is off as well: it installs a process-wide SIGUSR1
 # handler, and guests cannot block (poll_oneoff is refused). An installed WAMR does not say how it was
 # built, so a system package is accepted only once cmake/WamrTerminateProbe.cpp has shown that
-# terminating works and that initializing the runtime leaves SIGSEGV and SIGUSR1 alone; otherwise WAMR
-# is built from source.
+# terminating works, that initializing the runtime leaves SIGSEGV and SIGUSR1 alone, and that it accepts
+# exactly the WebAssembly features src/vtextension/wasm/EngineFeatures.hpp allows; otherwise WAMR is
+# built from source.
 #
 # First-party code links contour::wamr, whichever WAMR it resolves to.
 
@@ -198,7 +199,8 @@ endif()
 #
 # Sets <result-variable> to TRUE if a program linked against <target> stops a looping guest call
 # when another thread calls wasm_runtime_terminate() and its runtime initialization installs no
-# SIGSEGV or SIGUSR1 handler, FALSE otherwise (including when the probe cannot run, as when cross-compiling).
+# SIGSEGV or SIGUSR1 handler and it loads exactly the WebAssembly features extensions may use, FALSE
+# otherwise (including when the probe cannot run, as when cross-compiling).
 # Sets <result-variable>_REASON to why a WAMR was rejected.
 function(ContourThirdParties_WamrTerminates target resultVar)
     set(${resultVar} FALSE PARENT_SCOPE)
@@ -219,6 +221,10 @@ function(ContourThirdParties_WamrTerminates target resultVar)
         set(${resultVar}_REASON "it installs a SIGSEGV handler (built with hardware bounds checks)" PARENT_SCOPE)
     elseif(_wamr_probe_compile AND "${_wamr_probe_run}" STREQUAL "9")
         set(${resultVar}_REASON "it installs a SIGUSR1 handler (built with wakeup of blocking operations)" PARENT_SCOPE)
+    elseif(_wamr_probe_compile AND "${_wamr_probe_run}" STREQUAL "10")
+        set(${resultVar}_REASON "it loads modules using SIMD, threads, tail calls or multiple memories" PARENT_SCOPE)
+    elseif(_wamr_probe_compile AND "${_wamr_probe_run}" STREQUAL "11")
+        set(${resultVar}_REASON "it refuses extended constant expressions (built without WAMR_BUILD_EXTENDED_CONST_EXPR)" PARENT_SCOPE)
     endif()
 endfunction()
 
@@ -281,6 +287,20 @@ if(CONTOUR_EXTENSIONS)
                 "WAMR_BUILD_LIB_PTHREAD 0"
                 "WAMR_BUILD_LIB_WASI_THREADS 0"
                 "WAMR_BUILD_MULTI_MODULE 0"
+                # The WebAssembly features, as src/vtextension/wasm/EngineFeatures.hpp has them, so that WAMR
+                # accepts exactly the modules every other engine does; the backend contract checks it.
+                # Extended constant expressions are on because Wasmtime cannot refuse them.
+                "WAMR_BUILD_BULK_MEMORY 1"
+                "WAMR_BUILD_REF_TYPES 1"
+                "WAMR_BUILD_EXTENDED_CONST_EXPR 1"
+                "WAMR_BUILD_SIMD 0"
+                "WAMR_BUILD_SHARED_MEMORY 0"
+                "WAMR_BUILD_TAIL_CALL 0"
+                "WAMR_BUILD_MULTI_MEMORY 0"
+                "WAMR_BUILD_MEMORY64 0"
+                "WAMR_BUILD_GC 0"
+                "WAMR_BUILD_STRINGREF 0"
+                "WAMR_BUILD_EXCE_HANDLING 0"
                 "WAMR_DISABLE_HW_BOUND_CHECK 1"
                 "WAMR_DISABLE_STACK_HW_BOUND_CHECK 1"
                 "WAMR_DISABLE_WAKEUP_BLOCKING_OP 1"
