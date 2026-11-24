@@ -567,6 +567,105 @@ TEST_CASE("DaemonExtensionRuntime: a set's dropped variable is logged and the se
     CHECK(errors.lines.front().contains("kept without it"));
 }
 
+namespace
+{
+/// @return The declaration of `good`, starting with the daemon, with @p sets.
+[[nodiscard]] DaemonExtensionDeclaration goodWithSets(std::vector<EnvironmentSet> sets)
+{
+    auto declaration = declared("good", "/ext/good.wasm", ExtensionAutostart::AtDaemonStart);
+    declaration.environmentSets = std::move(sets);
+    return declaration;
+}
+
+/// @return The set `work`, holding CLAUDE_CONFIG_DIR=@p directory.
+[[nodiscard]] EnvironmentSet workSet(std::string directory)
+{
+    return EnvironmentSet { .name = "work",
+                            .variables = { { .name = "CLAUDE_CONFIG_DIR", .value = std::move(directory) } } };
+}
+} // namespace
+
+TEST_CASE("DaemonExtensionRuntime: a set added, changed or removed asks again",
+          "[daemon][runtime][consent][sets]")
+{
+    auto fixture = Fixture {};
+    REQUIRE(fixture.create({ goodWithSets({ workSet("/a") }) }).empty());
+    auto const asked = fixture.runtime->pending();
+    REQUIRE(asked.size() == 1);
+    auto const digest = asked[0].grantDigest;
+    fixture.runtime->answer("good", digest, GrantState::Granted);
+    REQUIRE(fixture.runtime->pending().empty());
+    fixture.firstLoad.wait();
+    fixture.runtime->stop();
+    fixture.runtime.reset();
+
+    SECTION("unchanged sets do not ask again")
+    {
+        REQUIRE(fixture.create({ goodWithSets({ workSet("/a") }) }).empty());
+        CHECK(fixture.runtime->pending().empty());
+    }
+
+    SECTION("a changed value asks again")
+    {
+        REQUIRE(fixture.create({ goodWithSets({ workSet("/b") }) }).empty());
+        auto const pending = fixture.runtime->pending();
+        REQUIRE(pending.size() == 1);
+        CHECK(pending[0].grantDigest != digest);
+        CHECK(std::ranges::contains(
+            pending[0].question.lines, "    CLAUDE_CONFIG_DIR=/b"sv, &ConsentLine::text));
+    }
+
+    SECTION("a removed set asks again")
+    {
+        REQUIRE(fixture.create({ goodWithSets({}) }).empty());
+        CHECK(fixture.runtime->pending().size() == 1);
+    }
+
+    SECTION("an added set asks again")
+    {
+        auto other =
+            EnvironmentSet { .name = "other", .variables = { { .name = "NO_PROXY", .value = "localhost" } } };
+        REQUIRE(fixture.create({ goodWithSets({ workSet("/a"), std::move(other) }) }).empty());
+        CHECK(fixture.runtime->pending().size() == 1);
+    }
+}
+
+TEST_CASE("DaemonExtensionRuntime: a grant from before sets existed holds",
+          "[daemon][runtime][consent][sets]")
+{
+    auto fixture = Fixture {};
+    REQUIRE(fixture.create({ goodWithSets({}) }).empty());
+    auto const pending = fixture.runtime->pending();
+    REQUIRE(pending.size() == 1);
+    auto const manifest =
+        parseManifest(testing::withManifest(testing::toModule(testing::DaemonProbeModule), WorkManifest));
+    REQUIRE(manifest.has_value());
+    auto const roots = std::vector<ResolvedRoot> { { .label = "work", .paths = { "/w" } } };
+    CHECK(pending[0].grantDigest == grantDigestOf(manifest->digest, roots));
+    CHECK(std::ranges::none_of(pending[0].question.lines, [](ConsentLine const& line) {
+        return line.text.starts_with("Variable sets");
+    }));
+}
+
+TEST_CASE("DaemonExtensionRuntime: a dropped variable is missing from the question",
+          "[daemon][runtime][consent][sets]")
+{
+    auto errors = ErrorCapture {};
+    auto fixture = Fixture {};
+    REQUIRE(fixture
+                .create({ goodWithSets(
+                    { EnvironmentSet { .name = "work",
+                                       .variables = { { .name = "CLAUDE_CONFIG_DIR", .value = "relative" },
+                                                      { .name = "NO_PROXY", .value = "localhost" } } } }) })
+                .empty());
+    auto const pending = fixture.runtime->pending();
+    REQUIRE(pending.size() == 1);
+    auto const& lines = pending[0].question.lines;
+    CHECK(std::ranges::contains(lines, "    NO_PROXY=localhost"sv, &ConsentLine::text));
+    CHECK(std::ranges::none_of(
+        lines, [](ConsentLine const& line) { return line.text.contains("CLAUDE_CONFIG_DIR="); }));
+}
+
 TEST_CASE("DaemonExtensionRuntime: entries say where each extension stands", "[daemon][runtime][consent]")
 {
     auto fixture = Fixture {};

@@ -261,7 +261,9 @@ std::expected<std::vector<ResolvedRoot>, RootPointerError> resolveRoots(
     return roots;
 }
 
-std::string grantDigestOf(std::string_view manifestDigest, std::span<ResolvedRoot const> roots)
+std::string grantDigestOf(std::string_view manifestDigest,
+                          std::span<ResolvedRoot const> roots,
+                          std::span<EnvironmentSet const> sets)
 {
     auto hasher = core::Sha256 {};
     hasher.update(manifestDigest);
@@ -273,6 +275,20 @@ std::string grantDigestOf(std::string_view manifestDigest, std::span<ResolvedRoo
             hasher.update(root.label);
             hasher.update("\t");
             hasher.update(path);
+            hasher.update("\n");
+        }
+    }
+    // Nothing for no set: a grant given before sets existed keeps its digest.
+    for (auto const& set: sets)
+    {
+        hasher.update("set\t");
+        hasher.update(set.name);
+        hasher.update("\n");
+        for (auto const& [name, value]: set.variables)
+        {
+            hasher.update(name);
+            hasher.update("=");
+            hasher.update(value);
             hasher.update("\n");
         }
     }

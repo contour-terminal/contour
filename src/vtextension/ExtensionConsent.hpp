@@ -12,6 +12,7 @@
 #include <vtextension/DaemonWorld.hpp>
 #include <vtextension/IHostServices.hpp>
 #include <vtextension/Manifest.hpp>
+#include <vtextension/UserSettableEnvironment.hpp>
 
 namespace vtextension
 {
@@ -71,14 +72,16 @@ struct ConsentQuestion
 ///         commands).` with that weight. Every text the guest chose goes through neutralizedForDisplay().
 [[nodiscard]] ConsentQuestion consentQuestion(ExtensionConsentRequest const& request);
 
-/// A daemon-scoped extension asking to run in the background: for its manifest and the directories its roots
-/// resolved to, the two things its grant is bound to (grantDigestOf()).
+/// A daemon-scoped extension asking to run in the background: for its manifest, the directories its roots
+/// resolved to and the user's variable sets, the things its grant is bound to (grantDigestOf()).
 struct DaemonConsentRequest
 {
     std::string hostId;              ///< Which installed extension asks: its config key and its module.
     Manifest manifest;               ///< What it declares.
     std::vector<ResolvedRoot> roots; ///< Its roots, resolved from its configuration, in declaration order.
     std::string grantDigest;         ///< What the answer is recorded for.
+    /// The user's sets, checked: what the bound panes and commands may take.
+    std::vector<EnvironmentSet> environmentSets = {};
 };
 
 /// @param request A daemon-scoped extension's request.
@@ -88,10 +91,15 @@ struct DaemonConsentRequest
 ///         can reach the network as you:`, then `Each of them with:` and one `  {NAME}={value}` per
 ///         `command-env` variable, then one `{command} ({short|long}, in {root}): {argv}` per command, each
 ///         followed by one `  {NAME}={value}` per variable of its own `command-env-for`; one `It may open
-///         tabs running: {pane} (in {root}): {argv}` per pane, followed by its `pane-env` variables alike;
-///         one `It may read files in: {root}` per readable root; `It shows its own tab: {scheme}://` for a
-///         served scheme. Commands, panes and every environment line weigh CanRunCommands, every other line
-///         Observes: what is granted is what is shown. Every text the guest or its configuration
+///         tabs running: {pane} (in {root}): {argv}` per pane, followed by its `pane-env` variables alike. A
+///         command or pane bound to a user's set (`command-env-set`, `pane-env-set`) is followed, after its
+///         own variables, by `  From the variable set the extension names: {NAME}, {NAME}`, the binding's
+///         variables in order. When the request carries sets, `Variable sets from your configuration:`
+///         follows the last pane, then per set `  {set}:` and one `    {NAME}={value}` per variable, or
+///         `  {set}: (empty)` for a set holding none; then the `pane-input` line, if declared; one `It may
+///         read files in: {root}` per readable root; `It shows its own tab: {scheme}://` for a served
+///         scheme. Commands, panes, every environment line and every set line weigh CanRunCommands, every
+///         other line Observes: what is granted is what is shown. Every text the guest or its configuration
 ///         chose goes through neutralizedForDisplay(), every argv through displayedCommandLine()'s quoting.
 [[nodiscard]] ConsentQuestion daemonConsentQuestion(DaemonConsentRequest const& request);
 

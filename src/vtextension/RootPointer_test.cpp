@@ -14,6 +14,7 @@
 #include <vtextension/Manifest.hpp>
 #include <vtextension/RootPathSyntax.hpp>
 #include <vtextension/RootPointer.hpp>
+#include <vtextension/UserSettableEnvironment.hpp>
 
 #ifdef _WIN32
     #include <vtpty/DirectoryHandle.hpp>
@@ -31,6 +32,7 @@
 
 using namespace std::string_view_literals;
 using core::platform::testing::InMemoryFileSystem;
+using vtextension::EnvironmentSet;
 using vtextension::grantDigestOf;
 using vtextension::Manifest;
 using vtextension::ResolvedRoot;
@@ -303,4 +305,35 @@ TEST_CASE("RootPointer: the grant digest names the manifest and every directory"
     auto added = roots;
     added[1].paths.emplace_back("/r/other");
     CHECK(grantDigestOf("m1", added) != digest);
+}
+
+TEST_CASE("RootPointer: the grant digest names every set, and only when there is one",
+          "[daemon][roots][sets]")
+{
+    auto const roots = std::vector<ResolvedRoot> {
+        { .label = "worktrees", .paths = { "/w" } },
+        { .label = "repos", .paths = { "/r/contour" } },
+    };
+    // No set: the digest from before sets existed, so that a grant given then still holds.
+    auto const withoutSets = grantDigestOf("m1", roots);
+    CHECK(grantDigestOf("m1", roots, {}) == withoutSets);
+    CHECK(withoutSets == "0fe97c7b408b8cae0b59b9ec7e6789deeaec6a959774a4d15fef800995e2f165");
+
+    auto const work =
+        EnvironmentSet { .name = "work", .variables = { { .name = "CLAUDE_CONFIG_DIR", .value = "/a" } } };
+    auto const other =
+        EnvironmentSet { .name = "other", .variables = { { .name = "NO_PROXY", .value = "localhost" } } };
+    auto const oneSet = std::vector { work };
+    auto const withSet = grantDigestOf("m1", roots, oneSet);
+    CHECK(withSet != withoutSets);
+    CHECK(grantDigestOf("m1", roots, oneSet) == withSet);
+
+    auto changed = oneSet;
+    changed[0].variables[0].value = "/b";
+    CHECK(grantDigestOf("m1", roots, changed) != withSet);
+
+    auto const workFirst = std::vector { work, other };
+    auto const otherFirst = std::vector { other, work };
+    CHECK(grantDigestOf("m1", roots, workFirst) != withSet);
+    CHECK(grantDigestOf("m1", roots, workFirst) != grantDigestOf("m1", roots, otherFirst));
 }

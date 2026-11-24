@@ -17,6 +17,7 @@
 
 #include <vtextension/DaemonWorld.hpp>
 #include <vtextension/Manifest.hpp>
+#include <vtextension/UserSettableEnvironment.hpp>
 
 namespace vtextension
 {
@@ -93,12 +94,16 @@ enum class RootPointerError : uint8_t
     core::platform::FileSystem const& fileSystem,
     vtpty::PathStyle style);
 
-/// The digest a daemon-world grant is recorded for: the manifest and the directories it was granted over,
-/// so that a moved directory or another repository asks again.
+/// The digest a daemon-world grant is recorded for: the manifest, the directories it was granted over and the
+/// user's variable sets, so that a moved directory, another repository or a changed set asks again.
 /// @param manifestDigest The manifest's digest.
 /// @param roots The resolved roots.
+/// @param sets The user's variable sets, checked (checkEnvironmentSets()), in configuration order.
 /// @return The lower-case hex SHA-256 of `<manifestDigest>\n`, then `<label>\t<path>\n` per resolved path,
-///         in declaration order.
-[[nodiscard]] std::string grantDigestOf(std::string_view manifestDigest, std::span<ResolvedRoot const> roots);
+///         in declaration order, then `set\t<name>\n` and one `<NAME>=<value>\n` per variable, per set, in
+///         order -- nothing appended when @p sets is empty, so a grant given without sets stays valid.
+[[nodiscard]] std::string grantDigestOf(std::string_view manifestDigest,
+                                        std::span<ResolvedRoot const> roots,
+                                        std::span<EnvironmentSet const> sets = {});
 
 } // namespace vtextension

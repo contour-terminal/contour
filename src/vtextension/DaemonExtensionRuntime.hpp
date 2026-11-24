@@ -177,9 +177,10 @@ struct DaemonExtensionRuntimeServices
 ///
 /// Constructed complete: every declaration is read, checked and resolved, and the boot-time extensions
 /// (bootStartOf()) that the user granted are started, before create() returns. An extension is granted for
-/// its manifest and the directories its roots resolved to (grantDigestOf()). Only a granted extension that is
-/// started acquires the engine and has its module loaded (on the calling thread, prepared for the runtime);
-/// one not granted holds neither, and waits for the user's consent.
+/// its manifest, the directories its roots resolved to and the user's variable sets, as checked
+/// (grantDigestOf()). Only a granted extension that is started acquires the engine and has its module loaded
+/// (on the calling thread, prepared for the runtime); one not granted holds neither, and waits for the user's
+/// consent.
 ///
 /// An extension that was to start but is not granted waits for the user's answer (pending()); answer()
 /// records it, and starts the extension once granted. revoke() forgets the answer and asks again.

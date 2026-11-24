@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <format>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -177,6 +178,16 @@ ConsentQuestion daemonConsentQuestion(DaemonConsentRequest const& request)
             line(std::format("  {}={}", neutralizedForDisplay(name), neutralizedForDisplay(value)),
                  ConsentWeight::CanRunCommands);
     };
+    // The variables it may take from the set a call names: their values are in the sets shown below.
+    auto const fromSet = [&line](std::optional<EnvironmentSetBinding> const& binding) {
+        if (!binding)
+            return;
+        auto names = std::string {};
+        for (auto const& name: binding->variables)
+            names += std::format("{}{}", names.empty() ? "" : ", ", neutralizedForDisplay(name));
+        line(std::format("  From the variable set the extension names: {}", names),
+             ConsentWeight::CanRunCommands);
+    };
     if (!manifest.commands.empty())
         line("It may run only these, which can reach the network as you:", ConsentWeight::Observes);
     if (!manifest.commands.empty() && !manifest.commandEnvironment.empty())
@@ -193,6 +204,7 @@ ConsentQuestion daemonConsentQuestion(DaemonConsentRequest const& request)
                          displayedArgv(command.argvTemplate)),
              ConsentWeight::CanRunCommands);
         environment(command.environment);
+        fromSet(command.environmentSet);
     }
     for (auto const& pane: manifest.panes)
     {
@@ -202,6 +214,18 @@ ConsentQuestion daemonConsentQuestion(DaemonConsentRequest const& request)
                          displayedArgv(pane.argvTemplate)),
              ConsentWeight::CanRunCommands);
         environment(pane.environment);
+        fromSet(pane.environmentSet);
+    }
+    // What a set holds is what a program bound to it runs with: every value is shown.
+    if (!request.environmentSets.empty())
+        line("Variable sets from your configuration:", ConsentWeight::CanRunCommands);
+    for (auto const& set: request.environmentSets)
+    {
+        line(std::format("  {}:{}", neutralizedForDisplay(set.name), set.variables.empty() ? " (empty)" : ""),
+             ConsentWeight::CanRunCommands);
+        for (auto const& [name, value]: set.variables)
+            line(std::format("    {}={}", neutralizedForDisplay(name), neutralizedForDisplay(value)),
+                 ConsentWeight::CanRunCommands);
     }
     if (manifest.paneInput == PaneInput::Typed)
         line("It may type text you write into those tabs, or press a number key you choose, when you send it "

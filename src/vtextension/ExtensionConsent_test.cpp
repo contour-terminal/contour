@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -17,6 +18,7 @@
 #include <vtextension/ExtensionConsent.hpp>
 #include <vtextension/Manifest.hpp>
 #include <vtextension/RootPointer.hpp>
+#include <vtextension/UserSettableEnvironment.hpp>
 
 using vtextension::ConsentAnswer;
 using vtextension::ConsentPrompt;
@@ -502,4 +504,78 @@ TEST_CASE("ExtensionConsent: a grant for the old roots does not cover new ones",
     auto added = rootsA;
     added[1].paths.emplace_back("/home/u/repo/other");
     CHECK(grants.lookup(hostId, vtextension::grantDigestOf(manifestDigest, added)) == GrantState::Pending);
+}
+
+TEST_CASE("ExtensionConsent: the daemon question shows the sets, and what each pane and command may take",
+          "[vtextension][consent][daemon][sets]")
+{
+    auto manifest =
+        vtextension::parseManifestText("name = sets\n"
+                                       "version = 2\n"
+                                       "root worktrees = config:worktree_root\n"
+                                       "arg env-set = name\n"
+                                       "command who short @worktrees = id\n"
+                                       "command-env-set who {env-set} = CLAUDE_CONFIG_DIR\n"
+                                       "pane shell @worktrees = sh\n"
+                                       "pane-env-set shell {env-set} = CLAUDE_CONFIG_DIR NO_PROXY\n"
+                                       "pane-input\n");
+    REQUIRE(manifest.has_value());
+    auto const question = vtextension::daemonConsentQuestion(vtextension::DaemonConsentRequest {
+        .hostId = "h",
+        .manifest = std::move(*manifest),
+        .roots = { ResolvedRoot { .label = "worktrees", .paths = { "/home/u/worktrees" } } },
+        .grantDigest = "g",
+        .environmentSets = {
+            vtextension::EnvironmentSet {
+                .name = "work",
+                .variables = { { .name = "CLAUDE_CONFIG_DIR", .value = "/home/u/.claude-work" } } },
+            vtextension::EnvironmentSet { .name = "empty", .variables = {} },
+        } });
+
+    // Each binding beneath what it is for, then the sets themselves, before what may be typed into the tabs.
+    auto const expected =
+        std::string { "who (short, in worktrees): id\n"
+                      "  From the variable set the extension names: CLAUDE_CONFIG_DIR\n"
+                      "It may open tabs running: shell (in worktrees): sh\n"
+                      "  From the variable set the extension names: CLAUDE_CONFIG_DIR, NO_PROXY\n"
+                      "Variable sets from your configuration:\n"
+                      "  work:\n"
+                      "    CLAUDE_CONFIG_DIR=/home/u/.claude-work\n"
+                      "  empty: (empty)\n"
+                      "It may type text" };
+    CHECK(joined(question).contains(expected));
+
+    auto const setLines = std::array<std::string_view, 6> {
+        "  From the variable set the extension names: CLAUDE_CONFIG_DIR",
+        "  From the variable set the extension names: CLAUDE_CONFIG_DIR, NO_PROXY",
+        "Variable sets from your configuration:",
+        "  work:",
+        "    CLAUDE_CONFIG_DIR=/home/u/.claude-work",
+        "  empty: (empty)",
+    };
+    for (auto const text: setLines)
+    {
+        CAPTURE(text);
+        auto const line = std::ranges::find(question.lines, text, &vtextension::ConsentLine::text);
+        REQUIRE(line != question.lines.end());
+        CHECK(line->weight == vtcontrol::ConsentWeight::CanRunCommands);
+    }
+
+    SECTION("a name or value the configuration chose is shown as text")
+    {
+        auto again = vtextension::parseManifestText("name = sets\nversion = 2\n");
+        REQUIRE(again.has_value());
+        auto const disguised = vtextension::daemonConsentQuestion(vtextension::DaemonConsentRequest {
+            .hostId = "h",
+            .manifest = std::move(*again),
+            .roots = {},
+            .grantDigest = "g",
+            .environmentSets = { vtextension::EnvironmentSet {
+                .name = "w\x1b[2J", .variables = { { .name = "NO_PROXY", .value = "a\nB=c" } } } } });
+        CHECK(std::ranges::contains(
+            disguised.lines, std::string_view { "  w<U+001B>[2J:" }, &vtextension::ConsentLine::text));
+        CHECK(std::ranges::contains(disguised.lines,
+                                    std::string_view { "    NO_PROXY=a<U+000A>B=c" },
+                                    &vtextension::ConsentLine::text));
+    }
 }

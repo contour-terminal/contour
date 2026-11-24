@@ -134,7 +134,7 @@ struct DaemonExtensionRuntime::Extension
     std::string configJson;
     ExtensionAutostart autostart = ExtensionAutostart::OnDemand;
     std::string hostId;      ///< What the grants are keyed on: the configuration key and the module.
-    std::string grantDigest; ///< What a grant must be recorded for: the manifest and the resolved roots.
+    std::string grantDigest; ///< What a grant must be recorded for: the manifest, the roots and the sets.
     std::vector<ResolvedRoot> roots;
     std::vector<EnvironmentSet> environmentSets; ///< The user's sets, checked: what its calls may name.
     ConsentQuestion question;                    ///< What the user is asked for its grant.
@@ -260,7 +260,6 @@ std::expected<std::unique_ptr<DaemonExtensionRuntime::Extension>, DeclarationPro
     extension->configJson = std::move(declaration.configJson);
     extension->autostart = declaration.autostart;
     extension->hostId = extensionHostId(name, *path);
-    extension->grantDigest = grantDigestOf(manifest->digest, *roots);
     extension->roots = *roots;
     auto checkedSets =
         checkEnvironmentSets(declaration.environmentSets, _home, _services.directories.pathStyle());
@@ -271,11 +270,14 @@ std::expected<std::unique_ptr<DaemonExtensionRuntime::Extension>, DeclarationPro
                    problem.variable,
                    userValueFaultText(problem.fault));
     extension->environmentSets = std::move(checkedSets.sets);
+    // The sets as checked: what is granted is what the calls apply, so a changed set asks again.
+    extension->grantDigest = grantDigestOf(manifest->digest, *roots, extension->environmentSets);
     extension->question =
         daemonConsentQuestion(DaemonConsentRequest { .hostId = extension->hostId,
                                                      .manifest = *manifest,
                                                      .roots = *roots,
-                                                     .grantDigest = extension->grantDigest });
+                                                     .grantDigest = extension->grantDigest,
+                                                     .environmentSets = extension->environmentSets });
     extension->module = std::move(*bytes);
     extension->store = std::make_unique<FileExtensionStore>(std::move(*store));
 
