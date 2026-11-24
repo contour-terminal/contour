@@ -302,6 +302,7 @@ function(ContourThirdParties_AddWamrWithClangCl sourceDir clangCl)
     if(EXISTS "${_msvc_bin}/ml64.exe")
         list(APPEND _cmake_args "-DCMAKE_ASM_MASM_COMPILER=${_msvc_bin}/ml64.exe")
     endif()
+    set(CONTOUR_WAMR_BUILD_JOBS 4 CACHE STRING "Parallel jobs of the clang-cl WAMR sub-build")
     set(_binary_dir "${CMAKE_BINARY_DIR}/_deps/wamr-clangcl-build")
     set(_library "${_binary_dir}/${CMAKE_STATIC_LIBRARY_PREFIX}iwasm${CMAKE_STATIC_LIBRARY_SUFFIX}")
     ExternalProject_Add(wamr_clangcl
@@ -316,7 +317,9 @@ function(ContourThirdParties_AddWamrWithClangCl sourceDir clangCl)
             # WAMR asks for CMake 3.14, before which the runtime library was a flag, not a property.
             "-DCMAKE_POLICY_DEFAULT_CMP0091=NEW"
             "-DCMAKE_MSVC_RUNTIME_LIBRARY=${_runtime}"
-        BUILD_COMMAND "${CMAKE_COMMAND}" --build <BINARY_DIR> --target vmlib
+        # The inner build is one job of the outer one, which cannot bound its parallelism: cap it, so that a
+        # `cmake --build -j 2` on a machine short of memory does not compile WAMR on every core at once.
+        BUILD_COMMAND "${CMAKE_COMMAND}" --build <BINARY_DIR> --target vmlib --parallel ${CONTOUR_WAMR_BUILD_JOBS}
         BUILD_ALWAYS YES
         BUILD_BYPRODUCTS "${_library}"
         INSTALL_COMMAND ""
