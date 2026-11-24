@@ -57,6 +57,7 @@
 #include <vtextension/StatusLineAdapter.hpp>
 #include <vtextension/StatuslineWorld.hpp>
 #include <vtextension/Surface.hpp>
+#include <vtextension/UserSettableEnvironment.hpp>
 #include <vtextension/Utf8.hpp>
 #include <vtextension/World.hpp>
 #include <vtextension/wasm/DefaultBackend.hpp>
