@@ -108,6 +108,12 @@ enum class NamingError : uint8_t
 /// @return The slug, such as "pr-2334", "issue-2301" or "ct-418", or NamingError::NotJiraKey.
 [[nodiscard]] std::expected<std::string, NamingError> itemSlug(ItemRef const& item);
 
+/// The key a task's prompt sees for the item as `{key}`: a Jira key as it is, or a pull or issue number in
+/// decimal.
+/// @param item The item.
+/// @return The key, such as "DEV-1234" or "42"; empty for a topic, which has none.
+[[nodiscard]] std::string itemKey(ItemRef const& item);
+
 class RunId;
 
 /// A run's id: the item's slug and the stamp, such as "pr-2334-20261113-150847".

@@ -306,3 +306,13 @@ TEST_CASE("Naming.topicSlug", "[orchestrator][naming]")
     CHECK(orchestrator::topicSlug(std::string(60, 'a')) == longest);
     CHECK(orchestrator::topicSlug(std::string(39, 'a') + " b") == std::string(39, 'a'));
 }
+
+TEST_CASE("Naming.itemKey", "[orchestrator][naming]")
+{
+    // The key a task's prompt sees as {key}: a Jira key as it is, a forge number in decimal, and none for a
+    // topic.
+    CHECK(orchestrator::itemKey(orchestrator::JiraRef { .key = "DEV-1234" }) == "DEV-1234");
+    CHECK(orchestrator::itemKey(orchestrator::ChangeRequestRef { .number = 42 }) == "42");
+    CHECK(orchestrator::itemKey(orchestrator::IssueRef { .number = 7 }) == "7");
+    CHECK(orchestrator::itemKey(orchestrator::TopicRef { .slug = "fix-ci" }).empty());
+}

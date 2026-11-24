@@ -68,7 +68,8 @@ struct TaskDef
     std::string label; ///< What the dashboard calls it.
     AppliesTo appliesTo = AppliesTo::PullRequest; ///< The kind of item it works on.
     std::string model;  ///< The model it runs with by default; one of Config::models().
-    std::string prompt; ///< The prompt, with `{url}` standing for the item's URL, or `{topic}` for a topic.
+    std::string prompt; ///< The prompt, with `{url}` standing for the item's URL and `{key}` for its key, or
+                        ///< `{topic}` for a topic.
     /// How long its runs' agents stay done before their run ends (`end_done_after`); nullopt: the global one.
     std::optional<std::chrono::milliseconds> endDoneAfter = std::nullopt;
     /// The permission profile its runs start with (`permissions`); empty: Config::defaultProfile().
@@ -148,7 +149,8 @@ enum class ConfigProblem : uint8_t
     TooShort,               ///< A duration below its minimum.
     NotOneKey,              ///< A task key that is not one printable character.
     ReservedKey,            ///< A task key the dashboard uses itself.
-    MissingUrl,             ///< A prompt without `{url}`.
+    MissingUrl,             ///< A prompt of an item with neither `{url}` nor `{key}`.
+    KeyInTopic,             ///< A topic's prompt that uses `{key}`: a topic has no item, so no key.
     NotPluginId,            ///< A plugin that is not `<plugin>@<marketplace>`.
     UnknownProfile,         ///< A permission profile no built-in or configured profile is called.
     ProfileCycle,           ///< A permission profile that extends itself, through any number of others.

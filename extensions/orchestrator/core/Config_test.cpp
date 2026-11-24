@@ -862,6 +862,29 @@ TEST_CASE("a topic task needs no {url}, and replaces the built-in one", "[config
     CHECK(config->firstTaskFor(AppliesTo::Topic)->id == "issue");
 }
 
+TEST_CASE("a prompt may name its item by {key} instead of {url}", "[config]")
+{
+    auto const config = parse(Input { .json = Minimal,
+                                      .find = R"("/contour-workflows:work-issue {url}")",
+                                      .replace = R"("/example-plugin:ticket {key}")" });
+    REQUIRE(config.has_value());
+    REQUIRE(config->tasks().size() == 2);
+    CHECK(std::ranges::any_of(
+        config->tasks(), [](auto const& task) { return task.prompt == "/example-plugin:ticket {key}"; }));
+}
+
+TEST_CASE("a topic prompt may not use {key}, which names an item", "[config]")
+{
+    auto const config = parse(Input { .json = Minimal,
+                                      .find = R"("applies_to": "issue", "model": "opus",
+               "prompt": "/contour-workflows:work-issue {url}")",
+                                      .replace = R"("applies_to": "topic", "model": "opus",
+               "prompt": "/contour-workflows:writing-plans {key}")" });
+    REQUIRE_FALSE(config.has_value());
+    CHECK(config.error().key.starts_with("tasks["));
+    CHECK(config.error().problem == ConfigProblem::KeyInTopic);
+}
+
 TEST_CASE("the built-in topic task takes another id when topic is taken", "[config]")
 {
     auto const config =

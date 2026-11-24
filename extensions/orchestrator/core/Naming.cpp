@@ -10,6 +10,7 @@
 
 #include <orchestrator/core/HostPaths.hpp>
 #include <orchestrator/core/Model.hpp>
+#include <orchestrator/core/Overloaded.hpp>
 
 namespace orchestrator
 {
@@ -75,6 +76,17 @@ std::string topicSlug(std::string_view text)
 std::expected<std::string, NamingError> itemSlug(ItemRef const& item)
 {
     return std::visit([](auto const& ref) { return slugOf(ref); }, item);
+}
+
+std::string itemKey(ItemRef const& item)
+{
+    return std::visit(Overloaded {
+                          [](ChangeRequestRef const& ref) { return std::format("{}", ref.number); },
+                          [](IssueRef const& ref) { return std::format("{}", ref.number); },
+                          [](JiraRef const& ref) { return ref.key; },
+                          [](TopicRef const&) { return std::string {}; },
+                      },
+                      item);
 }
 
 std::expected<RunId, NamingError> runId(ItemRef const& item, Stamp const& stamp)

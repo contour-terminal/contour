@@ -58,6 +58,16 @@ namespace
         return prompt;
     }
 
+    /// Whether @p key is one word a prompt can carry as an argument: letters, digits and '-', not leading
+    /// with '-'.
+    [[nodiscard]] constexpr bool isKeyText(std::string_view key) noexcept
+    {
+        auto const isKeyByte = [](char c) {
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-';
+        };
+        return !key.empty() && key.front() != '-' && std::ranges::all_of(key, isKeyByte);
+    }
+
     /// @return @p prompt if it is Text; otherwise why not, a NUL having been refused before.
     [[nodiscard]] std::expected<std::string, PromptError> asText(std::string prompt)
     {
@@ -70,14 +80,19 @@ namespace
 
 std::expected<std::string, PromptError> buildPrompt(std::string_view promptTemplate,
                                                     std::string_view url,
+                                                    std::string_view key,
                                                     std::optional<std::string_view> note)
 {
     if (promptTemplate.contains('\0'))
         return std::unexpected { PromptError::TemplateNotText };
     if (!isHttpsUrl(url))
         return std::unexpected { PromptError::UrlNotHttps };
+    if (promptTemplate.contains(KeyPlaceholder) && !isKeyText(key))
+        return std::unexpected { PromptError::KeyNotAccepted };
 
-    auto prompt = substituted(promptTemplate, UrlPlaceholder, url);
+    // The key goes in first: it holds no brace, so no {url} can appear in it, and a {key} inside the URL
+    // stays.
+    auto prompt = substituted(substituted(promptTemplate, KeyPlaceholder, key), UrlPlaceholder, url);
     if (note)
     {
         auto const line = singleLineNote(*note);

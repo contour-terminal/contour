@@ -239,6 +239,8 @@ at most 40 characters of `[a-z0-9-]`, such as `agent/topic-investigate-the-flaky
 reaches only the prompt and the dashboard. It starts on a new branch from the repository's base, as an
 issue's run does. `Enter` on a finished topic run opens the launcher again on its text.
 
+**The item's key.** `{key}` in a task's prompt stands for the item's key: a Jira key such as `DEV-1234`, or the number of a forge issue, pull request or merge request. A prompt may use `{url}`, `{key}` or both; a topic task's prompt may not use `{key}`.
+
 **The agents' skills.** A task's prompt such as `/contour-workflows:fix-ci {url}` names a skill, and
 the skill comes with a Claude Code plugin. If that plugin is missing, the agent answers "Unknown skill".
 `plugins` lists the plugins the agents need (by default `contour-workflows@contour-terminal`). With the status

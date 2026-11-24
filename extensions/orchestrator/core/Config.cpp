@@ -250,7 +250,9 @@ namespace
         ProblemText { .problem = ConfigProblem::ReservedKey,
                       .text = "is one of the dashboard's own keys",
                       .listing = Listing::ReservedKeys },
-        ProblemText { .problem = ConfigProblem::MissingUrl, .text = "must contain {url}" },
+        ProblemText { .problem = ConfigProblem::MissingUrl, .text = "must contain {url} or {key}" },
+        ProblemText { .problem = ConfigProblem::KeyInTopic,
+                      .text = "may not use {key}: a topic has no item, so no key" },
         ProblemText { .problem = ConfigProblem::NotPluginId,
                       .text = "must be <plugin>@<marketplace>, such as contour-workflows@contour-terminal" },
         ProblemText { .problem = ConfigProblem::UnknownProfile,
@@ -982,8 +984,14 @@ namespace
 
         auto const prompt = checked(json.prompt, key("prompt"), [&](std::string_view value) {
             auto const problem = textProblem(value);
-            // A topic has no URL: its text goes where `{topic}` is, or after the prompt.
-            if (!problem && *appliesTo != AppliesTo::Topic && !value.contains(UrlPlaceholder))
+            if (problem)
+                return problem;
+            // A topic has no item, so neither a URL nor a key: its text goes where `{topic}` is, or after the
+            // prompt.
+            if (*appliesTo == AppliesTo::Topic)
+                return value.contains(KeyPlaceholder) ? std::optional { ConfigProblem::KeyInTopic } : problem;
+            // An item's prompt names it by its URL, or by its key.
+            if (!value.contains(UrlPlaceholder) && !value.contains(KeyPlaceholder))
                 return std::optional { ConfigProblem::MissingUrl };
             return problem;
         });

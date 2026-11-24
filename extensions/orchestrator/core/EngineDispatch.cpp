@@ -123,7 +123,7 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
         return std::unexpected { DispatchRefusal::BaseUnknown };
 
     auto prompt = isTopic ? buildTopicPrompt(task->prompt, request.topic)
-                          : buildPrompt(task->prompt, request.url, request.note);
+                          : buildPrompt(task->prompt, request.url, itemKey(item), request.note);
     // A run of the item dispatched in the same second, since finished, still holds the plain id, and so may a
     // worktree no run accounts for, or its branch, which `git worktree add -b` would refuse: the new run
     // takes the next ordinal (no active run of the item exists here; that was refused above).

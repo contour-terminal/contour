@@ -29,6 +29,7 @@ struct PromptRow
 {
     std::string_view promptTemplate;
     std::string_view url;
+    std::string_view key = {};
     std::optional<std::string_view> note;
     PromptExpectation expectation;
     std::string_view expected; ///< The prompt, when accepted.
@@ -148,6 +149,58 @@ TEST_CASE("Prompt", "[orchestrator][prompt]")
                     .expectation = PromptExpectation::Refused,
                     .expected = {},
                     .error = PromptError::NoteTooLong },
+        // {key} is the item's key: a Jira key, or a forge number. A prompt with no {url} still needs the URL.
+        PromptRow { .promptTemplate = "/example-plugin:ticket {key}",
+                    .url = "https://example.atlassian.net/browse/DEV-1234",
+                    .key = "DEV-1234",
+                    .note = std::nullopt,
+                    .expectation = PromptExpectation::Accepted,
+                    .expected = "/example-plugin:ticket DEV-1234",
+                    .error = {} },
+        PromptRow { .promptTemplate = "/x:review {key} {url}",
+                    .url = "https://gitlab.example/g/p/-/merge_requests/42",
+                    .key = "42",
+                    .note = std::nullopt,
+                    .expectation = PromptExpectation::Accepted,
+                    .expected = "/x:review 42 https://gitlab.example/g/p/-/merge_requests/42",
+                    .error = {} },
+        // A {key} inside the URL is the URL's, not replaced.
+        PromptRow { .promptTemplate = "fix {key} {url}",
+                    .url = "https://h/{key}",
+                    .key = "7",
+                    .note = std::nullopt,
+                    .expectation = PromptExpectation::Accepted,
+                    .expected = "fix 7 https://h/{key}",
+                    .error = {} },
+        // A prompt without {key} is unchanged by the key it is given.
+        PromptRow { .promptTemplate = "fix {url}",
+                    .url = Pull,
+                    .key = "DEV-1234",
+                    .note = std::nullopt,
+                    .expectation = PromptExpectation::Accepted,
+                    .expected = "fix https://github.com/o/r/pull/1",
+                    .error = {} },
+        PromptRow { .promptTemplate = "fix {key}",
+                    .url = Pull,
+                    .key = "",
+                    .note = std::nullopt,
+                    .expectation = PromptExpectation::Refused,
+                    .expected = {},
+                    .error = PromptError::KeyNotAccepted },
+        PromptRow { .promptTemplate = "fix {key}",
+                    .url = Pull,
+                    .key = "DEV 1",
+                    .note = std::nullopt,
+                    .expectation = PromptExpectation::Refused,
+                    .expected = {},
+                    .error = PromptError::KeyNotAccepted },
+        PromptRow { .promptTemplate = "fix {key}",
+                    .url = Pull,
+                    .key = "-1",
+                    .note = std::nullopt,
+                    .expectation = PromptExpectation::Refused,
+                    .expected = {},
+                    .error = PromptError::KeyNotAccepted },
     };
 
     SECTION("accepted and refused prompts")
@@ -155,7 +208,7 @@ TEST_CASE("Prompt", "[orchestrator][prompt]")
         for (auto const& row: rows)
         {
             CAPTURE(row.promptTemplate, row.url, row.note, row.expectation, row.expected, row.error);
-            auto const prompt = orchestrator::buildPrompt(row.promptTemplate, row.url, row.note);
+            auto const prompt = orchestrator::buildPrompt(row.promptTemplate, row.url, row.key, row.note);
             REQUIRE(prompt.has_value() == (row.expectation == PromptExpectation::Accepted));
             if (prompt)
             {
@@ -194,11 +247,11 @@ TEST_CASE("Prompt", "[orchestrator][prompt]")
         for (auto const url: Urls)
         {
             CAPTURE(url);
-            auto const prompt = orchestrator::buildPrompt("fix {url}", url, std::nullopt);
+            auto const prompt = orchestrator::buildPrompt("fix {url}", url, {}, std::nullopt);
             REQUIRE_FALSE(prompt.has_value());
             CHECK(prompt.error() == PromptError::UrlNotHttps);
         }
-        auto const nul = orchestrator::buildPrompt("fix {url}", viewOf(UrlWithNul), std::nullopt);
+        auto const nul = orchestrator::buildPrompt("fix {url}", viewOf(UrlWithNul), {}, std::nullopt);
         REQUIRE_FALSE(nul.has_value());
         CHECK(nul.error() == PromptError::UrlNotHttps);
     }
@@ -206,7 +259,7 @@ TEST_CASE("Prompt", "[orchestrator][prompt]")
     SECTION("a template that is not Text is refused")
     {
         constexpr auto Template = std::array { 'f', 'i', 'x', '\0', ' ', '{', 'u', 'r', 'l', '}' };
-        auto const prompt = orchestrator::buildPrompt(viewOf(Template), Pull, std::nullopt);
+        auto const prompt = orchestrator::buildPrompt(viewOf(Template), Pull, {}, std::nullopt);
         REQUIRE_FALSE(prompt.has_value());
         CHECK(prompt.error() == PromptError::TemplateNotText);
     }
