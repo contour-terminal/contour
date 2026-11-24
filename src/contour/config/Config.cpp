@@ -4035,12 +4035,14 @@ std::vector<DaemonExtensionProgram> YAMLConfigReader::readDaemonExtensionProgram
         if (!vtpty::windowsImageName(core::pathToUtf8(path.filename())))
             errorLog()(
                 "Program '{}' of extension '{}' of {}: '{}' is not an .exe, and Windows runs only an .exe "
-                "for an extension, so it will be refused when run. Point it at the program's .exe (Claude "
-                "Code's native installer provides claude.exe).",
+                "for an extension, so it will be refused when run. Point it at the program's .exe{}.",
                 program,
                 name,
                 keyPath,
-                core::pathToUtf8(path));
+                core::pathToUtf8(path),
+                program == "claude"
+                    ? std::string_view { " (Claude Code's native installer provides claude.exe)" }
+                    : std::string_view {});
 #endif
         result.push_back(
             DaemonExtensionProgram { .name = std::move(program), .path = path.lexically_normal() });
