@@ -460,10 +460,8 @@ StartResult Process::start()
     if (auto const attached =
             initializeStartupInfoAttachedToPTY(_d->startupInfo, static_cast<ConPty&>(*_d->pty));
         FAILED(attached))
-        return std::unexpected(StartFailure {
-            .error = StartError::SpawnFailed,
-            .detail =
-                std::format("Could not attach it to its pseudoconsole: {}", hresultMessage(attached)) });
+        return spawnFailed(
+            std::format("Could not attach it to its pseudoconsole: {}", hresultMessage(attached)));
 
     // The child's environment is handed to it, as on POSIX, rather than set in this process's own for the
     // child to inherit: any other thread reading that meanwhile -- the daemon, a second tab spawning, a log

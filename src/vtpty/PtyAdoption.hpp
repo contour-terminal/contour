@@ -44,9 +44,9 @@ void closeInherited(InheritedPty const& pty) noexcept;
 
 /// Lets go of what this process holds of a child it did not adopt: on Windows the handle to it and to its
 /// job, closed -- which ends a held-directory child's tree, as closing its pane would; on POSIX nothing, the
-/// child being waited for by its process id, by whoever reaps it. Each Windows value is closed only once
-/// shown to be the process or job it crossed as; a value that names something else by now (this process
-/// reuses handle numbers) is left alone.
+/// child being waited for by its process id, by whoever reaps it. The process handle is closed only once
+/// shown to be the process it crossed as, and the job's only once shown to name a job; a value that names
+/// something else by now (this process reuses handle numbers) is left alone.
 /// @param child The child, as it crossed.
 void releaseUnadopted(AdoptedChild const& child) noexcept;
 

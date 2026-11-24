@@ -26,8 +26,9 @@ namespace
 #endif
 
 #ifdef _WIN32
+    /// Whether a handle names a Job Object: its accounting information can be queried.
     /// @param handle A handle of this process, which may name no job at all.
-    /// @return Whether @p handle names a Job Object: its accounting information can be queried.
+    /// @return Whether @p handle names a Job Object.
     [[nodiscard]] bool namesJob(HANDLE handle) noexcept
     {
         auto accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION {};
@@ -36,6 +37,7 @@ namespace
                != FALSE;
     }
 
+    /// Whether a handle names a given process: its process id is the one it crossed as.
     /// @param handle A handle of this process, which may name no process at all.
     /// @param pid The process id the handle crossed as.
     /// @return Whether @p handle names the process @p pid.
@@ -88,7 +90,8 @@ void releaseUnadopted([[maybe_unused]] AdoptedChild const& child) noexcept
     if (!child.processHandle.isNone() && namesProcess(child.processHandle.native(), child.pid))
         CloseHandle(child.processHandle.native());
     // The job's last handle, once its predecessor's is gone: closing it ends the tree no one serves any more.
-    // Closed only once shown to be the job it crossed as, for the same reason.
+    // Closed only once shown to name a job, for the same reason: which job is not shown, so a reused value
+    // that names another job would still be closed, which only a corrupt handover image could bring about.
     if (!child.job.isNone() && namesJob(child.job.native()))
         CloseHandle(child.job.native());
 #endif
