@@ -2672,9 +2672,10 @@ TEST_CASE("a worker or set that is no name is refused", "[orchestrator][run][wor
     // An agent the store does not name is no stored run.
     run.agent = orchestrator::AgentKind::Copilot;
     auto json = orchestrator::toJson(run);
-    auto const at = json.find(R"("agent":"copilot")");
+    constexpr auto Copilot = R"("agent":"copilot")"sv;
+    auto const at = json.find(Copilot);
     REQUIRE(at != std::string::npos);
-    json.replace(at, 17, R"("agent":"robot"  )");
+    json.replace(at, Copilot.size(), R"("agent":"robot")");
     CHECK_FALSE(runFromJson(json).has_value());
 }
 

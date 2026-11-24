@@ -14,6 +14,7 @@
 #include <orchestrator/core/Agents.hpp>
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Engine.hpp>
+#include <orchestrator/core/EngineDetail.hpp>
 #include <orchestrator/core/HostPaths.hpp>
 #include <orchestrator/core/Naming.hpp>
 #include <orchestrator/core/Permissions.hpp>
@@ -153,7 +154,8 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
     auto const takesProfile = agentRowOf(worker.agent).settings == SettingsProfile::Taken;
     auto const* const profile = request.permissions.empty() ? &_config->profileFor(task->id)
                                                             : _config->findProfile(request.permissions);
-    if (takesProfile && profile == nullptr)
+    // A profile no configuration names is refused whatever the agent, rather than ignored unseen.
+    if (profile == nullptr)
         return std::unexpected { DispatchRefusal::UnknownProfile };
     auto settings = takesProfile ? settingsJsonOf(*profile) : std::string { EmptySettingsJson };
     if (isTaken(*id))
@@ -175,7 +177,8 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
                      .board = takesProfile ? _config->boardInstruction() : std::string {},
                      .permissions = takesProfile ? profile->name : std::string {},
                      .settings = std::move(settings),
-                     .worker = worker.id,
+                     // The implicit worker is stored as none, so that a run reads as it did before workers.
+                     .worker = engine::detail::hasImplicitWorkerAlone(*_config) ? std::string {} : worker.id,
                      .agent = worker.agent,
                      .envSet = worker.envSet,
                      .session = request.session,

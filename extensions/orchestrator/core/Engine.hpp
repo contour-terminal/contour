@@ -78,9 +78,15 @@ struct ProcessOutcome
     std::string stderrText;                     ///< Its standard error.
 };
 
-/// How the host's refusal of an argument is spelled: a refused command's standard error, a refused tab's
-/// PaneOpenFailedFor::why. A run's set the user has since removed is refused so.
+/// How the host's refusal of an argument is spelled: a refused tab's PaneOpenFailedFor::why, and the name a
+/// refused command's standard error carries (refusedCommandText()). A run's set the user has since removed is
+/// refused so; so is a command whose program is missing, which a refusal alone cannot tell apart.
 inline constexpr std::string_view BadArgumentRefusal = "bad-argument";
+
+/// What a command the host refused to start carries as its standard error.
+/// @param hostError The host's name for the refusal, such as `limit` or BadArgumentRefusal.
+/// @return `the host refused it (<hostError>)`.
+[[nodiscard]] std::string refusedCommandText(std::string_view hostError);
 
 /// What a call made for a run says about the run's set.
 enum class SetAnswer : uint8_t
@@ -705,7 +711,8 @@ class Engine
     [[nodiscard]] std::optional<uint64_t> nextWake() const;
     void rebuildProblems();
     /// Records what a call made for @p runId says about its set: a refused one is a problem line until a
-    /// call with it is accepted. A run without a set records nothing.
+    /// call with it is accepted. Only the calls that pass the run's set come here (its tab, transcript and
+    /// statistics, which pass envSetArgumentOf()); a run without a set passes none and records nothing.
     void noteSetAnswer(std::string_view runId, SetAnswer answer);
     void forget(std::string_view runId);
 
@@ -858,7 +865,8 @@ class Engine
         std::string set;    ///< The set's name.
         std::string worker; ///< The worker of the run whose call it refused.
     };
-    std::vector<RefusedSet> _refusedSets; ///< Until a call with the set is accepted.
+    /// Until a call with the set is accepted, or no stored run has the set.
+    std::vector<RefusedSet> _refusedSets;
     /// One command of installing the missing plugins: `claude plugin marketplace add`, then `install`.
     struct PluginStep
     {

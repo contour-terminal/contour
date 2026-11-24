@@ -940,7 +940,7 @@ TEST_CASE("a missing program is refused, never gone", "[guest]")
         CHECK(reply.outcome.start == StartResult::Refused);
         CHECK_FALSE(reply.outcome.exitCode.has_value());
         // The refusal's name, which tells the engine a run's set was refused.
-        CHECK(reply.outcome.stderrText == BadArgumentRefusal);
+        CHECK(reply.outcome.stderrText == refusedCommandText(BadArgumentRefusal));
     }
 }
 

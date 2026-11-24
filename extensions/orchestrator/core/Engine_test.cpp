@@ -4515,6 +4515,16 @@ namespace
     return names;
 }
 
+/// @return What the driver feeds back for a command the host refused with @p hostError.
+[[nodiscard]] ProcessOutcome hostRefused(std::string_view hostError)
+{
+    auto outcome = ok();
+    outcome.start = StartResult::Refused;
+    outcome.exitCode = std::nullopt;
+    outcome.stderrText = refusedCommandText(hostError);
+    return outcome;
+}
+
 constexpr auto ClaudeWorker =
     R"("workers": [ { "id": "work", "agent": "claude", "env_set": "claude-work" } ],)"sv;
 
@@ -4532,8 +4542,16 @@ TEST_CASE("without workers every call is as it was", "[orchestrator][engine][wor
 
     auto const run = harness.run(PrId);
     REQUIRE(run != nullptr);
-    CHECK(run->worker == ImplicitWorkerId);
+    // Stored as before workers: the implicit worker is none, and no key of a worker is written.
+    CHECK(run->worker.empty());
     CHECK(run->envSet.empty());
+    for (auto const& entry: harness.stored())
+    {
+        CAPTURE(entry.value);
+        CHECK_FALSE(entry.value.contains(R"("worker")"));
+        CHECK_FALSE(entry.value.contains(R"("agent")"));
+        CHECK_FALSE(entry.value.contains(R"("envSet")"));
+    }
     for (auto const& command: harness.issuedCommands())
     {
         CAPTURE(command.command);
@@ -4625,11 +4643,7 @@ TEST_CASE("a refused set's line stays until a call with it succeeds", "[orchestr
     harness.holdStatsReads();
     harness.runToRunning(prDispatch());
     harness.feed(ReadTranscript { .run = std::string(PrId), .tab = {}, .page = 1, .monoMs = harness.now() });
-    auto refused = ok();
-    refused.start = StartResult::Refused;
-    refused.exitCode = std::nullopt;
-    refused.stderrText = "bad-argument";
-    harness.finish("agent-transcript", refused);
+    harness.finish("agent-transcript", hostRefused(BadArgumentRefusal));
     CHECK(mentions(harness.engine().problems(), "variable set 'claude-work'"));
 
     harness.wake(Minute);
@@ -4834,3 +4848,58 @@ TEST_CASE("without workers the setup checks pass no set and keep their lines",
 }
 
 // }}}
+
+TEST_CASE("a refused set's line goes once no run has the set", "[orchestrator][engine][workers]")
+{
+    auto harness = booted(
+        Settings { .limits = R"("workers": [ { "id": "work", "agent": "claude", "env_set": "gone" } ],)" });
+    harness.feed(prDispatch());
+    harness.finish("git-fetch", ok());
+    harness.finish("git-worktree-add", ok());
+    harness.finish("gh-pr-checkout", ok());
+    harness.feed(
+        PaneOpenFailedFor { .run = std::string(PrId), .why = "bad-argument", .monoMs = harness.now() });
+    harness.endCleanly(PrId);
+    REQUIRE(finishedOf(harness.run(PrId)));
+    // The finished run still has the set: its line stays until the run is dismissed.
+    CHECK(mentions(harness.engine().problems(), "variable set 'gone'"));
+
+    harness.feed(DismissRun { .run = std::string(PrId), .monoMs = harness.now() });
+    REQUIRE(harness.run(PrId) == nullptr);
+    CHECK_FALSE(mentions(harness.engine().problems(), "variable set"));
+}
+
+TEST_CASE("a refused call of a run without a set names no set", "[orchestrator][engine][workers]")
+{
+    // A missing program is refused as a bad argument too: without a set passed, it is no set's fault.
+    auto harness = booted();
+    harness.holdStatsReads();
+    harness.runToRunning(prDispatch());
+    harness.feed(ReadTranscript { .run = std::string(PrId), .tab = {}, .page = 1, .monoMs = harness.now() });
+    harness.finish("agent-transcript", hostRefused(BadArgumentRefusal));
+    CHECK_FALSE(mentions(harness.engine().problems(), "variable set"));
+    auto const* const view = harness.engine().transcript("", PrId);
+    REQUIRE(view != nullptr);
+    // The refusal reads as prose, with the host's name for it.
+    CHECK(view->failure == "the host refused it (bad-argument)");
+}
+
+TEST_CASE("an agent that takes no profile runs without one, and an unknown one is still refused",
+          "[orchestrator][engine][workers]")
+{
+    auto const settings = Settings { .limits = R"("workers": [ { "id": "cop", "agent": "copilot" } ],)" };
+    auto harness = booted(settings);
+    auto request = prDispatch();
+    request.permissions = "nope";
+    auto const refused = all<DispatchRefused>(harness.feed(request));
+    REQUIRE(refused.size() == 1);
+    CHECK(refused.front().reason == DispatchRefusal::UnknownProfile);
+
+    harness.feed(prDispatch());
+    auto const* const run = harness.run(PrId);
+    REQUIRE(run != nullptr);
+    CHECK(run->agent == AgentKind::Copilot);
+    CHECK(run->permissions.empty());
+    CHECK(run->board.empty());
+    CHECK(run->settings == EmptySettingsJson);
+}

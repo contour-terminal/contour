@@ -30,13 +30,14 @@ namespace
 {
     /// @return What @p outcome says about the set its call passed: a refusal names the refused argument,
     ///         and a call that started took it.
-    [[nodiscard]] SetAnswer setAnswerOf(ProcessOutcome const& outcome) noexcept
+    [[nodiscard]] SetAnswer setAnswerOf(ProcessOutcome const& outcome)
     {
         switch (outcome.start)
         {
             case StartResult::Started: return SetAnswer::Accepted;
             case StartResult::Refused:
-                return outcome.stderrText == BadArgumentRefusal ? SetAnswer::Refused : SetAnswer::Unknown;
+                return outcome.stderrText == refusedCommandText(BadArgumentRefusal) ? SetAnswer::Refused
+                                                                                    : SetAnswer::Unknown;
             case StartResult::CwdMissing: break;
         }
         return SetAnswer::Unknown;
@@ -911,10 +912,15 @@ std::optional<uint64_t> Engine::nextWake() const
     return wake;
 }
 
+std::string refusedCommandText(std::string_view hostError)
+{
+    return std::format("the host refused it ({})", hostError);
+}
+
 void Engine::noteSetAnswer(std::string_view runId, SetAnswer answer)
 {
     auto const* const run = findRun(runId);
-    if (run == nullptr || run->envSet.empty())
+    if (run == nullptr || !envSetArgumentOf(*run))
         return;
     switch (answer)
     {
@@ -960,6 +966,11 @@ void Engine::rebuildProblems()
                                               plugin.id),
                 MaxSummaryLineChars));
     }
+    // A set no stored run has, once the last of them was dismissed, is called with no more: nothing else
+    // would clear its line.
+    std::erase_if(_refusedSets, [&](RefusedSet const& refused) {
+        return !std::ranges::contains(_runs, refused.set, &Run::envSet);
+    });
     for (auto const& refused: _refusedSets)
         problems.push_back(displayText(std::format("the variable set '{}' of worker '{}' was refused: is it "
                                                    "still under daemon.extensions.orchestrator.env_sets?",
