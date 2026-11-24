@@ -35,6 +35,9 @@ enum class EngineFeature : uint8_t
     ComponentModel,
     ExtendedConst,
     FunctionReferences,
+    /// Not a feature but a behaviour: whether relaxed SIMD instructions give the same result on every
+    /// host. Wasmtime switches it like a feature; it matters only where RelaxedSimd is On, and no module
+    /// uses it.
     RelaxedSimdDeterministic,
     WideArithmetic,
     BranchHinting,
@@ -53,10 +56,12 @@ enum class FeatureState : uint8_t
     On,  ///< Every engine accepts it.
 };
 
-/// Whether an engine can be told to refuse a feature.
+/// Whether Wasmtime can be told to refuse a feature; not whether every engine takes a switch for it.
+/// WAMR decides most features when it is built, and is held to the table by its build options, which
+/// the backend contract checks.
 enum class FeatureSwitch : uint8_t
 {
-    Configurable, ///< Every engine takes a switch for it.
+    Configurable, ///< Wasmtime's C API has a switch for it, which its backend sets from the table.
     AlwaysOn,     ///< Wasmtime accepts it unconditionally (its C API has no switch), so it must be On.
 };
 
