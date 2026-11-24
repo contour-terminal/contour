@@ -353,6 +353,21 @@ The git configuration keys: `push.default` (`nothing`, `current`, `upstream`, `s
 `credential.helper`, a `*.command`, `alias.*`, `include.*`, `filter.*`, `diff.external` -- is refused. A
 command's environment is judged as the command gets it, `command-env-for` laid over `command-env`.
 
+**Variables a user's set may hold.** A second, separate list (`UserSettableEnvironment.hpp`) names what a
+`pane-env-set` or `command-env-set` line may take from a variable set the user defines (`env_sets`, see
+[Configuring the orchestrator](#configuring-the-orchestrator)). The manifest names the variables; their values
+come only from the user's configuration, never from the extension, and each value must have its listed shape:
+
+| Variable | Value |
+| --- | --- |
+| `CLAUDE_CONFIG_DIR`, `COPILOT_HOME` | an absolute path, or one starting with `~`, spelled as a root is (`~` expanded, normalised) |
+| `ANTHROPIC_BASE_URL` | an `https://` URL, or an `http://` one to `localhost`, `127.0.0.1` or `[::1]`, without credentials |
+| `HTTPS_PROXY`, `HTTP_PROXY` | an `http`, `https`, `socks5` or `socks5h` URL without credentials |
+| `NO_PROXY` | a comma-separated list of host names, domains or addresses (or `*`) |
+
+A value is at most 2048 bytes, with no control character. No API key is offered: a secret does not belong in
+the configuration.
+
 | Line | Example | Means |
 | --- | --- | --- |
 | `title = <text>` | `title = Agents` | What Contour names the extension's served tab, palette rows and frames; the `name` when absent. Given once, at most 40 characters, nothing that disguises text (controls, bidirectional overrides and isolates, zero-width characters, line separators). |
@@ -365,11 +380,17 @@ command's environment is judged as the command gets it, `command-env-for` laid o
 | `command-env-for <command> <KEY> = value` | `command-env-for git-status LC_ALL = C` | Environment for one command, applied after `command-env`. |
 | `pane <name> @<root> = argv…` | `pane agent @worktrees = claude --model {model}` | A program the extension may open in a tab. |
 | `pane-env <pane> <KEY> = value` | `pane-env agent GIT_CONFIG_COUNT = 1` | Environment for one pane. |
+| `pane-env-set <pane> {<arg>} = <VAR> …` | `pane-env-set agent {env-set} = CLAUDE_CONFIG_DIR NO_PROXY` | Variables one pane may take from the user's set the call names. |
+| `command-env-set <command> {<arg>} = <VAR> …` | `command-env-set agent-transcript {env-set} = CLAUDE_CONFIG_DIR` | Variables one command may take from the user's set the call names. |
 | `pane-input` | `pane-input` | `pane-send` may type text the user wrote into the extension's panes, and `pane-key` press a digit or Escape in them. The consent dialog says so. |
 | `inbox <name> = text` | `inbox note = A reviewer left a comment.` | Reserved: refused until a version of the manifest supports it. |
 | `serve <scheme>` | `serve orchestrator` | The extension serves `<scheme>://` tabs. |
 | `url-open` | `url-open` | `url-open` may ask the frontend the user is at to open an http or https link. The consent dialog says so. |
 | `action <id> = title` | `action open = Open Agents` | A row in the command palette; its title follows the `title` line's rules. |
+
+In `pane-env-set` and `command-env-set` the argument is an `arg … = name`, which a call may leave out (then no
+set applies), and every variable listed must be one a user's set may hold (above): the manifest names the
+variables, the user's set gives their values.
 
 A conformance corpus of valid and invalid version-2 manifests, which Contour's parser is tested
 against, lives in [`extensions/orchestrator/contract/manifest-v2`][corpus].
@@ -481,7 +502,11 @@ A declared command runs only where its manifest binds it, and sees only what its
   `GITLAB_API_HOST`, `GITLAB_SSH_HOST`, `GITLAB_REPO`, `GITLAB_GROUP`, `GITLAB_HEAD_REPO`, `GLAB_REMOTE_ALIAS`,
   `REMOTE_ALIAS`, `REMOTE_NICKNAME`) are withheld, so neither tool is steered to another instance or project
   than the repository's remote names; `GH_TOKEN` and `GITLAB_TOKEN`, which log the tools in, are kept.
-  Everything the manifest declares is added, `command-env-for` replacing `command-env` by name.
+  Everything the manifest declares is added, `command-env-for` replacing `command-env` by name. A command or
+  pane bound by `command-env-set` or `pane-env-set` then takes, from the user's set its call names, the listed
+  variables that set holds, applied after the manifest's own; each value is checked against its shape again. A
+  set the extension's `env_sets` does not hold, or a value that no longer fits its shape, is `bad-argument`. A
+  listed variable the set does not hold is inherited as any other.
 - **A missing program** is a refused start, never a vanished working directory.
 - **The program** is found before the spawn, on the PATH's absolute entries only, and that path is what
   runs -- for a command and an agent pane alike. An empty entry (the working directory, as `execvp()` reads
@@ -601,6 +626,22 @@ It shows its own tab: orchestrator://
 Every variable a command or pane is given is shown beneath it, one `NAME=value` line each, and those every
 command shares beneath `Each of them with:` -- what is granted is what is shown.
 
+A command or pane bound to a user's set lists, after its own variables, those it may take from one: `From the
+variable set the extension names: CLAUDE_CONFIG_DIR, ANTHROPIC_BASE_URL, …`. Below the panes, `Variable sets
+from your configuration:` lists each set in the extension's `env_sets` with its values, as the host checked
+them:
+
+```
+Variable sets from your configuration:
+  claude-work:
+    CLAUDE_CONFIG_DIR=/home/u/.claude-work
+  proxied:
+    HTTPS_PROXY=http://proxy.example.com:3128
+    NO_PROXY=localhost,.example.com
+```
+
+The grant is bound to the sets as well: adding, removing or changing a set asks again.
+
 **Only a window grants.** The dialog's Return is Deny, and Allow stays disabled while its window is not
 active, and for half a second each time a question is shown or the window becomes active; Escape and the close
 control put it away unanswered. The first window to answer settles the question, and the others close theirs.
@@ -673,6 +714,7 @@ for.
 [bundled]: https://github.com/contour-terminal/contour/tree/master/extensions/bundled
 [manifest]: https://github.com/contour-terminal/contour/tree/master/extensions/manifest
 [corpus]: https://github.com/contour-terminal/contour/tree/master/extensions/orchestrator/contract/manifest-v2
+[orchestrator-workers]: https://github.com/contour-terminal/contour/blob/master/extensions/orchestrator/README.md#workers
 [cxx-probe]: https://github.com/contour-terminal/contour/tree/master/extensions/testing/cxx-daemon-probe
 [wasi-sdk]: https://github.com/WebAssembly/wasi-sdk
 
@@ -704,9 +746,13 @@ daemon:
             autostart: true
             programs:
                 claude: ~/.local/bin/claude
+            env_sets:
+                claude-work: { CLAUDE_CONFIG_DIR: 'C:\Users\me\.claude-work' }   # elsewhere /home/u/.claude-work
             config:
                 worktree_root: ~/worktrees
                 models: [opus, sonnet, haiku]
+                workers:
+                    - { id: claude-work, agent: claude, env_set: claude-work }
                 repos:
                     - path: ~/repo/contour
                       forge: github
@@ -726,6 +772,7 @@ Key         | Meaning
 `path`      | The module to load; without it, the bundled orchestrator.
 `autostart` | `true`: start it as the daemon starts. Otherwise it starts when something asks for it, such as its command-palette row.
 `programs`  | A map from a program its commands and agent panes run, such as `claude` or `gh`, to the executable to run for it: an absolute path, or one starting with `~/` (on Windows also `C:\…`, `\\server\share\…` or `~\…`, and an `.exe`). Without an entry a program is looked up on the daemon's `PATH`, and a daemon started by systemd or launchd often has one without the user's own bin directories (`~/.local/bin`, a version manager's shims): the orchestrator then reports that `claude` is not installed.
+`env_sets`  | A map from a set's name to the variables a worker using it runs with, each a [variable a user's set may hold](#version-2) and its value. A set's name starts with a letter or digit, then holds letters, digits, `.`, `_` or `-`, at most 64 characters. Checked when the daemon starts: a variable not on the list, or a value of the wrong shape, is logged naming the set and the variable, and the set is kept without it. The consent dialog shows every set with its values, and a changed set asks again.
 `config`    | The orchestrator's configuration, below. One that does not parse is shown on its tab, one line naming the key, and nothing is read or started until it is fixed.
 
 **On Windows**, write a path in single quotes or unquoted -- `claude: 'C:\Users\me\.local\bin\claude.exe'` -- or
@@ -740,6 +787,7 @@ Key                   | Meaning
 ----------------------|------------------------------------------------------------------------------------------
 `worktree_root`       | Required. The directory every agent's worktree is made in, created if it is missing. No repository may lie inside it.
 `models`              | The models a run may choose. Default `[opus, sonnet, haiku]`. A model with a bracketed variant, such as `opus[1m]`, is refused.
+`workers`             | Who runs the tasks, each `{ id, agent, env_set }`: `id` a unique name; `agent` `claude` or `copilot`; `env_set` optional, a set of `env_sets` above, which its tab and every command run for it take their variables from. A task names its worker with `worker` (below). Without `workers` there is one worker, `claude` (agent `claude`, no set), and everything runs as before. A Copilot worker's run shows running until its tab closes and then ends `Closed`; it has no transcript, statistics or board, and takes no permission profile. On Windows it needs a real `copilot.exe`. See the orchestrator's README, [Workers][orchestrator-workers], for two Claude Code accounts side by side.
 `max_agents`          | The most agents running at once. Default `4`.
 `max_agents_per_repo` | The most agents running at once in one repository. Default `2`.
 `poll_every`          | How often the forges are asked for the lists. Default `2m`, at least `30s`.
@@ -796,8 +844,9 @@ Key              | Meaning
 `label`          | Required. What the dashboard calls it.
 `applies_to`     | Required. `pr` for a pull request, `issue` for an issue, `topic` for a topic you type in the dashboard (`n`). Without a `topic` task, a built-in one named `topic` uses the text as the whole prompt.
 `model`          | Required. The model it runs with, one of `models`; the launcher can change it.
-`prompt`         | Required. What the agent is started with; `{url}` stands for the item's URL, and must be there. A `topic` task's prompt takes `{topic}` for the text instead; without it, the text goes on a line after the prompt.
-`permissions`    | The permission profile its runs start with, over `permissions` above; for example `trusted` for a task that pushes its fix. Default: the global one.
+`prompt`         | Required. What the agent is started with; `{url}` stands for the item's URL and `{key}` for its key -- an issue's Jira key or number, or a pull or merge request's number -- and one of them must be there. A `topic` task's prompt takes `{topic}` for the text instead, and may not use `{key}`; without `{topic}`, the text goes on a line after the prompt.
+`worker`         | The worker that runs it, an `id` of `workers`. Default: the first worker. One that names no worker is a problem line, and the first worker runs the task.
+`permissions`    | The permission profile its runs start with, over `permissions` above; for example `trusted` for a task that pushes its fix. Default: the global one. On a Copilot worker it is a problem line, and the task is not offered.
 `end_done_after` | Its runs' own `end_done_after`, over the global one: a task whose agents rarely ask anything, such as fixing CI, can end itself (`5m`) while the rest wait for you, and `0` keeps its runs waiting whatever the global one says. Default: the global one.
 
 An action of the extension opens the dashboard from a key binding, and its summary is a status-line segment;
@@ -899,7 +948,9 @@ line the format does not know is counted and skipped, never fatal; the page says
 
 - **No agent tabs under Flatpak.** Where the shells run on the host, Contour cannot start a program in a
   directory it holds open, so the dashboard lists the work but cannot start an agent.
-- **Claude Code only.** The agents are `claude`, and the transcript reads Claude Code's session log.
+- **Claude Code and Copilot.** A worker's agent is `claude` or `copilot`. Only a Claude run reports its state and
+  has a transcript (Claude Code's session log), statistics and a board; a Copilot run shows running until its tab
+  closes.
 - **A worktree stays while its agent runs, on Windows.** It cannot be removed or renamed until the agent's tab is
   closed.
 
