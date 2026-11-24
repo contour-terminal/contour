@@ -10,7 +10,6 @@
 #include <string>
 #include <string_view>
 #include <utility>
-#include <vector>
 
 #include <vtextension/RootPointer.hpp>
 
@@ -24,14 +23,21 @@ namespace
     {
         std::string_view scheme;    ///< Before `://`.
         std::string_view authority; ///< After `://`, up to the first `/`.
-        std::string_view
-            host; ///< The authority without its port; a bracketed IPv6 address keeps its brackets.
+        /// The authority without its port; a bracketed IPv6 address keeps its brackets.
+        std::string_view host;
     };
 
     /// @return Whether @p c is printable ASCII, a space excluded: `0x21`-`0x7E`.
     [[nodiscard]] constexpr bool isVisibleAscii(char c) noexcept
     {
         return c >= 0x21 && c <= 0x7E;
+    }
+
+    /// @return Whether @p c is a control byte: below 0x20, or DEL.
+    [[nodiscard]] constexpr bool isControlByte(char c) noexcept
+    {
+        auto const byte = static_cast<unsigned char>(c);
+        return byte < 0x20 || byte == 0x7F;
     }
 
     /// @return Whether @p c may appear in a host list item: a host name, a domain, an address or a CIDR
@@ -42,8 +48,17 @@ namespace
                || c == '_' || c == ':' || c == '/' || c == '[' || c == ']' || c == '-';
     }
 
+    /// @return @p text without the ASCII spaces at either end; empty where it has no other character.
+    [[nodiscard]] constexpr std::string_view trimmedSpaces(std::string_view text) noexcept
+    {
+        auto const first = text.find_first_not_of(' ');
+        if (first == std::string_view::npos)
+            return {};
+        return text.substr(first, text.find_last_not_of(' ') - first + 1);
+    }
+
     /// @return The host of @p authority, without a port; empty where a `[` has no closing `]`.
-    [[nodiscard]] std::string_view hostOf(std::string_view authority) noexcept
+    [[nodiscard]] constexpr std::string_view hostOf(std::string_view authority) noexcept
     {
         if (authority.starts_with('['))
         {
@@ -62,10 +77,11 @@ namespace
     }
 
     /// Splits a URL of the form `scheme://authority[/…]`, judging the rules both URL shapes share: at most
-    /// MaxUserValueBytes, printable ASCII only, and a non-empty host in an authority without `@`.
+    /// MaxUserValueBytes, printable ASCII only, and a non-empty host, other than `[]`, in an authority
+    /// without `@`.
     /// @param value The URL as configured.
     /// @return Its parts; std::nullopt where the shared rules, or the `://`, are not met.
-    [[nodiscard]] std::optional<UrlParts> urlPartsOf(std::string_view value) noexcept
+    [[nodiscard]] constexpr std::optional<UrlParts> urlPartsOf(std::string_view value) noexcept
     {
         if (value.size() > MaxUserValueBytes || !std::ranges::all_of(value, isVisibleAscii))
             return std::nullopt;
@@ -75,7 +91,7 @@ namespace
         auto const rest = value.substr(separator + 3);
         auto const authority = rest.substr(0, rest.find('/'));
         auto const host = hostOf(authority);
-        if (authority.empty() || host.empty() || authority.contains('@'))
+        if (authority.empty() || host.empty() || host == "[]" || authority.contains('@'))
             return std::nullopt;
         return UrlParts { .scheme = value.substr(0, separator), .authority = authority, .host = host };
     }
@@ -89,7 +105,7 @@ namespace
     /// @return The value unchanged where it is an https:// URL, or an http:// one to the loopback host with
     /// an
     ///         optional port; NotAllowedUrl otherwise.
-    [[nodiscard]] std::expected<std::string, UserValueFault> localOrSecureUrl(std::string_view value) noexcept
+    [[nodiscard]] std::expected<std::string, UserValueFault> localOrSecureUrl(std::string_view value)
     {
         auto const parts = urlPartsOf(value);
         if (!parts)
@@ -104,7 +120,7 @@ namespace
     }
 
     /// @return The value unchanged where it is an http, https, socks5 or socks5h URL; NotUrl otherwise.
-    [[nodiscard]] std::expected<std::string, UserValueFault> proxyUrl(std::string_view value) noexcept
+    [[nodiscard]] std::expected<std::string, UserValueFault> proxyUrl(std::string_view value)
     {
         auto const parts = urlPartsOf(value);
         if (!parts)
@@ -117,38 +133,33 @@ namespace
         return std::string(value);
     }
 
-    /// @return The items of a host list, each trimmed of ASCII spaces, joined by `,`; NotHostList where an
-    /// item
-    ///         is empty or has a character outside the host grammar, or the list is too long.
+    /// @return The value, bounded and free of control bytes, spelled as rootSpellingOf() spells it;
+    /// NotAbsolutePath
+    ///         where it is too long, has a control byte, or is not an absolute path.
+    [[nodiscard]] std::expected<std::string, UserValueFault> absolutePath(std::string_view value,
+                                                                          std::string_view home,
+                                                                          vtpty::PathStyle style)
+    {
+        if (value.size() > MaxUserValueBytes || std::ranges::any_of(value, isControlByte))
+            return std::unexpected(UserValueFault::NotAbsolutePath);
+        return rootSpellingOf(value, home, style).transform_error([](RootPointerError) {
+            return UserValueFault::NotAbsolutePath;
+        });
+    }
+
+    /// @return The items of a host list, each trimmed of ASCII spaces, joined by `,`; NotHostList where the
+    ///         list is empty or too long, or an item is empty or has a character outside the host grammar.
     [[nodiscard]] std::expected<std::string, UserValueFault> hostList(std::string_view value)
     {
-        if (value.size() > MaxUserValueBytes)
+        if (value.empty() || value.size() > MaxUserValueBytes)
             return std::unexpected(UserValueFault::NotHostList);
-        auto const items =
-            std::views::split(value, ',')
-            | std::views::transform([](auto part) { return std::string(part.begin(), part.end()); })
-            | std::ranges::to<std::vector<std::string>>();
-        auto trimmed = std::vector<std::string_view> {};
-        trimmed.reserve(items.size());
-        for (auto const& item: items)
-        {
-            auto const first = item.find_first_not_of(' ');
-            if (first == std::string::npos)
+        auto items = std::views::split(value, ',') | std::views::transform([](auto part) {
+                               return trimmedSpaces(std::string_view(part.begin(), part.end()));
+                           });
+        for (auto const item: items)
+            if (item.empty() || (item != "*" && !std::ranges::all_of(item, isHostListChar)))
                 return std::unexpected(UserValueFault::NotHostList);
-            auto const view = std::string_view(item).substr(first, item.find_last_not_of(' ') - first + 1);
-            auto const isWildcard = view == "*";
-            if (!isWildcard && !std::ranges::all_of(view, isHostListChar))
-                return std::unexpected(UserValueFault::NotHostList);
-            trimmed.push_back(view);
-        }
-        auto joined = std::string {};
-        for (auto const item: trimmed)
-        {
-            if (!joined.empty())
-                joined += ',';
-            joined += item;
-        }
-        return joined;
+        return items | std::views::join_with(',') | std::ranges::to<std::string>();
     }
 
 } // namespace
@@ -171,10 +182,7 @@ std::expected<std::string, UserValueFault> normalisedUserValue(std::string_view 
         return std::unexpected(UserValueFault::NotSettable);
     switch (row->shape)
     {
-        case UserValueShape::AbsolutePath:
-            return rootSpellingOf(value, home, style).transform_error([](RootPointerError) {
-                return UserValueFault::NotAbsolutePath;
-            });
+        case UserValueShape::AbsolutePath: return absolutePath(value, home, style);
         case UserValueShape::LocalOrSecureUrl: return localOrSecureUrl(value);
         case UserValueShape::ProxyUrl: return proxyUrl(value);
         case UserValueShape::HostList: return hostList(value);

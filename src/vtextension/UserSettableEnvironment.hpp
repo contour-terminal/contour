@@ -6,10 +6,12 @@
 
 #include <vtpty/PathStyle.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -87,6 +89,11 @@ inline constexpr auto UserValueFaultTexts = std::array {
 
 static_assert(UserValueFaultTexts.size() == std::to_underlying(UserValueFault::NotHostList) + 1U,
               "UserValueFaultTexts needs one row per UserValueFault");
+static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, UserValueFaultTexts.size()),
+                                  [](std::size_t index) {
+                                      return std::to_underlying(UserValueFaultTexts[index].fault) == index;
+                                  }),
+              "UserValueFaultTexts is indexed by the fault's value: the rows are in enumerator order");
 
 /// A named set of variables from the user's configuration (`daemon.extensions.<name>.env_sets.<set>`).
 struct EnvironmentSet
@@ -146,8 +153,8 @@ struct CheckedEnvironmentSets
 /// @param sets The sets as the configuration states them.
 /// @param home The user's home directory.
 /// @param style The path grammar AbsolutePath values are spelled in.
-/// @return The sets with each variable normalised; the variables refused, one problem each. A set left empty
-/// is kept.
+/// @return The sets with each variable normalised, and the variables refused, one problem each. A set left
+///         empty is kept.
 [[nodiscard]] CheckedEnvironmentSets checkEnvironmentSets(std::span<EnvironmentSet const> sets,
                                                           std::string_view home,
                                                           vtpty::PathStyle style);
