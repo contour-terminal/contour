@@ -969,6 +969,25 @@ void memoryCapRefusesGrowth()
     CHECK_FALSE(instance->memory(0, 2 * PageBytes).has_value());
 }
 
+/// A call that trapped leaves its instance callable: the next call runs as if none had failed.
+template <typename T>
+void callAfterTrapRuns()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(
+        *backend,
+        RuntimeLimits { .memoryBytes = std::size_t { 2 } * PageBytes, .stackBytes = Limits.stackBytes });
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, InstanceModule);
+    auto context = RecordingHostContext {};
+    auto const instance = instantiate(*module, context);
+    REQUIRE_FALSE(instance->call(functionOf(*instance, "grow"), {}).has_value());
+
+    auto argv = std::array<uint32_t, 2> { 2, 3 };
+    REQUIRE(instance->call(functionOf(*instance, "add"), argv).has_value());
+    CHECK(argv[0] == 5);
+}
+
 /// A memory whose initial size exceeds the runtime's cap is not instantiated.
 template <typename T>
 void memoryCapRefusesInitialSize()
@@ -1241,6 +1260,7 @@ void wasiStdioGoesNowhere()
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoRuntimesShareHostImports)          \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, olderRuntimeOutlivesNewer)            \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesGrowth)               \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callAfterTrapRuns)                    \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesInitialSize)          \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unboundedRecursionTraps)              \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptStopsLoop)                   \

@@ -127,15 +127,21 @@ namespace
             auto const& entry = _functions[function.index];
             Require(argv.size() >= std::max(entry.parameterCount, entry.resultCount));
 
-            // The interrupt is sticky: once requested, no call enters the guest again. A request landing
+            // A host function may call back into the instance (to allocate in guest memory): what the
+            // outermost call records is kept until it returns. WAMR keeps a failed call's exception on the
+            // instance, where it would fail every later call: the outermost call starts without it.
+            if (_callDepth == 0)
+            {
+                _fault = std::nullopt;
+                wasm_runtime_clear_exception(_instance.get());
+            }
+
+            // The interrupt is sticky: once requested, no call enters the guest again. Checked after the
+            // exception is cleared, so that a request landing in between is seen here, and one landing
             // after this check finds WAMR's exception set, which stops the call before it gets far.
             if (_interruption.load(std::memory_order_acquire) == Interruption::Requested)
                 return std::unexpected(CallFailure::Interrupted);
 
-            // A host function may call back into the instance (to allocate in guest memory): what the
-            // outermost call records is kept until it returns.
-            if (_callDepth == 0)
-                _fault = std::nullopt;
             ++_callDepth;
             auto const returned =
                 wasm_runtime_call_wasm(_execEnv.get(), entry.function, entry.parameterCount, argv.data());
