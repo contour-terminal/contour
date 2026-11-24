@@ -19,9 +19,9 @@ One JSON object per line, its keys in this order:
 | `item`          | `pr#<n>`, `issue#<n>`, `jira:<key>`, or `topic:<slug>` for a topic the user typed.        |
 | `url`           | The item's web page; empty for a topic.                                                  |
 | `task`, `model` | The task's id and the model the agent ran.                                               |
-| `session`       | The agent's Claude Code session id.                                                      |
+| `session`       | The agent's Claude Code session id; for a Copilot run, an id the orchestrator made, which names no Copilot session. |
 | `dispatchedMs`, `endedMs` | When it was dispatched and ended, in milliseconds since the Unix epoch.        |
-| `ended`         | How: `completed`, `ended-by-you`, `preparation-failed`, `never-reported`, `worktree-gone`. |
+| `ended`         | How: `completed`, `ended-by-you`, `preparation-failed`, `never-reported`, `worktree-gone`, or `closed`: the tab of an agent that reports no status (Copilot) closed, a normal finish. |
 | `worktree`      | `removed` or `kept`.                                                                     |
 | `wallMs`        | From dispatch to the end, from the history; `null` without one.                          |
 | `waitingMs`     | Time its agent was blocked, waiting for the user.                                        |
@@ -30,7 +30,8 @@ One JSON object per line, its keys in this order:
 
 A line is at most 8 KiB, the most a declared command's text argument holds: past that the history is left
 empty first, then the statistics' tools and pull requests, then the statistics. A reader ignores a key it does
-not know.
+not know, and takes an `ended` value it does not know as some other end: values are added to it within this
+format. A Copilot run's `stats` is `null`: nothing of it is read.
 
 `format-1/finished.json` is the line of the run `core/Record_test.cpp` builds, byte for byte.
 

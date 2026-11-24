@@ -8,6 +8,7 @@
 #include <variant>
 #include <vector>
 
+#include <orchestrator/core/Agents.hpp>
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/core/EngineDetail.hpp>
 #include <orchestrator/core/Transcript.hpp>
@@ -28,6 +29,9 @@ namespace
 
     /// Why a page that the verb printed could not be read.
     constexpr auto NotAPage = "contour printed no transcript page"sv;
+
+    /// Why the transcript of a run whose agent keeps none Contour reads is not asked for.
+    constexpr auto NoReadableTranscript = "Copilot runs keep no transcript Contour can read"sv;
 } // namespace
 
 TranscriptView const* Engine::transcript(std::string_view tab, std::string_view run) const noexcept
@@ -119,6 +123,13 @@ void Engine::readTranscript(ReadTranscript const& request, std::vector<Effect>& 
         view.content = std::move(kept->content);
         _transcripts.erase(kept);
     }
+    // Only Claude Code's log is read: an agent that reads none of its state fails at once, with no call.
+    auto const readable = agentRowOf(run->agent).claudeState == ClaudeState::Read;
+    if (!readable)
+    {
+        view.state = FetchState::Failed;
+        view.failure = std::string { NoReadableTranscript };
+    }
     _transcripts.push_back(std::move(view));
     dropUnshownTranscripts();
     if (!rereads)
@@ -127,7 +138,7 @@ void Engine::readTranscript(ReadTranscript const& request, std::vector<Effect>& 
         feed(request.run, MarkSeen {}, out);
     // One page of a run is read at a time: a page asked for meanwhile, here or in another tab, is read once
     // that one answers.
-    if (!_transcriptCalls.contains(request.run))
+    if (readable && !_transcriptCalls.contains(request.run))
         if (auto const* const current = findRun(request.run))
             issueTranscript(*current, request.tab, request.page, out);
 }

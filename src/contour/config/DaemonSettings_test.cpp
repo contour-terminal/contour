@@ -554,6 +554,25 @@ TEST_CASE("daemon.extensions: a program that is no .exe is kept, and warned abou
     CHECK_FALSE(log.contains("'git'")); // no extension: .exe is appended
 }
 
+TEST_CASE("daemon.extensions: npm's copilot.cmd is kept, and warned about, on Windows", "[config][daemon]")
+{
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config =
+        loadConfigFromYaml("daemon:\n"
+                           "  extensions:\n"
+                           "    orchestrator:\n"
+                           "      programs:\n"
+                           "        copilot: 'C:\\Users\\me\\AppData\\Roaming\\npm\\copilot.cmd'\n");
+    REQUIRE(config.daemon.value().extensions.size() == 1);
+    // Kept: the host refuses it when it is run.
+    CHECK(config.daemon.value().extensions.front().programs.size() == 1);
+    auto const& log = capture.text();
+    CHECK(log.contains("Program 'copilot' of extension 'orchestrator'"));
+    CHECK(log.contains("only an .exe"));
+    // The hint names Claude Code's installer, which installs no Copilot.
+    CHECK_FALSE(log.contains("claude.exe"));
+}
+
 TEST_CASE("daemon.extensions: a program may start with ~\\ on Windows", "[config][daemon]")
 {
     auto const config = loadConfigFromYaml(

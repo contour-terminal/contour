@@ -115,6 +115,7 @@ namespace
         Spelling { Ended::PreparationFailed, "preparation-failed"sv },
         Spelling { Ended::NeverReported, "never-reported"sv },
         Spelling { Ended::WorktreeGone, "worktree-gone"sv },
+        Spelling { Ended::Closed, "closed"sv },
     };
 
     constexpr auto FateNames = std::array {
@@ -306,6 +307,15 @@ namespace
         if (run.failure || ending.resumedFrom || ending.removal == Removal::Issued)
             return ending.cause;
         return Ended::WorktreeGone;
+    }
+
+    /// How a run whose agent was running ended once its tab went away. An agent that reports no status ends
+    /// so in the normal way; one that does but never reported was broken.
+    [[nodiscard]] Ended paneGoneEnded(Run const& run) noexcept
+    {
+        if (agentRowOf(run.agent).status == StatusReporting::Silent)
+            return Ended::Closed;
+        return run.lastStatus ? Ended::Completed : Ended::NeverReported;
     }
 
     /// @p ending at @p step; entering Remove records that the removal was asked for.
@@ -727,8 +737,7 @@ std::vector<RunEffect> advance(Run& run, RunInput const& input, StepContext cons
         },
         [&](AgentState auto const&, PaneGone const&) {
             run.pane.reset();
-            return toVerify(
-                run, endingFor(run.lastStatus ? Ended::Completed : Ended::NeverReported), context);
+            return toVerify(run, endingFor(paneGoneEnded(run)), context);
         },
         [&](Done const&, EndWhenDone const&) -> Effects {
             // As the user's end does, but it ends as the agent's own: its tab goes after it reported done.

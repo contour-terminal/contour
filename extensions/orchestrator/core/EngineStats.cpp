@@ -9,6 +9,7 @@
 #include <variant>
 #include <vector>
 
+#include <orchestrator/core/Agents.hpp>
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/core/EngineDetail.hpp>
 #include <orchestrator/core/Record.hpp>
@@ -39,18 +40,27 @@ namespace
         return tag.ends_with(StatsTagSuffix) || tag.ends_with(RecordTagSuffix);
     }
 
+    /// @return Whether @p run's agent keeps a session `contour agent stats` reads: Claude Code's does, and an
+    ///         agent that reads none of its state keeps none.
+    [[nodiscard]] bool keepsReadableSession(Run const& run) noexcept
+    {
+        return agentRowOf(run.agent).claudeState == ClaudeState::Read;
+    }
+
     /// @return Whether @p run's agent has a session to read: its tab opened, and it has not finished.
     [[nodiscard]] bool isLive(Run const& run) noexcept
     {
-        return std::holds_alternative<Running>(run.state) || std::holds_alternative<Blocked>(run.state)
-               || std::holds_alternative<Done>(run.state);
+        return keepsReadableSession(run)
+               && (std::holds_alternative<Running>(run.state) || std::holds_alternative<Blocked>(run.state)
+                   || std::holds_alternative<Done>(run.state));
     }
 
     /// @return Whether @p run finished after its agent had a session: one whose preparation failed had none.
     [[nodiscard]] bool hadSession(Run const& run) noexcept
     {
         auto const* const finished = std::get_if<Finished>(&run.state);
-        return finished != nullptr && finished->ended != Ended::PreparationFailed;
+        return keepsReadableSession(run) && finished != nullptr
+               && finished->ended != Ended::PreparationFailed;
     }
 } // namespace
 

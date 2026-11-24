@@ -201,6 +201,7 @@ constexpr auto EndedNames = std::array {
     Spelling { Ended::PreparationFailed, "preparation-failed"sv },
     Spelling { Ended::NeverReported, "never-reported"sv },
     Spelling { Ended::WorktreeGone, "worktree-gone"sv },
+    Spelling { Ended::Closed, "closed"sv },
 };
 
 constexpr auto FateNames = std::array {
@@ -2708,4 +2709,38 @@ TEST_CASE("a Copilot run's tab takes its model, prompt and set, and nothing of C
     CHECK(std::ranges::none_of(orchestrator::agentPaneArguments(run), [](orchestrator::Argument const& a) {
         return a.name == orchestrator::EnvSetArgument;
     }));
+}
+
+TEST_CASE("a closed run is its own ended value, spelled closed", "[orchestrator][run][workers]")
+{
+    CHECK(orchestrator::endedName(Ended::Closed) == "closed");
+
+    auto run = makeRun(Item::Pr, kept(Ended::Closed));
+    run.agent = orchestrator::AgentKind::Copilot;
+    auto const json = orchestrator::toJson(run);
+    CHECK(json.contains(R"("ended":"closed")"));
+    auto const read = runFromJson(json);
+    REQUIRE(read.has_value());
+    CHECK(read->state == run.state);
+}
+
+TEST_CASE("a Copilot run whose tab closed ends closed, whatever it last reported",
+          "[orchestrator][run][workers]")
+{
+    for (auto const lastStatus: { std::optional<AgentStatus> {}, std::optional { AgentStatus::Working } })
+    {
+        auto run = makeRun(Item::Pr, Running {});
+        run.agent = orchestrator::AgentKind::Copilot;
+        run.pane = "pane-7";
+        run.lastStatus = lastStatus;
+        CHECK(describe(orchestrator::advance(run, PaneGone {}, knownContext())) == "persist, read-git-file");
+        CHECK(describe(run.state) == "Ending(verify, closed)");
+        CHECK_FALSE(run.pane.has_value());
+    }
+
+    // A Claude run that never reported is still a broken one.
+    auto claude = makeRun(Item::Pr, Running {});
+    claude.pane = "pane-7";
+    CHECK(describe(orchestrator::advance(claude, PaneGone {}, knownContext())) == "persist, read-git-file");
+    CHECK(describe(claude.state) == "Ending(verify, never-reported)");
 }

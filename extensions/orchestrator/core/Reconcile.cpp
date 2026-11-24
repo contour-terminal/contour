@@ -6,6 +6,7 @@
 #include <ranges>
 #include <utility>
 
+#include <orchestrator/core/Agents.hpp>
 #include <orchestrator/core/Naming.hpp>
 #include <orchestrator/core/Overloaded.hpp>
 
@@ -41,9 +42,12 @@ namespace
                           run.state);
     }
 
-    /// Reports a status the run has not taken in; a pane that reports nothing changes nothing.
+    /// Reports a status the run has not taken in; a pane that reports nothing changes nothing. An agent that
+    /// reports no status has none: whatever its tab lists is not its own, and it runs until its tab closes.
     void followStatus(Run const& run, PaneFact const& pane, std::vector<Decision>& decisions)
     {
+        if (agentRowOf(run.agent).status == StatusReporting::Silent)
+            return;
         if (pane.status && pane.status != run.lastStatus)
             decisions.emplace_back(StatusChanged { .run = run.id, .status = *pane.status });
     }

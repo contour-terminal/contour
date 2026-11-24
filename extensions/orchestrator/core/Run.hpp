@@ -67,6 +67,7 @@ enum class Ended : uint8_t
     PreparationFailed, ///< A preparation step failed; Run::failure says which and why.
     NeverReported,     ///< Its tab went away before the agent ever reported.
     WorktreeGone,      ///< Its worktree was removed by someone else.
+    Closed,            ///< Its tab closed: an agent that reports no status.
 };
 
 /// What happened to a finished run's worktree.

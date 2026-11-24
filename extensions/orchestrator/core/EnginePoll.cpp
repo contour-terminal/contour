@@ -1054,10 +1054,11 @@ void Engine::resumeCheckoutWaits(std::vector<Effect>& out)
 
 std::optional<uint64_t> Engine::boardDueAt(Run const& run) const
 {
-    // A blocked or done agent makes no tool calls: it writes no board.
+    // A blocked or done agent makes no tool calls: it writes no board. An agent that reports no status is
+    // asked for none, as if `status_board` were off.
     auto const after = static_cast<uint64_t>(_config->statusBoardAfter().count());
-    if (after == 0 || !std::holds_alternative<Running>(run.state) || !run.pane
-        || _boardsFound.contains(run.id))
+    if (after == 0 || agentRowOf(run.agent).status == StatusReporting::Silent
+        || !std::holds_alternative<Running>(run.state) || !run.pane || _boardsFound.contains(run.id))
         return std::nullopt;
     return later(run.runningSinceMs, after);
 }

@@ -4991,3 +4991,73 @@ TEST_CASE("an agent that takes no profile runs without one, and an unknown one i
     CHECK(run->board.empty());
     CHECK(run->settings == EmptySettingsJson);
 }
+
+namespace
+{
+
+/// One Copilot worker, which runs fix_ci.
+constexpr auto CopilotWorker = R"("workers": [ { "id": "copilot", "agent": "copilot" } ],)"sv;
+
+/// Why a Copilot run's transcript is not read.
+constexpr auto NoCopilotTranscript = "Copilot runs keep no transcript Contour can read"sv;
+
+} // namespace
+
+TEST_CASE("a Copilot run runs until its tab closes, and ends closed",
+          "[orchestrator][engine][workers][copilot]")
+{
+    auto harness = booted(Settings { .limits = CopilotWorker, .fixCiKeys = R"("worker": "copilot",)" });
+    harness.holdStatsReads();
+    harness.runToRunning(prDispatch());
+    REQUIRE(harness.openedPanes().size() == 1);
+    CHECK(harness.openedPanes().front().paneTemplate == CopilotPaneTemplate);
+    CHECK(namesOf(harness.openedPanes().front().arguments) == std::vector { "model"sv, "prompt"sv });
+    REQUIRE(holds<Running>(harness.run(PrId)));
+
+    // It reports nothing, and a status listed for its tab is not its own: it stays running, past the time a
+    // status board would be read, and nothing of Claude Code's is read for it.
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 20))
+    {
+        harness.wake(Minute);
+        harness.list({ paneOf(PrId, "p1", ProgramLiveness::Alive, std::nullopt) });
+        CHECK(holds<Running>(harness.run(PrId)));
+    }
+    harness.list({ paneOf(PrId, "p1", ProgramLiveness::Alive, AgentStatus::Done) });
+    CHECK(holds<Running>(harness.run(PrId)));
+    CHECK_FALSE(harness.run(PrId)->lastStatus.has_value());
+    CHECK(harness.commandsIssued("agent-stats") == 0);
+    CHECK_FALSE(harness.hasRead("STATUS.md"));
+
+    // Its transcript is not asked for: the view says why at once.
+    auto const transcriptEffects = harness.feed(
+        ReadTranscript { .run = std::string(PrId), .tab = {}, .page = 1, .monoMs = harness.now() });
+    CHECK(commandsIn(transcriptEffects).empty());
+    CHECK(harness.commandsIssued("agent-transcript") == 0);
+    auto const* const view = harness.engine().transcript("", PrId);
+    REQUIRE(view != nullptr);
+    CHECK(view->state == FetchState::Failed);
+    CHECK(view->failure == NoCopilotTranscript);
+
+    // Its tab closes: the run ends closed, a normal finish, and its record says so.
+    harness.endCleanly(PrId);
+    auto const finished = finishedOf(harness.run(PrId));
+    REQUIRE(finished);
+    CHECK(finished->ended == Ended::Closed);
+    CHECK(finished->fate == Fate::Removed);
+    harness.wake(Minute);
+    CHECK(harness.commandsIssued("agent-stats") == 0);
+    auto const records = issuedNamed(harness, "agent-record");
+    REQUIRE(records.size() == 1);
+    auto const line = argumentOf(records.front(), "record");
+    CAPTURE(line);
+    CHECK(line.contains(R"("ended":"closed")"));
+    CHECK(line.contains(R"("stats":null)"));
+}
+
+TEST_CASE("a permission profile on a Copilot worker's task is one problem line",
+          "[orchestrator][engine][workers][copilot]")
+{
+    auto harness = booted(Settings { .limits = CopilotWorker,
+                                     .fixCiKeys = R"("worker": "copilot", "permissions": "trusted",)" });
+    CHECK(linesMentioning(harness.engine().problems(), "tasks[0].permissions") == 1);
+}

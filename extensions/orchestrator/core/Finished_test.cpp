@@ -411,3 +411,19 @@ TEST_CASE("Finished list and summary", "[orchestrator][finished]")
         CHECK(lastLine == std::format("… {} more", 1000 - listed));
     }
 }
+
+TEST_CASE("a closed run's line reads closed", "[orchestrator][finished][workers]")
+{
+    CHECK(orchestrator::endedText(Ended::Closed) == "closed");
+    auto const runs = std::array { makeRun("pr-1-20261113-150847",
+                                           Finished { .ended = Ended::Closed,
+                                                      .fate = Fate::Removed,
+                                                      .entries = {},
+                                                      .seen = Seen::New,
+                                                      .endedWallMs = NowMs }) };
+    CHECK(orchestrator::runStateText(runs.front()) == "closed, worktree removed, new");
+    // A normal finish: counted as new, as a completed run is.
+    CHECK(orchestrator::newFinishedCount(runs) == 1);
+    CHECK(orchestrator::summarize(Counts { 0, 4, 0, 0, 1 }, runs).detail
+          == "⬢ agents 0/4 · ✓1 new\npr-1-20261113-150847 · contour · opus · closed, worktree removed, new");
+}

@@ -54,14 +54,15 @@ namespace
         "status board"sv, "remove"sv,
     };
     constexpr auto EndedNames = std::array {
-        "completed"sv, "ended by you"sv, "preparation failed"sv, "never reported"sv, "worktree gone"sv,
+        "completed"sv,      "ended by you"sv,  "preparation failed"sv,
+        "never reported"sv, "worktree gone"sv, "closed"sv,
     };
     constexpr auto FateNames = std::array { "worktree removed"sv, "worktree kept"sv };
     constexpr auto SeenNames = std::array { "new"sv, "seen"sv };
 
     static_assert(PrepareStepNames.size() == std::to_underlying(PrepareStep::OpenPane) + 1U);
     static_assert(EndStepNames.size() == std::to_underlying(EndStep::Remove) + 1U);
-    static_assert(EndedNames.size() == std::to_underlying(Ended::WorktreeGone) + 1U);
+    static_assert(EndedNames.size() == std::to_underlying(Ended::Closed) + 1U);
     static_assert(FateNames.size() == std::to_underlying(Fate::Kept) + 1U);
     static_assert(SeenNames.size() == std::to_underlying(Seen::Opened) + 1U);
 
