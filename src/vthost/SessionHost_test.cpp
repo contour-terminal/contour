@@ -4358,7 +4358,10 @@ TEST_CASE("a pane whose shell reports no directory is shown in its process's, po
         return recorder.all<vthost::WorkingDirectoryChangedSignal>().size();
     };
 
-    CHECK(host.shownWorkingDirectoryOf(session) == std::optional<std::string> { "/srv/one" });
+    REQUIRE(host.shownWorkingDirectoryOf(session).has_value());
+    CHECK(host.shownWorkingDirectoryOf(session)->path == "/srv/one");
+    // The process's own directory is on the daemon's machine by construction.
+    CHECK(host.shownWorkingDirectoryOf(session)->locality == vtbackend::ContextLocality::Local);
     tick();
     CHECK(told() == 1);
 
@@ -4368,7 +4371,7 @@ TEST_CASE("a pane whose shell reports no directory is shown in its process's, po
     CHECK(told() == 2);
     tick();
     CHECK(told() == 2);
-    CHECK(host.shownWorkingDirectoryOf(session) == std::optional<std::string> { "/srv/two" });
+    CHECK(host.shownWorkingDirectoryOf(session)->path == "/srv/two");
 
     // Once the shell reports one, that is the directory shown, and the process is not asked any more.
     host.terminal(session)->writeToScreen("\033]7;file:///srv/reported\033\\");
@@ -4377,7 +4380,16 @@ TEST_CASE("a pane whose shell reports no directory is shown in its process's, po
     *directory = "/srv/three";
     tick();
     CHECK(told() == 3);
-    CHECK(host.shownWorkingDirectoryOf(session) == std::optional<std::string> { "/srv/reported" });
+    CHECK(host.shownWorkingDirectoryOf(session)->path == "/srv/reported");
+    CHECK(host.shownWorkingDirectoryOf(session)->locality == vtbackend::ContextLocality::Local);
+
+    // The same path, reported from another machine: only the locality moved, and that is told too, so a
+    // window stops abbreviating a path that is no longer this machine's.
+    host.terminal(session)->writeToScreen("\033]7;file://elsewhere.example/srv/reported\033\\");
+    tick();
+    CHECK(told() == 4);
+    CHECK(host.shownWorkingDirectoryOf(session)->path == "/srv/reported");
+    CHECK(host.shownWorkingDirectoryOf(session)->locality == vtbackend::ContextLocality::Foreign);
 }
 
 TEST_CASE("a whole tab moved to another workspace reaches the subscribers, before and after",

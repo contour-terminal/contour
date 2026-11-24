@@ -624,7 +624,8 @@ void NativeSession::sessionSignal(SessionId session, SessionSignal const& signal
     if (std::holds_alternative<WorkingDirectoryChangedSignal>(signal))
     {
         queueSummary(session, [this, session](proto::PaneSummary& summary) {
-            summary.cwd = _host.shownWorkingDirectoryOf(session);
+            summary.cwd = _host.shownWorkingDirectoryOf(session).transform(
+                [](ShownDirectory shown) { return std::move(shown.path); });
         });
         return;
     }
@@ -908,7 +909,8 @@ void NativeSession::announcePanes()
             _pendingSummaries.try_emplace(session.value, proto::PaneSummary { .session = session.value })
                 .first->second;
         // Every pane's directory, as shown: a mirrored pane's stream does not say it.
-        summary.cwd = _host.shownWorkingDirectoryOf(session);
+        summary.cwd = _host.shownWorkingDirectoryOf(session).transform(
+            [](ShownDirectory shown) { return std::move(shown.path); });
         if (mirrorsSession(session))
             continue;
         if (auto const* terminal = _host.terminal(session))
