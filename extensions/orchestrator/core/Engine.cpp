@@ -958,12 +958,10 @@ void Engine::rebuildProblems()
         auto const missing = _missingPluginsBySet.find(set);
         if (missing == _missingPluginsBySet.end())
             continue;
+        auto const whose = workers.empty() ? std::string {} : std::format(" ({})", workersNamed(workers));
         for (auto const& plugin: missing->second)
             problems.push_back(displayText(
-                workers.empty() ? std::format("Claude Code lacks the plugin {} · ^K installs it", plugin.id)
-                                : std::format("Claude Code ({}) lacks the plugin {} · ^K installs it",
-                                              workersNamed(workers),
-                                              plugin.id),
+                std::format("Claude Code{} lacks the plugin {} · ^K installs it", whose, plugin.id),
                 MaxSummaryLineChars));
     }
     // A set no stored run has, once the last of them was dismissed, is called with no more: nothing else

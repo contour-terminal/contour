@@ -528,7 +528,8 @@ class Engine
     ///         it; else whether it may still become known.
     [[nodiscard]] std::optional<CheckoutUnknown> unknownCheckout(Run const& run) const noexcept;
     /// @return Whether Claude Code's status hooks are installed, over the sets of the workers that read
-    ///         Claude Code's state: Missing if any set's are; else Unknown if any set's are; else Present.
+    ///         Claude Code's state: Missing if any set's are; else Unknown if any set's are, or when no
+    ///         worker reads it; else Present.
     [[nodiscard]] HooksState hooks() const noexcept;
     /// @param envSet A variable set's name; "" for the workers without one.
     /// @return Whether Claude Code's status hooks are installed for that set; Unknown before its check.

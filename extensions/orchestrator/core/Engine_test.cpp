@@ -4814,7 +4814,8 @@ TEST_CASE("only Copilot workers check no hooks and no plugins", "[orchestrator][
     harness.boot();
     CHECK(harness.commandsIssued("agent-setup-check") == 0);
     CHECK(harness.commandsIssued("claude-plugins") == 0);
-    CHECK(harness.engine().hooks() != HooksState::Missing);
+    // Nothing was checked: the hooks are not said to be there.
+    CHECK(harness.engine().hooks() == HooksState::Unknown);
     CHECK(harness.engine().missingPlugins().empty());
 }
 
@@ -4845,6 +4846,93 @@ TEST_CASE("without workers the setup checks pass no set and keep their lines",
         CAPTURE(command.command);
         CHECK_FALSE(passesSet(command.arguments));
     }
+}
+
+TEST_CASE("a repository named hooks or plugins is polled like any other, with or without workers",
+          "[orchestrator][engine][workers][hooks]")
+{
+    for (auto const name: { "hooks"sv, "plugins"sv })
+        for (auto const workers: { ""sv, ClaudeSetsWorkers })
+        {
+            CAPTURE(name, workers);
+            auto const path = std::format("/home/u/projects/{}", name);
+            auto const repos = std::format(
+                R"([ {{ "name": "{}", "path": "~/projects/{}", "forge": "github",
+                       "issues": [ {{ "source": "forge", "query": "assignee:@me" }} ] }} ])",
+                name,
+                name);
+            auto harness = booted(Settings { .limits = workers, .repos = repos, .repoPaths = { path } });
+            CHECK_FALSE(harness.engine().changeRequests(name).empty());
+            CHECK_FALSE(mentions(harness.engine().problems(), "incomplete"));
+            // The poll completed: the next one comes when it is due.
+            harness.feed(
+                Wake { .monoMs = harness.now() + 2 * Minute, .wallMs = DispatchWallMs + 2 * Minute });
+            CHECK(harness.pending("gh-prs"));
+        }
+}
+
+TEST_CASE("a set's tags cannot be a repository's", "[orchestrator][engine][workers][hooks]")
+{
+    auto harness = Harness { contextFor(Settings { .limits = ClaudeSetsWorkers }) };
+    for (auto const& check: issuedNamed(harness, "agent-setup-check"))
+    {
+        CAPTURE(check.tag);
+        // A repository's tag is `poll/<name>/<list>`, and no name holds a ':'.
+        CHECK(check.tag.starts_with("poll/hooks:"));
+        CHECK_FALSE(check.tag.substr(5).contains('/'));
+    }
+}
+
+TEST_CASE("a set's answer after its worker was removed is answered to nobody",
+          "[orchestrator][engine][workers][hooks]")
+{
+    auto context = contextFor(Settings { .limits = ClaudeSetsWorkers });
+    context.finished = { FinishedResult { .tag = "poll/hooks:gone",
+                                          .outcome = ok(readFixture(FixtureRoot::Testdata,
+                                                                    "contour/setup-hooks-missing.json")) },
+                         FinishedResult { .tag = "poll/plugins:gone",
+                                          .outcome = ok(readFixture(FixtureRoot::Testdata,
+                                                                    "claude/plugin-list-without.json")) } };
+    auto harness = Harness { std::move(context) };
+    harness.answersPluginsCheck = Harness::PluginsCheck::Left;
+    CHECK(harness.engine().hooksFor("gone") == HooksState::Unknown);
+    CHECK(harness.engine().missingPlugins().empty());
+    CHECK_FALSE(mentions(harness.engine().problems(), "hooks are missing"));
+    CHECK(std::ranges::none_of(harness.issuedCommands(), [](RunCommand const& command) {
+        return argumentOf(command, EnvSetArgument) == "gone";
+    }));
+}
+
+TEST_CASE("plugins: [] checks no set's plugins", "[orchestrator][engine][workers][hooks]")
+{
+    auto const limits = std::format("{} {}", ClaudeSetsWorkers, R"("plugins": [],)");
+    auto harness = Harness { contextFor(Settings { .limits = limits }) };
+    harness.answersPluginsCheck = Harness::PluginsCheck::Left;
+    for (auto const set: { "a"sv, "b"sv })
+        finishFor(harness,
+                  "agent-setup-check",
+                  set,
+                  ok(readFixture(FixtureRoot::Testdata, "contour/setup-hooks-present.json")));
+    CHECK(harness.commandsIssued("claude-plugins") == 0);
+    CHECK(harness.engine().missingPlugins().empty());
+    CHECK_FALSE(mentions(harness.engine().problems(), "plugin"));
+    CHECK(all<RunCommand>(harness.feed(InstallPlugins {})).empty());
+}
+
+TEST_CASE("a missing worktree root is said once, whatever the sets", "[orchestrator][engine][workers][hooks]")
+{
+    auto harness = Harness { contextFor(Settings { .limits = ClaudeSetsWorkers }) };
+    harness.answersPluginsCheck = Harness::PluginsCheck::Left;
+    for (auto const set: { "a"sv, "b"sv })
+        finishFor(harness, "agent-setup-check", set, cwdMissing());
+    auto const rootMissing = std::format("{} does not exist", WorktreeRoot);
+    CHECK(linesMentioning(harness.engine().problems(), rootMissing) == 1);
+
+    // Once the sets' checks run there again, the root exists.
+    harness.feed(RefreshNow { .monoMs = harness.now() });
+    harness.boot();
+    CHECK(harness.engine().hooks() == HooksState::Present);
+    CHECK(linesMentioning(harness.engine().problems(), rootMissing) == 0);
 }
 
 // }}}

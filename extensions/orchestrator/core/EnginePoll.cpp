@@ -59,10 +59,14 @@ namespace
 
     /// @param check HooksTag or PluginsTag.
     /// @param envSet A variable set's name; "" for none.
-    /// @return The tag of @p check for @p envSet: @p check itself for none, else `<check>/<set>`.
+    /// What separates a set's name from its check in the check's tag. No repository name holds it (an
+    /// ArgumentKind::Name), so `poll/hooks:<set>` is never `poll/<repo>/<list>` of a repository `hooks`.
+    constexpr auto SetTagSeparator = ':';
+
+    /// @return The tag of @p check for @p envSet: @p check itself for none, else `<check>:<set>`.
     [[nodiscard]] std::string setupTagOf(std::string_view check, std::string_view envSet)
     {
-        return envSet.empty() ? std::string(check) : std::format("{}/{}", check, envSet);
+        return envSet.empty() ? std::string(check) : std::format("{}{}{}", check, SetTagSeparator, envSet);
     }
 
     /// @param tag A poll tag.
@@ -73,7 +77,7 @@ namespace
     {
         if (tag == check)
             return std::string_view {};
-        if (tag.starts_with(check) && tag.substr(check.size()).starts_with('/'))
+        if (tag.starts_with(check) && tag.substr(check.size()).starts_with(SetTagSeparator))
             return tag.substr(check.size() + 1);
         return std::nullopt;
     }
@@ -107,8 +111,7 @@ namespace
 
     [[nodiscard]] std::optional<PollTag> parsePollTag(std::string_view tag) noexcept
     {
-        // A set's hooks or plugins check (`poll/hooks/<set>`) is no repository's list.
-        if (!tag.starts_with(PollTagPrefix) || isSetCheckTag(tag))
+        if (!tag.starts_with(PollTagPrefix))
             return std::nullopt;
         auto const rest = tag.substr(PollTagPrefix.size());
         auto const slash = rest.find('/');
@@ -565,10 +568,16 @@ HooksState Engine::hooks() const noexcept
 {
     if (!_config)
         return HooksState::Unknown;
+    auto const readsClaude = [](WorkerDef const& worker) {
+        return agentRowOf(worker.agent).claudeState == ClaudeState::Read;
+    };
+    // No worker reads Claude Code's state: nothing was checked, so nothing is said to be there.
+    if (std::ranges::none_of(_config->workers(), readsClaude))
+        return HooksState::Unknown;
     auto worst = HooksState::Present;
     for (auto const& worker: _config->workers())
     {
-        if (agentRowOf(worker.agent).claudeState != ClaudeState::Read)
+        if (!readsClaude(worker))
             continue;
         switch (hooksFor(worker.envSet))
         {
@@ -744,8 +753,13 @@ void Engine::onHooksResult(std::string_view envSet, ProcessOutcome const& outcom
     auto const whose = forWorkers(namedWorkersOn(envSet));
     auto& lines = _pollProblems[setupTagOf(HooksTag, envSet)];
     lines.clear();
+    // Every set's check runs in the worktree root: that it is missing is said once, under the check's own
+    // tag (the implicit worker's), and unsaid by any set's check that ran there.
+    auto const rootMissing = line(std::format("{} does not exist", _config->worktreeRoot()));
+    auto& rootLines = _pollProblems[std::string(HooksTag)];
+    std::erase(rootLines, rootMissing);
     if (judgement.verdict == Verdict::CwdMissing)
-        lines.push_back(line(std::format("{} does not exist", _config->worktreeRoot())));
+        rootLines.push_back(rootMissing);
     else if (!ok)
         lines.push_back(line(std::format("the agent hooks check{} failed: {}", whose, judgement.why)));
     else if (state == HooksState::Unknown)
