@@ -296,7 +296,8 @@ class Config
     [[nodiscard]] std::span<TaskDef const> tasks() const noexcept { return _tasks; }
     /// @return The workers, in the configured order: never empty; the implicit one without `workers`.
     [[nodiscard]] std::span<WorkerDef const> workers() const noexcept { return _workers; }
-    /// @return What was accepted with a fallback, in the order the configuration names it.
+    /// @return What was accepted with a fallback: the tasks' unknown workers in task order, then the tasks'
+    ///         refused permission profiles in task order.
     [[nodiscard]] std::span<ConfigError const> notices() const noexcept { return _notices; }
     /// @return The forges and issue sources it was read with: the rows its repositories are served by.
     [[nodiscard]] SourceTables const& sources() const noexcept { return _sources; }

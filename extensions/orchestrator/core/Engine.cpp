@@ -970,11 +970,13 @@ void Engine::rebuildProblems()
         return !std::ranges::contains(_runs, refused.set, &Run::envSet);
     });
     for (auto const& refused: _refusedSets)
-        problems.push_back(displayText(std::format("the variable set '{}' of worker '{}' was refused: is it "
-                                                   "still under daemon.extensions.orchestrator.env_sets?",
-                                                   refused.set,
-                                                   refused.worker),
-                                       MaxSummaryLineChars));
+        // A refused call says only `bad-argument`: an unknown set, but also a program the host does not find.
+        problems.push_back(
+            displayText(std::format("the variable set '{}' of worker '{}' was refused (bad-argument): "
+                                    "is it still in env_sets, and is the worker's program installed?",
+                                    refused.set,
+                                    refused.worker),
+                        MaxSummaryLineChars));
     // Orphans are not problems: the dashboard lists them in a section of their own.
     if (problems != _problems)
     {

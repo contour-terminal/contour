@@ -4625,7 +4625,10 @@ TEST_CASE("a refused set is a problem line naming it", "[orchestrator][engine][w
 
     harness.feed(
         PaneOpenFailedFor { .run = std::string(PrId), .why = "bad-argument", .monoMs = harness.now() });
-    CHECK(mentions(harness.engine().problems(), "the variable set 'gone' of worker 'work' was refused"));
+    CHECK(std::ranges::contains(
+        harness.engine().problems(),
+        "the variable set 'gone' of worker 'work' was refused (bad-argument): is it still in "
+        "env_sets, and is the worker's program installed?"sv));
 
     // A refusal for another reason names no set.
     auto other = booted(Settings { .limits = ClaudeWorker });
