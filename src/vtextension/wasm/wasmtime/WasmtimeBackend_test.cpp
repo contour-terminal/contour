@@ -255,7 +255,10 @@ TEST_CASE("WasmtimeBackend.wasiReadsTheConfiguredEnvironment", "[wasmtime]")
         .trapMode = TrapMode::Software,
         .wasiEnvironment = {
             .clock = [](uint32_t clockId) { return 7'000'000'000 + uint64_t { clockId }; },
-            .random = [](std::span<std::byte> bytes) { std::ranges::fill(bytes, std::byte { 0x5A }); } },
+            .random = [](std::span<std::byte> bytes) -> std::expected<void, vtextension::wasm::wasi::Errno> {
+                std::ranges::fill(bytes, std::byte { 0x5A });
+                return {};
+            } },
     };
     auto const backend = makeWasmtimeBackend(WasmtimeTraits::kind(), std::move(config));
     auto const runtime = contract::createRuntime(*backend);

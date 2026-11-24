@@ -8,11 +8,13 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <initializer_list>
 #include <limits>
 #include <ranges>
 #include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <vtextension/wasm/WasiAllowList.hpp>
@@ -49,11 +51,12 @@ constexpr auto FirstRandomByte = uint8_t { 0xA0 };
 }
 
 /// Fills @p bytes with FirstRandomByte, FirstRandomByte + 1, and so on.
-void testRandom(std::span<std::byte> bytes)
+std::expected<void, Errno> testRandom(std::span<std::byte> bytes)
 {
     auto next = FirstRandomByte;
     for (auto& byte: bytes)
         byte = std::byte { next++ };
+    return {};
 }
 
 /// @return An environment whose clocks and random source give the same values on every run.
@@ -66,6 +69,11 @@ void testRandom(std::span<std::byte> bytes)
 class Guest
 {
   public:
+    Guest() = default;
+
+    /// @param environment What the shim functions read clocks and random bytes from.
+    explicit Guest(ShimEnvironment environment): _environment { std::move(environment) } {}
+
     /// Calls the shim function @p name with @p args.
     /// @return What it returned.
     [[nodiscard]] ShimResult call(std::string_view name, std::initializer_list<uint64_t> args)
@@ -334,6 +342,19 @@ TEST_CASE("Preview1Shim.random_get")
     CHECK(guest.isUntouched(700, 4));
 }
 
+TEST_CASE("Preview1Shim.random_getFailsWithTheSource")
+{
+    // A random source that refuses fails the guest's random_get, and nothing else: no byte is written.
+    auto environment = testEnvironment();
+    environment.random = [](std::span<std::byte>) -> std::expected<void, Errno> {
+        return std::unexpected(Errno::Io);
+    };
+    auto guest = Guest { std::move(environment) };
+    CHECK(guest.errnoOf("random_get", { 600, 16 }) == Errno::Io);
+    CHECK(guest.isUntouched());
+    CHECK(guest.errnoOf("clock_time_get", { 0, 1, 600 }) == Errno::Success);
+}
+
 TEST_CASE("Preview1Shim.proc_exit")
 {
     auto guest = Guest {};
@@ -390,6 +411,6 @@ TEST_CASE("Preview1Shim.systemEnvironment")
 
     // 64 random bytes are all zero with a chance of 2^-512.
     auto bytes = std::array<std::byte, 64> {};
-    environment.random(bytes);
+    REQUIRE(environment.random(bytes).has_value());
     CHECK(std::ranges::any_of(bytes, [](std::byte byte) { return byte != std::byte {}; }));
 }

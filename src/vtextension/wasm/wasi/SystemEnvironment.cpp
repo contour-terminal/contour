@@ -5,7 +5,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <exception>
+#include <expected>
 #include <span>
 
 #ifdef _WIN32
@@ -43,10 +43,10 @@ namespace
         return nanosecondsOf<std::chrono::steady_clock>();
     }
 
-    /// Fills @p bytes from the system's cryptographic random source. A source that refuses is a process
-    /// that forbids the call (a sandbox): a guest's random bytes are never quietly predictable, so that
-    /// terminates.
-    void fillRandom(std::span<std::byte> bytes) noexcept
+    /// Fills @p bytes from the system's cryptographic random source.
+    /// @return Nothing once filled; `Io` if the source refused (a sandbox forbidding the call). A guest's
+    ///         random bytes are never quietly predictable: its random_get fails instead, and only its.
+    [[nodiscard]] std::expected<void, Errno> fillRandom(std::span<std::byte> bytes) noexcept
     {
 #ifdef _WIN32
         // A guest's request is at most its memory, 4 GiB: ULONG holds every length but that one.
@@ -57,7 +57,7 @@ namespace
                                                 reinterpret_cast<PUCHAR>(bytes.data()),
                                                 static_cast<ULONG>(chunk),
                                                 BCRYPT_USE_SYSTEM_PREFERRED_RNG)))
-                std::terminate();
+                return std::unexpected(Errno::Io);
             bytes = bytes.subspan(chunk);
         }
 #elifdef __linux__
@@ -69,13 +69,14 @@ namespace
             {
                 if (errno == EINTR)
                     continue;
-                std::terminate();
+                return std::unexpected(Errno::Io);
             }
             bytes = bytes.subspan(static_cast<std::size_t>(filled));
         }
 #else
         ::arc4random_buf(bytes.data(), bytes.size());
 #endif
+        return {};
     }
 } // namespace
 

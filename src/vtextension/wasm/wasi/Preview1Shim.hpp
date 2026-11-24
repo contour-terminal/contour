@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <span>
 #include <string_view>
@@ -26,17 +27,6 @@ enum class ClockId : uint8_t
     ThreadCputime = 3,  ///< The CPU time of the thread; not provided (Errno::Nosys).
 };
 
-/// What the shim reads from outside guest memory: injected, so that tests are deterministic.
-/// Neither function may throw: an engine calls the shim from code an exception must not unwind through.
-struct ShimEnvironment
-{
-    /// @return The time of the clock @p clockId (ClockId::Realtime or ClockId::Monotonic only), in
-    ///         nanoseconds.
-    std::function<uint64_t(uint32_t clockId)> clock;
-    /// Fills its argument with random bytes.
-    std::function<void(std::span<std::byte>)> random;
-};
-
 /// A WASI preview 1 errno, by its value; only those the shim returns (a u16 on the wire; every value of
 /// preview 1 fits a byte).
 enum class Errno : uint8_t
@@ -45,7 +35,21 @@ enum class Errno : uint8_t
     Badf = 8,    ///< No such file descriptor.
     Fault = 21,  ///< A pointer the guest passed lies outside its memory.
     Inval = 28,  ///< An argument is out of range.
+    Io = 29,     ///< The host could not do what was asked of it (its random source failed).
     Nosys = 52,  ///< The function, or the clock asked for, is not provided.
+};
+
+/// What the shim reads from outside guest memory: injected, so that tests are deterministic.
+/// Neither function may throw: an engine calls the shim from code an exception must not unwind through.
+struct ShimEnvironment
+{
+    /// @return The time of the clock @p clockId (ClockId::Realtime or ClockId::Monotonic only), in
+    ///         nanoseconds.
+    std::function<uint64_t(uint32_t clockId)> clock;
+    /// Fills its argument with random bytes.
+    /// @return Nothing once filled; `Io` if the source refused, which fails only the calling guest's
+    ///         random_get, never the process.
+    std::function<std::expected<void, Errno>(std::span<std::byte>)> random;
 };
 
 /// How a shim function ended.

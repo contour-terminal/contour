@@ -276,8 +276,8 @@ namespace
                          std::span<uint64_t const> args)
     {
         return returned(
-            range(memory, asU32(args[0]), asU32(args[1])).transform([&](std::span<std::byte> bytes) {
-                environment.random(bytes);
+            range(memory, asU32(args[0]), asU32(args[1])).and_then([&](std::span<std::byte> bytes) {
+                return environment.random(bytes);
             }));
     }
 
