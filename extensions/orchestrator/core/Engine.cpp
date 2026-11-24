@@ -941,11 +941,25 @@ void Engine::rebuildProblems()
                 MaxSummaryLineChars));
     for (auto const& lines: _pollProblems | std::views::values)
         problems.insert(problems.end(), lines.begin(), lines.end());
-    if (_hooks == HooksState::Missing)
-        problems.emplace_back(HooksMissingProblem);
-    for (auto const& plugin: _missingPlugins)
-        problems.push_back(displayText(
-            std::format("Claude Code lacks the plugin {} · ^K installs it", plugin.id), MaxSummaryLineChars));
+    // Each set's lines name the workers on it; the implicit worker's read as they did before workers.
+    for (auto const& set: _config ? engine::detail::claudeSetsOf(*_config) : std::vector<std::string> {})
+    {
+        auto const workers = namedWorkersOn(set);
+        if (hooksFor(set) == HooksState::Missing)
+            problems.push_back(workers.empty()
+                                   ? std::string { HooksMissingProblem }
+                                   : displayText(hooksMissingProblemFor(workers), MaxSummaryLineChars));
+        auto const missing = _missingPluginsBySet.find(set);
+        if (missing == _missingPluginsBySet.end())
+            continue;
+        for (auto const& plugin: missing->second)
+            problems.push_back(displayText(
+                workers.empty() ? std::format("Claude Code lacks the plugin {} · ^K installs it", plugin.id)
+                                : std::format("Claude Code ({}) lacks the plugin {} · ^K installs it",
+                                              workersNamed(workers),
+                                              plugin.id),
+                MaxSummaryLineChars));
+    }
     for (auto const& refused: _refusedSets)
         problems.push_back(displayText(std::format("the variable set '{}' of worker '{}' was refused: is it "
                                                    "still under daemon.extensions.orchestrator.env_sets?",

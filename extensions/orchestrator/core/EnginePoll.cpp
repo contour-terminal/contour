@@ -16,6 +16,7 @@
 #include <variant>
 #include <vector>
 
+#include <orchestrator/core/Agents.hpp>
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/core/EngineDetail.hpp>
 #include <orchestrator/core/Finished.hpp>
@@ -56,6 +57,47 @@ namespace
     constexpr auto DefaultBranchList = "default-branch"sv;
     constexpr auto WorktreesList = "worktrees"sv;
 
+    /// @param check HooksTag or PluginsTag.
+    /// @param envSet A variable set's name; "" for none.
+    /// @return The tag of @p check for @p envSet: @p check itself for none, else `<check>/<set>`.
+    [[nodiscard]] std::string setupTagOf(std::string_view check, std::string_view envSet)
+    {
+        return envSet.empty() ? std::string(check) : std::format("{}/{}", check, envSet);
+    }
+
+    /// @param tag A poll tag.
+    /// @param check HooksTag or PluginsTag.
+    /// @return The set @p tag is @p check's tag for ("" for none), or std::nullopt when it is not one.
+    [[nodiscard]] std::optional<std::string_view> setOfSetupTag(std::string_view tag,
+                                                                std::string_view check) noexcept
+    {
+        if (tag == check)
+            return std::string_view {};
+        if (tag.starts_with(check) && tag.substr(check.size()).starts_with('/'))
+            return tag.substr(check.size() + 1);
+        return std::nullopt;
+    }
+
+    /// @return Whether @p tag is a hooks or plugins check's, of any set.
+    [[nodiscard]] bool isSetCheckTag(std::string_view tag) noexcept
+    {
+        return setOfSetupTag(tag, HooksTag) || setOfSetupTag(tag, PluginsTag);
+    }
+
+    /// @return @p arguments, followed by @p envSet's argument when it names a set.
+    [[nodiscard]] std::vector<Argument> withSet(std::vector<Argument> arguments, std::string_view envSet)
+    {
+        if (!envSet.empty())
+            arguments.push_back(Argument { .name = EnvSetArgument, .value = std::string(envSet) });
+        return arguments;
+    }
+
+    /// @return How a line says whose check or install it was: "" for none, else ` for worker <a>`.
+    [[nodiscard]] std::string forWorkers(std::span<std::string const> workers)
+    {
+        return workers.empty() ? std::string {} : std::format(" for {}", workersNamed(workers));
+    }
+
     /// A repository's poll tag, taken apart.
     struct PollTag
     {
@@ -65,7 +107,8 @@ namespace
 
     [[nodiscard]] std::optional<PollTag> parsePollTag(std::string_view tag) noexcept
     {
-        if (!tag.starts_with(PollTagPrefix))
+        // A set's hooks or plugins check (`poll/hooks/<set>`) is no repository's list.
+        if (!tag.starts_with(PollTagPrefix) || isSetCheckTag(tag))
             return std::nullopt;
         auto const rest = tag.substr(PollTagPrefix.size());
         auto const slash = rest.find('/');
@@ -121,7 +164,7 @@ namespace
     ///         a plugin's install step, or a login.
     [[nodiscard]] bool isSetupTag(std::string_view tag) noexcept
     {
-        return tag == HooksTag || tag == PluginsTag || tag == PluginStepTag || isAuthTag(tag);
+        return isSetCheckTag(tag) || tag == PluginStepTag || isAuthTag(tag);
     }
 
     /// What a repository's lists show: on the dashboard, in the launcher and in what a dispatch would do.
@@ -240,6 +283,26 @@ namespace
     };
 } // namespace
 
+namespace engine::detail
+{
+    std::vector<std::string> claudeSetsOf(Config const& config)
+    {
+        auto sets = std::vector<std::string> {};
+        for (auto const& worker: config.workers())
+            if (agentRowOf(worker.agent).claudeState == ClaudeState::Read
+                && !std::ranges::contains(sets, worker.envSet))
+                sets.push_back(worker.envSet);
+        return sets;
+    }
+
+    bool hasImplicitWorkerAlone(Config const& config) noexcept
+    {
+        auto const workers = config.workers();
+        return workers.size() == 1 && workers.front().id == ImplicitWorkerId
+               && workers.front().agent == AgentKind::Claude && workers.front().envSet.empty();
+    }
+} // namespace engine::detail
+
 // {{{ repositories
 
 Engine::RepoState* Engine::findRepoState(std::string_view name) noexcept
@@ -354,7 +417,7 @@ void Engine::issueSourceAuthChecks(std::vector<Effect>& out)
 
 bool Engine::isResumable(std::string_view tag) const noexcept
 {
-    if (isAuthTag(tag) || tag == HooksTag || tag == PluginsTag)
+    if (isAuthTag(tag) || isSetCheckTag(tag))
         return true;
     // A list of a repository no longer configured is answered to nobody.
     auto const parsed = parsePollTag(tag);
@@ -392,8 +455,9 @@ void Engine::startOrResumePoll(StartContext const& context, std::vector<Effect>&
         if (isForgePoll(tag))
             ++_pollOutstanding;
     }
-    if (!std::ranges::contains(answered, HooksTag))
-        checkHooks(out);
+    for (auto const& set: engine::detail::claudeSetsOf(*_config))
+        if (!std::ranges::contains(answered, setupTagOf(HooksTag, set)))
+            checkHooksOf(set, out);
 
     auto const forgeAnswered = static_cast<std::size_t>(
         std::ranges::count_if(answered, [&](std::string const& tag) { return isForgePoll(tag); }));
@@ -491,65 +555,144 @@ void Engine::issueLists(std::vector<Effect>& out)
     }
 }
 
+HooksState Engine::hooksFor(std::string_view envSet) const noexcept
+{
+    auto const found = _hooks.find(envSet);
+    return found != _hooks.end() ? found->second : HooksState::Unknown;
+}
+
+HooksState Engine::hooks() const noexcept
+{
+    if (!_config)
+        return HooksState::Unknown;
+    auto worst = HooksState::Present;
+    for (auto const& worker: _config->workers())
+    {
+        if (agentRowOf(worker.agent).claudeState != ClaudeState::Read)
+            continue;
+        switch (hooksFor(worker.envSet))
+        {
+            case HooksState::Missing: return HooksState::Missing;
+            case HooksState::Unknown: worst = HooksState::Unknown; break;
+            case HooksState::Present: break;
+        }
+    }
+    return worst;
+}
+
+std::vector<std::string> Engine::namedWorkersOn(std::string_view envSet) const
+{
+    auto named = std::vector<std::string> {};
+    if (!_config || engine::detail::hasImplicitWorkerAlone(*_config))
+        return named;
+    for (auto const& worker: _config->workers())
+        if (agentRowOf(worker.agent).claudeState == ClaudeState::Read && worker.envSet == envSet)
+            named.push_back(worker.id);
+    return named;
+}
+
 void Engine::checkHooks(std::vector<Effect>& out)
 {
-    if (isPending(HooksTag))
+    for (auto const& set: engine::detail::claudeSetsOf(*_config))
+        checkHooksOf(set, out);
+}
+
+void Engine::checkHooksOf(std::string_view envSet, std::vector<Effect>& out)
+{
+    auto tag = setupTagOf(HooksTag, envSet);
+    if (isPending(tag))
         return;
-    // In the worktree root, which the host creates if it is missing.
-    static_cast<void>(issuePoll(std::string(HooksTag), HooksCommand, {}, _config->worktreeRoot(), out));
+    // In the worktree root, which the host creates if it is missing. Every set's check is issued at once: a
+    // poll waits behind the runs' commands for a slot.
+    static_cast<void>(
+        issuePoll(std::move(tag), HooksCommand, withSet({}, envSet), _config->worktreeRoot(), out));
 }
 
 void Engine::checkPlugins(std::vector<Effect>& out)
 {
-    if (_config->plugins().empty())
-    {
-        _missingPlugins.clear();
-        _pollProblems.erase(std::string(PluginsTag));
-        return;
-    }
-    if (isPending(PluginsTag))
-        return;
-    // In the worktree root, as the hooks check: it always exists, and `claude` reads no project there.
-    static_cast<void>(issuePoll(std::string(PluginsTag), PluginsCommand, {}, _config->worktreeRoot(), out));
+    for (auto const& set: engine::detail::claudeSetsOf(*_config))
+        checkPluginsOf(set, out);
 }
 
-void Engine::onPluginsResult(ProcessOutcome const& outcome)
+void Engine::checkPluginsOf(std::string_view envSet, std::vector<Effect>& out)
+{
+    auto tag = setupTagOf(PluginsTag, envSet);
+    if (_config->plugins().empty())
+    {
+        if (auto const found = _missingPluginsBySet.find(envSet); found != _missingPluginsBySet.end())
+            _missingPluginsBySet.erase(found);
+        collectMissingPlugins();
+        _pollProblems.erase(tag);
+        return;
+    }
+    if (isPending(tag))
+        return;
+    // In the worktree root, as the hooks check: it always exists, and `claude` reads no project there.
+    static_cast<void>(
+        issuePoll(std::move(tag), PluginsCommand, withSet({}, envSet), _config->worktreeRoot(), out));
+}
+
+void Engine::onPluginsResult(std::string_view envSet, ProcessOutcome const& outcome)
 {
     auto const judgement = judge(outcome);
-    auto& lines = _pollProblems[std::string(PluginsTag)];
+    auto const whose = forWorkers(namedWorkersOn(envSet));
+    auto& lines = _pollProblems[setupTagOf(PluginsTag, envSet)];
     lines.clear();
-    _missingPlugins.clear();
+    auto& missing = _missingPluginsBySet[std::string(envSet)];
+    missing.clear();
     if (judgement.verdict != Verdict::Ok)
-    {
         // A `claude` that is missing is said by the agents' own failure; this says which check it was.
-        lines.push_back(line(std::format("the Claude Code plugins check failed: {}", judgement.why)));
+        lines.push_back(
+            line(std::format("the Claude Code plugins check{} failed: {}", whose, judgement.why)));
+    else if (auto const enabled = enabledPluginsOf(outcome.stdoutText))
+        missing = orchestrator::missingPlugins(_config->plugins(), *enabled);
+    else
+        lines.push_back(
+            line(std::format("the Claude Code plugins check{} printed something unreadable", whose)));
+    collectMissingPlugins();
+}
+
+void Engine::collectMissingPlugins()
+{
+    _missingPlugins.clear();
+    if (!_config)
         return;
-    }
-    auto const enabled = enabledPluginsOf(outcome.stdoutText);
-    if (!enabled)
+    for (auto const& plugin: _config->plugins())
     {
-        lines.emplace_back("the Claude Code plugins check printed something unreadable");
-        return;
+        auto const lacks = [&](std::vector<PluginRequirement> const& missing) {
+            return std::ranges::contains(missing, plugin.id, &PluginRequirement::id);
+        };
+        if (std::ranges::any_of(_missingPluginsBySet | std::views::values, lacks))
+            _missingPlugins.push_back(plugin);
     }
-    _missingPlugins = orchestrator::missingPlugins(_config->plugins(), *enabled);
 }
 
 void Engine::installPlugins(std::vector<Effect>& out)
 {
     if (!_config || _missingPlugins.empty() || !_pluginSteps.empty())
         return;
+    // One queue for every set, in the order of the workers: each set's Claude Code installs what it lacks.
     // A marketplace already known makes `marketplace add` fail; the install that follows still runs, and it
     // is what is judged.
-    for (auto const& plugin: _missingPlugins)
+    for (auto const& set: engine::detail::claudeSetsOf(*_config))
     {
-        if (!plugin.marketplace.empty())
+        auto const missing = _missingPluginsBySet.find(set);
+        if (missing == _missingPluginsBySet.end())
+            continue;
+        for (auto const& plugin: missing->second)
+        {
+            if (!plugin.marketplace.empty())
+                _pluginSteps.push_back(PluginStep {
+                    .command = std::string(MarketplaceAddCommand),
+                    .args = withSet({ Argument { .name = "source", .value = plugin.marketplace } }, set),
+                    .plugin = plugin.id,
+                    .envSet = set });
             _pluginSteps.push_back(
-                PluginStep { .command = std::string(MarketplaceAddCommand),
-                             .args = { Argument { .name = "source", .value = plugin.marketplace } },
-                             .plugin = plugin.id });
-        _pluginSteps.push_back(PluginStep { .command = std::string(PluginInstallCommand),
-                                            .args = { Argument { .name = "plugin", .value = plugin.id } },
-                                            .plugin = plugin.id });
+                PluginStep { .command = std::string(PluginInstallCommand),
+                             .args = withSet({ Argument { .name = "plugin", .value = plugin.id } }, set),
+                             .plugin = plugin.id,
+                             .envSet = set });
+        }
     }
     _pollProblems.erase(std::string(PluginStepTag));
     ++_revision;
@@ -579,8 +722,9 @@ void Engine::onPluginStepResult(ProcessOutcome const& outcome, std::vector<Effec
     auto const judgement = judge(outcome);
     if (step.command == PluginInstallCommand && judgement.verdict != Verdict::Ok)
         _pollProblems[std::string(PluginStepTag)].push_back(
-            line(std::format("installing {} failed: {}; run by hand: claude plugin install {}",
+            line(std::format("installing {}{} failed: {}; run by hand: claude plugin install {}",
                              step.plugin,
+                             forWorkers(namedWorkersOn(step.envSet)),
                              judgement.why,
                              step.plugin)));
     if (!_config)
@@ -591,19 +735,21 @@ void Engine::onPluginStepResult(ProcessOutcome const& outcome, std::vector<Effec
     issuePluginStep(out);
 }
 
-void Engine::onHooksResult(ProcessOutcome const& outcome)
+void Engine::onHooksResult(std::string_view envSet, ProcessOutcome const& outcome)
 {
     auto const judgement = judge(outcome);
     auto const ok = judgement.verdict == Verdict::Ok;
-    _hooks = ok ? hooksStateOf(outcome.stdoutText) : HooksState::Unknown;
-    auto& lines = _pollProblems[std::string(HooksTag)];
+    auto const state = ok ? hooksStateOf(outcome.stdoutText) : HooksState::Unknown;
+    _hooks.insert_or_assign(std::string(envSet), state);
+    auto const whose = forWorkers(namedWorkersOn(envSet));
+    auto& lines = _pollProblems[setupTagOf(HooksTag, envSet)];
     lines.clear();
     if (judgement.verdict == Verdict::CwdMissing)
         lines.push_back(line(std::format("{} does not exist", _config->worktreeRoot())));
     else if (!ok)
-        lines.push_back(line(std::format("the agent hooks check failed: {}", judgement.why)));
-    else if (_hooks == HooksState::Unknown)
-        lines.emplace_back("the agent hooks check printed something unreadable");
+        lines.push_back(line(std::format("the agent hooks check{} failed: {}", whose, judgement.why)));
+    else if (state == HooksState::Unknown)
+        lines.push_back(line(std::format("the agent hooks check{} printed something unreadable", whose)));
 }
 
 void Engine::onAuthResult(ProcessOutcome const& outcome, std::vector<Effect>& out)
@@ -681,17 +827,25 @@ void Engine::onPollResult(std::string_view tag, ProcessOutcome const& outcome, s
 
 void Engine::onSetupResult(std::string_view tag, ProcessOutcome const& outcome, std::vector<Effect>& out)
 {
-    if (tag == HooksTag)
+    // A set's check answered after the configuration stopped naming the set (a previous instance's) is
+    // answered to nobody.
+    auto const isClaudeSet = [&](std::string_view set) {
+        return std::ranges::contains(engine::detail::claudeSetsOf(*_config), set);
+    };
+    if (auto const set = setOfSetupTag(tag, HooksTag))
     {
-        onHooksResult(outcome);
-        // The plugins are checked once the hooks are: one setup check at a time, so that neither takes a
-        // command slot from the lists or a run.
-        checkPlugins(out);
+        if (!isClaudeSet(*set))
+            return;
+        onHooksResult(*set, outcome);
+        // A set's plugins are checked once its hooks are: one setup check per set at a time, so that neither
+        // takes a command slot from the lists or a run.
+        checkPluginsOf(*set, out);
         return;
     }
-    if (tag == PluginsTag)
+    if (auto const set = setOfSetupTag(tag, PluginsTag))
     {
-        onPluginsResult(outcome);
+        if (isClaudeSet(*set))
+            onPluginsResult(*set, outcome);
         return;
     }
     if (tag == PluginStepTag)

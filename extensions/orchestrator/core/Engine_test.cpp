@@ -4557,10 +4557,13 @@ TEST_CASE("a worker's set reaches its tab, transcript and stats", "[orchestrator
 
     REQUIRE(harness.openedPanes().size() == 1);
     CHECK(paneArgument(harness.openedPanes().front(), EnvSetArgument) == "claude-work");
+    // The setup checks read the worker's Claude Code state; no git or forge command passes the set.
     for (auto const& command: harness.issuedCommands())
     {
         CAPTURE(command.command);
-        CHECK_FALSE(passesSet(command.arguments));
+        auto const readsClaude =
+            command.command == "agent-setup-check" || command.command == "claude-plugins";
+        CHECK(passesSet(command.arguments) == readsClaude);
     }
 
     harness.feed(ReadTranscript { .run = std::string(PrId), .tab = {}, .page = 1, .monoMs = harness.now() });
@@ -4646,6 +4649,188 @@ TEST_CASE("an unknown task worker is a problem line, and the first worker runs i
     REQUIRE(opened.size() == 1);
     CHECK(opened.front().paneTemplate == AgentPaneTemplate);
     CHECK(harness.run(PrId)->worker == "work");
+}
+
+namespace
+{
+
+/// Two Claude workers on set `a`, one on set `b`, and a Copilot worker.
+constexpr auto ClaudeSetsWorkers = R"("workers": [ { "id": "w1", "agent": "claude", "env_set": "a" },
+                                                   { "id": "w2", "agent": "claude", "env_set": "b" },
+                                                   { "id": "w3", "agent": "claude", "env_set": "a" },
+                                                   { "id": "w4", "agent": "copilot" } ],)"sv;
+
+/// @return The commands issued so far named @p command, in order.
+[[nodiscard]] std::vector<RunCommand> issuedNamed(Harness const& harness, std::string_view command)
+{
+    auto found = std::vector<RunCommand> {};
+    for (auto const& issued: harness.issuedCommands())
+        if (issued.command == command)
+            found.push_back(issued);
+    return found;
+}
+
+/// Answers the pending @p command that passes the set @p set.
+std::vector<Effect> finishFor(Harness& harness,
+                              std::string_view command,
+                              std::string_view set,
+                              ProcessOutcome outcome)
+{
+    auto const pending = harness.pendingCommands();
+    auto const found = std::ranges::find_if(pending, [&](RunCommand const& candidate) {
+        return candidate.command == command && argumentOf(candidate, EnvSetArgument) == set;
+    });
+    CAPTURE(command, set);
+    REQUIRE(found != pending.end());
+    auto tag = found->tag;
+    return harness.feed(ProcessFinished { .tag = std::move(tag), .outcome = std::move(outcome) });
+}
+
+/// @return How many of @p lines contain @p text.
+[[nodiscard]] std::size_t linesMentioning(std::span<std::string const> lines, std::string_view text)
+{
+    return static_cast<std::size_t>(
+        std::ranges::count_if(lines, [&](std::string const& line) { return line.contains(text); }));
+}
+
+} // namespace
+
+TEST_CASE("the hooks are checked once per Claude worker set", "[orchestrator][engine][workers][hooks]")
+{
+    auto harness = Harness { contextFor(Settings { .limits = ClaudeSetsWorkers }) };
+    harness.answersPluginsCheck = Harness::PluginsCheck::Left;
+    auto const checks = issuedNamed(harness, "agent-setup-check");
+    REQUIRE(checks.size() == 2);
+    CHECK(argumentOf(checks[0], EnvSetArgument) == "a");
+    CHECK(argumentOf(checks[1], EnvSetArgument) == "b");
+    CHECK(harness.engine().hooks() == HooksState::Unknown);
+
+    finishFor(harness,
+              "agent-setup-check",
+              "a",
+              ok(readFixture(FixtureRoot::Testdata, "contour/setup-hooks-missing.json")));
+    finishFor(harness,
+              "agent-setup-check",
+              "b",
+              ok(readFixture(FixtureRoot::Testdata, "contour/setup-hooks-present.json")));
+    CHECK(harness.engine().hooksFor("a") == HooksState::Missing);
+    CHECK(harness.engine().hooksFor("b") == HooksState::Present);
+    CHECK(harness.engine().hooksFor("") == HooksState::Unknown);
+    CHECK(harness.engine().hooks() == HooksState::Missing);
+    auto const problems = harness.engine().problems();
+    CHECK(linesMentioning(problems, "hooks are missing") == 1);
+    CHECK(mentions(problems, "Claude Code's status hooks are missing for workers w1, w3: blocked"));
+    CHECK(mentions(problems, "with that CLAUDE_CONFIG_DIR"));
+    CHECK_FALSE(std::ranges::contains(problems, std::string { HooksMissingProblem }));
+}
+
+TEST_CASE("the hooks problem line names one worker", "[orchestrator][engine][workers][hooks]")
+{
+    auto const workers = std::array { "claude-work"s };
+    CHECK(
+        hooksMissingProblemFor(workers)
+        == "Claude Code's status hooks are missing for worker claude-work: blocked and permission states may "
+           "not show; run `contour agent setup` with that CLAUDE_CONFIG_DIR");
+}
+
+TEST_CASE("the plugins are checked and installed per Claude worker set",
+          "[orchestrator][engine][workers][hooks]")
+{
+    auto harness = Harness { contextFor(Settings { .limits = ClaudeSetsWorkers }) };
+    harness.answersPluginsCheck = Harness::PluginsCheck::Left;
+    for (auto const set: { "a"sv, "b"sv })
+        finishFor(harness,
+                  "agent-setup-check",
+                  set,
+                  ok(readFixture(FixtureRoot::Testdata, "contour/setup-hooks-present.json")));
+    auto const checks = issuedNamed(harness, "claude-plugins");
+    REQUIRE(checks.size() == 2);
+    CHECK(argumentOf(checks[0], EnvSetArgument) == "a");
+    CHECK(argumentOf(checks[1], EnvSetArgument) == "b");
+    CHECK(checks[0].cwd == WorktreeRoot);
+
+    finishFor(harness,
+              "claude-plugins",
+              "a",
+              ok(readFixture(FixtureRoot::Testdata, "claude/plugin-list-without.json")));
+    finishFor(
+        harness, "claude-plugins", "b", ok(readFixture(FixtureRoot::Testdata, "claude/plugin-list.json")));
+    REQUIRE(harness.engine().missingPlugins().size() == 1);
+    CHECK(harness.engine().missingPlugins().front().id == "contour-workflows@contour-terminal");
+    CHECK(mentions(harness.engine().problems(),
+                   "Claude Code (workers w1, w3) lacks the plugin contour-workflows@contour-terminal · ^K "
+                   "installs it"));
+    CHECK(linesMentioning(harness.engine().problems(), "lacks the plugin") == 1);
+
+    auto const added = all<RunCommand>(harness.feed(InstallPlugins {}));
+    REQUIRE(added.size() == 1);
+    CHECK(added.front().command == "claude-marketplace-add");
+    CHECK(argumentOf(added.front(), EnvSetArgument) == "a");
+    auto const installed = all<RunCommand>(harness.finish("claude-marketplace-add", ok()));
+    REQUIRE(installed.size() == 1);
+    CHECK(installed.front().command == "claude-plugin-install");
+    CHECK(argumentOf(installed.front(), EnvSetArgument) == "a");
+    CHECK(argumentOf(installed.front(), "plugin") == "contour-workflows@contour-terminal");
+
+    SECTION("installed: each set is checked again")
+    {
+        harness.finish("claude-plugin-install", ok());
+        CHECK(issuedNamed(harness, "claude-plugin-install").size() == 1);
+        CHECK(issuedNamed(harness, "claude-marketplace-add").size() == 1);
+        finishFor(harness,
+                  "claude-plugins",
+                  "a",
+                  ok(readFixture(FixtureRoot::Testdata, "claude/plugin-list.json")));
+        CHECK(harness.engine().missingPlugins().empty());
+        CHECK_FALSE(mentions(harness.engine().problems(), "lacks the plugin"));
+    }
+    SECTION("a failed install names the workers")
+    {
+        harness.finish("claude-plugin-install", failed(1, "network unreachable"));
+        CHECK(mentions(harness.engine().problems(),
+                       "installing contour-workflows@contour-terminal for workers w1, w3 failed"));
+    }
+}
+
+TEST_CASE("only Copilot workers check no hooks and no plugins", "[orchestrator][engine][workers][hooks]")
+{
+    auto harness = booted(Settings { .limits = R"("workers": [ { "id": "c", "agent": "copilot" } ],)" });
+    harness.feed(RefreshNow { .monoMs = harness.now() });
+    harness.feed(InstallPlugins {});
+    harness.boot();
+    CHECK(harness.commandsIssued("agent-setup-check") == 0);
+    CHECK(harness.commandsIssued("claude-plugins") == 0);
+    CHECK(harness.engine().hooks() != HooksState::Missing);
+    CHECK(harness.engine().missingPlugins().empty());
+}
+
+TEST_CASE("without workers the setup checks pass no set and keep their lines",
+          "[orchestrator][engine][workers][hooks]")
+{
+    auto harness = Harness { contextFor({}) };
+    harness.answersPluginsCheck = Harness::PluginsCheck::Left;
+    REQUIRE(harness.pending("agent-setup-check"));
+    CHECK(harness.pending("agent-setup-check")->tag == "poll/hooks");
+    harness.finish("agent-setup-check",
+                   ok(readFixture(FixtureRoot::Testdata, "contour/setup-hooks-missing.json")));
+    CHECK(harness.engine().hooksFor("") == HooksState::Missing);
+    REQUIRE(harness.pending("claude-plugins"));
+    CHECK(harness.pending("claude-plugins")->tag == "poll/plugins");
+    harness.finish("claude-plugins",
+                   ok(readFixture(FixtureRoot::Testdata, "claude/plugin-list-without.json")));
+    CHECK(std::ranges::contains(harness.engine().problems(), std::string { HooksMissingProblem }));
+    CHECK(std::ranges::contains(
+        harness.engine().problems(),
+        "Claude Code lacks the plugin contour-workflows@contour-terminal · ^K installs it"s));
+    harness.feed(InstallPlugins {});
+    harness.finish("claude-marketplace-add", ok());
+    harness.finish("claude-plugin-install", failed(1, "network unreachable"));
+    CHECK(mentions(harness.engine().problems(), "installing contour-workflows@contour-terminal failed: "));
+    for (auto const& command: harness.issuedCommands())
+    {
+        CAPTURE(command.command);
+        CHECK_FALSE(passesSet(command.arguments));
+    }
 }
 
 // }}}

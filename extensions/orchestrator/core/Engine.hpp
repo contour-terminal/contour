@@ -521,10 +521,15 @@ class Engine
     /// for
     ///         it; else whether it may still become known.
     [[nodiscard]] std::optional<CheckoutUnknown> unknownCheckout(Run const& run) const noexcept;
-    /// @return Whether Claude Code's status hooks are installed.
-    [[nodiscard]] HooksState hooks() const noexcept { return _hooks; }
+    /// @return Whether Claude Code's status hooks are installed, over the sets of the workers that read
+    ///         Claude Code's state: Missing if any set's are; else Unknown if any set's are; else Present.
+    [[nodiscard]] HooksState hooks() const noexcept;
+    /// @param envSet A variable set's name; "" for the workers without one.
+    /// @return Whether Claude Code's status hooks are installed for that set; Unknown before its check.
+    [[nodiscard]] HooksState hooksFor(std::string_view envSet) const noexcept;
     /// @return The Claude Code plugins the agents need (`plugins`) and the `claude` the panes run lacks, as
-    ///         last checked; empty while not known, or when none is missing.
+    ///         last checked, over the sets of the workers that read Claude Code's state: each plugin once, in
+    ///         the order of `plugins`; empty while not known, or when none is missing.
     [[nodiscard]] std::span<PluginRequirement const> missingPlugins() const noexcept
     {
         return _missingPlugins;
@@ -738,14 +743,21 @@ class Engine
     void onSetupResult(std::string_view tag, ProcessOutcome const& outcome, std::vector<Effect>& out);
     /// A repository's list answered: its pull requests, an issue query, its default branch or its worktrees.
     void onListResult(std::string_view tag, ProcessOutcome const& outcome, std::vector<Effect>& out);
-    void onHooksResult(ProcessOutcome const& outcome);
+    void onHooksResult(std::string_view envSet, ProcessOutcome const& outcome);
     void onAuthResult(ProcessOutcome const& outcome, std::vector<Effect>& out);
     void issueSourceAuthChecks(std::vector<Effect>& out);
     void onSourceAuthResult(std::string_view tag, ProcessOutcome const& outcome, std::vector<Effect>& out);
     void onListAnswered(std::vector<Effect>& out);
     void checkHooks(std::vector<Effect>& out);
+    void checkHooksOf(std::string_view envSet, std::vector<Effect>& out);
     void checkPlugins(std::vector<Effect>& out);
-    void onPluginsResult(ProcessOutcome const& outcome);
+    void checkPluginsOf(std::string_view envSet, std::vector<Effect>& out);
+    void onPluginsResult(std::string_view envSet, ProcessOutcome const& outcome);
+    void collectMissingPlugins();
+    /// @param envSet A variable set's name; "" for none.
+    /// @return The ids of the workers on @p envSet that read Claude Code's state, in configuration order, for
+    ///         a line to name; empty for the implicit worker alone, whose lines name none.
+    [[nodiscard]] std::vector<std::string> namedWorkersOn(std::string_view envSet) const;
     void installPlugins(std::vector<Effect>& out);
     void onPluginStepResult(ProcessOutcome const& outcome, std::vector<Effect>& out);
     void issuePluginStep(std::vector<Effect>& out);
@@ -836,8 +848,10 @@ class Engine
     std::vector<std::string> _startProblems;   ///< The configuration's, the store's and the outside runs'.
     std::map<std::string, std::vector<std::string>, std::less<>> _pollProblems; ///< By poll tag.
     std::vector<std::string> _problems;
-    HooksState _hooks = HooksState::Unknown;
-    std::vector<PluginRequirement> _missingPlugins; ///< As last checked; empty while unknown.
+    std::map<std::string, HooksState, std::less<>> _hooks; ///< By set ("" for none), as last checked.
+    /// The plugins each set lacks ("" for none), as last checked; a set not checked yet has no entry.
+    std::map<std::string, std::vector<PluginRequirement>, std::less<>> _missingPluginsBySet;
+    std::vector<PluginRequirement> _missingPlugins; ///< Their union, each once, in the order of `plugins`.
     /// A set the host refused for a run's call.
     struct RefusedSet
     {
@@ -849,8 +863,9 @@ class Engine
     struct PluginStep
     {
         std::string command;        ///< The declared command.
-        std::vector<Argument> args; ///< Its one argument.
+        std::vector<Argument> args; ///< Its one argument, and the set's when it has one.
         std::string plugin;         ///< The plugin it is for, as the problem line names it.
+        std::string envSet;         ///< The set whose Claude Code it installs into; empty: none.
     };
     std::deque<PluginStep> _pluginSteps; ///< The commands still to run, the first one running; empty: none.
     AuthState _auth = AuthState::Unknown;

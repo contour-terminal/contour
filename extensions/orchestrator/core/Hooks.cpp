@@ -2,6 +2,10 @@
 #include <orchestrator/core/Hooks.hpp>
 
 #include <algorithm>
+#include <format>
+#include <ranges>
+#include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -37,6 +41,28 @@ HooksState hooksStateOf(std::string_view setupDryRunJson)
     if (claude != outcomes->end() && claude->hooks && claude->hooks->state == Unchanged)
         return HooksState::Present;
     return HooksState::Missing;
+}
+
+std::string hooksMissingProblemFor(std::span<std::string const> workers)
+{
+    // HooksMissingProblem, with the workers named before its colon and the directory after its advice.
+    auto const colon = HooksMissingProblem.find(':');
+    return std::format("{} for {}{} with that CLAUDE_CONFIG_DIR",
+                       HooksMissingProblem.substr(0, colon),
+                       workersNamed(workers),
+                       HooksMissingProblem.substr(colon));
+}
+
+std::string workersNamed(std::span<std::string const> workers)
+{
+    auto named = std::string { workers.size() == 1 ? "worker " : "workers " };
+    for (auto const [index, worker]: std::views::enumerate(workers))
+    {
+        if (index != 0)
+            named += ", ";
+        named += worker;
+    }
+    return named;
 }
 
 } // namespace orchestrator

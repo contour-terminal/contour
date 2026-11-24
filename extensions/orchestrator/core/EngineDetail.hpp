@@ -5,6 +5,7 @@
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/core/HostPaths.hpp>
@@ -33,6 +34,16 @@ struct Judgement
 /// @param outcome What became of the command.
 /// @return Its verdict and, for a failure, the reason.
 [[nodiscard]] Judgement judge(ProcessOutcome const& outcome);
+
+/// @param config A configuration.
+/// @return The variable sets of its workers that read Claude Code's state, each once, in configuration order;
+///         "" for such a worker without a set. Empty when no worker reads it.
+[[nodiscard]] std::vector<std::string> claudeSetsOf(Config const& config);
+
+/// @param config A configuration.
+/// @return Whether its workers are the implicit one alone (as without `workers`): no line then names a
+///         worker, so that every line reads as before workers.
+[[nodiscard]] bool hasImplicitWorkerAlone(Config const& config) noexcept;
 
 /// The time from @p then to @p now, which never runs backwards.
 /// @param now The later time, in milliseconds.
