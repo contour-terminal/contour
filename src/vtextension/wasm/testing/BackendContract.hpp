@@ -173,6 +173,7 @@ inline constexpr auto AllowedWasiModule = std::to_array<uint8_t>({
     0x00,
 });
 
+// clang-format off
 /// Imports every allowed WASI preview 1 function, and exports one function per import, named after it,
 /// that calls it with arguments in bounds and returns its errno (`proc_exit` returns nothing). The
 /// pointers point at address 64; `fd_write` writes one empty buffer to standard output, `fd_close` closes
@@ -181,39 +182,39 @@ inline constexpr auto AllowedWasiModule = std::to_array<uint8_t>({
 ///
 ///     (module
 ///       (import "wasi_snapshot_preview1" "args_get" (func $args_get (param i32 i32) (result i32)))
-///       (import "wasi_snapshot_preview1" "args_sizes_get" (func $args_sizes_get (param i32 i32) (result
-///       i32))) (import "wasi_snapshot_preview1" "environ_get" (func $environ_get (param i32 i32) (result
-///       i32))) (import "wasi_snapshot_preview1" "environ_sizes_get" (func $environ_sizes_get (param i32 i32)
-///       (result i32))) (import "wasi_snapshot_preview1" "clock_time_get" (func $clock_time_get (param i32
-///       i64 i32) (result i32))) (import "wasi_snapshot_preview1" "clock_res_get" (func $clock_res_get (param
-///       i32 i32) (result i32))) (import "wasi_snapshot_preview1" "fd_write" (func $fd_write (param i32 i32
-///       i32 i32) (result i32))) (import "wasi_snapshot_preview1" "fd_close" (func $fd_close (param i32)
-///       (result i32))) (import "wasi_snapshot_preview1" "fd_fdstat_get" (func $fd_fdstat_get (param i32 i32)
-///       (result i32))) (import "wasi_snapshot_preview1" "fd_prestat_get" (func $fd_prestat_get (param i32
-///       i32) (result i32))) (import "wasi_snapshot_preview1" "fd_prestat_dir_name" (func
-///       $fd_prestat_dir_name (param i32 i32 i32) (result i32))) (import "wasi_snapshot_preview1" "fd_seek"
-///       (func $fd_seek (param i32 i64 i32 i32) (result i32))) (import "wasi_snapshot_preview1" "random_get"
-///       (func $random_get (param i32 i32) (result i32))) (import "wasi_snapshot_preview1" "proc_exit" (func
-///       $proc_exit (param i32))) (import "wasi_snapshot_preview1" "sched_yield" (func $sched_yield (result
-///       i32))) (memory (export "memory") 1) (func (export "args_get") (result i32) (call $args_get
-///       (i32.const 64) (i32.const 128))) (func (export "args_sizes_get") (result i32) (call $args_sizes_get
-///       (i32.const 64) (i32.const 68))) (func (export "environ_get") (result i32) (call $environ_get
-///       (i32.const 64) (i32.const 128))) (func (export "environ_sizes_get") (result i32) (call
-///       $environ_sizes_get (i32.const 64) (i32.const 68))) (func (export "clock_time_get") (result i32)
-///       (call $clock_time_get (i32.const 0) (i64.const 1) (i32.const 64))) (func (export "clock_res_get")
-///       (result i32) (call $clock_res_get (i32.const 0) (i32.const 64))) (func (export "fd_write") (result
-///       i32)
+///       (import "wasi_snapshot_preview1" "args_sizes_get" (func $args_sizes_get (param i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "environ_get" (func $environ_get (param i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "environ_sizes_get" (func $environ_sizes_get (param i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "clock_time_get" (func $clock_time_get (param i32 i64 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "clock_res_get" (func $clock_res_get (param i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "fd_write" (func $fd_write (param i32 i32 i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "fd_close" (func $fd_close (param i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "fd_fdstat_get" (func $fd_fdstat_get (param i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "fd_prestat_get" (func $fd_prestat_get (param i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "fd_prestat_dir_name" (func $fd_prestat_dir_name (param i32 i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "fd_seek" (func $fd_seek (param i32 i64 i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "random_get" (func $random_get (param i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "proc_exit" (func $proc_exit (param i32)))
+///       (import "wasi_snapshot_preview1" "sched_yield" (func $sched_yield (result i32)))
+///       (memory (export "memory") 1)
+///       (func (export "args_get") (result i32) (call $args_get (i32.const 64) (i32.const 128)))
+///       (func (export "args_sizes_get") (result i32) (call $args_sizes_get (i32.const 64) (i32.const 68)))
+///       (func (export "environ_get") (result i32) (call $environ_get (i32.const 64) (i32.const 128)))
+///       (func (export "environ_sizes_get") (result i32) (call $environ_sizes_get (i32.const 64) (i32.const 68)))
+///       (func (export "clock_time_get") (result i32) (call $clock_time_get (i32.const 0) (i64.const 1) (i32.const 64)))
+///       (func (export "clock_res_get") (result i32) (call $clock_res_get (i32.const 0) (i32.const 64)))
+///       (func (export "fd_write") (result i32)
 ///         (i32.store (i32.const 64) (i32.const 96))
 ///         (i32.store (i32.const 68) (i32.const 0))
 ///         (call $fd_write (i32.const 1) (i32.const 64) (i32.const 1) (i32.const 80)))
 ///       (func (export "fd_close") (result i32) (call $fd_close (i32.const 9)))
 ///       (func (export "fd_fdstat_get") (result i32) (call $fd_fdstat_get (i32.const 1) (i32.const 64)))
 ///       (func (export "fd_prestat_get") (result i32) (call $fd_prestat_get (i32.const 3) (i32.const 64)))
-///       (func (export "fd_prestat_dir_name") (result i32) (call $fd_prestat_dir_name (i32.const 3)
-///       (i32.const 64) (i32.const 8))) (func (export "fd_seek") (result i32) (call $fd_seek (i32.const 1)
-///       (i64.const 0) (i32.const 0) (i32.const 64))) (func (export "random_get") (result i32) (call
-///       $random_get (i32.const 64) (i32.const 16))) (func (export "proc_exit") (call $proc_exit (i32.const
-///       0))) (func (export "sched_yield") (result i32) (call $sched_yield)))
+///       (func (export "fd_prestat_dir_name") (result i32) (call $fd_prestat_dir_name (i32.const 3) (i32.const 64) (i32.const 8)))
+///       (func (export "fd_seek") (result i32) (call $fd_seek (i32.const 1) (i64.const 0) (i32.const 0) (i32.const 64)))
+///       (func (export "random_get") (result i32) (call $random_get (i32.const 64) (i32.const 16)))
+///       (func (export "proc_exit") (call $proc_exit (i32.const 0)))
+///       (func (export "sched_yield") (result i32) (call $sched_yield)))
 inline constexpr auto EveryWasiFunctionModule = std::to_array<uint8_t>({
     0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x35, 0x09, 0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7f,
     0x60, 0x03, 0x7f, 0x7e, 0x7f, 0x01, 0x7f, 0x60, 0x04, 0x7f, 0x7f, 0x7f, 0x7f, 0x01, 0x7f, 0x60, 0x01,
@@ -292,6 +293,7 @@ inline constexpr auto EveryWasiFunctionModule = std::to_array<uint8_t>({
     0x67, 0x65, 0x74, 0x0d, 0x09, 0x70, 0x72, 0x6f, 0x63, 0x5f, 0x65, 0x78, 0x69, 0x74, 0x0e, 0x0b, 0x73,
     0x63, 0x68, 0x65, 0x64, 0x5f, 0x79, 0x69, 0x65, 0x6c, 0x64,
 });
+// clang-format on
 
 /// What the instance cases run: calls `ping`, adds, stores, grows its memory, recurses, spins and
 /// prints. `ping-then-store` calls `ping(42)`, then stores 1 at address 0; `grow` traps if its memory
