@@ -21,6 +21,8 @@
 #include <vtextension/wasm/wasmtime/WasmtimeBackend.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
 
+struct wasmtime_context;
+
 namespace vtextension::wasm::wasmtime
 {
 
@@ -63,6 +65,10 @@ struct StoreData
     /// The error the latest host function call failed with, if it failed; it is what tells a call stopped
     /// by a failing host function apart from one the guest trapped in.
     std::optional<ExtensionError> hostFailure;
+    /// The context Wasmtime handed the host function call running, if one is: inside it, that is the only
+    /// context the store may be reached through (wasmtime/store.h), so a call made back into the
+    /// instance from there, or a read of its memory, goes through it.
+    wasmtime_context* callerContext = nullptr;
 };
 
 /// One host function as a runtime provides it, at a stable address its linker callback is handed.

@@ -5,6 +5,7 @@
 #include <core/Utils.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -31,6 +32,23 @@ namespace
 {
     /// The WebAssembly page size, in bytes.
     constexpr auto PageBytes = uint64_t { 64 } * 1024;
+
+    /// How many values a call passes each way without allocating: the Canonical ABI's limit on flat
+    /// parameters, which every function of the extension world keeps to.
+    constexpr auto InlineValues = std::size_t { 16 };
+
+    /// The values of one direction of a call: @p count of them, in @p inlineValues when they fit, else in
+    /// @p wideValues.
+    /// @return Where the @p count values are.
+    [[nodiscard]] std::span<wasmtime_val_t> valuesFor(std::size_t count,
+                                                      std::array<wasmtime_val_t, InlineValues>& inlineValues,
+                                                      std::vector<wasmtime_val_t>& wideValues)
+    {
+        if (count <= inlineValues.size())
+            return std::span { inlineValues }.first(count);
+        wideValues.resize(count);
+        return wideValues;
+    }
 
     /// One function export of an instance, looked up once.
     struct FunctionEntry
@@ -131,15 +149,19 @@ namespace
             if (_callDepth == 0)
                 _data->hostFailure = std::nullopt;
 
-            auto arguments = std::vector<wasmtime_val_t>(entry.parameterCount);
+            auto inlineArguments = std::array<wasmtime_val_t, InlineValues> {};
+            auto wideArguments = std::vector<wasmtime_val_t> {};
+            auto const arguments = valuesFor(entry.parameterCount, inlineArguments, wideArguments);
             for (auto const [index, argument]: core::views::enumerate(arguments))
             {
                 argument.kind = WASMTIME_I32;
                 argument.of.i32 = static_cast<int32_t>(argv[static_cast<std::size_t>(index)]);
             }
-            auto results = std::vector<wasmtime_val_t>(entry.resultCount);
+            auto inlineResults = std::array<wasmtime_val_t, InlineValues> {};
+            auto wideResults = std::vector<wasmtime_val_t> {};
+            auto const results = valuesFor(entry.resultCount, inlineResults, wideResults);
 
-            auto* const context = wasmtime_store_context(_store.get());
+            auto* const context = storeContext();
             armEpochDeadline(context);
             auto* rawTrap = static_cast<wasm_trap_t*>(nullptr);
             ++_callDepth;
@@ -172,7 +194,7 @@ namespace
                 return std::span<std::byte> {};
             if (!_memory)
                 return std::nullopt;
-            auto* const context = wasmtime_store_context(_store.get());
+            auto* const context = storeContext();
             auto const bytes = wasmtime_memory_data_size(context, &*_memory);
             if (uint64_t { address } + size > bytes)
                 return std::nullopt;
@@ -190,6 +212,15 @@ namespace
         }
 
       private:
+        /// @return The context the store is reached through: the caller's while a host function call runs,
+        ///         the store's own otherwise.
+        [[nodiscard]] wasmtime_context_t* storeContext() const noexcept
+        {
+            if (_data->callerContext)
+                return _data->callerContext;
+            return wasmtime_store_context(_store.get());
+        }
+
         /// @param trap The trap the call failed with; null if Wasmtime refused the call itself.
         /// @return Why the call that just failed did. Decided by what the instance recorded and by the
         ///         trap's code, never by its message.

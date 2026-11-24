@@ -196,6 +196,34 @@ TEST_CASE("WasmtimeBackend.hostFunctionCallsBackIn", "[wasmtime]")
     CHECK(contract::wordAt(*instance, 0) == 0);
 }
 
+TEST_CASE("WasmtimeBackend.callsWideExports", "[wasmtime]")
+{
+    // An export taking more values than a call passes without allocating still receives every one, in
+    // order: `sum` returns the first of 20 parameters plus twice the second, and so on.
+    namespace contract = vtextension::wasm::testing::contract;
+    constexpr auto Width = uint32_t { 20 };
+    auto parameters = std::string {};
+    auto body = std::string { "(i32.const 0)" };
+    for (auto const index: std::views::iota(uint32_t { 0 }, Width))
+    {
+        parameters += " i32";
+        body = std::format("(i32.add {} (i32.mul (local.get {}) (i32.const {})))", body, index, index + 1);
+    }
+    auto const backend = WasmtimeTraits::make();
+    auto const runtime = contract::createRuntime(*backend);
+    auto const guard = contract::enterThread(*backend);
+    auto const module = runtime->load(assemble(
+        std::format(R"((module (func (export "sum") (param{}) (result i32) {})))", parameters, body)));
+    REQUIRE(module.has_value());
+    auto context = contract::RecordingHostContext {};
+    auto const instance = contract::instantiate(**module, context);
+
+    // Passed 1, 2, ... 20: 1² + 2² + ... + 20², which no other order of them gives.
+    auto argv = std::ranges::to<std::vector>(std::views::iota(uint32_t { 1 }, Width + 1));
+    REQUIRE(instance->call(contract::functionOf(*instance, "sum"), argv).has_value());
+    CHECK(argv[0] == 2870);
+}
+
 TEST_CASE("WasmtimeBackend.refusesWhatWasmtimeEnablesByDefault", "[wasmtime]")
 {
     // A feature Wasmtime enables unless told otherwise is refused only because the backend switched it

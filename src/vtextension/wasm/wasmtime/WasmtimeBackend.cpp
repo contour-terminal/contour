@@ -174,14 +174,19 @@ namespace
                                   std::size_t /*resultCount*/) noexcept
     {
         auto const& binding = *static_cast<HostBinding const*>(env);
-        auto& data = *static_cast<StoreData*>(wasmtime_context_get_data(wasmtime_caller_context(caller)));
+        auto* const callerContext = wasmtime_caller_context(caller);
+        auto& data = *static_cast<StoreData*>(wasmtime_context_get_data(callerContext));
         // The linker gave the function binding.parameterCount i32 parameters, which create() capped.
         auto arguments = std::array<uint32_t, MaxHostParameters> {};
         auto const values = std::span { args, argCount };
         std::ranges::transform(values, arguments.begin(), [](wasmtime_val_t const& value) {
             return static_cast<uint32_t>(value.of.i32);
         });
+        // A host function call may be nested in another one's call back into the instance: the outer
+        // call's context is the one in force again once this one returns.
+        auto const outerContext = std::exchange(data.callerContext, callerContext);
         auto const called = data.context.callHost(binding.index, std::span { arguments }.first(argCount));
+        data.callerContext = outerContext;
         if (called)
             return nullptr;
         data.hostFailure = called.error();
