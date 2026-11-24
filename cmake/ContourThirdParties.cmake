@@ -368,22 +368,51 @@ endif()
 # First-party code links contour::wasmtime, and only where CONTOUR_HAVE_WASMTIME is ON.
 set(WASMTIME_VERSION "48.0.10")
 
-# The Wasmtime build features whose switches the backend drives (src/vtextension/wasm/wasmtime/
-# WasmtimeBackend.cpp, which stops the build without them as a backstop). The pinned archives have them
-# all; an installed Wasmtime is taken only if its wasmtime/conf.h defines each WASMTIME_FEATURE_<name>.
+# The Wasmtime build features whose switches the backend drives. The pinned archives have them all; an
+# installed Wasmtime is taken only if its wasmtime/conf.h defines each WASMTIME_FEATURE_<name>. The list is
+# the one source of both that probe and the backend's backstop (src/vtextension/wasm/wasmtime/
+# CMakeLists.txt generates it from ContourThirdParties_WasmtimeFeatureChecks), which stops the build
+# should headers without them be used all the same.
 set(_WASMTIME_REQUIRED_FEATURES COMPILER GC THREADS PARALLEL_COMPILATION COMPONENT_MODEL COMPONENT_MODEL_ASYNC)
 
-# ContourThirdParties_WasmtimeMissingFeatures(<target> <result-variable>)
+# ContourThirdParties_WasmtimeFeatureChecks(<result-variable> <feature>...)
 #
-# Sets <result-variable> to the features of _WASMTIME_REQUIRED_FEATURES the Wasmtime behind <target> was
-# built without, as a list; empty if it has them all. Compiles against its headers only, links nothing.
-function(ContourThirdParties_WasmtimeMissingFeatures target resultVar)
+# Sets <result-variable> to C++ source that includes <wasmtime.h> and stops the compile with an #error
+# for each <feature> whose WASMTIME_FEATURE_<feature> wasmtime/conf.h does not define.
+function(ContourThirdParties_WasmtimeFeatureChecks resultVar)
+    set(_text "#include <wasmtime.h>\n")
+    foreach(_feature IN LISTS ARGN)
+        string(APPEND _text
+            "#ifndef WASMTIME_FEATURE_${_feature}\n"
+            "    #error \"The extension host needs a Wasmtime built with its default features: "
+            "wasmtime/conf.h lacks WASMTIME_FEATURE_${_feature}.\"\n"
+            "#endif\n")
+    endforeach()
+    set(${resultVar} "${_text}" PARENT_SCOPE)
+endfunction()
+
+# ContourThirdParties_WasmtimeUnusableReason(<target> <version> <result-variable>)
+#
+# Sets <result-variable> to why the Wasmtime <version> behind <target> cannot be used: its headers do not
+# compile, or it was built without features of _WASMTIME_REQUIRED_FEATURES (named). Empty if it can be.
+# Compiles against its headers only, links nothing.
+function(ContourThirdParties_WasmtimeUnusableReason target version resultVar)
     set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+    # The headers alone first: a feature probe failing to compile them would blame a missing feature.
+    try_compile(_wasmtime_compiles
+        SOURCE_FROM_CONTENT wasmtime_headers.cpp "#include <wasmtime.h>\nint probe() { return 0; }\n"
+        LINK_LIBRARIES ${target}
+        NO_CACHE
+    )
+    if(NOT _wasmtime_compiles)
+        set(${resultVar} "the headers of the installed Wasmtime ${version} cannot be compiled" PARENT_SCOPE)
+        return()
+    endif()
     set(_missing "")
     foreach(_feature IN LISTS _WASMTIME_REQUIRED_FEATURES)
+        ContourThirdParties_WasmtimeFeatureChecks(_check ${_feature})
         try_compile(_wasmtime_has_feature
-            SOURCE_FROM_CONTENT wasmtime_feature.cpp
-                "#include <wasmtime.h>\n#ifndef WASMTIME_FEATURE_${_feature}\n#error missing\n#endif\nint probe() { return 0; }\n"
+            SOURCE_FROM_CONTENT wasmtime_feature.cpp "${_check}int probe() { return 0; }\n"
             LINK_LIBRARIES ${target}
             NO_CACHE
         )
@@ -391,7 +420,14 @@ function(ContourThirdParties_WasmtimeMissingFeatures target resultVar)
             list(APPEND _missing ${_feature})
         endif()
     endforeach()
-    set(${resultVar} "${_missing}" PARENT_SCOPE)
+    if(_missing)
+        list(JOIN _missing ", " _missing_text)
+        set(${resultVar}
+            "the installed Wasmtime ${version} was built without features it needs: ${_missing_text}"
+            PARENT_SCOPE)
+    else()
+        set(${resultVar} "" PARENT_SCOPE)
+    endif()
 endfunction()
 # <CMAKE_SYSTEM_NAME>|<processor>|<archive name after "wasmtime-v<version>-">|<SHA-256 of the archive>
 # The processor is CMAKE_SYSTEM_PROCESSOR lowercased, with amd64 read as x86_64 and arm64 as aarch64.
@@ -468,14 +504,12 @@ if(CONTOUR_EXTENSIONS)
         endif()
     else()
         find_package(wasmtime ${_wasmtime_major} QUIET)
-        set(_wasmtime_missing "")
+        set(_wasmtime_unusable "")
         if(TARGET wasmtime::wasmtime)
-            ContourThirdParties_WasmtimeMissingFeatures(wasmtime::wasmtime _wasmtime_missing)
+            ContourThirdParties_WasmtimeUnusableReason(wasmtime::wasmtime "${wasmtime_VERSION}" _wasmtime_unusable)
         endif()
-        if(_wasmtime_missing)
-            list(JOIN _wasmtime_missing ", " _wasmtime_missing_text)
-            set(_wasmtime_reason
-                "the installed Wasmtime ${wasmtime_VERSION} was built without features it needs: ${_wasmtime_missing_text}")
+        if(_wasmtime_unusable)
+            set(_wasmtime_reason "${_wasmtime_unusable}")
         elseif(TARGET wasmtime::wasmtime)
             add_library(contour_wasmtime INTERFACE)
             add_library(contour::wasmtime ALIAS contour_wasmtime)

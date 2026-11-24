@@ -22,15 +22,11 @@
 
 #include <vtextension/wasm/EngineFeatures.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
+// Every feature switch the table drives must exist: a Wasmtime built without one of these could neither
+// be told to refuse what the table forbids nor be trusted to accept what it allows. Generated from the
+// list the configure-time probe checks too (cmake/ContourThirdParties.cmake).
+#include <vtextension/wasm/wasmtime/WasmtimeRequiredFeatures.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeRuntime.hpp>
-
-// Every feature switch the table drives must exist: a Wasmtime built without one of these could
-// neither be told to refuse what the table forbids nor be trusted to accept what it allows.
-#if !defined(WASMTIME_FEATURE_COMPILER) || !defined(WASMTIME_FEATURE_GC)                     \
-    || !defined(WASMTIME_FEATURE_THREADS) || !defined(WASMTIME_FEATURE_PARALLEL_COMPILATION) \
-    || !defined(WASMTIME_FEATURE_COMPONENT_MODEL) || !defined(WASMTIME_FEATURE_COMPONENT_MODEL_ASYNC)
-    #error "The extension host needs a Wasmtime built with its default features (wasmtime/conf.h)."
-#endif
 
 namespace vtextension::wasm::wasmtime
 {
