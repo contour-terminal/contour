@@ -283,6 +283,59 @@ A run keeps the profile it started with, and its details name it (`perms  standa
 A changed configuration applies to the next run, not to a running one. The orchestrator never writes Claude
 Code's settings files: the profile lives only in the agent's command line, which the consent dialog shows.
 
+## Workers
+
+A **worker** is who runs a task: an `id`, an `agent` (`claude` or `copilot`) and, optionally, an `env_set`, the
+name of a variable set the user defines in the daemon's configuration (`daemon.extensions.orchestrator.env_sets`,
+see `docs/extensions.md`). The set's values come from that configuration, never from the orchestrator: it only
+names the set, and the host fills in the values the consent dialog showed. A task picks its worker with
+`worker:`; without one, the first worker runs it, and a task naming a worker that does not exist is a problem
+line (`tasks[1].worker: names no worker; the first worker runs it: …`) and also runs on the first. Without
+`workers` there is one implicit worker, `claude` (agent `claude`, no set), and everything runs as it did before
+workers existed. A variable a worker's set does not hold is inherited from the daemon's environment, as any
+other.
+
+Two Claude Code accounts side by side, one for work and one personal, differ only by `CLAUDE_CONFIG_DIR`; a third
+worker runs GitHub Copilot CLI:
+
+```yaml
+daemon:
+    extensions:
+        orchestrator:
+            env_sets:
+                claude-work:     { CLAUDE_CONFIG_DIR: 'C:\Users\me\.claude-work' }
+                claude-personal: { CLAUDE_CONFIG_DIR: 'C:\Users\me\.claude-personal' }
+            config:
+                models: [sonnet, opus]
+                workers:
+                    - { id: claude-work,     agent: claude,  env_set: claude-work }
+                    - { id: claude-personal, agent: claude,  env_set: claude-personal }
+                    - { id: copilot,         agent: copilot }
+                tasks:
+                    - { id: fix_ci, key: f, label: fix CI, applies_to: pr, model: sonnet,
+                        worker: claude-work, prompt: "/contour-workflows:fix-ci {url}" }
+                    - { id: chore, key: c, label: chore, applies_to: issue, model: sonnet,
+                        worker: copilot, prompt: "Work on issue {key}: {url}" }
+```
+
+A worker's set reaches everything the orchestrator runs for it: the agent's tab, the transcript and statistics
+reads, the status-hooks check and the plugin commands. A run keeps the worker and set it started with, also
+when the worker is later removed; a set since removed from `env_sets` makes its calls fail, with a problem line
+naming the set and the worker. When more than one worker is configured, a run's worker shows beside its model.
+
+- **Each `CLAUDE_CONFIG_DIR` is a Claude Code of its own.** Log in to each once (`claude` with that variable
+  set), and run `contour agent setup` in each, so its status hooks are installed:
+  `$env:CLAUDE_CONFIG_DIR = 'C:\Users\me\.claude-work'; contour agent setup` on Windows,
+  `CLAUDE_CONFIG_DIR=/home/u/.claude-work contour agent setup` elsewhere. The hooks are checked once per set,
+  and the problem line names the worker (`Claude Code's status hooks are missing for worker claude-work: …`);
+  the plugins are checked and installed per set as well.
+- **A Copilot run** starts `copilot --model {model} -i {prompt}` in its worktree, with the task's model, which,
+  as for every task, must be one of `models`. Copilot reports no status, so the run shows *running* until its
+  tab closes, and then ends `Closed`, a normal finish. It has no transcript (`t` says Copilot runs keep none
+  Contour can read), no statistics and no board. It takes no permission profile: a task with `permissions` on a
+  Copilot worker is a problem line, and the task is not offered. Its set may hold `COPILOT_HOME` and the proxy
+  variables. On Windows it must be a real `copilot.exe`: npm's `copilot.cmd` is refused, as `claude.cmd` is.
+
 ## Boards and transcripts
 
 Both are tabs of the Focus, and both are read-only.
