@@ -410,6 +410,73 @@ TEST_CASE("daemon.extensions: a malformed set or variable costs only itself", "[
     }
 }
 
+TEST_CASE("daemon.extensions: env_sets errors name the set that is skipped", "[config][daemon]")
+{
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config = loadConfigFromYaml("daemon:\n"
+                                           "  extensions:\n"
+                                           "    orchestrator:\n"
+                                           "      env_sets:\n"
+                                           "        'bad name': { CLAUDE_CONFIG_DIR: /x }\n"
+                                           "        listed: [a, b]\n");
+    CHECK(config.daemon.value().extensions.front().environmentSets.empty());
+    CHECK(capture.text().contains("Skipping env set 'bad name' of extension 'orchestrator'"));
+    CHECK(capture.text().contains("Skipping env set 'listed' of extension 'orchestrator'"));
+}
+
+TEST_CASE("daemon.extensions: a duplicate set or variable keeps the first", "[config][daemon]")
+{
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config =
+        loadConfigFromYaml("daemon:\n"
+                           "  extensions:\n"
+                           "    orchestrator:\n"
+                           "      env_sets:\n"
+                           "        dup: { CLAUDE_CONFIG_DIR: /first }\n"
+                           "        dup: { CLAUDE_CONFIG_DIR: /second }\n"
+                           "        twice: { CLAUDE_CONFIG_DIR: /a, CLAUDE_CONFIG_DIR: /b }\n");
+    auto const& sets = config.daemon.value().extensions.front().environmentSets;
+    REQUIRE(sets.size() == 2);
+    CHECK(sets[0]
+          == DaemonEnvironmentSet { .name = "dup", .variables = { { "CLAUDE_CONFIG_DIR", "/first" } } });
+    CHECK(sets[1]
+          == DaemonEnvironmentSet { .name = "twice", .variables = { { "CLAUDE_CONFIG_DIR", "/a" } } });
+    CHECK(capture.text().contains("env set 'dup'"));
+    CHECK(capture.text().contains("Skipping variable 'CLAUDE_CONFIG_DIR' of set 'twice'"));
+    CHECK(capture.text().contains("the first one stands"));
+}
+
+TEST_CASE("daemon.extensions: a null value is refused, an empty text kept", "[config][daemon]")
+{
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config = loadConfigFromYaml("daemon:\n"
+                                           "  extensions:\n"
+                                           "    orchestrator:\n"
+                                           "      env_sets:\n"
+                                           "        nulls: { CLAUDE_CONFIG_DIR: , HTTPS_PROXY: ~ }\n"
+                                           "        empty: { HTTPS_PROXY: '' }\n");
+    auto const& sets = config.daemon.value().extensions.front().environmentSets;
+    REQUIRE(sets.size() == 2);
+    CHECK(sets[0] == DaemonEnvironmentSet { .name = "nulls", .variables = {} });
+    CHECK(sets[1] == DaemonEnvironmentSet { .name = "empty", .variables = { { "HTTPS_PROXY", "" } } });
+    CHECK(capture.text().contains("Skipping variable 'CLAUDE_CONFIG_DIR' of set 'nulls'"));
+    CHECK(capture.text().contains("its value is not a text"));
+}
+
+TEST_CASE("daemon.extensions: an empty env set is written as {}", "[config][daemon]")
+{
+    auto const config = loadConfigFromYaml("daemon:\n"
+                                           "  extensions:\n"
+                                           "    orchestrator:\n"
+                                           "      env_sets:\n"
+                                           "        empty: {}\n");
+    CHECK(config.daemon.value().extensions.front().environmentSets
+          == std::vector { DaemonEnvironmentSet { .name = "empty", .variables = {} } });
+    auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+    CHECK(written.contains("'empty': {}"));
+    CHECK(loadConfigFromYaml(written).daemon.value().extensions == config.daemon.value().extensions);
+}
+
 TEST_CASE("daemon.extensions: a config that has no JSON spelling costs the entry", "[config][daemon]")
 {
     auto const config = loadConfigFromYaml(

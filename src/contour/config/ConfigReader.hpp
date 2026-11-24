@@ -525,7 +525,8 @@ struct YAMLConfigReader
 
     /// Reads the `env_sets` map of an entry of `daemon.extensions:`. A set whose name is not a set name, or whose
     /// value is no map, is skipped; a variable whose name is not a variable name, or whose value is no scalar, is
-    /// dropped from its set. Each skip is reported. The values are kept as written.
+    /// dropped from its set. Each skip is reported. The values are kept as written. A null value (`NAME:` or
+    /// `NAME: ~`) is no text and is dropped; `NAME: ''` is an empty text and is kept.
     /// @param sets The map.
     /// @param name The extension's key, for the diagnostics.
     /// @param keyPath Where the extension is declared, for the diagnostics.

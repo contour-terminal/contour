@@ -4061,6 +4061,9 @@ namespace
     }
 
     /// Whether @p name is a set name of `env_sets`: `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`.
+    /// This is a copy, not a call, of the grammar vtextension::ArgumentKind::Name accepts
+    /// (argumentAccepts()): it must stay equal to that one. contour_config does not link vtextension, and
+    /// must build without it.
     [[nodiscard]] bool isDaemonEnvironmentSetName(std::string_view name) noexcept
     {
         if (name.empty() || name.size() > 64 || !isAsciiAlnum(name.front()))
@@ -4103,8 +4106,9 @@ std::vector<DaemonEnvironmentSet> YAMLConfigReader::readDaemonExtensionEnvironme
         if (!isDaemonEnvironmentSetName(set))
         {
             errorLog()(
-                "Skipping an env set of extension '{}' of {}: its name must start with a letter or digit, "
+                "Skipping env set '{}' of extension '{}' of {}: its name must start with a letter or digit, "
                 "then hold only letters, digits, '.', '_' or '-', and be at most 64 characters.",
+                set,
                 name,
                 keyPath);
             continue;
