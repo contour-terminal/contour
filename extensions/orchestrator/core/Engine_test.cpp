@@ -61,6 +61,7 @@ struct Settings
     std::string_view repos = R"([ { "name": "contour", "path": "~/projects/contour", "forge": "github",
                                      "issues": [ { "source": "forge", "query": "assignee:@me" } ] } ])";
     std::vector<std::string_view> repoPaths = { ContourPath };
+    std::string_view issuePrompt = "/contour-workflows:work-issue {url}"; ///< The issue task's prompt.
 };
 
 [[nodiscard]] std::string configJson(Settings const& settings)
@@ -71,10 +72,11 @@ struct Settings
     {{ {} "id": "fix_ci", "key": "f", "label": "fix CI", "applies_to": "pr", "model": "sonnet",
        "prompt": "/contour-workflows:fix-ci {{url}}" }},
     {{ "id": "issue", "key": "w", "label": "work on issue", "applies_to": "issue", "model": "opus",
-       "prompt": "/contour-workflows:work-issue {{url}}" }} ] }})",
+       "prompt": "{}" }} ] }})",
                        settings.limits,
                        settings.repos,
-                       settings.fixCiKeys);
+                       settings.fixCiKeys,
+                       settings.issuePrompt);
 }
 
 [[nodiscard]] HostInfo hostFor(Settings const& settings, std::string_view root = WorktreeRoot)
@@ -4293,6 +4295,24 @@ TEST_CASE("a jira item dispatches on a new branch named from its key", "[orchest
     CHECK(argument("base") == "origin/master");
     auto const opened = all<OpenPane>(harness.finish("git-worktree-add-branch", ok()));
     CHECK(opened.size() == 1);
+}
+
+TEST_CASE("a jira item's run prompt names it by its key", "[orchestrator][engine][jira]")
+{
+    auto harness = Harness { contextFor(
+        Settings { .repos = R"j([ { "name": "contour", "path": "~/projects/contour", "forge": "github",
+                        "issues": [ { "source": "jira", "jql": "a", "site": "https://example.atlassian.net" } ] } ])j",
+                   .issuePrompt = "/example-plugin:ticket {key}" }) };
+    harness.boot();
+    auto request = issueDispatch();
+    request.item = JiraRef { .key = "DEV-1234" };
+    request.url = "https://example.atlassian.net/browse/DEV-1234";
+    harness.feed(request);
+    harness.finish("git-fetch", ok());
+    auto const opened = all<OpenPane>(harness.finish("git-worktree-add-branch", ok()));
+    REQUIRE(opened.size() == 1);
+    REQUIRE(harness.engine().runs().size() == 1);
+    CHECK(harness.engine().runs().front().prompt == "/example-plugin:ticket DEV-1234");
 }
 
 // }}}

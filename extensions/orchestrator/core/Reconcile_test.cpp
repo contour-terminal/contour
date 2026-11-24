@@ -396,6 +396,28 @@ TEST_CASE("Reconcile.rules", "[orchestrator][reconcile]")
     }
 }
 
+TEST_CASE("Reconcile.silentAgent", "[orchestrator][reconcile]")
+{
+    // A Copilot run reports no status: whatever its tab lists is not its own. Its tab going away still ends
+    // it.
+    for (auto const& row: ReconcileRows)
+    {
+        if (row.state != State::Running && row.state != State::Blocked && row.state != State::Done)
+            continue;
+        CAPTURE(row.name);
+        auto run = rowRun(row);
+        run.agent = orchestrator::AgentKind::Copilot;
+        auto const runs = std::vector { std::move(run) };
+        auto const panes = panesFor(row.listed, row.paneStatus);
+        auto const decisions = orchestrator::reconcile(runs, panes, ListedMs, Tagged);
+        CHECK(std::ranges::none_of(decisions, [](Decision const& decision) {
+            return std::holds_alternative<StatusChanged>(decision);
+        }));
+        if (row.expect != Expect::StatusChanged)
+            CHECK(decisions == expected(row));
+    }
+}
+
 TEST_CASE("Reconcile.idempotence", "[orchestrator][reconcile]")
 {
     // Applying the decisions and reconciling again ends in no decision. A tab that must go takes two rounds:
