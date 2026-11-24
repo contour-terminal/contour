@@ -61,6 +61,9 @@ struct JsonRun
     std::optional<std::string> board; ///< Absent: no board asked for, as in a run stored before it existed.
     std::optional<std::string> permissions; ///< Absent: a run stored before profiles existed.
     std::optional<std::string> settings;    ///< Absent: as for permissions; its agent got `--settings {}`.
+    std::optional<std::string> worker;      ///< Absent: a run stored before workers, the implicit one's.
+    std::optional<std::string> agent;       ///< Absent: Claude; written only for another agent.
+    std::optional<std::string> envSet;      ///< Absent: no set.
     std::string session;
     std::string branch;
     std::string worktree;

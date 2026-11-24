@@ -9,12 +9,14 @@
 #include <format>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
 
+#include <orchestrator/core/Agents.hpp>
 #include <orchestrator/core/ArgumentKinds.hpp>
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Model.hpp>
@@ -2599,4 +2601,110 @@ TEST_CASE("a topic run round-trips its slug and its text, and nothing else has a
         issue.topic = "stray";
         CHECK_FALSE(orchestrator::isStorable(issue));
     }
+}
+
+namespace
+{
+
+/// A run as the store held it before workers existed: one of store/runs-awaiting-worktree.tsv's, as that
+/// fixture was recorded then, without its board and settings.
+constexpr auto RunStoredBeforeWorkers =
+    R"({"v":3,"id":"issue-3001-20261113-150847","repo":"contour","repoPath":"/home/u/projects/contour",)"
+    R"("forge":"github","remote":"origin","base":"master","itemKind":"issue","itemNumber":3001,)"
+    R"("url":"https://github.com/contour-terminal/contour/issues/3001","task":"issue","model":"opus",)"
+    R"("prompt":"/contour-workflows:work-issue https://github.com/contour-terminal/contour/issues/3001",)"
+    R"("permissions":"standard","session":"123e4567-e89b-12d3-a456-426614174000",)"
+    R"("branch":"agent/issue-3001-20261113-150847","worktree":"/home/u/worktrees/contour/issue-3001-20261113-150847",)"
+    R"("state":"preparing","step":"worktree-add","startedWallMs":1794582527000,"attempt":2,)"
+    R"("history":[{"wallMs":1794582527000,"state":"preparing"}]})"sv;
+
+/// @return Each of @p arguments as its name and value, in order.
+[[nodiscard]] std::vector<std::pair<std::string_view, std::string>> pairsOf(
+    std::span<orchestrator::Argument const> arguments)
+{
+    auto pairs = std::vector<std::pair<std::string_view, std::string>> {};
+    for (auto const& argument: arguments)
+        pairs.emplace_back(argument.name, argument.value);
+    return pairs;
+}
+
+} // namespace
+
+TEST_CASE("a run's worker, agent and set round-trip, and the defaults are not written",
+          "[orchestrator][run][workers]")
+{
+    auto run = makeRun(Item::Pr, Running {});
+    auto const defaults = orchestrator::toJson(run);
+    CHECK_FALSE(defaults.contains(R"("worker")"));
+    CHECK_FALSE(defaults.contains(R"("agent")"));
+    CHECK_FALSE(defaults.contains(R"("envSet")"));
+
+    run.worker = "work";
+    run.agent = orchestrator::AgentKind::Copilot;
+    run.envSet = "copilot-work";
+    auto const read = runFromJson(orchestrator::toJson(run));
+    REQUIRE(read.has_value());
+    CHECK(read->worker == "work");
+    CHECK(read->agent == orchestrator::AgentKind::Copilot);
+    CHECK(read->envSet == "copilot-work");
+}
+
+TEST_CASE("a run stored before workers reads as the implicit worker's", "[orchestrator][run][workers]")
+{
+    auto const read = runFromJson(RunStoredBeforeWorkers);
+    REQUIRE(read.has_value());
+    CHECK(read->worker.empty());
+    CHECK(read->agent == orchestrator::AgentKind::Claude);
+    CHECK(read->envSet.empty());
+}
+
+TEST_CASE("a worker or set that is no name is refused", "[orchestrator][run][workers]")
+{
+    auto run = makeRun(Item::Pr, Running {});
+    run.worker = "a b";
+    CHECK_FALSE(orchestrator::isStorable(run));
+    run.worker = "work";
+    run.envSet = "a b";
+    CHECK_FALSE(orchestrator::isStorable(run));
+    run.envSet = "copilot-work";
+    CHECK(orchestrator::isStorable(run));
+
+    // An agent the store does not name is no stored run.
+    run.agent = orchestrator::AgentKind::Copilot;
+    auto json = orchestrator::toJson(run);
+    auto const at = json.find(R"("agent":"copilot")");
+    REQUIRE(at != std::string::npos);
+    json.replace(at, 17, R"("agent":"robot"  )");
+    CHECK_FALSE(runFromJson(json).has_value());
+}
+
+TEST_CASE("a Copilot run's tab takes its model, prompt and set, and nothing of Claude's",
+          "[orchestrator][run][workers]")
+{
+    auto run = makeRun(Item::Pr, Running {});
+    run.worker = "work";
+    run.agent = orchestrator::AgentKind::Copilot;
+    run.envSet = "copilot-work";
+    CHECK(orchestrator::agentPaneTemplateOf(run) == "copilot");
+    CHECK(pairsOf(orchestrator::agentPaneArguments(run))
+          == std::vector<std::pair<std::string_view, std::string>> {
+              { "model", run.model }, { "prompt", run.prompt }, { "env-set", "copilot-work" } });
+    auto const set = orchestrator::envSetArgumentOf(run);
+    REQUIRE(set.has_value());
+    CHECK(set->name == "env-set");
+    CHECK(set->value == "copilot-work");
+
+    // A Claude run with a set passes it after its own arguments; one without passes none.
+    run.agent = orchestrator::AgentKind::Claude;
+    run.envSet = "claude-work";
+    auto const arguments = orchestrator::agentPaneArguments(run);
+    REQUIRE_FALSE(arguments.empty());
+    CHECK(arguments.back().name == "env-set");
+    CHECK(arguments.back().value == "claude-work");
+    CHECK(orchestrator::agentPaneTemplateOf(run) == orchestrator::AgentPlainPaneTemplate);
+    run.envSet.clear();
+    CHECK_FALSE(orchestrator::envSetArgumentOf(run).has_value());
+    CHECK(std::ranges::none_of(orchestrator::agentPaneArguments(run), [](orchestrator::Argument const& a) {
+        return a.name == orchestrator::EnvSetArgument;
+    }));
 }

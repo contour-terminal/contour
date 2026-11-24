@@ -19,6 +19,7 @@
 #include <vector>
 
 #include <glaze/glaze.hpp>
+#include <orchestrator/core/Agents.hpp>
 #include <orchestrator/core/ArgumentKinds.hpp>
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/HostPaths.hpp>
@@ -988,17 +989,39 @@ namespace
 
 std::string_view agentPaneTemplateOf(Run const& run) noexcept
 {
-    return run.board.empty() ? AgentPlainPaneTemplate : AgentPaneTemplate;
+    auto const& row = agentRowOf(run.agent);
+    return run.board.empty() ? row.plainPane : row.boardPane;
+}
+
+std::optional<Argument> envSetArgumentOf(Run const& run)
+{
+    if (run.envSet.empty())
+        return std::nullopt;
+    return Argument { .name = EnvSetArgument, .value = run.envSet };
 }
 
 std::vector<Argument> agentPaneArguments(Run const& run)
 {
-    auto arguments = std::vector<Argument> { { .name = "model", .value = run.model },
-                                             { .name = "session", .value = run.session },
-                                             { .name = "prompt", .value = run.prompt } };
-    arguments.push_back({ .name = "settings", .value = run.settings });
-    if (!run.board.empty())
-        arguments.push_back({ .name = "board", .value = run.board });
+    auto arguments = std::vector<Argument> {};
+    switch (run.agent)
+    {
+        case AgentKind::Claude:
+            arguments = { { .name = "model", .value = run.model },
+                          { .name = "session", .value = run.session },
+                          { .name = "prompt", .value = run.prompt },
+                          { .name = "settings", .value = run.settings } };
+            if (!run.board.empty())
+                arguments.push_back({ .name = "board", .value = run.board });
+            break;
+        // The host refuses an argument its template does not name: Copilot's names no session, settings
+        // or board.
+        case AgentKind::Copilot:
+            arguments = { { .name = "model", .value = run.model },
+                          { .name = "prompt", .value = run.prompt } };
+            break;
+    }
+    if (auto set = envSetArgumentOf(run))
+        arguments.push_back(std::move(*set));
     return arguments;
 }
 
@@ -1029,6 +1052,10 @@ bool isStorable(Run const& run) noexcept
     if (!run.board.empty() && !fits(Shape::Prompt, run.board))
         return false;
     if (!run.permissions.empty() && !fits(Shape::Name, run.permissions))
+        return false;
+    if (!run.worker.empty() && !fits(Shape::Name, run.worker))
+        return false;
+    if (!run.envSet.empty() && !fits(Shape::Name, run.envSet))
         return false;
     if (!fits(Shape::Prompt, run.settings))
         return false;
@@ -1222,6 +1249,12 @@ std::string toJson(Run const& run)
         json.permissions = run.permissions;
     if (run.settings != EmptySettingsJson)
         json.settings = run.settings;
+    if (!run.worker.empty())
+        json.worker = run.worker;
+    if (run.agent != AgentKind::Claude)
+        json.agent = std::string { agentRowOf(run.agent).name };
+    if (!run.envSet.empty())
+        json.envSet = run.envSet;
     json.session = run.session;
     json.branch = run.branch;
     json.worktree = run.worktree;
@@ -1279,7 +1312,10 @@ std::optional<Run> runFromJson(std::string_view text)
     auto const lastStatus = json.lastStatus ? agentStatusNamed(*json.lastStatus) : std::nullopt;
     auto const failureStep = json.failure ? parse(PrepareStepNames, json.failure->step) : std::nullopt;
     auto const forge = forgeNamed(json.forge);
-    if (!item || !state || !forge || (json.lastStatus && !lastStatus) || (json.failure && !failureStep))
+    auto const* const agent =
+        findAgent(json.agent.value_or(std::string { agentRowOf(AgentKind::Claude).name }));
+    if (!item || !state || !forge || agent == nullptr || (json.lastStatus && !lastStatus)
+        || (json.failure && !failureStep))
         return std::nullopt;
 
     auto run = Run {
@@ -1298,6 +1334,9 @@ std::optional<Run> runFromJson(std::string_view text)
         .board = std::move(json.board).value_or(std::string {}),
         .permissions = std::move(json.permissions).value_or(std::string {}),
         .settings = std::move(json.settings).value_or(std::string { EmptySettingsJson }),
+        .worker = std::move(json.worker).value_or(std::string {}),
+        .agent = agent->kind,
+        .envSet = std::move(json.envSet).value_or(std::string {}),
         .session = std::move(json.session),
         .branch = std::move(json.branch),
         .worktree = std::move(json.worktree),

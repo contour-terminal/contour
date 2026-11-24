@@ -11,6 +11,7 @@
 #include <variant>
 #include <vector>
 
+#include <orchestrator/core/Agents.hpp>
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/core/HostPaths.hpp>
@@ -147,10 +148,14 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
     }
     if (!prompt || !id)
         return std::unexpected { DispatchRefusal::BadPrompt };
+    auto const& worker = _config->workerFor(task->id);
+    // An agent that takes no permission profile runs without one, and without a board.
+    auto const takesProfile = agentRowOf(worker.agent).settings == SettingsProfile::Taken;
     auto const* const profile = request.permissions.empty() ? &_config->profileFor(task->id)
                                                             : _config->findProfile(request.permissions);
-    if (profile == nullptr)
+    if (takesProfile && profile == nullptr)
         return std::unexpected { DispatchRefusal::UnknownProfile };
+    auto settings = takesProfile ? settingsJsonOf(*profile) : std::string { EmptySettingsJson };
     if (isTaken(*id))
         return std::unexpected { DispatchRefusal::AlreadyRunning };
 
@@ -167,9 +172,12 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
                      .task = task->id,
                      .model = model,
                      .prompt = std::move(*prompt),
-                     .board = _config->boardInstruction(),
-                     .permissions = profile->name,
-                     .settings = settingsJsonOf(*profile),
+                     .board = takesProfile ? _config->boardInstruction() : std::string {},
+                     .permissions = takesProfile ? profile->name : std::string {},
+                     .settings = std::move(settings),
+                     .worker = worker.id,
+                     .agent = worker.agent,
+                     .envSet = worker.envSet,
                      .session = request.session,
                      .branch = branchName(*id),
                      .worktree = worktreePath(_config->worktreeRoot(), repo->name, *id, _config->pathStyle()),

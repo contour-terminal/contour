@@ -26,6 +26,29 @@ using namespace std::string_view_literals;
 namespace orchestrator
 {
 
+namespace
+{
+    /// @return What @p outcome says about the set its call passed: a refusal names the refused argument,
+    ///         and a call that started took it.
+    [[nodiscard]] SetAnswer setAnswerOf(ProcessOutcome const& outcome) noexcept
+    {
+        switch (outcome.start)
+        {
+            case StartResult::Started: return SetAnswer::Accepted;
+            case StartResult::Refused:
+                return outcome.stderrText == BadArgumentRefusal ? SetAnswer::Refused : SetAnswer::Unknown;
+            case StartResult::CwdMissing: break;
+        }
+        return SetAnswer::Unknown;
+    }
+
+    /// @return What a tab's failed opening says about the set it was asked for with.
+    [[nodiscard]] SetAnswer setAnswerOf(PaneOpenFailedFor const& failed) noexcept
+    {
+        return failed.why == BadArgumentRefusal ? SetAnswer::Refused : SetAnswer::Unknown;
+    }
+} // namespace
+
 namespace engine::detail
 {
     namespace
@@ -158,6 +181,10 @@ Engine::Started Engine::start(StartContext context)
     auto out = std::vector<Effect> {};
     if (!config)
         engine._startProblems.push_back(message(config.error(), context.sources));
+    // What the configuration loaded around: each a line, worded as its errors are.
+    if (engine._config)
+        for (auto const& notice: engine._config->notices())
+            engine._startProblems.push_back(message(notice, context.sources));
     engine.loadStore(context.stored);
     if (engine._config)
     {
@@ -202,6 +229,11 @@ std::vector<Effect> Engine::step(Input const& input)
                        input);
         abandonOverduePaneOpenings(answeredRun, out);
     }
+    // What a tab's opening says about its run's set, noted before the run moves on.
+    if (auto const* const opened = std::get_if<PaneOpenedFor>(&input))
+        noteSetAnswer(opened->run, SetAnswer::Accepted);
+    else if (auto const* const failed = std::get_if<PaneOpenFailedFor>(&input))
+        noteSetAnswer(failed->run, setAnswerOf(*failed));
     std::visit(
         Overloaded {
             [&](Wake const& wake) { _wallMs = wake.wallMs; },
@@ -617,10 +649,10 @@ void Engine::onProcessFinished(ProcessFinished const& finished, std::vector<Effe
     }
     if (finished.tag.ends_with(TranscriptTagSuffix))
     {
-        onTranscriptResult(
-            std::string_view(finished.tag).substr(0, finished.tag.size() - TranscriptTagSuffix.size()),
-            finished.outcome,
-            out);
+        auto const runId =
+            std::string_view(finished.tag).substr(0, finished.tag.size() - TranscriptTagSuffix.size());
+        noteSetAnswer(runId, setAnswerOf(finished.outcome));
+        onTranscriptResult(runId, finished.outcome, out);
         return;
     }
     if (finished.tag.ends_with(RecordTagSuffix))
@@ -632,9 +664,10 @@ void Engine::onProcessFinished(ProcessFinished const& finished, std::vector<Effe
     }
     if (finished.tag.ends_with(StatsTagSuffix))
     {
-        onStatsResult(std::string_view(finished.tag).substr(0, finished.tag.size() - StatsTagSuffix.size()),
-                      finished.outcome,
-                      out);
+        auto const runId =
+            std::string_view(finished.tag).substr(0, finished.tag.size() - StatsTagSuffix.size());
+        noteSetAnswer(runId, setAnswerOf(finished.outcome));
+        onStatsResult(runId, finished.outcome, out);
         return;
     }
     auto const run = std::ranges::find_if(std::span(_runs).first(_insideCount), [&](Run const& candidate) {
@@ -878,6 +911,25 @@ std::optional<uint64_t> Engine::nextWake() const
     return wake;
 }
 
+void Engine::noteSetAnswer(std::string_view runId, SetAnswer answer)
+{
+    auto const* const run = findRun(runId);
+    if (run == nullptr || run->envSet.empty())
+        return;
+    switch (answer)
+    {
+        case SetAnswer::Unknown: break;
+        case SetAnswer::Accepted:
+            std::erase_if(_refusedSets,
+                          [&](RefusedSet const& refused) { return refused.set == run->envSet; });
+            break;
+        case SetAnswer::Refused:
+            if (!std::ranges::contains(_refusedSets, run->envSet, &RefusedSet::set))
+                _refusedSets.push_back(RefusedSet { .set = run->envSet, .worker = run->worker });
+            break;
+    }
+}
+
 void Engine::rebuildProblems()
 {
     auto problems = _startProblems;
@@ -894,6 +946,12 @@ void Engine::rebuildProblems()
     for (auto const& plugin: _missingPlugins)
         problems.push_back(displayText(
             std::format("Claude Code lacks the plugin {} · ^K installs it", plugin.id), MaxSummaryLineChars));
+    for (auto const& refused: _refusedSets)
+        problems.push_back(displayText(std::format("the variable set '{}' of worker '{}' was refused: is it "
+                                                   "still under daemon.extensions.orchestrator.env_sets?",
+                                                   refused.set,
+                                                   refused.worker),
+                                       MaxSummaryLineChars));
     // Orphans are not problems: the dashboard lists them in a section of their own.
     if (problems != _problems)
     {

@@ -79,7 +79,8 @@ namespace
         return observer;
     }
 
-    /// @return What the engine is told of a command the host did not start.
+    /// @return What the engine is told of a command the host did not start: the refusal's name stands in
+    ///         its standard error, as a pane's refusal stands in PaneOpenFailedFor::why.
     [[nodiscard]] ProcessOutcome notStarted(HostError error)
     {
         // A missing working directory is the one refusal that says the worktree is gone; a missing program
@@ -90,7 +91,7 @@ namespace
                                 .exitCode = std::nullopt,
                                 .extent = OutputExtent::Whole,
                                 .stdoutText = {},
-                                .stderrText = {} };
+                                .stderrText = std::string { nameOf(error) } };
     }
 
     [[nodiscard]] FileReadError readErrorOf(FileError error) noexcept

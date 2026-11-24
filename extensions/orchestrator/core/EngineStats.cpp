@@ -5,6 +5,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -111,16 +112,21 @@ std::optional<uint64_t> Engine::nextStatsDue() const
 
 void Engine::issueStats(Run const& run, std::vector<Effect>& out)
 {
+    auto arguments = std::vector<Argument> {
+        Argument { .name = "session", .value = run.session },
+        Argument { .name = "path", .value = run.worktree },
+        Argument { .name = "format", .value = std::format("{}", StatsFormat) },
+    };
+    // As for its transcript: the agent's log lies where its set pointed it.
+    if (auto set = envSetArgumentOf(run))
+        arguments.push_back(std::move(*set));
     // In the worktree root: the run's own worktree may be gone, its log is not.
-    issue(
-        RunCommand { .tag = std::format("{}{}", run.id, StatsTagSuffix),
-                     .command = StatsCommand,
-                     .arguments = { Argument { .name = "session", .value = run.session },
-                                    Argument { .name = "path", .value = run.worktree },
-                                    Argument { .name = "format", .value = std::format("{}", StatsFormat) } },
-                     .cwd = _config->worktreeRoot() },
-        Priority::Poll,
-        out);
+    issue(RunCommand { .tag = std::format("{}{}", run.id, StatsTagSuffix),
+                       .command = StatsCommand,
+                       .arguments = std::move(arguments),
+                       .cwd = _config->worktreeRoot() },
+          Priority::Poll,
+          out);
 }
 
 void Engine::onStatsResult(std::string_view runId, ProcessOutcome const& outcome, std::vector<Effect>& out)

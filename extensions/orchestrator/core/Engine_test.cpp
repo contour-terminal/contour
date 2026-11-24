@@ -475,6 +475,11 @@ class Harness
         return found != runs.end() ? &*found : nullptr;
     }
 
+    /// @return Every RunCommand carried out so far, in order.
+    [[nodiscard]] std::span<RunCommand const> issuedCommands() const { return _commands; }
+    /// @return Every OpenPane carried out so far, in order.
+    [[nodiscard]] std::span<OpenPane const> openedPanes() const { return _opened; }
+
     [[nodiscard]] std::size_t commandsIssued(std::string_view command) const
     {
         return static_cast<std::size_t>(std::ranges::count(_issued, command));
@@ -590,7 +595,11 @@ class Harness
         CHECK(_pending.size() + _foreignInFlight.size() <= MaxInFlight);
     }
 
-    void checkArguments(std::span<std::string_view const> argv, std::span<Argument const> arguments)
+    /// Every argument fits its kind, and the arguments are the placeholders of @p argv, and the set's
+    /// argument where @p setVariables binds one.
+    void checkArguments(std::span<std::string_view const> argv,
+                        std::span<std::string_view const> setVariables,
+                        std::span<Argument const> arguments)
     {
         auto placeholders = std::set<std::string_view> {};
         for (auto const word: argv)
@@ -599,6 +608,13 @@ class Harness
         auto names = std::set<std::string_view> {};
         for (auto const& argument: arguments)
         {
+            if (argument.name == EnvSetArgument)
+            {
+                CAPTURE(argument.value);
+                CHECK_FALSE(setVariables.empty());
+                CHECK(argumentAccepts(ArgumentKind::Name, argument.value));
+                continue;
+            }
             names.insert(argument.name);
             auto const* const decl = findArgumentDecl(argument.name);
             CAPTURE(argument.name, argument.value);
@@ -625,7 +641,8 @@ class Harness
         CAPTURE(command.tag, command.command);
         auto const* const decl = findCommand(command.command);
         REQUIRE(decl != nullptr);
-        checkArguments(decl->argv, command.arguments);
+        checkArguments(decl->argv, decl->setVariables, command.arguments);
+        _commands.push_back(command);
         checkCwd(decl->root, command.cwd);
         CHECK(std::ranges::none_of(_pending,
                                    [&](RunCommand const& other) { return other.tag == command.tag; }));
@@ -646,7 +663,8 @@ class Harness
         CAPTURE(pane.run);
         auto const* const decl = findPaneTemplate(pane.paneTemplate);
         REQUIRE(decl != nullptr);
-        checkArguments(decl->argv, pane.arguments);
+        checkArguments(decl->argv, decl->setVariables, pane.arguments);
+        _opened.push_back(pane);
         checkCwd(decl->root, pane.cwd);
         auto const stored = _stored.find(pane.run);
         REQUIRE(stored != _stored.end());
@@ -675,6 +693,8 @@ class Harness
     std::vector<std::string> _foreignInFlight;
     std::vector<ReadFile> _reads;
     std::vector<std::string_view> _issued;
+    std::vector<RunCommand> _commands; ///< Every RunCommand carried out, in order.
+    std::vector<OpenPane> _opened;     ///< Every OpenPane carried out, in order.
     std::map<std::string, std::string, std::less<>> _stored;
     std::set<std::string, std::less<>> _tainted;
     std::map<std::string, uint64_t, std::less<>> _deadlines;
@@ -4474,3 +4494,158 @@ TEST_CASE(
     harness.list({ asking });
     CHECK(harness.run(PrId)->lastStatus == AgentStatus::Asking);
 }
+
+// {{{ workers
+
+namespace
+{
+
+/// @return Whether @p arguments name the set's argument.
+[[nodiscard]] bool passesSet(std::span<Argument const> arguments)
+{
+    return std::ranges::contains(arguments, EnvSetArgument, &Argument::name);
+}
+
+/// @return The names of @p arguments, in order.
+[[nodiscard]] std::vector<std::string_view> namesOf(std::span<Argument const> arguments)
+{
+    auto names = std::vector<std::string_view> {};
+    for (auto const& argument: arguments)
+        names.push_back(argument.name);
+    return names;
+}
+
+constexpr auto ClaudeWorker =
+    R"("workers": [ { "id": "work", "agent": "claude", "env_set": "claude-work" } ],)"sv;
+
+} // namespace
+
+TEST_CASE("without workers every call is as it was", "[orchestrator][engine][workers]")
+{
+    auto harness = booted();
+    harness.holdStatsReads();
+    harness.runToRunning(prDispatch());
+    harness.feed(ReadTranscript { .run = std::string(PrId), .tab = {}, .page = 1, .monoMs = harness.now() });
+    REQUIRE(harness.pending("agent-transcript"));
+    harness.wake(Minute);
+    REQUIRE(harness.pending("agent-stats"));
+
+    auto const run = harness.run(PrId);
+    REQUIRE(run != nullptr);
+    CHECK(run->worker == ImplicitWorkerId);
+    CHECK(run->envSet.empty());
+    for (auto const& command: harness.issuedCommands())
+    {
+        CAPTURE(command.command);
+        CHECK_FALSE(passesSet(command.arguments));
+    }
+    REQUIRE(harness.openedPanes().size() == 1);
+    CHECK(namesOf(harness.openedPanes().front().arguments)
+          == std::vector { "model"sv, "session"sv, "prompt"sv, "settings"sv, "board"sv });
+}
+
+TEST_CASE("a worker's set reaches its tab, transcript and stats", "[orchestrator][engine][workers]")
+{
+    auto harness = booted(Settings { .limits = ClaudeWorker });
+    harness.holdStatsReads();
+    harness.runToRunning(prDispatch());
+    auto const* const run = harness.run(PrId);
+    REQUIRE(run != nullptr);
+    CHECK(run->worker == "work");
+    CHECK(run->agent == AgentKind::Claude);
+    CHECK(run->envSet == "claude-work");
+
+    REQUIRE(harness.openedPanes().size() == 1);
+    CHECK(paneArgument(harness.openedPanes().front(), EnvSetArgument) == "claude-work");
+    for (auto const& command: harness.issuedCommands())
+    {
+        CAPTURE(command.command);
+        CHECK_FALSE(passesSet(command.arguments));
+    }
+
+    harness.feed(ReadTranscript { .run = std::string(PrId), .tab = {}, .page = 1, .monoMs = harness.now() });
+    auto const transcript = harness.pending("agent-transcript");
+    REQUIRE(transcript);
+    CHECK(argumentOf(*transcript, EnvSetArgument) == "claude-work");
+    harness.wake(Minute);
+    auto const stats = harness.pending("agent-stats");
+    REQUIRE(stats);
+    CHECK(argumentOf(*stats, EnvSetArgument) == "claude-work");
+}
+
+TEST_CASE("a run keeps its set when its worker is removed", "[orchestrator][engine][workers]")
+{
+    auto stored = storedRun(Running {});
+    stored.pane = "p1";
+    stored.lastStatus = AgentStatus::Working;
+    stored.worker = "gone";
+    stored.envSet = "old-set";
+    auto context = contextFor({});
+    context.stored = { entryOf(stored) };
+    context.panes = { paneOf(PrId) };
+    auto harness = Harness { std::move(context) };
+    harness.boot();
+
+    harness.feed(ReadTranscript { .run = std::string(PrId), .tab = {}, .page = 1, .monoMs = harness.now() });
+    auto const transcript = harness.pending("agent-transcript");
+    REQUIRE(transcript);
+    CHECK(argumentOf(*transcript, EnvSetArgument) == "old-set");
+}
+
+TEST_CASE("a refused set is a problem line naming it", "[orchestrator][engine][workers]")
+{
+    auto harness = booted(
+        Settings { .limits = R"("workers": [ { "id": "work", "agent": "claude", "env_set": "gone" } ],)" });
+    harness.feed(prDispatch());
+    harness.finish("git-fetch", ok());
+    harness.finish("git-worktree-add", ok());
+    REQUIRE(all<OpenPane>(harness.finish("gh-pr-checkout", ok())).size() == 1);
+    CHECK_FALSE(mentions(harness.engine().problems(), "variable set"));
+
+    harness.feed(
+        PaneOpenFailedFor { .run = std::string(PrId), .why = "bad-argument", .monoMs = harness.now() });
+    CHECK(mentions(harness.engine().problems(), "the variable set 'gone' of worker 'work' was refused"));
+
+    // A refusal for another reason names no set.
+    auto other = booted(Settings { .limits = ClaudeWorker });
+    other.feed(prDispatch());
+    other.finish("git-fetch", ok());
+    other.finish("git-worktree-add", ok());
+    other.finish("gh-pr-checkout", ok());
+    other.feed(PaneOpenFailedFor { .run = std::string(PrId), .why = "limit", .monoMs = other.now() });
+    CHECK_FALSE(mentions(other.engine().problems(), "variable set"));
+}
+
+TEST_CASE("a refused set's line stays until a call with it succeeds", "[orchestrator][engine][workers]")
+{
+    auto harness = booted(Settings { .limits = ClaudeWorker });
+    harness.holdStatsReads();
+    harness.runToRunning(prDispatch());
+    harness.feed(ReadTranscript { .run = std::string(PrId), .tab = {}, .page = 1, .monoMs = harness.now() });
+    auto refused = ok();
+    refused.start = StartResult::Refused;
+    refused.exitCode = std::nullopt;
+    refused.stderrText = "bad-argument";
+    harness.finish("agent-transcript", refused);
+    CHECK(mentions(harness.engine().problems(), "variable set 'claude-work'"));
+
+    harness.wake(Minute);
+    harness.finish("agent-stats", ok(statsReport("running.json")));
+    CHECK_FALSE(mentions(harness.engine().problems(), "variable set"));
+}
+
+TEST_CASE("an unknown task worker is a problem line, and the first worker runs it",
+          "[orchestrator][engine][workers]")
+{
+    auto harness = booted(Settings { .limits = ClaudeWorker, .fixCiKeys = R"("worker": "nobody",)" });
+    CHECK(mentions(harness.engine().problems(), "tasks[0].worker"));
+    harness.feed(prDispatch());
+    harness.finish("git-fetch", ok());
+    harness.finish("git-worktree-add", ok());
+    auto const opened = all<OpenPane>(harness.finish("gh-pr-checkout", ok()));
+    REQUIRE(opened.size() == 1);
+    CHECK(opened.front().paneTemplate == AgentPaneTemplate);
+    CHECK(harness.run(PrId)->worker == "work");
+}
+
+// }}}

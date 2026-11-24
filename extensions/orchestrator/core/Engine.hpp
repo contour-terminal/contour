@@ -78,6 +78,18 @@ struct ProcessOutcome
     std::string stderrText;                     ///< Its standard error.
 };
 
+/// How the host's refusal of an argument is spelled: a refused command's standard error, a refused tab's
+/// PaneOpenFailedFor::why. A run's set the user has since removed is refused so.
+inline constexpr std::string_view BadArgumentRefusal = "bad-argument";
+
+/// What a call made for a run says about the run's set.
+enum class SetAnswer : uint8_t
+{
+    Unknown = 0, ///< Nothing: the call failed some other way.
+    Accepted,    ///< The host took it: the call started, or the tab opened.
+    Refused,     ///< The host refused an argument of the call: the set, once a call takes one.
+};
+
 /// One entry of the extension's store.
 struct StoredEntry
 {
@@ -687,6 +699,9 @@ class Engine
     void endStep(std::vector<Effect>& out, uint64_t revision);
     [[nodiscard]] std::optional<uint64_t> nextWake() const;
     void rebuildProblems();
+    /// Records what a call made for @p runId says about its set: a refused one is a problem line until a
+    /// call with it is accepted. A run without a set records nothing.
+    void noteSetAnswer(std::string_view runId, SetAnswer answer);
     void forget(std::string_view runId);
 
     // Defined in EngineDispatch.cpp.
@@ -823,6 +838,13 @@ class Engine
     std::vector<std::string> _problems;
     HooksState _hooks = HooksState::Unknown;
     std::vector<PluginRequirement> _missingPlugins; ///< As last checked; empty while unknown.
+    /// A set the host refused for a run's call.
+    struct RefusedSet
+    {
+        std::string set;    ///< The set's name.
+        std::string worker; ///< The worker of the run whose call it refused.
+    };
+    std::vector<RefusedSet> _refusedSets; ///< Until a call with the set is accepted.
     /// One command of installing the missing plugins: `claude plugin marketplace add`, then `install`.
     struct PluginStep
     {

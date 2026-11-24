@@ -135,14 +135,19 @@ void Engine::readTranscript(ReadTranscript const& request, std::vector<Effect>& 
 void Engine::issueTranscript(Run const& run, std::string_view tab, uint32_t page, std::vector<Effect>& out)
 {
     _transcriptCalls.insert_or_assign(run.id, TranscriptCall { .tab = std::string { tab }, .page = page });
+    auto arguments = std::vector<Argument> {
+        Argument { .name = "session", .value = run.session },
+        Argument { .name = "path", .value = run.worktree },
+        Argument { .name = "page", .value = std::format("{}", page) },
+        Argument { .name = "format", .value = std::format("{}", TranscriptFormat) },
+    };
+    // The run's agent read its state where its set pointed it, which the read must point to as well.
+    if (auto set = envSetArgumentOf(run))
+        arguments.push_back(std::move(*set));
     // In the worktree root: the run's own worktree may be gone, its log is not.
     issue(RunCommand { .tag = std::format("{}{}", run.id, TranscriptTagSuffix),
                        .command = TranscriptCommand,
-                       .arguments = { Argument { .name = "session", .value = run.session },
-                                      Argument { .name = "path", .value = run.worktree },
-                                      Argument { .name = "page", .value = std::format("{}", page) },
-                                      Argument { .name = "format",
-                                                 .value = std::format("{}", TranscriptFormat) } },
+                       .arguments = std::move(arguments),
                        .cwd = _config->worktreeRoot() },
           Priority::Poll,
           out);

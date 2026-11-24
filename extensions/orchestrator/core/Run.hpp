@@ -11,6 +11,7 @@
 #include <variant>
 #include <vector>
 
+#include <orchestrator/core/Agents.hpp>
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/HostPaths.hpp>
 #include <orchestrator/core/Model.hpp>
@@ -216,10 +217,15 @@ struct Run
     /// What its agent's `--settings` carries (settingsJsonOf()), a Text; EmptySettingsJson for a run stored
     /// before profiles existed.
     std::string settings { EmptySettingsJson };
-    std::string session;             ///< The agent's session: a Uuid.
-    std::string branch;              ///< `agent/<id>`: a Ref.
-    std::string worktree;            ///< The worktree's directory: a Path.
-    std::optional<std::string> pane; ///< The agent's tab, a Name, once open and until it is gone.
+    std::string worker {};               ///< The worker's id, a Name; empty: a run stored before workers (the
+                                         ///< implicit one).
+    AgentKind agent = AgentKind::Claude; ///< Its agent: kept with the run, so a removed worker's runs still
+                                         ///< end right.
+    std::string envSet {};               ///< The worker's set when it started, a Name; empty: none.
+    std::string session;                 ///< The agent's session: a Uuid.
+    std::string branch;                  ///< `agent/<id>`: a Ref.
+    std::string worktree;                ///< The worktree's directory: a Path.
+    std::optional<std::string> pane;     ///< The agent's tab, a Name, once open and until it is gone.
     std::optional<std::string>
         nearTab {}; ///< The dashboard tab it was dispatched from, a Name; none: unknown.
     RunState state; ///< Where it stands.
@@ -236,15 +242,20 @@ struct Run
 };
 
 /// @param run A run.
-/// @return The pane template its agent runs in: AgentPaneTemplate, or AgentPlainPaneTemplate when no board is
-///         asked for.
+/// @return The pane template its agent runs in: its agent row's board pane, or its plain pane when no board
+///         is asked for.
 [[nodiscard]] std::string_view agentPaneTemplateOf(Run const& run) noexcept;
+
+/// @param run A run.
+/// @return The run's set as the argument a call for it passes; nothing without a set.
+[[nodiscard]] std::optional<Argument> envSetArgumentOf(Run const& run);
 
 /// The arguments the agent's pane template is opened with for @p run: the one place OpenPane's arguments,
 /// a preview's argv and the check before a tab is asked for come from.
 /// @param run A run.
-/// @return Its model, session, settings and prompt, and its board's instruction when it has one, by
-///         placeholder.
+/// @return By placeholder: for Claude its model, session, prompt and settings, and its board's instruction
+///         when it has one; for Copilot its model and prompt alone. Either is followed by envSetArgumentOf()
+///         when the run has a set.
 [[nodiscard]] std::vector<Argument> agentPaneArguments(Run const& run);
 
 /// A host call's result: the command exited 0.
