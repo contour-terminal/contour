@@ -297,6 +297,8 @@ TEST_CASE("a profile's spawn starts an agent in the handle's directory, on Windo
     auto const inherited = InheritedRepositorySelection {};
     auto shell = vthost::testing::fakeProfile(DefaultShell, vtbackend::LineCount(100));
     shell.sandbox = vthost::SandboxEscape::Contained;
+    // What only the profile's spawn hands its child: the fallback factory would start the agent as well.
+    shell.shell.env = { { "CONTOUR_TEST_PROFILE", "main" } };
     auto h = SpawningHost { std::make_shared<vthost::testing::FakeProfileCatalog>(
         std::map<std::string, vthost::ResolvedProfile> { { "main", std::move(shell) } }, "main") };
 
@@ -304,7 +306,9 @@ TEST_CASE("a profile's spawn starts an agent in the handle's directory, on Windo
         { .commandOverride = agentOverride(worktree), .startDirectory = vthost::StartDirectory::Required });
     REQUIRE(tab != nullptr);
 
-    checkAgentReport(worktree, awaitFile(worktree.report(), [&] { h.turn(); }));
+    auto const report = awaitFile(worktree.report(), [&] { h.turn(); });
+    checkAgentReport(worktree, report);
+    CHECK(std::ranges::contains(linesOf(report), std::string { "CONTOUR_TEST_PROFILE=main" }));
 }
 
 // CreateProcessW takes the directory by path: a worktree renamed away, and another put at its name, is

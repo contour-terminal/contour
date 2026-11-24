@@ -8,6 +8,7 @@
 
 #include <vtbackend/screen/LocalTime.hpp>
 
+#include <core/Utf8Path.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/testing/InMemoryTransport.hpp>
 #include <core/platform/Clock.hpp>
@@ -326,10 +327,12 @@ struct OrchestratorWorld
             return std::optional<core::testing::ScopedTempDir> { std::in_place,
                                                                  "contour-orchestrator-world" };
         }() },
-        home { git ? git->worktreeRoot.parent_path().string()
-                   : std::filesystem::canonical(ownHome->path()).string() },
-        worktreeRootPath { git ? git->worktreeRoot.string() : home + "/worktrees" },
-        repositoryPath { git ? git->repository.string() : home + "/projects/contour" }
+        // UTF-8 whatever the temp directory's name: path::string() is the ANSI code page's on Windows, and
+        // the paths are written into the JSON configuration.
+        home { git ? core::pathToUtf8(git->worktreeRoot.parent_path())
+                   : core::pathToUtf8(std::filesystem::canonical(ownHome->path())) },
+        worktreeRootPath { git ? core::pathToUtf8(git->worktreeRoot) : home + "/worktrees" },
+        repositoryPath { git ? core::pathToUtf8(git->repository) : home + "/projects/contour" }
     {
         // Set before any host or thread exists, and restored after every one is gone.
         for (auto const entry: OrchestratorInheritedEnvironment | std::views::drop(1))

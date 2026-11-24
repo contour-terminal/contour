@@ -192,7 +192,9 @@ TEST_CASE("DaemonWorld: a window grants, every window closes, the summary stays"
     auto h = DaemonWorldHarness {};
     REQUIRE(h.services.world() != nullptr);
     // Started at the daemon's start, it waits for its user: no command has run.
-    REQUIRE(h.services.world()->status("orchestrator")->state == vthost::DaemonExtensionState::Pending);
+    auto const started = h.services.world()->status("orchestrator");
+    REQUIRE(started.has_value());
+    REQUIRE(started->state == vthost::DaemonExtensionState::Pending);
     CHECK(h.status().state == "pending");
     CHECK(h.services.processRunner.waiting() == 0);
 
@@ -207,13 +209,14 @@ TEST_CASE("DaemonWorld: a window grants, every window closes, the summary stays"
     // No window is left. Within one poll -- every command it runs started once and answered -- it reports
     // running, with the run list it published. Waited for one 1 ms delay at a time: a turn of a loop that
     // nothing is parked on returns at once, so counting turns would not wait for the guest's lane at all.
-    std::ignore = h.loop.blockOn(core::net::testing::waitUntil(
+    auto const polled = h.loop.blockOn(core::net::testing::waitUntil(
         &h.loop,
         [&h] {
             std::ignore = h.services.processRunner.answerWaiting();
             return h.services.pollDone() && h.status().summary.starts_with("⬢ agents");
         },
         WaitTicks));
+    REQUIRE(polled);
     for (auto const& answer: vtextension::testing::OrchestratorFixtureAnswers)
     {
         CAPTURE(answer.program, answer.verb);
