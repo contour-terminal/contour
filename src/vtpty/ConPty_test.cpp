@@ -979,6 +979,19 @@ TEST_CASE("ConPty.aProgramNotCreatedInAHeldDirectoryClosesItsPseudoconsole", "[v
     CHECK(process.pty().isClosed());
 }
 
+// A spawn refused after its pseudoconsole started -- here for an environment that is not UTF-8 -- closes it:
+// a started one with no program on it would read nothing forever, and its pane would stay open and empty.
+TEST_CASE("ConPty.aStartRefusedAfterItsPseudoconsoleStartedClosesIt", "[vtpty][conpty]")
+{
+    auto exec = execInfo("cmd.exe", { "/c", "exit" });
+    exec.env = { { "CONTOUR_NOT_UTF8", "\xFF" } };
+    auto process = vtpty::testing::unplacedProcess(exec, pageSize(80, 24));
+    auto const started = process.start();
+    REQUIRE_FALSE(started.has_value());
+    CHECK(started.error().error == vtpty::StartError::SpawnFailed);
+    CHECK(process.pty().isClosed());
+}
+
 // CreateProcessW takes the directory by path: a held directory renamed away, and another put at its name, is
 // refused rather than the other entered.
 TEST_CASE("ConPty.aHeldDirectoryReplacedAtItsNameStartsNothing", "[vtpty][conpty][held]")

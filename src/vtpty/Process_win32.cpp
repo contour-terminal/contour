@@ -450,8 +450,20 @@ StartResult Process::start()
 
     if (auto started = _d->pty->start(); !started)
         return started;
-
-    initializeStartupInfoAttachedToPTY(_d->startupInfo, static_cast<ConPty&>(*_d->pty));
+    // Closed again unless the child runs on it, as in startInHeldDirectory(): a started pseudoconsole with
+    // no program reads nothing forever, and no exit watcher would ever close it.
+    auto running = false;
+    auto const closeUnlessRunning = gsl::finally([this, &running] {
+        if (!running)
+            _d->pty->close();
+    });
+    if (auto const attached =
+            initializeStartupInfoAttachedToPTY(_d->startupInfo, static_cast<ConPty&>(*_d->pty));
+        FAILED(attached))
+        return std::unexpected(StartFailure {
+            .error = StartError::SpawnFailed,
+            .detail =
+                std::format("Could not attach it to its pseudoconsole: {}", hresultMessage(attached)) });
 
     // The child's environment is handed to it, as on POSIX, rather than set in this process's own for the
     // child to inherit: any other thread reading that meanwhile -- the daemon, a second tab spawning, a log
@@ -538,6 +550,7 @@ StartResult Process::start()
 
         // The child is running; the only thing left to say is what this rung had to give up to get
         // there, which is empty for the rung that ran exactly what was asked for.
+        running = true;
         return StartOutcome { .diagnostic = std::move(attempt.diagnostic) };
     }
 
