@@ -121,6 +121,10 @@ set(vtextension_HEADERS
 
 add_library(vtextension STATIC ${vtextension_SOURCES} ${vtextension_HEADERS})
 target_compile_definitions(vtextension PUBLIC CONTOUR_EXTENSIONS=1)
+# DaemonLimits.hpp widens the daemon's deadlines for a cl-compiled WAMR; see cmake/ContourThirdParties.cmake.
+if(CONTOUR_WAMR_SLOW_INTERPRETER)
+    target_compile_definitions(vtextension PUBLIC CONTOUR_WAMR_SLOW_INTERPRETER=1)
+endif()
 target_include_directories(vtextension PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>

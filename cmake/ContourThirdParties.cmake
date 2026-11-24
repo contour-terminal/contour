@@ -226,12 +226,117 @@ function(ContourThirdParties_WamrTerminates target resultVar)
     endif()
 endfunction()
 
+# ContourThirdParties_FindWamrClangCl(<result-variable>)
+#
+# Sets <result-variable> to the clang-cl that compiles WAMR in an MSVC build, or to "" with
+# <result-variable>_REASON saying why there is none. It is looked for first where the Visual Studio
+# installer puts it ("C++ Clang tools for Windows"): cl.exe is <VS>/VC/Tools/MSVC/<version>/bin/Host<arch>/<arch>/,
+# clang-cl <VS>/VC/Tools/Llvm/x64/bin/; then on the PATH. CONTOUR_WAMR_CLANG_CL_EXECUTABLE names another.
+function(ContourThirdParties_FindWamrClangCl resultVar)
+    set(${resultVar} "" PARENT_SCOPE)
+    get_property(_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+    if(_multi_config)
+        set(${resultVar}_REASON "a multi-config generator, whose configuration WAMR's own build cannot follow" PARENT_SCOPE)
+        return()
+    endif()
+    if(NOT CMAKE_C_COMPILER_ARCHITECTURE_ID STREQUAL "x64")
+        set(${resultVar}_REASON "a ${CMAKE_C_COMPILER_ARCHITECTURE_ID} target, and clang-cl is used for x64 only" PARENT_SCOPE)
+        return()
+    endif()
+    cmake_path(GET CMAKE_C_COMPILER PARENT_PATH _tools)
+    foreach(_level RANGE 1 5)
+        cmake_path(GET _tools PARENT_PATH _tools)
+    endforeach()
+    find_program(CONTOUR_WAMR_CLANG_CL_EXECUTABLE
+        NAMES clang-cl
+        HINTS "${_tools}/Llvm/x64/bin"
+        DOC "The clang-cl that compiles WAMR in an MSVC build")
+    if(CONTOUR_WAMR_CLANG_CL_EXECUTABLE)
+        set(${resultVar} "${CONTOUR_WAMR_CLANG_CL_EXECUTABLE}" PARENT_SCOPE)
+    else()
+        set(${resultVar}_REASON "no clang-cl found (install Visual Studio's \"C++ Clang tools for Windows\", or set CONTOUR_WAMR_CLANG_CL_EXECUTABLE)" PARENT_SCOPE)
+    endif()
+endfunction()
+
+# ContourThirdParties_PatchWamrForClang(<source-dir>)
+#
+# Clang, like GCC, joins a line ending in a backslash and whitespace to the next one; MSVC does not. WAMR's
+# win_file.c has three // comments ending in a backslash and a space (a path prefix such as `\??\`), so clang
+# makes each swallow the line after it and fails to compile the file. There is no flag against it; each such
+# comment is rewritten as a /* */ one, which ends before the backslash could join anything. Every Windows build
+# applies it, whichever compiler it uses: cl reads the rewritten comments as it read the old ones.
+function(ContourThirdParties_PatchWamrForClang sourceDir)
+    set(_file "${sourceDir}/core/shared/platform/windows/win_file.c")
+    file(READ "${_file}" _text)
+    string(REGEX REPLACE "//([^\r\n]*\\\\)[ \t]+(\r?\n)" "/*\\1 */\\2" _patched "${_text}")
+    if(NOT _patched STREQUAL _text)
+        file(WRITE "${_file}" "${_patched}")
+    endif()
+endfunction()
+
+# ContourThirdParties_AddWamrWithClangCl(<source-dir> <clang-cl> <options>...)
+#
+# Builds WAMR from <source-dir> as an external project compiled by <clang-cl>, configured with <options>
+# (CPMAddPackage's "NAME VALUE" form), and defines the static library it makes as the imported target vmlib,
+# exporting what WAMR's own vmlib target does: its public include directory and ntdll.
+#
+# clang-cl objects link into an MSVC build as they are: they share its ABI, and the runtime library
+# (CMAKE_MSVC_RUNTIME_LIBRARY, /MD by default) and the build type are passed down, so both sides agree.
+# What the cl build gives vmlib per target is given here as definitions: the host keeps Winsock
+# (WASM_ENABLE_HOST_SOCKET_INIT), and the interpreter dispatches by computed goto
+# (WASM_ENABLE_LABELS_AS_VALUES), which WAMR's config.h enables only for __GNUC__, which clang-cl does not
+# define. WAMR is not sanitized: the build's sanitizer flags are not passed down.
+function(ContourThirdParties_AddWamrWithClangCl sourceDir clangCl)
+    include(ExternalProject)
+    set(_cmake_args)
+    foreach(_option IN LISTS ARGN)
+        string(REPLACE " " "=" _definition "${_option}")
+        list(APPEND _cmake_args "-D${_definition}")
+    endforeach()
+    set(_runtime "${CMAKE_MSVC_RUNTIME_LIBRARY}")
+    if(NOT _runtime)
+        set(_runtime "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    endif()
+    # MASM assembles the native-call trampoline; ml64 sits beside cl.
+    cmake_path(GET CMAKE_C_COMPILER PARENT_PATH _msvc_bin)
+    if(EXISTS "${_msvc_bin}/ml64.exe")
+        list(APPEND _cmake_args "-DCMAKE_ASM_MASM_COMPILER=${_msvc_bin}/ml64.exe")
+    endif()
+    set(_binary_dir "${CMAKE_BINARY_DIR}/_deps/wamr-clangcl-build")
+    set(_library "${_binary_dir}/${CMAKE_STATIC_LIBRARY_PREFIX}iwasm${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    ExternalProject_Add(wamr_clangcl
+        SOURCE_DIR "${sourceDir}"
+        BINARY_DIR "${_binary_dir}"
+        CMAKE_ARGS
+            ${_cmake_args}
+            "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+            "-DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+            "-DCMAKE_C_COMPILER=${clangCl}"
+            "-DCMAKE_C_FLAGS=/DWIN32 /D_WINDOWS -DWASM_ENABLE_HOST_SOCKET_INIT=1 -DWASM_ENABLE_LABELS_AS_VALUES=1"
+            # WAMR asks for CMake 3.14, before which the runtime library was a flag, not a property.
+            "-DCMAKE_POLICY_DEFAULT_CMP0091=NEW"
+            "-DCMAKE_MSVC_RUNTIME_LIBRARY=${_runtime}"
+        BUILD_COMMAND "${CMAKE_COMMAND}" --build <BINARY_DIR> --target vmlib
+        BUILD_ALWAYS YES
+        BUILD_BYPRODUCTS "${_library}"
+        INSTALL_COMMAND ""
+        EXCLUDE_FROM_ALL YES
+    )
+    add_library(vmlib STATIC IMPORTED GLOBAL)
+    set_target_properties(vmlib PROPERTIES
+        IMPORTED_LOCATION "${_library}"
+        INTERFACE_INCLUDE_DIRECTORIES "${sourceDir}/core/iwasm/include"
+        INTERFACE_LINK_LIBRARIES ntdll)
+    add_dependencies(vmlib wamr_clangcl)
+endfunction()
+
 if(CONTOUR_EXTENSIONS)
     add_library(contour_wamr INTERFACE)
     add_library(contour::wamr ALIAS contour_wamr)
 
     set(_wamr_target "")
     set(_wamr_rejected "")
+    set(_wamr_clang_cl "")
     if(TARGET iwasm::vmlib)
         set(_wamr_target iwasm::vmlib)
         set(THIRDPARTY_BUILTIN_wamr "embedded")
@@ -272,32 +377,54 @@ if(CONTOUR_EXTENSIONS)
                 "and without hardware bounds checks. "
                 "Install one, set CONTOUR_USE_CPM=ON, or configure with -DCONTOUR_EXTENSIONS=OFF.")
         endif()
+        set(_wamr_options
+            "WAMR_BUILD_INTERP 1"
+            "WAMR_BUILD_FAST_INTERP 1"
+            "WAMR_BUILD_AOT 0"
+            "WAMR_BUILD_JIT 0"
+            "WAMR_BUILD_FAST_JIT 0"
+            "WAMR_BUILD_LIBC_WASI 1"
+            "WAMR_BUILD_LIBC_BUILTIN 0"
+            "WAMR_BUILD_THREAD_MGR 1"
+            "WAMR_BUILD_LIB_PTHREAD 0"
+            "WAMR_BUILD_LIB_WASI_THREADS 0"
+            "WAMR_BUILD_MULTI_MODULE 0"
+            "WAMR_DISABLE_HW_BOUND_CHECK 1"
+            "WAMR_DISABLE_STACK_HW_BOUND_CHECK 1"
+            "WAMR_DISABLE_WAKEUP_BLOCKING_OP 1"
+            # WAMR writes the linear memory's base to GS on every call, for the AOT code's sake ("segue");
+            # the interpreter never reads it back. valgrind cannot decode wrgsbase, and the daemon's
+            # suites run under it.
+            "WAMR_DISABLE_WRITE_GS_BASE 1"
+            "BUILD_SHARED_LIBS OFF"
+        )
+
+        # MSVC compiles WAMR's interpreter about ten times slower than clang: it has no computed goto, so the
+        # interpreter falls back to a switch, which it also optimizes poorly. clang-cl shares MSVC's ABI, so an
+        # MSVC build has WAMR compiled by clang-cl, in a build of its own, where one is found.
+        if(MSVC AND NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
+            option(CONTOUR_WAMR_CLANG_CL "Compile the bundled WAMR with clang-cl in an MSVC build" ON)
+            if(CONTOUR_WAMR_CLANG_CL)
+                ContourThirdParties_FindWamrClangCl(_wamr_clang_cl)
+                if(NOT _wamr_clang_cl)
+                    message(STATUS "WAMR is compiled by cl, its interpreter about ten times slower: ${_wamr_clang_cl_REASON}.")
+                endif()
+            endif()
+        endif()
+        if(_wamr_clang_cl)
+            set(_wamr_download_only YES)
+        else()
+            set(_wamr_download_only NO)
+        endif()
+
         message(STATUS "Using CPM to fetch WAMR")
         CPMAddPackage(
             NAME wamr
             VERSION ${WAMR_MINIMAL_VERSION}
             GITHUB_REPOSITORY bytecodealliance/wasm-micro-runtime
             GIT_TAG 25bd7eb63e828e4bd242cc9b38d260b4b31c6605 # WAMR-${WAMR_MINIMAL_VERSION}
-            OPTIONS
-                "WAMR_BUILD_INTERP 1"
-                "WAMR_BUILD_FAST_INTERP 1"
-                "WAMR_BUILD_AOT 0"
-                "WAMR_BUILD_JIT 0"
-                "WAMR_BUILD_FAST_JIT 0"
-                "WAMR_BUILD_LIBC_WASI 1"
-                "WAMR_BUILD_LIBC_BUILTIN 0"
-                "WAMR_BUILD_THREAD_MGR 1"
-                "WAMR_BUILD_LIB_PTHREAD 0"
-                "WAMR_BUILD_LIB_WASI_THREADS 0"
-                "WAMR_BUILD_MULTI_MODULE 0"
-                "WAMR_DISABLE_HW_BOUND_CHECK 1"
-                "WAMR_DISABLE_STACK_HW_BOUND_CHECK 1"
-                "WAMR_DISABLE_WAKEUP_BLOCKING_OP 1"
-                # WAMR writes the linear memory's base to GS on every call, for the AOT code's sake ("segue");
-                # the interpreter never reads it back. valgrind cannot decode wrgsbase, and the daemon's
-                # suites run under it.
-                "WAMR_DISABLE_WRITE_GS_BASE 1"
-                "BUILD_SHARED_LIBS OFF"
+            OPTIONS ${_wamr_options}
+            DOWNLOAD_ONLY ${_wamr_download_only}
             EXCLUDE_FROM_ALL YES
             SYSTEM YES
         )
@@ -310,32 +437,57 @@ if(CONTOUR_EXTENSIONS)
                  "# Written by Contour's build (cmake/ContourThirdParties.cmake): third-party code is not linted.\n"
                  "Checks: '-*'\n")
         endif()
-        if(NOT CONTOUR_SANITIZE STREQUAL "OFF")
-            # The fast interpreter reads its pre-decoded operands unaligned on purpose, on CPUs that
-            # allow it (WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS); UBSan would report every one.
-            target_compile_options(vmlib PRIVATE -fno-sanitize=alignment)
+        if(WIN32 AND wamr_ADDED)
+            ContourThirdParties_PatchWamrForClang("${wamr_SOURCE_DIR}")
         endif()
-        if(WIN32)
-            # Winsock is the host's: WAMR's own deinit calls WSACleanup on every runtime teardown but
-            # starts Winsock only on the first init, so each later teardown takes Winsock away from
-            # the process's live sockets. Extensions get no sockets, so WAMR needs none of it.
-            target_compile_definitions(vmlib PRIVATE WASM_ENABLE_HOST_SOCKET_INIT=1)
+        if(_wamr_clang_cl)
+            ContourThirdParties_AddWamrWithClangCl("${wamr_SOURCE_DIR}" "${_wamr_clang_cl}" ${_wamr_options})
+        else()
+            if(NOT CONTOUR_SANITIZE STREQUAL "OFF")
+                # The fast interpreter reads its pre-decoded operands unaligned on purpose, on CPUs that
+                # allow it (WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS); UBSan would report every one.
+                target_compile_options(vmlib PRIVATE -fno-sanitize=alignment)
+            endif()
+            if(WIN32)
+                # Winsock is the host's: WAMR's own deinit calls WSACleanup on every runtime teardown but
+                # starts Winsock only on the first init, so each later teardown takes Winsock away from
+                # the process's live sockets. Extensions get no sockets, so WAMR needs none of it.
+                target_compile_definitions(vmlib PRIVATE WASM_ENABLE_HOST_SOCKET_INIT=1)
+            endif()
+            if(MSVC)
+                # WAMR's headers use C11 alignof in static assertions; MSVC compiles C without a C11
+                # standard unless one is requested.
+                set_target_properties(vmlib PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+            endif()
+            if(MSVC AND CMAKE_C_COMPILER_ID MATCHES "Clang")
+                # clang-cl has computed goto, but does not define __GNUC__, which WAMR's config.h asks for.
+                target_compile_definitions(vmlib PRIVATE WASM_ENABLE_LABELS_AS_VALUES=1)
+            endif()
+            if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+                # The native-call trampoline is a plain .s file, which the driver assembles without
+                # preprocessing; Clang then warns about every -D and dependency flag the build passes.
+                target_compile_options(vmlib PRIVATE $<$<COMPILE_LANGUAGE:ASM>:-Wno-unused-command-line-argument>)
+            endif()
         endif()
         if(MSVC)
-            # WAMR's headers use C11 alignof in static assertions; MSVC compiles C without a C11
-            # standard unless one is requested.
-            set_target_properties(vmlib PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
             # wasm_export.h marks the API __declspec(dllimport) under MSVC unless told otherwise, which
             # is right only for a WAMR DLL; this one is linked statically.
             target_compile_definitions(contour_wamr INTERFACE WASM_RUNTIME_API_EXTERN=)
         endif()
-        if(CMAKE_C_COMPILER_ID MATCHES "Clang")
-            # The native-call trampoline is a plain .s file, which the driver assembles without
-            # preprocessing; Clang then warns about every -D and dependency flag the build passes.
-            target_compile_options(vmlib PRIVATE $<$<COMPILE_LANGUAGE:ASM>:-Wno-unused-command-line-argument>)
-        endif()
         set(_wamr_target vmlib)
         set(THIRDPARTY_BUILTIN_wamr "CPM (WAMR-${WAMR_MINIMAL_VERSION}, static, fast interpreter)${_wamr_rejected}")
+        if(_wamr_clang_cl)
+            string(APPEND THIRDPARTY_BUILTIN_wamr ", compiled by clang-cl")
+        endif()
+    endif()
+
+    # Whether the WAMR linked is cl-compiled, whose interpreter runs about five times slower than the
+    # orchestrator's deadlines assume (vtextension's DaemonLimits.hpp). An installed WAMR does not say what
+    # compiled it, so in an MSVC build it is taken to be cl, as the host is.
+    if(MSVC AND NOT CMAKE_C_COMPILER_ID MATCHES "Clang" AND NOT _wamr_clang_cl)
+        set(CONTOUR_WAMR_SLOW_INTERPRETER ON)
+    else()
+        set(CONTOUR_WAMR_SLOW_INTERPRETER OFF)
     endif()
     target_link_libraries(contour_wamr INTERFACE ${_wamr_target})
 else()

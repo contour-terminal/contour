@@ -39,11 +39,12 @@ struct DurableBudget
 };
 
 /// How many times slower the WebAssembly interpreter runs a guest in this build than in a clang or GCC one.
-/// WAMR's interpreter is C compiled by the same compiler as the host. MSVC cannot use its labels-as-values
-/// dispatch (WAMR's config.h needs `__GNUC__` for it) and optimizes its switch dispatch poorly: the
-/// orchestrator's full repaint, about 30 ms under clang, takes about 275 ms there, past the 200 ms deadline,
-/// and the daemon then stops the extension after repeated faults. A clang-cl build keeps the deadlines.
-#if defined(_MSC_VER) && !defined(__clang__)
+/// What compiled WAMR decides, not what compiled the host: an MSVC build has WAMR compiled by clang-cl where
+/// one is found, and the build defines CONTOUR_WAMR_SLOW_INTERPRETER only where cl compiled it. cl cannot use
+/// WAMR's labels-as-values dispatch and optimizes its switch dispatch poorly: the orchestrator's full
+/// repaint, about 8 ms in a release build with WAMR compiled by clang-cl, takes about 290 ms with WAMR
+/// compiled by cl, past the 200 ms deadline, and the daemon then stops the extension after repeated faults.
+#if defined(CONTOUR_WAMR_SLOW_INTERPRETER)
 inline constexpr auto InterpreterSlowdown = 5;
 #else
 inline constexpr auto InterpreterSlowdown = 1;
