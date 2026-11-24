@@ -37,6 +37,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3
 
+$RootGiven = $PSBoundParameters.ContainsKey('Root')
 $DaemonName = 'orch-smoke'
 $LocalAppData = Join-Path $Root 'localappdata'
 $Install = Join-Path $Root 'install'
@@ -49,6 +50,10 @@ $SmokeRepo = Join-Path $Root 'repos\smoke'
 $SmokeRemote = Join-Path $Root 'remote\smoke.git'
 $WorktreeRoot = Join-Path $Root 'wt'
 $TreeRecord = Join-Path $Root 'probe-tree.txt'
+# Written as the run creates -Root: -Stop deletes only a directory that carries it.
+$Marker = Join-Path $Root '.contour-orch-smoke'
+# The Forge tier's -GitLabRepo, kept for -Stop, which must clean the smoke's worktrees out of it.
+$ForgeRecord = Join-Path $Root 'gitlab-repo.txt'
 $script:Failures = 0
 
 Add-Type -Namespace SmokeNative -Name Path -MemberDefinition @'
@@ -81,10 +86,12 @@ function Stop-Smoke([string]$Why) { Write-Host "smoke: $Why"; exit 2 }
 # Runs contour (or any program) bounded, so that a verb that waits forever cannot hold the run. Sets
 # $script:ExitCode; returns stdout and stderr together. Both streams are read asynchronously and their wait is
 # bounded too: a detached daemon that inherited a pipe would otherwise keep them open.
+#
+# Limitation: output not complete 10 s after the process ended is dropped.
 function Invoke-Bounded([string]$Program, [string[]]$Arguments, [int]$Seconds = 60) {
-    $quoted = $Arguments | ForEach-Object { if ($_ -match '[\s"]' -or $_ -eq '') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ } }
     $info = [System.Diagnostics.ProcessStartInfo]::new($Program)
-    $info.Arguments = $quoted -join ' '
+    # ArgumentList quotes each argument itself, a path that ends in a backslash included.
+    foreach ($argument in $Arguments) { $info.ArgumentList.Add($argument) }
     $info.UseShellExecute = $false
     $info.CreateNoWindow = $true
     $info.RedirectStandardOutput = $true
@@ -96,7 +103,7 @@ function Invoke-Bounded([string]$Program, [string[]]$Arguments, [int]$Seconds = 
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
     $timedOut = -not $process.WaitForExit($Seconds * 1000)
-    if ($timedOut) { $process.Kill() }
+    if ($timedOut) { $process.Kill($true) }
     $process.WaitForExit()
     $null = [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($stdout, $stderr), 10000)
     $text = ''
@@ -152,26 +159,54 @@ if (-not (Test-Path $script:Contour)) { $script:Contour = Join-Path $Build 'bin\
 
 # ---- -Stop ------------------------------------------------------------------------------------------------------
 
+# Removes, from $Repo, the worktrees that lie under the smoke's worktree root, then prunes. Any other worktree of
+# the repository is left alone, and no branch is deleted.
+function Remove-SmokeWorktrees([string]$Repo) {
+    if (-not $Repo -or -not (Test-Path -LiteralPath (Join-Path $Repo '.git'))) { return }
+    $prefixes = @((Get-LongPath $WorktreeRoot), $WorktreeRoot) | ForEach-Object { $_.TrimEnd('\') + '\' }
+    $listed = @(git -C $Repo worktree list --porcelain | Where-Object { $_ -like 'worktree *' } | ForEach-Object { $_.Substring(9) })
+    foreach ($path in $listed) {
+        $windowsPath = $path -replace '/', '\'
+        $ours = $prefixes | Where-Object { $windowsPath.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }
+        if (-not $ours) { continue }
+        git -C $Repo worktree remove --force $path
+        if ($LASTEXITCODE -eq 0) { Write-Host "removed worktree $windowsPath" }
+        else { Write-Host "could not remove worktree $windowsPath from $Repo (git exit $LASTEXITCODE)" }
+    }
+    git -C $Repo worktree prune
+}
+
 function Invoke-Stop {
-    if (Test-Path $script:Contour) {
+    if (-not (Test-Path -LiteralPath $Root)) { Write-Host "nothing to stop: no $Root"; return }
+    if (-not (Test-Path -LiteralPath $Marker)) { Stop-Smoke "$Root has no $(Split-Path -Leaf $Marker): not a smoke root; refusing to touch it" }
+    $forgeRepo = $GitLabRepo
+    if (-not $forgeRepo -and (Test-Path -LiteralPath $ForgeRecord)) { $forgeRepo = (Get-Content -LiteralPath $ForgeRecord -TotalCount 1).Trim() }
+
+    $daemonGone = $true
+    if (Test-Path -LiteralPath $script:Contour) {
         $output = Invoke-Contour @('daemon', 'stop', '--socket', $Socket, '--yes')
         Write-Host "daemon stop (exit $script:ExitCode): $($output.Trim())"
+        if ($script:ExitCode -ne 0) {
+            # A daemon that is not running fails to stop too; only one that still answers keeps -Root.
+            $null = Invoke-Contour @('daemon', 'status', '--socket', $Socket)
+            $daemonGone = $script:ExitCode -ne 0
+        }
     }
-    foreach ($repo in @($SmokeRepo, $GitLabRepo)) {
-        if ($repo -and (Test-Path (Join-Path $repo '.git'))) { git -C $repo worktree prune }
-    }
-    if ($GitLabRepo -and (Test-Path $GitLabRepo)) {
-        $branches = @(git -C $GitLabRepo branch --list 'agent/*' --format '%(refname:short)')
+    if (-not $daemonGone) { Stop-Smoke "the daemon still answers on $Socket; kept $Root. Stop it, then -Stop again." }
+
+    foreach ($repo in @($SmokeRepo, $forgeRepo)) { Remove-SmokeWorktrees $repo }
+    if ($forgeRepo -and (Test-Path -LiteralPath $forgeRepo)) {
+        $branches = @(git -C $forgeRepo branch --list 'agent/*' --format '%(refname:short)')
         if ($branches.Count -gt 0) {
-            Write-Host "The run left these branches in $GitLabRepo; delete them yourself once you have looked:"
+            Write-Host "The run left these branches in $forgeRepo; delete them yourself once you have looked:"
             $branches | ForEach-Object { Write-Host "    $_" }
         }
     }
     if ($Keep) { Write-Host "kept $Root"; return }
     # The daemon's per-version copy under $LocalAppData may stay locked for a moment after it ends.
     $removed = Wait-Until 15 {
-        Remove-Item -Recurse -Force $Root -ErrorAction SilentlyContinue
-        -not (Test-Path $Root)
+        Remove-Item -LiteralPath $Root -Recurse -Force -ErrorAction SilentlyContinue
+        -not (Test-Path -LiteralPath $Root)
     }
     if ($removed) { Write-Host "removed $Root" } else { Write-Host "could not remove all of $Root; remove it by hand" }
 }
@@ -206,8 +241,11 @@ function Get-AgentTree {
     $tree = [System.Collections.Generic.List[object]]::new()
     $queue = [System.Collections.Generic.Queue[object]]::new()
     foreach ($a in $agents) { $queue.Enqueue($a) }
+    $visited = @{}
     while ($queue.Count -gt 0) {
         $p = $queue.Dequeue()
+        if ($visited.ContainsKey([int]$p.ProcessId)) { continue }
+        $visited[[int]$p.ProcessId] = $true
         $tree.Add($p)
         foreach ($child in $all) {
             if ($child.ParentProcessId -eq $p.ProcessId -and $child.ProcessId -ne $p.ProcessId) { $queue.Enqueue($child) }
@@ -228,8 +266,12 @@ function Invoke-Probe([string]$Which) {
                 $refused = $false
                 try { Rename-Item -LiteralPath $target.FullName -NewName $newName -ErrorAction Stop }
                 catch { $refused = $true; $reason = $_.Exception.Message }
-                if (-not $refused) { Rename-Item -LiteralPath (Join-Path $target.Parent.FullName $newName) -NewName $target.Name }
-                Write-Check "renaming $($target.Name) is refused while its tab is open" $refused 'the rename succeeded (it was renamed back)'
+                $detail = 'the rename succeeded (it was renamed back)'
+                if (-not $refused) {
+                    try { Rename-Item -LiteralPath (Join-Path $target.Parent.FullName $newName) -NewName $target.Name -ErrorAction Stop }
+                    catch { $detail = "the rename succeeded, and renaming it back failed: it is now $newName ($($_.Exception.Message))" }
+                }
+                Write-Check "renaming $($target.Name) is refused while its tab is open" $refused $detail
                 if ($refused) { Write-Host "        ($reason)" }
             }
         }
@@ -262,8 +304,12 @@ function Invoke-Probe([string]$Which) {
 
 # ---- the manual table -------------------------------------------------------------------------------------------
 
+function ConvertTo-PowerShellQuoted([string]$Text) { return "'" + ($Text -replace "'", "''") + "'" }
+
 function Write-ManualSteps {
-    $self = "pwsh -NoProfile -File `"$PSCommandPath`""
+    # Every printed command of this script carries a -Root that is not the default, so it finds this smoke.
+    $self = "pwsh -NoProfile -File $(ConvertTo-PowerShellQuoted $PSCommandPath)"
+    if ($script:RootGiven) { $self += " -Root $(ConvertTo-PowerShellQuoted $Root)" }
     $withEnv = "`$env:LOCALAPPDATA = '$LocalAppData'; & '$script:Contour'"
     $client = "$withEnv client --daemon '$Socket'"
     $rows = @(
@@ -288,7 +334,9 @@ function Write-ManualSteps {
         Write-Host ("{0,3}. [{1}] {2}" -f $row[0], $row[3], $row[1])
         Write-Host ("      expect: {0}" -f $row[2])
     }
-    Write-Host "When done: $self -Stop   (add -Keep to keep $Root)"
+    $stopCommand = "$self -Stop"
+    if ($Tier -eq 'Forge') { $stopCommand += " -GitLabRepo $(ConvertTo-PowerShellQuoted $GitLabRepo)" }
+    Write-Host "When done: $stopCommand   (add -Keep to keep $Root)"
 }
 
 # ---- the run ----------------------------------------------------------------------------------------------------
@@ -311,12 +359,17 @@ function Invoke-Preflight {
             if (-not (Get-Command $tool -CommandType Application -ErrorAction SilentlyContinue | Where-Object Extension -eq '.exe')) { Stop-Smoke "$tool.exe not found" }
         }
         $checks = @(@('glab', @('auth', 'status')), @('acli', @('jira', 'auth', 'status')))
+        # The smoke's environment is already entered here, so each check runs once with the user's own
+        # LOCALAPPDATA, as saved before it, and once with the smoke's.
         foreach ($check in $checks) {
-            $own = Get-ExitCode $GitLabRepo $check[0] $check[1]
+            try {
+                [Environment]::SetEnvironmentVariable('LOCALAPPDATA', $SavedEnvironment['LOCALAPPDATA'], 'Process')
+                $own = Get-ExitCode $GitLabRepo $check[0] $check[1]
+                $env:LOCALAPPDATA = $LocalAppData
+                $isolated = Get-ExitCode $GitLabRepo $check[0] $check[1]
+            }
+            finally { $env:LOCALAPPDATA = $LocalAppData }
             if ($own -ne 0) { Stop-Smoke "$($check[0]) $($check[1] -join ' ') fails (exit $own); log it in first" }
-            $saved = $env:LOCALAPPDATA
-            $env:LOCALAPPDATA = $LocalAppData
-            try { $isolated = Get-ExitCode $GitLabRepo $check[0] $check[1] } finally { $env:LOCALAPPDATA = $saved }
             if ($isolated -ne $own) { Stop-Smoke "state isolation would log glab/acli out ($($check[0]) exits $isolated with LOCALAPPDATA under -Root)" }
         }
     }
@@ -325,6 +378,8 @@ function Invoke-Preflight {
 
 function Invoke-Install {
     New-Item -ItemType Directory -Force $Root | Out-Null
+    Set-Content -LiteralPath $Marker -Value 'Created by scripts/smoke-orchestrator-windows.ps1; -Stop removes this directory.' -Encoding utf8
+    if ($Tier -eq 'Forge') { Set-Content -LiteralPath $ForgeRecord -Value $GitLabRepo -Encoding utf8 }
     $output = Invoke-Bounded 'cmake' @('--install', $Build, '--prefix', $Install) 600
     if ($script:ExitCode -ne 0) { Write-Host $output; Stop-Smoke "cmake --install failed (exit $script:ExitCode)" }
     $script:Contour = Join-Path $Install 'bin\contour.exe'
