@@ -925,11 +925,17 @@ TEST_CASE("a pseudoconsole that cannot be adopted is closed, and its program's h
     auto const event = [] {
         return vtpty::CrossingHandle::of(CreateEventW(nullptr, TRUE, FALSE, nullptr));
     };
+    // The program's handle carries the query right its CreateProcess handle has: what shows it to be the
+    // child.
     auto program = HANDLE {};
-    REQUIRE(
-        DuplicateHandle(
-            GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(), &program, SYNCHRONIZE, FALSE, 0)
-        != FALSE);
+    REQUIRE(DuplicateHandle(GetCurrentProcess(),
+                            GetCurrentProcess(),
+                            GetCurrentProcess(),
+                            &program,
+                            SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                            FALSE,
+                            0)
+            != FALSE);
     auto image = HandoverImage {};
     auto session = HandoverSession {};
     session.id = SessionId { 1 };

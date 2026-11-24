@@ -219,12 +219,18 @@ TEST_CASE("a device that cannot be handed over says so", "[vtpty][handover]")
 TEST_CASE("an unadopted child is let go", "[vtpty][handover]")
 {
 #ifdef _WIN32
-    // Its handle and its job's are all this process holds of it, and closed.
+    // Its handle and its job's are all this process holds of it, and closed. The handle carries the query
+    // right the child's own handle from CreateProcess has, which is what shows it to be the process it
+    // crossed as.
     auto process = HANDLE {};
-    REQUIRE(
-        DuplicateHandle(
-            GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(), &process, SYNCHRONIZE, FALSE, 0)
-        != FALSE);
+    REQUIRE(DuplicateHandle(GetCurrentProcess(),
+                            GetCurrentProcess(),
+                            GetCurrentProcess(),
+                            &process,
+                            SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                            FALSE,
+                            0)
+            != FALSE);
     auto* const job = CreateJobObjectW(nullptr, nullptr);
     REQUIRE(job != nullptr);
     auto child = vtpty::AdoptedChild {};
@@ -245,6 +251,53 @@ TEST_CASE("an unadopted child is let go", "[vtpty][handover]")
     closeUnnamed(fresh);
 #endif
 }
+
+#ifdef _WIN32
+TEST_CASE("releaseUnadopted leaves a value that names no job open", "[vtpty][adoption]")
+{
+    auto* const event = CreateEventW(nullptr, TRUE, FALSE, nullptr); // what the job's value names now
+    REQUIRE(event != nullptr);
+    vtpty::releaseUnadopted(vtpty::AdoptedChild { .job = vtpty::CrossingHandle::of(event) });
+    CHECK(isOpen(event));
+    CloseHandle(event);
+}
+
+TEST_CASE("releaseUnadopted leaves a process handle of another process open", "[vtpty][adoption]")
+{
+    auto self = HANDLE {};
+    REQUIRE(DuplicateHandle(GetCurrentProcess(),
+                            GetCurrentProcess(),
+                            GetCurrentProcess(),
+                            &self,
+                            0,
+                            FALSE,
+                            DUPLICATE_SAME_ACCESS));
+    vtpty::releaseUnadopted(
+        vtpty::AdoptedChild { .pid = 4, .processHandle = vtpty::CrossingHandle::of(self) });
+    CHECK(isOpen(self));
+    CloseHandle(self);
+}
+
+TEST_CASE("releaseUnadopted closes a job and the process it crossed as", "[vtpty][adoption]")
+{
+    auto self = HANDLE {};
+    REQUIRE(DuplicateHandle(GetCurrentProcess(),
+                            GetCurrentProcess(),
+                            GetCurrentProcess(),
+                            &self,
+                            0,
+                            FALSE,
+                            DUPLICATE_SAME_ACCESS));
+    auto* const job = CreateJobObjectW(nullptr, nullptr);
+    REQUIRE(job != nullptr);
+    auto child = vtpty::AdoptedChild { .pid = static_cast<std::int64_t>(GetCurrentProcessId()),
+                                       .processHandle = vtpty::CrossingHandle::of(self),
+                                       .job = vtpty::CrossingHandle::of(job) };
+    vtpty::releaseUnadopted(child);
+    CHECK_FALSE(isOpen(child.processHandle));
+    CHECK_FALSE(isOpen(child.job));
+}
+#endif
 
 #ifndef _WIN32
 TEST_CASE("a POSIX PTY names none of the pseudoconsole handles a corrupt image carries", "[vtpty][handover]")

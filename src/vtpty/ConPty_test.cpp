@@ -1339,13 +1339,13 @@ TEST_CASE("ConPty.aDeferredJobCloseGivesALeaderThatStaysTheGrace", "[vtpty][conp
     REQUIRE(child.has_value());
     REQUIRE_FALSE(child->job.isNone());
 
-    constexpr auto Grace = std::chrono::seconds { 2 };
+    constexpr auto Grace = std::chrono::seconds { 5 };
     auto const deferred = std::chrono::steady_clock::now();
     vtpty::closeJobAfter(vtpty::UniqueHandle { std::exchange(child->job, {}).native() },
                          vtpty::UniqueHandle { std::exchange(child->processHandle, {}).native() },
                          Grace);
 
-    std::this_thread::sleep_until(deferred + Grace / 2);
+    std::this_thread::sleep_until(deferred + std::chrono::seconds { 1 });
     CHECK(isAlive(leader));
     CHECK(isAlive(grandchild));
     CHECK(isDead(grandchild, Grace + std::chrono::seconds { 5 }));

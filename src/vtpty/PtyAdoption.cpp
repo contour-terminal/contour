@@ -11,6 +11,7 @@
     #include <unistd.h>
 #endif
 
+#include <cstdint>
 #include <utility>
 
 namespace vtpty
@@ -22,6 +23,26 @@ namespace
     using Adopted = ConPty;
 #else
     using Adopted = UnixPty;
+#endif
+
+#ifdef _WIN32
+    /// @param handle A handle of this process, which may name no job at all.
+    /// @return Whether @p handle names a Job Object: its accounting information can be queried.
+    [[nodiscard]] bool namesJob(HANDLE handle) noexcept
+    {
+        auto accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION {};
+        return QueryInformationJobObject(
+                   handle, JobObjectBasicAccountingInformation, &accounting, sizeof(accounting), nullptr)
+               != FALSE;
+    }
+
+    /// @param handle A handle of this process, which may name no process at all.
+    /// @param pid The process id the handle crossed as.
+    /// @return Whether @p handle names the process @p pid.
+    [[nodiscard]] bool namesProcess(HANDLE handle, std::int64_t pid) noexcept
+    {
+        return pid > 0 && std::cmp_equal(GetProcessId(handle), pid);
+    }
 #endif
 } // namespace
 
@@ -62,10 +83,13 @@ void closeInherited(InheritedPty const& pty) noexcept
 void releaseUnadopted([[maybe_unused]] AdoptedChild const& child) noexcept
 {
 #ifdef _WIN32
-    if (!child.processHandle.isNone())
+    // Closed once shown to be the process they crossed as: a value that names something else by now (this
+    // process reuses handle numbers) is left alone.
+    if (!child.processHandle.isNone() && namesProcess(child.processHandle.native(), child.pid))
         CloseHandle(child.processHandle.native());
     // The job's last handle, once its predecessor's is gone: closing it ends the tree no one serves any more.
-    if (!child.job.isNone())
+    // Closed only once shown to be the job it crossed as, for the same reason.
+    if (!child.job.isNone() && namesJob(child.job.native()))
         CloseHandle(child.job.native());
 #endif
 }
