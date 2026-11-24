@@ -39,6 +39,7 @@
 #include <variant>
 #include <vector>
 
+#include <vtcontrol/Json.hpp>
 #include <vtextension/DaemonExtensionRuntime.hpp>
 #include <vtextension/ThreadCpuClock.hpp>
 #include <vtextension/testing/FakeFileLocker.hpp>
@@ -74,20 +75,21 @@ inline constexpr auto OrchestratorModulePath = std::string_view { "/ext/orchestr
 /// @param worktreeRoot Where the worktrees go.
 /// @param repository The repository's main checkout.
 /// @return The orchestrator's configuration: one repository, with the issues assigned to the user; a task for
-///         pull requests and one for issues.
+///         pull requests and one for issues. The paths are quoted as JSON strings, so that a Windows path's
+///         backslashes stay its separators rather than turning the document invalid.
 [[nodiscard]] inline std::string orchestratorConfig(std::string_view worktreeRoot,
                                                     std::string_view repository)
 {
-    return std::format(R"({{ "worktree_root": "{}", "models": ["opus", "sonnet"],
-  "repos": [ {{ "name": "contour", "path": "{}", "forge": "github",
+    return std::format(R"({{ "worktree_root": {}, "models": ["opus", "sonnet"],
+  "repos": [ {{ "name": "contour", "path": {}, "forge": "github",
                "issues": [ {{ "source": "forge", "query": "assignee:@me" }} ] }} ],
   "tasks": [
     {{ "id": "fix_ci", "key": "f", "label": "fix CI", "applies_to": "pr", "model": "sonnet",
       "prompt": "/contour-workflows:fix-ci {{url}}" }},
     {{ "id": "work", "key": "w", "label": "work on it", "applies_to": "issue", "model": "opus",
       "prompt": "/contour-workflows:work-issue {{url}}" }} ] }})",
-                       worktreeRoot,
-                       repository);
+                       vtcontrol::quoteJsonString(worktreeRoot),
+                       vtcontrol::quoteJsonString(repository));
 }
 
 /// The daemon's environment the orchestrator inherits, and the test process holds while a world lives (as a
