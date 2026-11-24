@@ -6,20 +6,22 @@
 **Goal:** the agent orchestrator runs on Windows against GitLab repositories and Jira issues, as it runs on
 Linux and macOS against GitHub today.
 
-**Status (2026-11-24): every phase is done.** What is left is listed under "Out of scope" in each phase's plan;
+**Status (2026-11-24): every phase is done.** Each row's commit range is written `first^..last`, both ends
+inclusive. The boundary between A2 and C is inferred from commit order: `9e7bacef2` is counted as A2's last
+commit, though it could belong to C. What is left is listed under "Out of scope" in each phase's plan;
 the end-to-end run's manual rows are with the user (see "End-to-end run" below).
 
 ## Where it stands (measured 2026-11-23, updated 2026-11-24; Windows 11, glab 1.119.0, acli 1.3.41, gh 2.97)
 
 | # | Piece | Today | Blocks |
 | --- | --- | --- | --- |
-| 1 | `glab` provider, `acli` issue source | **done**: recorded and enabled (plan `2026-11-23-orchestrator-glab-acli.md`): GitLab recorded from glab 1.119, Jira through acli recorded from acli 1.3.41, a harness that scrubs a recorded reply into a fixture, the configuration docs (`c73a476fc`..`12372fdb8`) | — |
-| A | `vtpty` directory opener (`DirectoryHandle_win32.cpp`) | **done** (plan `2026-11-23-orchestrator-windows-directory-handles.md`): the Windows path rules a handle obeys, open and resolve by handle, create beneath a held directory, hardened edges (`7e8a22f1a`..`93bf86ac8`) | — |
-| A2 | extension roots and environment on Windows | **done** (plan `2026-11-23-orchestrator-windows-extension-roots.md`): a root's path grammar for POSIX and Windows, roots resolved and judged in the opener's grammar, environment names folded, the orchestrator takes the host's spelling of a path, one Windows path corpus for host and guest, `vtextension_test` builds on Windows (`ee96175f4`..`9e7bacef2`) | — |
-| B | `vtpty::PipedProcessRunner` (`ProcessRunner_win32.cpp`) | **done** (plan `2026-11-23-orchestrator-windows-process-runner.md`): the rules a Windows spawn obeys as a pure unit, `.exe` programs run in a kill-on-close job each with both streams captured, timeout and cancel end the whole tree at once, background processes outlive a command that exits by itself (`6791c56fb`..`aed9fbf41`) | — |
-| C | `file-read` beneath a root (`BeneathRead_win32.cpp`) | **done** (plan `2026-11-23-orchestrator-windows-file-read.md`): what a Windows entry is to a read as a pure rule, the Win32 calls a read beneath a held directory makes, `file-read` on Windows through the native reader, a delete-pending directory is `Missing`, a removed root's handle let go of before it is opened again (`93561a1ff`..`3d63d4b4b`) | — |
-| D | `pane-open` in a held directory | **done** (plan `2026-11-23-orchestrator-windows-pane-open.md`): one check that a held directory can be a child's cwd, its name guarded until the child ended, one kill-on-close job for every held spawn, a pseudoconsole child started in a held directory, the agent's tree ends with its pane and survives an upgrade, a failed start closes its pseudoconsole (`18be32883`..`d8f9c9cad`) | — |
-| E | Packaging and docs | **done**: the MSI, per-user MSI and zip carry `share/contour/extensions/orchestrator.wasm` (plan `2026-11-24-orchestrator-windows-packaging-and-docs.md`): a warning when a program is no `.exe`, an NTSTATUS exit code shown in hex, the profile route and pseudoconsole-close fixes, the Windows CI wiring, the WIT, README and `docs/extensions.md` on Windows, a smoke script (`4e6cb637b`..`be9c48b84`). The CI wiring (`beb16d479`) has **not run in CI yet**: nothing is pushed | — |
+| 1 | `glab` provider, `acli` issue source | **done**: recorded and enabled (plan `2026-11-23-orchestrator-glab-acli.md`): GitLab recorded from glab 1.119, Jira through acli recorded from acli 1.3.41, a harness that scrubs a recorded reply into a fixture, the configuration docs (`c73a476fc^..12372fdb8`) | — |
+| A | `vtpty` directory opener (`DirectoryHandle_win32.cpp`) | **done** (plan `2026-11-23-orchestrator-windows-directory-handles.md`): the Windows path rules a handle obeys, open and resolve by handle, create beneath a held directory, hardened edges (`7e8a22f1a^..93bf86ac8`) | — |
+| A2 | extension roots and environment on Windows | **done** (plan `2026-11-23-orchestrator-windows-extension-roots.md`): a root's path grammar for POSIX and Windows, roots resolved and judged in the opener's grammar, environment names folded, the orchestrator takes the host's spelling of a path, one Windows path corpus for host and guest, `vtextension_test` builds on Windows (`ee96175f4^..9e7bacef2`) | — |
+| B | `vtpty::PipedProcessRunner` (`ProcessRunner_win32.cpp`) | **done** (plan `2026-11-23-orchestrator-windows-process-runner.md`): the rules a Windows spawn obeys as a pure unit, `.exe` programs run in a kill-on-close job each with both streams captured, timeout and cancel end the whole tree at once, background processes outlive a command that exits by itself (`6791c56fb^..aed9fbf41`) | — |
+| C | `file-read` beneath a root (`BeneathRead_win32.cpp`) | **done** (plan `2026-11-23-orchestrator-windows-file-read.md`): what a Windows entry is to a read as a pure rule, the Win32 calls a read beneath a held directory makes, `file-read` on Windows through the native reader, a delete-pending directory is `Missing`, a removed root's handle let go of before it is opened again (`93561a1ff^..3d63d4b4b`) | — |
+| D | `pane-open` in a held directory | **done** (plan `2026-11-23-orchestrator-windows-pane-open.md`): one check that a held directory can be a child's cwd, its name guarded until the child ended, one kill-on-close job for every held spawn, a pseudoconsole child started in a held directory, the agent's tree ends with its pane and survives an upgrade, a failed start closes its pseudoconsole (`18be32883^..d8f9c9cad`) | — |
+| E | Packaging and docs | **done**: the MSI, per-user MSI and zip carry `share/contour/extensions/orchestrator.wasm` (plan `2026-11-24-orchestrator-windows-packaging-and-docs.md`): a warning when a program is no `.exe`, an NTSTATUS exit code shown in hex, the profile route and pseudoconsole-close fixes, the Windows CI wiring, the WIT, README and `docs/extensions.md` on Windows, a smoke script (`4e6cb637b^..be9c48b84`, plus this roadmap's own commits). The CI wiring (`beb16d479`) has **not run in CI yet**: nothing is pushed | — |
 
 Findings from the recording that shaped phase 1:
 
@@ -65,7 +67,7 @@ Findings from the recording that shaped phase 1:
 ## Pre-existing Windows test failures
 
 Measured by phase E's Task 1 (2026-11-24: `clangcl-release`, orchestrator guest on, the full `ctest`), none of
-them caused by phases A to E. Later work must not count them as regressions.
+them attributed to phases A to E. Later work must not count them as regressions.
 
 - `check_guest_portability`: 6 sites, from commits made before this roadmap (2026-11-22) — `at()` in
   `extensions/orchestrator/core/QuickReplies.cpp:59`, `extensions/orchestrator/guest/WitHost.cpp:140`,
@@ -101,7 +103,8 @@ Fixed, and no longer listed:
 ## Known Windows differences
 
 Each is described for users in `docs/extensions.md`, section
-[Daemon extensions on Windows](../../extensions.md#daemon-extensions-on-windows).
+[Daemon extensions on Windows](../../extensions.md#daemon-extensions-on-windows), except the YAML entry, which is in
+[Configuring the orchestrator](../../extensions.md#configuring-the-orchestrator).
 
 - **A held directory's parent cannot be renamed.** NTFS refuses to rename a directory while any handle
   beneath it is open (`ERROR_ACCESS_DENIED`), whatever that handle shares; POSIX allows it. Removing the
@@ -122,7 +125,8 @@ Each is described for users in `docs/extensions.md`, section
   ending in a dot or a space).
 - **SMB shares without file ids** cannot be read from by `file-read`.
 - **YAML double-quoted Windows paths.** In a double-quoted YAML string `\U` starts an escape, so
-  `"C:\Users\…"` does not parse; single-quote the path or use forward slashes.
+  `"C:\Users\…"` does not parse; single-quote the path or use forward slashes. See
+  [Configuring the orchestrator](../../extensions.md#configuring-the-orchestrator).
 
 ## End-to-end run (2026-11-24)
 
