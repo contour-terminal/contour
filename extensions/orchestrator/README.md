@@ -287,7 +287,7 @@ Code's settings files: the profile lives only in the agent's command line, which
 
 A **worker** is who runs a task: an `id`, an `agent` (`claude` or `copilot`) and, optionally, an `env_set`, the
 name of a variable set the user defines in the daemon's configuration (`daemon.extensions.orchestrator.env_sets`,
-see `docs/extensions.md`). The set's values come from that configuration, never from the orchestrator: it only
+see [Configuring the orchestrator](../../docs/extensions.md#configuring-the-orchestrator)). The set's values come from that configuration, never from the orchestrator: it only
 names the set, and the host fills in the values the consent dialog showed. A task picks its worker with
 `worker:`; without one, the first worker runs it, and a task naming a worker that does not exist is a problem
 line (`tasks[1].worker: names no worker; the first worker runs it: …`) and also runs on the first. Without
@@ -306,7 +306,7 @@ daemon:
                 claude-work:     { CLAUDE_CONFIG_DIR: 'C:\Users\me\.claude-work' }
                 claude-personal: { CLAUDE_CONFIG_DIR: 'C:\Users\me\.claude-personal' }
             config:
-                models: [sonnet, opus]
+                models: [sonnet, opus, auto]
                 workers:
                     - { id: claude-work,     agent: claude,  env_set: claude-work }
                     - { id: claude-personal, agent: claude,  env_set: claude-personal }
@@ -314,7 +314,7 @@ daemon:
                 tasks:
                     - { id: fix_ci, key: f, label: fix CI, applies_to: pr, model: sonnet,
                         worker: claude-work, prompt: "/contour-workflows:fix-ci {url}" }
-                    - { id: chore, key: c, label: chore, applies_to: issue, model: sonnet,
+                    - { id: chore, key: c, label: chore, applies_to: issue, model: auto,
                         worker: copilot, prompt: "Work on issue {key}: {url}" }
 ```
 
@@ -330,7 +330,8 @@ naming the set and the worker. When more than one worker is configured, a run's 
   and the problem line names the worker (`Claude Code's status hooks are missing for worker claude-work: …`);
   the plugins are checked and installed per set as well.
 - **A Copilot run** starts `copilot --model {model} -i {prompt}` in its worktree, with the task's model, which,
-  as for every task, must be one of `models`. Copilot reports no status, so the run shows *running* until its
+  as for every task, must be one of `models`. A Copilot task's model is a Copilot model id (`auto`, or one
+  `copilot --help` lists), not a Claude Code alias such as `sonnet`, so `models` lists it too. Copilot reports no status, so the run shows *running* until its
   tab closes, and then ends `Closed`, a normal finish. It has no transcript (`t` says Copilot runs keep none
   Contour can read), no statistics and no board. It takes no permission profile: a task with `permissions` on a
   Copilot worker is a problem line, and the task is not offered. Its set may hold `COPILOT_HOME` and the proxy
