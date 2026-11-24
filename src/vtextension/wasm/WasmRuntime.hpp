@@ -117,7 +117,7 @@ struct RuntimeLimits
 /// One host import. Every world host function takes only i32s and returns nothing.
 ///
 /// A host function may take no parameter at all. A backend may cap how many it can take (the WAMR
-/// backend's cap is `wamr::MaxHostParameters`, five); createRuntime() refuses a table holding one above
+/// backend's cap is `wamr::MaxHostParameters`, 17); createRuntime() refuses a table holding one above
 /// the cap with `RuntimeUnavailable`.
 struct HostFunction
 {

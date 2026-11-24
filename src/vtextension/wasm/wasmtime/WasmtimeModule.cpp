@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <core/Assert.hpp>
+#include <core/Utils.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -224,6 +227,26 @@ Linkage linkageOf(ImportDescription const& import, std::span<HostBinding const> 
     return std::ranges::any_of(hostBindings, provides) ? Linkage::Satisfied : Linkage::Unsatisfied;
 }
 
+detail::FuncTypeHandle functionType(FunctionSignature const& signature)
+{
+    auto const fill = [](wasm_valtype_vec_t& vector, std::span<ValueType const> types) {
+        wasm_valtype_vec_new_uninitialized(&vector, types.size());
+        auto const slots = std::span { vector.data, vector.size };
+        for (auto const [index, type]: core::views::enumerate(types))
+        {
+            auto const row = std::ranges::find(ValueKinds, type, &ValueKindRow::type);
+            Require(row != ValueKinds.end());
+            slots[static_cast<std::size_t>(index)] = wasm_valtype_new(row->kind);
+        }
+    };
+    auto parameters = wasm_valtype_vec_t {};
+    fill(parameters, signature.parameters);
+    auto results = wasm_valtype_vec_t {};
+    fill(results, signature.results);
+    // wasm_functype_new takes both vectors over.
+    return detail::FuncTypeHandle { wasm_functype_new(&parameters, &results) };
+}
+
 std::expected<std::shared_ptr<IWasmModule>, ExtensionError> loadModule(
     std::shared_ptr<WasmtimeRuntime> runtime, wasm_engine_t* engine, std::span<std::byte const> bytes)
 {
@@ -250,16 +273,6 @@ WasmtimeModule::WasmtimeModule(std::shared_ptr<WasmtimeRuntime> runtime,
     _imports { std::move(imports) },
     _exports { std::move(exports) }
 {
-}
-
-std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> WasmtimeModule::instantiate(
-    IHostContext& /*context*/)
-{
-    // Instances are not provided yet. Whatever provides them gives each its own store, whose data is the
-    // IHostContext its host function calls reach (callHostFunction in WasmtimeBackend.cpp), and sets the
-    // store's epoch deadline before every call into the guest: with epoch interruption on, a store's
-    // deadline starts at 0 ticks, and the guest would trap at its first epoch check.
-    return std::unexpected(ExtensionError::RuntimeUnavailable);
 }
 
 } // namespace vtextension::wasm::wasmtime

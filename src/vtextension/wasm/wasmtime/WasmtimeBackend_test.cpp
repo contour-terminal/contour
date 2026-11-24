@@ -5,10 +5,19 @@
 #include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <format>
 #include <memory>
+#include <optional>
+#include <ranges>
 #include <span>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <vector>
 
 #include <wasmtime.h>
 
@@ -65,9 +74,118 @@ struct WasmtimeTraits
     return !error;
 }
 
+/// @return The module the WebAssembly text @p wat assembles to.
+[[nodiscard]] std::vector<std::byte> assemble(std::string_view wat)
+{
+    namespace detail = vtextension::wasm::wasmtime::detail;
+    auto bytes = wasm_byte_vec_t {};
+    auto const error = detail::ErrorHandle { wasmtime_wat2wasm(wat.data(), wat.size(), &bytes) };
+    REQUIRE_FALSE(error);
+    auto const view = std::as_bytes(std::span { bytes.data, bytes.size });
+    auto module = std::vector<std::byte> { view.begin(), view.end() };
+    wasm_byte_vec_delete(&bytes);
+    return module;
+}
+
+/// @return A module importing `arity` `f`, taking @p arity i32s, and exporting `call`, which calls it with
+///         1, 2, ... @p arity.
+[[nodiscard]] std::vector<std::byte> arityModule(uint32_t arity)
+{
+    auto parameters = std::string {};
+    auto arguments = std::string {};
+    for (auto const value: std::views::iota(uint32_t { 1 }, arity + 1))
+    {
+        parameters += " i32";
+        arguments += std::format(" (i32.const {})", value);
+    }
+    return assemble(std::format(R"((module
+  (import "arity" "f" (func $f (param{})))
+  (func (export "call") (call $f{})))
+)",
+                                parameters,
+                                arguments));
+}
+
+/// A host context whose every host function call calls back into its instance first, as the extension
+/// host does to allocate in guest memory, and then fails.
+class ReenteringHostContext final: public vtextension::wasm::IHostContext
+{
+  public:
+    /// The instance to call back into; set once it exists.
+    vtextension::wasm::IWasmInstance* instance = nullptr;
+    /// What the call back into the instance returned.
+    std::optional<std::expected<uint32_t, vtextension::wasm::CallFailure>> reentered;
+
+    [[nodiscard]] std::expected<void, ExtensionError> callHost(
+        std::size_t /*functionIndex*/, std::span<uint32_t const> /*arguments*/) noexcept override
+    {
+        auto argv = std::array<uint32_t, 2> { 2, 3 };
+        auto const add = instance->function("add");
+        reentered = instance->call(*add, argv).transform([&] { return argv[0]; });
+        return std::unexpected(ExtensionError::PermissionDenied);
+    }
+};
+
 } // namespace
 
 CONTOUR_WASM_BACKEND_CONTRACT(WasmtimeTraits)
+
+TEST_CASE("WasmtimeBackend.hostFunctionArities", "[wasmtime]")
+{
+    // A host function takes from none up to MaxHostParameters i32s, each reaching the host in order. One
+    // taking more cannot be provided, and the runtime is refused.
+    namespace contract = vtextension::wasm::testing::contract;
+    using vtextension::wasm::HostFunction;
+    using vtextension::wasm::wasmtime::MaxHostParameters;
+    auto const backend = WasmtimeTraits::make();
+
+    for (auto const arity: { uint32_t { 0 }, uint32_t { 1 }, MaxHostParameters })
+    {
+        INFO("arity " << arity);
+        auto const hostFunctions =
+            std::array { HostFunction { .module = "arity", .name = "f", .parameterCount = arity } };
+        auto const runtime = backend->createRuntime(contract::Limits, hostFunctions);
+        REQUIRE(runtime.has_value());
+        auto const guard = contract::enterThread(*backend);
+        auto const module = (*runtime)->load(arityModule(arity));
+        REQUIRE(module.has_value());
+        auto context = contract::RecordingHostContext {};
+        auto const instance = contract::instantiate(**module, context);
+
+        CHECK(instance->call(contract::functionOf(*instance, "call"), {}).has_value());
+        auto const expected = std::ranges::to<std::vector>(std::views::iota(uint32_t { 1 }, arity + 1));
+        CHECK(context.calls()
+              == std::vector { contract::HostCall {
+                  .functionIndex = 0, .arguments = expected, .thread = std::this_thread::get_id() } });
+    }
+
+    auto const tooMany = std::array { HostFunction {
+        .module = "arity", .name = "f", .parameterCount = MaxHostParameters + 1 } };
+    auto const refused = backend->createRuntime(contract::Limits, tooMany);
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(refused.error() == ExtensionError::RuntimeUnavailable);
+}
+
+TEST_CASE("WasmtimeBackend.hostFunctionCallsBackIn", "[wasmtime]")
+{
+    // A host function calling back into its instance, as the extension host does to allocate in guest
+    // memory, gets its answer from the same store; its own failure after that still fails the outer call
+    // as a host failure.
+    namespace contract = vtextension::wasm::testing::contract;
+    auto const backend = WasmtimeTraits::make();
+    auto const runtime = contract::createRuntime(*backend);
+    auto const guard = contract::enterThread(*backend);
+    auto const module = contract::load(*runtime, contract::InstanceModule);
+    auto context = ReenteringHostContext {};
+    auto const instance = contract::instantiate(*module, context);
+    context.instance = instance.get();
+
+    auto const called = instance->call(contract::functionOf(*instance, "ping-then-store"), {});
+    REQUIRE_FALSE(called.has_value());
+    CHECK(called.error() == vtextension::wasm::CallFailure::HostFailure);
+    CHECK(context.reentered == std::expected<uint32_t, vtextension::wasm::CallFailure> { 5 });
+    CHECK(contract::wordAt(*instance, 0) == 0);
+}
 
 TEST_CASE("WasmtimeBackend.refusesWhatWasmtimeEnablesByDefault", "[wasmtime]")
 {

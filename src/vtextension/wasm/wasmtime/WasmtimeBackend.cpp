@@ -21,6 +21,8 @@
 #include <wasmtime.h>
 
 #include <vtextension/wasm/EngineFeatures.hpp>
+#include <vtextension/wasm/WasiAllowList.hpp>
+#include <vtextension/wasm/wasi/Preview1Signatures.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
 // Every feature switch the table drives must exist: a Wasmtime built without one of these could neither
 // be told to refuse what the table forbids nor be trusted to accept what it allows. Generated from the
@@ -146,8 +148,8 @@ namespace
             setter(engineConfig, featureRow(feature).state == FeatureState::On);
         wasmtime_config_max_wasm_stack_set(engineConfig, limits.stackBytes);
         // Epoch interruption is how a call is stopped from another thread. A store's epoch deadline
-        // starts at 0 ticks, so a guest traps at its first epoch check: whoever enters guest code sets
-        // the store's deadline (wasmtime_context_set_epoch_deadline) before every call into it.
+        // starts at 0 ticks, so a guest would trap at its first epoch check: WasmtimeInstance.cpp sets the
+        // store's deadline (wasmtime_context_set_epoch_deadline) before every entry into guest code.
         wasmtime_config_epoch_interruption_set(engineConfig, true);
         wasmtime_config_signals_based_traps_set(engineConfig, config.trapMode == TrapMode::Signals);
         wasmtime_config_cranelift_opt_level_set(engineConfig, WASMTIME_OPT_LEVEL_SPEED);
@@ -158,10 +160,11 @@ namespace
         return engineConfig;
     }
 
-    /// Runs a host function on behalf of the guest: hands its i32 arguments to the IHostContext that is
-    /// the data of the calling instance's store.
+    /// Runs a host function on behalf of the guest: hands its i32 arguments to the IHostContext of the
+    /// calling instance's store. A failure is stashed in the store's data, which is how the call that
+    /// made it tells it apart from a trap of the guest's own.
     /// Called from Wasmtime's Rust code, which an exception must not unwind through: noexcept.
-    /// @return Null on success; a trap if there is no host context or it failed.
+    /// @return Null on success; a trap if the host function failed.
     wasm_trap_t* callHostFunction(void* env,
                                   wasmtime_caller_t* caller,
                                   wasmtime_val_t const* args,
@@ -170,39 +173,91 @@ namespace
                                   std::size_t /*resultCount*/) noexcept
     {
         auto const& binding = *static_cast<HostBinding const*>(env);
-        auto* const context =
-            static_cast<IHostContext*>(wasmtime_context_get_data(wasmtime_caller_context(caller)));
-        if (!context)
-        {
-            static constexpr auto Message = std::string_view { "no host context" };
-            return wasmtime_trap_new(Message.data(), Message.size());
-        }
-        auto const arguments = std::ranges::to<std::vector>(
-            std::span { args, argCount } | std::views::transform([](wasmtime_val_t const& value) {
-                return static_cast<uint32_t>(value.of.i32);
-            }));
-        if (!context->callHost(binding.index, arguments))
-        {
-            static constexpr auto Message = std::string_view { "host function failed" };
-            return wasmtime_trap_new(Message.data(), Message.size());
-        }
-        return nullptr;
+        auto& data = *static_cast<StoreData*>(wasmtime_context_get_data(wasmtime_caller_context(caller)));
+        // The linker gave the function binding.parameterCount i32 parameters, which create() capped.
+        auto arguments = std::array<uint32_t, MaxHostParameters> {};
+        auto const values = std::span { args, argCount };
+        std::ranges::transform(values, arguments.begin(), [](wasmtime_val_t const& value) {
+            return static_cast<uint32_t>(value.of.i32);
+        });
+        auto const called = data.context.callHost(binding.index, std::span { arguments }.first(argCount));
+        if (called)
+            return nullptr;
+        data.hostFailure = called.error();
+        static constexpr auto Message = std::string_view { "host function failed" };
+        return wasmtime_trap_new(Message.data(), Message.size());
     }
 
-    /// @return The type of a host function taking @p parameterCount i32s and returning nothing.
-    [[nodiscard]] detail::FuncTypeHandle hostFunctionType(uint32_t parameterCount)
+    /// Stands in for a WASI function the backend does not implement: the module importing it
+    /// instantiates, and a call to it traps.
+    wasm_trap_t* unimplementedWasiFunction(void* /*env*/,
+                                           wasmtime_caller_t* /*caller*/,
+                                           wasmtime_val_t const* /*args*/,
+                                           std::size_t /*argCount*/,
+                                           wasmtime_val_t* /*results*/,
+                                           std::size_t /*resultCount*/) noexcept
     {
-        auto parameters = wasm_valtype_vec_t {};
-        wasm_valtype_vec_new_uninitialized(&parameters, parameterCount);
-        for (auto& parameter: std::span { parameters.data, parameters.size })
-            parameter = wasm_valtype_new(WASM_I32);
-        auto results = wasm_valtype_vec_t {};
-        wasm_valtype_vec_new_empty(&results);
-        return detail::FuncTypeHandle { wasm_functype_new(&parameters, &results) };
+        static constexpr auto Message = std::string_view { "WASI function not implemented" };
+        return wasmtime_trap_new(Message.data(), Message.size());
     }
 
-    /// @return A linker on @p engine providing every host function of @p hostBindings; nothing if one
-    ///         cannot be defined.
+    /// One row of the WASI table: an allowed WASI preview 1 function and what implements it.
+    struct WasiBinding
+    {
+        std::string_view name;                             ///< The function's name.
+        wasmtime_func_callback_t implementation = nullptr; ///< What a call to it runs.
+    };
+
+    /// What implements each allowed WASI preview 1 function, in the order of wasi::Preview1Functions,
+    /// whose signature each is provided with. A row not implemented yet traps when called.
+    constexpr auto WasiBindings = std::to_array<WasiBinding>({
+        { .name = "args_get", .implementation = &unimplementedWasiFunction },
+        { .name = "args_sizes_get", .implementation = &unimplementedWasiFunction },
+        { .name = "environ_get", .implementation = &unimplementedWasiFunction },
+        { .name = "environ_sizes_get", .implementation = &unimplementedWasiFunction },
+        { .name = "clock_time_get", .implementation = &unimplementedWasiFunction },
+        { .name = "clock_res_get", .implementation = &unimplementedWasiFunction },
+        { .name = "fd_write", .implementation = &unimplementedWasiFunction },
+        { .name = "fd_close", .implementation = &unimplementedWasiFunction },
+        { .name = "fd_fdstat_get", .implementation = &unimplementedWasiFunction },
+        { .name = "fd_prestat_get", .implementation = &unimplementedWasiFunction },
+        { .name = "fd_prestat_dir_name", .implementation = &unimplementedWasiFunction },
+        { .name = "fd_seek", .implementation = &unimplementedWasiFunction },
+        { .name = "random_get", .implementation = &unimplementedWasiFunction },
+        { .name = "proc_exit", .implementation = &unimplementedWasiFunction },
+        { .name = "sched_yield", .implementation = &unimplementedWasiFunction },
+    });
+    static_assert(std::ranges::equal(WasiBindings | std::views::transform(&WasiBinding::name),
+                                     wasi::Preview1Functions
+                                         | std::views::transform(&wasi::Preview1Function::name)),
+                  "WasiBindings implements every allowed WASI function, in the order of Preview1Functions");
+
+    /// Defines one function on @p linker.
+    /// @return Nothing on success; `RuntimeUnavailable` if Wasmtime refused the definition.
+    [[nodiscard]] std::expected<void, ExtensionError> defineFunction(wasmtime_linker_t* linker,
+                                                                     std::string_view module,
+                                                                     std::string_view name,
+                                                                     FunctionSignature const& signature,
+                                                                     wasmtime_func_callback_t callback,
+                                                                     void* env)
+    {
+        auto const type = functionType(signature);
+        auto const error = detail::ErrorHandle { wasmtime_linker_define_func(linker,
+                                                                             module.data(),
+                                                                             module.size(),
+                                                                             name.data(),
+                                                                             name.size(),
+                                                                             type.get(),
+                                                                             callback,
+                                                                             env,
+                                                                             nullptr) };
+        if (error)
+            return std::unexpected(ExtensionError::RuntimeUnavailable);
+        return {};
+    }
+
+    /// @return A linker on @p engine providing every host function of @p hostBindings and every allowed
+    ///         WASI function; nothing if one cannot be defined.
     [[nodiscard]] std::optional<detail::LinkerHandle> makeLinker(wasm_engine_t* engine,
                                                                  std::span<HostBinding> hostBindings)
     {
@@ -211,17 +266,18 @@ namespace
             return std::nullopt;
         for (auto& binding: hostBindings)
         {
-            auto const type = hostFunctionType(binding.parameterCount);
-            auto const error = detail::ErrorHandle { wasmtime_linker_define_func(linker.get(),
-                                                                                 binding.module.data(),
-                                                                                 binding.module.size(),
-                                                                                 binding.name.data(),
-                                                                                 binding.name.size(),
-                                                                                 type.get(),
-                                                                                 &callHostFunction,
-                                                                                 &binding,
-                                                                                 nullptr) };
-            if (error)
+            auto const signature =
+                FunctionSignature { .parameters = std::vector(binding.parameterCount, ValueType::I32),
+                                    .results = {} };
+            if (!defineFunction(
+                    linker.get(), binding.module, binding.name, signature, &callHostFunction, &binding))
+                return std::nullopt;
+        }
+        for (auto const [index, function]: core::views::enumerate(wasi::Preview1Functions))
+        {
+            auto const implementation = WasiBindings.at(static_cast<std::size_t>(index)).implementation;
+            if (!defineFunction(
+                    linker.get(), WasiModule, function.name, function.signature(), implementation, nullptr))
                 return std::nullopt;
         }
         return linker;
@@ -316,6 +372,11 @@ std::expected<std::shared_ptr<WasmtimeRuntime>, ExtensionError> WasmtimeRuntime:
     // wasm_engine_new_with_config takes the configuration over.
     auto engine = detail::EngineHandle { wasm_engine_new_with_config(engineConfig(config, limits)) };
     if (!engine)
+        return std::unexpected(ExtensionError::RuntimeUnavailable);
+    // The host function trampoline reads the arguments into an array of MaxHostParameters.
+    if (std::ranges::any_of(hostFunctions, [](HostFunction const& function) {
+            return function.parameterCount > MaxHostParameters;
+        }))
         return std::unexpected(ExtensionError::RuntimeUnavailable);
     auto hostBindings = std::vector<HostBinding> {};
     hostBindings.reserve(hostFunctions.size());

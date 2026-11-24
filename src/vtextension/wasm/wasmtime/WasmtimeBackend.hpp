@@ -12,6 +12,11 @@
 namespace vtextension::wasm::wasmtime
 {
 
+/// The most i32 parameters a host function can take; createRuntime() refuses a table holding one taking
+/// more. The same cap as the WAMR backend's: the Canonical ABI passes at most 16 flat parameters, and a
+/// result that does not flatten to one value adds its address.
+inline constexpr auto MaxHostParameters = uint32_t { 17 };
+
 /// How compiled guest code detects an out-of-bounds access or a stack overflow.
 enum class TrapMode : uint8_t
 {
@@ -38,7 +43,8 @@ class KindState;
 /// Creates a Wasmtime backend.
 /// @param kind The state every Wasmtime backend of the process shares.
 /// @param config How the backend sets up each engine it creates.
-/// @return The backend. Refused memory growth is not reported (MemoryGrowthReporting::Unreported).
+/// @return The backend. Refused memory growth is not reported (MemoryGrowthReporting::Unreported): the
+///         guest's memory.grow returns -1, and whatever the guest does about it fails the call.
 [[nodiscard]] std::unique_ptr<IWasmBackend> makeWasmtimeBackend(std::shared_ptr<KindState> kind,
                                                                 WasmtimeConfig config);
 

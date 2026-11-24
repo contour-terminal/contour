@@ -4,6 +4,7 @@
 
 add_library(vtextension_wasmtime STATIC
     WasmtimeBackend.cpp
+    WasmtimeInstance.cpp
     WasmtimeModule.cpp
     WasmtimeBackend.hpp
     WasmtimeHandles.hpp

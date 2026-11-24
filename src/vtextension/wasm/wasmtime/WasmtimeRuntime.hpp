@@ -10,6 +10,7 @@
 #include <expected>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -51,6 +52,17 @@ class KindState
     std::atomic<uint64_t> _generation {}; ///< The current bring-up generation.
 };
 
+/// The data of an instance's store: what a host function the guest calls reaches, and how it failed.
+///
+/// Lives at a stable address for as long as the store, which hands it to every host function call.
+struct StoreData
+{
+    IHostContext& context; ///< What the instance's host function calls reach.
+    /// The error the latest host function call failed with, if it failed; it is what tells a call stopped
+    /// by a failing host function apart from one the guest trapped in.
+    std::optional<ExtensionError> hostFailure;
+};
+
 /// One host function as a runtime provides it, at a stable address its linker callback is handed.
 struct HostBinding
 {
@@ -70,8 +82,8 @@ class WasmtimeRuntime final: public IWasmRuntime, public std::enable_shared_from
     /// @param config How the engine is set up.
     /// @param limits What every instance is held to.
     /// @param hostFunctions What modules may import; copied.
-    /// @return The runtime; `RuntimeUnavailable` if @p limits allow no stack at all, or the engine or the
-    ///         linker could not be set up.
+    /// @return The runtime; `RuntimeUnavailable` if @p limits allow no stack at all, a host function takes
+    ///         more than MaxHostParameters, or the engine or the linker could not be set up.
     [[nodiscard]] static std::expected<std::shared_ptr<WasmtimeRuntime>, ExtensionError> create(
         std::shared_ptr<KindState> kind,
         WasmtimeConfig config,
@@ -94,6 +106,12 @@ class WasmtimeRuntime final: public IWasmRuntime, public std::enable_shared_from
     [[nodiscard]] std::expected<std::shared_ptr<IWasmModule>, ExtensionError> load(
         std::vector<std::byte> bytes) override;
 
+    /// @return The engine modules are compiled and stores are created on.
+    [[nodiscard]] wasm_engine_t* engine() const noexcept { return _engine.get(); }
+
+    /// @return The linker providing the host functions and WASI to every instance.
+    [[nodiscard]] wasmtime_linker const* linker() const noexcept { return _linker.get(); }
+
     /// @return The host functions the runtime provides.
     [[nodiscard]] std::span<HostBinding const> hostBindings() const noexcept { return _hostBindings; }
 
@@ -110,7 +128,7 @@ class WasmtimeRuntime final: public IWasmRuntime, public std::enable_shared_from
 };
 
 /// A compiled module, described once at load time.
-class WasmtimeModule final: public IWasmModule
+class WasmtimeModule final: public IWasmModule, public std::enable_shared_from_this<WasmtimeModule>
 {
   public:
     /// @param runtime The runtime it was loaded on, kept alive by it.
@@ -124,6 +142,7 @@ class WasmtimeModule final: public IWasmModule
 
     [[nodiscard]] std::span<ImportDescription const> imports() const noexcept override { return _imports; }
     [[nodiscard]] std::span<ExportDescription const> exports() const noexcept override { return _exports; }
+    /// Defined in WasmtimeInstance.cpp. @see IWasmModule::instantiate
     [[nodiscard]] std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> instantiate(
         IHostContext& context) override;
 
@@ -141,6 +160,9 @@ class WasmtimeModule final: public IWasmModule
 /// @param hostBindings The runtime's host functions.
 /// @return Whether it is provided.
 [[nodiscard]] Linkage linkageOf(ImportDescription const& import, std::span<HostBinding const> hostBindings);
+
+/// @return The function type of @p signature.
+[[nodiscard]] detail::FuncTypeHandle functionType(FunctionSignature const& signature);
 
 /// Compiles and describes a module on @p runtime.
 /// @return The module; `InvalidComponent` if Wasmtime refuses the bytes, or the module imports or
