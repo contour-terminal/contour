@@ -97,6 +97,20 @@ inline constexpr auto WrongSignatureModule = std::to_array<uint8_t>({
     0x74, 0x2f, 0x68, 0x6f, 0x73, 0x74, 0x40, 0x30, 0x04, 0x70, 0x69, 0x6e, 0x67, 0x00, 0x00,
 });
 
+/// Imports an allowed WASI function with another signature than preview 1 gives it: `fd_seek` with an i32
+/// offset where preview 1 has an i64. It exports a memory, as WAMR requires of any module importing WASI.
+///
+///     (module
+///       (import "wasi_snapshot_preview1" "fd_seek" (func (param i32 i32 i32 i32) (result i32)))
+///       (memory (export "memory") 1))
+inline constexpr auto WrongSignatureWasiModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x09, 0x01, 0x60, 0x04, 0x7f, 0x7f,
+    0x7f, 0x7f, 0x01, 0x7f, 0x02, 0x22, 0x01, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e,
+    0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31,
+    0x07, 0x66, 0x64, 0x5f, 0x73, 0x65, 0x65, 0x6b, 0x00, 0x00, 0x05, 0x03, 0x01, 0x00, 0x01,
+    0x07, 0x0a, 0x01, 0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00,
+});
+
 /// Imports every allowed WASI preview 1 function, with its preview 1 signature.
 ///
 ///     (module
@@ -474,6 +488,17 @@ void wrongSignatureImportIsUnsatisfied()
     CHECK(ping.signature
           == FunctionSignature { .parameters = { ValueType::I32, ValueType::I32 }, .results = {} });
     CHECK(ping.linkage == Linkage::Unsatisfied);
+}
+
+/// An allowed WASI function imported with another signature than preview 1 gives it is unsatisfied,
+/// rather than linked and then reading its arguments wrongly.
+template <typename T>
+void wrongSignatureWasiIsUnsatisfied()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const module = load(*runtime, WrongSignatureWasiModule);
+    CHECK(importOf(*module, WasiModule, "fd_seek").linkage == Linkage::Unsatisfied);
 }
 
 /// Every WASI preview 1 function the extension host allows is provided.
@@ -1024,6 +1049,7 @@ void wasiStdioGoesNowhere()
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, describesImportsAndExports)           \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unknownImportIsUnsatisfied)           \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureImportIsUnsatisfied)    \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureWasiIsUnsatisfied)      \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, allowListedWasiIsSatisfied)           \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNeedsARuntime)             \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNests)                     \

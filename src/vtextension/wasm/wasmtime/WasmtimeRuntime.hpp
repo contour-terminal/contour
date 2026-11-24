@@ -70,7 +70,8 @@ class WasmtimeRuntime final: public IWasmRuntime, public std::enable_shared_from
     /// @param config How the engine is set up.
     /// @param limits What every instance is held to.
     /// @param hostFunctions What modules may import; copied.
-    /// @return The runtime; `RuntimeUnavailable` if the engine or the linker could not be set up.
+    /// @return The runtime; `RuntimeUnavailable` if @p limits allow no stack at all, or the engine or the
+    ///         linker could not be set up.
     [[nodiscard]] static std::expected<std::shared_ptr<WasmtimeRuntime>, ExtensionError> create(
         std::shared_ptr<KindState> kind,
         WasmtimeConfig config,

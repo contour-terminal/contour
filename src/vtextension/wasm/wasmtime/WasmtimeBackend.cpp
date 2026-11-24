@@ -314,6 +314,9 @@ std::expected<std::shared_ptr<WasmtimeRuntime>, ExtensionError> WasmtimeRuntime:
     RuntimeLimits limits,
     std::span<HostFunction const> hostFunctions)
 {
+    // Wasmtime aborts the process, rather than failing, on an engine with no stack at all.
+    if (limits.stackBytes == 0)
+        return std::unexpected(ExtensionError::RuntimeUnavailable);
     // wasm_engine_new_with_config takes the configuration over.
     auto engine = detail::EngineHandle { wasm_engine_new_with_config(engineConfig(config, limits)) };
     if (!engine)
