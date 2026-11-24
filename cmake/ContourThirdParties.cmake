@@ -333,6 +333,108 @@ else()
     set(THIRDPARTY_BUILTIN_wamr "(extensions disabled)")
 endif()
 
+# Wasmtime compiles the status-line extensions to native code inside the extension host, the only
+# process that links it, statically. The pin is an LTS release (every 12th major, supported for 24
+# months) and moves from LTS to LTS; security advisories in between are taken as patch releases. With
+# CPM, the prebuilt c-api archive for this platform is fetched, pinned by its SHA-256; a platform without
+# a row below, or CONTOUR_USE_CPM=OFF, looks for an installed wasmtime of the same major instead. Without
+# either, the extension host runs WAMR and CONTOUR_HAVE_WASMTIME stays OFF.
+#
+# Bumping: take the newest patch release of the LTS major, download each archive below and replace its
+# SHA-256 (GitHub shows the same digest on the release page).
+#
+# First-party code links contour::wasmtime, and only where CONTOUR_HAVE_WASMTIME is ON.
+set(WASMTIME_VERSION "48.0.10")
+# <CMAKE_SYSTEM_NAME>|<processor>|<archive name after "wasmtime-v<version>-">|<SHA-256 of the archive>
+# The processor is CMAKE_SYSTEM_PROCESSOR lowercased, with amd64 read as x86_64 and arm64 as aarch64.
+# Windows rows are for the MSVC ABI; MinGW has no row.
+set(_WASMTIME_ARCHIVES
+    "Linux|x86_64|x86_64-linux-c-api.tar.xz|5fc9a0b8c825ae7e2730f41f6260ec38556236f28bcd34fbb9b76e15c9f56e27"
+    "Linux|aarch64|aarch64-linux-c-api.tar.xz|7be1929dd01708212668696cf55b224b4c82bd562bc231596122563e2eb32a3d"
+    "Darwin|x86_64|x86_64-macos-c-api.tar.xz|3bd16df4a8beedb510e8b92a9a3063da8b4187a6ebbc4f363b25397d436ef232"
+    "Darwin|aarch64|aarch64-macos-c-api.tar.xz|868e59b586157b2497d5cd3004a588dde85c8542b4ff2366acc069a7da5d6927"
+    "Windows|x86_64|x86_64-windows-c-api.zip|2c5cd1a231c0b6aee80ecc700d68946bca4afaa09b728f6f8c43db64207ae682"
+)
+
+if(CONTOUR_EXTENSIONS)
+    string(REGEX MATCH "^[0-9]+" _wasmtime_major "${WASMTIME_VERSION}")
+    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _wasmtime_processor)
+    if(_wasmtime_processor STREQUAL "amd64")
+        set(_wasmtime_processor "x86_64")
+    elseif(_wasmtime_processor STREQUAL "arm64")
+        set(_wasmtime_processor "aarch64")
+    endif()
+    set(_wasmtime_system "${CMAKE_SYSTEM_NAME}")
+    if(WIN32 AND NOT MSVC)
+        set(_wasmtime_system "${CMAKE_SYSTEM_NAME}-MinGW")
+    endif()
+
+    set(_wasmtime_archive "")
+    set(_wasmtime_sha256 "")
+    foreach(_wasmtime_row IN LISTS _WASMTIME_ARCHIVES)
+        string(REPLACE "|" ";" _wasmtime_fields "${_wasmtime_row}")
+        list(GET _wasmtime_fields 0 _wasmtime_row_system)
+        list(GET _wasmtime_fields 1 _wasmtime_row_processor)
+        if(_wasmtime_row_system STREQUAL _wasmtime_system AND _wasmtime_row_processor STREQUAL _wasmtime_processor)
+            list(GET _wasmtime_fields 2 _wasmtime_archive)
+            list(GET _wasmtime_fields 3 _wasmtime_sha256)
+        endif()
+    endforeach()
+
+    add_library(contour_wasmtime INTERFACE)
+    add_library(contour::wasmtime ALIAS contour_wasmtime)
+
+    if(CONTOUR_USE_CPM AND _wasmtime_archive)
+        message(STATUS "Using CPM to fetch Wasmtime ${WASMTIME_VERSION} (${_wasmtime_archive})")
+        CPMAddPackage(
+            NAME wasmtime
+            VERSION ${WASMTIME_VERSION}
+            URL "https://github.com/bytecodealliance/wasmtime/releases/download/v${WASMTIME_VERSION}/wasmtime-v${WASMTIME_VERSION}-${_wasmtime_archive}"
+            URL_HASH SHA256=${_wasmtime_sha256}
+            DOWNLOAD_ONLY YES
+        )
+        target_include_directories(contour_wasmtime SYSTEM INTERFACE "${wasmtime_SOURCE_DIR}/include")
+        if(WIN32)
+            target_link_libraries(contour_wasmtime INTERFACE
+                "${wasmtime_SOURCE_DIR}/lib/wasmtime.lib"
+                ws2_32 advapi32 userenv ntdll shell32 ole32 bcrypt)
+            # wasm.h and wasi.h mark the API __declspec(dllimport) on Windows unless told otherwise, which is
+            # right only for wasmtime.dll; this one is linked statically.
+            target_compile_definitions(contour_wasmtime INTERFACE LIBWASM_STATIC WASI_API_EXTERN=)
+        else()
+            target_link_libraries(contour_wasmtime INTERFACE "${wasmtime_SOURCE_DIR}/lib/libwasmtime.a")
+            if(LINUX)
+                target_link_libraries(contour_wasmtime INTERFACE pthread dl m)
+            endif()
+        endif()
+        set(CONTOUR_HAVE_WASMTIME ON)
+        set(CONTOUR_EXTENSION_HOST_ENGINE_STRING "Wasmtime ${WASMTIME_VERSION}")
+        set(THIRDPARTY_BUILTIN_wasmtime "CPM (Wasmtime ${WASMTIME_VERSION}, prebuilt, static)")
+    else()
+        find_package(wasmtime ${_wasmtime_major} QUIET)
+        if(TARGET wasmtime::wasmtime)
+            target_link_libraries(contour_wasmtime INTERFACE wasmtime::wasmtime)
+            set(CONTOUR_HAVE_WASMTIME ON)
+            set(CONTOUR_EXTENSION_HOST_ENGINE_STRING "Wasmtime ${wasmtime_VERSION}")
+            set(THIRDPARTY_BUILTIN_wasmtime "system package (Wasmtime ${wasmtime_VERSION})")
+        elseif(NOT CONTOUR_USE_CPM)
+            set(_wasmtime_reason "CONTOUR_USE_CPM is OFF and no Wasmtime ${_wasmtime_major} is installed")
+        else()
+            string(CONCAT _wasmtime_reason
+                "no pinned Wasmtime archive for ${_wasmtime_system} ${_wasmtime_processor}, "
+                "and no Wasmtime ${_wasmtime_major} is installed")
+        endif()
+    endif()
+
+    if(NOT CONTOUR_HAVE_WASMTIME)
+        set(THIRDPARTY_BUILTIN_wasmtime "(not found: ${_wasmtime_reason})")
+        set(CONTOUR_EXTENSION_HOST_ENGINE_STRING "WAMR (${_wasmtime_reason})")
+    endif()
+    message(STATUS "Extension host engine: ${CONTOUR_EXTENSION_HOST_ENGINE_STRING}")
+else()
+    set(THIRDPARTY_BUILTIN_wasmtime "(extensions disabled)")
+endif()
+
 # glaze, the JSON (de)serializer behind vtcontrol: structs in, structs out, schemas from the same structs.
 #
 # It must come before termbench-pro, whose CMakeLists declares its own, older glaze to FetchContent
@@ -535,6 +637,7 @@ macro(ContourThirdPartiesSummary2)
     message(STATUS "boxed-cpp           ${THIRDPARTY_BUILTIN_boxed-cpp}")
     message(STATUS "core-cpp            ${THIRDPARTY_BUILTIN_core-cpp}")
     message(STATUS "WAMR                ${THIRDPARTY_BUILTIN_wamr}")
+    message(STATUS "Wasmtime            ${THIRDPARTY_BUILTIN_wasmtime}")
     message(STATUS "Tracy               ${THIRDPARTY_BUILTIN_Tracy}")
     message(STATUS "------------------------------------------------------------------------------")
 endmacro()

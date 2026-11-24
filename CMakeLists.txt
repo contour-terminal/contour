@@ -181,6 +181,9 @@ if(CONTOUR_EXTENSIONS AND NOT CONTOUR_WASM_RUNTIME IN_LIST _CONTOUR_WASM_RUNTIME
     message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is \"${CONTOUR_WASM_RUNTIME}\", which is not a WebAssembly runtime "
                         "Contour has a backend for. Known: ${_CONTOUR_WASM_RUNTIMES}.")
 endif()
+# Whether the extension host can run Wasmtime: set ON by cmake/ContourThirdParties.cmake once a Wasmtime
+# resolves (the pinned prebuilt archive, or an installed one), never by the user.
+set(CONTOUR_HAVE_WASMTIME OFF)
 option(CONTOUR_CARGO_OFFLINE "Runs cargo with --offline, for builds from vendored crates [default: OFF]" OFF)
 option(CONTOUR_TRACY "Compiles Tracy profiler instrumentation into contour [default: OFF]" OFF)
 option(CONTOUR_TRACY_TOOLS "Builds Tracy's capture and csvexport CLI tools [default: OFF]" OFF)
@@ -484,6 +487,7 @@ macro(ContourConfigurationSummary)
     message(STATUS "WebAssembly status-line extensions:                 ${CONTOUR_EXTENSIONS}")
     if(CONTOUR_EXTENSIONS)
         message(STATUS "|> WebAssembly runtime:                             ${CONTOUR_WASM_RUNTIME}")
+        message(STATUS "|> Extension host engine:                          ${CONTOUR_EXTENSION_HOST_ENGINE_STRING}")
     endif()
     message(STATUS "Build contour using mimalloc:                       ${CONTOUR_BUILD_WITH_MIMALLOC}")
     message(STATUS "Clang Tidy:                                         ${USING_TIDY_STRING}")
