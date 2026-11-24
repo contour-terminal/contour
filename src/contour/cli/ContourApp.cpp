@@ -35,6 +35,7 @@
 #include <vtpty/DirectoryHandle.hpp>
 #include <vtpty/ExecutablePath.hpp>
 #include <vtpty/Process.hpp>
+#include <vtpty/ProcessEnvironment.hpp>
 #include <vtpty/ProcessRunner.hpp>
 #include <vtpty/ProgramLookup.hpp>
 
@@ -1252,11 +1253,7 @@ namespace
     ///         inherit, less what ChildEnvironment withholds.
     [[nodiscard]] std::vector<std::string> inheritedEnvironment()
     {
-    #ifdef _WIN32
-        return {}; // No declared process runs on Windows: the runner answers Unsupported.
-    #else
-        return vthost::keeper::processEnvironmentEntries();
-    #endif
+        return vtpty::processEnvironmentEntries();
     }
 
     /// @param extensions The daemon's `daemon.extensions`.

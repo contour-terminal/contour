@@ -37,6 +37,7 @@ set(vtpty_SOURCES
     Pty.cpp
     PtyAdoption.cpp
     SandboxInfo.cpp
+    ProcessEnvironment.cpp
     SpawnLadder.cpp
     SpawnSpec.cpp
     SpawnTrampoline${PLATFORM_SUFFIX}.cpp
@@ -52,6 +53,7 @@ set(vtpty_SOURCES
 )
 
 set(vtpty_HEADERS
+    ProcessEnvironment.hpp
     AdoptedChild.hpp
     AsciiFold.hpp
     BeneathRead.hpp
@@ -222,6 +224,7 @@ if(VTPTY_TESTING)
         PtyAdoption_test.cpp
         SandboxInfo_test.cpp
         SpawnLadder_test.cpp
+        ProcessEnvironment_test.cpp
         SpawnSpec_test.cpp
         SpawnTrampoline_test.cpp
         SshAgentIo_test.cpp
