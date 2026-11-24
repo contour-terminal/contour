@@ -4162,8 +4162,7 @@ std::vector<DaemonEnvironmentSet> YAMLConfigReader::readDaemonExtensionEnvironme
             if (std::ranges::contains(variables, variableName, &DaemonEnvironmentVariable::name))
             {
                 errorLog()("Skipping variable '{}' of set '{}' of extension '{}' of {}: it is given twice; "
-                           "the first "
-                           "one stands.",
+                           "the first one stands.",
                            variableName,
                            set,
                            name,

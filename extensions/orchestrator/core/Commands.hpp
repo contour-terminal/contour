@@ -190,8 +190,8 @@ struct ActionDecl
 
 /// The manifest lines the tables declare: every root, read, arg, command-env, command, command-env-for,
 /// command-env-set, pane, pane-env, pane-env-set, serve and action line, in that order and each kind in table
-/// order. A command whose
-/// verification is Unmeasured is left out, and so is an argument that no command left in and no pane names.
+/// order. A command whose verification is Unmeasured is left out, and so is an argument that no command left
+/// in and no pane names.
 /// The manifest is these lines after its fixed `name`, `version`, `title` and `placement` lines.
 /// @return One string per line, without line ends.
 [[nodiscard]] std::vector<std::string> manifestLines();
