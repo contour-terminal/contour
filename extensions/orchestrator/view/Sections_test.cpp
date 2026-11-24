@@ -276,6 +276,74 @@ TEST_CASE("with more than one repository each run names its own", "[orchestrator
     CHECK(rowOfRun(rows, DoneId)->prefix == "other");
 }
 
+namespace
+{
+
+/// @return The index of the detail line labelled @p label, or the line count when there is none.
+[[nodiscard]] std::size_t detailIndexOf(std::vector<DetailLine> const& details, std::string_view label)
+{
+    auto const found = std::ranges::find(details, label, &DetailLine::label);
+    return static_cast<std::size_t>(std::ranges::distance(details.begin(), found));
+}
+
+/// @return The configuration's workers, as the `workers` array spells them.
+[[nodiscard]] std::string workersJson(std::string_view workers)
+{
+    return std::format(R"({{ "worktree_root": "~/worktrees", "models": ["opus", "sonnet"],
+  "workers": [ {} ],
+  "repos": [ {{ "name": "contour", "path": "~/projects/contour", "forge": "github", "issues": [] }} ],
+  "tasks": [
+    {{ "id": "fix_ci", "key": "f", "label": "fix CI", "applies_to": "pr", "model": "sonnet",
+       "prompt": "/contour-workflows:fix-ci {{url}}" }},
+    {{ "id": "issue", "key": "w", "label": "work on issue", "applies_to": "issue", "model": "opus",
+       "prompt": "/contour-workflows:work-issue {{url}}" }} ] }})",
+                       workers);
+}
+
+} // namespace
+
+TEST_CASE("a run names its worker beside its model when more than one worker is configured",
+          "[orchestrator][view]")
+{
+    auto withWork = storedRun(Running {}, RunningId, ChangeRequestRef { 2375 });
+    withWork.worker = "work";
+    auto implicit = storedRun(Running {}, DoneId, ChangeRequestRef { 2379 });
+    auto const engine = bootEngine({ .configJson = workersJson(R"({ "id": "work", "agent": "claude" },
+                                                   { "id": "copilot", "agent": "copilot" })"),
+                                     .stored = { withWork, implicit } });
+    auto const rows = buildRows(engine, StartMonoMs);
+
+    auto const* const named = rowOfRun(rows, RunningId);
+    REQUIRE(named != nullptr);
+    auto const modelAt = detailIndexOf(named->details, "model");
+    REQUIRE(modelAt + 1 < named->details.size());
+    CHECK(named->details[modelAt + 1] == DetailLine { .label = "worker", .value = "work" });
+
+    // A run that stores no worker is the implicit one.
+    auto const* const unnamed = rowOfRun(rows, DoneId);
+    REQUIRE(unnamed != nullptr);
+    auto const implicitAt = detailIndexOf(unnamed->details, "model");
+    REQUIRE(implicitAt + 1 < unnamed->details.size());
+    CHECK(unnamed->details[implicitAt + 1] == DetailLine { .label = "worker", .value = "claude" });
+}
+
+TEST_CASE("a single or no configured worker shows no worker line", "[orchestrator][view]")
+{
+    auto named = storedRun(Running {}, RunningId, ChangeRequestRef { 2375 });
+    named.worker = "work";
+    auto const single = bootEngine(
+        { .configJson = workersJson(R"({ "id": "work", "agent": "claude" })"), .stored = { named } });
+    auto const none = bootEngine({ .stored = { named } });
+
+    for (auto const* const engine: { &single, &none })
+    {
+        auto const rows = buildRows(*engine, StartMonoMs);
+        auto const* const row = rowOfRun(rows, RunningId);
+        REQUIRE(row != nullptr);
+        CHECK(detailIndexOf(row->details, "worker") == row->details.size());
+    }
+}
+
 TEST_CASE("a filter keeps the runs that hold it, and their groups' headings", "[orchestrator][view]")
 {
     auto const engine = bootEngine({ .stored = { storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }),

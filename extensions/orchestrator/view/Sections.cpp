@@ -354,11 +354,16 @@ namespace
     /// The details every run row shows.
     [[nodiscard]] std::vector<DetailLine> runDetails(Lists const& lists, Run const& run)
     {
-        auto details =
-            std::vector<DetailLine> { DetailLine { .label = "task",
-                                                   .value = clean(taskLabel(lists.config, run)) },
-                                      DetailLine { .label = "model", .value = clean(run.model) },
-                                      DetailLine { .label = "state", .value = clean(runStateText(run)) } };
+        auto details = std::vector<DetailLine> { DetailLine { .label = "task",
+                                                              .value = clean(taskLabel(lists.config, run)) },
+                                                 DetailLine { .label = "model", .value = clean(run.model) } };
+        // The worker is named only where a choice of workers makes it news; a run stores none when it ran on
+        // the implicit worker.
+        if (lists.config != nullptr && lists.config->workers().size() > 1)
+            details.push_back(DetailLine {
+                .label = "worker",
+                .value = clean(run.worker.empty() ? std::string { ImplicitWorkerId } : run.worker) });
+        details.push_back(DetailLine { .label = "state", .value = clean(runStateText(run)) });
         // What the agent spent and did comes before where it worked: it is what a finished run is opened for.
         std::ranges::move(statsDetails(run), std::back_inserter(details));
         details.push_back(DetailLine { .label = "branch", .value = clean(run.branch) });
