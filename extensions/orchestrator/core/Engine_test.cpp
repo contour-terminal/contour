@@ -798,6 +798,16 @@ TEST_CASE("start checks the login and the hooks before any list", "[orchestrator
     CHECK(other.engine().problems().empty());
 }
 
+TEST_CASE("a command's exit code is shown in decimal, an NTSTATUS in hex", "[orchestrator][engine]")
+{
+    CHECK(engine::detail::judge(failed(1)).why == "it exited with 1");
+    CHECK(engine::detail::judge(failed(128)).why == "it exited with 128");
+    CHECK(engine::detail::judge(failed(-1073741819)).why == "it exited with 0xC0000005"); // access violation
+    CHECK(engine::detail::judge(failed(-1)).why == "it exited with 0xFFFFFFFF");
+    CHECK(engine::detail::judge(failed(-1073741819, "fatal: boom\nmore")).why
+          == "fatal: boom"); // stderr wins
+}
+
 TEST_CASE("published() is the last summary", "[orchestrator][engine]")
 {
     auto const harness = booted();

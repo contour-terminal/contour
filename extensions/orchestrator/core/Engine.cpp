@@ -28,6 +28,16 @@ namespace orchestrator
 
 namespace engine::detail
 {
+    namespace
+    {
+        /// @return How an exit code reads: decimal, or for a negative one (an NTSTATUS on Windows, such as
+        ///         0xC0000005) its 32 bits in hex.
+        [[nodiscard]] std::string exitCodeText(int32_t code)
+        {
+            return code < 0 ? std::format("0x{:08X}", static_cast<uint32_t>(code)) : std::format("{}", code);
+        }
+    } // namespace
+
     Judgement judge(ProcessOutcome const& outcome)
     {
         switch (outcome.start)
@@ -51,7 +61,7 @@ namespace engine::detail
                 std::string_view(outcome.stderrText).substr(0, outcome.stderrText.find('\n'));
             auto why = displayText(firstLine, MaxEntryChars);
             if (why.empty())
-                why = outcome.exitCode ? std::format("it exited with {}", *outcome.exitCode)
+                why = outcome.exitCode ? std::format("it exited with {}", exitCodeText(*outcome.exitCode))
                                        : std::string("it exited without a code");
             return { .verdict = Verdict::Failed, .why = std::move(why) };
         }
