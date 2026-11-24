@@ -348,11 +348,12 @@ TEST_CASE("SixelParser.raster", "[sixel]")
     sp.done();
     CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
     CHECK(ib.aspectRatio() == 1);
-    // `"5;0` is 5:1 -- a zero Pad reads as one, not as "leave the previous ratio untouched".
-    sp.parseFragment("\"5;0");
+    // A zero Pad, which the VT340 manual leaves open, leaves the previous ratio untouched, as in Windows
+    // Terminal. (xterm reads it as 1, which here would make `"5;0` 5:1.)
+    sp.parseFragment("\"3;1\"5;0");
     sp.done();
     CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
-    CHECK(ib.aspectRatio() == 5);
+    CHECK(ib.aspectRatio() == 3);
     sp.parseFragment("\"0;5");
     sp.done();
     CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
@@ -576,7 +577,7 @@ TEST_CASE("SixelParser.aspect_ratio_overflow", "[sixel]")
     auto constexpr PinColor = RGBColor { 0x10, 0x20, 0x40 };
 
     auto ib = rawBuilder({ Width(3), Height(7) }, OpaqueBlack, { .vertical = 2, .horizontal = 1 });
-    ib.setRaster(2, 1, std::nullopt);
+    ib.setRaster(2, 1, ImageSize {});
 
     auto sp = SixelParser { ib };
 
@@ -870,6 +871,91 @@ TEST_CASE("SixelParser.rgb_parameters_saturate", "[sixel]")
     CHECK(paintOnePixelWith("#0;2;99999999999999999999;0;0") == RGBColor { 0xFF, 0x00, 0x00 });
 }
 
+TEST_CASE("SixelParser.rgb_rounds_to_nearest", "[sixel]")
+{
+    // 50% is 127.5, which rounds to 128 (as in Windows Terminal); truncating gave 127.
+    STATIC_CHECK(sixelColorFromRgb100(0, 50, 100) == RGBColor { 0, 128, 255 });
+    STATIC_CHECK(sixelColorFromRgb100(1, 99, 200) == RGBColor { 3, 252, 255 });
+    CHECK(paintOnePixelWith("#0;2;50;50;50") == RGBColor { 128, 128, 128 });
+}
+
+TEST_CASE("SixelParser.colour_introducer_reads_omitted_parameters_as_zero", "[sixel]")
+{
+    // Register 1 starts as the VT340's blue, so a pixel painted with it shows whether it was redefined.
+    auto constexpr Vt340Blue = VT340DefaultColorPalette[1];
+    auto constexpr Green = RGBColor { 0, 255, 0 };
+
+    SECTION("a model with missing components defines the rest as 0")
+    {
+        CHECK(paintOnePixelWith("#1;2") == RGBColor { 0, 0, 0 });
+        CHECK(paintOnePixelWith("#1;2;100") == RGBColor { 255, 0, 0 });
+    }
+
+    SECTION("an unknown model selects the colour without redefining it")
+    {
+        CHECK(paintOnePixelWith("#1;0;100;0;0") == Vt340Blue);
+        CHECK(paintOnePixelWith("#1;3;100;0;0") == Vt340Blue);
+    }
+
+    SECTION("a bare introducer selects colour 0")
+    {
+        CHECK(paintOnePixelWith("#0;2;0;100;0#1#") == Green);
+    }
+}
+
+TEST_CASE("SixelParser.raster_attribute_reads_omitted_parameters_as_zero", "[sixel]")
+{
+    auto constexpr Canvas = ImageSize { Width(80), Height(60) };
+
+    SECTION("a Pad of 0 leaves the aspect ratio as it was")
+    {
+        CHECK(buildOn(Canvas, "\"2;1\"5;0").aspectRatio() == 2u);
+        CHECK(buildOn(Canvas, "\"2;1\"5").aspectRatio() == 2u);
+        CHECK(buildOn(Canvas, "\"3;1").aspectRatio() == 3u);
+    }
+
+    SECTION("a zero dimension declares no size, so the image grows as it is painted")
+    {
+        // A zero-width canvas used to clip every pixel away.
+        auto constexpr Pin = RGBColor { 0x10, 0x20, 0x40 };
+        auto const ib = buildOn(Canvas, "\"1;1;0;12#0~~", Pin);
+        CHECK(ib.size() == ImageSize { Width(2), Height(6) });
+        CHECK(ib.at({ .line = LineOffset(5), .column = ColumnOffset(1) }).rgb() == Pin);
+    }
+
+    SECTION("a zero dimension keeps what an earlier raster attribute declared for it, on its own")
+    {
+        CHECK(buildOn(Canvas, "\"1;1;8;12\"1;1;0;18").size() == ImageSize { Width(8), Height(18) });
+        CHECK(buildOn(Canvas, "\"1;1;8;12\"1;1;10;0").size() == ImageSize { Width(10), Height(12) });
+        CHECK(buildOn(Canvas, "\"1;1;8;12\"1;1;0;0").size() == ImageSize { Width(8), Height(12) });
+    }
+
+    SECTION("parameters past the fourth are ignored, not the whole attribute")
+    {
+        auto const ib = buildOn(Canvas, "\"2;1;8;12;9");
+        CHECK(ib.aspectRatio() == 2u);
+        CHECK(ib.size() == ImageSize { Width(8), Height(24) });
+    }
+
+    SECTION("it is also a graphics carriage return")
+    {
+        CHECK(buildOn(Canvas, "~~~\"1;1~").sixelCursor().column == ColumnOffset(1));
+    }
+}
+
+TEST_CASE("SixelParser.default_palette_continues_with_the_xterm_colours", "[sixel]")
+{
+    // Registers an image never defines start as the VT340 sixel colours, then (as in Windows Terminal,
+    // the manual saying nothing past the VT340's 16) the xterm 6x6x6 cube and grey ramp, then black.
+    auto const palette = SixelColorPalette { 300, 300 };
+    CHECK(palette.at(1) == VT340DefaultColorPalette[1]);
+    CHECK(palette.at(21) == RGBColor { 0, 0, 255 });
+    CHECK(palette.at(196) == RGBColor { 255, 0, 0 });
+    CHECK(palette.at(232) == RGBColor { 8, 8, 8 });
+    CHECK(palette.at(255) == RGBColor { 238, 238, 238 });
+    CHECK(palette.at(256) == RGBColor { 0, 0, 0 });
+}
+
 TEST_CASE("SixelParser.sixelAspectVertical", "[sixel]")
 {
     STATIC_CHECK(sixelAspectVertical(0) == 2);
@@ -1085,8 +1171,8 @@ TEST_CASE("SixelParser.digit_runs_match_per_byte", "[sixel]")
     }
     SECTION("a digit that is not part of a run still parses")
     {
-        // ColorIntroducer's first digit transitions into ColorParam, so it is not foldable and must
-        // go through the ordinary dispatch. A one-digit parameter is the case that proves it.
+        // A one-digit parameter is the shortest run the fold can see, and the case most likely to
+        // be mishandled at a run's boundary.
         CHECK(agree("#1~"));
         CHECK(agree("#1;2;1;1;1~"));
     }
@@ -1137,14 +1223,13 @@ TEST_CASE("SixelParser.param_count_saturates", "[sixel]")
         return std::tuple { ib.size(), ib.sixelCursor(), ib.data() };
     };
 
-    SECTION("a colour past five parameters defines nothing, however far past")
+    SECTION("a colour past five parameters reads only the first five, however far past")
     {
-        // Six parameters is not a colour definition, so it must leave the painting colour exactly as
-        // if the command had never been sent. This is the assertion that pins the saturation point:
-        // comparing six against seven would pass even if the count saturated at five, because both
-        // would then define the same wrong colour. Only "defines nothing" tells the two apart.
-        CHECK(build("#1;2;100;0;0;7~") == build("~"));
-        CHECK(build("#1;2;100;0;0;7;7;7;7~") == build("~"));
+        // The parameters past the fifth are ignored, as in Windows Terminal. If the overflow slot
+        // the saturated count writes into were one a reader used, the trailing 7s would land in the
+        // blue component and these would differ.
+        CHECK(build("#1;2;100;0;0;7~") == build("#1;2;100;0;0~"));
+        CHECK(build("#1;2;100;0;0;7;7;7;7~") == build("#1;2;100;0;0~"));
     }
 
     SECTION("an untrusted flood of separators cannot corrupt the decision")
@@ -1153,14 +1238,13 @@ TEST_CASE("SixelParser.param_count_saturates", "[sixel]")
         for ([[maybe_unused]] auto const i: std::views::iota(0, 5000))
             flood += ";7";
         flood += "~";
-        CHECK(build(flood) == build("~"));
+        CHECK(build(flood) == build("#1;2;100;0;0~"));
     }
 
     SECTION("the counts that do mean something still do")
     {
-        // Guards the saturation from swallowing the real cases: five parameters define a colour, so
-        // this pair must differ. Note the raster predicate (> 1 && < 5) cannot distinguish where the
-        // count saturates -- five and six both fail it -- so only the colour cases above pin that.
+        // Guards the saturation from swallowing the real cases: five parameters define a colour, and
+        // a raster attribute declares a size, so each pair must differ.
         CHECK(build("#1;2;100;0;0~") != build("~"));
         CHECK(build("\"1;1;8;12#1;2;100;0;0~") != build("#1;2;100;0;0~"));
     }
