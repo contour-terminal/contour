@@ -56,7 +56,7 @@ BACKENDS = (
     Backend(
         name="Wasmtime",
         directory=Path("src/vtextension/wasm/wasmtime"),
-        c_header=re.compile(r'#include\s*[<"](wasmtime\.h|wasm\.h|wasi\.h|wasmtime/)'),
+        c_header=re.compile(r'#include\s*[<"]((wasmtime|wasm|wasi)\.h[>"]|wasmtime/)'),
         backend_header=re.compile(r'#include\s*[<"](vtextension/)?wasm/wasmtime/'),
         link=re.compile(r"contour::wasmtime\b"),
     ),
@@ -137,6 +137,7 @@ def self_test() -> int:
         ("wasi.h", bool(WASMTIME.c_header.search('#include "wasi.h"')), True),
         ("a wasmtime/ header", bool(WASMTIME.c_header.search("#include <wasmtime/config.h>")), True),
         ("WAMR header is not Wasmtime", bool(WASMTIME.c_header.search("#include <wasm_export.h>")), False),
+        ("a .hpp of the same stem is not Wasmtime", bool(WASMTIME.c_header.search("#include <wasm.hpp>")), False),
         ("similar name is not Wasmtime", bool(WASMTIME.c_header.search("#include <my_wasm.h>")), False),
         ("Wasmtime backend header", bool(WASMTIME.backend_header.search("#include <vtextension/wasm/wasmtime/WasmtimeBackend.hpp>")), True),
         ("WAMR backend header is not Wasmtime's", bool(WASMTIME.backend_header.search("#include <vtextension/wasm/wamr/WamrBackend.hpp>")), False),
