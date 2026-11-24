@@ -1288,7 +1288,7 @@ TEST_CASE("ConPty.terminatingAHeldDirectoryChildWhoseLeaderExitedEndsItsTree", "
 
 // Closing a pane closes its console; the agent is given the console-close grace to handle that, and then what
 // it left behind ends with its job -- without the Process that is freed waiting for any of it.
-TEST_CASE("ConPty.closingAHeldDirectoryChildsConsoleEndsADetachedGrandchild", "[vtpty][conpty][held]")
+TEST_CASE("ConPty.closingTheConsoleOfAHeldDirectoryChildEndsADetachedGrandchild", "[vtpty][conpty][held]")
 {
     auto tree = HeldTree {};
     auto process = tree.startDetachedTree();

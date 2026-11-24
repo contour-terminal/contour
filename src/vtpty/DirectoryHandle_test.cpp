@@ -444,10 +444,10 @@ TEST_CASE("DirectoryHandle: openBeneath refuses what is not one component beneat
         REQUIRE_FALSE(opened.has_value());
         CHECK(opened.error() == DWORD { ERROR_ACCESS_DENIED });
     }
-    auto const unparented = vtpty::openBeneath(
+    auto const parentless = vtpty::openBeneath(
         nullptr, L"x", vtpty::BeneathEntry::DirectoryCreatedIfMissing, vtpty::HeldDirectoryAccess);
-    REQUIRE_FALSE(unparented.has_value());
-    CHECK(unparented.error() == DWORD { ERROR_ACCESS_DENIED });
+    REQUIRE_FALSE(parentless.has_value());
+    CHECK(parentless.error() == DWORD { ERROR_ACCESS_DENIED });
     CHECK(std::filesystem::is_empty(dir));
 }
 

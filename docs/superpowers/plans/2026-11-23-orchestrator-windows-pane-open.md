@@ -511,7 +511,7 @@ TEST_CASE("ConPty.terminatingAHeldDirectoryChildEndsItsTree", "[vtpty][conpty][h
 {   // heldProbe {"spawn-detached", grand, "pid", leaderFile, "sleep", "600000"}; await both pids;
     // process.terminate(Normal) → isDead(leader) && isDead(grandchild)
 }
-TEST_CASE("ConPty.closingAHeldDirectoryChildsConsoleEndsADetachedGrandchild", "[vtpty][conpty][held]")
+TEST_CASE("ConPty.closingTheConsoleOfAHeldDirectoryChildEndsADetachedGrandchild", "[vtpty][conpty][held]")
 {   // as above; process.close(); process.reset() returns at once (no wait for the child);
     // isDead(grandchild) within ConsoleCloseGrace + 5 s
 }

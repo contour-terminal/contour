@@ -64,6 +64,7 @@ tio = "tio"                       # The POSIX idiom for a local `struct termios`
 iy = "iy"                         # Item-space y coordinate, paired with `ix`.
 msg_controllen = "msg_controllen" # The control-buffer length field of POSIX `struct msghdr`.
 unexpect = "unexpect"             # C++23 std::unexpect, the tag constructing std::expected's error.
+ERROR_FILENAME_EXCED_RANGE = "ERROR_FILENAME_EXCED_RANGE" # Win32's own spelling of the error, in winerror.h.
 
 [default.extend-words]
 # Domain vocabulary that is genuinely tree-wide in a terminal emulator.

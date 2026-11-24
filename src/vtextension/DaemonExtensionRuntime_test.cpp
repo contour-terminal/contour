@@ -781,8 +781,8 @@ TEST_CASE("DaemonExtensionRuntime: a Windows root is shown and granted by its re
     std::filesystem::create_directories(top / "Repos");
     std::filesystem::create_directories(top / "ext");
     {
-        auto module = std::ofstream { top / "ext" / "good.wasm", std::ios::binary };
-        module << textOf(testing::withManifest(testing::toModule(testing::DaemonProbeModule), WorkManifest));
+        auto moduleFile = std::ofstream { top / "ext" / "good.wasm", std::ios::binary };
+        moduleFile << textOf(testing::withManifest(testing::toModule(testing::DaemonProbeModule), WorkManifest));
     }
     auto& directories = vtpty::nativeDirectoryOpener();
     auto const opened = directories.open(core::pathToUtf8(top / "Repos"));
