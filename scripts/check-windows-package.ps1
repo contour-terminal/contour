@@ -40,13 +40,14 @@ $UserUpgradeCode = '{AFF353C7-C33A-474C-B9C7-EDD160677BC9}'
 # What the zip may hold in the way of executables, and what it must hold. Loaded by name or file type at run
 # time, none of these is noticed missing by a build: the Fluent row's controls style (QQuickStyle::setStyle,
 # which windeployqt's --qmldir scan cannot see), Qt SVG and its image plugin (see cmake/DeployQt.cmake), and
-# the bundled status-line extensions, which contour.exe looks for beside bin/.
+# the bundled status-line extensions and the agent orchestrator's module, which contour.exe looks for beside
+# bin/.
 $ShippedExecutables = 'contour.exe', 'OpenConsole.exe'
 $RequiredZipEntries = @(
     'bin/qml/QtQuick/Controls/FluentWinUI3/qmldir'
     'bin/imageformats/qsvg.dll'
     'bin/Qt6Svg.dll'
-) + ('agent-status', 'clock', 'git', 'plasma', 'sysload' | ForEach-Object { "share/contour/extensions/$_.wasm" })
+) + ('agent-status', 'clock', 'git', 'orchestrator', 'plasma', 'sysload' | ForEach-Object { "share/contour/extensions/$_.wasm" })
 
 # The components whose registry root and environment scope depend on the installer's scope (wix_scope.wxs).
 $PathComponent = 'ContourPathEnvironment'

@@ -75,6 +75,7 @@ env:
   WASI_SDK_VERSION: "34"
   WASI_SDK_X86_64_LINUX_SHA256: "b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4"
   WASI_SDK_ARM64_MACOS_SHA256: "9c59398106b417f8f14913380fdf0097a8cc0ff4af9eb3ce0065a859e88d49e9"
+  WASI_SDK_X86_64_WINDOWS_SHA256: "cccb5c323a9b34f0349a9b09e8804a0a7632c68c3310f4b5f437ed57d7e71d8f"
   # The one place where a step or script learns that it builds a release; jobs use the same condition
   # in their `if:` (docs/internals/releasing.md).
   CONTOUR_BUILD_CHANNEL: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || 'prerelease' }}
@@ -1526,12 +1527,22 @@ jobs:
             Get-Content (Join-Path $env:RUNNER_TEMP 'pace-kv.err') -Tail 15 -ErrorAction SilentlyContinue
           }
           exit 0
+      # The agent orchestrator's guest is C++, built with wasi-sdk (cmake/ContourWasiCxx.cmake), and installed with
+      # the bundled extensions into share/contour/extensions. On the command line rather than in the preset, so
+      # that a local msvc-release configure needs no wasi-sdk.
+      - name: "wasi-sdk (the agent orchestrator)"
+        id: wasi_sdk
+        uses: ./.github/actions/wasi-sdk
+        with:
+          version: ${{ env.WASI_SDK_VERSION }}
+          platform: x86_64-windows
+          sha256: ${{ env.WASI_SDK_X86_64_WINDOWS_SHA256 }}
       - name: "Generate build files"
         shell: pwsh
         run: |
           $log = Join-Path $env:RUNNER_TEMP 'configure.log'
           foreach ($attempt in 1..3) {
-            cmake --preset $env:CMAKE_PRESET 2>&1 | Tee-Object -FilePath $log
+            cmake --preset $env:CMAKE_PRESET -DCONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST=ON "-DWASI_SDK_PREFIX=${{ steps.wasi_sdk.outputs.prefix }}" 2>&1 | Tee-Object -FilePath $log
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             # Without pace-cc there is nothing to configure again for.
             if (-not (Get-Command pace-cc -ErrorAction SilentlyContinue)) { break }
@@ -1653,12 +1664,22 @@ jobs:
         uses: ./.github/actions/windows-build-env
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+      # The agent orchestrator's guest is C++, built with wasi-sdk (cmake/ContourWasiCxx.cmake), and installed with
+      # the bundled extensions into share/contour/extensions. On the command line rather than in the preset, so
+      # that a local msvc-release configure needs no wasi-sdk.
+      - name: "wasi-sdk (the agent orchestrator)"
+        id: wasi_sdk
+        uses: ./.github/actions/wasi-sdk
+        with:
+          version: ${{ env.WASI_SDK_VERSION }}
+          platform: x86_64-windows
+          sha256: ${{ env.WASI_SDK_X86_64_WINDOWS_SHA256 }}
       - name: "Generate build files"
         shell: pwsh
         # Without a launcher: the runner image's ccache would otherwise be picked up as a cache that is
         # empty on every run.
         run: |
-          cmake --preset $env:CMAKE_PRESET -DUSE_COMPILER_CACHE=OFF
+          cmake --preset $env:CMAKE_PRESET -DUSE_COMPILER_CACHE=OFF -DCONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST=ON "-DWASI_SDK_PREFIX=${{ steps.wasi_sdk.outputs.prefix }}"
         env:
           VCPKG_ROOT: "${{ runner.workspace }}/vcpkg"
       - name: "Build"

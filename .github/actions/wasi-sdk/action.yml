@@ -10,7 +10,7 @@ inputs:
     description: "The wasi-sdk major version, as in the release tag wasi-sdk-<version>."
     required: true
   platform:
-    description: "The release asset's platform suffix: x86_64-linux, arm64-macos, ..."
+    description: "The release asset's platform suffix: x86_64-linux, arm64-macos, x86_64-windows, ..."
     required: true
   sha256:
     description: "The SHA-256 of wasi-sdk-<version>.0-<platform>.tar.gz, as the release lists it."
@@ -32,11 +32,32 @@ runs:
       run: |
         set -euo pipefail
         name="wasi-sdk-${WASI_SDK_VERSION}.0-${WASI_SDK_PLATFORM}"
-        curl -fsSL --retry 5 --retry-all-errors --max-time 600 -o "$RUNNER_TEMP/$name.tar.gz" \
+        # Git Bash on Windows: RUNNER_TEMP is a Windows path, which curl and the checksum tools want in
+        # Unix form.
+        temp="$RUNNER_TEMP"
+        if [[ "$RUNNER_OS" == Windows ]]; then
+            temp=$(cygpath -u "$RUNNER_TEMP")
+        fi
+        curl -fsSL --retry 5 --retry-all-errors --max-time 600 -o "$temp/$name.tar.gz" \
             "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/$name.tar.gz"
-        # shasum is on both runner images; sha256sum is not on macOS.
-        echo "$WASI_SDK_SHA256  $RUNNER_TEMP/$name.tar.gz" | shasum -a 256 --check --strict
-        tar -xzf "$RUNNER_TEMP/$name.tar.gz" -C "$RUNNER_TEMP"
-        rm "$RUNNER_TEMP/$name.tar.gz"
-        test -x "$RUNNER_TEMP/$name/bin/clang++"
-        echo "prefix=$RUNNER_TEMP/$name" >> "$GITHUB_OUTPUT"
+        # sha256sum is on Linux and in Git Bash; macOS has shasum only.
+        if command -v sha256sum > /dev/null; then
+            echo "$WASI_SDK_SHA256  $temp/$name.tar.gz" | sha256sum --check --strict
+        else
+            echo "$WASI_SDK_SHA256  $temp/$name.tar.gz" | shasum -a 256 --check --strict
+        fi
+        if [[ "$RUNNER_OS" == Windows ]]; then
+            # Git Bash's GNU tar reads the "C:" of a Windows path as a remote host; CMake's tar does not, and
+            # is run from the directory anyway, so that it is handed no drive letter at all.
+            (cd "$temp" && cmake -E tar xzf "$name.tar.gz")
+        else
+            tar -xzf "$temp/$name.tar.gz" -C "$temp"
+        fi
+        rm "$temp/$name.tar.gz"
+        test -x "$temp/$name/bin/clang++" || test -x "$temp/$name/bin/clang++.exe"
+        if [[ "$RUNNER_OS" == Windows ]]; then
+            # A mixed path (C:/...): what CMake and the MSVC tools accept alike.
+            echo "prefix=$(cygpath -m "$temp/$name")" >> "$GITHUB_OUTPUT"
+        else
+            echo "prefix=$RUNNER_TEMP/$name" >> "$GITHUB_OUTPUT"
+        fi
