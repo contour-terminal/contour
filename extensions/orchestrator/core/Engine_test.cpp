@@ -4883,6 +4883,26 @@ TEST_CASE("a set's tags cannot be a repository's", "[orchestrator][engine][worke
     }
 }
 
+TEST_CASE("a repository named auth is polled like any other beside an issue source's login check",
+          "[orchestrator][engine][jira]")
+{
+    constexpr auto AuthPath = "/home/u/projects/auth"sv;
+    auto harness = Harness { contextFor(
+        Settings { .repos = R"j([ { "name": "auth", "path": "~/projects/auth", "forge": "github",
+                        "issues": [ { "source": "forge", "query": "assignee:@me" },
+                                    { "source": "jira", "jql": "a", "site": "https://example.atlassian.net" } ] } ])j",
+                   .repoPaths = { AuthPath } }) };
+    auto const check = harness.pending("acli-auth");
+    REQUIRE(check);
+    // The source's login tag is `poll/auth:<source>`; a repository's is `poll/<name>/<list>`.
+    CHECK(check->tag == "poll/auth:jira");
+    harness.boot();
+    CHECK_FALSE(harness.engine().changeRequests("auth").empty());
+    CHECK(jiraItemsIn(harness.engine().unclaimedIssues("auth")) == RecordedWorkItems);
+    CHECK_FALSE(mentions(harness.engine().problems(), "incomplete"));
+    CHECK_FALSE(mentions(harness.engine().problems(), "login check"));
+}
+
 TEST_CASE("a set's answer after its worker was removed is answered to nobody",
           "[orchestrator][engine][workers][hooks]")
 {

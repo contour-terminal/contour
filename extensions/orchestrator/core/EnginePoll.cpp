@@ -57,12 +57,13 @@ namespace
     constexpr auto DefaultBranchList = "default-branch"sv;
     constexpr auto WorktreesList = "worktrees"sv;
 
-    /// @param check HooksTag or PluginsTag.
-    /// @param envSet A variable set's name; "" for none.
-    /// What separates a set's name from its check in the check's tag. No repository name holds it (an
-    /// ArgumentKind::Name), so `poll/hooks:<set>` is never `poll/<repo>/<list>` of a repository `hooks`.
+    /// What separates a set's or an issue source's name from its check in the check's tag. No repository
+    /// name holds it (an ArgumentKind::Name), so `poll/hooks:<set>` is never `poll/<repo>/<list>` of a
+    /// repository `hooks`, nor `poll/auth:<source>` one of a repository `auth`.
     constexpr auto SetTagSeparator = ':';
 
+    /// @param check HooksTag or PluginsTag.
+    /// @param envSet A variable set's name; "" for none.
     /// @return The tag of @p check for @p envSet: @p check itself for none, else `<check>:<set>`.
     [[nodiscard]] std::string setupTagOf(std::string_view check, std::string_view envSet)
     {
@@ -70,7 +71,7 @@ namespace
     }
 
     /// @param tag A poll tag.
-    /// @param check HooksTag or PluginsTag.
+    /// @param check HooksTag, PluginsTag or AuthTag.
     /// @return The set @p tag is @p check's tag for ("" for none), or std::nullopt when it is not one.
     [[nodiscard]] std::optional<std::string_view> setOfSetupTag(std::string_view tag,
                                                                 std::string_view check) noexcept
@@ -150,21 +151,20 @@ namespace
                  line(std::format("{}: {} is incomplete", repo, label)) };
     }
 
-    /// @return Whether @p tag is a login check's: the forge's, or an issue source's (`poll/auth/<source>`).
+    /// @return Whether @p tag is a login check's: the forge's, or an issue source's (`poll/auth:<source>`).
     [[nodiscard]] bool isAuthTag(std::string_view tag) noexcept
     {
-        return tag == AuthTag || (tag.starts_with(AuthTag) && tag.substr(AuthTag.size()).starts_with('/'));
+        return setOfSetupTag(tag, AuthTag).has_value();
     }
 
     /// @return The tag of @p source's login check.
     [[nodiscard]] std::string sourceAuthTag(IssueSourceRow const& source)
     {
-        return std::format("{}/{}", AuthTag, source.name);
+        return setupTagOf(AuthTag, source.name);
     }
 
     /// @return Whether @p tag is a check of the setup rather than a repository's list: the hooks, the
-    /// plugins,
-    ///         a plugin's install step, or a login.
+    ///         plugins, a plugin's install step, or a login.
     [[nodiscard]] bool isSetupTag(std::string_view tag) noexcept
     {
         return isSetCheckTag(tag) || tag == PluginStepTag || isAuthTag(tag);
