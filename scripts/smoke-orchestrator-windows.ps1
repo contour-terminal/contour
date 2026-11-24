@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # End-to-end smoke check of the agent orchestrator on Windows: an installed contour, a daemon of its own under
 # -Root, the bundled orchestrator.wasm, and (by tier) Claude Code and the GitLab and Jira forges.
 #
@@ -187,14 +188,14 @@ function Invoke-Stop {
         $output = Invoke-Contour @('daemon', 'stop', '--socket', $Socket, '--yes')
         Write-Host "daemon stop (exit $script:ExitCode): $($output.Trim())"
         if ($script:ExitCode -ne 0) {
-            # A daemon that is not running fails to stop too; only one that still answers keeps -Root.
+            # A daemon that is not running fails to stop too. Only `daemon status`'s 4 (Unreachable) says none
+            # runs; any other exit, a hung daemon's or a timeout's included, keeps -Root.
             $null = Invoke-Contour @('daemon', 'status', '--socket', $Socket)
-            $daemonGone = $script:ExitCode -ne 0
+            $daemonGone = $script:ExitCode -eq 4
         }
     }
     if (-not $daemonGone) { Stop-Smoke "the daemon still answers on $Socket; kept $Root. Stop it, then -Stop again." }
 
-    foreach ($repo in @($SmokeRepo, $forgeRepo)) { Remove-SmokeWorktrees $repo }
     if ($forgeRepo -and (Test-Path -LiteralPath $forgeRepo)) {
         $branches = @(git -C $forgeRepo branch --list 'agent/*' --format '%(refname:short)')
         if ($branches.Count -gt 0) {
@@ -202,7 +203,9 @@ function Invoke-Stop {
             $branches | ForEach-Object { Write-Host "    $_" }
         }
     }
-    if ($Keep) { Write-Host "kept $Root"; return }
+    # -Keep keeps the worktrees too: removing them with --force would discard an agent's uncommitted work.
+    if ($Keep) { Write-Host "kept $Root and the smoke's worktrees"; return }
+    foreach ($repo in @($SmokeRepo, $forgeRepo)) { Remove-SmokeWorktrees $repo }
     # The daemon's per-version copy under $LocalAppData may stay locked for a moment after it ends.
     $removed = Wait-Until 15 {
         Remove-Item -LiteralPath $Root -Recurse -Force -ErrorAction SilentlyContinue
