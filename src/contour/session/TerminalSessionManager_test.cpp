@@ -2057,6 +2057,39 @@ TEST_CASE("TerminalSessionManager: a pane's working directory is abbreviated and
     contour::test::closeAllTabs(*window);
 }
 
+TEST_CASE("TerminalSessionManager: the sidebar lists a pane's directory as the header shows it",
+          "[manager][panes]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+
+    auto const& home = manager.homeDirectory();
+    REQUIRE_FALSE(home.empty());
+    auto const path = std::string { home.starts_with('/') ? "" : "/" } + home;
+    auto const listed = [&] {
+        return window->directorySource()->directory().workspaces.at(0).tabs.at(0).panes.at(0).cwd;
+    };
+
+    SECTION("this machine's, beneath the home")
+    {
+        reportWorkingDirectory(*session,
+                               std::format("file://{}{}/repo", contour::test::TestApp::HostName, path));
+        CHECK(listed() == "~/repo");
+    }
+    SECTION("another machine's, of the same path")
+    {
+        reportWorkingDirectory(*session, std::format("file://elsewhere.example{}/repo", path));
+        // The URL's path is "/C:/…" on Windows; the decoded directory drops the slash before the drive.
+        CHECK(listed() == std::format("{}/repo", home));
+    }
+
+    contour::test::closeAllTabs(*window);
+}
+
 TEST_CASE("TerminalSessionManager: a pane's program status is its own", "[manager][panes]")
 {
     using contour::window::TabBadgeKind;
