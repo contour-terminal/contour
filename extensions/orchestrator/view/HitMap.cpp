@@ -13,7 +13,7 @@ void HitMap::add(core::tui::Rect area, Hit hit)
         _regions.push_back(HitRegion { .area = area, .hit = hit });
 }
 
-std::vector<Hit> HitMap::at(int x, int y) const
+std::vector<Hit> HitMap::hitsAt(int x, int y) const
 {
     return std::ranges::to<std::vector>(
         _regions | std::views::reverse

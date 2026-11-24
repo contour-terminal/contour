@@ -719,11 +719,16 @@ void openLauncherFor(Interaction& interaction,
                      std::string_view task,
                      std::string_view topic)
 {
-    // What each refusal leaves on the action bar, indexed by LauncherRefusal; `{}` is the item's label.
-    constexpr auto RefusalNotices = std::array {
-        "the orchestrator is not configured"sv, // NotConfigured
-        "{} is not listed any more"sv,          // NotListed
-        "no task applies to this item"sv,       // NoTask
+    // What each refusal leaves on the action bar, indexed by LauncherRefusal, given the item's label. Each
+    // formats with a literal: a run-time format string would throw on a malformed one.
+    using RefusalNotice = std::string (*)(std::string_view label);
+    constexpr auto RefusalNotices = std::array<RefusalNotice, 3> {
+        // NotConfigured
+        [](std::string_view) { return std::string { "the orchestrator is not configured" }; },
+        // NotListed
+        [](std::string_view label) { return std::format("{} is not listed any more", label); },
+        // NoTask
+        [](std::string_view) { return std::string { "no task applies to this item" }; },
     };
     static_assert(RefusalNotices.size() == std::to_underlying(LauncherRefusal::NoTask) + 1U);
 
@@ -738,7 +743,7 @@ void openLauncherFor(Interaction& interaction,
             LauncherScope { .repo = std::string { repo }, .kind = interaction.launcherScope.kind });
         if (!launcher)
         {
-            interaction.notice = RefusalNotices[std::to_underlying(LauncherRefusal::NotConfigured)];
+            interaction.notice = RefusalNotices[std::to_underlying(LauncherRefusal::NotConfigured)]({});
             return;
         }
         interaction.launcher = std::move(launcher);
@@ -748,9 +753,7 @@ void openLauncherFor(Interaction& interaction,
     auto launcher = openLauncherOn(engine, repo, item, task, {});
     if (!launcher)
     {
-        auto const label = itemLabel(item);
-        interaction.notice =
-            std::vformat(RefusalNotices[std::to_underlying(launcher.error())], std::make_format_args(label));
+        interaction.notice = RefusalNotices[std::to_underlying(launcher.error())](itemLabel(item));
         return;
     }
     interaction.launcher = std::move(*launcher);

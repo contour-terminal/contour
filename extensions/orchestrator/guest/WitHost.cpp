@@ -137,7 +137,7 @@ namespace
         static_assert(AgentStatusOfCase.size() == TERMINAL_EXTENSIONS_DAEMON_HOST_AGENT_STATUS_ASKING + 1U);
         auto status = std::optional<AgentStatus> {};
         if (info.status.is_some && info.status.val < AgentStatusOfCase.size())
-            status = AgentStatusOfCase.at(info.status.val);
+            status = AgentStatusOfCase[info.status.val];
         return PaneInfo { .pane = copied(info.pane),
                           .tag = copied(info.tag),
                           .status = status,

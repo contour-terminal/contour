@@ -56,7 +56,8 @@ std::optional<PaneKey> paneKeyNamed(std::string_view text) noexcept
 
 std::string_view paneKeyName(PaneKey key) noexcept
 {
-    return PaneKeyNames.at(std::to_underlying(key));
+    auto const index = std::to_underlying(key);
+    return index < PaneKeyNames.size() ? PaneKeyNames[index] : std::string_view {};
 }
 
 std::span<std::string_view const> paneKeyNames() noexcept

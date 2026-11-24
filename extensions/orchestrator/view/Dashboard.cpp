@@ -1123,14 +1123,20 @@ namespace
 
     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, MouseRows.size()),
                                       [](std::size_t index) {
-                                          return std::to_underlying(MouseRows.at(index).kind) == index;
+                                          return std::to_underlying(MouseRows[index].kind) == index;
                                       }),
                   "MouseRows is indexed by the HitKind's value");
+    static_assert(MouseRows.size() == std::to_underlying(HitKind::LauncherKind) + 1U,
+                  "every HitKind has a row");
 
-    /// @return What the mouse does on @p hit.
+    /// What the mouse does on a hit.
+    /// @param hit The hit.
+    /// @return Its row; a kind out of range, which a valid HitKind never is, gets the popup's, which a click
+    ///         leaves alone.
     [[nodiscard]] MouseRow const& mouseRowOf(Hit const& hit) noexcept
     {
-        return MouseRows.at(std::to_underlying(hit.kind));
+        auto const index = std::to_underlying(hit.kind);
+        return index < MouseRows.size() ? MouseRows[index] : MouseRows.front();
     }
 
     /// The most cells of a link the action bar names when it opens.
@@ -1161,7 +1167,7 @@ void Dashboard::State::applyMouse(core::tui::MouseEvent const& mouse, std::vecto
     using Type = core::tui::MouseEvent::Type;
     auto const x = mouse.x - 1;
     auto const y = mouse.y - 1;
-    auto const under = hits.at(x, y);
+    auto const under = hits.hitsAt(x, y);
     auto const takes = [&](Hit const& hit) {
         return !popupOpen() || mouseRowOf(hit).layer == Layer::Popup;
     };

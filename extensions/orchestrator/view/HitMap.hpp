@@ -59,10 +59,12 @@ class HitMap
     /// @param hit What it stands for.
     void add(core::tui::Rect area, Hit hit);
 
+    /// What lies at a cell. Not `at()`: the guest has no exceptions, and its portability check reads every
+    /// `at(` as the throwing accessor.
     /// @param x A column, 0-based.
     /// @param y A line, 0-based.
     /// @return What lies at the cell, the topmost first: what was drawn last.
-    [[nodiscard]] std::vector<Hit> at(int x, int y) const;
+    [[nodiscard]] std::vector<Hit> hitsAt(int x, int y) const;
 
     /// @return Every region, in the order it was recorded.
     [[nodiscard]] std::span<HitRegion const> regions() const noexcept { return _regions; }

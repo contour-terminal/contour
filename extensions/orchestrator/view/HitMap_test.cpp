@@ -18,13 +18,13 @@ TEST_CASE("the hit map answers what was drawn last first", "[orchestrator][view]
     map.add({ .x = 1, .y = 3, .width = 38, .height = 2 }, Hit { .kind = HitKind::Row, .value = 1 });
     map.add({ .x = 5, .y = 5, .width = 0, .height = 3 }, Hit { .kind = HitKind::Row, .value = 9 });
 
-    CHECK(map.at(2, 4)
+    CHECK(map.hitsAt(2, 4)
           == std::vector { Hit { .kind = HitKind::Row, .value = 1 }, Hit { .kind = HitKind::FleetPane } });
-    CHECK(map.at(0, 10) == std::vector { Hit { .kind = HitKind::FleetPane } });
-    CHECK(map.at(40, 0).empty());
+    CHECK(map.hitsAt(0, 10) == std::vector { Hit { .kind = HitKind::FleetPane } });
+    CHECK(map.hitsAt(40, 0).empty());
     CHECK(map.regions().size() == 3);
     map.clear();
-    CHECK(map.at(2, 4).empty());
+    CHECK(map.hitsAt(2, 4).empty());
 }
 
 TEST_CASE("a hit recorder records in its canvas's coordinates", "[orchestrator][view][mouse]")
@@ -33,6 +33,6 @@ TEST_CASE("a hit recorder records in its canvas's coordinates", "[orchestrator][
     auto const focus = HitRecorder { map, { .x = 50, .y = 2 } };
     auto const inside = focus.shifted(1, 1);
     inside.add({ .x = 0, .y = 0, .width = 5, .height = 1 }, Hit { .kind = HitKind::Command, .value = 3 });
-    CHECK(map.at(51, 3) == std::vector { Hit { .kind = HitKind::Command, .value = 3 } });
-    CHECK(map.at(50, 3).empty());
+    CHECK(map.hitsAt(51, 3) == std::vector { Hit { .kind = HitKind::Command, .value = 3 } });
+    CHECK(map.hitsAt(50, 3).empty());
 }
