@@ -211,9 +211,11 @@ function(ContourThirdParties_WamrTerminates target resultVar)
     find_package(Threads QUIET)
     try_run(_wamr_probe_run _wamr_probe_compile
         SOURCES "${PROJECT_SOURCE_DIR}/cmake/WamrTerminateProbe.cpp"
+        CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${PROJECT_SOURCE_DIR}/src"
         LINK_LIBRARIES ${target} Threads::Threads
         CXX_STANDARD 20
         NO_CACHE
+        RUN_OUTPUT_VARIABLE _wamr_probe_feature
     )
     if(_wamr_probe_compile AND "${_wamr_probe_run}" STREQUAL "0")
         set(${resultVar} TRUE PARENT_SCOPE)
@@ -222,9 +224,9 @@ function(ContourThirdParties_WamrTerminates target resultVar)
     elseif(_wamr_probe_compile AND "${_wamr_probe_run}" STREQUAL "9")
         set(${resultVar}_REASON "it installs a SIGUSR1 handler (built with wakeup of blocking operations)" PARENT_SCOPE)
     elseif(_wamr_probe_compile AND "${_wamr_probe_run}" STREQUAL "10")
-        set(${resultVar}_REASON "it loads modules using SIMD, threads, tail calls or multiple memories" PARENT_SCOPE)
+        set(${resultVar}_REASON "it loads a module using ${_wamr_probe_feature}, which extensions may not use" PARENT_SCOPE)
     elseif(_wamr_probe_compile AND "${_wamr_probe_run}" STREQUAL "11")
-        set(${resultVar}_REASON "it refuses extended constant expressions (built without WAMR_BUILD_EXTENDED_CONST_EXPR)" PARENT_SCOPE)
+        set(${resultVar}_REASON "it refuses a module using ${_wamr_probe_feature}, which extensions may use" PARENT_SCOPE)
     endif()
 endfunction()
 

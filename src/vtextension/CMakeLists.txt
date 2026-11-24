@@ -120,6 +120,7 @@ if(VTEXTENSION_TESTING)
         testing/StandardStreamsCapture.hpp
         testing/TestModules.hpp
         wasm/testing/BackendContract.hpp
+        wasm/testing/FeatureModules.hpp
         wasm/testing/PreparedGeneration.hpp
     )
     # The WIT package is the normative spec of the extension ABI; the tests read it from the source tree.
