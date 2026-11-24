@@ -24,6 +24,8 @@ set(vtextension_SOURCES
     SessionExtensions.cpp
     StatusLineAdapter.cpp
     Surface.cpp
+    wasm/wasi/Preview1Shim.cpp
+    wasm/wasi/SystemEnvironment.cpp
 )
 
 set(vtextension_HEADERS
@@ -64,7 +66,9 @@ set(vtextension_HEADERS
     wasm/WasiAllowList.hpp
     wasm/WasmBinary.hpp
     wasm/WasmRuntime.hpp
+    wasm/wasi/Preview1Shim.hpp
     wasm/wasi/Preview1Signatures.hpp
+    wasm/wasi/SystemEnvironment.hpp
 )
 
 add_library(vtextension STATIC ${vtextension_SOURCES} ${vtextension_HEADERS})
@@ -79,6 +83,10 @@ target_link_libraries(vtextension PUBLIC vtbackend vtcontrol vtpty core::async c
 # Private, as in vtcontrol: ControlCodec.hpp reflects the control vocabulary through glaze, and it is included
 # from vtextension's .cpp files only. vtextension_public_headers_test below pins that no public header leaks it.
 target_link_libraries(vtextension PRIVATE glaze::glaze)
+if(WIN32)
+    # BCryptGenRandom: the random source of the WASI shim's system environment (wasm/wasi/SystemEnvironment.cpp).
+    target_link_libraries(vtextension PRIVATE bcrypt)
+endif()
 
 option(VTEXTENSION_TESTING "Enables building of unittests for vtextension [default: ON]" ${CONTOUR_TESTING})
 if(VTEXTENSION_TESTING)
@@ -111,6 +119,7 @@ if(VTEXTENSION_TESTING)
         Surface_test.cpp
         Wit_test.cpp
         wasm/WasmBinary_test.cpp
+        wasm/wasi/Preview1Shim_test.cpp
         testing/FakeGuestMemory.hpp
         testing/FakeWasmBackend.hpp
         testing/Harness.hpp

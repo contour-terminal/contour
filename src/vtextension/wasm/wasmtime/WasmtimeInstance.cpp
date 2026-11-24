@@ -222,8 +222,8 @@ namespace
         if (std::ranges::any_of(exports, exceedsCap))
             return std::unexpected(ExtensionError::OutOfMemory);
 
-        auto data =
-            std::make_unique<StoreData>(StoreData { .context = context, .hostFailure = std::nullopt });
+        auto data = std::make_unique<StoreData>(StoreData {
+            .context = context, .wasiEnvironment = runtime.wasiEnvironment(), .hostFailure = std::nullopt });
         auto store = detail::StoreHandle { wasmtime_store_new(runtime.engine(), data.get(), nullptr) };
         if (!store)
             return std::unexpected(ExtensionError::RuntimeUnavailable);

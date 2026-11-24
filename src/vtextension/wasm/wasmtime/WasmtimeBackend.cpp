@@ -22,6 +22,7 @@
 
 #include <vtextension/wasm/EngineFeatures.hpp>
 #include <vtextension/wasm/WasiAllowList.hpp>
+#include <vtextension/wasm/wasi/Preview1Shim.hpp>
 #include <vtextension/wasm/wasi/Preview1Signatures.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
 // Every feature switch the table drives must exist: a Wasmtime built without one of these could neither
@@ -141,7 +142,7 @@ namespace
                   "FeatureSetters drives every switchable row of EngineFeatures");
 
     /// @return A configuration for one runtime's engine, from EngineFeatures, @p config and @p limits.
-    [[nodiscard]] wasm_config_t* engineConfig(WasmtimeConfig config, RuntimeLimits limits)
+    [[nodiscard]] wasm_config_t* engineConfig(WasmtimeConfig const& config, RuntimeLimits limits)
     {
         auto* const engineConfig = wasm_config_new();
         for (auto const& [feature, setter]: FeatureSetters)
@@ -188,49 +189,59 @@ namespace
         return wasmtime_trap_new(Message.data(), Message.size());
     }
 
-    /// Stands in for a WASI function the backend does not implement: the module importing it
-    /// instantiates, and a call to it traps.
-    wasm_trap_t* unimplementedWasiFunction(void* /*env*/,
-                                           wasmtime_caller_t* /*caller*/,
-                                           wasmtime_val_t const* /*args*/,
-                                           std::size_t /*argCount*/,
-                                           wasmtime_val_t* /*results*/,
-                                           std::size_t /*resultCount*/) noexcept
+    /// @return The memory the calling instance exports as "memory", where WASI preview 1 looks for it;
+    ///         empty if it exports none, so that every pointer a WASI function is passed faults.
+    [[nodiscard]] std::span<std::byte> callerMemory(wasmtime_caller_t* caller) noexcept
     {
-        static constexpr auto Message = std::string_view { "WASI function not implemented" };
-        return wasmtime_trap_new(Message.data(), Message.size());
+        static constexpr auto Name = std::string_view { "memory" };
+        auto item = wasmtime_extern_t {};
+        if (!wasmtime_caller_export_get(caller, Name.data(), Name.size(), &item)
+            || item.kind != WASMTIME_EXTERN_MEMORY)
+            return {};
+        auto* const context = wasmtime_caller_context(caller);
+        return { reinterpret_cast<std::byte*>(wasmtime_memory_data(context, &item.of.memory)),
+                 wasmtime_memory_data_size(context, &item.of.memory) };
     }
 
-    /// One row of the WASI table: an allowed WASI preview 1 function and what implements it.
-    struct WasiBinding
+    /// Runs an allowed WASI function on behalf of the guest, through the host's own implementation
+    /// (wasi/Preview1Shim.hpp), never Wasmtime's: hands it the guest's arguments, memory and the store's
+    /// environment, and returns its errno. proc_exit ends the call as a trap, which the call reports as
+    /// CallFailure::Trap: nothing is stashed in the store's data.
+    /// Called from Wasmtime's Rust code, which an exception must not unwind through: noexcept.
+    /// @return Null when the function returned; a trap when it ended the call.
+    wasm_trap_t* callShimFunction(void* env,
+                                  wasmtime_caller_t* caller,
+                                  wasmtime_val_t const* args,
+                                  std::size_t argCount,
+                                  wasmtime_val_t* results,
+                                  std::size_t resultCount) noexcept
     {
-        std::string_view name;                             ///< The function's name.
-        wasmtime_func_callback_t implementation = nullptr; ///< What a call to it runs.
-    };
-
-    /// What implements each allowed WASI preview 1 function, in the order of wasi::Preview1Functions,
-    /// whose signature each is provided with. A row not implemented yet traps when called.
-    constexpr auto WasiBindings = std::to_array<WasiBinding>({
-        { .name = "args_get", .implementation = &unimplementedWasiFunction },
-        { .name = "args_sizes_get", .implementation = &unimplementedWasiFunction },
-        { .name = "environ_get", .implementation = &unimplementedWasiFunction },
-        { .name = "environ_sizes_get", .implementation = &unimplementedWasiFunction },
-        { .name = "clock_time_get", .implementation = &unimplementedWasiFunction },
-        { .name = "clock_res_get", .implementation = &unimplementedWasiFunction },
-        { .name = "fd_write", .implementation = &unimplementedWasiFunction },
-        { .name = "fd_close", .implementation = &unimplementedWasiFunction },
-        { .name = "fd_fdstat_get", .implementation = &unimplementedWasiFunction },
-        { .name = "fd_prestat_get", .implementation = &unimplementedWasiFunction },
-        { .name = "fd_prestat_dir_name", .implementation = &unimplementedWasiFunction },
-        { .name = "fd_seek", .implementation = &unimplementedWasiFunction },
-        { .name = "random_get", .implementation = &unimplementedWasiFunction },
-        { .name = "proc_exit", .implementation = &unimplementedWasiFunction },
-        { .name = "sched_yield", .implementation = &unimplementedWasiFunction },
-    });
-    static_assert(std::ranges::equal(WasiBindings | std::views::transform(&WasiBinding::name),
-                                     wasi::Preview1Functions
-                                         | std::views::transform(&wasi::Preview1Function::name)),
-                  "WasiBindings implements every allowed WASI function, in the order of Preview1Functions");
+        auto const& function = *static_cast<wasi::ShimFunction const*>(env);
+        auto const& data =
+            *static_cast<StoreData const*>(wasmtime_context_get_data(wasmtime_caller_context(caller)));
+        // The linker gave the function its preview 1 signature: at most MaxPreview1Parameters, each an i32
+        // or an i64.
+        auto arguments = std::array<uint64_t, wasi::MaxPreview1Parameters> {};
+        std::ranges::transform(
+            std::span { args, argCount }, arguments.begin(), [](wasmtime_val_t const& value) {
+                return value.kind == WASMTIME_I64 ? static_cast<uint64_t>(value.of.i64)
+                                                  : uint64_t { static_cast<uint32_t>(value.of.i32) };
+            });
+        auto const result = function.call(
+            data.wasiEnvironment, callerMemory(caller), std::span { arguments }.first(argCount));
+        if (result.outcome == wasi::ShimOutcome::Exit)
+        {
+            static constexpr auto Message = std::string_view { "proc_exit" };
+            return wasmtime_trap_new(Message.data(), Message.size());
+        }
+        // Every function that returns has one result, its errno.
+        for (auto& value: std::span { results, resultCount })
+        {
+            value.kind = WASMTIME_I32;
+            value.of.i32 = static_cast<int32_t>(result.error);
+        }
+        return nullptr;
+    }
 
     /// Defines one function on @p linker.
     /// @return Nothing on success; `RuntimeUnavailable` if Wasmtime refused the definition.
@@ -273,11 +284,16 @@ namespace
                     linker.get(), binding.module, binding.name, signature, &callHostFunction, &binding))
                 return std::nullopt;
         }
-        for (auto const [index, function]: core::views::enumerate(wasi::Preview1Functions))
+        // Our own WASI, never Wasmtime's (wasmtime_linker_define_wasi), which would bring threads of its own.
+        for (auto const& function: wasi::shimFunctions())
         {
-            auto const implementation = WasiBindings.at(static_cast<std::size_t>(index)).implementation;
-            if (!defineFunction(
-                    linker.get(), WasiModule, function.name, function.signature(), implementation, nullptr))
+            // Wasmtime hands the callback a mutable env; the shim's table is constant, and never written.
+            if (!defineFunction(linker.get(),
+                                WasiModule,
+                                function.preview1.name,
+                                function.preview1.signature(),
+                                &callShimFunction,
+                                const_cast<wasi::ShimFunction*>(&function)))
                 return std::nullopt;
         }
         return linker;
@@ -288,7 +304,7 @@ namespace
     {
       public:
         WasmtimeBackend(std::shared_ptr<KindState> kind, WasmtimeConfig config) noexcept:
-            _kind { std::move(kind) }, _config { config }
+            _kind { std::move(kind) }, _config { std::move(config) }
         {
         }
 
@@ -389,17 +405,23 @@ std::expected<std::shared_ptr<WasmtimeRuntime>, ExtensionError> WasmtimeRuntime:
     auto linker = makeLinker(engine.get(), hostBindings);
     if (!linker)
         return std::unexpected(ExtensionError::RuntimeUnavailable);
-    return std::make_shared<WasmtimeRuntime>(
-        std::move(kind), limits, std::move(engine), std::move(hostBindings), std::move(*linker));
+    return std::make_shared<WasmtimeRuntime>(std::move(kind),
+                                             limits,
+                                             std::move(config.wasiEnvironment),
+                                             std::move(engine),
+                                             std::move(hostBindings),
+                                             std::move(*linker));
 }
 
 WasmtimeRuntime::WasmtimeRuntime(std::shared_ptr<KindState> kind,
                                  RuntimeLimits limits,
+                                 wasi::ShimEnvironment wasiEnvironment,
                                  detail::EngineHandle engine,
                                  std::vector<HostBinding> hostBindings,
                                  detail::LinkerHandle linker) noexcept:
     _kind { std::move(kind) },
     _limits { limits },
+    _wasiEnvironment { std::move(wasiEnvironment) },
     _engine { std::move(engine) },
     _hostBindings { std::move(hostBindings) },
     _linker { std::move(linker) }
@@ -428,7 +450,7 @@ std::shared_ptr<KindState> makeKindState()
 
 std::unique_ptr<IWasmBackend> makeWasmtimeBackend(std::shared_ptr<KindState> kind, WasmtimeConfig config)
 {
-    return std::make_unique<WasmtimeBackend>(std::move(kind), config);
+    return std::make_unique<WasmtimeBackend>(std::move(kind), std::move(config));
 }
 
 } // namespace vtextension::wasm::wasmtime

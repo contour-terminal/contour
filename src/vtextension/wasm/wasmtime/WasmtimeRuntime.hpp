@@ -17,6 +17,7 @@
 
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
+#include <vtextension/wasm/wasi/Preview1Shim.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeBackend.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
 
@@ -57,7 +58,8 @@ class KindState
 /// Lives at a stable address for as long as the store, which hands it to every host function call.
 struct StoreData
 {
-    IHostContext& context; ///< What the instance's host function calls reach.
+    IHostContext& context;                        ///< What the instance's host function calls reach.
+    wasi::ShimEnvironment const& wasiEnvironment; ///< What the instance's WASI function calls read.
     /// The error the latest host function call failed with, if it failed; it is what tells a call stopped
     /// by a failing host function apart from one the guest trapped in.
     std::optional<ExtensionError> hostFailure;
@@ -93,6 +95,7 @@ class WasmtimeRuntime final: public IWasmRuntime, public std::enable_shared_from
     /// Use create(). Public for std::make_shared only.
     WasmtimeRuntime(std::shared_ptr<KindState> kind,
                     RuntimeLimits limits,
+                    wasi::ShimEnvironment wasiEnvironment,
                     detail::EngineHandle engine,
                     std::vector<HostBinding> hostBindings,
                     detail::LinkerHandle linker) noexcept;
@@ -118,9 +121,13 @@ class WasmtimeRuntime final: public IWasmRuntime, public std::enable_shared_from
     /// @return The limits every instance is held to.
     [[nodiscard]] RuntimeLimits limits() const noexcept { return _limits; }
 
+    /// @return Where the WASI functions of every instance read clocks and random bytes from.
+    [[nodiscard]] wasi::ShimEnvironment const& wasiEnvironment() const noexcept { return _wasiEnvironment; }
+
   private:
     std::shared_ptr<KindState> _kind;
     RuntimeLimits _limits;
+    wasi::ShimEnvironment _wasiEnvironment;
     detail::EngineHandle _engine;
     // The linker's callbacks point into _hostBindings, so the linker goes first.
     std::vector<HostBinding> _hostBindings;

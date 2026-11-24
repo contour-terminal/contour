@@ -8,6 +8,8 @@
 #include <memory>
 
 #include <vtextension/wasm/WasmRuntime.hpp>
+#include <vtextension/wasm/wasi/Preview1Shim.hpp>
+#include <vtextension/wasm/wasi/SystemEnvironment.hpp>
 
 namespace vtextension::wasm::wasmtime
 {
@@ -29,6 +31,8 @@ struct WasmtimeConfig
 {
     /// How traps are detected. Software keeps the contract's promise of no process signal handler.
     TrapMode trapMode = TrapMode::Software;
+    /// Where the WASI functions every instance imports read clocks and random bytes from.
+    wasi::ShimEnvironment wasiEnvironment = wasi::systemEnvironment();
 };
 
 /// What all Wasmtime backends of a process share: the bring-up generation and the count of runtimes

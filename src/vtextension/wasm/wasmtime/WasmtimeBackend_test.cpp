@@ -5,6 +5,7 @@
 #include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -17,6 +18,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <wasmtime.h>
@@ -37,6 +39,7 @@ using vtextension::wasm::FeatureState;
 using vtextension::wasm::IWasmBackend;
 using vtextension::wasm::MemoryGrowthReporting;
 using vtextension::wasm::RuntimeLimits;
+using vtextension::wasm::wasmtime::KindState;
 using vtextension::wasm::wasmtime::makeKindState;
 using vtextension::wasm::wasmtime::makeWasmtimeBackend;
 using vtextension::wasm::wasmtime::TrapMode;
@@ -51,8 +54,14 @@ struct WasmtimeTraits
     /// @return A Wasmtime backend of the one kind state this test binary shares, as a process would.
     [[nodiscard]] static std::unique_ptr<IWasmBackend> make()
     {
-        static auto const kind = makeKindState();
-        return makeWasmtimeBackend(kind, WasmtimeConfig { .trapMode = TrapMode::Software });
+        return makeWasmtimeBackend(kind(), WasmtimeConfig { .trapMode = TrapMode::Software });
+    }
+
+    /// @return The one kind state this test binary shares.
+    [[nodiscard]] static std::shared_ptr<KindState> const& kind()
+    {
+        static auto const state = makeKindState();
+        return state;
     }
 };
 
@@ -236,4 +245,39 @@ TEST_CASE("WasmtimeBackend.refusesAZeroStack", "[wasmtime]")
 TEST_CASE("WasmtimeBackend.leavesMemoryGrowthUnreported", "[wasmtime]")
 {
     CHECK(WasmtimeTraits::make()->capabilities().memoryGrowth == MemoryGrowthReporting::Unreported);
+}
+
+TEST_CASE("WasmtimeBackend.wasiReadsTheConfiguredEnvironment", "[wasmtime]")
+{
+    namespace contract = vtextension::wasm::testing::contract;
+    // A clock reading 7 seconds past its id, and random bytes that are all 0x5A.
+    auto config = WasmtimeConfig {
+        .trapMode = TrapMode::Software,
+        .wasiEnvironment = {
+            .clock = [](uint32_t clockId) { return 7'000'000'000 + uint64_t { clockId }; },
+            .random = [](std::span<std::byte> bytes) { std::ranges::fill(bytes, std::byte { 0x5A }); } },
+    };
+    auto const backend = makeWasmtimeBackend(WasmtimeTraits::kind(), std::move(config));
+    auto const runtime = contract::createRuntime(*backend);
+    auto const guard = contract::enterThread(*backend);
+    auto const module = contract::load(*runtime, contract::EveryWasiFunctionModule);
+    auto context = contract::RecordingHostContext {};
+    auto const instance = contract::instantiate(*module, context);
+
+    // Both write at address 64: clock_time_get reads the realtime clock (id 0), random_get fills 16 bytes.
+    auto error = std::array<uint32_t, 1> {};
+    REQUIRE(instance->call(contract::functionOf(*instance, "clock_time_get"), error).has_value());
+    CHECK(error[0] == 0);
+    auto const time = instance->memory(64, 8);
+    REQUIRE(time.has_value());
+    auto nanoseconds = uint64_t { 0 };
+    for (auto const byte: *time | std::views::reverse)
+        nanoseconds = (nanoseconds << 8U) | std::to_integer<uint64_t>(byte);
+    CHECK(nanoseconds == 7'000'000'000);
+
+    REQUIRE(instance->call(contract::functionOf(*instance, "random_get"), error).has_value());
+    CHECK(error[0] == 0);
+    auto const random = instance->memory(64, 16);
+    REQUIRE(random.has_value());
+    CHECK(std::ranges::all_of(*random, [](std::byte byte) { return byte == std::byte { 0x5A }; }));
 }
