@@ -30,6 +30,16 @@ finished and its worktree is gone; and from either I start the next run on the s
   anything into a pane that you did not write and send, reading a screen, or choosing Claude's settings;
   untrusted PR or issue text reaching a prompt, a branch name or a path.
 
+## On Windows
+
+The host hands the orchestrator `worktree_root` and each `repos[].path` in their resolved backslash spelling
+(`C:\…` or `\\server\share\…`), whichever way the configuration wrote them (`C:\…`, `C:/…`, `\\server\share\…`,
+`~\…`). The orchestrator works out the host's style from that spelling, refuses a repository spelled in the other
+style or that Win32 cannot address, and compares roots ignoring ASCII case. It builds worktree paths with `\`
+(`C:\…\wt\<repo>\<run>`) and reads git's forward-slash output against them; the paths it passes to `file-read`
+stay `/`-separated and relative to the worktree root. A command that fails with a negative exit code — an
+NTSTATUS — is shown in hex (`it exited with 0xC0000005`).
+
 ## The dashboard
 
 The orchestrator draws its own tab (`view/`, drawn with core-cpp's headless terminal UI). It is one screen to
