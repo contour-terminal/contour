@@ -65,6 +65,14 @@ struct JsonQuickReply
     std::optional<std::string> then;
 };
 
+/// One `workers` entry.
+struct JsonWorker
+{
+    std::optional<std::string> id;
+    std::optional<std::string> agent;
+    std::optional<std::string> envSet; ///< `env_set`.
+};
+
 /// One `tasks` entry; `applies_to` is no member name, Config.cpp maps the key.
 struct JsonTask
 {
@@ -76,6 +84,7 @@ struct JsonTask
     std::optional<std::string> prompt;
     std::optional<JsonDuration> endDoneAfter;
     std::optional<std::string> permissions;
+    std::optional<std::string> worker;
 };
 
 /// The `config` subtree; its snake_case keys are mapped in Config.cpp.
@@ -91,6 +100,7 @@ struct JsonConfig
     std::optional<JsonDuration> endDoneAfter;
     std::optional<JsonDuration> finishedRetention;
     std::optional<std::vector<JsonRepo>> repos;
+    std::optional<std::vector<JsonWorker>> workers;
     std::optional<std::vector<JsonTask>> tasks;
     std::optional<std::vector<JsonPluginRequirement>> plugins;
     std::optional<std::string> permissions;

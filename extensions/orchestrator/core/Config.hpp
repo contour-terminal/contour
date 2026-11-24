@@ -12,6 +12,7 @@
 #include <variant>
 #include <vector>
 
+#include <orchestrator/core/Agents.hpp>
 #include <orchestrator/core/HostPaths.hpp>
 #include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Model.hpp>
@@ -45,6 +46,19 @@ enum class AppliesTo : uint8_t
 inline constexpr auto BuiltinTopicTaskIds =
     std::array { std::string_view { "topic" }, std::string_view { "builtin_topic" } };
 
+/// The worker a configuration without `workers` has: today's behaviour.
+inline constexpr std::string_view ImplicitWorkerId = "claude";
+
+/// One row of the `workers` table: an agent a task may run on, and the set of the user's variables it runs
+/// with.
+struct WorkerDef
+{
+    std::string id;                      ///< Unique; an ArgumentKind::Name.
+    AgentKind agent = AgentKind::Claude; ///< The agent it runs.
+    std::string envSet = {};             ///< A set name, passed as is (the host checks it); empty: none.
+    [[nodiscard]] bool operator==(WorkerDef const&) const = default;
+};
+
 /// One row of the `tasks` table: what the dashboard offers to start on an item. A new task is a new row.
 struct TaskDef
 {
@@ -59,6 +73,8 @@ struct TaskDef
     std::optional<std::chrono::milliseconds> endDoneAfter = std::nullopt;
     /// The permission profile its runs start with (`permissions`); empty: Config::defaultProfile().
     std::string permissions = {};
+    /// The worker that runs it (`worker`): always one of Config::workers().
+    std::string worker = {};
 };
 
 /// A program a declared command names that the host runs as its own executable.
@@ -144,6 +160,10 @@ enum class ConfigProblem : uint8_t
     NotAPaneKey,            ///< A quick reply's `press` that is not a digit from 1 to 9 or `esc`.
     UnknownThen,            ///< A quick reply's `then` other than `wait` or `message`.
     LabelTooLong,           ///< A quick reply's label longer than MaxQuickReplyLabelBytes.
+    UnknownAgent,           ///< A worker's `agent` that is no agent's name (AgentRows).
+    UnknownWorker,          ///< A task's `worker` that names no worker: a notice; the first worker runs it.
+    ProfileOnCopilot, ///< A task with its own `permissions` on a worker that takes no profile: a notice;
+                      ///< the task is unavailable.
 };
 
 /// Why a configuration was refused.
@@ -270,8 +290,12 @@ class Config
     [[nodiscard]] std::chrono::milliseconds finishedRetention() const noexcept { return _finishedRetention; }
     /// @return The repositories, in the configured order.
     [[nodiscard]] std::span<Repo const> repos() const noexcept { return _repos; }
-    /// @return The tasks, in the configured order.
+    /// @return The tasks, in the configured order; a task whose worker takes no profile is not among them.
     [[nodiscard]] std::span<TaskDef const> tasks() const noexcept { return _tasks; }
+    /// @return The workers, in the configured order: never empty; the implicit one without `workers`.
+    [[nodiscard]] std::span<WorkerDef const> workers() const noexcept { return _workers; }
+    /// @return What was accepted with a fallback, in the order the configuration names it.
+    [[nodiscard]] std::span<ConfigError const> notices() const noexcept { return _notices; }
     /// @return The forges and issue sources it was read with: the rows its repositories are served by.
     [[nodiscard]] SourceTables const& sources() const noexcept { return _sources; }
 
@@ -284,6 +308,12 @@ class Config
     /// @param item A kind of item.
     /// @return The first task in the table that applies to @p item, or nullptr: what Enter offers.
     [[nodiscard]] TaskDef const* firstTaskFor(AppliesTo item) const noexcept;
+    /// @param id A worker id.
+    /// @return The worker of that id, or nullptr.
+    [[nodiscard]] WorkerDef const* findWorker(std::string_view id) const noexcept;
+    /// @param taskId A task id.
+    /// @return The worker the task runs on; the first worker for a task no longer configured.
+    [[nodiscard]] WorkerDef const& workerFor(std::string_view taskId) const noexcept;
 
   private:
     /// Everything a Config holds, in one aggregate, so that parse() builds it field by field.
@@ -305,6 +335,8 @@ class Config
         std::chrono::milliseconds finishedRetention = DefaultFinishedRetention;
         std::vector<Repo> repos = {};
         std::vector<TaskDef> tasks = {};
+        std::vector<WorkerDef> workers = {};
+        std::vector<ConfigError> notices = {};
         SourceTables sources = {};
     };
 
@@ -322,6 +354,8 @@ class Config
     std::chrono::milliseconds _finishedRetention;
     std::vector<Repo> _repos;
     std::vector<TaskDef> _tasks;
+    std::vector<WorkerDef> _workers;
+    std::vector<ConfigError> _notices;
     std::vector<PluginRequirement> _plugins;
     std::vector<QuickReply> _quickReplies;
     std::vector<PermissionProfile> _profiles;

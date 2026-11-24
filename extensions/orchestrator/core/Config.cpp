@@ -63,6 +63,8 @@ struct glz::meta<orchestrator::config::detail::JsonConfig>
                                               &T::finishedRetention,
                                               "repos",
                                               &T::repos,
+                                              "workers",
+                                              &T::workers,
                                               "tasks",
                                               &T::tasks,
                                               "plugins",
@@ -97,7 +99,19 @@ struct glz::meta<orchestrator::config::detail::JsonTask>
                                               "end_done_after",
                                               &T::endDoneAfter,
                                               "permissions",
-                                              &T::permissions);
+                                              &T::permissions,
+                                              "worker",
+                                              &T::worker);
+};
+
+/// A worker's keys: `env_set` is no member name.
+template <>
+struct glz::meta<orchestrator::config::detail::JsonWorker>
+{
+    using T = orchestrator::config::detail::JsonWorker;
+    // Glaze finds the table by this spelling, as the standard library finds `value_type`.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr auto value = glz::object("id", &T::id, "agent", &T::agent, "env_set", &T::envSet);
 };
 
 namespace orchestrator
@@ -114,6 +128,7 @@ namespace
     using config::detail::JsonQuickReply;
     using config::detail::JsonRepo;
     using config::detail::JsonTask;
+    using config::detail::JsonWorker;
 
     template <typename T>
     using Checked = std::expected<T, ConfigError>;
@@ -260,6 +275,11 @@ namespace
                       .text = "must be one of",
                       .listing = Listing::AfterReplies },
         ProblemText { .problem = ConfigProblem::LabelTooLong, .text = "is longer than 40 bytes" },
+        ProblemText { .problem = ConfigProblem::UnknownAgent, .text = "is not an agent: claude or copilot" },
+        ProblemText { .problem = ConfigProblem::UnknownWorker,
+                      .text = "names no worker; the first worker runs it" },
+        ProblemText { .problem = ConfigProblem::ProfileOnCopilot,
+                      .text = "is a permission profile, which a Copilot worker does not take" },
     };
 
     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ProblemTexts.size()),
@@ -267,7 +287,7 @@ namespace
                                           return static_cast<std::size_t>(ProblemTexts[i].problem) == i;
                                       }),
                   "ProblemTexts has one row per ConfigProblem, in its order");
-    static_assert(ProblemTexts.size() == static_cast<std::size_t>(ConfigProblem::LabelTooLong) + 1,
+    static_assert(ProblemTexts.size() == static_cast<std::size_t>(ConfigProblem::ProfileOnCopilot) + 1,
                   "ProblemTexts covers every ConfigProblem");
 
     /// @return The values @p listing names, as the user writes them, of the rows @p sources holds.
@@ -361,6 +381,7 @@ namespace
         Plugin,
         PermissionProfile,
         QuickReply,
+        Worker,
     };
 
     /// One key an object may have, and the type of its value.
@@ -382,6 +403,7 @@ namespace
         Field { .key = "end_done_after", .type = JsonType::Duration },
         Field { .key = "finished_retention", .type = JsonType::Duration },
         Field { .key = "repos", .type = JsonType::Objects, .object = ObjectKind::Repo },
+        Field { .key = "workers", .type = JsonType::Objects, .object = ObjectKind::Worker },
         Field { .key = "tasks", .type = JsonType::Objects, .object = ObjectKind::Task },
         Field { .key = "plugins", .type = JsonType::Objects, .object = ObjectKind::Plugin },
         Field { .key = "permissions", .type = JsonType::String },
@@ -416,6 +438,13 @@ namespace
         Field { .key = "prompt", .type = JsonType::String },
         Field { .key = "end_done_after", .type = JsonType::Duration },
         Field { .key = "permissions", .type = JsonType::String },
+        Field { .key = "worker", .type = JsonType::String },
+    };
+
+    constexpr auto WorkerFields = std::array {
+        Field { .key = "id", .type = JsonType::String },
+        Field { .key = "agent", .type = JsonType::String },
+        Field { .key = "env_set", .type = JsonType::String },
     };
 
     constexpr auto PluginFields = std::array {
@@ -449,6 +478,7 @@ namespace
             case ObjectKind::Plugin: return PluginFields;
             case ObjectKind::PermissionProfile: return PermissionProfileFields;
             case ObjectKind::QuickReply: return QuickReplyFields;
+            case ObjectKind::Worker: return WorkerFields;
         }
         return {};
     }
@@ -475,6 +505,7 @@ namespace
                   "PermissionProfileFields and JsonPermissionProfile name the same keys");
     static_assert(matchesMirror<JsonQuickReply>(QuickReplyFields),
                   "QuickReplyFields and JsonQuickReply name the same keys");
+    static_assert(matchesMirror<JsonWorker>(WorkerFields), "WorkerFields and JsonWorker name the same keys");
 
     /// Integers are read exactly, so that a count is never a rounded double.
     using Generic = glz::generic_u64;
@@ -866,11 +897,52 @@ namespace
         return repos;
     }
 
-    /// Validates the task at @p index against those before it.
+    /// @return The workers a configuration names, each checked; without `workers`, the implicit one.
+    [[nodiscard]] Checked<std::vector<WorkerDef>> workersOf(
+        std::optional<std::vector<JsonWorker>> const& value)
+    {
+        if (!value)
+            return std::vector<WorkerDef> { WorkerDef {
+                .id = std::string { ImplicitWorkerId }, .agent = AgentKind::Claude, .envSet = {} } };
+        if (value->empty())
+            return fail("workers", ConfigProblem::Empty);
+        auto workers = std::vector<WorkerDef> {};
+        for (auto const [index, json]: std::views::enumerate(*value))
+        {
+            auto const key = [&](std::string_view field) {
+                return std::format("workers[{}].{}", index, field);
+            };
+            auto const id = checked(json.id, key("id"), nameProblem);
+            if (!id)
+                return std::unexpected(id.error());
+            if (std::ranges::contains(workers, *id, &WorkerDef::id))
+                return fail(key("id"), ConfigProblem::Duplicate);
+            if (!json.agent)
+                return fail(key("agent"), ConfigProblem::Missing);
+            auto const* const agent = findAgent(*json.agent);
+            if (agent == nullptr)
+                return fail(key("agent"), ConfigProblem::UnknownAgent);
+            auto envSet = std::string {};
+            if (json.envSet)
+            {
+                auto const set = checked(json.envSet, key("env_set"), nameProblem);
+                if (!set)
+                    return std::unexpected(set.error());
+                envSet = *set;
+            }
+            workers.push_back(WorkerDef { .id = *id, .agent = agent->kind, .envSet = std::move(envSet) });
+        }
+        return workers;
+    }
+
+    /// Validates the task at @p index against those before it. A task naming no worker runs on the first
+    /// one, and a notice says so.
     [[nodiscard]] Checked<TaskDef> taskOf(JsonTask const& json,
                                           std::size_t index,
                                           std::span<std::string const> models,
-                                          std::span<TaskDef const> earlier)
+                                          std::span<TaskDef const> earlier,
+                                          std::span<WorkerDef const> workers,
+                                          std::vector<ConfigError>& notices)
     {
         auto const key = [index](std::string_view field) {
             return std::format("tasks[{}].{}", index, field);
@@ -939,6 +1011,19 @@ namespace
             permissions = *profile;
         }
 
+        auto worker = std::string { workers.front().id };
+        if (json.worker)
+        {
+            auto const named = checked(json.worker, key("worker"), nameProblem);
+            if (!named)
+                return std::unexpected(named.error());
+            if (std::ranges::contains(workers, *named, &WorkerDef::id))
+                worker = *named;
+            else
+                notices.push_back(ConfigError {
+                    .key = key("worker"), .problem = ConfigProblem::UnknownWorker, .subject = *named });
+        }
+
         return TaskDef { .id = *id,
                          .key = keyText->front(),
                          .label = *label,
@@ -946,11 +1031,14 @@ namespace
                          .model = *model,
                          .prompt = *prompt,
                          .endDoneAfter = endDoneAfter,
-                         .permissions = std::move(permissions) };
+                         .permissions = std::move(permissions),
+                         .worker = std::move(worker) };
     }
 
     [[nodiscard]] Checked<std::vector<TaskDef>> tasksOf(std::optional<std::vector<JsonTask>> const& value,
-                                                        std::span<std::string const> models)
+                                                        std::span<std::string const> models,
+                                                        std::span<WorkerDef const> workers,
+                                                        std::vector<ConfigError>& notices)
     {
         if (!value)
             return fail("tasks", ConfigProblem::Missing);
@@ -959,7 +1047,7 @@ namespace
         auto tasks = std::vector<TaskDef> {};
         for (auto const& json: *value)
         {
-            auto task = taskOf(json, tasks.size(), models, tasks);
+            auto task = taskOf(json, tasks.size(), models, tasks, workers, notices);
             if (!task)
                 return std::unexpected(task.error());
             tasks.push_back(std::move(*task));
@@ -1107,6 +1195,15 @@ namespace
         profile.allow = std::move(*allow);
         profile.deny = std::move(*deny);
         return profile;
+    }
+
+    /// @return Whether @p task has its own permission profile on a worker whose agent takes none: such a task
+    ///         is unavailable.
+    [[nodiscard]] bool profileRefused(TaskDef const& task, std::span<WorkerDef const> workers) noexcept
+    {
+        auto const worker = std::ranges::find(workers, task.worker, &WorkerDef::id);
+        return worker != workers.end() && agentRowOf(worker->agent).settings == SettingsProfile::NotTaken
+               && !task.permissions.empty();
     }
 
     /// The permission profiles, resolved, and the default's name.
@@ -1282,7 +1379,10 @@ std::expected<Config, ConfigError> Config::parse(std::string_view json,
             return e;
         if (auto e = assign(values.repos, reposOf(document.repos, host, values.pathStyle, sources)))
             return e;
-        if (auto e = assign(values.tasks, tasksOf(document.tasks, values.models)))
+        if (auto e = assign(values.workers, workersOf(document.workers)))
+            return e;
+        if (auto e =
+                assign(values.tasks, tasksOf(document.tasks, values.models, values.workers, values.notices)))
             return e;
         if (auto e = assign(values.plugins, pluginsOf(document.plugins)))
             return e;
@@ -1293,6 +1393,13 @@ std::expected<Config, ConfigError> Config::parse(std::string_view json,
             return std::move(permissions.error());
         values.profiles = std::move(permissions->profiles);
         values.defaultProfile = std::move(permissions->defaultProfile);
+        // A task on a worker that takes no profile cannot have one: it is unavailable, and the rest loads.
+        for (auto const [index, task]: std::views::enumerate(values.tasks))
+            if (profileRefused(task, values.workers))
+                values.notices.push_back(ConfigError { .key = std::format("tasks[{}].permissions", index),
+                                                       .problem = ConfigProblem::ProfileOnCopilot });
+        std::erase_if(values.tasks,
+                      [&](TaskDef const& task) { return profileRefused(task, values.workers); });
         return std::nullopt;
     }();
     if (problem)
@@ -1313,6 +1420,8 @@ Config::Config(Values values) noexcept:
     _finishedRetention { values.finishedRetention },
     _repos { std::move(values.repos) },
     _tasks { std::move(values.tasks) },
+    _workers { std::move(values.workers) },
+    _notices { std::move(values.notices) },
     _plugins { std::move(values.plugins) },
     _quickReplies { std::move(values.quickReplies) },
     _profiles { std::move(values.profiles) },
@@ -1334,7 +1443,8 @@ Config::Config(Values values) noexcept:
                                .appliesTo = AppliesTo::Topic,
                                .model = _models.front(),
                                .prompt = std::string { TopicPlaceholder },
-                               .endDoneAfter = std::nullopt });
+                               .endDoneAfter = std::nullopt,
+                               .worker = _workers.front().id });
 }
 
 PermissionProfile const* Config::findProfile(std::string_view name) const noexcept
@@ -1379,6 +1489,19 @@ TaskDef const* Config::firstTaskFor(AppliesTo item) const noexcept
 {
     auto const task = std::ranges::find(_tasks, item, &TaskDef::appliesTo);
     return task != _tasks.end() ? &*task : nullptr;
+}
+
+WorkerDef const* Config::findWorker(std::string_view id) const noexcept
+{
+    auto const worker = std::ranges::find(_workers, id, &WorkerDef::id);
+    return worker != _workers.end() ? &*worker : nullptr;
+}
+
+WorkerDef const& Config::workerFor(std::string_view taskId) const noexcept
+{
+    auto const* const task = findTask(taskId);
+    auto const* const worker = task != nullptr ? findWorker(task->worker) : nullptr;
+    return worker != nullptr ? *worker : _workers.front();
 }
 
 } // namespace orchestrator

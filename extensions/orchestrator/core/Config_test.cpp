@@ -198,6 +198,10 @@ TEST_CASE("Config.defaults", "[config]")
     CHECK(config->repos()[0].remote == "origin");
     CHECK(config->repos()[0].issueQueries.empty());
     CHECK(config->firstTaskFor(AppliesTo::PullRequest) == nullptr);
+    CHECK(config->workers().size() == 1);
+    CHECK(config->workers()[0] == WorkerDef { .id = "claude", .agent = AgentKind::Claude, .envSet = {} });
+    CHECK(config->tasks()[0].worker == "claude");
+    CHECK(config->notices().empty());
 }
 
 namespace
@@ -316,6 +320,64 @@ TEST_CASE("Config.accepts", "[config]")
 namespace
 {
 
+TEST_CASE("workers: each task names one, an unknown one falls back with a notice", "[config][workers]")
+{
+    constexpr auto Workers = R"({
+  "worktree_root": "~/worktrees",
+  "workers": [ { "id": "work", "agent": "claude", "env_set": "claude-work" },
+               { "id": "copilot", "agent": "copilot" } ],
+  "repos": [ { "path": "~/repo/contour", "forge": "github" } ],
+  "tasks": [
+    { "id": "fix_ci", "key": "f", "label": "fix CI", "applies_to": "pr", "model": "sonnet",
+      "prompt": "/contour-workflows:fix-ci {url}", "worker": "copilot" },
+    { "id": "address_review", "key": "r", "label": "address review", "applies_to": "pr", "model": "opus",
+      "prompt": "/contour-workflows:address-review {url}", "worker": "nobody" },
+    { "id": "issue", "key": "w", "label": "work on issue", "applies_to": "issue", "model": "opus",
+      "prompt": "/contour-workflows:work-issue {url}" }
+  ]
+})"sv;
+
+    auto const config = parse(Input { .json = Workers });
+    REQUIRE(config.has_value());
+    REQUIRE(config->workers().size() == 2);
+    CHECK(config->workers()[0].envSet == "claude-work");
+    CHECK(config->workers()[1].agent == AgentKind::Copilot);
+    REQUIRE(config->tasks().size() == 4);
+    CHECK(config->tasks()[0].worker == "copilot");
+    CHECK(config->tasks()[1].worker == "work");
+    CHECK(config->tasks()[2].worker == "work");
+    REQUIRE(config->notices().size() == 1);
+    CHECK(config->notices()[0].key == "tasks[1].worker");
+    CHECK(config->notices()[0].problem == ConfigProblem::UnknownWorker);
+    CHECK(config->notices()[0].subject == "nobody");
+    CHECK(config->workerFor("fix_ci").agent == AgentKind::Copilot);
+    CHECK(config->workerFor("gone").id == "work");
+    CHECK(config->findWorker("copilot") != nullptr);
+    CHECK(config->findWorker("nobody") == nullptr);
+}
+
+TEST_CASE("workers: a Copilot worker takes no permission profile, so its task is unavailable",
+          "[config][workers]")
+{
+    auto const config = parse(Input { .json = R"({
+  "worktree_root": "~/worktrees",
+  "workers": [ { "id": "work", "agent": "claude" }, { "id": "copilot", "agent": "copilot" } ],
+  "repos": [ { "path": "~/repo/contour", "forge": "github" } ],
+  "tasks": [
+    { "id": "fix_ci", "key": "f", "label": "fix CI", "applies_to": "pr", "model": "sonnet",
+      "prompt": "/contour-workflows:fix-ci {url}", "worker": "copilot", "permissions": "trusted" },
+    { "id": "issue", "key": "w", "label": "work on issue", "applies_to": "issue", "model": "opus",
+      "prompt": "/contour-workflows:work-issue {url}" }
+  ]
+})"sv });
+    REQUIRE(config.has_value());
+    CHECK(config->findTask("fix_ci") == nullptr);
+    REQUIRE(config->notices().size() == 1);
+    CHECK(config->notices()[0].key == "tasks[0].permissions");
+    CHECK(config->notices()[0].problem == ConfigProblem::ProfileOnCopilot);
+    CHECK(config->findTask("issue") != nullptr);
+}
+
 struct RejectRow
 {
     std::string_view label;
@@ -410,6 +472,12 @@ constexpr auto RejectRows = std::array {
     RejectRow { "a quick reply pressing Enter", { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "quick_replies": [ { "key": "1", "label": "yes", "press": "enter" } ],)" }, "quick_replies[0].press", ConfigProblem::NotAPaneKey },
     RejectRow { "a quick reply then sending", { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "quick_replies": [ { "key": "1", "label": "yes", "then": "send" } ],)" }, "quick_replies[0].then", ConfigProblem::UnknownThen },
     RejectRow { "a quick reply's long label", { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "quick_replies": [ { "key": "1", "label": "yes, and do not ask again for anything at all" } ],)" }, "quick_replies[0].label", ConfigProblem::LabelTooLong },
+    RejectRow { "an empty workers", { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "workers": [],)" }, "workers", ConfigProblem::Empty },
+    RejectRow { "a worker without id", { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "workers": [ { "agent": "claude" } ],)" }, "workers[0].id", ConfigProblem::Missing },
+    RejectRow { "a worker id twice", { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "workers": [ { "id": "a", "agent": "claude" }, { "id": "a", "agent": "copilot" } ],)" }, "workers[1].id", ConfigProblem::Duplicate },
+    RejectRow { "an unknown agent", { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "workers": [ { "id": "a", "agent": "codex" } ],)" }, "workers[0].agent", ConfigProblem::UnknownAgent },
+    RejectRow { "an env_set that is no Name", { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "workers": [ { "id": "a", "agent": "claude", "env_set": "a b" } ],)" }, "workers[0].env_set", ConfigProblem::NotAName },
+    RejectRow { "a task worker that is no Name", { .find = R"("applies_to": "issue")", .replace = R"("applies_to": "issue", "worker": "a b")" }, "tasks[2].worker", ConfigProblem::NotAName },
 };
 // clang-format on
 
