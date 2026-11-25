@@ -7,8 +7,11 @@
 // handle closes (the process handle's), allows it no second process, caps its memory and lets an unhandled
 // exception end it rather than open a dialog.
 //
-// The child gets the null device as stdin and stdout, this process's stderr, the environment it is given and
-// nothing else, and the root of its executable's volume as its working directory.
+// The child gets the null device as stdin and stdout, the stderr it is given or else the null device -- never
+// this process's console unasked -- the environment it is given and nothing else, the root of its
+// executable's volume as its working directory, and a console of its own that shows no window
+// (CREATE_NO_WINDOW), so that it is attached to no console of the parent's and receives none of its
+// Ctrl+C events.
 //
 // The inheritance window. The handle list binds only this CreateProcessW(): while the duplicates are
 // inheritable, any other CreateProcess() of this process that inherits handles without a list of its own
@@ -268,12 +271,16 @@ namespace
                 ::TerminateProcess(_process.get(), KilledExitCode);
         }
 
-        [[nodiscard]] std::optional<ExitStatus> tryReap() noexcept override
+        [[nodiscard]] std::expected<std::optional<ExitStatus>, LaunchError> tryReap() noexcept override
         {
             if (_status)
                 return _status;
-            if (::WaitForSingleObject(_process.get(), 0) != WAIT_OBJECT_0)
-                return std::nullopt;
+            switch (::WaitForSingleObject(_process.get(), 0))
+            {
+                case WAIT_OBJECT_0: break;
+                case WAIT_TIMEOUT: return std::nullopt;
+                default: return std::unexpected(launchErrorOf(::GetLastError()));
+            }
             auto code = DWORD { 0 };
             if (!::GetExitCodeProcess(_process.get(), &code))
                 code = static_cast<DWORD>(-1);
@@ -394,12 +401,11 @@ namespace
                 std::ignore = nullDevice.release();
                 return std::unexpected(launchErrorOf(::GetLastError()));
             }
-            // The stderr the spec names, else this process's own, if it has one; the null device if not. Our
-            // own is looked up only when the spec names none.
+            // The stderr the spec names, if it is a handle; the null device if not.
             auto errorOutput = OwnedHandle {};
-            if (auto* const own = spec.standardError ? *spec.standardError : ::GetStdHandle(STD_ERROR_HANDLE);
-                own != nullptr && own != INVALID_HANDLE_VALUE)
-                errorOutput = copyOf(own);
+            if (spec.standardError && *spec.standardError != nullptr
+                && *spec.standardError != INVALID_HANDLE_VALUE)
+                errorOutput = copyOf(*spec.standardError);
             auto* const childError = errorOutput ? errorOutput.get() : nullDevice.get();
 
             auto handleList = childHandles;
@@ -487,6 +493,15 @@ std::shared_ptr<IProcessLauncher> makeSystemProcessLauncher()
 ProcessId currentProcessId() noexcept
 {
     return static_cast<ProcessId>(::GetCurrentProcessId());
+}
+
+std::optional<transport::NativeHandle> defaultHelperStandardError()
+{
+#ifdef CONTOUR_INSTRUMENTED_BUILD
+    if (auto* const own = ::GetStdHandle(STD_ERROR_HANDLE); own != nullptr && own != INVALID_HANDLE_VALUE)
+        return own;
+#endif
+    return std::nullopt;
 }
 
 std::vector<std::pair<std::string, std::string>> defaultHelperEnvironment()

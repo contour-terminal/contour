@@ -38,6 +38,8 @@ struct FakeProcessLauncher::State
     std::optional<LaunchError> waitFailure;  ///< What every wait() fails with; nothing while they work.
     std::optional<LaunchError> watchFailure; ///< What every watch() fails with; nothing while they work.
     std::set<std::size_t> survivors;         ///< The processes kill() does not end.
+    std::map<std::size_t, LaunchError>
+        reapFailures; ///< What each process's tryReap() fails with, if it does.
 };
 
 namespace
@@ -69,9 +71,11 @@ namespace
             }
         }
 
-        [[nodiscard]] std::optional<ExitStatus> tryReap() noexcept override
+        [[nodiscard]] std::expected<std::optional<ExitStatus>, LaunchError> tryReap() noexcept override
         {
             auto const lock = std::scoped_lock { _state->mutex };
+            if (auto const failure = _state->reapFailures.find(_index); failure != _state->reapFailures.end())
+                return std::unexpected(failure->second);
             return _state->launches[_index].exit;
         }
 
@@ -168,6 +172,13 @@ std::expected<std::unique_ptr<IExitWaitSet>, LaunchError> FakeProcessLauncher::m
     [[maybe_unused]] core::IClock& clock)
 {
     return std::make_unique<FakeExitWaitSet>(_state);
+}
+
+void FakeProcessLauncher::failReap(std::size_t index, LaunchError error)
+{
+    auto const lock = std::scoped_lock { _state->mutex };
+    _state->reapFailures.insert_or_assign(index, error);
+    _state->changed.notify_all();
 }
 
 void FakeProcessLauncher::exit(std::size_t index, ExitStatus status)

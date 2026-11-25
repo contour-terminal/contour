@@ -15,7 +15,8 @@
 // killed, which is what the tests of a helper outliving its parent do.
 //
 // The report is one `key=value` line each: `cwd=` its working directory, `env=NAME` per environment variable,
-// `stdin=` and `stdout=` each `null` if it is the null device, else `other`; `caps=` `apply` or `skip` as
+// `stdin=`, `stdout=` and `stderr=` each `null` if it is the null device, `terminal` if a terminal, else
+// `other`; (POSIX) `pid=` its process id and `sid=` its session's; `caps=` `apply` or `skip` as
 // the build caps, and (POSIX) `nproc=` and `data=` its limits, a number or `unlimited`; and `fd=N` per open
 // descriptor (POSIX) or `handle=H:valid|invalid` per --check-handle (Windows); then `end`.
 #include <core/Clock.hpp>
@@ -35,6 +36,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -109,31 +111,46 @@ constexpr auto CheckHandle = std::string_view { "--check-handle=" };
     return lines;
 }
 
-/// The standard streams the report names.
+/// The standard streams the report names, as the system numbers them.
 enum class StandardStream : uint8_t
 {
     Input,
     Output,
+    Error,
 };
 
-/// @return Whether @p stream is the null device: `null`, else `other`.
+/// @return What @p stream is: `null` for the null device, `terminal` for a terminal (a console on Windows),
+///         else `other`.
 [[nodiscard]] std::string_view deviceOf(StandardStream stream)
 {
 #ifdef _WIN32
-    auto* const handle =
-        ::GetStdHandle(stream == StandardStream::Input ? STD_INPUT_HANDLE : STD_OUTPUT_HANDLE);
+    constexpr auto Handles = std::array<DWORD, 3> { STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE };
+    auto* const handle = ::GetStdHandle(Handles[std::to_underlying(stream)]);
+    if (handle == nullptr || handle == INVALID_HANDLE_VALUE || ::GetFileType(handle) != FILE_TYPE_CHAR)
+        return "other";
     // NUL is a character device, and unlike a console it has no console mode.
     auto mode = DWORD { 0 };
-    auto const isNull = handle != nullptr && handle != INVALID_HANDLE_VALUE
-                        && ::GetFileType(handle) == FILE_TYPE_CHAR && !::GetConsoleMode(handle, &mode);
+    return ::GetConsoleMode(handle, &mode) ? "terminal" : "null";
 #else
+    constexpr auto Descriptors = std::array { STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO };
+    auto const descriptor = Descriptors[std::to_underlying(stream)];
     struct stat opened {};
     struct stat nullDevice {};
-    auto const descriptor = stream == StandardStream::Input ? STDIN_FILENO : STDOUT_FILENO;
-    auto const isNull = ::fstat(descriptor, &opened) == 0 && ::stat("/dev/null", &nullDevice) == 0
-                        && opened.st_dev == nullDevice.st_dev && opened.st_ino == nullDevice.st_ino;
+    if (::fstat(descriptor, &opened) == 0 && ::stat("/dev/null", &nullDevice) == 0
+        && opened.st_dev == nullDevice.st_dev && opened.st_ino == nullDevice.st_ino)
+        return "null";
+    return ::isatty(descriptor) == 1 ? "terminal" : "other";
 #endif
-    return isNull ? "null" : "other";
+}
+
+/// @return Its process and session, one line each (POSIX); nothing on Windows, which has no sessions.
+[[nodiscard]] std::string sessionLines()
+{
+#ifdef _WIN32
+    return {};
+#else
+    return std::format("pid={}\nsid={}\n", ::getpid(), ::getsid(0));
+#endif
 }
 
 /// @return The open handles, one line each: every descriptor (POSIX), or the validity of each of @p checked
@@ -201,10 +218,12 @@ enum class StandardStream : uint8_t
     std::ignore =
         vtextension::wasm::host::capResources(parsed->dataBytes, vtextension::wasm::host::BuildCapPolicy);
 
-    auto const text = std::format("cwd={}\nstdin={}\nstdout={}\n{}{}{}end\n",
+    auto const text = std::format("cwd={}\nstdin={}\nstdout={}\nstderr={}\n{}{}{}{}end\n",
                                   std::filesystem::current_path().string(),
                                   deviceOf(StandardStream::Input),
                                   deviceOf(StandardStream::Output),
+                                  deviceOf(StandardStream::Error),
+                                  sessionLines(),
                                   environmentLines(environment),
                                   capLines(),
                                   handleLines(checked));

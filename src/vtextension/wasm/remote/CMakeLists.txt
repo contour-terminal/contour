@@ -86,6 +86,11 @@ if(_process_source)
         ${_process_source}
     )
     target_link_libraries(vtextension_remote_process PUBLIC core::log core::platform)
+    # A sanitizer or coverage build's helpers report to Contour's stderr (defaultHelperStandardError()); any
+    # other build's get the null device.
+    if(CONTOUR_SANITIZE OR CONTOUR_COVERAGE)
+        target_compile_definitions(vtextension_remote_process PRIVATE CONTOUR_INSTRUMENTED_BUILD)
+    endif()
     # Where the extension host is installed, from the directory contour is (../../../CMakeLists.txt).
     target_compile_definitions(vtextension_remote_process PUBLIC
         CONTOUR_EXTENSION_HOST_RELATIVE_DIR="${CONTOUR_EXTENSION_HOST_RELATIVE_DIR}")

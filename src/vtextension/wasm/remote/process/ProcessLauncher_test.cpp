@@ -87,6 +87,8 @@ struct ProbeOptions
     std::vector<std::pair<std::string, std::string>> environment {};
     std::vector<std::string> checkHandles {}; ///< Handle values the probe reports the validity of (Windows).
     process::ProcessId parentProcessId = ownProcessId(); ///< What `--parent` names.
+    /// Its stderr: this process's own, so that what it reports shows.
+    std::optional<NativeHandle> standardError = process::testing::ownStandardError();
 };
 
 /// @return The probe's report on @p control, one line each, once it wrote all of it; nothing if the channel
@@ -144,7 +146,8 @@ struct ProbeOptions
                 },
             .parentProcessId = options.parentProcessId,
             .dataBytes = ProbeDataBytes,
-            .environment = std::move(options.environment) });
+            .environment = std::move(options.environment),
+            .standardError = options.standardError });
 }
 
 } // namespace
@@ -186,6 +189,35 @@ TEST_CASE("ProcessLauncher.childRunsAtTheRootOnTheNullDevice", "[vtextension]")
     CHECK(valuesOf(*report, "stdout=") == std::vector<std::string> { "null" });
     CHECK(endAndReap(*probe->launcher, *probe->process));
 }
+
+TEST_CASE("ProcessLauncher.childStderrIsTheNullDeviceUnlessGiven", "[vtextension]")
+{
+    // Nothing of this process's terminal reaches a child that was given no stderr.
+    auto probe =
+        launchProbe(process::makeSystemProcessLauncher(), ProbeOptions { .standardError = std::nullopt });
+    REQUIRE(probe.has_value());
+    auto const report = readReport(probe->control);
+    REQUIRE(report.has_value());
+    CHECK(valuesOf(*report, "stderr=") == std::vector<std::string> { "null" });
+    CHECK(endAndReap(*probe->launcher, *probe->process));
+}
+
+#ifndef _WIN32
+TEST_CASE("ProcessLauncher.childLeadsASessionOfItsOwn", "[vtextension]")
+{
+    // A session of its own has no controlling terminal: the child can neither open this process's terminal
+    // nor be signalled by it.
+    auto probe = launchProbe(process::makeSystemProcessLauncher());
+    REQUIRE(probe.has_value());
+    auto const report = readReport(probe->control);
+    REQUIRE(report.has_value());
+    auto const session = valuesOf(*report, "sid=");
+    REQUIRE(session.size() == 1);
+    CHECK(session.front() == std::to_string(probe->process->id()));
+    CHECK(session.front() != std::to_string(::getsid(0)));
+    CHECK(endAndReap(*probe->launcher, *probe->process));
+}
+#endif
 
 TEST_CASE("ProcessLauncher.childInheritsExactlyItsHandles", "[vtextension]")
 {
@@ -273,7 +305,7 @@ TEST_CASE("ProcessLauncher.killThenReap", "[vtextension]")
     REQUIRE(set.has_value());
     REQUIRE((*set)->watch(3, *probe->process).has_value());
     REQUIRE(readReport(probe->control).has_value());
-    CHECK_FALSE(probe->process->tryReap().has_value());
+    CHECK(probe->process->tryReap() == std::nullopt);
 
     probe->process->kill();
     CHECK((*set)->wait(clock.now() + ChildPatience) == std::vector<uint64_t> { 3 });
@@ -298,7 +330,9 @@ TEST_CASE("ProcessLauncher.killAfterReapDoesNothing", "[vtextension]")
     // Reaped: a kill now could reach whatever process took the id over, so it reaches nothing.
     probe->process->kill();
     probe->process->kill();
-    CHECK(probe->process->tryReap() == first);
+    auto const again = probe->process->tryReap();
+    REQUIRE(again.has_value());
+    CHECK(*again == first);
 }
 
 TEST_CASE("ProcessLauncher.missingExecutableIsNotFound", "[vtextension]")
@@ -370,7 +404,10 @@ class CopiedWaitable final: public IProcessHandle
     CopiedWaitable(IProcessHandle& process, int copy) noexcept: _process { process }, _copy { copy } {}
     [[nodiscard]] process::ProcessId id() const noexcept override { return _process.id(); }
     void kill() noexcept override { _process.kill(); }
-    [[nodiscard]] std::optional<ExitStatus> tryReap() noexcept override { return _process.tryReap(); }
+    [[nodiscard]] std::expected<std::optional<ExitStatus>, LaunchError> tryReap() noexcept override
+    {
+        return _process.tryReap();
+    }
     [[nodiscard]] process::Waitable waitable() const noexcept override { return _copy; }
 
   private:
@@ -451,7 +488,7 @@ TEST_CASE("FakeProcessLauncher.recordsAndExits", "[vtextension]")
         launcher->exit(1, ExitStatus { .kind = ExitKind::Exited, .value = 3 });
         CHECK(woken.get() == std::vector<uint64_t> { 20 });
         CHECK(launcher->lastDeadline() == deadline);
-        CHECK_FALSE((*first)->tryReap().has_value());
+        CHECK((*first)->tryReap() == std::nullopt);
         CHECK((*second)->tryReap() == ExitStatus { .kind = ExitKind::Exited, .value = 3 });
     }
     SECTION("a kill is recorded and ends the process")

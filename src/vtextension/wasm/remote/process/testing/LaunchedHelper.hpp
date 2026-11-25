@@ -32,8 +32,12 @@ inline constexpr auto ChildPatience = std::chrono::seconds { 5 };
 /// @return This process's id.
 [[nodiscard]] ProcessId ownProcessId() noexcept;
 
+/// @return This process's stderr, as it is now: what a launched child reports to unless a test says
+/// otherwise.
+[[nodiscard]] std::optional<transport::NativeHandle> ownStandardError() noexcept;
+
 /// Reaps @p process, waiting up to ChildPatience for it to exit.
-/// @return Its status; nothing if it still ran when the patience ran out.
+/// @return Its status; nothing if it still ran when the patience ran out, or could not be waited for.
 [[nodiscard]] std::optional<ExitStatus> awaitReap(IProcessLauncher& launcher, IProcessHandle& process);
 
 /// Kills @p process if it still runs, and reaps it.
@@ -50,6 +54,8 @@ struct HelperLaunch
     ProcessId parentProcessId = ownProcessId();                      ///< What `--parent` names.
     uint64_t dataBytes = DefaultDataBytes;                           ///< What `--data-bytes` names.
     std::vector<std::pair<std::string, std::string>> environment {}; ///< The child's environment.
+    /// Its stderr (LaunchSpec::standardError): by default this process's own, so that what it reports shows.
+    std::optional<transport::NativeHandle> standardError = ownStandardError();
 };
 
 /// A started child: Contour's ends of everything it was handed, and the process. Its destructor ends and

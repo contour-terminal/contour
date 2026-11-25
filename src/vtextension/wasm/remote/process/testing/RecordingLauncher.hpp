@@ -130,14 +130,14 @@ class RecordingLauncher final: public IProcessLauncher
             _inner->kill();
         }
 
-        [[nodiscard]] std::optional<ExitStatus> tryReap() noexcept override
+        [[nodiscard]] std::expected<std::optional<ExitStatus>, LaunchError> tryReap() noexcept override
         {
             auto status = _inner->tryReap();
-            if (status && !_reaped)
+            if (status && *status && !_reaped)
             {
-                _reaped = status;
+                _reaped = *status;
                 auto const lock = std::scoped_lock { _records->mutex };
-                _records->exitStatuses.push_back(*status);
+                _records->exitStatuses.push_back(**status);
             }
             return status;
         }

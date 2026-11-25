@@ -60,6 +60,12 @@ class FakeProcessLauncher final: public IProcessLauncher
     /// @param index The process, counted from 0 in launch order; it may be launched later.
     void survivesKill(std::size_t index);
 
+    /// Makes the @p index-th process's tryReap() fail with @p error from now on: a process that cannot be
+    /// waited for.
+    /// @param index The process, counted from 0 in launch order.
+    /// @param error What tryReap() fails with.
+    void failReap(std::size_t index, LaunchError error);
+
     /// Makes every watch() of every set fail with @p error from now on.
     void failWatches(LaunchError error);
 

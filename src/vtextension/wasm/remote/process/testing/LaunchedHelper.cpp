@@ -8,10 +8,18 @@
 #include <algorithm>
 #include <cstddef>
 #include <iterator>
+#include <optional>
 #include <ranges>
 #include <tuple>
 
 #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
+
+#ifdef _WIN32
+    #define WIN32_LEAN_AND_MEAN
+    #include <Windows.h>
+#else
+    #include <unistd.h>
+#endif
 
 namespace vtextension::wasm::remote::process::testing
 {
@@ -24,6 +32,17 @@ ProcessId ownProcessId() noexcept
     return currentProcessId();
 }
 
+std::optional<transport::NativeHandle> ownStandardError() noexcept
+{
+#ifdef _WIN32
+    if (auto* const own = ::GetStdHandle(STD_ERROR_HANDLE); own != nullptr && own != INVALID_HANDLE_VALUE)
+        return own;
+    return std::nullopt;
+#else
+    return STDERR_FILENO;
+#endif
+}
+
 std::optional<ExitStatus> awaitReap(IProcessLauncher& launcher, IProcessHandle& process)
 {
     auto clock = core::SteadyClock {};
@@ -33,8 +52,11 @@ std::optional<ExitStatus> awaitReap(IProcessLauncher& launcher, IProcessHandle& 
         return std::nullopt;
     while (true)
     {
-        if (auto const status = process.tryReap())
-            return status;
+        auto const status = process.tryReap();
+        if (!status)
+            return std::nullopt;
+        if (*status)
+            return *status;
         if (clock.now() >= deadline)
             return std::nullopt;
         if (!(*set)->wait(deadline))
@@ -98,7 +120,8 @@ std::expected<LaunchedHelper, LaunchError> launchHelper(std::shared_ptr<IProcess
                              .inherited = {},
                              .arguments = {},
                              .environment = std::move(launch.environment),
-                             .caps = {} };
+                             .caps = {},
+                             .standardError = launch.standardError };
     spec.inherited.push_back(control->helper.nativeHandle());
     for (auto const& lane: lanes)
         spec.inherited.push_back(lane.helper.nativeHandle());

@@ -4,8 +4,9 @@
 // instruction, which kill() signals (pdkill), the wait set polls (it hangs up when the process exits), and
 // whose close ends the process -- nothing ever addresses it by a pid that could be reused. Everything the
 // child needs is prepared before the fork, so that the child of this multi-threaded process calls only
-// async-signal-safe functions: dup2(), closefrom(), chdir(), sigaction(), sigprocmask() and execve(), and
-// _exit(127) on any failure.
+// async-signal-safe functions: setsid(), dup2(), closefrom(), chdir(), sigaction(), sigprocmask() and
+// execve(), and _exit(127) on any failure. It starts as the other launchers' children do: in a session of
+// its own, which has no controlling terminal, on the null device but for its stderr, in "/".
 #include <sys/procdesc.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -52,26 +53,15 @@ namespace
                 ::pdkill(_descriptor.get(), SIGKILL);
         }
 
-        [[nodiscard]] std::optional<ExitStatus> tryReap() noexcept override
+        [[nodiscard]] std::expected<std::optional<ExitStatus>, LaunchError> tryReap() noexcept override
         {
             if (_status)
                 return _status;
-            auto status = 0;
             // The descriptor holds the pid until it is closed: reaping by pid cannot reach another process.
-            while (true)
-            {
-                auto const reaped = ::waitpid(_pid, &status, WNOHANG);
-                if (reaped == 0)
-                    return std::nullopt;
-                if (reaped == _pid)
-                    break;
-                if (errno == EINTR)
-                    continue;
-                _status = ExitStatus { .kind = ExitKind::Exited, .value = -1 };
-                return _status;
-            }
-            _status = posix::exitStatusOfWait(status);
-            return _status;
+            auto const reaped = posix::reapChild(_pid);
+            if (reaped && *reaped)
+                _status = *reaped;
+            return reaped;
         }
 
         [[nodiscard]] Waitable waitable() const noexcept override { return _descriptor.get(); }
@@ -106,10 +96,13 @@ namespace
         sigemptyset(&empty);
         ::sigprocmask(SIG_SETMASK, &empty, nullptr);
 
+        // A session of its own: no controlling terminal, and no process group a terminal signals. pdfork()'s
+        // child is no process group leader, which is all setsid() asks.
+        if (::setsid() == -1)
+            ::_exit(ExecFailed);
         if (!inheritAs(prepared.nullDevice.get(), STDIN_FILENO)
             || !inheritAs(prepared.nullDevice.get(), STDOUT_FILENO)
-            || (prepared.standardError.get() != -1
-                && !inheritAs(prepared.standardError.get(), STDERR_FILENO)))
+            || !inheritAs(prepared.childStandardError(), STDERR_FILENO))
             ::_exit(ExecFailed);
         auto child = posix::FirstChildDescriptor;
         for (auto const& parked: prepared.parked)

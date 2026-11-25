@@ -2,19 +2,22 @@
 //
 // The launcher on Linux. posix_spawn(), whose glibc implementation clones with CLONE_VM | CLONE_VFORK rather
 // than forking: no copy of a large, sanitized, multi-threaded parent, and no window in which a forked child
-// may only call async-signal-safe functions. The child's descriptors are set by file actions -- the null
-// device on 0 and 1, the parked inherited descriptors dup2()ed onto 3, 4, …, everything from the first beyond
-// them closed -- and it starts in "/" with default signal dispositions and an empty mask.
+// may only call async-signal-safe functions. What the child starts with is PosixLaunch's spawn(): the null
+// device on 0 and 1, its stderr, the parked inherited descriptors dup2()ed onto 3, 4, …, everything from
+// the first beyond them closed, "/" as its working directory, a session of its own, default signal
+// dispositions and an empty mask.
 //
 // Right after the spawn the child is pinned by a pidfd: kill() signals the pidfd, tryReap() waits on it, and
 // the wait set polls it, so that no number is ever used after the process behind it could have been reaped
-// and the number reused. A kernel without pidfds (before 5.3) is refused.
+// and the number reused. A kernel that cannot wait on a pidfd (before 5.4; pidfds themselves came in 5.3)
+// is found out once, when the launcher is made, and every launch is refused as Unsupported.
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
 #include <cerrno>
 #include <csignal>
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <optional>
@@ -46,6 +49,25 @@ namespace
         return UniqueFd { pidfd };
     }
 
+    /// Whether the kernel waits on pidfds.
+    enum class PidfdWaits : uint8_t
+    {
+        Unsupported, ///< Before Linux 5.4: no waitid(P_PIDFD), or (before 5.3) no pidfd at all.
+        Supported,
+    };
+
+    /// @return Whether the kernel waits on pidfds, asked of this process's own: waitid(P_PIDFD) on it fails
+    ///         ECHILD where the id type is known, as a process is no child of its own, and EINVAL where not.
+    [[nodiscard]] PidfdWaits probePidfdWaits() noexcept
+    {
+        auto const own = openPidfd(::getpid());
+        if (!own)
+            return own.error() == ENOSYS ? PidfdWaits::Unsupported : PidfdWaits::Supported;
+        auto info = siginfo_t {};
+        auto const waited = ::waitid(PidfdIdType, static_cast<id_t>(own->get()), &info, WEXITED | WNOHANG);
+        return waited == -1 && errno == EINVAL ? PidfdWaits::Unsupported : PidfdWaits::Supported;
+    }
+
     class LinuxProcessHandle final: public IProcessHandle
     {
       public:
@@ -59,7 +81,7 @@ namespace
                 ::syscall(SYS_pidfd_send_signal, _pidfd.get(), SIGKILL, nullptr, 0);
         }
 
-        [[nodiscard]] std::optional<ExitStatus> tryReap() noexcept override
+        [[nodiscard]] std::expected<std::optional<ExitStatus>, LaunchError> tryReap() noexcept override
         {
             if (_status)
                 return _status;
@@ -69,8 +91,10 @@ namespace
                 if (errno == EINTR)
                     continue;
                 // ECHILD: reaped by someone else (a SIGCHLD handler), and its status lost with it. It is gone
-                // either way; the code says the status is not known.
-                _status = ExitStatus { .kind = ExitKind::Exited, .value = -1 };
+                // either way; the code says the status is not known. Any other error leaves it unreaped.
+                if (errno != ECHILD)
+                    return std::unexpected(posix::launchErrorOf(errno));
+                _status = LostExitStatus;
                 return _status;
             }
             if (info.si_pid == 0)
@@ -92,52 +116,21 @@ namespace
     class LinuxProcessLauncher final: public IProcessLauncher
     {
       public:
+        LinuxProcessLauncher() noexcept: _pidfdWaits { probePidfdWaits() } {}
+
         [[nodiscard]] std::expected<std::unique_ptr<IProcessHandle>, LaunchError> launch(
             LaunchSpec const& spec) override
         {
+            // Refused before anything starts: a child that could not be waited for must not run.
+            if (_pidfdWaits == PidfdWaits::Unsupported)
+                return std::unexpected(LaunchError::Unsupported);
             auto prepared = posix::prepareLaunch(spec);
             if (!prepared)
                 return std::unexpected(prepared.error());
-
-            auto actions = posix::FileActions {};
-            actions.check(
-                ::posix_spawn_file_actions_adddup2(actions.get(), prepared->nullDevice.get(), STDIN_FILENO));
-            actions.check(
-                ::posix_spawn_file_actions_adddup2(actions.get(), prepared->nullDevice.get(), STDOUT_FILENO));
-            if (prepared->standardError.get() != -1)
-                actions.check(::posix_spawn_file_actions_adddup2(
-                    actions.get(), prepared->standardError.get(), STDERR_FILENO));
-            auto child = posix::FirstChildDescriptor;
-            for (auto const& parked: prepared->parked)
-                actions.check(::posix_spawn_file_actions_adddup2(actions.get(), parked.get(), child++));
-            actions.check(::posix_spawn_file_actions_addclosefrom_np(actions.get(), prepared->childEnd()));
-            actions.check(::posix_spawn_file_actions_addchdir_np(actions.get(), "/"));
-
-            auto attributes = posix::SpawnAttributes {};
-            auto defaults = sigset_t {};
-            auto mask = sigset_t {};
-            ::sigfillset(&defaults);
-            ::sigemptyset(&mask);
-            attributes.check(::posix_spawnattr_setsigdefault(attributes.get(), &defaults));
-            attributes.check(::posix_spawnattr_setsigmask(attributes.get(), &mask));
-            attributes.check(
-                ::posix_spawnattr_setflags(attributes.get(), POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK));
-            if (actions.error() != 0)
-                return std::unexpected(posix::launchErrorOf(actions.error()));
-            if (attributes.error() != 0)
-                return std::unexpected(posix::launchErrorOf(attributes.error()));
-
-            auto argv = prepared->argv();
-            auto envp = prepared->envp();
-            auto pid = pid_t { -1 };
-            if (auto const error = ::posix_spawn(&pid,
-                                                 prepared->executable.c_str(),
-                                                 actions.get(),
-                                                 attributes.get(),
-                                                 argv.data(),
-                                                 envp.data());
-                error != 0)
-                return std::unexpected(posix::launchErrorOf(error));
+            auto const spawned = posix::spawn(*prepared);
+            if (!spawned)
+                return std::unexpected(spawned.error());
+            auto const pid = *spawned;
 
             auto pidfd = openPidfd(pid);
             if (!pidfd)
@@ -158,6 +151,9 @@ namespace
         {
             return posix::makePollExitWaitSet(clock);
         }
+
+      private:
+        PidfdWaits _pidfdWaits; ///< Whether a child can be waited for at all.
     };
 } // namespace
 

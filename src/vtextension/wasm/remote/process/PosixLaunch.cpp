@@ -8,6 +8,7 @@
 #include <array>
 #include <cerrno>
 #include <chrono>
+#include <csignal>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -24,7 +25,12 @@
 
 #include <fcntl.h>
 #include <poll.h>
+#include <spawn.h>
 #include <unistd.h>
+
+#ifdef __APPLE__
+    #include <Availability.h>
+#endif
 
 namespace vtextension::wasm::remote::process::posix
 {
@@ -137,6 +143,94 @@ ExitStatus exitStatusOfWait(int status) noexcept
         return ExitStatus { .kind = ExitKind::Signalled, .value = WTERMSIG(status) };
     return ExitStatus { .kind = ExitKind::Exited, .value = WEXITSTATUS(status) };
 }
+
+#if defined(__linux__) || defined(__APPLE__)
+namespace
+{
+    /// Adds the change of the child's working directory to @p actions. POSIX.1-2024 named it
+    /// posix_spawn_file_actions_addchdir(); macOS 26 declares that and deprecates the _np spelling, which
+    /// glibc and older macOS alone have. A build for macOS 26 and later uses POSIX's, one for older systems
+    /// whichever the system it runs on has.
+    [[nodiscard]] int addChdir(posix_spawn_file_actions_t* actions, char const* path) noexcept
+    {
+    #if defined(__APPLE__) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 260000
+        return ::posix_spawn_file_actions_addchdir(actions, path);
+    #elif defined(__APPLE__) && defined(__MAC_26_0)
+        if (__builtin_available(macOS 26.0, *))
+            return ::posix_spawn_file_actions_addchdir(actions, path);
+        return ::posix_spawn_file_actions_addchdir_np(actions, path);
+    #else
+        return ::posix_spawn_file_actions_addchdir_np(actions, path);
+    #endif
+    }
+} // namespace
+
+std::expected<pid_t, LaunchError> spawn(PreparedLaunch& prepared)
+{
+    auto actions = FileActions {};
+    actions.check(::posix_spawn_file_actions_adddup2(actions.get(), prepared.nullDevice.get(), STDIN_FILENO));
+    actions.check(
+        ::posix_spawn_file_actions_adddup2(actions.get(), prepared.nullDevice.get(), STDOUT_FILENO));
+    actions.check(
+        ::posix_spawn_file_actions_adddup2(actions.get(), prepared.childStandardError(), STDERR_FILENO));
+    auto child = FirstChildDescriptor;
+    for (auto const& parked: prepared.parked)
+        actions.check(::posix_spawn_file_actions_adddup2(actions.get(), parked.get(), child++));
+    #ifdef __APPLE__
+    // POSIX_SPAWN_CLOEXEC_DEFAULT closes every descriptor no action names.
+    constexpr auto ClosingFlags = POSIX_SPAWN_CLOEXEC_DEFAULT;
+    #else
+    actions.check(::posix_spawn_file_actions_addclosefrom_np(actions.get(), prepared.childEnd()));
+    constexpr auto ClosingFlags = 0;
+    #endif
+    actions.check(addChdir(actions.get(), "/"));
+
+    auto attributes = SpawnAttributes {};
+    auto defaults = sigset_t {};
+    auto mask = sigset_t {};
+    sigfillset(&defaults);
+    sigemptyset(&mask);
+    attributes.check(::posix_spawnattr_setsigdefault(attributes.get(), &defaults));
+    attributes.check(::posix_spawnattr_setsigmask(attributes.get(), &mask));
+    attributes.check(
+        ::posix_spawnattr_setflags(attributes.get(),
+                                   static_cast<short>(POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK
+                                                      | POSIX_SPAWN_SETSID | ClosingFlags)));
+    if (actions.error() != 0)
+        return std::unexpected(launchErrorOf(actions.error()));
+    if (attributes.error() != 0)
+        return std::unexpected(launchErrorOf(attributes.error()));
+
+    auto argv = prepared.argv();
+    auto envp = prepared.envp();
+    auto pid = pid_t { -1 };
+    if (auto const error = ::posix_spawn(
+            &pid, prepared.executable.c_str(), actions.get(), attributes.get(), argv.data(), envp.data());
+        error != 0)
+        return std::unexpected(launchErrorOf(error));
+    return pid;
+}
+#endif
+
+#if defined(__APPLE__) || defined(__FreeBSD__)
+std::expected<std::optional<ExitStatus>, LaunchError> reapChild(pid_t pid) noexcept
+{
+    auto status = 0;
+    while (true)
+    {
+        auto const reaped = ::waitpid(pid, &status, WNOHANG);
+        if (reaped == 0)
+            return std::nullopt;
+        if (reaped == pid)
+            return exitStatusOfWait(status);
+        if (errno == EINTR)
+            continue;
+        if (errno == ECHILD)
+            return LostExitStatus;
+        return std::unexpected(launchErrorOf(errno));
+    }
+}
+#endif
 
 #ifndef __APPLE__
 namespace
@@ -252,6 +346,15 @@ namespace vtextension::wasm::remote::process
 ProcessId currentProcessId() noexcept
 {
     return static_cast<ProcessId>(::getpid());
+}
+
+std::optional<transport::NativeHandle> defaultHelperStandardError()
+{
+#ifdef CONTOUR_INSTRUMENTED_BUILD
+    return STDERR_FILENO;
+#else
+    return std::nullopt;
+#endif
 }
 
 } // namespace vtextension::wasm::remote::process

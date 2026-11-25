@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // The launcher on macOS. posix_spawn() with POSIX_SPAWN_CLOEXEC_DEFAULT, Apple's extension that closes every
-// descriptor no file action names: the null device on 0 and 1, stderr inherited, the parked inherited
-// descriptors dup2()ed onto 3, 4, …; the child starts in "/" with default signal dispositions and an empty
-// mask.
+// descriptor no file action names; what the child starts with is PosixLaunch's spawn(): the null device on 0
+// and 1, its stderr, the parked inherited descriptors dup2()ed onto 3, 4, …, "/" as its working directory, a
+// session of its own, default signal dispositions and an empty mask.
 //
 // The parent's own ends are close-on-exec, but between their creation and that flag (macOS has no
 // SOCK_CLOEXEC) a concurrent fork() and exec() elsewhere in the process could inherit one; the spawn itself
@@ -30,7 +30,6 @@
 #include <utility>
 #include <vector>
 
-#include <spawn.h>
 #include <unistd.h>
 
 #include <vtextension/wasm/remote/process/PosixLaunch.hpp>
@@ -62,26 +61,14 @@ namespace
                 ::kill(_pid, SIGKILL);
         }
 
-        [[nodiscard]] std::optional<ExitStatus> tryReap() noexcept override
+        [[nodiscard]] std::expected<std::optional<ExitStatus>, LaunchError> tryReap() noexcept override
         {
             if (_status)
                 return _status;
-            auto status = 0;
-            while (true)
-            {
-                auto const reaped = ::waitpid(_pid, &status, WNOHANG);
-                if (reaped == 0)
-                    return std::nullopt;
-                if (reaped == _pid)
-                    break;
-                if (errno == EINTR)
-                    continue;
-                // ECHILD: reaped by someone else, and its status lost with it.
-                _status = ExitStatus { .kind = ExitKind::Exited, .value = -1 };
-                return _status;
-            }
-            _status = posix::exitStatusOfWait(status);
-            return _status;
+            auto const reaped = posix::reapChild(_pid);
+            if (reaped && *reaped)
+                _status = *reaped;
+            return reaped;
         }
 
         [[nodiscard]] Waitable waitable() const noexcept override { return _pid; }
@@ -219,50 +206,9 @@ namespace
             auto prepared = posix::prepareLaunch(spec);
             if (!prepared)
                 return std::unexpected(prepared.error());
-
-            auto actions = posix::FileActions {};
-            actions.check(
-                ::posix_spawn_file_actions_adddup2(actions.get(), prepared->nullDevice.get(), STDIN_FILENO));
-            actions.check(
-                ::posix_spawn_file_actions_adddup2(actions.get(), prepared->nullDevice.get(), STDOUT_FILENO));
-            if (prepared->standardError.get() != -1)
-                actions.check(::posix_spawn_file_actions_adddup2(
-                    actions.get(), prepared->standardError.get(), STDERR_FILENO));
-            else
-                actions.check(::posix_spawn_file_actions_addinherit_np(actions.get(), STDERR_FILENO));
-            auto child = posix::FirstChildDescriptor;
-            for (auto const& parked: prepared->parked)
-                actions.check(::posix_spawn_file_actions_adddup2(actions.get(), parked.get(), child++));
-            actions.check(::posix_spawn_file_actions_addchdir_np(actions.get(), "/"));
-
-            auto attributes = posix::SpawnAttributes {};
-            auto defaults = sigset_t {};
-            auto mask = sigset_t {};
-            sigfillset(&defaults);
-            sigemptyset(&mask);
-            attributes.check(::posix_spawnattr_setsigdefault(attributes.get(), &defaults));
-            attributes.check(::posix_spawnattr_setsigmask(attributes.get(), &mask));
-            attributes.check(
-                ::posix_spawnattr_setflags(attributes.get(),
-                                           static_cast<short>(POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK
-                                                              | POSIX_SPAWN_CLOEXEC_DEFAULT)));
-            if (actions.error() != 0)
-                return std::unexpected(posix::launchErrorOf(actions.error()));
-            if (attributes.error() != 0)
-                return std::unexpected(posix::launchErrorOf(attributes.error()));
-
-            auto argv = prepared->argv();
-            auto envp = prepared->envp();
-            auto pid = pid_t { -1 };
-            if (auto const error = ::posix_spawn(&pid,
-                                                 prepared->executable.c_str(),
-                                                 actions.get(),
-                                                 attributes.get(),
-                                                 argv.data(),
-                                                 envp.data());
-                error != 0)
-                return std::unexpected(posix::launchErrorOf(error));
-            return std::make_unique<MacProcessHandle>(pid);
+            return posix::spawn(*prepared).transform([](pid_t pid) -> std::unique_ptr<IProcessHandle> {
+                return std::make_unique<MacProcessHandle>(pid);
+            });
         }
 
         [[nodiscard]] std::expected<std::unique_ptr<IExitWaitSet>, LaunchError> makeWaitSet(

@@ -233,6 +233,24 @@ TEST_CASE("Supervisor.exitIsObservedAndReaped", "[vtextension]")
     CHECK(rig.fake->kills().empty());
 }
 
+TEST_CASE("Supervisor.unreapableHelperIsStoppedAndForgotten", "[vtextension]")
+{
+    auto rig = Rig {};
+    auto helper = rig.launch();
+    helper.attach(rig.countingDeaths());
+    rig.supervisor->sync();
+    // It cannot be waited for: looked at again on every wait, it would be looked at for ever.
+    rig.fake->failReap(0, LaunchError::Io);
+    rig.supervisor->sync();
+
+    CHECK(rig.fake->kills() == std::vector<std::size_t> { 0 });
+    auto const counters = rig.supervisor->counters();
+    CHECK(counters.reaped == 1);
+    CHECK(counters.uncleanExits == 1);
+    CHECK(rig.deaths->load() == 1);
+    CHECK(rig.supervisor->liveProcesses() == 0);
+}
+
 TEST_CASE("Supervisor.attachAfterDeathFiresAtOnce", "[vtextension]")
 {
     auto rig = Rig {};

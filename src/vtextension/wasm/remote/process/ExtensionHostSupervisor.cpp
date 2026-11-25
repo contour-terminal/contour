@@ -648,9 +648,22 @@ void SupervisorLoop::reapEnded(Observation observation)
 {
     auto ended = std::vector<std::pair<uint64_t, ExitStatus>> {};
     for (auto const& [key, helper]: _helpers)
-        if (helper.process)
-            if (auto const status = helper.process->tryReap())
-                ended.emplace_back(key, *status);
+    {
+        if (!helper.process)
+            continue;
+        auto const status = helper.process->tryReap();
+        if (status && *status)
+            ended.emplace_back(key, **status);
+        else if (!status)
+        {
+            // It cannot be waited for, and so would be looked at again on every wait: it is stopped, and
+            // forgotten as a host that ended in a way no one knows.
+            errorLog()("An extension host cannot be waited for ({}); it was stopped.",
+                       launchErrorText(status.error()));
+            helper.process->kill();
+            ended.emplace_back(key, LostExitStatus);
+        }
+    }
     for (auto const& [key, status]: ended)
     {
         auto& helper = _helpers.at(key);

@@ -6,8 +6,10 @@
 /// interface, so that the supervisor above runs on a fake in its tests.
 ///
 /// A child starts with exactly the handles it is given (`LaunchSpec::inherited`), the environment it is given
-/// and nothing of the parent's, the null device as its stdin and stdout, the parent's stderr, and the root
-/// directory as its working directory. On POSIX the i-th inherited handle is descriptor 3 + i in the child;
+/// and nothing of the parent's, the null device as its stdin and stdout, the stderr it is given or else the
+/// null device, the root directory as its working directory, and no terminal of the parent's: on POSIX in a
+/// session of its own, which has no controlling terminal; on Windows with a console of its own, which shows
+/// no window. On POSIX the i-th inherited handle is descriptor 3 + i in the child;
 /// on Windows a child sees inheritable duplicates under values known only once they exist, which is why the
 /// command line is a function of them.
 
@@ -21,6 +23,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -43,10 +46,26 @@ enum class LaunchError : uint8_t
 {
     NotFound,    ///< The executable does not exist, or cannot be executed.
     Resources,   ///< The system is out of memory, processes or handles.
-    Unsupported, ///< The system lacks what the launcher needs (Linux: pidfds, kernel 5.3).
+    Unsupported, ///< The system lacks what the launcher needs (Linux: waiting on pidfds, kernel 5.4).
     Stopped,     ///< Whoever launches has stopped launching.
     Io,          ///< The system refused for any other reason.
 };
+
+/// @param error Why a process could not be started, or watched.
+/// @return What it means, user-readable: a sentence's end, naming no system call.
+[[nodiscard]] constexpr std::string_view launchErrorText(LaunchError error) noexcept
+{
+    switch (error)
+    {
+        case LaunchError::NotFound: return "the program is missing, or cannot be executed";
+        case LaunchError::Resources: return "the system is out of memory, processes or handles";
+        case LaunchError::Unsupported:
+            return "the system lacks what it takes (on Linux, kernel 5.4 or later)";
+        case LaunchError::Stopped: return "Contour is shutting down";
+        case LaunchError::Io: return "the system refused";
+    }
+    return "the system refused";
+}
 
 /// How a process ended.
 enum class ExitKind : uint8_t
@@ -63,6 +82,10 @@ struct ExitStatus
 
     bool operator==(ExitStatus const&) const = default;
 };
+
+/// How a process ended that another reaped -- a SIGCHLD handler of this process's -- or that could not be
+/// waited for: its status is lost.
+inline constexpr auto LostExitStatus = ExitStatus { .kind = ExitKind::Exited, .value = -1 };
 
 /// The caps on a child's resources.
 struct ResourceCaps
@@ -93,9 +116,10 @@ struct LaunchSpec
         arguments {};
     std::vector<std::pair<std::string, std::string>> environment {}; ///< The child's whole environment.
     ResourceCaps caps {};                                            ///< Its caps.
-    /// Where the child's stderr goes: nothing for this process's own, as Contour starts its helpers. A test
-    /// names a copy of its own stderr taken before anything captured it, so that what a helper reports stays
-    /// visible however the test redirects its own.
+    /// Where the child's stderr goes: nothing for the null device, so that a terminal Contour runs in never
+    /// reaches the child. A build whose helpers report diagnostics names this process's own
+    /// (defaultHelperStandardError()); a test names a copy of its own stderr taken before anything captured
+    /// it, so that what a helper reports stays visible however the test redirects its own.
     std::optional<transport::NativeHandle> standardError {};
 };
 
@@ -121,8 +145,10 @@ class IProcessHandle
     virtual void kill() noexcept = 0;
 
     /// Collects the process's status if it ended. Never blocks.
-    /// @return How it ended, the same status on every later call; nothing while it runs.
-    [[nodiscard]] virtual std::optional<ExitStatus> tryReap() noexcept = 0;
+    /// @return How it ended, the same status on every later call -- an exit code of -1 if it was reaped by
+    ///         another (a SIGCHLD handler of this process's), its status lost with it; nothing while it runs;
+    ///         why it could not be waited for, which leaves it unreaped.
+    [[nodiscard]] virtual std::expected<std::optional<ExitStatus>, LaunchError> tryReap() noexcept = 0;
 
     /// @return What its exit is waited on by, still owned by the handle.
     [[nodiscard]] virtual Waitable waitable() const noexcept = 0;
@@ -193,5 +219,10 @@ class IProcessLauncher
 /// @return What a helper's environment holds by default: nothing on POSIX; `SystemRoot` on Windows, without
 ///         which a process cannot load the system's DLLs.
 [[nodiscard]] std::vector<std::pair<std::string, std::string>> defaultHelperEnvironment();
+
+/// @return Where a helper's stderr goes by default (LaunchSpec::standardError): this process's own in a
+///         sanitizer or coverage build, whose helpers report there; nothing, the null device, in any other,
+///         whose helpers have nothing to say.
+[[nodiscard]] std::optional<transport::NativeHandle> defaultHelperStandardError();
 
 } // namespace vtextension::wasm::remote::process
