@@ -16,6 +16,7 @@
 #include <orchestrator/view/Fleet.hpp>
 #include <orchestrator/view/Keys.hpp>
 #include <orchestrator/view/Sections.hpp>
+#include <orchestrator/view/WorkBoard.hpp>
 
 namespace orchestrator::view
 {
@@ -122,5 +123,11 @@ enum class MessageKeys : uint8_t
 ///         else the row's actions, `esc back` in the Focus and `n new agent` where the row does not offer it
 ///         already, then `^k all actions`, which always shows.
 [[nodiscard]] std::string barText(Row const* row, Place place, MessageKeys keys, int columns);
+
+/// @param selected What the Work view's selected line is; std::nullopt: none is.
+/// @param columns The cells the line may take.
+/// @return The Work view's action bar line, as many whole hints as fit: what `⏎` does on a heading, then the
+///         Work view's keys (workKeyRows()), then `^k all actions`, which always shows.
+[[nodiscard]] std::string workBarText(std::optional<WorkLineKind> selected, int columns);
 
 } // namespace orchestrator::view

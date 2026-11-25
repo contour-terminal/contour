@@ -1,0 +1,146 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// The Work view: the user's merge requests and tickets, in the groups core/WorkItems puts them in, folding,
+// sortable and filtered; its keys, and the component that draws it.
+#pragma once
+
+#include <core/tui/Component.hpp>
+
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <string>
+#include <vector>
+
+#include <orchestrator/core/Engine.hpp>
+#include <orchestrator/core/WorkItems.hpp>
+#include <orchestrator/view/HitMap.hpp>
+#include <orchestrator/view/Keys.hpp>
+
+namespace orchestrator::view
+{
+
+/// What a line of the Work view is.
+enum class WorkLineKind : uint8_t
+{
+    Heading = 0, ///< A group's heading: `▾ Needs you  3`.
+    Item,        ///< An item's row.
+};
+
+/// One line of the Work view.
+struct WorkLine
+{
+    WorkLineKind kind = WorkLineKind::Heading;   ///< What it is.
+    WorkGroup group = WorkGroup::EverythingElse; ///< Its group: the heading's, or the item's.
+    std::size_t item = 0;                        ///< An item line's index into the items; 0 for a heading.
+    [[nodiscard]] bool operator==(WorkLine const&) const = default;
+};
+
+/// What the Work view draws from, kept by the dashboard across frames: the items are built again only when
+/// the engine's revision changed, and the lines whenever the interaction or the folds may have moved them.
+struct WorkBoardData
+{
+    std::vector<WorkItem> items = {};                ///< Engine::workItems().
+    std::vector<std::size_t> order = {};             ///< orderOf() the items, by the engine's sort.
+    std::vector<WorkLine> lines = {};                ///< workLines() of them.
+    std::optional<uint64_t> revision = std::nullopt; ///< The engine's revision they were built at.
+    std::size_t listRows = 0;                        ///< How many lines the list showed, as last drawn.
+};
+
+/// @param engine The engine: the fold keys it holds.
+/// @param group A group.
+/// @return Whether @p group is folded: its default, flipped when the engine holds its fold key.
+[[nodiscard]] bool isGroupFolded(Engine const& engine, WorkGroup group) noexcept;
+
+/// @param engine The engine: the fold keys it holds.
+/// @return The sort the engine's fold keys hold: LastUpdate while it holds SortByUpdateKey.
+[[nodiscard]] WorkSort sortOf(Engine const& engine) noexcept;
+
+/// @param items The items.
+/// @param order Indices into @p items, ordered by orderOf().
+/// @param engine The engine: its folds, its sort and its repositories (for the repository chip).
+/// @param state The filter and the repository chip.
+/// @return The lines drawn: Importance → per non-empty group a heading then its items unless folded;
+///         LastUpdate → items only. Items the filter or the repository chip hide are left out, and a group
+///         left empty by them loses its heading.
+[[nodiscard]] std::vector<WorkLine> workLines(std::span<WorkItem const> items,
+                                              std::span<std::size_t const> order,
+                                              Engine const& engine,
+                                              WorkState const& state);
+
+/// @param line A line.
+/// @param items The items it indexes.
+/// @return Its identity across rebuilds: workItemKey() of an item, `group:<foldKey>` of a heading.
+[[nodiscard]] std::string workLineKey(WorkLine const& line, std::span<WorkItem const> items);
+
+/// Keeps the selection on its line across a rebuild of the lines, by WorkState::selectedKey; when that line
+/// is gone, on the nearest one; with nothing chosen yet, on the first item. Then scrolls it into view.
+/// @param state The Work view's interaction.
+/// @param lines The lines, as built now.
+/// @param items The items they index.
+/// @param pageRows How many lines the list shows; 0: not known yet, the scroll is left alone.
+void keepWorkSelection(WorkState& state,
+                       std::span<WorkLine const> lines,
+                       std::span<WorkItem const> items,
+                       std::size_t pageRows);
+
+/// @param ms How long ago, in milliseconds.
+/// @return `45s`, `12m`, `3h`, `2d`: the age of a last update, rounded down.
+[[nodiscard]] std::string updateAgeText(uint64_t ms);
+
+/// Applies one Work-view command. Fold on a line, or Enter on a heading, folds its group by ToggleFoldAction
+/// of the group's key and selects the heading; Sort toggles SortByUpdateKey; Enter on an item is left to the
+/// caller. SwitchView, NewAgent and Palette act as in the Agents view (dispatch()).
+/// @param command The command (KeyCommand).
+/// @param interaction Where the user is; its WorkState changed.
+/// @param lines The lines as drawn.
+/// @param items The items they index.
+/// @param engine The engine: its repositories and their forges.
+/// @param pageRows How many lines the list shows: what a page key moves by.
+/// @return What the engine is asked, if anything.
+[[nodiscard]] std::optional<UiAction> applyWorkCommand(KeyCommand command,
+                                                       Interaction& interaction,
+                                                       std::span<WorkLine const> lines,
+                                                       std::span<WorkItem const> items,
+                                                       Engine const& engine,
+                                                       std::size_t pageRows);
+
+/// Applies one key in the Work view: to its filter while it is typed (Enter or Esc give the list the keys
+/// again), else by workKeyRows().
+/// @param key A key the terminal sent.
+/// @param interaction Where the user is; changed by the key.
+/// @param lines The lines as drawn.
+/// @param items The items they index.
+/// @param engine The engine.
+/// @param pageRows How many lines the list shows.
+/// @return What the engine is asked, if anything.
+[[nodiscard]] std::optional<UiAction> applyWorkKey(core::tui::KeyEvent const& key,
+                                                   Interaction& interaction,
+                                                   std::span<WorkLine const> lines,
+                                                   std::span<WorkItem const> items,
+                                                   Engine const& engine,
+                                                   std::size_t pageRows);
+
+/// The Work view: the filter bar (the filter, the repository chip, the sort chip), the lines that fit, the
+/// scrollbar on the list's right edge, and the details line of the selected one. Records the hits of its
+/// chips.
+class WorkBoardView final: public core::tui::Component
+{
+  public:
+    /// @param engine The engine: its repositories, forges and wall clock.
+    /// @param interaction Where the user is: its scroll is kept so that the selection stays in view.
+    /// @param data What it draws: its listRows is set as it draws.
+    /// @param hits Where it records what a click lands on.
+    WorkBoardView(Engine const& engine, Interaction& interaction, WorkBoardData& data, HitMap& hits);
+
+    void render(core::tui::Canvas& canvas) override;
+
+  private:
+    Engine const& _engine;
+    Interaction& _interaction;
+    WorkBoardData& _data;
+    HitMap& _hits;
+};
+
+} // namespace orchestrator::view

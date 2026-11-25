@@ -1,0 +1,24 @@
+ ✦ Agents  Work                                                      ⬢ 1/4 ▰▱▱▱ 
+╭─ Work 6 ─────────────────────────────────────────────────────────────────────╮
+│ / prj▏                                ‹ all repositories ›  sort: importance │
+│ ▾ Needs you  2                                                               │
+│▍#2375 PRJ-1234 PRJ-1234: fix the fla… ✗ pipeline · ◆ In Progress             │
+│ #2377 PRJ-1301 PRJ-1301: rebase       ✓ pipeline ⚠ ◆ In Review               │
+│ ▾ In review  1                                                               │
+│ #2379 PRJ-1999 PRJ-1999: running      ◌ running  … ◆ In Review               │
+│ ▾ No MR yet  1                                                               │
+│       PRJ-1302 Example summary        ·          · ◆ [31mBlocked             │
+│ ▸ Everything else  2                                                         │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│ #2375 · contour · pipeline fails: test-windows · PRJ-1234 In Progress        │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ o open · z fold · / filter · s sort · → repository · w agents · ^k all actions 

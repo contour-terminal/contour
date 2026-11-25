@@ -24,6 +24,7 @@ place: statuses are `To Do`, `Selected for Development`, `In Progress`, `In Revi
 | `acli-bad-jql.stderr` | `acli-issues` | what it writes on stderr for a JQL it refuses, in recorded form with a placeholder field value |
 | `issues-bad-key.json` | `acli-issues` | **hand-made**: four work items, three of whose keys are no Jira key (lower case, a `;`, an option) |
 | `issues-work.json` | `acli-issues` | **hand-made**, in the recorded shape: five `PRJ-` work items, one per status the Work board groups — `In Progress`, `Selected for Development` and `To Do` (both `new`), `In Review`, and a last `indeterminate` one, `PRJ-1302`, that no merge request names and whose status name starts with `\u001b[31m`, which sanitising removes |
+| `issues-lookup-work.json` | `acli-issues` | **hand-made**, in the recorded shape: the key lookup's answer for the Work board's screens, one work item, `PRJ-1999`, `In Review` (`indeterminate`) |
 
 **What was measured.** `acli jira workitem search --jql … --fields key,summary,status,issuetype --limit 100 --json`
 prints one JSON array, indented by two, of the Jira REST API's issue objects (`expand`, `id`, `key`, `self`,

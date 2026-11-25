@@ -35,6 +35,13 @@ inline constexpr auto BracketedPasteOn = std::string_view { "\033[?2004h" };
 /// encoding (DECSET 1006), which core::tui::VtParser decodes into mouse events. A served tab may set both.
 inline constexpr auto MouseReportingOn = std::string_view { "\033[?1000h\033[?1006h" };
 
+/// What every frame sets while the Work view is shown: any-motion reporting (DECSET 1003), for hovering and
+/// dragging over the board. Without motion events nothing else changes.
+inline constexpr auto AnyMotionOn = std::string_view { "\033[?1003h" };
+
+/// What the first frame after the Work view sets: any-motion reporting off again (DECRST 1003).
+inline constexpr auto AnyMotionOff = std::string_view { "\033[?1003l" };
+
 /// The dashboard tab: the Fleet (the runs, by what they need) and the Focus (the selected run) drawn with
 /// core::tui, laid out by breakpoint (narrowest first, the last one the tab's size meets wins:
 /// BandBreakpoints), and the keys typed into it.
@@ -147,8 +154,9 @@ class Dashboard
     ///         after a frame or an input.
     [[nodiscard]] std::optional<core::SteadyTimePoint> nextRepaintDue() const noexcept;
 
-    /// @return How often the rows were built from the engine: once per input(), and in frame() only after
-    ///         engineChanged() or when a row changed with time. For tests.
+    /// @return How often the rows were built from the engine: the Fleet's once per input(), and in frame()
+    ///         only after engineChanged() or when a row changed with time; the Work view's items only when
+    ///         the engine's revision changed. Only the view shown builds its rows. For tests.
     [[nodiscard]] std::size_t rowBuilds() const noexcept;
 
     /// What the dashboard asks of the engine with no key typed; the guest calls it before frame(), so that it

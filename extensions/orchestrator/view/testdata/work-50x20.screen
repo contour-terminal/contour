@@ -1,0 +1,20 @@
+ ✦ Agents  Work                        ⬢ 1/4 ▰▱▱▱ 
+╭─ Work 14 ──────────────────────────────────────╮
+│ / fil…  ‹ all repositories ›  sort: importance │
+│ ▾ Needs you  3                                ┃│
+│▍#2375 PRJ-1234: fix t… ✗ · ◆ In Pro…          ┃│
+│ #2376 address the rev… ✓ ⟲ ·         ⬢ claude ┃│
+│ #2377 PRJ-1301: rebase ✓ ⚠ ◆ In Rev…          ┃│
+│ ▾ Ready to merge  1                           ┃│
+│ #2378 ready one        ✓ ✓ ·                  ┃│
+│ ▾ In review  1                                ┃│
+│ #2379 PRJ-1999: runni… ◌ … ◆ In Rev…          ┃│
+│ ▾ No MR yet  6                                ┃│
+│       OSC 9;9 (ConEmu… · · ● open             ┃│
+│       OSC 133: option… · · ● open             ┃│
+│       Switch `daemon`… · · ● open             ┃│
+│       Flaky on Window… · · ● open             ││
+│       Report the Qt m… · · ● open             ││
+│ #2375 · contour · pipeline fails: test-window… │
+╰────────────────────────────────────────────────╯
+ o open · z fold · / filter · ^k all actions      

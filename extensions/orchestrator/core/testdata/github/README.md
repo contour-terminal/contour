@@ -25,3 +25,9 @@ command can print: `prs-open.json` scaled up to the 100 pull requests the comman
 
 `mergeable` and `updatedAt` were added to the recorded replies by hand (their shapes checked against `gh` once):
 `MERGEABLE`, `CONFLICTING` or `UNKNOWN`, and an ISO 8601 time.
+
+`prs-work.json` is **hand-made**, already projected: six pull requests of a generic `example/contour`, one per
+state the Work board tells apart — #2375 failing (`test-windows`), #2376 with changes requested, #2377
+conflicting and approved, #2378 passing and approved, #2379 with a check still running and a review required,
+#2380 a draft — updated between `2026-11-12T12:00:00Z` and `2026-11-13T12:00:00Z`, newest first. Three name a
+`PRJ-` key in their title.

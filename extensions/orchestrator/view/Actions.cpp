@@ -84,6 +84,8 @@ namespace
         CommandRow { .command = KeyCommand::Timeline,
                      .label = "show the last 24 hours"sv,
                      .scope = CommandScope::Global },
+        CommandRow {
+            .command = KeyCommand::SwitchView, .label = "switch view"sv, .scope = CommandScope::Global },
         // The replies: a row's chip names each by the configuration's label (actionLabel()).
         CommandRow { .command = KeyCommand::Reply1, .label = "answer 1"sv, .unoffered = NoReply },
         CommandRow { .command = KeyCommand::Reply2, .label = "answer 2"sv, .unoffered = NoReply },
@@ -94,6 +96,24 @@ namespace
         CommandRow { .command = KeyCommand::Reply7, .label = "answer 7"sv, .unoffered = NoReply },
         CommandRow { .command = KeyCommand::Reply8, .label = "answer 8"sv, .unoffered = NoReply },
         CommandRow { .command = KeyCommand::Reply9, .label = "answer 9"sv, .unoffered = NoReply },
+    };
+
+    /// One hint of the Work view's action bar.
+    struct WorkHint
+    {
+        KeyCommand command = KeyCommand::Fold; ///< What its key does.
+        std::string_view label = {};           ///< What the bar calls it.
+    };
+
+    /// The Work view's hints, most important first.
+    constexpr auto WorkHints = std::array {
+        WorkHint { .command = KeyCommand::OpenLink, .label = "open"sv },
+        WorkHint { .command = KeyCommand::Fold, .label = "fold"sv },
+        WorkHint { .command = KeyCommand::Filter, .label = "filter"sv },
+        WorkHint { .command = KeyCommand::Sort, .label = "sort"sv },
+        WorkHint { .command = KeyCommand::RepoNext, .label = "repository"sv },
+        WorkHint { .command = KeyCommand::SwitchView, .label = "agents"sv },
+        WorkHint { .command = KeyCommand::NewAgent, .label = "new agent"sv },
     };
 
     // }}}
@@ -389,6 +409,26 @@ std::string barText(Row const* row, Place place, MessageKeys keys, int columns)
         hints.push_back(std::format("{} {}", keyNameOf(KeyCommand::NewAgent), labelOf(KeyCommand::NewAgent)));
     // The palette always shows: whatever was cut is in it.
     auto const line = joined(columns - columnsOf(palette) - columnsOf(HintSeparator));
+    if (line.empty())
+        return cut(palette, columns);
+    return std::format("{}{}{}", line, HintSeparator, palette);
+}
+
+std::string workBarText(std::optional<WorkLineKind> selected, int columns)
+{
+    auto const palette = std::format("{} all actions", keyNameOf(KeyCommand::Palette));
+    auto hints = std::vector<std::string> {};
+    // ⏎ folds a heading; on an item it is the start dialog's.
+    if (selected == WorkLineKind::Heading)
+        hints.push_back(std::format("{} fold", workKeyNameOf(KeyCommand::Enter)));
+    for (auto const& hint: WorkHints)
+        if (hint.command != KeyCommand::OpenLink || selected == WorkLineKind::Item)
+            hints.push_back(std::format("{} {}", workKeyNameOf(hint.command), hint.label));
+    auto const views =
+        hints | std::views::transform([](std::string const& hint) { return std::string_view { hint }; })
+        | std::ranges::to<std::vector>();
+    // The palette always shows: whatever was cut is in it.
+    auto const line = joinHints(views, columns - columnsOf(palette) - columnsOf(HintSeparator));
     if (line.empty())
         return cut(palette, columns);
     return std::format("{}{}{}", line, HintSeparator, palette);

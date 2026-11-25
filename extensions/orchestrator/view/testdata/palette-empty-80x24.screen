@@ -1,4 +1,4 @@
- ✦ Agents                                                            ⬢ 0/4 ▱▱▱▱ 
+ ✦ Agents  Work                                                      ⬢ 0/4 ▱▱▱▱ 
 ╭─ Agents 0 ───────────────────────────────────────────────────────────────────╮
 │▍+ ╭─ ✦ All actions ──────────────────────────────────────────────────────╮   │
 │   │ › ▏type to filter the actions                                        │   │
@@ -7,15 +7,15 @@
 │   │  filter the agents                                                 / │   │
 │   │  refresh the lists                                      palette only │   │
 │   │  show the last 24 hours                                 palette only │   │
-╰───│  open · no run selected                                 palette only │───╯
-╭───│  run again · no run selected                            palette only │───╮
-│ No│  end · no run selected                                             e │   │
-│ yo│  agent tab · no run selected                                       r │   │
-│ On│  open link · no run selected                                       o │   │
-│ es│  retry removal · no run selected                                   x │   │
-│ Ev│  dismiss · no run selected                                       del │   │
-│   │  board · no run selected                                           b │   │
-│   │  ↓ 4 more                                                            │   │
+╰───│  switch view                                                       w │───╯
+╭───│  open · no run selected                                 palette only │───╮
+│ No│  run again · no run selected                            palette only │   │
+│ yo│  end · no run selected                                             e │   │
+│ On│  agent tab · no run selected                                       r │   │
+│ es│  open link · no run selected                                       o │   │
+│ Ev│  retry removal · no run selected                                   x │   │
+│   │  dismiss · no run selected                                       del │   │
+│   │  ↓ 5 more                                                            │   │
 │   │                                                                      │   │
 │   │ ⏎ run · ↑↓ choose · esc close                                        │   │
 │   ╰──────────────────────────────────────────────────────────────────────╯   │

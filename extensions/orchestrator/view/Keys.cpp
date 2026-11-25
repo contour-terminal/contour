@@ -59,6 +59,7 @@ namespace
         KeyRow { .key = "right"sv, .command = KeyCommand::NextPage },
         KeyRow { .key = "^k"sv, .command = KeyCommand::Palette },
         KeyRow { .key = "?"sv, .command = KeyCommand::Palette },
+        KeyRow { .key = "w"sv, .command = KeyCommand::SwitchView },
         KeyRow { .key = "1"sv, .command = KeyCommand::Reply1 },
         KeyRow { .key = "2"sv, .command = KeyCommand::Reply2 },
         KeyRow { .key = "3"sv, .command = KeyCommand::Reply3 },
@@ -68,6 +69,31 @@ namespace
         KeyRow { .key = "7"sv, .command = KeyCommand::Reply7 },
         KeyRow { .key = "8"sv, .command = KeyCommand::Reply8 },
         KeyRow { .key = "9"sv, .command = KeyCommand::Reply9 },
+    };
+
+    // The Work view's keys: the first row of a command names its key on the bar (workKeyNameOf()).
+    constexpr auto WorkKeyTable = std::array {
+        KeyRow { .key = "up"sv, .command = KeyCommand::Up },
+        KeyRow { .key = "k"sv, .command = KeyCommand::Up },
+        KeyRow { .key = "down"sv, .command = KeyCommand::Down },
+        KeyRow { .key = "j"sv, .command = KeyCommand::Down },
+        KeyRow { .key = "pgup"sv, .command = KeyCommand::ScrollPageUp },
+        KeyRow { .key = "pgdn"sv, .command = KeyCommand::ScrollPageDown },
+        KeyRow { .key = "home"sv, .command = KeyCommand::Home },
+        KeyRow { .key = "end"sv, .command = KeyCommand::End },
+        KeyRow { .key = "enter"sv, .command = KeyCommand::Enter },
+        KeyRow { .key = "z"sv, .command = KeyCommand::Fold },
+        KeyRow { .key = "/"sv, .command = KeyCommand::Filter },
+        KeyRow { .key = "esc"sv, .command = KeyCommand::Back },
+        KeyRow { .key = "s"sv, .command = KeyCommand::Sort },
+        KeyRow { .key = "left"sv, .command = KeyCommand::RepoPrevious },
+        KeyRow { .key = "right"sv, .command = KeyCommand::RepoNext },
+        KeyRow { .key = "o"sv, .command = KeyCommand::OpenLink },
+        KeyRow { .key = "n"sv, .command = KeyCommand::NewAgent },
+        KeyRow { .key = "w"sv, .command = KeyCommand::SwitchView },
+        KeyRow { .key = "^k"sv, .command = KeyCommand::Palette },
+        KeyRow { .key = "?"sv, .command = KeyCommand::Palette },
+        KeyRow { .key = "tab"sv, .command = KeyCommand::Tab },
     };
 
     /// The commands that act on the selected row only where it offers them (Row::offers).
@@ -145,6 +171,27 @@ namespace
         if (auto const printable = printableOf(key))
             appendUtf8(name, *printable);
         return name;
+    }
+
+    /// @return What @p key does by @p table; std::nullopt for a key no row names, or one with Alt.
+    [[nodiscard]] std::optional<KeyCommand> commandIn(std::span<KeyRow const> table,
+                                                      core::tui::KeyEvent const& key)
+    {
+        if (hasAlt(key))
+            return std::nullopt;
+        auto const name = nameOf(key);
+        auto const row = std::ranges::find(table, name, &KeyRow::key);
+        return row != table.end() ? std::optional { row->command } : std::nullopt;
+    }
+
+    /// @return How the bar names the key @p table binds @p command to first; empty: none.
+    [[nodiscard]] std::string_view keyNameIn(std::span<KeyRow const> table, KeyCommand command) noexcept
+    {
+        auto const row = std::ranges::find(table, command, &KeyRow::command);
+        if (row == table.end())
+            return {};
+        auto const special = std::ranges::find(SpecialKeys, row->key, &SpecialKey::name);
+        return special != SpecialKeys.end() ? special->shown : row->key;
     }
 
     // }}}
@@ -524,6 +571,12 @@ namespace
                              PaletteState { .query = std::exchange(interaction.paletteQuery, {}) };
                          return std::nullopt;
                      } },
+        // `w` shows the other view; each keeps where the user was in it.
+        HandlerRow { .command = KeyCommand::SwitchView,
+                     .handler = [](Interaction& interaction, KeyContext const&) -> std::optional<UiAction> {
+                         interaction.view = interaction.view == View::Agents ? View::Work : View::Agents;
+                         return std::nullopt;
+                     } },
         HandlerRow { .command = KeyCommand::Timeline,
                      .handler = [](Interaction& interaction, KeyContext const&) -> std::optional<UiAction> {
                          interaction.overlay = Overlay::Timeline;
@@ -614,6 +667,13 @@ void pasteInto(Interaction& interaction, KeyContext const& context, std::string_
         interaction.palette->highlighted = 0;
         return;
     }
+    // The Work view takes a paste into its filter while it is typed, and drops it anywhere else.
+    if (interaction.view == View::Work && !interaction.launcher)
+    {
+        if (interaction.work.filtering == Filtering::Typing)
+            interaction.work.filter += pastedText(text);
+        return;
+    }
     if (interaction.place == Place::Focus && hasMessageBox(context.engine, context.selected))
     {
         // A message keeps its line feeds: the agent receives it as one paste. A CR LF is one line end, and
@@ -651,22 +711,29 @@ std::span<KeyRow const> keyRows() noexcept
     return KeyTable;
 }
 
+std::span<KeyRow const> workKeyRows() noexcept
+{
+    return WorkKeyTable;
+}
+
 std::optional<KeyCommand> commandFor(core::tui::KeyEvent const& key) noexcept
 {
-    if (hasAlt(key))
-        return std::nullopt;
-    auto const name = nameOf(key);
-    auto const row = std::ranges::find(KeyTable, name, &KeyRow::key);
-    return row != KeyTable.end() ? std::optional { row->command } : std::nullopt;
+    return commandIn(KeyTable, key);
+}
+
+std::optional<KeyCommand> workCommandFor(core::tui::KeyEvent const& key) noexcept
+{
+    return commandIn(WorkKeyTable, key);
 }
 
 std::string_view keyNameOf(KeyCommand command) noexcept
 {
-    auto const row = std::ranges::find(KeyTable, command, &KeyRow::command);
-    if (row == KeyTable.end())
-        return {};
-    auto const special = std::ranges::find(SpecialKeys, row->key, &SpecialKey::name);
-    return special != SpecialKeys.end() ? special->shown : row->key;
+    return keyNameIn(KeyTable, command);
+}
+
+std::string_view workKeyNameOf(KeyCommand command) noexcept
+{
+    return keyNameIn(WorkKeyTable, command);
 }
 
 bool isRowCommand(KeyCommand command) noexcept
@@ -871,31 +938,40 @@ namespace
     }
 } // namespace
 
-FilterInput typeIntoFilter(core::tui::KeyEvent const& key, Interaction& interaction)
+FilterInput typeIntoFilter(core::tui::KeyEvent const& key, Filtering& filtering, std::string& filter)
 {
-    if (interaction.filtering != Filtering::Typing)
+    if (filtering != Filtering::Typing)
         return FilterInput::NotTaken;
     if (auto const edit = textEditOf(key))
     {
-        applyTextEdit(interaction.filter, *edit);
+        applyTextEdit(filter, *edit);
         return FilterInput::Taken;
     }
     switch (key.key)
     {
         case core::tui::KeyCode::Escape:
-            interaction.filter.clear();
-            interaction.filtering = Filtering::Off;
+            filter.clear();
+            filtering = Filtering::Off;
             return FilterInput::Taken;
-        case core::tui::KeyCode::Enter: interaction.filtering = Filtering::Off; return FilterInput::Taken;
+        case core::tui::KeyCode::Enter: filtering = Filtering::Off; return FilterInput::Taken;
         case core::tui::KeyCode::Delete: return FilterInput::Taken; // Typing, never a run command.
         default: break;
     }
     auto const printable = printableOf(key);
     if (!printable)
         return FilterInput::NotTaken;
-    appendUtf8(interaction.filter, *printable);
-    interaction.selected = 0;
+    appendUtf8(filter, *printable);
     return FilterInput::Taken;
+}
+
+FilterInput typeIntoFilter(core::tui::KeyEvent const& key, Interaction& interaction)
+{
+    auto const before = interaction.filter.size();
+    auto const taken = typeIntoFilter(key, interaction.filtering, interaction.filter);
+    // A character typed starts the selection over at the top; an edit keeps it.
+    if (interaction.filter.size() > before)
+        interaction.selected = 0;
+    return taken;
 }
 
 std::optional<UiAction> applyKey(core::tui::KeyEvent const& key,

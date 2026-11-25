@@ -1,0 +1,24 @@
+ ✦ Agents  Work                                                      ⬢ 1/4 ▰▱▱▱ 
+╭─ Work 14 ────────────────────────────────────────────────────────────────────╮
+│ / filter                              ‹ all repositories ›  sort: importance │
+│▍▸ Needs you  3                                                               │
+│ ▾ Ready to merge  1                                                          │
+│ #2378 ·        ready one              ✓ pipeline ✓ ·                         │
+│ ▾ In review  1                                                               │
+│ #2379 PRJ-1999 PRJ-1999: running      ◌ running  … ◆ In Review               │
+│ ▾ No MR yet  6                                                               │
+│       #2162    OSC 9;9 (ConEmu cwd) … ·          · ● open                    │
+│       #2163    OSC 133: optional non… ·          · ● open                    │
+│       #2253    Switch `daemon` Same … ·          · ● open                    │
+│       #2338    Flaky on Windows: Ses… ·          · ● open                    │
+│       #2356    Report the Qt macOS b… ·          · ● open                    │
+│       PRJ-1302 Example summary        ·          · ◆ [31mBlocked             │
+│ ▸ Everything else  3                                                         │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│ Needs you · z folds it                                                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ ⏎ fold · z fold · / filter · s sort · → repository · w agents · ^k all actions 

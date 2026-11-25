@@ -279,6 +279,14 @@ struct Scene
         Scene { .name = "orphans", .world = orphansWorld(), .keys = "\x1b[Hj", .sizes = { Wide, Medium } },
         // Tab gives an orphan's details the whole tab in the Narrow band.
         Scene { .name = "orphans", .world = orphansWorld(), .keys = "\x1b[Hj\t", .sizes = { Narrow } },
+        // The Work view: grouped by importance, Everything else folded.
+        Scene { .name = "work", .world = workWorld(), .keys = "w", .sizes = { Narrow, Medium, Wide, { .width = 160, .height = 40 } } },
+        // Needs you folded from its first item, its heading selected.
+        Scene { .name = "work-folded", .world = workWorld(), .keys = "wz", .sizes = { Medium, Wide } },
+        // One flat list, newest first.
+        Scene { .name = "work-flat", .world = workWorld(), .keys = "ws", .sizes = { Medium, Wide } },
+        // The filter being typed.
+        Scene { .name = "work-filter", .world = workWorld(), .keys = "w/prj", .sizes = { Medium, Wide } },
     };
 }
 
@@ -335,7 +343,8 @@ TEST_CASE("golden screens", "[orchestrator][view]")
                 // The guest's turn: the Focus run's board and transcript are read, and drawn.
                 fixture.settle(sceneAnswers());
                 static_cast<void>(fixture.dashboard.frame());
-                CHECK(fixture.dashboard.input(scene.keys).empty());
+                // What the keys ask, such as a fold, is carried out as the guest does.
+                static_cast<void>(fixture.carryOut(fixture.dashboard.input(scene.keys), sceneAnswers()));
                 fixture.settle(sceneAnswers());
                 checkGolden(name, fixture.screen());
             }

@@ -39,6 +39,7 @@
 #include <orchestrator/view/StatusBoard.hpp>
 #include <orchestrator/view/Theme.hpp>
 #include <orchestrator/view/Transcript.hpp>
+#include <orchestrator/view/WorkBoard.hpp>
 
 using namespace std::string_view_literals;
 
@@ -117,6 +118,7 @@ namespace
         TopBar, ///< The top bar, which gives way in a small tab.
         Fleet,  ///< The Fleet.
         Focus,  ///< The Focus.
+        Work,   ///< The Work board, which replaces the Fleet and the Focus while it is shown.
     };
 
     /// How wide the Focus is drawn while it has the keys.
@@ -126,19 +128,31 @@ namespace
         Whole,      ///< The whole tab: a worktree's details hold a command line, which wants every cell.
     };
 
-    /// @return Whether a panel of @p role is shown while the user is at @p place, in @p band, with @p given
-    ///         furniture given way and the Focus as wide as @p width.
-    [[nodiscard]] bool isShown(
-        PanelRole role, Place place, Band band, Furniture given, FocusWidth width) noexcept
+    /// Where the user is, as far as which panels are shown goes.
+    struct Showing
     {
+        View view = View::Agents;              ///< The view shown.
+        Place place = Place::Fleet;            ///< Which pane of the Agents view has the keys.
+        Band band = Band::Wide;                ///< The tab's band.
+        Furniture given = Furniture::None;     ///< What gave way to the Focus.
+        FocusWidth width = FocusWidth::Shared; ///< How wide the Focus is drawn while it has the keys.
+    };
+
+    /// @return Whether a panel of @p role is shown as @p showing says.
+    [[nodiscard]] bool isShown(PanelRole role, Showing const& showing) noexcept
+    {
+        auto const agents = showing.view == View::Agents;
         switch (role)
         {
-            case PanelRole::TopBar: return !holds(given, Furniture::TopBar);
+            case PanelRole::TopBar: return !holds(showing.given, Furniture::TopBar);
+            case PanelRole::Work: return !agents;
             case PanelRole::Fleet:
-                return place == Place::Fleet || (band == Band::Wide && width == FocusWidth::Shared);
+                return agents
+                       && (showing.place == Place::Fleet
+                           || (showing.band == Band::Wide && showing.width == FocusWidth::Shared));
             case PanelRole::Focus: break;
         }
-        return band != Band::Narrow || place == Place::Focus;
+        return agents && (showing.band != Band::Narrow || showing.place == Place::Focus);
     }
 
     /// @return How wide the Focus of @p row is drawn while it has the keys.
@@ -204,8 +218,13 @@ struct Dashboard::State
 
     /// Builds the layout of @p breakpoint, an index into BandBreakpoints.
     [[nodiscard]] std::unique_ptr<Component> buildLayout(std::size_t breakpoint);
-    /// Rebuilds the rows from the engine when they are stale: the engine changed, or an age moved on.
+    /// Rebuilds the rows of the view shown from the engine when they are stale: the Fleet's when the engine
+    /// changed or an age moved on, the Work view's items when the engine's revision moved.
     void ensureRows();
+    /// Builds the Work view's lines again from its items and the interaction, and keeps its selection.
+    void syncWork();
+    /// @return Where the user is, as far as which panels are shown goes.
+    [[nodiscard]] Showing showing(Furniture given, FocusWidth width) const noexcept;
     /// How refilter() keeps the selection.
     enum class Keep : uint8_t
     {
@@ -235,6 +254,10 @@ struct Dashboard::State
     /// @param command The command.
     /// @param actions What the engine is asked, appended to.
     void run(KeyCommand command, std::vector<UiAction>& actions);
+    /// What follows every key and click: a launcher opened gets its session id, a view switched to builds its
+    /// rows, and the selection is kept on the rows of the view shown.
+    /// @param before The view shown before the command.
+    void afterCommand(View before);
     /// @return Whether a popup is open: the launcher, the palette or the timeline.
     [[nodiscard]] bool popupOpen() const noexcept;
     /// @return The form's HooksWarning now: what the next input begins with.
@@ -353,6 +376,8 @@ struct Dashboard::State
                                                      ///< std::nullopt before the first build.
     std::string newestNeed; ///< The run that entered Needs you last, named on the action bar until it is
                             ///< selected or leaves it; empty: none.
+    WorkBoardData work;     ///< What the Work view draws from.
+    View framedView = View::Agents; ///< The view the last frame showed.
     std::unique_ptr<core::tui::Responsive> root;
 };
 
@@ -437,18 +462,47 @@ namespace
         canvas.putString(row, x, gauge.fleet, styleOf(theme, Role::Working));
     }
 
-    /// The top bar: the brand, the fleet gauge, the pill, and a setup warning while something is missing.
+    /// A view the top bar names.
+    struct ViewName
+    {
+        View view = View::Agents;   ///< The view.
+        std::string_view name = {}; ///< What the top bar calls it.
+    };
+
+    /// The views, in the order the top bar names them.
+    constexpr auto ViewNames = std::array {
+        ViewName { .view = View::Agents, .name = "Agents"sv },
+        ViewName { .view = View::Work, .name = "Work"sv },
+    };
+
+    /// The top bar: the brand and the views' names (the shown one in the focus colour, a click on the other
+    /// switches to it), the fleet gauge, the pill, and a setup warning while something is missing.
     class TopBar final: public Component
     {
       public:
-        explicit TopBar(Dashboard::State const& state): _state { state } {}
+        explicit TopBar(Dashboard::State& state): _state { state } {}
 
         void render(Canvas& canvas) override
         {
             auto const& theme = canvas.theme();
             auto brand = styleOf(theme, Role::Accent);
             brand.bold = true;
-            auto const x = 1 + canvas.putString(0, 1, "✦ Agents", brand);
+            auto x = 1 + canvas.putString(0, 1, "✦", brand) + 1;
+            auto const hits = HitRecorder { _state.hits, { .x = screenBounds().x, .y = screenBounds().y } };
+            for (auto const& [index, shown]: std::views::enumerate(ViewNames))
+            {
+                if (index > 0)
+                    x += 2;
+                auto const isShown = shown.view == _state.interaction.view;
+                auto style = styleOf(theme, isShown ? Role::Focus : Role::Dim);
+                style.bold = isShown;
+                auto const columns = canvas.putString(0, x, shown.name, style);
+                if (!isShown)
+                    hits.add(Rect { .x = x, .y = 0, .width = columns, .height = 1 },
+                             Hit { .kind = HitKind::Command,
+                                   .value = std::to_underlying(KeyCommand::SwitchView) });
+                x += columns;
+            }
             if (!_state.engine.missingPlugins().empty())
                 canvas.putString(0,
                                  x + 2,
@@ -460,7 +514,7 @@ namespace
         [[nodiscard]] Size preferredSize() const override { return { .width = 0, .height = 1 }; }
 
       private:
-        Dashboard::State const& _state;
+        Dashboard::State& _state;
     };
 
     /// The rows of the Fleet, in a box titled with their count and the filter. In the Wide band a run's row
@@ -646,7 +700,8 @@ namespace
                 end -= columnsOf(gauge.fleet) + (gauge.pill.empty() ? 0 : columnsOf(gauge.pill) + 2) + 2;
             }
             // The run that entered Needs you last is named on the right, until it is selected.
-            if (!_state.newestNeed.empty())
+            auto const agents = _state.interaction.view == View::Agents;
+            if (agents && !_state.newestNeed.empty())
             {
                 auto const need = std::format("{} needs you · home", nameOf(_state.newestNeed));
                 if (auto const needColumns = columnsOf(need); needColumns < end / 2)
@@ -666,6 +721,14 @@ namespace
                     cut(std::format("end {}? e again to end · esc keeps it", nameOf(interaction.pendingEnd)),
                         columns),
                     styleOf(theme, Role::Warning));
+            else if (!agents)
+            {
+                auto const& work = interaction.work;
+                auto const& lines = _state.work.lines;
+                auto const selected =
+                    work.selected < lines.size() ? std::optional { lines[work.selected].kind } : std::nullopt;
+                canvas.putString(0, 1, workBarText(selected, columns), styleOf(theme, Role::Dim));
+            }
             else
             {
                 auto const* const row = _state.selectedRow();
@@ -737,7 +800,9 @@ std::unique_ptr<Component> Dashboard::State::buildLayout(std::size_t breakpoint)
     toggled.clear();
     // Shown or hidden once added: adding a child shows it.
     auto const toggle = [this, band](PanelRole role, Component& panel) {
-        panel.setVisible(isShown(role, interaction.place, band, focus.givenWay, focusWidthOf(focus.row)));
+        auto shown = showing(focus.givenWay, focusWidthOf(focus.row));
+        shown.band = band;
+        panel.setVisible(isShown(role, shown));
         toggled.emplace_back(role, &panel);
     };
 
@@ -755,6 +820,9 @@ std::unique_ptr<Component> Dashboard::State::buildLayout(std::size_t breakpoint)
     toggle(PanelRole::Focus,
            body->add(std::make_unique<Focus>(engine, interaction, focus, tab, clock, focusPanels, hits),
                      layout::Style { .grow = FocusShare, .basis = 0 }));
+    toggle(PanelRole::Work,
+           body->add(std::make_unique<WorkBoardView>(engine, interaction, work, hits),
+                     layout::Style { .grow = 1, .basis = 0 }));
     column->add(std::move(body), layout::Style { .grow = 1, .basis = 0 });
     column->add(std::make_unique<ActionBar>(*this), layout::Style { .shrink = 0 });
     shownLayout = column.get();
@@ -772,6 +840,20 @@ uint64_t Dashboard::State::nowMonoMs() const noexcept
 
 void Dashboard::State::ensureRows()
 {
+    // The Work view builds its items again only when the engine changed what they are made of: its revision
+    // counts every such change, the folds and the sort among them. Its lines follow from them cheaply.
+    if (interaction.view == View::Work)
+    {
+        if (work.revision != engine.revision())
+        {
+            work.items = engine.workItems();
+            work.order = orderOf(work.items, engine.repositories(), sortOf(engine));
+            work.revision = engine.revision();
+            ++rowBuilds;
+        }
+        syncWork();
+        return;
+    }
     auto const now = nowMonoMs();
     // Built again once the engine changed, or once a row says otherwise with time alone (an age, a
     // countdown): a key after a pause finds the rows as they were.
@@ -790,6 +872,19 @@ void Dashboard::State::ensureRows()
             return row.run == answered->run && row.rowState == RowState::Asking;
         }))
         interaction.answered.reset();
+}
+
+void Dashboard::State::syncWork()
+{
+    work.lines = workLines(work.items, work.order, engine, interaction.work);
+    keepWorkSelection(interaction.work, work.lines, work.items, work.listRows);
+}
+
+Showing Dashboard::State::showing(Furniture given, FocusWidth width) const noexcept
+{
+    return Showing {
+        .view = interaction.view, .place = interaction.place, .band = band(), .given = given, .width = width
+    };
 }
 
 std::optional<uint64_t> Dashboard::State::stillAsksDueMs() const noexcept
@@ -885,7 +980,8 @@ void Dashboard::State::noteNeeds()
 
 void Dashboard::State::noteSeen()
 {
-    auto const* const selected = selectedRow();
+    // In the Work view the user looks at no run.
+    auto const* const selected = keyContext().selected;
     auto const selectedId = selected != nullptr ? std::string_view { selected->run } : std::string_view {};
     if (!newestNeed.empty()
         && (newestNeed == selectedId || !std::ranges::binary_search(*needing, newestNeed)))
@@ -921,7 +1017,8 @@ Band Dashboard::State::band() const noexcept
 
 KeyContext Dashboard::State::keyContext() const noexcept
 {
-    auto const* const row = selectedRow();
+    // The Work view selects no Fleet row: the palette's row commands do not apply there.
+    auto const* const row = interaction.view == View::Agents ? selectedRow() : nullptr;
     auto const tab = activeTabOf(interaction, row);
     auto const [lines, shown] = focusPanels.extentOf(tab);
     auto const* const view = row != nullptr ? engine.transcript(this->tab, row->run) : nullptr;
@@ -975,11 +1072,16 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
                 interaction.launcherScope = interaction.launcher->scope;
             continue;
         }
-        if (auto action = applyKey(*key, interaction, keyContext()))
+        auto const view = interaction.view;
+        // The Work view takes its own keys while nothing is over it.
+        if (view == View::Work && !interaction.palette && interaction.overlay == Overlay::None)
+        {
+            if (auto action = applyWorkKey(*key, interaction, work.lines, work.items, engine, work.listRows))
+                actions.push_back(std::move(*action));
+        }
+        else if (auto action = applyKey(*key, interaction, keyContext()))
             actions.push_back(std::move(*action));
-        // A launcher a key opened gets its agent's session id now.
-        mintSession();
-        refilter(Keep::Position);
+        afterCommand(view);
     }
     if (interaction != before)
         repaint = Repaint::Needed;
@@ -1156,10 +1258,26 @@ void Dashboard::State::press(core::tui::KeyCode key, std::vector<UiAction>& acti
 
 void Dashboard::State::run(KeyCommand command, std::vector<UiAction>& actions)
 {
-    if (auto action = dispatch(command, interaction, keyContext()))
+    auto const view = interaction.view;
+    auto action = view == View::Work
+                      ? applyWorkCommand(command, interaction, work.lines, work.items, engine, work.listRows)
+                      : dispatch(command, interaction, keyContext());
+    if (action)
         actions.push_back(std::move(*action));
+    afterCommand(view);
+}
+
+void Dashboard::State::afterCommand(View before)
+{
+    // A launcher a command opened gets its agent's session id now.
     mintSession();
-    refilter(Keep::Position);
+    // A view switched to builds what it shows.
+    if (interaction.view != before)
+        ensureRows();
+    if (interaction.view == View::Work)
+        syncWork();
+    else
+        refilter(Keep::Position);
 }
 
 void Dashboard::State::applyMouse(core::tui::MouseEvent const& mouse, std::vector<UiAction>& actions)
@@ -1309,8 +1427,8 @@ void Dashboard::State::syncLayout()
                                    .follow = interaction.follow };
     // The top bar gives way, in its turn, when the Focus would keep too few rows for its tab.
     focus.givenWay = Furniture::None;
-    if (isShown(PanelRole::Focus, interaction.place, currentBand, Furniture::None, FocusWidth::Shared)
-        && row != nullptr && (!row->run.empty() || row->kind == RowKind::Orphan))
+    if (isShown(PanelRole::Focus, showing(Furniture::None, FocusWidth::Shared)) && row != nullptr
+        && (!row->run.empty() || row->kind == RowKind::Orphan))
     {
         auto const shared = currentBand == Band::Medium && interaction.place == Place::Fleet;
         auto const focusOf = [&](int body) {
@@ -1332,8 +1450,7 @@ void Dashboard::State::syncLayout()
             focus.givenWay = Furniture::TopBar;
     }
     for (auto const& [role, panel]: toggled)
-        if (auto const shown =
-                isShown(role, interaction.place, currentBand, focus.givenWay, focusWidthOf(row));
+        if (auto const shown = isShown(role, showing(focus.givenWay, focusWidthOf(row)));
             panel->visible() != shown)
             panel->setVisible(shown);
     if (problems != nullptr)
@@ -1381,7 +1498,7 @@ void Dashboard::State::syncPalette()
             screen.hideOverlay(*paletteView);
         return;
     }
-    auto entries = paletteEntries(selectedRow(), &engine);
+    auto entries = paletteEntries(keyContext().selected, &engine);
     auto const wanted = Size { .width = popupWidthIn(band(), size.width, PaletteMaxColumns),
                                .height = std::min(paletteView->heightFor(entries), size.height) };
     paletteView->place(wanted, std::move(entries));
@@ -1667,6 +1784,12 @@ std::string Dashboard::frame()
     auto bytes = std::exchange(state.frameBytes, {});
     bytes += BracketedPasteOn;
     bytes += MouseReportingOn;
+    // The Work view asks for the pointer's every move, for hovering and dragging; the view after it, no more.
+    if (state.interaction.view == View::Work)
+        bytes += AnyMotionOn;
+    else if (state.framedView == View::Work)
+        bytes += AnyMotionOff;
+    state.framedView = state.interaction.view;
     bytes += RestingCursor;
     state.repaint = State::Repaint::Clean;
     return bytes;

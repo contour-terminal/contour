@@ -176,6 +176,10 @@ enum class KeyCommand : uint8_t
     Open,           ///< To the Focus of the selected row: to write to its agent, or to read it.
     RunAgain,       ///< Open the launcher on the selected finished run's item, task and model.
     Timeline,       ///< Show the last 24 hours, an hour a bar; the palette's.
+    SwitchView,     ///< Show the other view: Agents ⇄ Work.
+    Sort,           ///< The Work view: sort by importance ⇄ by last update.
+    RepoPrevious,   ///< The Work view: step the repository chip back.
+    RepoNext,       ///< The Work view: step the repository chip on.
     Reply1,         ///< Answer the selected agent that asks with the quick reply on `1`.
     Reply2,         ///< … on `2`.
     Reply3,         ///< … on `3`.
@@ -215,6 +219,21 @@ struct KeyRow
 /// @return Every key the dashboard acts on; the first row of a command names its key (keyNameOf()).
 [[nodiscard]] std::span<KeyRow const> keyRows() noexcept;
 
+/// @return The keys the Work view acts on; the first row of a command names its key (workKeyNameOf()). None
+///         is added to dashboardKeys(): that would refuse today's configurations with a task keyed `w`, `s`
+///         or `o`.
+[[nodiscard]] std::span<KeyRow const> workKeyRows() noexcept;
+
+/// @param key A key the terminal sent.
+/// @return What it does in the Work view; std::nullopt for a key no row of workKeyRows() names, or one with
+///         Alt.
+[[nodiscard]] std::optional<KeyCommand> workCommandFor(core::tui::KeyEvent const& key) noexcept;
+
+/// @param command A command.
+/// @return How the Work view's bar names its key, such as `z` or `←`; empty for a command no key of the Work
+///         view is bound to.
+[[nodiscard]] std::string_view workKeyNameOf(KeyCommand command) noexcept;
+
 /// @param key A key the terminal sent.
 /// @return What it does; std::nullopt for a key no row names, or one with Alt.
 [[nodiscard]] std::optional<KeyCommand> commandFor(core::tui::KeyEvent const& key) noexcept;
@@ -231,6 +250,22 @@ struct KeyRow
 
 // }}}
 // {{{ the interaction
+
+/// Which view the dashboard shows.
+enum class View : uint8_t
+{
+    Agents = 0, ///< The Fleet and the Focus.
+    Work,       ///< The Work board: the merge requests and tickets, by what they need.
+};
+
+/// Where the Work view's keys go.
+enum class WorkFocus : uint8_t
+{
+    List = 0, ///< The list: the keys move the selection.
+    Filter,   ///< The filter: printable keys type into it.
+    RepoChip, ///< The repository chip: ⏎ steps it.
+    SortChip, ///< The sort chip: ⏎ switches the sort.
+};
 
 /// What is shown over the dashboard, besides the launcher and the palette.
 enum class Overlay : uint8_t
@@ -288,6 +323,21 @@ struct AnsweredRequest
     [[nodiscard]] bool operator==(AnsweredRequest const&) const = default;
 };
 
+/// The Work view's interaction. The filter does not persist; the folds and the sort are the engine's fold
+/// keys.
+struct WorkState
+{
+    std::size_t selected = 0;             ///< Into the lines drawn (workLines()): headings and items.
+    std::size_t scroll = 0;               ///< The first line shown.
+    WorkFocus focus = WorkFocus::List;    ///< Where the keys go.
+    Filtering filtering = Filtering::Off; ///< Whether typed text goes to the filter.
+    std::string filter = {};              ///< Items it does not match (matchesFilter()) are left out.
+    std::size_t repoChip = 0;             ///< 0: every repository; else 1 + its index in the configuration.
+    std::string selectedKey = {}; ///< workItemKey() of the selected item, or `group:<foldKey>` of a heading;
+                                  ///< empty: none chosen yet, the first item is.
+    [[nodiscard]] bool operator==(WorkState const&) const = default;
+};
+
 /// How long an answered agent may still ask before the action bar says so.
 inline constexpr uint64_t StillAsksAfterMs = 10'000;
 
@@ -316,6 +366,8 @@ struct Interaction
     std::optional<AnsweredRequest> answered = {}; ///< The last quick reply, until its agent stops asking.
     std::string followGroup = {}; ///< A group whose heading the selection moves to once the rows are built
                                   ///< again, as folding from one of its runs asks; empty: none.
+    View view = View::Agents;     ///< Which view is shown.
+    WorkState work = {};          ///< Where the user is in the Work view.
     [[nodiscard]] bool operator==(Interaction const&) const = default;
 };
 
@@ -447,6 +499,16 @@ enum class FilterInput : uint8_t
 /// @param interaction Where the user is; its filter changed.
 /// @return Whether the key was taken.
 [[nodiscard]] FilterInput typeIntoFilter(core::tui::KeyEvent const& key, Interaction& interaction);
+
+/// Applies a key to a filter while it is being typed: line edits edit it, printable keys extend it, Enter
+/// keeps it, Esc drops it; either ends the typing.
+/// @param key A key the terminal sent.
+/// @param filtering Whether the filter is being typed; set Off by Enter and Esc.
+/// @param filter The filter.
+/// @return Whether the key was taken.
+[[nodiscard]] FilterInput typeIntoFilter(core::tui::KeyEvent const& key,
+                                         Filtering& filtering,
+                                         std::string& filter);
 
 /// Applies one key: to the palette while it is open (applyPaletteKey()), to the timeline while it is shown
 /// (esc and ⏎ close it, `^K` opens the palette), to the message box while it has the keys, to the filter

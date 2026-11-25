@@ -79,6 +79,13 @@ namespace
 
     [[nodiscard]] ProcessOutcome answerFor(World const& world, RunCommand const& command)
     {
+        for (auto const& own: world.answers)
+            if (own.command == command.command
+                && (own.argumentContains.empty()
+                    || std::ranges::any_of(command.arguments, [&](Argument const& argument) {
+                           return argument.value.contains(own.argumentContains);
+                       })))
+                return listed(own.answer);
         if (command.command == "agent-setup-check")
         {
             auto const set = std::ranges::find(command.arguments, EnvSetArgument, &Argument::name);
@@ -200,6 +207,8 @@ std::vector<RunCommand> DashboardFixture::carryOut(std::vector<UiAction> const& 
             effects = engine.step(ShowBoard { .run = show->run, .tab = tab, .monoMs = now });
         else if (std::holds_alternative<HideBoardAction>(action))
             effects = engine.step(HideBoard { .tab = tab, .monoMs = now });
+        else if (auto const* const fold = std::get_if<ToggleFoldAction>(&action))
+            effects = engine.step(ToggleFold { .group = fold->group, .monoMs = now });
         // What the answers lead to is followed too: a statistics read, failed at once, may have held the
         // transcript's back in the queue.
         while (!effects.empty())
@@ -255,6 +264,19 @@ Run outsideConfiguration(Run run)
     run.repoPath = "/home/u/projects/retired";
     run.worktree = std::format("{}/retired/{}", WorktreeRoot, run.id);
     return run;
+}
+
+World workWorld()
+{
+    return World { .repos = std::string { WorkRepository },
+                   .prs = { "github/prs-work.json" },
+                   .stored = { storedRun(Running {}, WorkRunId, ChangeRequestRef { 2376 }) },
+                   .answers = {
+                       CommandAnswer { .command = "acli-issues",
+                                       .argumentContains = "key in",
+                                       .answer = { "jira/issues-lookup-work.json" } },
+                       CommandAnswer { .command = "acli-issues", .answer = { "jira/issues-work.json" } },
+                   } };
 }
 
 Engine bootEngine(World const& world)

@@ -48,6 +48,14 @@ struct ListAnswer
     std::optional<std::string> text = std::nullopt; ///< What it prints instead of @ref fixture.
 };
 
+/// How one command answers, whatever World's own fields say: the first whose command and argument match.
+struct CommandAnswer
+{
+    std::string command = {};          ///< The declared command, such as `acli-issues`.
+    std::string argumentContains = {}; ///< Some argument's value holds it; empty: any.
+    ListAnswer answer = {};            ///< What it prints.
+};
+
 /// What the engine a test draws is started from.
 struct World
 {
@@ -68,7 +76,23 @@ struct World
     std::vector<HostProgram> selfPrograms = {}; ///< What the host runs as its own executable.
     std::map<std::string, std::string, std::less<>> paneMessages = {}; ///< By run id: the reason line its tab
                                                                        ///< lists with its status.
+    std::vector<CommandAnswer> answers = {}; ///< Consulted before every other field.
 };
+
+/// The contour repository with a Jira source beside its forge's.
+inline constexpr auto WorkRepository =
+    R"j([ { "name": "contour", "path": "~/projects/contour", "forge": "github",
+           "issues": [ { "source": "forge", "query": "assignee:@me" },
+                       { "source": "jira", "jql": "assignee = currentUser()",
+                         "site": "https://example.atlassian.net" } ] } ])j"sv;
+
+/// The id of the run the Work world keeps on #2376.
+inline constexpr auto WorkRunId = "pr-2376-20261113-150847"sv;
+
+/// @return The Work board's world: WorkRepository, its pull requests one per state (`github/prs-work.json`),
+///         its Jira tickets (`jira/issues-work.json`) and the key lookup's (`jira/issues-lookup-work.json`),
+///         and a run working on #2376.
+[[nodiscard]] World workWorld();
 
 /// @param world What the engine is started from.
 /// @return The engine, started and with every poll command answered.
@@ -142,8 +166,8 @@ struct DashboardFixture
     [[nodiscard]] std::string screen();
 
     /// Carries out what the dashboard asked, as the guest does: a transcript page read, a board shown or
-    /// hidden, and the reads they lead to answered as @p answers says (a statistics read fails); then tells
-    /// the dashboard the engine changed.
+    /// hidden, a fold toggled, and the reads they lead to answered as @p answers says (a statistics read
+    /// fails); then tells the dashboard the engine changed.
     /// @return The `agent-transcript` commands the engine ran.
     std::vector<RunCommand> carryOut(std::vector<UiAction> const& actions, Answers const& answers = {});
 

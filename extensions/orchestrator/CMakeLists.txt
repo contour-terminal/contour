@@ -166,6 +166,8 @@ add_library(orchestrator_view STATIC
     view/Theme.hpp
     view/Transcript.cpp
     view/Transcript.hpp
+    view/WorkBoard.cpp
+    view/WorkBoard.hpp
 )
 target_link_libraries(orchestrator_view PUBLIC orchestrator_core core::tui_core)
 
@@ -234,6 +236,7 @@ if(ORCHESTRATOR_TESTING)
         view/StatusBoard_test.cpp
         view/TextEdit_test.cpp
         view/Transcript_test.cpp
+        view/WorkBoard_test.cpp
         view/ViewFixtures.cpp
         view/ViewFixtures.hpp
     )

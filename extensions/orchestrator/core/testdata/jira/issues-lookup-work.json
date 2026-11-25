@@ -1,0 +1,44 @@
+[
+  {
+    "changelog": null,
+    "editmeta": null,
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+    "fields": {
+      "issuetype": {
+        "description": "x",
+        "hierarchyLevel": 0,
+        "iconUrl": "https://example.atlassian.net/images/icons/issuetypes/10002.svg",
+        "id": "10002",
+        "name": "Task",
+        "self": "https://example.atlassian.net/rest/api/3/issuetype/10002",
+        "subtask": false
+      },
+      "status": {
+        "description": "x",
+        "iconUrl": "https://example.atlassian.net/images/icons/statuses/10101.png",
+        "id": "10101",
+        "name": "In Review",
+        "self": "https://example.atlassian.net/rest/api/3/status/10101",
+        "statusCategory": {
+          "colorName": "yellow",
+          "id": 4,
+          "key": "indeterminate",
+          "name": "In Progress",
+          "self": "https://example.atlassian.net/rest/api/3/statuscategory/4"
+        }
+      },
+      "summary": "Example summary"
+    },
+    "fieldsToInclude": null,
+    "id": "10099",
+    "key": "PRJ-1999",
+    "names": null,
+    "operations": null,
+    "properties": null,
+    "renderedFields": null,
+    "schema": null,
+    "self": "https://example.atlassian.net/rest/api/3/issue/10099",
+    "transitions": null,
+    "versionedRepresentations": null
+  }
+]
