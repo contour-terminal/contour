@@ -544,6 +544,23 @@ TEMPLATE_LIST_TEST_CASE("GuestReader.fetchesEachByteOnce", "[vtextension]", Lift
     CHECK((memory.bytesRead() > 0 || abi::Codec<TestType>::Size == 0));
 }
 
+TEMPLATE_LIST_TEST_CASE("GuestReader.flatLiftsFetchEachByteOnce", "[vtextension]", LiftedTypes)
+{
+    // What a host function or a small control request lifts from its flat parameters: the pointers they
+    // carry are followed through read() alone, and no byte is read twice.
+    auto const sample = sampleOf<TestType>();
+    auto memory = FetchCountingMemory {};
+    auto flat = abi::FlatValues {};
+    REQUIRE(abi::Codec<TestType>::lowerFlat(memory, sample, flat).has_value());
+
+    memory.startLoading();
+    auto reader = abi::FlatReader(flat);
+    auto const lifted = abi::Codec<TestType>::liftFlat(memory, reader);
+    REQUIRE(lifted.has_value());
+    CHECK(sameValue(*lifted, sample));
+    CHECK(memory.mostReads() <= 1);
+}
+
 TEST_CASE("GuestReader.mutationAfterReadChangesNothing", "[vtextension]")
 {
     // Every byte is flipped once read() copied it: a lift that read any byte again would see the flip.
