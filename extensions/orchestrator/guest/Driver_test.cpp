@@ -1541,6 +1541,23 @@ TEST_CASE("the driver remembers the origin a dashboard was opened from", "[guest
     CHECK(served.host.paneReveals.size() == 2);
 }
 
+TEST_CASE("a fold the user sets is stepped as the engine's SetFold", "[guest][driver]")
+{
+    auto served = Served {};
+    served.load();
+    served.invoke("open");
+
+    served.driver->apply("tab-1",
+                         view::SetFoldAction { .group = "work/in-review", .choice = FoldChoice::Folded });
+
+    auto const set = served.observer.inputsOf<SetFold>();
+    REQUIRE(set.size() == 1);
+    CHECK(set.front().group == "work/in-review");
+    CHECK(set.front().choice == FoldChoice::Folded);
+    CHECK(served.driver->engine().foldChoiceOf("work/in-review") == FoldChoice::Folded);
+    CHECK(served.host.store.at(std::string { FoldsKey }) == R"(["work/in-review#folded"])");
+}
+
 TEST_CASE("a reveal without a remembered origin passes 0", "[guest][driver]")
 {
     constexpr auto RunId = "pr-2375-20261113-150847"sv;

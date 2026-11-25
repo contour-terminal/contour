@@ -206,6 +206,11 @@ namespace
         return ToggleFold { .group = toggle.group, .monoMs = monoMs };
     }
 
+    [[nodiscard]] Input inputOf(view::SetFoldAction const& fold, uint64_t monoMs)
+    {
+        return SetFold { .group = fold.group, .choice = fold.choice, .monoMs = monoMs };
+    }
+
     /// @return A listed tab's size, as the dashboard takes it.
     [[nodiscard]] core::tui::Size sizeOf(TabInfo const& tab) noexcept
     {

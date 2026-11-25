@@ -235,6 +235,23 @@ struct ToggleFold
     uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
 };
 
+/// What the user chose for a fold.
+enum class FoldChoice : uint8_t
+{
+    Open = 0, ///< Shown open.
+    Folded,   ///< Shown folded.
+};
+
+/// The user folded or unfolded a group, whatever it was before: kept as `<group>#open` or `<group>#folded`.
+struct SetFold
+{
+    std::string group;                    ///< The group's key, such as `work/else`; at most MaxFoldKeyBytes
+                                          ///< with its `#folded` suffix.
+    FoldChoice choice = FoldChoice::Open; ///< What the user chose.
+    uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
+    [[nodiscard]] bool operator==(SetFold const&) const = default;
+};
+
 /// The most bytes of a fold's key, and the most folds kept.
 inline constexpr std::size_t MaxFoldKeyBytes = 200;
 inline constexpr std::size_t MaxFolds = 256;
@@ -308,6 +325,7 @@ using Input = std::variant<Wake,
                            DismissRun,
                            MarkRunSeen,
                            ToggleFold,
+                           SetFold,
                            RefreshNow,
                            InstallPlugins,
                            ReadTranscript,
@@ -593,6 +611,10 @@ class Engine
     /// @return Whether the user folded it; kept across restarts.
     [[nodiscard]] bool isFolded(std::string_view group) const noexcept;
 
+    /// @param group A group of the dashboard's list, such as `work/else`.
+    /// @return The choice SetFold stored for @p group; std::nullopt: none.
+    [[nodiscard]] std::optional<FoldChoice> foldChoiceOf(std::string_view group) const noexcept;
+
     /// @return How many runs count as active (countsAsActive()): what `max_agents` is checked against.
     [[nodiscard]] std::size_t activeRuns() const noexcept;
 
@@ -728,6 +750,11 @@ class Engine
     void loadFolds(std::string_view json);
     /// Folds @p group, or unfolds it, and stores the folds.
     void toggleFold(std::string_view group, std::vector<Effect>& out);
+    /// Keeps @p choice for @p group in place of any toggle or choice it had, and stores the folds; refused
+    /// for a group that is not a fold key, or whose `#folded` key exceeds MaxFoldKeyBytes.
+    void setFold(std::string_view group, FoldChoice choice, std::vector<Effect>& out);
+    /// Stores the folds under FoldsKey.
+    void storeFolds(std::vector<Effect>& out) const;
     /// Turns an asking run Waiting, for AwaitMessage.
     void awaitMessage(std::string_view runId, std::vector<Effect>& out);
     /// A listed pane of a run that waits for a message (AwaitMessage) still reporting its request reads as

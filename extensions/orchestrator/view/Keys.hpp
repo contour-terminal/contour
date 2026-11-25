@@ -117,6 +117,14 @@ struct ToggleFoldAction
     [[nodiscard]] bool operator==(ToggleFoldAction const&) const = default;
 };
 
+/// Fold or unfold a Work-view group as the user chose (Decision 12).
+struct SetFoldAction
+{
+    std::string group = {};               ///< The group's fold key.
+    FoldChoice choice = FoldChoice::Open; ///< What the user chose.
+    [[nodiscard]] bool operator==(SetFoldAction const&) const = default;
+};
+
 /// Read a page of a run's transcript, for the dashboard's tab to show.
 struct ReadTranscriptAction
 {
@@ -142,7 +150,8 @@ using UiAction = std::variant<RefreshNowAction,
                               ShowBoardAction,
                               HideBoardAction,
                               ReadTranscriptAction,
-                              ToggleFoldAction>;
+                              ToggleFoldAction,
+                              SetFoldAction>;
 
 // }}}
 // {{{ the key table

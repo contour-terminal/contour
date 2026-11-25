@@ -4535,6 +4535,44 @@ TEST_CASE("the folds a previous instance stored are folded again", "[orchestrato
     CHECK(harness.engine().problems().empty());
 }
 
+TEST_CASE("Engine: a fold the user sets replaces the group's toggle", "[orchestrator][engine][folds]")
+{
+    auto harness = booted();
+    static_cast<void>(harness.feed(ToggleFold { .group = "work/else", .monoMs = harness.now() }));
+    REQUIRE(harness.engine().isFolded("work/else"));
+    CHECK_FALSE(harness.engine().foldChoiceOf("work/else").has_value());
+
+    auto const opened =
+        harness.feed(SetFold { .group = "work/else", .choice = FoldChoice::Open, .monoMs = harness.now() });
+    CHECK_FALSE(harness.engine().isFolded("work/else"));
+    CHECK(harness.engine().foldChoiceOf("work/else") == FoldChoice::Open);
+    REQUIRE(countOf<StoreSet>(opened) == 1);
+    CHECK(all<StoreSet>(opened).back().key == FoldsKey);
+    CHECK(all<StoreSet>(opened).back().value == R"(["work/else#open"])");
+    CHECK(countOf<Redraw>(opened) == 1);
+
+    auto const folded =
+        harness.feed(SetFold { .group = "work/else", .choice = FoldChoice::Folded, .monoMs = harness.now() });
+    CHECK(harness.engine().foldChoiceOf("work/else") == FoldChoice::Folded);
+    REQUIRE(countOf<StoreSet>(folded) == 1);
+    auto const stored = all<StoreSet>(folded).back().value;
+    CHECK(stored == R"(["work/else#folded"])");
+
+    // A fresh engine reads the choice back.
+    auto context = contextFor({});
+    context.stored = { StoredEntry { .key = std::string { FoldsKey }, .value = stored } };
+    auto reloaded = Harness { std::move(context) };
+    CHECK(reloaded.engine().foldChoiceOf("work/else") == FoldChoice::Folded);
+    CHECK_FALSE(reloaded.engine().foldChoiceOf("work/ready").has_value());
+
+    // A group whose `#folded` key would not fit changes nothing.
+    auto const tooLong = harness.feed(
+        SetFold { .group = std::string(199, 'g'), .choice = FoldChoice::Folded, .monoMs = harness.now() });
+    CHECK(countOf<StoreSet>(tooLong) == 0);
+    CHECK_FALSE(harness.engine().foldChoiceOf(std::string(199, 'g')).has_value());
+    CHECK(harness.engine().foldChoiceOf("work/else") == FoldChoice::Folded);
+}
+
 // }}}
 
 TEST_CASE(

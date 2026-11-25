@@ -444,7 +444,7 @@ namespace
                 if (line == nullptr)
                     return {};
                 if (line->kind == WorkLineKind::Heading)
-                    return { foldWorkGroup(work, line->group) };
+                    return { foldWorkGroup(work, context.engine, line->group) };
                 // Its session id is left empty for the dashboard, which holds the source of them, to mint.
                 auto const& item = context.items[line->item];
                 auto dialog = openStartDialog(context.engine, item, {}, {});
@@ -460,7 +460,7 @@ namespace
                 auto const* const line = selectedLine(interaction.work, context.lines);
                 if (line == nullptr)
                     return {};
-                return { foldWorkGroup(interaction.work, line->group) };
+                return { foldWorkGroup(interaction.work, context.engine, line->group) };
             } },
         WorkHandlerRow {
             .command = KeyCommand::Filter,
@@ -523,7 +523,14 @@ namespace
 bool isGroupFolded(Engine const& engine, WorkGroup group) noexcept
 {
     auto const& row = WorkGroupRows[std::to_underlying(group)];
-    return engine.isFolded(row.foldKey) != (row.fold == orchestrator::FoldDefault::Folded);
+    if (auto const choice = engine.foldChoiceOf(row.foldKey))
+        return *choice == FoldChoice::Folded;
+    auto const builtIn = row.fold == orchestrator::FoldDefault::Folded;
+    // A fold key stored before choices toggled the row's built-in default, whatever `work.folded` says now.
+    if (engine.isFolded(row.foldKey))
+        return !builtIn;
+    auto const* const config = engine.config();
+    return config != nullptr ? std::ranges::contains(config->work().folded, group) : builtIn;
 }
 
 WorkSort sortOf(Engine const& engine) noexcept
@@ -539,10 +546,11 @@ std::string workMrLabel(Engine const& engine, WorkItem const& item)
         "{}{}", forgeOf(engine, item.repo) == Forge::GitLab ? "!" : "#", item.changeRequest->number);
 }
 
-UiAction foldWorkGroup(WorkState& state, WorkGroup group)
+UiAction foldWorkGroup(WorkState& state, Engine const& engine, WorkGroup group)
 {
     state.selectedKey = workLineKey(WorkLine { .kind = WorkLineKind::Heading, .group = group }, {});
-    return ToggleFoldAction { .group = std::string { WorkGroupRows[std::to_underlying(group)].foldKey } };
+    return SetFoldAction { .group = std::string { WorkGroupRows[std::to_underlying(group)].foldKey },
+                           .choice = isGroupFolded(engine, group) ? FoldChoice::Open : FoldChoice::Folded };
 }
 
 void selectWorkLine(WorkState& state, WorkBoardData const& data, std::size_t index)
@@ -593,18 +601,18 @@ std::vector<WorkLine> workLines(std::span<WorkItem const> items,
                     WorkLine { .kind = WorkLineKind::Item, .group = items[index].group, .item = index });
         return lines;
     }
+    auto const* const config = engine.config();
+    auto const empty = config != nullptr ? config->work().empty : EmptyGroups::Hidden;
     for (auto const& row: WorkGroupRows)
     {
         auto const heading = lines.size();
+        lines.push_back(WorkLine { .kind = WorkLineKind::Heading, .group = row.group, .item = 0 });
         for (auto const index: order)
             if (items[index].group == row.group && shown(index))
-            {
-                if (lines.size() == heading)
-                    lines.push_back(
-                        WorkLine { .kind = WorkLineKind::Heading, .group = row.group, .item = 0 });
                 lines.push_back(WorkLine { .kind = WorkLineKind::Item, .group = row.group, .item = index });
-            }
-        if (lines.size() != heading && isGroupFolded(engine, row.group))
+        if (lines.size() == heading + 1 && empty == EmptyGroups::Hidden)
+            lines.pop_back();
+        else if (isGroupFolded(engine, row.group))
             lines.resize(heading + 1);
     }
     return lines;
@@ -720,7 +728,7 @@ std::vector<UiAction> foldOtherGroups(WorkState& state,
     auto actions = std::vector<UiAction> {};
     for (auto const& line: lines)
         if (line.kind == WorkLineKind::Heading && line.group != group && !isGroupFolded(engine, line.group))
-            actions.push_back(foldWorkGroup(state, line.group));
+            actions.push_back(foldWorkGroup(state, engine, line.group));
     state.selectedKey = selected;
     return actions;
 }

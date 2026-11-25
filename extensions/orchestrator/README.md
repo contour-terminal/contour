@@ -222,7 +222,7 @@ five groups shown in this order:
 | Ready to merge | a merge request whose pipeline passed (or that has none), without conflicts, and approved or needing no review (on GitLab: `mergeable`) |
 | In review | every other open merge request: its pipeline running, its review pending |
 | No MR yet | a ticket in progress that no merge request names |
-| Everything else | a draft merge request, whatever its pipeline or conflicts, and a ticket not in progress; folded until you open it |
+| Everything else | a draft merge request, whatever its pipeline or conflicts, and a ticket not in progress; folded by default (`work.folded`) |
 
 A draft is checked first; then the first group whose rule matches takes the item. A ticket a merge request names
 is not listed on its own: its status shows on the merge request's row. A merge request names a Jira ticket with
@@ -257,8 +257,10 @@ the sort chip (`sort: importance`, or `sort: last update`, one flat list without
 the selection kept in view, and a scrollbar shows on its right edge while it does not fit. Below it, the details
 line says what the selected row is about: its failing checks (`pipeline fails: test-windows`), the base it
 conflicts with, its ticket and that ticket's status, and the agent on it (`#2375 · contour · pipeline fails:
-test-windows · PRJ-1234 In Progress`). The groups' folds and the sort are kept across restarts, as the Fleet's
-folds are; the filter and the repository chip are not.
+test-windows · PRJ-1234 In Progress`). A group starts folded or open as `work.folded` says (see "Configuration"
+below); a group you fold or unfold stays as you left it, over whatever `work.folded` says then, and is kept across
+restarts, as the sort is; the filter and the repository chip are not. A group with nothing to show has no heading,
+unless `work.fold_empty` is `false`: then every group shows its heading, an empty one with `0`.
 
 | Key | In the Work view |
 | --- | --- |
@@ -371,7 +373,7 @@ this is how its agents get their skills. The orchestrator never edits Claude Cod
 ## Configuration
 
 The whole configuration is in [Configuring the orchestrator](../../docs/extensions.md#configuring-the-orchestrator).
-The Work view adds two optional keys; every configuration that was valid before stays valid.
+The Work view adds optional keys; every configuration that was valid before stays valid.
 
 ```yaml
 repos:
@@ -394,6 +396,19 @@ tasks:
 - **`role`** (a task's, optional): `fix_ci`, `resolve_conflicts`, `address_review` or `work_on_issue`, the state
   the start dialog suggests the task for. Without it, a task whose `id` is one of these has that role, so
   `id: fix_ci` needs none. Any other value is refused, and the line names the four.
+
+**`work`** (optional) sets how the Work view starts:
+
+```yaml
+work:
+    folded: [everything_else]   # the default
+    fold_empty: true            # the default
+```
+
+- **`folded`**: the groups shown folded until you unfold them, by the names `needs_you`, `ready_to_merge`,
+  `in_review`, `no_mr_yet` and `everything_else`; the default is `[everything_else]`, and `[]` opens every group.
+  A group you folded or unfolded yourself keeps your choice, whatever the list says.
+- **`fold_empty`**: `true`, the default, hides a group with nothing in it; `false` shows every group's heading.
 
 **GitLab.** `glab mr list` carries no pipeline and no approvals, so per GitLab repository and poll the orchestrator
 also asks for the project's newest pipelines and its failed jobs, two REST calls through `glab api`:

@@ -228,6 +228,8 @@ struct Scene
                                       IssueRef { 2356 },
                                       "issue") } };
     auto const paneRefused = World { .prs = { "github/prs-empty.json" }, .stored = { paneRefusedRun() } };
+    auto workEmptyGroups = workWorld();
+    workEmptyGroups.work = R"({ "fold_empty": false })";
     auto const withStats = World { .prs = { "github/prs-empty.json" }, .stored = { finishedWithStats() } };
     auto const twoRuns = World { .stored = { storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }),
                                              storedRun(Done {}, DoneId, ChangeRequestRef { 2379 }) } };
@@ -292,6 +294,8 @@ struct Scene
         Scene { .name = "work-flat", .world = workWorld(), .keys = "ws", .sizes = { Medium, Wide } },
         // The filter being typed.
         Scene { .name = "work-filter", .world = workWorld(), .keys = "w/prj", .sizes = { Medium, Wide } },
+        // `work.fold_empty: false`: a group the filter leaves empty keeps its heading.
+        Scene { .name = "work-empty-groups", .world = workEmptyGroups, .keys = "w/2375", .sizes = { Medium } },
         // The start dialog on Needs you's first item: its suggested task with the reason, the worker chips.
         Scene { .name = "start-dialog", .world = workWorld(), .keys = "w\r", .sizes = { Narrow, Medium, Wide } },
         // The `n` box, a task typed: the defaults it starts on, the branch and worktree it makes.
@@ -1147,9 +1151,9 @@ TEST_CASE("Work palette: fold the other groups", "[orchestrator][view][work]")
     REQUIRE(dashboard.interaction().work.selectedKey == FirstMr);
     CHECK(dashboard.input("other groups").empty());
     CHECK(dashboard.input("")
-          == std::vector<UiAction> { ToggleFoldAction { .group = "work/ready" },
-                                     ToggleFoldAction { .group = "work/in-review" },
-                                     ToggleFoldAction { .group = "work/no-mr" } });
+          == std::vector<UiAction> { SetFoldAction { .group = "work/ready", .choice = FoldChoice::Folded },
+                                     SetFoldAction { .group = "work/in-review", .choice = FoldChoice::Folded },
+                                     SetFoldAction { .group = "work/no-mr", .choice = FoldChoice::Folded } });
     CHECK_FALSE(dashboard.interaction().palette.has_value());
     // The selection stays where it was.
     CHECK(dashboard.interaction().work.selectedKey == FirstMr);
@@ -1170,11 +1174,13 @@ TEST_CASE("Work mouse: a click on a heading folds; a right-click folds the other
     auto const heading = regionOf(
         dashboard, Hit { .kind = HitKind::WorkHeading, .value = std::to_underlying(WorkGroup::NeedsYou) });
     CHECK(dashboard.input(clickAt(heading.x + 3, heading.y))
-          == std::vector<UiAction> { ToggleFoldAction { .group = "work/needs-you" } });
-    CHECK(dashboard.input(rightClickAt(heading.x + 3, heading.y))
-          == std::vector<UiAction> { ToggleFoldAction { .group = "work/ready" },
-                                     ToggleFoldAction { .group = "work/in-review" },
-                                     ToggleFoldAction { .group = "work/no-mr" } });
+          == std::vector<UiAction> {
+              SetFoldAction { .group = "work/needs-you", .choice = FoldChoice::Folded } });
+    CHECK(
+        dashboard.input(rightClickAt(heading.x + 3, heading.y))
+        == std::vector<UiAction> { SetFoldAction { .group = "work/ready", .choice = FoldChoice::Folded },
+                                   SetFoldAction { .group = "work/in-review", .choice = FoldChoice::Folded },
+                                   SetFoldAction { .group = "work/no-mr", .choice = FoldChoice::Folded } });
 }
 
 TEST_CASE("Work mouse: the wheel scrolls the list and keeps the selection until it leaves view",

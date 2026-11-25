@@ -31,7 +31,7 @@ enum class FoldDefault : uint8_t
 struct WorkGroupRow
 {
     WorkGroup group;             ///< The group.
-    std::string_view foldKey;    ///< The fold key that toggles it from @ref fold.
+    std::string_view foldKey;    ///< The key its fold is kept under (SetFold).
     std::string_view name;       ///< What the board calls it.
     std::string_view configName; ///< The name `work.folded` spells it by.
     FoldDefault fold;            ///< Whether it starts folded.
@@ -66,9 +66,9 @@ inline constexpr auto WorkGroupRows = std::array {
                    .fold = FoldDefault::Folded },
 };
 
-/// The fold key whose presence means the flat sort by last update. A group's fold key held by the engine
-/// means "toggled from the group's FoldDefault"; folds and sort persist through ToggleFoldAction, with no
-/// store change.
+/// The fold key whose presence means the flat sort by last update, toggled by ToggleFoldAction. A group's
+/// fold is the user's choice, kept by SetFoldAction as `<foldKey>#open` or `<foldKey>#folded`; a bare fold
+/// key, stored before choices, means "toggled from the group's FoldDefault".
 inline constexpr std::string_view SortByUpdateKey = "work/sort-by-update";
 
 /// Whether the Work view shows a group with no item.

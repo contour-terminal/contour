@@ -1465,8 +1465,8 @@ namespace
                                return;
                            state.interaction.work.focus = WorkFocus::List;
                            state.interaction.work.filtering = Filtering::Off;
-                           actions.push_back(
-                               foldWorkGroup(state.interaction.work, static_cast<WorkGroup>(value)));
+                           actions.push_back(foldWorkGroup(
+                               state.interaction.work, state.engine, static_cast<WorkGroup>(value)));
                        },
                    .rightClick =
                        [](State& state, std::size_t value, Pointer const&, std::vector<UiAction>& actions) {
@@ -1639,7 +1639,7 @@ namespace
         MenuRow { .command = RowMenuCommand::FoldGroup,
                   .handler =
                       [](State& state, WorkItem const& item, std::vector<UiAction>& actions) {
-                          actions.push_back(foldWorkGroup(state.interaction.work, item.group));
+                          actions.push_back(foldWorkGroup(state.interaction.work, state.engine, item.group));
                       } },
     };
     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, MenuRows.size()),

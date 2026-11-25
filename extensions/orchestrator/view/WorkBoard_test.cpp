@@ -165,7 +165,9 @@ TEST_CASE("Work view: z folds the selected row's group and the fold persists", "
     // The first item is selected: Needs you's newest.
     CHECK(selectedName(fixture) == "#2375");
     auto const folding = fixture.dashboard.input("z");
-    CHECK(folding == std::vector<UiAction> { ToggleFoldAction { .group = "work/needs-you" } });
+    CHECK(folding
+          == std::vector<UiAction> {
+              SetFoldAction { .group = "work/needs-you", .choice = FoldChoice::Folded } });
     static_cast<void>(fixture.carryOut(folding));
     CHECK(isGroupFolded(fixture.engine, WorkGroup::NeedsYou));
     static_cast<void>(fixture.screen());
@@ -176,7 +178,8 @@ TEST_CASE("Work view: z folds the selected row's group and the fold persists", "
     CHECK(fixture.dashboard.input("\x1b[F").empty());
     CHECK(selectedName(fixture) == "Everything else");
     auto const unfolding = fixture.dashboard.input("\r");
-    CHECK(unfolding == std::vector<UiAction> { ToggleFoldAction { .group = "work/else" } });
+    CHECK(unfolding
+          == std::vector<UiAction> { SetFoldAction { .group = "work/else", .choice = FoldChoice::Open } });
     static_cast<void>(fixture.carryOut(unfolding));
     CHECK_FALSE(isGroupFolded(fixture.engine, WorkGroup::EverythingElse));
     CHECK(std::ranges::contains(groupOf(BoardLines { fixture.engine }, "Everything else"), "#2380"s));
@@ -381,4 +384,73 @@ TEST_CASE("Work view: the hidden Fleet and Focus ask for no wake and read nothin
     CHECK(fixture.dashboard.input("w").empty());
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.nextRepaintDue().has_value());
+}
+
+TEST_CASE("Work view: the configured folds, the user's choice, a fold stored before",
+          "[orchestrator][view][work]")
+{
+    auto const configured = [](std::string_view work) {
+        auto world = workWorld();
+        world.work = std::string { work };
+        return world;
+    };
+
+    // The default configuration: Everything else folded, the rest open.
+    auto const defaults = bootEngine(workWorld());
+    CHECK(isGroupFolded(defaults, WorkGroup::EverythingElse));
+    CHECK_FALSE(isGroupFolded(defaults, WorkGroup::NeedsYou));
+
+    // `work.folded` says which.
+    auto inReview = bootEngine(configured(R"({ "folded": ["in_review"] })"));
+    CHECK(isGroupFolded(inReview, WorkGroup::InReview));
+    CHECK_FALSE(isGroupFolded(inReview, WorkGroup::EverythingElse));
+
+    // A toggle stored before choices flips the row's built-in default: Everything else stays open, as the
+    // user left it.
+    static_cast<void>(inReview.step(ToggleFold { .group = "work/else", .monoMs = StartMonoMs }));
+    CHECK_FALSE(isGroupFolded(inReview, WorkGroup::EverythingElse));
+
+    // The user's choice wins over `work.folded`, whatever it says.
+    for (auto const work: { R"({ "folded": ["in_review"] })"sv, R"({ "folded": [] })"sv })
+    {
+        CAPTURE(work);
+        auto engine = bootEngine(configured(work));
+        static_cast<void>(engine.step(
+            SetFold { .group = "work/in-review", .choice = FoldChoice::Open, .monoMs = StartMonoMs }));
+        CHECK_FALSE(isGroupFolded(engine, WorkGroup::InReview));
+    }
+
+    // Folding a folded group asks to open it.
+    auto state = WorkState {};
+    CHECK(foldWorkGroup(state, inReview, WorkGroup::InReview)
+          == UiAction { SetFoldAction { .group = "work/in-review", .choice = FoldChoice::Open } });
+    CHECK(state.selectedKey == "group:work/in-review");
+    CHECK(foldWorkGroup(state, inReview, WorkGroup::NeedsYou)
+          == UiAction { SetFoldAction { .group = "work/needs-you", .choice = FoldChoice::Folded } });
+}
+
+TEST_CASE("Work view: fold_empty false shows every group's heading", "[orchestrator][view][work]")
+{
+    // One pull request whose pipeline fails, and nothing else: every item is Needs you's.
+    auto const needsYouOnly = [](std::string_view work) {
+        auto world = World {
+            .prs = { .text = R"([[2375,"fix the flaky test","https://github.com/example/contour/pull/2375",)"
+                             R"("fix/flaky-test","master",false,false,"",[],[["CheckRun","test",null,)"
+                             R"("COMPLETED","FAILURE",null]],"MERGEABLE","2026-11-13T12:00:00Z"]])" },
+            .issues = { .text = "[]" },
+        };
+        world.work = std::string { work };
+        return world;
+    };
+    auto const headings = [](Engine const& engine) {
+        auto const board = BoardLines { engine };
+        return std::ranges::count(board.lines, WorkLineKind::Heading, &WorkLine::kind);
+    };
+
+    auto const hidden = bootEngine(needsYouOnly({}));
+    REQUIRE_FALSE(hidden.workItems().empty());
+    REQUIRE(std::ranges::all_of(hidden.workItems(),
+                                [](WorkItem const& item) { return item.group == WorkGroup::NeedsYou; }));
+    CHECK(headings(hidden) == 1);
+    CHECK(headings(bootEngine(needsYouOnly(R"({ "fold_empty": false })"))) == 5);
 }

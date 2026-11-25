@@ -37,8 +37,9 @@ namespace
     {{ "id": "fix_ci", "key": "f", "label": "fix CI", "applies_to": "pr", "model": "sonnet",
        "prompt": "/contour-workflows:fix-ci {{url}}" }},
     {{ "id": "issue", "key": "w", "label": "work on issue", "applies_to": "issue", "model": "opus",
-       "prompt": "/contour-workflows:work-issue {{url}}" }} ] }})",
-                           world.repos);
+       "prompt": "/contour-workflows:work-issue {{url}}" }} ]{} }})",
+                           world.repos,
+                           world.work.empty() ? std::string {} : std::format(R"(, "work": {})", world.work));
     }
 
     [[nodiscard]] ProcessOutcome ok(std::string text)
@@ -218,6 +219,8 @@ std::vector<RunCommand> DashboardFixture::carryOut(std::vector<UiAction> const& 
             effects = engine.step(HideBoard { .tab = tab, .monoMs = now });
         else if (auto const* const fold = std::get_if<ToggleFoldAction>(&action))
             effects = engine.step(ToggleFold { .group = fold->group, .monoMs = now });
+        else if (auto const* const set = std::get_if<SetFoldAction>(&action))
+            effects = engine.step(SetFold { .group = set->group, .choice = set->choice, .monoMs = now });
         // What the answers lead to is followed too: a statistics read, failed at once, may have held the
         // transcript's back in the queue.
         while (!effects.empty())

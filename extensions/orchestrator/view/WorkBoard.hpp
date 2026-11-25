@@ -62,9 +62,11 @@ struct WorkBoardData
     std::optional<uint64_t> ageChangeMs = std::nullopt;
 };
 
-/// @param engine The engine: the fold keys it holds.
+/// @param engine The engine: the fold keys it holds, and its configuration's `work.folded`.
 /// @param group A group.
-/// @return Whether @p group is folded: its default, flipped when the engine holds its fold key.
+/// @return Whether @p group is folded: its SetFold choice, else a toggle stored before choices (against the
+///         row's built-in FoldDefault), else Config::work().folded (the built-in default without a
+///         configuration).
 [[nodiscard]] bool isGroupFolded(Engine const& engine, WorkGroup group) noexcept;
 
 /// @param engine The engine: the fold keys it holds.
@@ -75,9 +77,9 @@ struct WorkBoardData
 /// @param order Indices into @p items, ordered by orderOf().
 /// @param engine The engine: its folds, its sort and its repositories (for the repository chip).
 /// @param state The filter and the repository chip.
-/// @return The lines drawn: Importance → per non-empty group a heading then its items unless folded;
-///         LastUpdate → items only. Items the filter or the repository chip hide are left out, and a group
-///         left empty by them loses its heading.
+/// @return The lines drawn: Importance → per group a heading then its items unless folded; LastUpdate → items
+///         only. Items the filter or the repository chip hide are left out. A group with no item shown loses
+///         its heading, unless the configuration's `work.fold_empty` is false (EmptyGroups::Shown).
 [[nodiscard]] std::vector<WorkLine> workLines(std::span<WorkItem const> items,
                                               std::span<std::size_t const> order,
                                               Engine const& engine,
@@ -106,9 +108,10 @@ void keepWorkSelection(WorkState& state,
 
 /// Folds or unfolds @p group, and selects its heading once the lines are built again.
 /// @param state The Work view's interaction: its selection moves to the heading.
+/// @param engine The engine: whether the group is folded now (isGroupFolded()).
 /// @param group The group.
-/// @return The ToggleFoldAction of the group's fold key.
-[[nodiscard]] UiAction foldWorkGroup(WorkState& state, WorkGroup group);
+/// @return SetFoldAction of the group's fold key, choosing the opposite of what isGroupFolded() says now.
+[[nodiscard]] UiAction foldWorkGroup(WorkState& state, Engine const& engine, WorkGroup group);
 
 /// Folds every group whose heading @p lines show open, but @p group: what FoldOthers and a right-click on a
 /// heading do. The selection stays where it was.
@@ -155,7 +158,7 @@ void jumpWorkList(WorkState& state, WorkBoardData const& data, std::size_t row);
 /// @return How many milliseconds later updateAgeText() says something else: the rest of its unit.
 [[nodiscard]] uint64_t untilAgeChanges(uint64_t ms) noexcept;
 
-/// Applies one Work-view command. Fold on a line, or Enter on a heading, folds its group by ToggleFoldAction
+/// Applies one Work-view command. Fold on a line, or Enter on a heading, folds its group by SetFoldAction
 /// of the group's key and selects the heading; Sort toggles SortByUpdateKey; Enter on an item opens the start
 /// dialog on it (its session id left for the caller to mint), or says on the action bar why it cannot.
 /// RowMenu opens the row menu on a selected item, its place left for the caller to set; FoldOthers folds

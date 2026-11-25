@@ -288,6 +288,7 @@ std::vector<Effect> Engine::step(Input const& input)
             },
             [&](MarkRunSeen const& seen) { feed(seen.run, MarkSeen {}, out); },
             [&](ToggleFold const& toggle) { toggleFold(toggle.group, out); },
+            [&](SetFold const& fold) { setFold(fold.group, fold.choice, out); },
             [&](ReadTranscript const& request) { readTranscript(request, out); },
             [&](ShowBoard const& request) { showBoard(request, out); },
             [&](HideBoard const& request) { hideBoard(request.tab); },
