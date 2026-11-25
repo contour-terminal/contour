@@ -22,6 +22,7 @@
 #include <orchestrator/core/EngineDetail.hpp>
 #include <orchestrator/core/Fixtures.hpp>
 #include <orchestrator/core/Hooks.hpp>
+#include <orchestrator/core/HostOutput.hpp>
 #include <orchestrator/core/HostPaths.hpp>
 #include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Overloaded.hpp>
@@ -1202,6 +1203,48 @@ TEST_CASE("a clean ending removes the worktree and frees the slot", "[orchestrat
 
     auto another = prDispatch(2369);
     CHECK(countOf<DispatchRefused>(harness.feed(another)) == 0);
+}
+
+TEST_CASE("a run in a large clean repository ends removed", "[orchestrator][engine]")
+{
+    // A listing larger than the host keeps of a stream: the host drops its unmarked entries as declared, and
+    // the check reads what is left. Once the host kept it whole the listing was cut, and every run was kept.
+    auto const printed = indexListing(30'000);
+    REQUIRE(printed.size() > HostStreamCap);
+    auto const kept = keptByHost("git-index-flags", printed);
+    auto outcome = ok(kept.text);
+    outcome.extent = kept.extent;
+
+    auto harness = booted();
+    harness.runToRunning(prDispatch());
+    harness.list({});
+    harness.read("/.git", intactGitFile(ContourPath, PrId));
+    harness.finish("git-common-dir", ok(commonDirOf(ContourPath)));
+    harness.finish("git-index-flags", std::move(outcome));
+    harness.finish("git-head-reachable", ok("refs/heads/agent/x\n"));
+    harness.finish("git-operation-state", ok(CleanLongStatus));
+    harness.finish("git-status", ok());
+    harness.finish("git-worktree-remove", ok());
+    auto const finished = finishedOf(harness.run(PrId));
+    REQUIRE(finished);
+    CHECK(finished->fate == Fate::Removed);
+}
+
+TEST_CASE("a run whose index check output was cut is kept, saying what to do", "[orchestrator][engine]")
+{
+    auto harness = booted();
+    harness.runToRunning(prDispatch());
+    harness.list({});
+    harness.read("/.git", intactGitFile(ContourPath, PrId));
+    harness.finish("git-common-dir", ok(commonDirOf(ContourPath)));
+    harness.finish("git-index-flags", truncated("h 100644 78981922613b2afb6025042ff6bd878ac1994e85 0\tf\n"));
+    auto const finished = finishedOf(harness.run(PrId));
+    REQUIRE(finished);
+    CHECK(finished->fate == Fate::Kept);
+    REQUIRE(finished->entries.size() == 1);
+    CHECK(finished->entries.front().starts_with(
+        "the index check failed: its output was cut at the host's limit; git ls-files -v --stage there"));
+    CHECK(!harness.pending("git-head-reachable"));
 }
 
 TEST_CASE("a reported run ends as completed", "[orchestrator][engine]")

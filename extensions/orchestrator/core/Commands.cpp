@@ -234,6 +234,12 @@ namespace
     /// `git status` would enter. It reads no attributes (measured: harness/r11.sh), so it runs before
     /// anything that does.
     constexpr auto GitIndexFlagsArgv = std::array { "git"sv, "ls-files"sv, "-v"sv, "--stage"sv };
+    /// What the host drops of that listing as it reads it: a plain file (`H 100644`, `H 100755`) or a
+    /// symbolic link (`H 120000`), neither marked nor a gitlink: a line that checks nothing. What is left is
+    /// every entry that keeps the worktree, and any line of a shape not foreseen, so a clean index of any
+    /// size reads empty instead of being cut at the host's cap (measured: 21557 entries list 2.1 MB, beyond
+    /// its 1 MiB, and drop to nothing).
+    constexpr auto GitIndexFlagsDroppedLines = std::array { "H 10"sv, "H 12"sv };
     /// The long status names a rebase, merge, cherry-pick, revert or bisect in progress on a line of its own;
     /// without the comment prefix and colour those lines start in column 0, and it exits 0 in every state.
     constexpr auto GitOperationStateArgv = std::array {
@@ -371,7 +377,8 @@ namespace
                       .timeout = Timeout::Short,
                       .root = Root::Worktrees,
                       .argv = GitIndexFlagsArgv,
-                      .environment = CleanupEnvironment },
+                      .environment = CleanupEnvironment,
+                      .droppedLines = GitIndexFlagsDroppedLines },
         CommandDecl { .name = "git-clean",
                       .timeout = Timeout::Short,
                       .root = Root::Worktrees,
@@ -754,6 +761,9 @@ std::vector<std::string> manifestLines()
     for (auto const& decl: declared)
         if (!decl.setVariables.empty())
             lines.push_back(setLine("command-env-set ", decl.name, decl.setVariables));
+    for (auto const& decl: declared)
+        for (auto const prefix: decl.droppedLines)
+            lines.push_back(concat({ "command-drop-lines ", decl.name, " = ", prefix }));
     for (auto const& decl: PaneTable)
         lines.push_back(
             concat({ "pane ", decl.name, " @", manifestLabel(decl.root), " = ", joined(decl.argv) }));

@@ -67,6 +67,10 @@ struct CommandDecl
     OutputUse output = OutputUse::Read; ///< Whether its output is read at all.
     /// What it may take from the set the call names; empty: no binding.
     std::span<std::string_view const> setVariables = {};
+    /// The prefixes of the lines of its output the host drops as it reads them, before its cap applies
+    /// (`command-drop-lines`): what the guest would skip anyway, so that a long listing of which only a few
+    /// lines matter is never cut. Empty: every line is kept.
+    std::span<std::string_view const> droppedLines = {};
 };
 
 /// A program the extension may put in a tab.

@@ -200,6 +200,7 @@ if(ORCHESTRATOR_TESTING)
         core/Config_test.cpp
         core/Engine_test.cpp
         core/Fixtures.hpp
+        core/HostOutput.hpp
         core/FailureWords_test.cpp
         core/Finished_test.cpp
         core/GitHub_test.cpp

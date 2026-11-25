@@ -485,6 +485,16 @@ TEST_CASE("DeclaredProcesses: timeout classes", "[daemon][processes]")
     CHECK(started.at(0).spec.standardError == vtpty::StreamCapture::Capture);
 }
 
+TEST_CASE("DeclaredProcesses: a command's dropped output lines reach the runner", "[daemon][processes]")
+{
+    auto fixture = Fixture {};
+    REQUIRE(fixture.start("git-index-flags", {}, "/w/contour/pr-1").has_value());
+    REQUIRE(fixture.start("git-status", {}, "/w/contour/pr-1").has_value());
+    auto const& started = fixture.runner.started();
+    CHECK(started.at(0).spec.droppedOutputLines == std::vector<std::string> { "H 10", "H 12" });
+    CHECK(started.at(1).spec.droppedOutputLines.empty());
+}
+
 TEST_CASE("DeclaredProcesses: a root declared create is created before its first command",
           "[daemon][processes]")
 {

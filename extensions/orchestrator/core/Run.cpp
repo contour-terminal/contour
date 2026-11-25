@@ -165,7 +165,16 @@ namespace
         std::string_view name;  ///< In tags and in the store.
         std::string_view label; ///< In a kept run's entry.
         Awaits awaits;
+        /// What the user can do when the step fails, after its reason in the kept run's entry; empty for
+        /// none.
+        std::string_view remedy = {};
     };
+
+    /// What a kept run says to do when the index check gives no answer: its command failed, or its output, of
+    /// which the host already dropped every unmarked entry, was still cut.
+    constexpr auto IndexCheckRemedy =
+        "; git ls-files -v --stage there lists what is marked: remove the worktree by hand once nothing is"sv
+        " marked and no submodule is listed"sv;
 
     constexpr auto EndSteps = std::array {
         EndStepRow { .step = EndStep::ClosePane,
@@ -187,7 +196,8 @@ namespace
         EndStepRow { .step = EndStep::IndexFlags,
                      .name = "index-flags"sv,
                      .label = "the index check"sv,
-                     .awaits = Awaits::Command },
+                     .awaits = Awaits::Command,
+                     .remedy = IndexCheckRemedy },
         EndStepRow { .step = EndStep::Reachable,
                      .name = "reachable"sv,
                      .label = "the reachability check"sv,
@@ -784,8 +794,13 @@ std::vector<RunEffect> advance(Run& run, RunInput const& input, StepContext cons
         [&](Ending const& ending, CommandFailed const& failed) -> Effects {
             if (!awaitsCommand(ending))
                 return {};
-            return keep(
-                run, context, ending, std::format("{} failed: {}", endStep(ending.step).label, failed.why));
+            auto const& step = endStep(ending.step);
+            // The reason is cut, never the remedy after it.
+            auto const failure = std::format("{} failed: {}", step.label, failed.why);
+            return keep(run,
+                        context,
+                        ending,
+                        displayText(failure, MaxEntryChars - step.remedy.size()) + std::string(step.remedy));
         },
         [&](Ending const& ending, CwdMissing const&) -> Effects {
             if (!awaitsCommand(ending))

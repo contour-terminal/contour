@@ -19,6 +19,7 @@
 #include <orchestrator/core/Agents.hpp>
 #include <orchestrator/core/ArgumentKinds.hpp>
 #include <orchestrator/core/Commands.hpp>
+#include <orchestrator/core/HostOutput.hpp>
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Naming.hpp>
 #include <orchestrator/core/Run.hpp>
@@ -56,6 +57,7 @@ using orchestrator::Lost;
 using orchestrator::MarkSeen;
 using orchestrator::MaxHistory;
 using orchestrator::OpenAgentPane;
+using orchestrator::OutputExtent;
 using orchestrator::PaneGone;
 using orchestrator::PaneOpened;
 using orchestrator::PaneOpenFailed;
@@ -1062,7 +1064,10 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
         CommandStep { .step = EndStep::OperationState,
                       .kept = "Finished(completed, kept, new: the operation-state check failed: timed out)" },
         CommandStep { .step = EndStep::IndexFlags,
-                      .kept = "Finished(completed, kept, new: the index check failed: timed out)" },
+                      .kept =
+                          "Finished(completed, kept, new: the index check failed: timed out; git ls-files -v "
+                          "--stage there lists what is marked: remove the worktree by hand once nothing is "
+                          "marked and no submodule is listed)" },
         CommandStep { .step = EndStep::Status,
                       .kept = "Finished(completed, kept, new: git status failed: timed out)" },
         CommandStep { .step = EndStep::CleanStatusBoard,
@@ -1147,6 +1152,64 @@ TEST_CASE("the run's transition table", "[orchestrator][run]")
         CHECK(describe(run.state) == to);
         CHECK(describe(effects) == row.effects);
         CHECK(describe(run.failure) == row.failureAfter);
+    }
+}
+
+TEST_CASE("the index check decides on what the host keeps of a listing of any size", "[orchestrator][run]")
+{
+    using orchestrator::indexListing;
+    using orchestrator::keptByHost;
+
+    // 30000 entries list some 2.4 MB, more than the host keeps of a stream; a repository of 21557 tracked
+    // files was measured at 2.1 MB.
+    constexpr auto Files = std::size_t { 30'000 };
+    constexpr auto Flagged =
+        "h 100644 78981922613b2afb6025042ff6bd878ac1994e85 0\tmodule-1/src/marked.txt\n"sv;
+    auto const manyFlagged = [&] {
+        auto lines = std::string {};
+        for ([[maybe_unused]] auto const _: std::views::iota(std::size_t { 0 }, Files))
+            lines += Flagged;
+        return lines;
+    }();
+    constexpr auto CutKept =
+        "Finished(completed, kept, new: the index check failed: its output was cut at the host's limit; git "
+        "ls-files -v --stage there lists what is marked: remove the worktree by hand once nothing is marked "
+        "and "
+        "no submodule is listed)"sv;
+
+    struct Row
+    {
+        std::string_view name;
+        std::string listing;
+        std::string_view to;
+    };
+    auto const rows = std::vector<Row> {
+        { .name = "a large clean index",
+          .listing = indexListing(Files),
+          .to = "Ending(reachable, completed)" },
+        { .name = "one assume-unchanged entry", .listing = indexListing(Files, Flagged), .to = HiddenKept },
+        { .name = "one skip-worktree entry",
+          .listing =
+              indexListing(Files, "S 100644 78981922613b2afb6025042ff6bd878ac1994e85 0\tmodule-2/a.txt\n"),
+          .to = HiddenKept },
+        { .name = "one gitlink",
+          .listing = indexListing(Files, "H 160000 78981922613b2afb6025042ff6bd878ac1994e85 0\tvendor/sub\n"),
+          .to = SubmoduleKept },
+        // Even the marked entries alone exceed the host's cap: what is kept is no whole answer.
+        { .name = "more marked entries than the host keeps", .listing = manyFlagged, .to = CutKept },
+    };
+    REQUIRE(indexListing(Files).size() > orchestrator::HostStreamCap);
+    for (auto const& row: rows)
+    {
+        CAPTURE(row.name);
+        auto run = makeRun(Item::Pr, endingAt(EndStep::IndexFlags));
+        auto const kept = keptByHost("git-index-flags", row.listing);
+        // The engine hands a cut output on as a failure (Engine.cpp, judge()).
+        auto const input = kept.extent == OutputExtent::Whole
+                               ? RunInput { CommandOk { kept.text } }
+                               : RunInput { CommandFailed { "its output was cut at the host's limit" } };
+        orchestrator::advance(run, input, knownContext());
+        CHECK(describe(run.state) == row.to);
     }
 }
 
