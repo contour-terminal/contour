@@ -8,10 +8,12 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <format>
+#include <future>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -76,6 +78,9 @@ struct WasmtimeTraits
     auto* const config = wasm_config_new();
     wasmtime_config_signals_based_traps_set(config, false);
     wasmtime_config_macos_use_mach_ports_set(config, false);
+    // Compiled on this thread, as the backend's engines compile: Wasmtime's compilation threads
+    // synchronize in Rust no sanitizer sees. What the engine accepts does not depend on it.
+    wasmtime_config_parallel_compilation_set(config, false);
     auto const engine = detail::EngineHandle { wasm_engine_new_with_config(config) };
     REQUIRE(engine);
     auto* module = static_cast<wasmtime_module_t*>(nullptr);
@@ -150,6 +155,39 @@ constexpr auto CountingModule = std::string_view { R"((module
 
 /// What `count` of CountingModule returns.
 constexpr auto CountedTo = uint32_t { 1'000'000 };
+
+/// A host context whose every host function call interrupts its own instance, calls back into it, and
+/// absorbs the failure, as a host function may when it can do without what it asked for.
+class SelfInterruptingHostContext final: public vtextension::wasm::IHostContext
+{
+  public:
+    /// Names the instance: it is created with this context, so the two are wired after both exist.
+    /// @param instance The instance; outlives every call made through this context.
+    void attach(vtextension::wasm::IWasmInstance& instance) noexcept { _instance = &instance; }
+
+    [[nodiscard]] std::expected<void, ExtensionError> callHost(
+        std::size_t /*functionIndex*/, std::span<uint32_t const> /*arguments*/) noexcept override
+    {
+        _instance->interrupt();
+        if (auto const add = _instance->function("add"))
+        {
+            auto argv = std::array<uint32_t, 2> { 2, 3 };
+            _nested = _instance->call(*add, argv);
+        }
+        return {};
+    }
+
+    /// @return What the call back into the instance returned; nothing before it was made.
+    [[nodiscard]] std::optional<std::expected<void, vtextension::wasm::CallFailure>> const& nested()
+        const noexcept
+    {
+        return _nested;
+    }
+
+  private:
+    vtextension::wasm::IWasmInstance* _instance = nullptr;
+    std::optional<std::expected<void, vtextension::wasm::CallFailure>> _nested;
+};
 
 /// A host context whose every host function call interrupts another instance: from inside a running
 /// call, at a known point of it.
@@ -364,11 +402,60 @@ TEST_CASE("Wasmtime.idleInstanceNeverWakes", "[wasmtime]")
     auto context = contract::RecordingHostContext {};
     auto const instance = contract::instantiate(**module, context);
 
+    // Long enough for a ticker, were one moving the epoch, to fire many times over.
+    using namespace std::chrono_literals;
+    constexpr auto RunFor = 100ms;
+    auto const count = contract::functionOf(*instance, "count");
     auto const before = kind.epochCallbacks();
-    auto result = std::array<uint32_t, 1> {};
-    REQUIRE(instance->call(contract::functionOf(*instance, "count"), result).has_value());
-    CHECK(result[0] == CountedTo);
+    auto const started = std::chrono::steady_clock::now();
+    auto calls = 0;
+    auto counted = true;
+    while (std::chrono::steady_clock::now() - started < RunFor)
+    {
+        auto result = std::array<uint32_t, 1> {};
+        counted = counted && instance->call(count, result).has_value() && result[0] == CountedTo;
+        ++calls;
+    }
+    INFO("calls of a million iterations each: " << calls);
+    CHECK(counted);
     CHECK(kind.epochCallbacks() == before);
+}
+
+TEST_CASE("Wasmtime.nestedInterruptStopsTheOuterCall", "[wasmtime]")
+{
+    // An interrupt landing during a host function call stops the guest that made it, even when the host
+    // function calls back in, finds that call interrupted, absorbs the failure and returns into a guest
+    // that would spin forever. A regression would hang: the call runs on a thread of its own, and is
+    // released by a second interrupt if it does not end in time.
+    using namespace std::chrono_literals;
+    namespace contract = vtextension::wasm::testing::contract;
+    using vtextension::wasm::CallFailure;
+    auto const backend = WasmtimeTraits::make();
+    auto const runtime = contract::createRuntime(*backend);
+    auto const guard = contract::enterThread(*backend);
+    auto const module = runtime->load(assemble(R"((module
+  (import "contract:test/host@0" "ping" (func $ping (param i32)))
+  (func (export "add") (param i32 i32) (result i32) (i32.add (local.get 0) (local.get 1)))
+  (func (export "ping-then-spin") (call $ping (i32.const 0)) (loop (br 0))))
+)"));
+    REQUIRE(module.has_value());
+    auto context = SelfInterruptingHostContext {};
+    auto const instance = contract::instantiate(**module, context);
+    context.attach(*instance);
+    auto const pingThenSpin = contract::functionOf(*instance, "ping-then-spin");
+
+    auto called = std::async(std::launch::async, [&] {
+        auto const callGuard = backend->enterThread();
+        return instance->call(pingThenSpin, {});
+    });
+    auto const ended = called.wait_for(5s) == std::future_status::ready;
+    if (!ended)
+        instance->interrupt();
+    auto const result = called.get();
+    CHECK(ended);
+    CHECK(context.nested() == std::expected<void, CallFailure> { std::unexpected(CallFailure::Interrupted) });
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error() == CallFailure::Interrupted);
 }
 
 TEST_CASE("Wasmtime.interruptLeavesSiblingsRunning", "[wasmtime]")

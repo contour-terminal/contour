@@ -81,6 +81,17 @@ namespace
     /// epoch reached. The epoch is the engine's, shared by every instance of the runtime, so reaching
     /// the deadline says only that some instance was interrupted: this one's own flag decides.
     /// Called from Wasmtime's Rust code, which an exception must not unwind through: noexcept.
+    ///
+    /// A known window, accepted: when this callback finds the flag not set and returns, Wasmtime sets the
+    /// new deadline one tick past the epoch *as it reads it then*, after the flag was read. An interrupt()
+    /// of this instance landing between the flag read and that re-read moves the epoch the new deadline is
+    /// then counted from, so the guest is not woken again: the interrupt is lost until another one moves
+    /// the epoch. It cannot be closed from here: the callback only hands back a delta relative to an epoch
+    /// Wasmtime reads after it returns, and neither it nor wasmtime_context_set_epoch_deadline sets an
+    /// absolute deadline or compares the epoch it counts from. It takes two instances sharing an engine
+    /// (another's interrupt woke this guest) and an interrupt landing within a few instructions. The
+    /// in-process Wasmtime backend serves tests; in production the guest runs in a helper process, and the
+    /// supervisor's grace timer kills a helper whose interrupted call does not return.
     /// @param env The instance's StoreData.
     /// @return An error ending the call if the instance was interrupted; otherwise null, with the deadline
     ///         moved one tick past the current epoch.
@@ -169,7 +180,7 @@ namespace
             std::atomic_thread_fence(std::memory_order_acquire);
             // The interrupt is sticky: once requested, no call enters the guest again.
             if (_data->interrupt.load(std::memory_order_relaxed) == InterruptState::Interrupted)
-                return std::unexpected(CallFailure::Interrupted);
+                return interrupted(context);
 
             // A host function may call back into the instance (to allocate in guest memory): what the
             // outermost call records is kept until it returns.
@@ -204,6 +215,8 @@ namespace
             // it decides what becomes of it, and the call it is nested in must not report it again.
             if (_callDepth > 0)
                 _data->hostFailure = std::nullopt;
+            if (failed == CallFailure::Interrupted)
+                return interrupted(context);
             if (failed)
                 return std::unexpected(*failed);
 
@@ -231,7 +244,9 @@ namespace
 
         /// Wait-free, from any thread, before, during or after a call: stores the flag, then moves the
         /// engine's epoch past the deadline of every guest of the runtime running now. Each of them wakes
-        /// once (onEpochDeadline); only this instance's stops.
+        /// once (onEpochDeadline); only this instance's stops. One landing just as this instance's guest
+        /// was woken by another instance's interrupt can be missed (the window documented at
+        /// onEpochDeadline); the helper process's supervisor kills a call that then never returns.
         void interrupt() noexcept override
         {
             _data->interrupt.store(InterruptState::Interrupted, std::memory_order_relaxed);
@@ -241,6 +256,19 @@ namespace
         }
 
       private:
+        /// Ends a call as interrupted. A nested call also makes the deadline of the call it is nested in
+        /// due at once: the store has one deadline, which this call set one tick past an epoch the
+        /// interrupt may already have moved, and the host function may absorb this failure and return
+        /// into a guest that would then run on.
+        /// @param context The context the call runs in.
+        /// @return The failure `Interrupted`.
+        [[nodiscard]] std::unexpected<CallFailure> interrupted(wasmtime_context_t* context) const noexcept
+        {
+            if (_callDepth > 0)
+                wasmtime_context_set_epoch_deadline(context, 0);
+            return std::unexpected(CallFailure::Interrupted);
+        }
+
         /// @return The context the store is reached through: the caller's while a host function call runs,
         ///         the store's own otherwise.
         [[nodiscard]] wasmtime_context_t* storeContext() const noexcept
