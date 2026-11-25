@@ -113,9 +113,10 @@ std::vector<std::pair<std::string, std::string>> helperEnvironment()
     return environment;
 }
 
-HelperComposition::HelperComposition(std::chrono::milliseconds teardownGrace):
+HelperComposition::HelperComposition(std::chrono::milliseconds teardownGrace, ArgumentRewrite laterArguments):
     _teardownGrace { teardownGrace },
-    _recording { std::make_shared<RecordingLauncher>(makeSystemProcessLauncher()) },
+    _recording { std::make_shared<RecordingLauncher>(makeSystemProcessLauncher(),
+                                                     std::move(laterArguments)) },
     _supervisor { [this] {
         logErrorsToOriginalStandardError();
         auto started = ExtensionHostSupervisor::start(SupervisorConfig {

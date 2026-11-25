@@ -47,7 +47,10 @@ class HelperComposition
   public:
     /// Starts the supervisor; aborts the test run if it cannot start.
     /// @param teardownGrace How long a helper let go may take to exit on its own before it is killed.
-    explicit HelperComposition(std::chrono::milliseconds teardownGrace = HelperTeardownGrace);
+    /// @param laterArguments Applied to the command line of every helper started after the first (as
+    ///        RecordingLauncher applies it); none to start every one alike.
+    explicit HelperComposition(std::chrono::milliseconds teardownGrace = HelperTeardownGrace,
+                               ArgumentRewrite laterArguments = {});
 
     /// Destroys the supervisor, as a hosting process that quits does: it kills every helper, reaps within its
     /// budget, and joins. Afterwards only recording() and kind() may be used.
