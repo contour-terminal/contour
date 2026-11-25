@@ -497,7 +497,7 @@ namespace
                 interaction.work.focus = WorkFocus::Filter;
                 return {};
             } },
-        // esc clears the filter, and gives the list the keys.
+        // esc in the list clears the filter (the filter's own esc keeps it), and gives the list the keys.
         WorkHandlerRow {
             .command = KeyCommand::Back,
             .handler = [](Interaction& interaction, WorkContext const&) -> std::vector<UiAction> {
@@ -770,16 +770,20 @@ std::vector<UiAction> applyWorkKey(core::tui::KeyEvent const& key,
                                    std::size_t pageRows)
 {
     auto& work = interaction.work;
-    auto const typing = work.filtering == Filtering::Typing;
-    if (typeIntoFilter(key, work.filtering, work.filter) == FilterInput::Taken)
+    if (work.filtering == Filtering::Typing)
     {
-        if (work.filtering == Filtering::Off)
-            work.focus = WorkFocus::List;
-        return {};
+        auto const& keys = keysInForce(engine);
+        if (typeIntoFilter(key, typedNavOf(key, nav, keys), work.filtering, work.filter)
+            == FilterInput::Taken)
+        {
+            // Left, the filter is kept; the list has the keys, and its esc clears it.
+            if (work.filtering == Filtering::Off)
+                work.focus = WorkFocus::List;
+            return {};
+        }
+        // A key the filter passed on acts as it would with nothing typed: ↓ still moves the selection.
+        nav = passedKeyAction(key, keys);
     }
-    // A key the filter passed on acts as it would with nothing typed: ↓ still moves the selection.
-    if (typing)
-        nav = passedKeyAction(key, keysInForce(engine));
     auto const listCommand = nav ? listCommandOf(*nav, View::Work) : std::nullopt;
     auto const command = listCommand ? listCommand : workCommandFor(key);
     return command ? applyWorkCommand(*command, interaction, lines, items, engine, pageRows)

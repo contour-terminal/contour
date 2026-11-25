@@ -899,10 +899,13 @@ namespace
         return name == "tab" || std::ranges::contains(messagePassKeys(), name, &MessagePassKey::name);
     }
 
-    /// Types @p key into the message box, while it has the keys.
+    /// Types @p key into the message box, while it has the keys. `leave_field` (@p nav) returns to the Fleet
+    /// with the draft kept; Alt+Enter adds a line.
+    /// @param nav What @p key resolved to in NavContext::Typing, Alt applied (typedNavOf()).
     /// @return Nothing when it does not have them, or the box passes the key on (passesMessageKey()), so that
     ///         the Focus decides; else what the key asks: the message to send, or nothing.
     [[nodiscard]] std::optional<std::optional<UiAction>> typeIntoMessage(core::tui::KeyEvent const& key,
+                                                                         std::optional<NavAction> nav,
                                                                          Interaction& interaction,
                                                                          KeyContext const& context)
     {
@@ -924,12 +927,10 @@ namespace
                 interaction.drafts.erase(run);
             return std::optional<UiAction> {};
         }
-        auto const alt = core::tui::hasModifier(key.modifiers, core::tui::Modifier::Alt);
-        // Alt+Enter adds a line. Any other key with Alt is how an Esc reads when the next key follows it in
-        // the same read: back to the Fleet, the draft kept.
-        if (alt && key.key == core::tui::KeyCode::Enter)
+        // Alt+Enter adds a line. Any other key with Alt does what esc does (typedNavOf()), and types nothing.
+        if (hasAlt(key) && key.key == core::tui::KeyCode::Enter)
             draft += '\n';
-        else if (alt || key.key == core::tui::KeyCode::Escape)
+        else if (nav == NavAction::LeaveField)
             backToFleet(interaction);
         else if (key.key == core::tui::KeyCode::Enter && !draft.empty())
         {
@@ -952,7 +953,10 @@ namespace
     }
 } // namespace
 
-FilterInput typeIntoFilter(core::tui::KeyEvent const& key, Filtering& filtering, std::string& filter)
+FilterInput typeIntoFilter(core::tui::KeyEvent const& key,
+                           std::optional<NavAction> nav,
+                           Filtering& filtering,
+                           std::string& filter)
 {
     if (filtering != Filtering::Typing)
         return FilterInput::NotTaken;
@@ -961,16 +965,16 @@ FilterInput typeIntoFilter(core::tui::KeyEvent const& key, Filtering& filtering,
         applyTextEdit(filter, *edit);
         return FilterInput::Taken;
     }
-    switch (key.key)
+    // leave_field and ⏎ stop typing and keep the filter; the list's esc then clears it.
+    if (nav == NavAction::LeaveField || key.key == core::tui::KeyCode::Enter)
     {
-        case core::tui::KeyCode::Escape:
-            filter.clear();
-            filtering = Filtering::Off;
-            return FilterInput::Taken;
-        case core::tui::KeyCode::Enter: filtering = Filtering::Off; return FilterInput::Taken;
-        case core::tui::KeyCode::Delete: return FilterInput::Taken; // Typing, never a run command.
-        default: break;
+        filtering = Filtering::Off;
+        return FilterInput::Taken;
     }
+    // An esc that is no leave_field, a key with Alt (typedNavOf() resolved it) and Del are typing: never a
+    // list command.
+    if (key.key == core::tui::KeyCode::Escape || key.key == core::tui::KeyCode::Delete || hasAlt(key))
+        return FilterInput::Taken;
     auto const printable = printableOf(key);
     if (!printable)
         return FilterInput::NotTaken;
@@ -978,10 +982,12 @@ FilterInput typeIntoFilter(core::tui::KeyEvent const& key, Filtering& filtering,
     return FilterInput::Taken;
 }
 
-FilterInput typeIntoFilter(core::tui::KeyEvent const& key, Interaction& interaction)
+FilterInput typeIntoFilter(core::tui::KeyEvent const& key,
+                           std::optional<NavAction> nav,
+                           Interaction& interaction)
 {
     auto const before = interaction.filter.size();
-    auto const taken = typeIntoFilter(key, interaction.filtering, interaction.filter);
+    auto const taken = typeIntoFilter(key, nav, interaction.filtering, interaction.filter);
     // A character typed starts the selection over at the top; an edit keeps it.
     if (interaction.filter.size() > before)
         interaction.selected = 0;
@@ -1006,14 +1012,18 @@ std::optional<UiAction> applyKey(core::tui::KeyEvent const& key,
         return command == KeyCommand::Palette ? dispatch(*command, interaction, context) : std::nullopt;
     }
     auto const fieldContext = navContextOf(interaction, context);
-    if (auto typed = typeIntoMessage(key, interaction, context))
-        return std::move(*typed);
-    if (typeIntoFilter(key, interaction) == FilterInput::Taken)
-        return std::nullopt;
-    // A key the message box or the filter passed on acts as it would with nothing typed: ← still turns the
-    // transcript's pages, ↓ still moves the selection.
     if (fieldContext == NavContext::Typing)
-        nav = passedKeyAction(key, keysInForce(context.engine));
+    {
+        auto const& keys = keysInForce(context.engine);
+        auto const typedNav = typedNavOf(key, nav, keys);
+        if (auto typed = typeIntoMessage(key, typedNav, interaction, context))
+            return std::move(*typed);
+        if (typeIntoFilter(key, typedNav, interaction) == FilterInput::Taken)
+            return std::nullopt;
+        // A key the message box or the filter passed on acts as it would with nothing typed: ← still turns
+        // the transcript's pages, ↓ still moves the selection.
+        nav = passedKeyAction(key, keys);
+    }
     auto const listCommand = nav ? listCommandOf(*nav, View::Agents) : std::nullopt;
     auto const command = listCommand ? listCommand : commandFor(key);
     if (!interaction.pendingEnd.empty() && command != KeyCommand::EndRun)

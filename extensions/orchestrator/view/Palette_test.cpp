@@ -227,3 +227,89 @@ TEST_CASE("the timeline opens from the palette, and esc closes it", "[orchestrat
     CHECK(fixture.dashboard.interaction().overlay == Overlay::None);
     CHECK_FALSE(fixture.screen().contains("Last 24 hours"));
 }
+
+TEST_CASE("in the palette every letter types into the query, the vim keys too",
+          "[orchestrator][view][palette]")
+{
+    auto const live = LiveRun {};
+    auto interaction = Interaction { .palette = PaletteState {} };
+    for (auto const c: U"jkhlqgGi")
+        if (c != U'\0')
+            CHECK(applyResolvedKey(character(c), interaction, live.context()) == std::nullopt);
+    REQUIRE(interaction.palette.has_value());
+    CHECK(interaction.palette->query == "jkhlqgGi");
+    CHECK(interaction.pendingKey.empty());
+}
+
+TEST_CASE("j typed into the palette's query filters it and highlights the first match",
+          "[orchestrator][view][palette]")
+{
+    auto const live = LiveRun {};
+    auto interaction = Interaction { .palette = PaletteState { .query = "re", .highlighted = 1 } };
+    CHECK(applyResolvedKey(character(U'j'), interaction, live.context()) == std::nullopt);
+    REQUIRE(interaction.palette.has_value());
+    CHECK(interaction.palette == PaletteState { .query = "rej", .highlighted = 0 });
+    auto const entries = paletteEntries(&live.row, &live.engine);
+    CHECK(paletteMatches(entries, interaction.palette->query).size() < paletteMatches(entries, "re").size());
+}
+
+TEST_CASE("the palette's query takes the line-editing keys", "[orchestrator][view][palette]")
+{
+    auto const live = LiveRun {};
+    auto interaction = Interaction { .palette = PaletteState { .query = "end the run" } };
+    CHECK(applyResolvedKey(
+              KeyEvent { .key = KeyCode::Backspace, .modifiers = Modifier::Alt }, interaction, live.context())
+          == std::nullopt);
+    REQUIRE(interaction.palette.has_value());
+    CHECK(interaction.palette->query == "end the ");
+    CHECK(applyResolvedKey(character(U'w', Modifier::Ctrl), interaction, live.context()) == std::nullopt);
+    REQUIRE(interaction.palette.has_value());
+    CHECK(interaction.palette->query == "end ");
+    CHECK(applyResolvedKey(character(U'u', Modifier::Ctrl), interaction, live.context()) == std::nullopt);
+    REQUIRE(interaction.palette.has_value());
+    CHECK(interaction.palette->query.empty());
+}
+
+TEST_CASE("Ctrl+N and Ctrl+P choose the palette's entry as down and up do, wrapping",
+          "[orchestrator][view][palette]")
+{
+    auto fixture = DashboardFixture { World {} };
+    CHECK(fixture.dashboard.input("\x0b").empty());
+    auto const& palette = fixture.dashboard.interaction().palette;
+    REQUIRE(palette.has_value());
+    CHECK(palette->highlighted == 0);
+    CHECK(fixture.dashboard.input("\x1b[B").empty());
+    CHECK(palette->highlighted == 1);
+    CHECK(fixture.dashboard.input("\x0e").empty());
+    CHECK(palette->highlighted == 2);
+    CHECK(fixture.dashboard.input("\x10").empty());
+    CHECK(palette->highlighted == 1);
+    CHECK(fixture.dashboard.input("\x1b[A").empty());
+    CHECK(palette->highlighted == 0);
+    // Up from the first entry wraps to the last, and Ctrl+N from it back to the first.
+    CHECK(fixture.dashboard.input("\x1b[A").empty());
+    CHECK(palette->highlighted > 2);
+    CHECK(fixture.dashboard.input("\x0e").empty());
+    CHECK(palette->highlighted == 0);
+    CHECK(palette->query.empty());
+
+    // j after Ctrl+N types into the query and highlights the first match.
+    CHECK(fixture.dashboard.input("\x0e").empty());
+    CHECK(palette->highlighted == 1);
+    CHECK(fixture.dashboard.input("j").empty());
+    REQUIRE(palette.has_value());
+    CHECK(palette->query == "j");
+    CHECK(palette->highlighted == 0);
+}
+
+TEST_CASE("one esc closes the palette from a typed query, keeping the query", "[orchestrator][view][palette]")
+{
+    auto fixture = DashboardFixture { World {} };
+    CHECK(fixture.dashboard.input("\x0bre").empty());
+    REQUIRE(fixture.dashboard.interaction().palette.has_value());
+    CHECK(fixture.dashboard.interaction().palette->query == "re");
+    CHECK(fixture.dashboard.input("\x1b").empty());
+    static_cast<void>(fixture.escapeTimesOut());
+    CHECK_FALSE(fixture.dashboard.interaction().palette.has_value());
+    CHECK(fixture.dashboard.interaction().paletteQuery == "re");
+}

@@ -2023,7 +2023,7 @@ TEST_CASE("a held ESC is the Escape key once the wake it asked for comes", "[gue
     served.driver->update(Hint::Wake);
 
     CHECK(served.dashboard().interaction().filtering == view::Filtering::Off);
-    CHECK(served.dashboard().interaction().filter.empty());
+    CHECK(served.dashboard().interaction().filter == "x");
 }
 
 TEST_CASE("a restarted guest redraws every open tab", "[guest]")

@@ -116,6 +116,25 @@ std::optional<KeyCommand> highlightedCommand(PaletteState const& palette, KeyCon
     return entries[matches[palette.highlighted].entry].command;
 }
 
+void movePaletteHighlight(PaletteState& palette, KeyContext const& context, NavAction move)
+{
+    if (move != NavAction::MoveUp && move != NavAction::MoveDown)
+        return;
+    auto const count = paletteMatches(paletteEntries(context.selected, context.engine), palette.query).size();
+    if (count == 0)
+        return;
+    palette.highlighted = move == NavAction::MoveUp ? (palette.highlighted + count - 1) % count
+                                                    : (palette.highlighted + 1) % count;
+}
+
+void closePalette(Interaction& interaction)
+{
+    if (!interaction.palette)
+        return;
+    interaction.paletteQuery = std::move(interaction.palette->query);
+    interaction.palette.reset();
+}
+
 std::optional<UiAction> applyPaletteKey(core::tui::KeyEvent const& key,
                                         Interaction& interaction,
                                         KeyContext const& context)
@@ -133,23 +152,24 @@ std::optional<UiAction> applyPaletteKey(core::tui::KeyEvent const& key,
     // follows it in the same read.
     if (key.key == KeyCode::Escape || core::tui::hasModifier(key.modifiers, Modifier::Alt))
     {
-        interaction.paletteQuery = std::move(palette.query);
-        interaction.palette.reset();
+        closePalette(interaction);
         return std::nullopt;
     }
+    // Ctrl+N and Ctrl+P choose as ↓ and ↑ do; no other chord types. (Ctrl+J is LF, which reads as ⏎.)
     if (core::tui::hasModifier(key.modifiers, Modifier::Ctrl))
+    {
+        if (isCtrl(key, U'n') || isCtrl(key, U'p'))
+            movePaletteHighlight(
+                palette, context, isCtrl(key, U'n') ? NavAction::MoveDown : NavAction::MoveUp);
         return std::nullopt;
+    }
     switch (key.key)
     {
         case KeyCode::Up:
-        case KeyCode::Down: {
-            auto const count =
-                paletteMatches(paletteEntries(context.selected, context.engine), palette.query).size();
-            if (count != 0)
-                palette.highlighted = key.key == KeyCode::Up ? (palette.highlighted + count - 1) % count
-                                                             : (palette.highlighted + 1) % count;
+        case KeyCode::Down:
+            movePaletteHighlight(
+                palette, context, key.key == KeyCode::Up ? NavAction::MoveUp : NavAction::MoveDown);
             return std::nullopt;
-        }
         case KeyCode::Enter: {
             auto const command = highlightedCommand(palette, context);
             if (!command)

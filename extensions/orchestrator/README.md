@@ -126,7 +126,7 @@ has the keys: every printable key types, digits too, so no letter is ever both a
 | `←` `→` `h` `l` | turn the transcript's pages; on the Board or Details, or past the transcript's first or last page, show the tab beside |
 | `n` | start a custom task: the `n` box (below) |
 | `w` | show the Work view |
-| `/` | filter the runs by text, Finished's folded ones too; Enter keeps the filter, Esc drops it |
+| `/` | filter the runs by text, Finished's folded ones too; `Enter` or `Esc` stops typing and keeps the filter, and `/` types it again |
 | `Ctrl+K` `?` | open the command palette: every action, and the commands that have no key |
 | `e` | end the selected run; asks once (`e again to end · esc keeps it`) |
 | `r` | show the selected agent's tab |
@@ -135,7 +135,7 @@ has the keys: every printable key types, digits too, so no letter is ever both a
 | `Del` | drop a finished run from the list |
 | `z` | fold the selected run's group, or unfold a folded one |
 | `1` `2` `3` | answer the selected agent that asks, with that quick reply (below) |
-| `Esc` | drop the filter |
+| `Esc` | drop the filter (after the `Esc` that stopped typing it) |
 
 A run key acts only where it applies to the selected row; elsewhere the action bar says why (`del dismiss ·
 not while it is working`) and nothing happens.
@@ -148,7 +148,7 @@ not while it is working`) and nothing happens.
 | `Alt+Enter` | add a line; a paste keeps its line feeds |
 | `PgUp` `PgDn` `End` | scroll the tab; `End` back to live |
 | `←` `→` | as in the Fleet: pages, then the tab beside |
-| `Esc` `Tab` | back to the Fleet, keeping the draft (drafts are kept per run, in memory) |
+| `Esc` `Tab` | back to the Fleet, keeping the draft (drafts are kept per run, in memory); every letter, `j` `k` `q` included, types |
 | `Ctrl+K` | open the command palette |
 
 In the Focus of a run without a message box — one finished, preparing or ending, or a leftover worktree — the
@@ -178,9 +178,10 @@ send · alt⏎ line · esc keep draft`.
 `Ctrl+K` or `?` opens the command palette over the dashboard. It lists the selected row's actions first, then
 the commands for the whole dashboard — new task, filter the agents, refresh the lists, install the missing
 plugins, show the last 24 hours, switch view, fold the other groups (the Work view's) — then every other action, dimmed, with the reason it does not apply now
-(`end · no run selected`); an asking run's quick replies are listed by their labels. Each shows its key, or `palette only`. Typing filters it fuzzily (`l24` finds "show
-the last 24 hours"), the matched letters underlined; `↑` `↓` choose; `Enter` runs the command exactly as its
-key would; `Esc` closes it and keeps what you typed for the next time. Refreshing the lists and installing the
+(`end · no run selected`); an asking run's quick replies are listed by their labels. Each shows its key, or `palette only`. The palette always types
+its query: every letter, `j` and `k` included, filters it fuzzily (`l24` finds "show the last 24 hours"), the
+matched letters underlined; `↑` `↓` or `Ctrl+N` `Ctrl+P` choose; `Enter` runs the command exactly as its key
+would; `Esc` closes it at once and keeps what you typed for the next time. Refreshing the lists and installing the
 plugins have no key: they are the palette's. "Show the last 24 hours" opens a popup that charts, an hour a bar,
 the agents active, the tokens they wrote and the runs started and ended; `Esc` or `q` closes it.
 
@@ -272,8 +273,8 @@ unless `work.fold_empty` is `false`: then every group shows its heading, an empt
 | `Ctrl+D` `Ctrl+U` | move the selection by half the lines shown |
 | `Enter` | on a row, open the start dialog (below); on a group's heading, fold or unfold it |
 | `z` | fold or unfold the selected line's group |
-| `/` | filter: what you type matches a merge request's number (`!812`, `#2375`, `2375`), a ticket's key, a title, a repository or a URL, case-insensitively; `Enter` keeps the filter, `Esc` clears it |
-| `Esc` | clear the filter |
+| `/` | filter: what you type matches a merge request's number (`!812`, `#2375`, `2375`), a ticket's key, a title, a repository or a URL, case-insensitively; `Enter` or `Esc` stops typing and keeps the filter, and `/` types it again |
+| `Esc` | clear the filter (after the `Esc` that stopped typing it) |
 | `s` | sort by importance (in groups) or by last update (one flat list) |
 | `←` `→` `h` `l` | step the chip with the keys: on the sort chip, switch the sort; anywhere else, step the repository chip |
 | `o` | open the selected merge request, or a ticket row's ticket, on your machine (see "Links" above) |
@@ -287,7 +288,8 @@ The action bar lists the keys that apply to the selected line (`⏎ start · n n
 / filter · s sort · → repository · w agents · ^k all actions`, as many as fit), and a click on one runs it.
 
 **The row menu** (`m`, or a right-click on a row) offers *Start agent…*, *Open MR*, *Open ticket* and *Fold
-group*; an entry that does not apply to the row is dimmed. `↑` `↓` choose, `Enter` runs one, `Esc` closes it. It
+group*; an entry that does not apply to the row is dimmed. `↑` `↓` `j` `k` choose, `Home` `End` `gg` `G` go to the
+first or last, `Enter` runs one, `Esc` or `q` closes it. It
 offers no "copy branch name": a served tab drops OSC 52, so no copy would reach your clipboard.
 
 **The mouse** in the Work view:
@@ -434,17 +436,17 @@ defaults, plain then vim (the action bar names an action by its first key):
 
 | Action | Defaults | What it does |
 | --- | --- | --- |
-| `move_up` | `up` `k` | the row or line above; in the Focus, scroll up a line; a dialog's setting above |
-| `move_down` | `down` `j` | the row or line below; in the Focus, scroll down a line; a dialog's setting below |
-| `first` | `home` `gg` | the first row or line; the Focus's top; a dialog's first setting |
-| `last` | `end` `G` | the last row or line; the Focus's end, live; a dialog's last setting |
+| `move_up` | `up` `k` | the row or line above; in the Focus, scroll up a line; a dialog's setting above; the row menu's entry above |
+| `move_down` | `down` `j` | the row or line below; in the Focus, scroll down a line; a dialog's setting below; the row menu's entry below |
+| `first` | `home` `gg` | the first row or line; the Focus's top; a dialog's first setting; the row menu's first entry |
+| `last` | `end` `G` | the last row or line; the Focus's end, live; a dialog's last setting; the row menu's last entry |
 | `half_page_up` | `^u` | half the rows shown up; in the Focus, scroll half the tab |
 | `half_page_down` | `^d` | half the rows shown down; in the Focus, scroll half the tab |
 | `previous_value` | `left` `h` | the transcript's previous page; the Work view's chip back; a dialog's setting back |
 | `next_value` | `right` `l` | the transcript's next page; the Work view's chip on; a dialog's setting on |
-| `leave_field` | `esc` | stop typing a text field (acts only while one is typed); the `n` box goes to Repo |
+| `leave_field` | `esc` | stop typing a text field (acts only while one is typed): a filter keeps its text, the message box returns to the Fleet with the draft kept, the `n` box goes to Repo |
 | `enter_field` | `enter` `i` | type a dialog's text field (`⏎` types only on the field's line, and stays a list row's own key) |
-| `close` | `esc` `q` | close what is open, such as the last 24 hours; `Esc` still closes that popup when `close` is rebound |
+| `close` | `esc` `q` | close what is open, such as the last 24 hours or the row menu; `Esc` still closes those when `close` is rebound |
 
 A key is a printable character, `^` and a letter for Ctrl (not `^h`, `^i`, `^j` or `^m`, which terminals send as
 Backspace, Tab, LF and CR), two characters such as `gg`, or one of `up down left right home end pgup pgdn enter
@@ -457,10 +459,12 @@ problem line names the other holder:
 
 A task's `key` is not a navigation key's concern: it starts nothing from a list, so a task keyed `G`, `q` or `l`
 still loads, and the navigation key wins in the lists and in the start dialog, where a task's key picks no task.
-For now the keys take effect in the Fleet, the Focus, the Work list, the last 24 hours, the start dialog and the
-`n` box; the row menu, the palette, the filters and the message box still take their own keys. While the dialog's
-note or the box's text is typed, a letter or a chord never acts as navigation; the plain special keys (`↑` `↓`
-`Home` `End`) still move between the settings.
+The keys take effect in the Fleet, the Focus, the Work list, the row menu, the last 24 hours, the start dialog
+and the `n` box, and `leave_field` in the filters and the message box. The palette consults none of them: it
+always types its query, and only `↑` `↓` `Ctrl+N` `Ctrl+P` choose there. While a text field is typed, a letter or
+a chord never acts as navigation; the plain special keys (`↑` `↓` `Home` `End`) still move between the settings
+and the rows. A key with `Alt` is how `Esc` reads when the next key follows it at once, so while a field is typed
+it does what `Esc` does there, and with `Esc` rebound away from `leave_field` it does nothing.
 
 **GitLab.** `glab mr list` carries no pipeline and no approvals, so per GitLab repository and poll the orchestrator
 also asks for the project's newest pipelines and its failed jobs, two REST calls through `glab api`:

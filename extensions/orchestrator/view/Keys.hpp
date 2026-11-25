@@ -309,7 +309,7 @@ struct PaletteState
 enum class Filtering : uint8_t
 {
     Off,    ///< Keys act by the key table.
-    Typing, ///< Printable keys extend the filter; Backspace shortens it; Enter keeps it; Esc drops it.
+    Typing, ///< Printable keys extend the filter; Backspace shortens it; Enter and Esc keep it.
 };
 
 /// Whether the transcript follows the agent.
@@ -538,19 +538,28 @@ enum class FilterInput : uint8_t
     Taken,    ///< The key edited the filter, kept it or dropped it.
 };
 
-/// Applies a key to the filter while it is being typed.
+/// Applies a key to the filter while it is being typed (typeIntoFilter() below); a character typed starts the
+/// selection over at the top.
 /// @param key A key the terminal sent.
+/// @param nav What @p key resolved to in NavContext::Typing, Alt applied (typedNavOf()); std::nullopt:
+/// nothing.
 /// @param interaction Where the user is; its filter changed.
 /// @return Whether the key was taken.
-[[nodiscard]] FilterInput typeIntoFilter(core::tui::KeyEvent const& key, Interaction& interaction);
+[[nodiscard]] FilterInput typeIntoFilter(core::tui::KeyEvent const& key,
+                                         std::optional<NavAction> nav,
+                                         Interaction& interaction);
 
-/// Applies a key to a filter while it is being typed: line edits edit it, printable keys extend it, Enter
-/// keeps it, Esc drops it; either ends the typing.
+/// Applies a key to a filter while it is being typed: line edits edit it, printable keys extend it; `⏎` and
+/// `leave_field` (@p nav) end the typing and keep it (Decision 10), and a second `esc`, the list's `Back`,
+/// clears it. Any other `esc` or key with Alt is taken and does nothing.
 /// @param key A key the terminal sent.
-/// @param filtering Whether the filter is being typed; set Off by Enter and Esc.
+/// @param nav What @p key resolved to in NavContext::Typing, Alt applied (typedNavOf()); std::nullopt:
+/// nothing.
+/// @param filtering Whether the filter is being typed; set Off by `⏎` and `leave_field`.
 /// @param filter The filter.
 /// @return Whether the key was taken.
 [[nodiscard]] FilterInput typeIntoFilter(core::tui::KeyEvent const& key,
+                                         std::optional<NavAction> nav,
                                          Filtering& filtering,
                                          std::string& filter);
 

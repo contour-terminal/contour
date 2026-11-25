@@ -212,6 +212,11 @@ TEST_CASE("Work view: the filter, the repository chip and Esc", "[orchestrator][
     auto const& work = fixture.dashboard.interaction().work;
     CHECK(work.filter == "2375");
     CHECK(BoardLines { fixture.engine, work }.names() == std::vector<std::string> { "Needs you", "#2375" });
+    // The first esc stops typing and keeps the filter; the second clears it.
+    CHECK(fixture.dashboard.input("\x1b").empty());
+    static_cast<void>(fixture.escapeTimesOut());
+    CHECK(work.filter == "2375");
+    CHECK(work.filtering == Filtering::Off);
     CHECK(fixture.dashboard.input("\x1b").empty());
     static_cast<void>(fixture.escapeTimesOut());
     CHECK(work.filter.empty());
@@ -539,4 +544,30 @@ TEST_CASE("Work view: while the filter is typed, Ctrl+D moves nothing and the ar
     CHECK(fixture.dashboard.input("\x1b[B").empty());
     CHECK(work.selected == selected + 1);
     CHECK(work.filtering == Filtering::Typing);
+}
+
+TEST_CASE("Work view: the filter's esc keeps it and a second esc clears it; / types it again",
+          "[orchestrator][view][work][workboard]")
+{
+    auto fixture = DashboardFixture { workWorld(), Wide };
+    CHECK(fixture.dashboard.input("w/jkq").empty());
+    auto const& work = fixture.dashboard.interaction().work;
+    CHECK(work.filter == "jkq");
+    CHECK(work.filtering == Filtering::Typing);
+    CHECK(fixture.dashboard.input("\x1b").empty());
+    static_cast<void>(fixture.escapeTimesOut());
+    CHECK(work.filter == "jkq");
+    CHECK(work.filtering == Filtering::Off);
+    CHECK(work.focus == WorkFocus::List);
+    CHECK(fixture.screen().contains("/ jkq"));
+    // `/` types it again with its text kept.
+    CHECK(fixture.dashboard.input("/x").empty());
+    CHECK(work.filter == "jkqx");
+    CHECK(work.filtering == Filtering::Typing);
+    CHECK(fixture.dashboard.input("\x1b").empty());
+    static_cast<void>(fixture.escapeTimesOut());
+    CHECK(fixture.dashboard.input("\x1b").empty());
+    static_cast<void>(fixture.escapeTimesOut());
+    CHECK(work.filter.empty());
+    CHECK(work.filtering == Filtering::Off);
 }

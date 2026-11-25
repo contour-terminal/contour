@@ -17,6 +17,7 @@
 #include <string_view>
 #include <vector>
 
+#include <orchestrator/core/NavKeys.hpp>
 #include <orchestrator/core/WorkItems.hpp>
 #include <orchestrator/view/HitMap.hpp>
 
@@ -66,13 +67,17 @@ struct RowMenuState
 /// @return The item of that key; nullptr when none is listed (any more).
 [[nodiscard]] WorkItem const* workItemOf(std::span<WorkItem const> items, std::string_view key) noexcept;
 
-/// Applies one key to the open menu: ↑/↓ move the highlight, Esc closes it, ⏎ chooses the highlighted entry
-/// where it applies to the item (and closes the menu); every other key is taken and does nothing.
-/// @param key A key the terminal sent.
-/// @param menu The open menu; closed (reset) by Esc, by a choice, or when @p item is gone.
+/// Applies one key to the open menu, which is always navigating: `move_up`/`move_down` (↑/↓, k/j) move the
+/// highlight, stopping at the ends; `first`/`last` (Home/End, gg/G) go to them; `close` (esc, q) and Esc
+/// close it; ⏎ chooses the highlighted entry where it applies to the item (and closes the menu). Every other
+/// key is taken and does nothing.
+/// @param key A key the terminal sent; KeyCode::None for an action the mouse asks.
+/// @param nav What @p key resolved to in NavContext::Navigating (navActionOf()); std::nullopt: nothing.
+/// @param menu The open menu; closed (reset) by `close`, by a choice, or when @p item is gone.
 /// @param item The item the menu is about; nullptr: it is gone, and the menu closes.
 /// @return The command chosen, if any.
 [[nodiscard]] std::optional<RowMenuCommand> applyRowMenuKey(core::tui::KeyEvent const& key,
+                                                            std::optional<NavAction> nav,
                                                             std::optional<RowMenuState>& menu,
                                                             WorkItem const* item);
 

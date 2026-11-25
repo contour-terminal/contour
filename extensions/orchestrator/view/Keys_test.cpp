@@ -11,6 +11,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include <orchestrator/view/Keys.hpp>
 #include <orchestrator/view/NavInput.hpp>
@@ -45,8 +46,17 @@ constexpr auto RunId = "pr-1-20261113-150847"sv;
 /// An engine with one running agent, whose tab is open: its row has a message box.
 struct LiveRun
 {
-    Engine engine = bootEngine(World { .prs = { "github/prs-empty.json" },
-                                       .stored = { storedRun(Running {}, RunId, ChangeRequestRef { 1 }) } });
+    LiveRun(): LiveRun(std::string {}) {}
+
+    /// @param keys The configuration's `keys` object; empty: none.
+    explicit LiveRun(std::string keys):
+        engine { bootEngine(World { .keys = std::move(keys),
+                                    .prs = { "github/prs-empty.json" },
+                                    .stored = { storedRun(Running {}, RunId, ChangeRequestRef { 1 }) } }) }
+    {
+    }
+
+    Engine engine;
     Row row = Row { .kind = RowKind::Agent,
                     .run = std::string { RunId },
                     .name = "pr-1",
@@ -154,15 +164,18 @@ TEST_CASE("a run command acts only on a row that offers it", "[orchestrator][vie
 TEST_CASE("typing a filter", "[orchestrator][view][keys]")
 {
     auto interaction = Interaction { .filtering = Filtering::Typing };
-    CHECK(typeIntoFilter(character(U's'), interaction) == FilterInput::Taken);
-    CHECK(typeIntoFilter(character(U'é'), interaction) == FilterInput::Taken);
+    auto const typed = [&](KeyEvent const& key) {
+        return typeIntoFilter(key, navFor(key, NavContext::Typing), interaction);
+    };
+    CHECK(typed(character(U's')) == FilterInput::Taken);
+    CHECK(typed(character(U'é')) == FilterInput::Taken);
     CHECK(interaction.filter == "sé");
-    CHECK(typeIntoFilter(special(KeyCode::Backspace), interaction) == FilterInput::Taken);
+    CHECK(typed(special(KeyCode::Backspace)) == FilterInput::Taken);
     CHECK(interaction.filter == "s");
-    CHECK(typeIntoFilter(special(KeyCode::Up), interaction) == FilterInput::NotTaken);
-    CHECK(typeIntoFilter(special(KeyCode::Enter), interaction) == FilterInput::Taken);
+    CHECK(typed(special(KeyCode::Up)) == FilterInput::NotTaken);
+    CHECK(typed(special(KeyCode::Enter)) == FilterInput::Taken);
     CHECK(interaction == Interaction { .filtering = Filtering::Off, .filter = "s" });
-    CHECK(typeIntoFilter(character(U'x'), interaction) == FilterInput::NotTaken);
+    CHECK(typed(character(U'x')) == FilterInput::NotTaken);
 }
 
 TEST_CASE("Del while typing a filter edits nothing and dismisses nothing", "[orchestrator][view][keys]")
@@ -595,4 +608,89 @@ TEST_CASE("with close rebound to q, esc still closes the timeline", "[orchestrat
     interaction.overlay = Overlay::Timeline;
     typeKeys(std::array { character(U'q') }, interaction, context);
     CHECK(interaction.overlay == Overlay::None);
+}
+
+TEST_CASE("the Fleet's filter: esc stops typing and keeps it, a second esc clears it, / types it again",
+          "[orchestrator][view][keys]")
+{
+    auto const context = KeyContext { .selectable = 3 };
+    auto interaction = Interaction {};
+    typeKeys(std::array { character(U'/'), character(U'j'), character(U'k'), character(U'q') },
+             interaction,
+             context);
+    CHECK(interaction.filtering == Filtering::Typing);
+    CHECK(interaction.filter == "jkq");
+    typeKeys(std::array { special(KeyCode::Escape) }, interaction, context);
+    CHECK(interaction.filtering == Filtering::Off);
+    CHECK(interaction.filter == "jkq");
+    // `/` types it again, its text kept.
+    typeKeys(std::array { character(U'/'), character(U'x') }, interaction, context);
+    CHECK(interaction.filtering == Filtering::Typing);
+    CHECK(interaction.filter == "jkqx");
+    typeKeys(std::array { special(KeyCode::Escape) }, interaction, context);
+    CHECK(interaction.filter == "jkqx");
+    typeKeys(std::array { special(KeyCode::Escape) }, interaction, context);
+    CHECK(interaction.filtering == Filtering::Off);
+    CHECK(interaction.filter.empty());
+}
+
+TEST_CASE("the filter takes the line-editing keys, and Alt leaves it as esc does",
+          "[orchestrator][view][keys]")
+{
+    auto const context = KeyContext { .selectable = 3 };
+    auto interaction = Interaction { .filtering = Filtering::Typing, .filter = "fix the flaky test" };
+    typeKeys(std::array { special(KeyCode::Backspace, Modifier::Alt) }, interaction, context);
+    CHECK(interaction.filter == "fix the flaky ");
+    typeKeys(std::array { character(U'w', Modifier::Ctrl) }, interaction, context);
+    CHECK(interaction.filter == "fix the ");
+    typeKeys(std::array { character(U'u', Modifier::Ctrl) }, interaction, context);
+    CHECK(interaction.filter.empty());
+    CHECK(interaction.filtering == Filtering::Typing);
+    typeKeys(std::array { character(U'p'), character(U'j', Modifier::Alt) }, interaction, context);
+    CHECK(interaction.filtering == Filtering::Off);
+    CHECK(interaction.filter == "p");
+}
+
+TEST_CASE("the message box types the vim letters, and esc returns to the Fleet with the draft kept",
+          "[orchestrator][view][keys]")
+{
+    auto const live = LiveRun {};
+    auto interaction = Interaction { .place = Place::Focus };
+    typeKeys(
+        std::array { character(U'j'), character(U'k'), character(U'h'), character(U'l'), character(U'q') },
+        interaction,
+        live.context());
+    CHECK(interaction.place == Place::Focus);
+    CHECK(interaction.drafts.at(std::string { RunId }) == "jkhlq");
+    typeKeys(std::array { special(KeyCode::Escape) }, interaction, live.context());
+    CHECK(interaction.place == Place::Fleet);
+    CHECK(interaction.drafts.at(std::string { RunId }) == "jkhlq");
+}
+
+TEST_CASE("with leave_field ^c, Ctrl+C leaves the message box; esc and Alt+j do not",
+          "[orchestrator][view][keys]")
+{
+    auto const live = LiveRun { R"({ "leave_field": ["^c"] })" };
+    REQUIRE(live.engine.config() != nullptr);
+    auto interaction = Interaction { .place = Place::Focus };
+    typeKeys(std::array { character(U'x') }, interaction, live.context());
+    typeKeys(std::array { special(KeyCode::Escape) }, interaction, live.context());
+    CHECK(interaction.place == Place::Focus);
+    // Alt+j is an esc and a j read together: as esc it does nothing here, and the j types nothing.
+    typeKeys(std::array { character(U'j', Modifier::Alt) }, interaction, live.context());
+    CHECK(interaction.place == Place::Focus);
+    CHECK(interaction.drafts.at(std::string { RunId }) == "x");
+    typeKeys(std::array { character(U'c', Modifier::Ctrl) }, interaction, live.context());
+    CHECK(interaction.place == Place::Fleet);
+    CHECK(interaction.drafts.at(std::string { RunId }) == "x");
+}
+
+TEST_CASE("with the defaults, Alt+j leaves the message box with the draft kept", "[orchestrator][view][keys]")
+{
+    auto const live = LiveRun {};
+    auto interaction = Interaction { .place = Place::Focus };
+    typeKeys(std::array { character(U'x') }, interaction, live.context());
+    typeKeys(std::array { character(U'j', Modifier::Alt) }, interaction, live.context());
+    CHECK(interaction.place == Place::Fleet);
+    CHECK(interaction.drafts.at(std::string { RunId }) == "x");
 }

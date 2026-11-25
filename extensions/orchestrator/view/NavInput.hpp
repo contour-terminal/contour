@@ -64,6 +64,17 @@ enum class NavMiss : uint8_t
 /// @return The action it does with nothing typed; std::nullopt: none, or it is no plain special key.
 [[nodiscard]] std::optional<NavAction> passedKeyAction(core::tui::KeyEvent const& key, NavKeys const& keys);
 
+/// Resolves a key given to a text field being typed (Decision 11). A key with Alt is how `esc` reads when the
+/// next key follows it in one read, so it does what `esc` does while typing (`leave_field` with the defaults;
+/// nothing once `esc` is no Typing key), and the key itself is dropped.
+/// @param key A key the terminal sent.
+/// @param nav What @p key resolved to in NavContext::Typing (navActionOf()).
+/// @param keys The keys in force.
+/// @return The action @p key does in the field; std::nullopt: none.
+[[nodiscard]] std::optional<NavAction> typedNavOf(core::tui::KeyEvent const& key,
+                                                  std::optional<NavAction> nav,
+                                                  NavKeys const& keys);
+
 /// @return The context of the surface with the keys: the start dialog's or the `n` box's mode while one is
 ///         open; else Typing while a filter is typed or the message box has the keys, else Navigating. The
 ///         palette is never resolved.

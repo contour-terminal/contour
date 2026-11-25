@@ -1016,6 +1016,27 @@ TEST_CASE("a click on a palette entry runs it; one beside the palette closes it"
     CHECK_FALSE(fixture.dashboard.interaction().palette.has_value());
 }
 
+TEST_CASE("the wheel over the palette moves its highlight; a click beside it closes it, query kept",
+          "[orchestrator][view][mouse][palette]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    CHECK(fixture.dashboard.input("\x0b").empty());
+    static_cast<void>(fixture.dashboard.frame());
+    auto const& palette = fixture.dashboard.interaction().palette;
+    REQUIRE(palette.has_value());
+    auto const popup = regionOf(fixture.dashboard, Hit { .kind = HitKind::Popup });
+    CHECK(fixture.dashboard.input(wheelAt(popup.x + 2, popup.y + 1, MouseWheel::Down)).empty());
+    CHECK(palette->highlighted == 1);
+    CHECK(fixture.dashboard.input(wheelAt(popup.x + 2, popup.y + 1, MouseWheel::Up)).empty());
+    CHECK(palette->highlighted == 0);
+    // A typed query does not keep the palette open against a click beside it.
+    CHECK(fixture.dashboard.input("re").empty());
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.input(clickAt(0, 0)).empty());
+    CHECK_FALSE(fixture.dashboard.interaction().palette.has_value());
+    CHECK(fixture.dashboard.interaction().paletteQuery == "re");
+}
+
 TEST_CASE("a double click on a palette entry runs it once", "[orchestrator][view][mouse]")
 {
     auto fixture = Fixture { fleetWorld() };
@@ -1184,6 +1205,28 @@ TEST_CASE("Work mouse: m opens the menu under the selected row; the keys run it"
     REQUIRE(dashboard.interaction().startDialog.has_value());
     CHECK(dashboard.interaction().startDialog->form.item == ItemRef { ChangeRequestRef { 2375 } });
     CHECK_FALSE(dashboard.interaction().startDialog->form.session.empty());
+}
+
+TEST_CASE("Row menu: j, G, gg and q through the dashboard's input", "[orchestrator][view][work][rowmenu]")
+{
+    auto const fixture = workFixture();
+    auto& dashboard = fixture->dashboard;
+    CHECK(dashboard.input("m").empty());
+    auto const& menu = dashboard.interaction().work.menu;
+    REQUIRE(menu.has_value());
+    CHECK(dashboard.input("j").empty());
+    CHECK(menu->highlighted == 1);
+    CHECK(dashboard.input("G").empty());
+    CHECK(menu->highlighted == RowMenuEntries.size() - 1);
+    // gg in two reads: the first g waits for the second.
+    CHECK(dashboard.input("g").empty());
+    CHECK(menu->highlighted == RowMenuEntries.size() - 1);
+    CHECK(dashboard.input("g").empty());
+    CHECK(menu->highlighted == 0);
+    CHECK(dashboard.input("q").empty());
+    CHECK_FALSE(menu.has_value());
+    // The list's own keys did not act behind it.
+    CHECK_FALSE(dashboard.interaction().startDialog.has_value());
 }
 
 TEST_CASE("Work mouse: a press on a menu entry the menu closed before does nothing",
@@ -1608,7 +1651,11 @@ TEST_CASE("key input", "[orchestrator][view]")
           .size = Wide,
           .keys = "/2375\r",
           .expected = { .filter = "2375" } },
-        { .name = "filter dropped", .world = &fleet, .size = Wide, .keys = "/2375\x1b", .expected = {} },
+        { .name = "filter kept by esc",
+          .world = &fleet,
+          .size = Wide,
+          .keys = "/2375\x1b",
+          .expected = { .filter = "2375" } },
         { .name = "tab to the Focus",
           .world = &fleet,
           .size = Medium,

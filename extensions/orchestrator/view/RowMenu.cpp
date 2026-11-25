@@ -45,6 +45,7 @@ WorkItem const* workItemOf(std::span<WorkItem const> items, std::string_view key
 }
 
 std::optional<RowMenuCommand> applyRowMenuKey(core::tui::KeyEvent const& key,
+                                              std::optional<NavAction> nav,
                                               std::optional<RowMenuState>& menu,
                                               WorkItem const* item)
 {
@@ -57,13 +58,27 @@ std::optional<RowMenuCommand> applyRowMenuKey(core::tui::KeyEvent const& key,
     }
     using core::tui::KeyCode;
     auto& highlighted = menu->highlighted;
+    constexpr auto Last = RowMenuEntries.size() - 1;
+    if (nav)
+        switch (*nav)
+        {
+            case NavAction::MoveUp: highlighted = highlighted == 0 ? 0 : highlighted - 1; return std::nullopt;
+            case NavAction::MoveDown: highlighted = std::min(highlighted + 1, Last); return std::nullopt;
+            case NavAction::First: highlighted = 0; return std::nullopt;
+            case NavAction::Last: highlighted = Last; return std::nullopt;
+            case NavAction::Close: menu.reset(); return std::nullopt;
+            // ⏎ is enter_field's too: the key decides below, as it does for every other action.
+            case NavAction::HalfPageUp:
+            case NavAction::HalfPageDown:
+            case NavAction::PreviousValue:
+            case NavAction::NextValue:
+            case NavAction::LeaveField:
+            case NavAction::EnterField: break;
+        }
     switch (key.key)
     {
+        // Esc closes it even where `close` is bound elsewhere, as it closes the timeline.
         case KeyCode::Escape: menu.reset(); return std::nullopt;
-        case KeyCode::Up: highlighted = highlighted == 0 ? 0 : highlighted - 1; return std::nullopt;
-        case KeyCode::Down:
-            highlighted = std::min(highlighted + 1, RowMenuEntries.size() - 1);
-            return std::nullopt;
         case KeyCode::Enter: {
             if (highlighted >= RowMenuEntries.size())
                 return std::nullopt;

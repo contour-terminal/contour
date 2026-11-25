@@ -180,9 +180,10 @@ void jumpWorkList(WorkState& state, WorkBoardData const& data, std::size_t row);
                                                      Engine const& engine,
                                                      std::size_t pageRows);
 
-/// Applies one key in the Work view: to its filter while it is typed (Enter or Esc give the list the keys
-/// again), else as @p nav's list command (listCommandOf()), else by workKeyRows(). A key the filter passes
-/// on, such as an arrow, is resolved again as if nothing were typed, and acts so.
+/// Applies one key in the Work view: to its filter while it is typed (Enter or `leave_field` give the list
+/// the keys again and keep the filter, a key with Alt doing what Esc does), else as @p nav's list command
+/// (listCommandOf()), else by workKeyRows(). A key the filter passes on, such as an arrow, is resolved again
+/// as if nothing were typed, and acts so.
 /// @param key A key the terminal sent.
 /// @param nav What @p key resolved to (navActionOf()) in navContextOf()'s context; std::nullopt: nothing.
 /// @param interaction Where the user is; changed by the key.

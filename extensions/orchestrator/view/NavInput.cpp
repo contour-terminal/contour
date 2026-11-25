@@ -166,6 +166,15 @@ std::optional<NavAction> passedKeyAction(core::tui::KeyEvent const& key, NavKeys
     return action ? std::optional { *action } : std::nullopt;
 }
 
+std::optional<NavAction> typedNavOf(core::tui::KeyEvent const& key,
+                                    std::optional<NavAction> nav,
+                                    NavKeys const& keys)
+{
+    if (core::tui::hasModifier(key.modifiers, core::tui::Modifier::Alt))
+        return keys.actionFor("esc", NavContext::Typing);
+    return nav;
+}
+
 NavContext navContextOf(Interaction const& interaction, KeyContext const& context) noexcept
 {
     auto const contextOf = [](FieldMode mode) {

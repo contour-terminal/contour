@@ -271,11 +271,18 @@ struct Dashboard::State
     void press(core::tui::KeyCode key, std::vector<UiAction>& actions);
     /// Routes @p action as resolved to the surface with the keys, whatever key the configuration binds it to
     /// and whether a field is typed (Decision 17): the mouse acts on intent, never through the key table. The
-    /// palette and the row menu still take keys: they are given the plain key that does @p action there
-    /// (`esc`, `up`, `down`).
+    /// palette, which resolves no key, is closed or has its highlight moved directly.
     /// @param action What the mouse asks.
     /// @param actions What the engine is asked, appended to.
     void press(NavAction action, std::vector<UiAction>& actions);
+    /// Applies one key to the open row menu, and runs the command it chooses.
+    /// @param key The key; KeyCode::None for an action the mouse asks.
+    /// @param nav What it resolved to in NavContext::Navigating, or what the mouse asked; std::nullopt:
+    ///        nothing.
+    /// @param actions What the engine is asked, appended to.
+    void applyMenuKey(core::tui::KeyEvent const& key,
+                      std::optional<NavAction> nav,
+                      std::vector<UiAction>& actions);
     /// Applies one key to the open start dialog, else the open `n` box.
     /// @param key The key.
     /// @param nav What it resolved to in the dialog's or the box's mode, or what the mouse asked;
@@ -1153,14 +1160,14 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
             applyBoxKey(*key, resolved ? std::optional { *resolved } : std::nullopt, hooksAtInput, actions);
             continue;
         }
-        auto const view = interaction.view;
-        // The row menu takes every key while it is open.
-        if (auto& menu = interaction.work.menu)
+        // The row menu takes every key while it is open; it has no text, so it is always navigating.
+        if (interaction.work.menu)
         {
-            auto const* const item = workItemOf(work.items, menu->itemKey);
-            if (auto const command = applyRowMenuKey(*key, menu, item); command && item != nullptr)
-                runMenuCommand(*command, *item, actions);
-            afterCommand(view);
+            auto const resolved =
+                navActionOf(*key, NavContext::Navigating, keysInForce(engine), interaction.pendingKey);
+            if (!resolved && resolved.error() == NavMiss::Pending)
+                continue;
+            applyMenuKey(*key, resolved ? std::optional { *resolved } : std::nullopt, actions);
             continue;
         }
         // A list surface resolves the key once (the palette types every key into its query); a key that
@@ -1179,6 +1186,18 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
     if (interaction != before)
         repaint = Repaint::Needed;
     return actions;
+}
+
+void Dashboard::State::applyMenuKey(core::tui::KeyEvent const& key,
+                                    std::optional<NavAction> nav,
+                                    std::vector<UiAction>& actions)
+{
+    auto const view = interaction.view;
+    auto& menu = interaction.work.menu;
+    auto const* const item = menu ? workItemOf(work.items, menu->itemKey) : nullptr;
+    if (auto const command = applyRowMenuKey(key, nav, menu, item); command && item != nullptr)
+        runMenuCommand(*command, *item, actions);
+    afterCommand(view);
 }
 
 void Dashboard::State::applyBoxKey(core::tui::KeyEvent const& key,
@@ -1736,15 +1755,19 @@ void Dashboard::State::press(NavAction action, std::vector<UiAction>& actions)
     interaction.pendingKey.clear();
     auto const plain = std::ranges::find(PlainKeys, action, &PlainKey::action);
     auto const key = plain != PlainKeys.end() ? plain->key : core::tui::KeyCode::None;
-    // The palette and the row menu take keys until they take a resolved action of their own.
-    if (interaction.palette || interaction.work.menu)
-    {
-        press(key, actions);
-        return;
-    }
     auto const before = interaction;
     interaction.notice.clear();
-    if (interaction.startDialog || interaction.taskBox)
+    // The palette resolves no key (Decision 15): close closes it, and the wheel moves its highlight.
+    if (interaction.palette)
+    {
+        if (action == NavAction::Close)
+            closePalette(interaction);
+        else
+            movePaletteHighlight(*interaction.palette, keyContext(), action);
+    }
+    else if (interaction.work.menu)
+        applyMenuKey(core::tui::KeyEvent { .key = key }, action, actions);
+    else if (interaction.startDialog || interaction.taskBox)
         applyBoxKey(core::tui::KeyEvent { .key = key }, action, dialogHooks(), actions);
     else
         applyListKey(core::tui::KeyEvent { .key = key }, action, actions);

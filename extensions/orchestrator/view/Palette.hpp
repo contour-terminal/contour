@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <orchestrator/core/Engine.hpp>
+#include <orchestrator/core/NavKeys.hpp>
 #include <orchestrator/view/HitMap.hpp>
 #include <orchestrator/view/Keys.hpp>
 #include <orchestrator/view/Sections.hpp>
@@ -60,10 +61,22 @@ struct PaletteMatch
 [[nodiscard]] std::optional<KeyCommand> highlightedCommand(PaletteState const& palette,
                                                            KeyContext const& context);
 
-/// Applies one key to the open palette. Printable keys and Backspace edit the query; ↑/↓ move the highlight;
-/// ⏎ closes it and runs the highlighted command as its key would (dispatch()), which says why where it does
-/// not apply; esc, or a key with Alt (an esc and the key after it, read together), closes it keeping the
-/// query for the next time it opens.
+/// Moves the open palette's highlight one entry, wrapping at either end, as ↑/↓, Ctrl+P/Ctrl+N and the wheel
+/// do.
+/// @param palette The open palette.
+/// @param context The selected row and the engine: what the entries are.
+/// @param move NavAction::MoveUp or NavAction::MoveDown; any other action moves nothing.
+void movePaletteHighlight(PaletteState& palette, KeyContext const& context, NavAction move);
+
+/// Closes the open palette, keeping its query for the next time it opens.
+/// @param interaction Where the user is: its palette open.
+void closePalette(Interaction& interaction);
+
+/// Applies one key to the open palette, which is always typing its query and consults no navigation key
+/// (Decision 15). Every printable key, `j` and `k` included, and the line-editing keys edit the query; ↑/↓
+/// and Ctrl+P/Ctrl+N move the highlight; ⏎ closes it and runs the highlighted command as its key would
+/// (dispatch()), which says why where it does not apply; esc, or a key with Alt (an esc and the key after it,
+/// read together), closes it at once keeping the query for the next time it opens.
 /// @param key A key the terminal sent.
 /// @param interaction Where the user is: its palette open.
 /// @param context The selected row and the engine.
