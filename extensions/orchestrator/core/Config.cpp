@@ -101,7 +101,9 @@ struct glz::meta<orchestrator::config::detail::JsonTask>
                                               "permissions",
                                               &T::permissions,
                                               "worker",
-                                              &T::worker);
+                                              &T::worker,
+                                              "role",
+                                              &T::role);
 };
 
 /// A worker's keys: `env_set` is no member name.
@@ -112,6 +114,25 @@ struct glz::meta<orchestrator::config::detail::JsonWorker>
     // Glaze finds the table by this spelling, as the standard library finds `value_type`.
     // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr auto value = glz::object("id", &T::id, "agent", &T::agent, "env_set", &T::envSet);
+};
+
+/// An issue source's keys: `in_progress_jql` is no member name.
+template <>
+struct glz::meta<orchestrator::config::detail::JsonIssueSource>
+{
+    using T = orchestrator::config::detail::JsonIssueSource;
+    // Glaze finds the table by this spelling, as the standard library finds `value_type`.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr auto value = glz::object("source",
+                                              &T::source,
+                                              "query",
+                                              &T::query,
+                                              "jql",
+                                              &T::jql,
+                                              "in_progress_jql",
+                                              &T::inProgressJql,
+                                              "site",
+                                              &T::site);
 };
 
 namespace orchestrator
@@ -179,6 +200,7 @@ namespace
         BuiltinProfiles, ///< builtinProfiles().
         PaneKeys,        ///< paneKeyNames().
         AfterReplies,    ///< afterReplyNames().
+        TaskRoles,       ///< TaskRoleRows.
     };
 
     /// What each problem means; one row per ConfigProblem, in its order.
@@ -282,6 +304,8 @@ namespace
                       .text = "names no worker; the first worker runs it" },
         ProblemText { .problem = ConfigProblem::ProfileOnCopilot,
                       .text = "is a permission profile, which a Copilot worker does not take" },
+        ProblemText {
+            .problem = ConfigProblem::UnknownRole, .text = "must be one of", .listing = Listing::TaskRoles },
     };
 
     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ProblemTexts.size()),
@@ -289,7 +313,7 @@ namespace
                                           return static_cast<std::size_t>(ProblemTexts[i].problem) == i;
                                       }),
                   "ProblemTexts has one row per ConfigProblem, in its order");
-    static_assert(ProblemTexts.size() == static_cast<std::size_t>(ConfigProblem::ProfileOnCopilot) + 1,
+    static_assert(ProblemTexts.size() == static_cast<std::size_t>(ConfigProblem::UnknownRole) + 1,
                   "ProblemTexts covers every ConfigProblem");
 
     /// @return The values @p listing names, as the user writes them, of the rows @p sources holds.
@@ -330,6 +354,10 @@ namespace
             case Listing::PaneKeys: std::ranges::copy(paneKeyNames(), std::back_inserter(values)); break;
             case Listing::AfterReplies:
                 std::ranges::copy(afterReplyNames(), std::back_inserter(values));
+                break;
+            case Listing::TaskRoles:
+                for (auto const& row: TaskRoleRows)
+                    values.push_back(row.spelling);
                 break;
         }
         return values;
@@ -428,6 +456,7 @@ namespace
         Field { .key = "source", .type = JsonType::String },
         Field { .key = "query", .type = JsonType::String },
         Field { .key = "jql", .type = JsonType::String },
+        Field { .key = "in_progress_jql", .type = JsonType::String },
         Field { .key = "site", .type = JsonType::String },
     };
 
@@ -441,6 +470,7 @@ namespace
         Field { .key = "end_done_after", .type = JsonType::Duration },
         Field { .key = "permissions", .type = JsonType::String },
         Field { .key = "worker", .type = JsonType::String },
+        Field { .key = "role", .type = JsonType::String },
     };
 
     constexpr auto WorkerFields = std::array {
@@ -498,6 +528,8 @@ namespace
 
     static_assert(matchesMirror<JsonConfig>(ConfigFields), "ConfigFields and JsonConfig name the same keys");
     static_assert(matchesMirror<JsonRepo>(RepoFields), "RepoFields and JsonRepo name the same keys");
+    static_assert(matchesMirror<JsonIssueSource>(IssueSourceFields),
+                  "IssueSourceFields and JsonIssueSource name the same keys");
     static_assert(matchesMirror<JsonIssueSource>(IssueSourceFields),
                   "IssueSourceFields and JsonIssueSource name the same keys");
     static_assert(matchesMirror<JsonTask>(TaskFields), "TaskFields and JsonTask name the same keys");
@@ -739,11 +771,13 @@ namespace
         auto const keys = std::array {
             SourceKey { .key = "query", .value = &json.query },
             SourceKey { .key = "jql", .value = &json.jql },
+            SourceKey { .key = "in_progress_jql", .value = &json.inProgressJql },
             SourceKey { .key = "site", .value = &json.site },
         };
         for (auto const& [name, value]: keys)
         {
-            auto const used = name == row->configKey || (name == "site" && row->site == SiteUse::Required);
+            auto const used = name == row->configKey || name == row->progressKey
+                              || (name == "site" && row->site == SiteUse::Required);
             if (value->has_value() && !used)
                 return fail(key(name), ConfigProblem::UnknownKey);
         }
@@ -754,6 +788,17 @@ namespace
         auto text = checked(*query->value, key(row->configKey), textProblem);
         if (!text)
             return std::unexpected(text.error());
+        auto progress = std::string {};
+        if (json.inProgressJql)
+        {
+            auto const checkedProgress = checked(json.inProgressJql, key(row->progressKey), textProblem);
+            if (!checkedProgress)
+                return std::unexpected(checkedProgress.error());
+            // The two are sent as one query, `(jql) AND (in_progress_jql)`, which must fit a Text too.
+            if (std::format("({}) AND ({})", *text, *checkedProgress).size() > MaxTextBytes)
+                return fail(key(row->progressKey), ConfigProblem::NotText);
+            progress = *checkedProgress;
+        }
         auto site = std::string {};
         if (row->site == SiteUse::Required)
         {
@@ -766,7 +811,8 @@ namespace
         }
         return IssueQuery { .source = std::string(row->name),
                             .text = std::move(*text),
-                            .site = std::move(site) };
+                            .site = std::move(site),
+                            .inProgressJql = std::move(progress) };
     }
 
     /// @return The name a repository is known by: the one written at `name`, or else its directory's.
@@ -1032,6 +1078,16 @@ namespace
                     .key = key("worker"), .problem = ConfigProblem::UnknownWorker, .subject = *named });
         }
 
+        // A role written is the one it names; without one, the role the id spells, else none.
+        auto role = taskRoleNamed(*id).value_or(TaskRole::None);
+        if (json.role)
+        {
+            auto const named = taskRoleNamed(*json.role);
+            if (!named)
+                return fail(key("role"), ConfigProblem::UnknownRole);
+            role = *named;
+        }
+
         return TaskDef { .id = *id,
                          .key = keyText->front(),
                          .label = *label,
@@ -1040,7 +1096,8 @@ namespace
                          .prompt = *prompt,
                          .endDoneAfter = endDoneAfter,
                          .permissions = std::move(permissions),
-                         .worker = std::move(worker) };
+                         .worker = std::move(worker),
+                         .role = role };
     }
 
     [[nodiscard]] Checked<std::vector<TaskDef>> tasksOf(std::optional<std::vector<JsonTask>> const& value,

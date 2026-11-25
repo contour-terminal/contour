@@ -20,9 +20,10 @@ using JsonDuration = std::variant<uint64_t, std::string>;
 struct JsonIssueSource
 {
     std::optional<std::string> source;
-    std::optional<std::string> query; ///< A forge source's search.
-    std::optional<std::string> jql;   ///< A Jira source's query.
-    std::optional<std::string> site;  ///< A Jira source's site.
+    std::optional<std::string> query;         ///< A forge source's search.
+    std::optional<std::string> jql;           ///< A Jira source's query.
+    std::optional<std::string> inProgressJql; ///< A Jira source's `in_progress_jql`: its in-progress filter.
+    std::optional<std::string> site;          ///< A Jira source's site.
 };
 
 /// One `repos` entry.
@@ -85,6 +86,7 @@ struct JsonTask
     std::optional<JsonDuration> endDoneAfter;
     std::optional<std::string> permissions;
     std::optional<std::string> worker;
+    std::optional<std::string> role;
 };
 
 /// The `config` subtree; its snake_case keys are mapped in Config.cpp.

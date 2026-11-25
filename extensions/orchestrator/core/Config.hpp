@@ -20,6 +20,7 @@
 #include <orchestrator/core/Plugins.hpp>
 #include <orchestrator/core/Provider.hpp>
 #include <orchestrator/core/QuickReplies.hpp>
+#include <orchestrator/core/TaskRoles.hpp>
 
 namespace orchestrator
 {
@@ -76,6 +77,8 @@ struct TaskDef
     std::string permissions = {};
     /// The worker that runs it (`worker`): always one of Config::workers().
     std::string worker = {};
+    /// What the start dialog suggests the task is for (`role`), else the role its id spells, else None.
+    TaskRole role = TaskRole::None;
 };
 
 /// A program a declared command names that the host runs as its own executable.
@@ -101,9 +104,10 @@ struct HostInfo
 /// One search that lists the issues a repository offers for work.
 struct IssueQuery
 {
-    std::string source; ///< Its issue source's name: `forge` or `jira`.
-    std::string text;   ///< The query: a forge search, or a JQL; an ArgumentKind::Text.
-    std::string site;   ///< A Jira source's site, without a trailing `/`; empty for the forge.
+    std::string source;             ///< Its issue source's name: `forge` or `jira`.
+    std::string text;               ///< The query: a forge search, or a JQL; an ArgumentKind::Text.
+    std::string site;               ///< A Jira source's site, without a trailing `/`; empty for the forge.
+    std::string inProgressJql = {}; ///< A Jira source's `in_progress_jql`; empty: none.
 };
 
 /// One configured repository.
@@ -166,6 +170,7 @@ enum class ConfigProblem : uint8_t
     UnknownWorker,          ///< A task's `worker` that names no worker: a notice; the first worker runs it.
     ProfileOnCopilot, ///< A task with its own `permissions` on a worker that takes no profile: a notice;
                       ///< the task is unavailable.
+    UnknownRole,      ///< A task's `role` no TaskRoleRows row spells.
 };
 
 /// Why a configuration was refused.

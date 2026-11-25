@@ -1075,3 +1075,68 @@ TEST_CASE("permissions: what is refused, and where", "[config]")
     CHECK(taskProfile.error().key == "tasks[0].permissions");
     CHECK(taskProfile.error().problem == ConfigProblem::UnknownProfile);
 }
+
+TEST_CASE("a jira source may name an in_progress_jql", "[config]")
+{
+    auto const config = parseIssues(
+        R"j([ { "source": "jira", "jql": "assignee = currentUser()", "site": "https://example.atlassian.net",
+               "in_progress_jql": "status in (\"In Progress\", \"Selected for Development\")" } ])j");
+    REQUIRE(config);
+    CHECK(config->repos().front().issueQueries.front().inProgressJql
+          == R"(status in ("In Progress", "Selected for Development"))");
+
+    SECTION("on a forge source it is an unknown key")
+    {
+        auto const withForge = parseIssues(
+            R"([ { "source": "forge", "query": "label:bug", "in_progress_jql": "status = Open" } ])");
+        REQUIRE_FALSE(withForge);
+        CHECK(withForge.error().key == "repos[0].issues[0].in_progress_jql");
+        CHECK(withForge.error().problem == ConfigProblem::UnknownKey);
+    }
+
+    SECTION("too long together with jql")
+    {
+        auto const longProgress = std::string(8192, 'x');
+        auto const tooLong = parseIssues(std::format(
+            R"j([ {{ "source": "jira", "jql": "x", "site": "https://example.atlassian.net", "in_progress_jql": "{}" }} ])j",
+            longProgress));
+        REQUIRE_FALSE(tooLong);
+        CHECK(tooLong.error().key == "repos[0].issues[0].in_progress_jql");
+        CHECK(tooLong.error().problem == ConfigProblem::NotText);
+    }
+}
+
+TEST_CASE("a task's role is written, or spelled by its id", "[config]")
+{
+    auto const config = parse(Input {});
+    REQUIRE(config);
+    // The built-in topic task is appended after the three configured ones.
+    REQUIRE(config->tasks().size() == 4);
+    CHECK(config->tasks()[0].role == TaskRole::FixCi);
+    CHECK(config->tasks()[1].role == TaskRole::AddressReview);
+    CHECK(config->tasks()[2].role == TaskRole::None);
+
+    auto const written = parse(
+        Input { .find = R"("id": "fix_ci")", .replace = R"("id": "mend", "role": "resolve_conflicts")" });
+    REQUIRE(written);
+    CHECK(written->tasks()[0].role == TaskRole::ResolveConflicts);
+
+    auto const unknown =
+        parse(Input { .find = R"("id": "fix_ci")", .replace = R"("id": "x", "role": "fix_everything")" });
+    REQUIRE_FALSE(unknown);
+    CHECK(unknown.error().key == "tasks[0].role");
+    CHECK(unknown.error().problem == ConfigProblem::UnknownRole);
+    CHECK(message(unknown.error(), sourceTables())
+              .contains("fix_ci, resolve_conflicts, address_review, work_on_issue"));
+}
+
+TEST_CASE("task keys w, s and o stay valid", "[config]")
+{
+    auto const renamed = parse(Input { .find = R"("key": "f")", .replace = R"("key": "o")" });
+    REQUIRE(renamed);
+    CHECK(renamed->tasks()[0].key == 'o');
+    CHECK(renamed->tasks()[2].key == 'w');
+    auto const others = parse(Input { .find = R"("key": "r")", .replace = R"("key": "s")" });
+    REQUIRE(others);
+    CHECK(others->tasks()[1].key == 's');
+}

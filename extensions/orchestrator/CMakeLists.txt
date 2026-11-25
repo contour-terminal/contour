@@ -105,6 +105,7 @@ add_library(orchestrator_core STATIC
     core/Spelling.hpp
     core/Stats.cpp
     core/Stats.hpp
+    core/TaskRoles.hpp
     core/Timeline.cpp
     core/Timeline.hpp
     core/Timestamps.cpp

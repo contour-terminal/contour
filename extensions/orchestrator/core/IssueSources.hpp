@@ -39,8 +39,10 @@ struct IssueSourceRow
     std::string_view title;    ///< Its name as the user reads it, such as `Jira`.
     std::string_view command;  ///< The command that lists its issues; empty: the forge provider's listIssues.
     std::string_view argument; ///< The command's placeholder the query fills.
-    std::string_view configKey; ///< The configuration key that holds the query, such as `jql`.
-    SiteUse site;               ///< Whether the configuration names its site.
+    std::string_view configKey;   ///< The configuration key that holds the query, such as `jql`.
+    std::string_view progressKey; ///< The configuration key that holds its in-progress query:
+                                  ///< `in_progress_jql` for Jira; empty for the forge.
+    SiteUse site; ///< Whether the configuration names its site.
     std::string_view
         authCheck; ///< The command that succeeds only when its CLI is logged in; empty: the forge's.
     Verification verification; ///< Only a Recorded source is accepted by the configuration.
