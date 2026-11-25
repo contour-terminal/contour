@@ -54,8 +54,9 @@ class WamrRuntime final: public IWasmRuntime, public std::enable_shared_from_thi
     WamrRuntime& operator=(WamrRuntime const&) = delete;
     WamrRuntime& operator=(WamrRuntime&&) = delete;
 
+    /// Loads @p bytes in this process; the identity is ignored, as every module runs here.
     [[nodiscard]] std::expected<std::shared_ptr<IWasmModule>, ExtensionError> load(
-        std::vector<std::byte> bytes) override;
+        ModuleIdentity identity, std::vector<std::byte> bytes) override;
 
     /// @return The limits every instance of the runtime is held to.
     [[nodiscard]] RuntimeLimits const& limits() const noexcept { return _limits; }

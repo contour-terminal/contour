@@ -88,6 +88,8 @@ namespace
         CallHost { .functionIndex = 4, .arguments = { 1, 2, 3 } },
         HostResult { .error = ExtensionError::PermissionDenied },
         CallResult { .failure = CallFailure::HostFailure, .argv = { 42 } },
+        CallResult { .failure = CallFailure::HostCrashed, .argv = {} },
+        HostResult { .error = ExtensionError::HostUnavailable },
         MemoryRead { .instanceId = 11, .address = 0x10000, .size = 256 },
         MemoryData { .status = MemoryStatus::Ok, .bytes = raw({ 1, 2, 3 }) },
         MemoryWrite { .instanceId = 11, .address = 0xFFFFFFF0, .bytes = raw({ 9, 8 }) },
@@ -149,9 +151,12 @@ TEST_CASE("PduCodec.tableHasOneRowPerKind", "[vtextension]")
 
 TEST_CASE("PduCodec.roundTrip", "[vtextension]")
 {
-    for (auto const& sample: samples())
+    auto const all = samples();
+    for (auto const index: std::views::iota(std::size_t { 0 }, all.size()))
     {
-        DYNAMIC_SECTION("kind " << static_cast<int>(kindOf(sample)))
+        // Indexed, as a kind may be sampled more than once and a section runs once per name.
+        auto const& sample = all[index];
+        DYNAMIC_SECTION("sample " << index << ", kind " << static_cast<int>(kindOf(sample)))
         {
             auto const& row = rowOf(sample);
             auto const frame = encoded(sample);
@@ -258,7 +263,7 @@ TEST_CASE("PduCodec.lyingBodyIsMalformed", "[vtextension]")
         CHECK(errorOf(frameOf(std::to_underlying(PduKind::Hello), std::vector<uint8_t> { 1, 0, 3 }), helloRow)
               == DecodeError::BadEnum);
         // A status names the error + 1; one past the last error is out of range.
-        auto const lastError = std::to_underlying(ExtensionError::ModuleTooLarge);
+        auto const lastError = std::to_underlying(ExtensionError::HostUnavailable);
         auto const& createdRow = PduTable.at(std::to_underlying(PduKind::RuntimeCreated) - 1);
         CHECK(errorOf(frameOf(std::to_underlying(PduKind::RuntimeCreated),
                               std::vector<uint8_t> { 7, static_cast<uint8_t>(lastError + 1) }),

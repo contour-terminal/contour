@@ -55,7 +55,7 @@ struct LoadedModule
 {
     auto engine = Engine::create(backend, limits);
     REQUIRE(engine.has_value());
-    auto compiled = CompiledExtension::load(**engine, std::move(bytes));
+    auto compiled = CompiledExtension::load(**engine, wasm::ModuleIdentity {}, std::move(bytes));
     REQUIRE(compiled.has_value());
     return LoadedModule { .engine = std::move(*engine), .compiled = std::move(*compiled) };
 }

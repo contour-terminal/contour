@@ -79,7 +79,7 @@ struct RenderMeasurement
 
     auto measurement = RenderMeasurement {};
     auto const loadStart = clock.now();
-    auto compiled = CompiledExtension::load(**engine, std::move(module));
+    auto compiled = CompiledExtension::load(**engine, ModuleIdentity {}, std::move(module));
     measurement.load = clock.now() - loadStart;
     REQUIRE(compiled.has_value());
 

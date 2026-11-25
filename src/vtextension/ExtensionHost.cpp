@@ -95,7 +95,8 @@ PreparedExtensions prepareExtensions(ExtensionHostConfig config,
                 threadGuard.emplace((*engine)->backend().enterThread());
             if (!*threadGuard)
                 return std::unexpected(threadGuard->error());
-            return CompiledExtension::load(**engine, std::move(spec.module));
+            return CompiledExtension::load(
+                **engine, wasm::ModuleIdentity { spec.hostId }, std::move(spec.module));
         }();
         spec.module.clear();
         prepared.extensions.push_back(

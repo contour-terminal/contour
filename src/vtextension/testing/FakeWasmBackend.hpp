@@ -210,12 +210,10 @@ class FakeWasmRuntime final: public wasm::IWasmRuntime, public std::enable_share
     /// Tells the backend that one runtime fewer is alive.
     ~FakeWasmRuntime() override;
 
-    /// Ignores @p bytes: every module is a world guest.
+    /// Tells the backend of @p identity and ignores @p bytes: every module is a world guest.
+    /// @return The module; the backend's FakeWasmBackend::loadFailure if it names one.
     [[nodiscard]] std::expected<std::shared_ptr<wasm::IWasmModule>, ExtensionError> load(
-        std::vector<std::byte> /*bytes*/) override
-    {
-        return std::make_shared<FakeWasmModule>(shared_from_this(), _backend, _hostFunctions);
-    }
+        wasm::ModuleIdentity identity, std::vector<std::byte> /*bytes*/) override;
 
   private:
     FakeWasmBackend& _backend;
@@ -259,8 +257,25 @@ class FakeWasmBackend final: public wasm::IWasmBackend
         return wasm::BackendCapabilities { .memoryGrowth = wasm::MemoryGrowthReporting::Reported };
     }
 
+    /// @return How many modules were loaded, failed loads included.
+    [[nodiscard]] std::size_t loads() const noexcept
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        return _loads;
+    }
+
+    /// @return The identity the last module was loaded with; empty before the first.
+    [[nodiscard]] wasm::ModuleIdentity lastIdentity() const
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        return _lastIdentity;
+    }
+
     /// How every instance created from now on behaves.
     FakeGuest guest;
+
+    /// What every load from now on fails with; nothing for loads that succeed.
+    std::optional<ExtensionError> loadFailure;
 
     /// The instance created last; null before the first. Valid only while that instance lives.
     FakeWasmInstance* lastInstance = nullptr;
@@ -289,6 +304,14 @@ class FakeWasmBackend final: public wasm::IWasmBackend
             _generation.fetch_add(1, std::memory_order_release);
     }
 
+    /// Counts a module loaded with @p identity.
+    void moduleLoaded(wasm::ModuleIdentity identity)
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        ++_loads;
+        _lastIdentity = std::move(identity);
+    }
+
     /// Counts a runtime destroyed, on whichever thread drops the last reference to it.
     void runtimeDestroyed()
     {
@@ -298,6 +321,8 @@ class FakeWasmBackend final: public wasm::IWasmBackend
 
     mutable std::mutex _mutex;             ///< Guards the counters below; the generation is read without it.
     std::size_t _runtimesAlive = 0;        ///< How many runtimes are alive.
+    std::size_t _loads = 0;                ///< How many modules were loaded.
+    wasm::ModuleIdentity _lastIdentity;    ///< The identity the last module was loaded with.
     std::atomic<uint64_t> _generation = 0; ///< How many times the engine was brought up.
 };
 
@@ -311,6 +336,15 @@ inline FakeWasmRuntime::FakeWasmRuntime(FakeWasmBackend& backend,
 inline FakeWasmRuntime::~FakeWasmRuntime()
 {
     _backend.runtimeDestroyed();
+}
+
+inline std::expected<std::shared_ptr<wasm::IWasmModule>, ExtensionError> FakeWasmRuntime::load(
+    wasm::ModuleIdentity identity, std::vector<std::byte> /*bytes*/)
+{
+    _backend.moduleLoaded(std::move(identity));
+    if (_backend.loadFailure)
+        return std::unexpected(*_backend.loadFailure);
+    return std::make_shared<FakeWasmModule>(shared_from_this(), _backend, _hostFunctions);
 }
 
 inline FakeWasmModule::FakeWasmModule(std::shared_ptr<wasm::IWasmRuntime> runtime,

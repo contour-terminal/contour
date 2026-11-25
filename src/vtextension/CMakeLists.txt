@@ -105,6 +105,7 @@ if(VTEXTENSION_TESTING)
         Engine_test.cpp
         EventQueue_test.cpp
         ExtensionComposition_test.cpp
+        ExtensionError_test.cpp
         ExtensionConsent_test.cpp
         ExtensionGrantStore_test.cpp
         ExtensionHost_test.cpp

@@ -220,7 +220,8 @@ WamrRuntime::~WamrRuntime()
     releaseRuntime();
 }
 
-std::expected<std::shared_ptr<IWasmModule>, ExtensionError> WamrRuntime::load(std::vector<std::byte> bytes)
+std::expected<std::shared_ptr<IWasmModule>, ExtensionError> WamrRuntime::load(ModuleIdentity /*identity*/,
+                                                                              std::vector<std::byte> bytes)
 {
     return loadModule(shared_from_this(), std::move(bytes));
 }

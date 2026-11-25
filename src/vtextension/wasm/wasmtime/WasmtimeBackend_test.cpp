@@ -43,6 +43,7 @@ using vtextension::ExtensionError;
 using vtextension::wasm::FeatureState;
 using vtextension::wasm::IWasmBackend;
 using vtextension::wasm::MemoryGrowthReporting;
+using vtextension::wasm::ModuleIdentity;
 using vtextension::wasm::RuntimeLimits;
 using vtextension::wasm::wasmtime::KindState;
 using vtextension::wasm::wasmtime::makeKindState;
@@ -232,7 +233,7 @@ TEST_CASE("WasmtimeBackend.hostFunctionArities", "[wasmtime]")
         auto const runtime = backend->createRuntime(contract::Limits, hostFunctions);
         REQUIRE(runtime.has_value());
         auto const guard = contract::enterThread(*backend);
-        auto const module = (*runtime)->load(arityModule(arity));
+        auto const module = (*runtime)->load(ModuleIdentity {}, arityModule(arity));
         REQUIRE(module.has_value());
         auto context = contract::RecordingHostContext {};
         auto const instance = contract::instantiate(**module, context);
@@ -288,8 +289,10 @@ TEST_CASE("WasmtimeBackend.callsWideExports", "[wasmtime]")
     auto const backend = WasmtimeTraits::make();
     auto const runtime = contract::createRuntime(*backend);
     auto const guard = contract::enterThread(*backend);
-    auto const module = runtime->load(assemble(
-        std::format(R"((module (func (export "sum") (param{}) (result i32) {})))", parameters, body)));
+    auto const module =
+        runtime->load(ModuleIdentity {},
+                      assemble(std::format(
+                          R"((module (func (export "sum") (param{}) (result i32) {})))", parameters, body)));
     REQUIRE(module.has_value());
     auto context = contract::RecordingHostContext {};
     auto const instance = contract::instantiate(**module, context);
@@ -319,7 +322,7 @@ TEST_CASE("WasmtimeBackend.refusesWhatWasmtimeEnablesByDefault", "[wasmtime]")
         ++enabledByDefault;
         INFO("feature: " << row.name);
         auto const module = std::as_bytes(bytes);
-        auto const loaded = runtime->load({ module.begin(), module.end() });
+        auto const loaded = runtime->load(ModuleIdentity {}, { module.begin(), module.end() });
         REQUIRE_FALSE(loaded.has_value());
         CHECK(loaded.error() == ExtensionError::InvalidComponent);
     }
@@ -401,7 +404,7 @@ TEST_CASE("Wasmtime.idleInstanceNeverWakes", "[wasmtime]")
     auto const backend = WasmtimeTraits::make();
     auto const runtime = contract::createRuntime(*backend);
     auto const guard = contract::enterThread(*backend);
-    auto const module = runtime->load(assemble(CountingModule));
+    auto const module = runtime->load(ModuleIdentity {}, assemble(CountingModule));
     REQUIRE(module.has_value());
     auto context = contract::RecordingHostContext {};
     auto const instance = contract::instantiate(**module, context);
@@ -437,7 +440,7 @@ TEST_CASE("Wasmtime.nestedInterruptStopsTheOuterCall", "[wasmtime]")
     auto const backend = WasmtimeTraits::make();
     auto const runtime = contract::createRuntime(*backend);
     auto const guard = contract::enterThread(*backend);
-    auto const module = runtime->load(assemble(R"((module
+    auto const module = runtime->load(ModuleIdentity {}, assemble(R"((module
   (import "contract:test/host@0" "ping" (func $ping (param i32)))
   (func (export "add") (param i32 i32) (result i32) (i32.add (local.get 0) (local.get 1)))
   (func (export "ping-then-spin") (call $ping (i32.const 0)) (loop (br 0))))
@@ -472,7 +475,7 @@ TEST_CASE("Wasmtime.interruptLeavesSiblingsRunning", "[wasmtime]")
     auto const backend = WasmtimeTraits::make();
     auto const runtime = contract::createRuntime(*backend);
     auto const guard = contract::enterThread(*backend);
-    auto const module = runtime->load(assemble(CountingModule));
+    auto const module = runtime->load(ModuleIdentity {}, assemble(CountingModule));
     REQUIRE(module.has_value());
     auto targetContext = contract::RecordingHostContext {};
     auto const target = contract::instantiate(**module, targetContext);

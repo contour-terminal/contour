@@ -81,7 +81,8 @@ namespace
             case CallFailure::Trap:
             case CallFailure::Interrupted:
             case CallFailure::MemoryGrowthRefused:
-            case CallFailure::HostFailure: return true;
+            case CallFailure::HostFailure:
+            case CallFailure::HostCrashed: return true;
         }
         return false;
     }

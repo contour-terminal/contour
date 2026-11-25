@@ -76,6 +76,17 @@ enum class CallFailure : uint8_t
     MemoryGrowthRefused, ///< The guest trapped after its memory refused to grow past the cap; only
                          ///< from a backend declaring MemoryGrowthReporting::Reported.
     HostFailure,         ///< A host function the guest called failed (IHostContext::callHost).
+    HostCrashed,         ///< The host running the instance died; every later call fails so.
+};
+
+/// Which host a module runs in. Modules with equal keys share one; an empty key gets a host of its own.
+/// In-process backends ignore it.
+struct ModuleIdentity
+{
+    std::string key; ///< What names the host; empty for a host of the module's own.
+
+    /// @return Whether both name the same host.
+    bool operator==(ModuleIdentity const&) const = default;
 };
 
 /// A function's core signature.
@@ -298,11 +309,12 @@ class IWasmRuntime
     virtual ~IWasmRuntime() = default;
 
     /// Loads a module. Runs none of its code.
+    /// @param identity Which host the module runs in; a backend running every module in-process ignores it.
     /// @param bytes The module's bytes; the module keeps them.
     /// @return The module, which keeps the runtime alive; `InvalidComponent` if the bytes are not a
-    ///         valid core module.
+    ///         valid core module, `HostUnavailable` if the host it is to run in cannot be reached.
     [[nodiscard]] virtual std::expected<std::shared_ptr<IWasmModule>, ExtensionError> load(
-        std::vector<std::byte> bytes) = 0;
+        ModuleIdentity identity, std::vector<std::byte> bytes) = 0;
 };
 
 /// A thread's preparation to call into instances, held for as long as the guard lives.

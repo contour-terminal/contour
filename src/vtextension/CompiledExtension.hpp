@@ -36,12 +36,14 @@ class CompiledExtension: public std::enable_shared_from_this<CompiledExtension>
     /// Loads and checks a module.
     /// @param engine The engine the module is loaded on and its instances run on; the module keeps it
     ///        alive.
+    /// @param identity Which host the module runs in, for a runtime that runs modules out of process.
     /// @param bytes The module's bytes; the runtime's module keeps them.
-    /// @return The loaded module; `InvalidComponent` if it is not a valid core module,
+    /// @return The loaded module; `HostUnavailable` if the host it is to run in cannot be reached,
+    ///         `InvalidComponent` if it is not a valid core module,
     ///         `ManifestInvalid` if its manifest does not parse, `WorldMismatch` if it imports
     ///         something the host does not provide or lacks an export the world requires.
     [[nodiscard]] static std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> load(
-        Engine& engine, std::vector<std::byte> bytes);
+        Engine& engine, wasm::ModuleIdentity identity, std::vector<std::byte> bytes);
 
     /// Use load(); public only so that std::make_shared can reach it.
     CompiledExtension(PrivateTag,

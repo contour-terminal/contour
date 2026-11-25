@@ -635,7 +635,7 @@ template <typename Body>
 template <std::size_t N>
 [[nodiscard]] std::shared_ptr<IWasmModule> load(IWasmRuntime& runtime, std::array<uint8_t, N> const& bytes)
 {
-    auto module = runtime.load(vtextension::testing::toModule(bytes));
+    auto module = runtime.load(ModuleIdentity {}, vtextension::testing::toModule(bytes));
     REQUIRE(module.has_value());
     return std::move(*module);
 }
@@ -680,7 +680,7 @@ void loadRejectsNonModule()
 {
     auto const backend = T::make();
     auto const runtime = createRuntime(*backend);
-    auto const loaded = runtime->load({ std::byte { 1 }, std::byte { 2 } });
+    auto const loaded = runtime->load(ModuleIdentity {}, { std::byte { 1 }, std::byte { 2 } });
     REQUIRE_FALSE(loaded.has_value());
     CHECK(loaded.error() == ExtensionError::InvalidComponent);
 }
@@ -702,7 +702,7 @@ void checkFeatureModules(FeatureState state)
         {
             INFO("feature: " << row.name);
             auto const module = std::as_bytes(bytes);
-            auto const loaded = runtime->load({ module.begin(), module.end() });
+            auto const loaded = runtime->load(ModuleIdentity {}, { module.begin(), module.end() });
             if (state == FeatureState::On)
                 CHECK(loaded.has_value());
             else
@@ -929,7 +929,7 @@ void moduleCrossesThreads()
         auto const guard = backend->enterThread();
         if (!guard)
             return std::unexpected(guard.error());
-        return runtime->load(vtextension::testing::toModule(DescribedModule));
+        return runtime->load(ModuleIdentity {}, vtextension::testing::toModule(DescribedModule));
     });
     REQUIRE(loaded.has_value());
     auto const& module = *loaded;
@@ -1295,7 +1295,7 @@ void tableCountIsCapped()
 {
     auto const backend = T::make();
     auto const runtime = createRuntime(*backend);
-    auto const module = runtime->load(vtextension::testing::toModule(TwoTablesModule));
+    auto const module = runtime->load(ModuleIdentity {}, vtextension::testing::toModule(TwoTablesModule));
     REQUIRE_FALSE(module.has_value());
     CHECK(module.error() == ExtensionError::InvalidComponent);
 }
@@ -1307,7 +1307,8 @@ void tableSectionWithTrailingBytesIsRefused()
 {
     auto const backend = T::make();
     auto const runtime = createRuntime(*backend);
-    auto const module = runtime->load(vtextension::testing::toModule(TrailingBytesTableModule));
+    auto const module =
+        runtime->load(ModuleIdentity {}, vtextension::testing::toModule(TrailingBytesTableModule));
     REQUIRE_FALSE(module.has_value());
     CHECK(module.error() == ExtensionError::InvalidComponent);
 }
@@ -1417,8 +1418,9 @@ void instanceCrossesThreads()
 {
     auto const backend = T::make();
     auto const runtime = createRuntime(*backend);
-    auto const loaded = onPreparedThread(
-        *backend, [&] { return runtime->load(vtextension::testing::toModule(DescribedModule)); });
+    auto const loaded = onPreparedThread(*backend, [&] {
+        return runtime->load(ModuleIdentity {}, vtextension::testing::toModule(DescribedModule));
+    });
     REQUIRE(loaded.has_value());
     REQUIRE(loaded->has_value());
     auto const& module = **loaded;

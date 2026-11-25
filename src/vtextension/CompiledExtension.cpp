@@ -120,15 +120,18 @@ CompiledExtension::CompiledExtension(PrivateTag /*unused*/,
 }
 
 std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> CompiledExtension::load(
-    Engine& engine, std::vector<std::byte> bytes)
+    Engine& engine, wasm::ModuleIdentity identity, std::vector<std::byte> bytes)
 {
     // The manifest is read before the runtime sees the bytes, which its loader may rewrite in place.
     auto manifest = parseManifest(bytes);
     auto const startsItself = hasStartFunction(bytes);
 
-    auto module = engine.runtime().load(std::move(bytes));
+    auto module = engine.runtime().load(std::move(identity), std::move(bytes));
+    // A host that cannot be reached says nothing about the module; any other refusal is the module's.
     if (!module)
-        return std::unexpected(ExtensionError::InvalidComponent);
+        return std::unexpected(module.error() == ExtensionError::HostUnavailable
+                                   ? ExtensionError::HostUnavailable
+                                   : ExtensionError::InvalidComponent);
 
     // A module that is one, but whose manifest does not parse, is refused before anything else. One
     // without a manifest declares no commands.

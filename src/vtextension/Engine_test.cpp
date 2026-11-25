@@ -229,7 +229,7 @@ TEST_CASE("Engine.deadline.endToEnd")
     auto limits = ExtensionLimits {};
     limits.callDeadline = std::chrono::milliseconds { 50 };
     auto const engine = createEngine(*backend, limits);
-    auto module = engine->runtime().load(hostOnlyModule());
+    auto module = engine->runtime().load(vtextension::wasm::ModuleIdentity {}, hostOnlyModule());
     REQUIRE(module.has_value());
 
     auto const callUnderDeadline = [&](vtextension::wasm::IWasmInstance& instance, std::string_view name) {

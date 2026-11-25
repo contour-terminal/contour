@@ -146,7 +146,7 @@ class RunningGuest
         auto engine = Engine::create(*_backend, limits);
         REQUIRE(engine.has_value());
         _engine = std::move(*engine);
-        auto compiled = CompiledExtension::load(*_engine, std::move(module));
+        auto compiled = CompiledExtension::load(*_engine, wasm::ModuleIdentity {}, std::move(module));
         REQUIRE(compiled.has_value());
         _compiled = std::move(*compiled);
         restart();

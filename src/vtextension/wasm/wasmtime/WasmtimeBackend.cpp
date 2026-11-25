@@ -450,7 +450,7 @@ WasmtimeRuntime::~WasmtimeRuntime()
 }
 
 std::expected<std::shared_ptr<IWasmModule>, ExtensionError> WasmtimeRuntime::load(
-    std::vector<std::byte> bytes)
+    ModuleIdentity /*identity*/, std::vector<std::byte> bytes)
 {
     return loadModule(shared_from_this(), _engine.get(), bytes);
 }

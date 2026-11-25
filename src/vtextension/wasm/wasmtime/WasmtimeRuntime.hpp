@@ -136,8 +136,9 @@ class WasmtimeRuntime final: public IWasmRuntime, public std::enable_shared_from
     WasmtimeRuntime& operator=(WasmtimeRuntime&&) = delete;
     ~WasmtimeRuntime() override;
 
+    /// Loads @p bytes in this process; the identity is ignored, as every module runs here.
     [[nodiscard]] std::expected<std::shared_ptr<IWasmModule>, ExtensionError> load(
-        std::vector<std::byte> bytes) override;
+        ModuleIdentity identity, std::vector<std::byte> bytes) override;
 
     /// @return The engine modules are compiled and stores are created on.
     [[nodiscard]] wasm_engine_t* engine() const noexcept { return _engine.get(); }

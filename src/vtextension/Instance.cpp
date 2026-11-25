@@ -369,8 +369,14 @@ ExtensionError Instance::guestFailure(wasm::CallFailure failure) const noexcept
     // interface, so a later failure in the same guarded body is `Trapped`, where WAMR driven directly
     // once said `OutOfMemory` -- a documented deviation, in the label only. Refusal inside a host call's
     // allocation does reach here as `OutOfMemory`: the host call records it as its error, which ranks first.
-    if (failure == wasm::CallFailure::MemoryGrowthRefused)
-        return ExtensionError::OutOfMemory;
+    switch (failure)
+    {
+        case wasm::CallFailure::MemoryGrowthRefused: return ExtensionError::OutOfMemory;
+        case wasm::CallFailure::HostCrashed: return ExtensionError::HostUnavailable;
+        case wasm::CallFailure::Trap:
+        case wasm::CallFailure::Interrupted:
+        case wasm::CallFailure::HostFailure: return ExtensionError::Trapped;
+    }
     return ExtensionError::Trapped;
 }
 
