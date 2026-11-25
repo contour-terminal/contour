@@ -115,8 +115,17 @@ enum class ProbeSandbox : uint8_t
     return line->substr(prefix.size());
 }
 
+/// @return The Landlock ABI this kernel has; 0 if none.
+[[nodiscard]] long landlockAbi()
+{
+    constexpr auto Version = 1U;
+    auto const version = ::syscall(SYS_landlock_create_ruleset, nullptr, 0, Version);
+    return version < 0 ? 0 : version;
+}
+
 constexpr auto Killed = ExitStatus { .kind = ExitKind::Signalled, .value = SIGSYS };
 constexpr auto Clean = ExitStatus { .kind = ExitKind::Exited, .value = 0 };
+constexpr auto FirstAbiWithThreadSync = 8;
 
 /// The refusal an op's report says.
 [[nodiscard]] std::string refused(int error)
@@ -137,6 +146,8 @@ TEST_CASE("Sandbox.forbiddenOperationsFailFromAnExecutor", "[vtextension][sandbo
         std::optional<vtextension::wasm::BuildInstrumentation> allowedIn = std::nullopt;
     };
     constexpr auto Expectations = std::array {
+        Expectation { .op = "open-file", .refusedWith = EACCES },
+        Expectation { .op = "open-directory", .refusedWith = EACCES },
         Expectation { .op = "socket-inet", .refusedWith = EPERM },
         Expectation { .op = "socket-unix", .refusedWith = EPERM },
         Expectation { .op = "send-descriptor", .refusedWith = std::nullopt },
@@ -226,6 +237,70 @@ TEST_CASE("Sandbox.permittedOperationsWorkFromAnExecutor", "[vtextension][sandbo
         if (!status)
             CHECK(process::testing::endAndReap(*probe.launcher, *probe.process));
     }
+}
+
+TEST_CASE("Sandbox.landlockCoversEveryThread", "[vtextension][sandbox]")
+{
+    auto probe = launchProbe("none", {}, ProbeSandbox::System);
+    auto const lockdown = readReport(probe.lanes.front());
+    REQUIRE(lockdown.has_value());
+    CHECK(valueOf(*lockdown, "lockdown") == "locked");
+
+    // Every thread runs the filter, and gains no privilege: the main thread, the one started before the
+    // restriction and the one after.
+    auto const tasks = std::filesystem::path { std::format("/proc/{}/task", probe.process->id()) };
+    auto threads = 0;
+    for (auto const& task: std::filesystem::directory_iterator { tasks })
+    {
+        auto status = std::ifstream { task.path() / "status" };
+        auto lines = std::vector<std::string> {};
+        for (auto line = std::string {}; std::getline(status, line);)
+            lines.push_back(line);
+        INFO(task.path().string());
+        CHECK(std::ranges::contains(lines, std::string { "Seccomp:\t2" }));
+        CHECK(std::ranges::contains(lines, std::string { "NoNewPrivs:\t1" }));
+        threads += 1;
+    }
+    CHECK(threads >= 3);
+
+    // Opening a file between the restriction and the lockdown -- Landlock's, not the filter's -- fails from
+    // a thread started after the restriction, and from one started before where the ABI reaches it (TSYNC).
+    auto const abi = landlockAbi();
+    if (abi == 0)
+        SKIP("this kernel has no Landlock");
+    CHECK(valueOf(*lockdown, "after-restrict") == refused(EACCES));
+    if (abi >= FirstAbiWithThreadSync)
+        CHECK(valueOf(*lockdown, "before-restrict") == refused(EACCES));
+    else
+        CHECK(valueOf(*lockdown, "before-restrict") == "ok");
+    CHECK(endProbe(probe) == Clean);
+}
+
+TEST_CASE("Sandbox.locksDownWithoutLandlock", "[vtextension][sandbox]")
+{
+    // Inside a filter that has no Landlock, the host locks down all the same, by its filter alone.
+    auto const run = runProbe("open-file", "no-landlock");
+    CHECK(valueOf(run.lockdown, "lockdown") == "locked");
+    CHECK(valueOf(run.lockdown, "after-restrict") == "ok");
+    REQUIRE(run.op.has_value());
+    // The filter refuses files; an instrumented build's lets them through for its reports and counters, and
+    // leaves them to Landlock, which is missing here.
+    auto const expected =
+        vtextension::wasm::ThisBuildInstrumentation == vtextension::wasm::BuildInstrumentation::None
+            ? refused(EACCES)
+            : std::string { "ok" };
+    CHECK(valueOf(*run.op, "op") == expected);
+    CHECK(run.exit == Clean);
+}
+
+TEST_CASE("Sandbox.locksDownUnderAFlatpakLikeFilter", "[vtextension][sandbox]")
+{
+    auto const run = runProbe("open-file", "flatpak");
+    CHECK(valueOf(run.lockdown, "lockdown") == "locked");
+    REQUIRE(run.op.has_value());
+    CHECK(valueOf(*run.op, "op") == refused(EACCES));
+    CHECK(run.exit == Clean);
+    // Its permitted operations: Sandbox.permittedOperationsWorkFromAnExecutor, under the same filter.
 }
 
 TEST_CASE("Sandbox.threadSyncFailureFailsLockdown", "[vtextension][sandbox]")

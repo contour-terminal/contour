@@ -161,6 +161,7 @@ if(_process_source)
             contour_test_trace)
         if(VTEXTENSION_LINUX_SANDBOX)
             target_sources(vtextension_process_test PRIVATE
+                ../host/linux/Landlock_test.cpp
                 ../host/linux/SeccompFilter_test.cpp
                 ../host/linux/testing/BpfEvaluator.hpp
                 process/SandboxProbe_test.cpp

@@ -17,6 +17,8 @@ set(_platform_sandbox 0)
 if(VTEXTENSION_LINUX_SANDBOX)
     set(_sandbox_source
         Sandbox_linux.cpp
+        linux/Landlock.cpp
+        linux/Landlock.hpp
         linux/SeccompFilter.cpp
         linux/SeccompFilter.hpp
         linux/SystemCallRows.cpp
@@ -48,6 +50,10 @@ add_library(vtextension_host STATIC
 )
 target_link_libraries(vtextension_host PUBLIC vtextension_remote_wire vtextension_memory_provision PRIVATE core::base)
 target_compile_definitions(vtextension_host PUBLIC CONTOUR_PLATFORM_SANDBOX=${_platform_sandbox})
+if(CONTOUR_COVERAGE)
+    # Where a coverage build writes its counters: the one directory its sandboxed host may still write to.
+    target_compile_definitions(vtextension_host PRIVATE CONTOUR_COVERAGE_OBJECT_ROOT="${CMAKE_BINARY_DIR}")
+endif()
 
 # The memory a host hands the engine an instance runs on (MemoryProvision.hpp): a target of its own, so that an
 # engine's backend, which Contour also links to run extensions in its own process, needs it and not the host.
