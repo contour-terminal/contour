@@ -70,12 +70,17 @@ namespace
 
     constexpr auto BuiltinProfiles = std::array {
         BuiltinProfile { .name = DefaultProfileName,
+                         .extends = StandardProfileName,
+                         .mode = PermissionMode::Auto,
+                         .allow = {},
+                         .deny = {} },
+        BuiltinProfile { .name = StandardProfileName,
                          .extends = {},
                          .mode = PermissionMode::AcceptEdits,
                          .allow = StandardAllow,
                          .deny = StandardDeny },
         BuiltinProfile { .name = "trusted",
-                         .extends = DefaultProfileName,
+                         .extends = StandardProfileName,
                          .mode = std::nullopt,
                          .allow = TrustedAllow,
                          .deny = {} },

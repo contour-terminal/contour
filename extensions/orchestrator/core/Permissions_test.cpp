@@ -63,8 +63,37 @@ TEST_CASE("Permissions: modes are spelt as Claude Code spells them", "[orchestra
     CHECK(permissionModeOf("acceptEdits") == PermissionMode::AcceptEdits);
     CHECK(permissionModeOf("default") == PermissionMode::Default);
     CHECK(permissionModeOf("plan") == PermissionMode::Plan);
+    CHECK(permissionModeOf("auto") == PermissionMode::Auto);
     CHECK_FALSE(permissionModeOf(RefusedPermissionMode).has_value());
     CHECK_FALSE(permissionModeOf("AcceptEdits").has_value());
+}
+
+TEST_CASE("Permissions: auto is the default profile, and standard is what it builds on",
+          "[orchestrator][permissions]")
+{
+    CHECK(DefaultProfileName == "auto");
+    CHECK(StandardProfileName == "standard");
+    auto const profiles = resolveProfiles({});
+    REQUIRE(profiles.has_value());
+    REQUIRE(profiles->size() == 4);
+
+    auto const& autoProfile = named(*profiles, "auto");
+    CHECK(autoProfile.mode == PermissionMode::Auto);
+    CHECK(autoProfile.allow == named(*profiles, "standard").allow);
+    CHECK(autoProfile.deny
+          == named(*profiles, "standard").deny); // Review Focus 1: the denies hold under auto
+    CHECK(settingsJsonOf(autoProfile)
+              .starts_with(R"js({"permissions":{"defaultMode":"auto","allow":["Bash(git status:*)",)js"));
+    CHECK(permissionsText("auto", settingsJsonOf(autoProfile))
+          == "auto · 19 allowed · 4 denied · Claude Code decides what needs approval");
+    // A configured `standard` (mode plan) is what `auto` extends: auto keeps mode Auto and gains its rules.
+    auto const configured = std::vector<ProfileDef> {
+        ProfileDef { .name = "standard", .mode = PermissionMode::Plan, .allow = { "Read" } },
+    };
+    auto const withPlan = resolveProfiles(configured);
+    REQUIRE(withPlan.has_value());
+    CHECK(named(*withPlan, "auto").mode == PermissionMode::Auto);
+    CHECK(named(*withPlan, "auto").allow.back() == "Read");
 }
 
 TEST_CASE("Permissions: the built-in profiles resolve", "[orchestrator][permissions]")
@@ -73,7 +102,7 @@ TEST_CASE("Permissions: the built-in profiles resolve", "[orchestrator][permissi
     REQUIRE(profiles.has_value());
     REQUIRE(profiles->size() == builtinProfiles().size());
 
-    auto const& standard = named(*profiles, DefaultProfileName);
+    auto const& standard = named(*profiles, StandardProfileName);
     CHECK(standard.mode == PermissionMode::AcceptEdits);
     CHECK(standard.allow.size() == 19);
     CHECK(standard.deny.size() == 4);
@@ -89,6 +118,8 @@ TEST_CASE("Permissions: the built-in profiles resolve", "[orchestrator][permissi
     CHECK(ask.mode == PermissionMode::Default);
     CHECK(ask.allow.empty());
     CHECK(ask.deny.empty());
+
+    CHECK(named(*profiles, "auto").mode == PermissionMode::Auto);
 }
 
 TEST_CASE("Permissions: a configured profile replaces a built-in one, and others build on it",
@@ -101,7 +132,7 @@ TEST_CASE("Permissions: a configured profile replaces a built-in one, and others
     };
     auto const profiles = resolveProfiles(configured);
     REQUIRE(profiles.has_value());
-    REQUIRE(profiles->size() == 5);
+    REQUIRE(profiles->size() == 6);
     CHECK(named(*profiles, "trusted").allow
           == std::vector<std::string> {
               "Read", "Bash(git push:*)", "Bash(gh pr create:*)", "Bash(gh pr edit:*)" });
@@ -133,11 +164,12 @@ TEST_CASE("Permissions: an unknown or circular extends is refused", "[orchestrat
     CHECK(resolveProfiles(unknown).error()
           == ProfileProblem { .profile = "x", .error = ProfileError::UnknownProfile });
 
-    // A built-in profile replaced so that it builds on one built on it.
+    // A built-in profile replaced so that it builds on one built on it. `auto` is the first built-in, and it
+    // builds on `standard`, so it is the first profile the cycle is found through.
     auto const builtinCycle =
         std::vector<ProfileDef> { ProfileDef { .name = "standard", .extends = "trusted" } };
     CHECK(resolveProfiles(builtinCycle).error()
-          == ProfileProblem { .profile = "standard", .error = ProfileError::ProfileCycle });
+          == ProfileProblem { .profile = "auto", .error = ProfileError::ProfileCycle });
 }
 
 TEST_CASE("Permissions: the settings Claude Code takes", "[orchestrator][permissions]")
@@ -146,7 +178,7 @@ TEST_CASE("Permissions: the settings Claude Code takes", "[orchestrator][permiss
     REQUIRE(profiles.has_value());
     CHECK(settingsJsonOf(named(*profiles, "ask"))
           == R"js({"permissions":{"defaultMode":"default","allow":[],"deny":[]}})js");
-    CHECK(settingsJsonOf(named(*profiles, DefaultProfileName))
+    CHECK(settingsJsonOf(named(*profiles, StandardProfileName))
               .starts_with(
                   R"js({"permissions":{"defaultMode":"acceptEdits","allow":["Bash(git status:*)",)js"));
 }

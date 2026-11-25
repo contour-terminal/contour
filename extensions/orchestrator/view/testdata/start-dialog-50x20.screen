@@ -7,7 +7,7 @@
 │           pipeline fails: test-windows         │
 │ worker     claude 1                            │
 │ model     ‹ sonnet ›                           │
-│ perms     ‹ standard ›                         │
+│ perms     ‹ auto ›                             │
 │ note      none                                 │
 │ ────────────────────────────────────────────── │
 │ checkout  gh pr checkout 2375 --branch         │

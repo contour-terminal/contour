@@ -22,6 +22,7 @@ enum class PermissionMode : uint8_t
     Default = 0, ///< Everything that is not read-only asks.
     AcceptEdits, ///< Edits inside the working directory need no approval.
     Plan,        ///< The agent plans and changes nothing.
+    Auto,        ///< Claude Code decides what needs approval.
 };
 
 /// One PermissionMode: how the configuration and Claude Code spell it, and what it leaves to the agent.
@@ -40,13 +41,18 @@ inline constexpr auto PermissionModeNames = std::array {
         .word = "acceptEdits", .mode = PermissionMode::AcceptEdits, .effect = "edits need no approval" },
     PermissionModeName {
         .word = "plan", .mode = PermissionMode::Plan, .effect = "it plans and changes nothing" },
+    PermissionModeName {
+        .word = "auto", .mode = PermissionMode::Auto, .effect = "Claude Code decides what needs approval" },
 };
 
 /// The mode no profile may name: it would let an agent do anything without asking.
 inline constexpr std::string_view RefusedPermissionMode = "bypassPermissions";
 
 /// The profile a task without its own runs with, unless `permissions` names another.
-inline constexpr std::string_view DefaultProfileName = "standard";
+inline constexpr std::string_view DefaultProfileName = "auto";
+
+/// The built-in profile `trusted` and `auto` build on.
+inline constexpr std::string_view StandardProfileName = "standard";
 
 /// The settings of a run stored before profiles existed: none of the orchestrator's, Claude Code's own alone.
 inline constexpr std::string_view EmptySettingsJson = "{}";
@@ -65,8 +71,9 @@ struct BuiltinProfile
     std::span<std::string_view const> deny;  ///< The rules it denies besides its parent's.
 };
 
-/// @return The profiles every configuration has: `standard`, `trusted` (standard, plus publishing its own
-///         branch) and `ask` (Claude Code's own prompts). A new built-in profile is a new row.
+/// @return The profiles every configuration has: `auto` (Claude Code's auto mode on top of `standard`'s
+///         rules), `standard`, `trusted` (standard, plus publishing its own branch) and `ask` (Claude Code's
+///         own prompts). A new built-in profile is a new row.
 [[nodiscard]] std::span<BuiltinProfile const> builtinProfiles() noexcept;
 
 /// A profile as `permission_profiles` lists it, before resolution.

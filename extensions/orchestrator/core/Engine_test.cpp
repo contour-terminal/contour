@@ -4249,13 +4249,13 @@ TEST_CASE("every agent starts with its permission profile as --settings",
         return std::pair { opened.front(), harness.engine().runs().front() };
     };
 
-    SECTION("by default, standard")
+    SECTION("by default, auto")
     {
         auto const profiles = resolveProfiles({});
         REQUIRE(profiles.has_value());
         auto const [pane, run] = openedWith({});
-        CHECK(run.permissions == "standard");
-        CHECK(run.settings == settingsJsonOf(*findProfile(*profiles, "standard")));
+        CHECK(run.permissions == DefaultProfileName);
+        CHECK(run.settings == settingsJsonOf(*findProfile(*profiles, DefaultProfileName)));
         CHECK(paneArgument(pane, "settings") == run.settings);
     }
     SECTION("the default the configuration names")

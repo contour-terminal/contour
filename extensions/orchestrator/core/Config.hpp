@@ -158,7 +158,7 @@ enum class ConfigProblem : uint8_t
     NotPluginId,            ///< A plugin that is not `<plugin>@<marketplace>`.
     UnknownProfile,         ///< A permission profile no built-in or configured profile is called.
     ProfileCycle,           ///< A permission profile that extends itself, through any number of others.
-    NotPermissionMode,      ///< A permission mode other than `default`, `acceptEdits` or `plan`.
+    NotPermissionMode,      ///< A permission mode other than those PermissionModeNames spells.
     BypassRefused,          ///< The `bypassPermissions` mode, which no profile may name.
     NotPermissionRule,      ///< A permission rule that is not `Tool` or `Tool(specifier)`.
     SettingsTooLarge,       ///< A permission profile too large to pass to `--settings`.

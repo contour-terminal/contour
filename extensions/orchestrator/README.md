@@ -321,7 +321,7 @@ the board, with the item, then its settings:
   a second `Enter`. A worker that takes no permission profile for the task (a Copilot worker) is marked
   `(no profile)`, and Perms is passed over. The worker chosen holds for this run only.
 - **Model**: the task's model, any of `models`.
-- **Perms**: the permission profile, the task's by default.
+- **Perms**: the permission profile: the task's, else the default (`auto`, unless `permissions` names another)
 - **Note**: optional text added to the prompt; it may not start with `-`.
 
 Below them are the checkout and the worktree; `Ctrl+P` also shows the prompt and the agent's exact command line.
@@ -443,15 +443,18 @@ The dashboard tells you where to look without being asked:
 ## Permissions
 
 Every agent starts with a permission profile, which the orchestrator passes to Claude Code as `--settings`, so
-routine work does not wait for someone who may be on another machine. The default, `standard`, lets an agent
-edit its worktree, build, test, use local `git` and read the forge without asking; pushing, opening a pull
-request and anything not listed still ask, and such a run shows as asking. It denies `sudo`, `rm -rf`, a forced
-push and `git reset --hard`. `trusted` adds pushing and opening a pull request, for a task that publishes its
-own fix (`permissions: trusted` on the task). `permissions: ask` gives every decision back to Claude Code.
-`permission_profiles` adds profiles or replaces the built-in ones; `bypassPermissions` is refused, so a full
-bypass is never one line of configuration away.
+routine work does not wait for someone who may be on another machine. The default, `auto`, runs an agent in
+Claude Code's auto mode on top of `standard`'s rules: Claude Code decides what needs approval, and the four denies
+still hold. The denies are `sudo`, `rm -rf`, a forced push and `git reset --hard`. `standard` lets an agent edit
+its worktree, build, test, use local `git` and read the forge without asking; pushing, opening a pull request and
+anything not listed still ask, and such a run shows as asking. `trusted` adds pushing and opening a pull request,
+for a task that publishes its own fix. `ask` gives every decision back to Claude Code. Any of them is selectable
+per task (`permissions:` on the task), as the default (`permissions: standard` at the top level), and in the start
+dialog's Perms. If your Claude Code cannot run an agent in auto mode, it decides how the agent runs; set
+`permissions: standard` to keep today's behaviour. `permission_profiles` adds profiles or replaces the built-in
+ones; `bypassPermissions` is refused, so a full bypass is never one line of configuration away.
 
-A run keeps the profile it started with, and its details name it (`perms  standard · 19 allowed · 4 denied`).
+A run keeps the profile it started with, and its details name it (`perms  auto · 19 allowed · 4 denied`).
 A changed configuration applies to the next run, not to a running one. The orchestrator never writes Claude
 Code's settings files: the profile lives only in the agent's command line, which the consent dialog shows.
 

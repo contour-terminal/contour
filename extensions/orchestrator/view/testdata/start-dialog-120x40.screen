@@ -17,7 +17,7 @@
 │        #│ task      ‹ fix CI ›  pipeline fails: test-windows                                               │         │
 │        P│ worker     claude 1                                                                              │         │
 │ ▸ Everyt│ model     ‹ sonnet ›                                                                             │         │
-│         │ perms     ‹ standard ›                                                                           │         │
+│         │ perms     ‹ auto ›                                                                               │         │
 │         │ note      none                                                                                   │         │
 │         │ ──────────────────────────────────────────────────────────────────────────────────────────────── │         │
 │         │ checkout  gh pr checkout 2375 --branch agent/pr-2375-…                                           │         │

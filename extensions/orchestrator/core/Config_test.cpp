@@ -984,7 +984,8 @@ TEST_CASE("permissions: the default profile, a task's own, and profiles of one's
     CHECK(defaulted->defaultProfile().name == DefaultProfileName);
     CHECK(defaulted->profileFor("fix_ci").name == DefaultProfileName);
     CHECK(defaulted->profileFor("no-such-task").name == DefaultProfileName);
-    CHECK(defaulted->profiles().size() == 3);
+    CHECK(defaulted->profiles().size() == 4);
+    CHECK(defaulted->defaultProfile().name == "auto");
 
     auto const ask = parse(
         Input { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "permissions": "ask",)" });
@@ -996,7 +997,21 @@ TEST_CASE("permissions: the default profile, a task's own, and profiles of one's
                                                      "permissions": "trusted" })" });
     REQUIRE(trusted.has_value());
     CHECK(trusted->profileFor("fix_ci").name == "trusted");
-    CHECK(trusted->profileFor("issue").name == DefaultProfileName);
+    CHECK(trusted->profileFor("issue").name == "auto");
+
+    auto const standard = parse(Input { .find = R"("prompt": "/contour-workflows:fix-ci {url}" })",
+                                        .replace = R"("prompt": "/contour-workflows:fix-ci {url}",
+                                                      "permissions": "standard" })" });
+    REQUIRE(standard.has_value());
+    CHECK(standard->profileFor("fix_ci").name == "standard");
+
+    auto const autoMode = parse(Input {
+        .find = R"("max_agents": 4,)",
+        .replace =
+            R"js("max_agents": 4, "permission_profiles": [ { "name": "careful", "mode": "auto" } ],)js" });
+    REQUIRE(autoMode.has_value());
+    REQUIRE(autoMode->findProfile("careful") != nullptr);
+    CHECK(autoMode->findProfile("careful")->mode == PermissionMode::Auto);
 
     auto const own =
         parse(Input { .find = R"("max_agents": 4,)",
