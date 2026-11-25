@@ -564,7 +564,9 @@ struct ScriptedInstance
     return called ? std::nullopt : std::optional { called.error() };
 }
 
-/// Loads PeekModule through a scripted host that opens with @p hello, driven as @p lockdown asks.
+/// Loads PeekModule through a scripted host that opens with @p hello, driven as @p lockdown asks. The host
+/// answers whatever it is asked, so that a parent that wrongly accepted it gets as far as a loaded module --
+/// and the case fails -- rather than waiting for an answer forever.
 /// @return What the load failed with; nothing if it succeeded.
 [[nodiscard]] std::optional<ExtensionError> loadAfterHello(
     proto::Hello hello,
@@ -573,8 +575,20 @@ struct ScriptedInstance
 {
     auto const connector =
         std::make_shared<ScriptedConnector>([hello](HelperEnds& ends, std::size_t /*connection*/) {
-            if (ends.send(hello))
-                ends.drain();
+            auto const created = [&] {
+                if (!ends.send(hello))
+                    return false;
+                auto const create = ends.receive<proto::CreateRuntime>();
+                return create
+                       && ends.send(
+                           proto::RuntimeCreated { .runtimeId = create->runtimeId, .error = std::nullopt });
+            }();
+            if (created)
+            {
+                if (auto const load = ends.receive<proto::Load>())
+                    std::ignore = ends.sendFrame(frameOf(peekDescription(load->moduleId)));
+            }
+            ends.drain();
         });
     {
         auto const backend = makeBackend(connector, lockdown);
@@ -759,31 +773,13 @@ TEST_CASE("RemoteBackend.unsandboxedIsRefusedUnlessAccepted", "[vtextension][rem
           == ExtensionError::HostUnavailable);
     CHECK(terminations == 1);
 
-    // A host in its sandbox is driven under either requirement: it gets as far as creating the runtime.
+    // The same host is driven once it accepts hosts without a sandbox, and one in its sandbox under either.
+    CHECK(loadAfterHello(HonestHello, terminations, LockdownRequirement::AcceptUnsandboxed) == std::nullopt);
+    CHECK(terminations == 0);
     auto lockedDown = HonestHello;
     lockedDown.lockdown = proto::LockdownState::LockedDown;
-    auto const connector =
-        std::make_shared<ScriptedConnector>([lockedDown](HelperEnds& ends, std::size_t /*connection*/) {
-            auto const created = [&] {
-                if (!ends.send(lockedDown))
-                    return false;
-                auto const create = ends.receive<proto::CreateRuntime>();
-                return create
-                       && ends.send(
-                           proto::RuntimeCreated { .runtimeId = create->runtimeId, .error = std::nullopt });
-            }();
-            if (created)
-            {
-                auto const load = ends.receive<proto::Load>();
-                if (load)
-                    std::ignore = ends.sendFrame(frameOf(peekDescription(load->moduleId)));
-            }
-            ends.drain();
-        });
-    auto const backend = makeBackend(connector, LockdownRequirement::RequireLockedDown);
-    auto const runtime = contract::createRuntime(*backend);
-    CHECK(runtime->load(ModuleIdentity {}, toModule(PeekModule)).has_value());
-    CHECK(connector->terminations() == 0);
+    CHECK(loadAfterHello(lockedDown, terminations, LockdownRequirement::RequireLockedDown) == std::nullopt);
+    CHECK(terminations == 0);
 }
 
 TEST_CASE("RemoteBackend.eachStepIsWatched", "[vtextension][remote]")

@@ -168,19 +168,29 @@ class SupervisorMailbox: public std::enable_shared_from_this<SupervisorMailbox>
         Open,   ///< The supervisor takes them.
     };
 
+    /// What became of a posted command.
+    enum class Delivery : uint8_t
+    {
+        Dropped, ///< The mailbox closed: the supervisor is gone.
+        Queued,  ///< The supervisor will process it.
+    };
+
     /// Queues @p command and wakes the supervisor.
     /// @return Whether it was queued; not once the mailbox closed.
-    bool post(Command command) noexcept;
+    [[nodiscard]] Delivery post(Command command) noexcept;
 
     /// @return Every command queued, in order; the queue empty.
     [[nodiscard]] std::vector<Command> take() noexcept;
 
-    /// Blocks until a command is queued, or @p timeout passed. For a supervisor that cannot wait on its set.
-    void waitForCommands(std::chrono::milliseconds timeout);
+    /// Blocks until a command is queued, or @p timeout passed; with no timeout, until a command is queued.
+    /// For a supervisor that cannot wait on its set.
+    void waitForCommands(std::optional<std::chrono::milliseconds> timeout);
 
     /// Queues the last command, and closes. @param stop The Stop command.
     void close(Command stop) noexcept;
 
+    /// Refreshes the supervisor's clock first, which an idle supervisor does not: a caching clock would
+    /// otherwise tell the time of its last wake-up.
     /// @return The time by the supervisor's clock; nothing once the mailbox closed, when the clock may be
     /// gone.
     [[nodiscard]] std::optional<core::SteadyTimePoint> now() const noexcept;

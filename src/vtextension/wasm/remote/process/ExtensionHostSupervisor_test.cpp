@@ -6,14 +6,19 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -327,7 +332,14 @@ TEST_CASE("Supervisor.stopIsBounded", "[vtextension]")
         rig.clock.advance(ShutdownReapBudget);
         helpers.front().nudge();
     }
-    REQUIRE(stopping.wait_for(1s) == std::future_status::ready);
+    if (stopping.wait_for(1s) != std::future_status::ready)
+    {
+        // The future's destructor would wait for the stop forever, and the rig cannot go while the stop runs
+        // on it: the run ends here, rather than hang.
+        FAIL_CHECK("the supervisor did not stop within its budget");
+        std::fputs("Supervisor.stopIsBounded: the supervisor did not stop within its budget\n", stderr);
+        std::abort();
+    }
     CHECK(rig.fake->kills().size() == 3);
 }
 
@@ -369,6 +381,114 @@ TEST_CASE("Supervisor.failedWaitStopsEveryHelper", "[vtextension]")
     CHECK(rig.supervisor->counters().uncleanExits == 0);
     CHECK(rig.supervisor->mailbox()->launch(fakeSpec()).error() == LaunchError::Stopped);
     CHECK(rig.fake->launches().size() == 1);
+}
+
+TEST_CASE("Supervisor.refusedWatchIsPolledAndReaped", "[vtextension]")
+{
+    // A helper the set cannot wait for is killed at once, and looked for until it is gone.
+    auto rig = Rig {};
+    rig.fake->survivesKill(0);
+    rig.fake->failWatches(LaunchError::Unsupported);
+    CHECK(rig.supervisor->mailbox()->launch(fakeSpec()).error() == LaunchError::Unsupported);
+    rig.settle();
+    CHECK(rig.fake->kills() == std::vector<std::size_t> { 0 });
+    CHECK(killsFor(*rig.supervisor, KillReason::Shutdown) == 1);
+    CHECK(rig.supervisor->counters().launches == 1);
+    CHECK(rig.supervisor->liveProcesses() == 1);
+    CHECK(rig.fake->lastDeadline() == rig.clock.now() + 100ms);
+
+    // It ends; no wait reports it, the next poll does.
+    rig.fake->exit(0, ExitStatus { .kind = ExitKind::Signalled, .value = 9 });
+    rig.advance(100ms);
+    CHECK(rig.supervisor->liveProcesses() == 0);
+    CHECK(rig.supervisor->counters().reaped == 1);
+    CHECK(rig.supervisor->counters().uncleanExits == 0);
+    rig.settle();
+    CHECK(rig.fake->lastDeadline() == std::nullopt);
+}
+
+TEST_CASE("Supervisor.killIsCountedOnce", "[vtextension]")
+{
+    // A helper killed for a timeout is told to die again by its holder (markDead() terminates): one kill.
+    auto rig = Rig {};
+    auto helper = rig.launch();
+    rig.fake->survivesKill(0);
+    auto const watch = helper.watch(HostStep::Load, 10ms);
+    rig.advance(10ms);
+    helper.kill();
+    rig.supervisor->sync();
+    CHECK(rig.fake->kills() == std::vector<std::size_t> { 0 });
+    auto const kills = rig.supervisor->counters().kills;
+    CHECK(kills.at(std::to_underlying(KillReason::StepTimeout)) == 1);
+    CHECK(kills.at(std::to_underlying(KillReason::Requested)) == 0);
+    rig.fake->exit(0, ExitStatus { .kind = ExitKind::Signalled, .value = 9 });
+    rig.supervisor->sync();
+}
+
+namespace
+{
+/// A manual clock that records the threads it is refreshed on: a caching clock is stale until refreshed.
+class RefreshRecordingClock final: public core::IClock
+{
+  public:
+    [[nodiscard]] core::SteadyTimePoint now() const noexcept override { return _clock.now(); }
+
+    void refresh() noexcept override
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        _refreshes.push_back(std::this_thread::get_id());
+    }
+
+    /// @return The threads it was refreshed on, in order.
+    [[nodiscard]] std::vector<std::thread::id> refreshes() const
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        return _refreshes;
+    }
+
+  private:
+    core::ManualClock _clock;
+    mutable std::mutex _mutex;
+    std::vector<std::thread::id> _refreshes;
+};
+
+/// @return A supervisor over @p fake, timed by @p clock, which must start.
+[[nodiscard]] std::unique_ptr<ExtensionHostSupervisor> startOver(std::shared_ptr<FakeProcessLauncher> fake,
+                                                                 core::IClock& clock)
+{
+    auto started = ExtensionHostSupervisor::start(
+        SupervisorConfig { .launcher = std::move(fake), .clock = &clock, .teardownGrace = 0ms });
+    REQUIRE(started.has_value());
+    return std::move(*started);
+}
+} // namespace
+
+TEST_CASE("Supervisor.watchRefreshesTheClock", "[vtextension]")
+{
+    // An idle supervisor refreshes nothing: a watch's start is the time of the watch, not of the last
+    // wake-up.
+    auto clock = RefreshRecordingClock {};
+    auto const fake = std::make_shared<FakeProcessLauncher>();
+    auto const supervisor = startOver(fake, clock);
+    auto launched = supervisor->mailbox()->launch(fakeSpec());
+    REQUIRE(launched.has_value());
+    auto const watch = launched->watch(HostStep::Load, 10ms);
+    CHECK(std::ranges::contains(clock.refreshes(), std::this_thread::get_id()));
+}
+
+TEST_CASE("Supervisor.failedWaitIdlesOnceNothingIsLeft", "[vtextension]")
+{
+    // With its set broken, the supervisor polls while helpers or timers are left, and only waits for
+    // commands once none is: it then stops refreshing its clock.
+    auto clock = RefreshRecordingClock {};
+    auto const fake = std::make_shared<FakeProcessLauncher>();
+    auto const supervisor = startOver(fake, clock);
+    fake->failWaits(LaunchError::Io);
+    supervisor->sync();
+    supervisor->sync();
+    auto const before = clock.refreshes().size();
+    std::this_thread::sleep_for(350ms); // three polls, were it polling
+    CHECK(clock.refreshes().size() == before);
 }
 
 TEST_CASE("Supervisor.moveHandsTheHelperOn", "[vtextension]")

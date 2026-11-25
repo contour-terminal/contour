@@ -162,13 +162,14 @@ SupervisedHelper::~SupervisedHelper()
 void SupervisedHelper::release() noexcept
 {
     if (_key != 0)
-        _mailbox->post(SupervisorMailbox::Command { DropCommand { .helper = std::exchange(_key, 0) } });
+        std::ignore =
+            _mailbox->post(SupervisorMailbox::Command { DropCommand { .helper = std::exchange(_key, 0) } });
 }
 
 void SupervisedHelper::kill() noexcept
 {
     if (_key != 0)
-        _mailbox->post(SupervisorMailbox::Command { KillCommand { .helper = _key } });
+        std::ignore = _mailbox->post(SupervisorMailbox::Command { KillCommand { .helper = _key } });
 }
 
 StepWatch SupervisedHelper::watch(HostStep step, std::chrono::milliseconds budget)
@@ -180,18 +181,19 @@ StepWatch SupervisedHelper::watch(HostStep step, std::chrono::milliseconds budge
     if (!start)
         return StepWatch {};
     auto const timer = TimerKey { .helper = _key, .serial = _mailbox->nextSerial() };
-    if (!_mailbox->post(SupervisorMailbox::Command {
-            WatchCommand { .timer = timer, .step = step, .start = *start, .budget = budget } }))
+    if (_mailbox->post(SupervisorMailbox::Command {
+            WatchCommand { .timer = timer, .step = step, .start = *start, .budget = budget } })
+        == SupervisorMailbox::Delivery::Dropped)
         return StepWatch {};
     return StepWatch { [mailbox = _mailbox, timer] {
-        mailbox->post(SupervisorMailbox::Command { DisarmCommand { .timer = timer } });
+        std::ignore = mailbox->post(SupervisorMailbox::Command { DisarmCommand { .timer = timer } });
     } };
 }
 
 void SupervisedHelper::attach(HostAttachment attachment)
 {
     if (_key != 0)
-        _mailbox->post(SupervisorMailbox::Command {
+        std::ignore = _mailbox->post(SupervisorMailbox::Command {
             AttachCommand { .helper = _key, .attachment = std::move(attachment) } });
 }
 
@@ -219,7 +221,8 @@ std::expected<SupervisedHelper, LaunchError> SupervisorMailbox::launch(LaunchSpe
     Require(std::this_thread::get_id() != _supervisorThread);
     auto launched = std::promise<LaunchResult> {};
     auto result = launched.get_future();
-    if (!post(Command { LaunchCommand { .spec = std::move(spec), .launched = std::move(launched) } }))
+    if (post(Command { LaunchCommand { .spec = std::move(spec), .launched = std::move(launched) } })
+        == Delivery::Dropped)
         return std::unexpected(LaunchError::Stopped);
     auto const outcome = [&]() -> LaunchResult {
         try
@@ -237,17 +240,17 @@ std::expected<SupervisedHelper, LaunchError> SupervisorMailbox::launch(LaunchSpe
     });
 }
 
-bool SupervisorMailbox::post(Command command) noexcept
+SupervisorMailbox::Delivery SupervisorMailbox::post(Command command) noexcept
 {
     {
         auto const lock = std::scoped_lock { _mutex };
         if (_state == MailboxState::Closed)
-            return false;
+            return Delivery::Dropped;
         _commands.push_back(std::move(command));
     }
     _posted.notify_one();
     wake();
-    return true;
+    return Delivery::Queued;
 }
 
 std::vector<SupervisorMailbox::Command> SupervisorMailbox::take() noexcept
@@ -256,10 +259,16 @@ std::vector<SupervisorMailbox::Command> SupervisorMailbox::take() noexcept
     return std::exchange(_commands, {});
 }
 
-void SupervisorMailbox::waitForCommands(std::chrono::milliseconds timeout)
+void SupervisorMailbox::waitForCommands(std::optional<std::chrono::milliseconds> timeout)
 {
     auto lock = std::unique_lock { _mutex };
-    std::ignore = _posted.wait_for(lock, timeout, [this] { return !_commands.empty(); });
+    auto const posted = [this] {
+        return !_commands.empty();
+    };
+    if (timeout)
+        std::ignore = _posted.wait_for(lock, *timeout, posted);
+    else
+        _posted.wait(lock, posted);
 }
 
 void SupervisorMailbox::close(Command stop) noexcept
@@ -278,6 +287,7 @@ std::optional<core::SteadyTimePoint> SupervisorMailbox::now() const noexcept
     auto const lock = std::scoped_lock { _mutex };
     if (_state == MailboxState::Closed)
         return std::nullopt;
+    _clock->refresh();
     return _clock->now();
 }
 
@@ -367,6 +377,13 @@ class SupervisorLoop
         Working, ///< It waits on the set.
     };
 
+    /// How the loop learns of a helper's end.
+    enum class Watching : uint8_t
+    {
+        Polled,  ///< The set refused it: the loop looks every DegradedPollPeriod, by the injected clock.
+        Watched, ///< The set reports it.
+    };
+
     /// One helper.
     struct Supervised
     {
@@ -375,6 +392,7 @@ class SupervisorLoop
         DeathNotice notice = DeathNotice::Alive;
         Holding holding = Holding::Held;
         KillState killed = KillState::None;
+        Watching watching = Watching::Watched;
         std::map<uint32_t, HostStep> steps; ///< The steps its armed watches watch, by serial.
     };
 
@@ -393,6 +411,9 @@ class SupervisorLoop
 
     /// Blocks until the set reports an end, a command wakes it, or the next timer is due.
     void waitForWork();
+
+    /// @return When the loop must look again: the next timer, or the next poll of a helper the set refused.
+    [[nodiscard]] std::optional<core::SteadyTimePoint> nextWake() const;
 
     /// Kills every helper and reaps what ends within the budget, after `teardownGrace` for them to exit.
     void stop();
@@ -486,21 +507,25 @@ void SupervisorLoop::launch(LaunchCommand& command)
         return;
     }
     auto const key = _nextKey++;
+    ++_counters.launches;
     if (auto const watched = _waitSet.watch(key, **process); !watched)
     {
-        // A helper nobody can wait for does not run: killed, and reaped when the loop next looks.
-        (*process)->kill();
-        _helpers.emplace(key,
-                         Supervised { .process = std::move(*process),
-                                      .onDeath = nullptr,
-                                      .notice = DeathNotice::Given,
-                                      .holding = Holding::Dropped,
-                                      .killed = KillState::Sent,
-                                      .steps = {} });
+        // A helper the set cannot wait for does not run: killed as the supervisor kills what it cannot wait
+        // for, and reaped by polling, as the loop looks every DegradedPollPeriod until it is gone.
+        auto& refused = _helpers
+                            .emplace(key,
+                                     Supervised { .process = std::move(*process),
+                                                  .onDeath = nullptr,
+                                                  .notice = DeathNotice::Given,
+                                                  .holding = Holding::Dropped,
+                                                  .killed = KillState::None,
+                                                  .watching = Watching::Polled,
+                                                  .steps = {} })
+                            .first->second;
+        killProcess(refused, KillReason::Shutdown);
         command.launched.set_value(std::unexpected(watched.error()));
         return;
     }
-    ++_counters.launches;
     auto const processId = (*process)->id();
     _helpers.emplace(key,
                      Supervised { .process = std::move(*process),
@@ -508,6 +533,7 @@ void SupervisorLoop::launch(LaunchCommand& command)
                                   .notice = DeathNotice::Alive,
                                   .holding = Holding::Held,
                                   .killed = KillState::None,
+                                  .watching = Watching::Watched,
                                   .steps = {} });
     command.launched.set_value(LaunchedProcess { .key = key, .processId = processId });
 }
@@ -635,10 +661,12 @@ void SupervisorLoop::waitForWork()
 {
     if (_wait == WaitState::Broken)
     {
-        _mailbox.waitForCommands(DegradedPollPeriod);
+        // Nothing left to poll for: only a command can change anything.
+        auto const isIdle = liveCount() == 0 && _timers.armed() == 0;
+        _mailbox.waitForCommands(isIdle ? std::nullopt : std::optional { DegradedPollPeriod });
         return;
     }
-    if (_waitSet.wait(_timers.nextDeadline()))
+    if (_waitSet.wait(nextWake()))
         return;
     // Waiting again would fail again at once. Without the set no end is noticed in time, and no timeout fires
     // in time: every helper is stopped, none is started any more, and the loop polls for the ends and for its
@@ -684,9 +712,24 @@ void SupervisorLoop::reapUntil(core::SteadyTimePoint deadline)
     }
 }
 
+std::optional<core::SteadyTimePoint> SupervisorLoop::nextWake() const
+{
+    auto wake = _timers.nextDeadline();
+    auto const isPolled = [](auto const& entry) {
+        return entry.second.process && entry.second.watching == Watching::Polled;
+    };
+    if (std::ranges::any_of(_helpers, isPolled))
+    {
+        auto const poll = _clock.now() + DegradedPollPeriod;
+        wake = wake ? std::min(*wake, poll) : poll;
+    }
+    return wake;
+}
+
 void SupervisorLoop::killProcess(Supervised& helper, KillReason reason) noexcept
 {
-    if (!helper.process)
+    // Killed once: a second kill would count a second reason for the same end.
+    if (!helper.process || helper.killed == KillState::Sent)
         return;
     helper.process->kill();
     helper.killed = KillState::Sent;
@@ -758,7 +801,8 @@ void ExtensionHostSupervisor::sync()
 {
     auto done = std::promise<void> {};
     auto processed = done.get_future();
-    if (_mailbox->post(SupervisorMailbox::Command { SyncCommand { .done = std::move(done) } }))
+    if (_mailbox->post(SupervisorMailbox::Command { SyncCommand { .done = std::move(done) } })
+        == SupervisorMailbox::Delivery::Queued)
         processed.wait();
 }
 
