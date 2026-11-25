@@ -1510,11 +1510,26 @@ TEST_CASE("RemoteBackend.releaseQueuedWhileARequestEndsIsSent", "[vtextension][r
     auto context = contract::RecordingHostContext {};
     auto older = contract::instantiate(*module, context);
 
+    // The hook runs from the watch's destructor, where an assertion that throws would terminate: it only
+    // records how the drop went, and the case checks that once the request returned. A drop that never
+    // returns ends the run, rather than hang in the future's destructor.
+    enum class Drop : uint8_t
+    {
+        NotRun,
+        Returned,
+    };
+    auto drop = Drop::NotRun;
     connector->onNextDisarm([&] {
         auto dropping = std::async(std::launch::async, [&] { older.reset(); });
-        readyWithin(dropping, std::chrono::seconds { 5 }, "dropping an instance waited for the channel");
+        if (dropping.wait_for(std::chrono::seconds { 5 }) != std::future_status::ready)
+        {
+            std::fputs("dropping an instance waited for the channel\n", stderr);
+            std::abort();
+        }
+        drop = Drop::Returned;
     });
     auto const newer = contract::instantiate(*module, context);
+    CHECK(drop == Drop::Returned);
 
     // Recorded: Load, Instantiate, Instantiate, and the release, with nothing more asked of the host.
     auto const pdus = transcript.awaitAtLeast(4);

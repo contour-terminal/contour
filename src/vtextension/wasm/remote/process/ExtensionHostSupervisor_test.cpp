@@ -417,7 +417,10 @@ TEST_CASE("Supervisor.failedWaitStopsEveryHelper", "[vtextension]")
     helper.attach(rig.countingDeaths());
     rig.supervisor->sync();
     rig.fake->failWaits(LaunchError::Io);
-    rig.supervisor->sync();
+    // A failed wait is no command, so one sync() need not come after it: a wake the last sync() left
+    // pending can start one more turn, which takes the next sync() before any wait failed. The second
+    // sync() is taken only by the turn after that wait, by then failed.
+    rig.settle();
     CHECK(killsFor(*rig.supervisor, KillReason::Shutdown) == 1);
     CHECK(rig.deaths->load() == 1);
     CHECK(rig.supervisor->counters().reaped == 1);

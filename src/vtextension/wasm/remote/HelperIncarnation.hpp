@@ -123,10 +123,9 @@ class HelperIncarnation
     /// Tells the host a module or an instance is gone, without ever blocking: the release is queued, and
     /// sent at once only if no other thread holds the control channel and the channel takes it now; if one
     /// does, that thread sends it once it lets the channel go. What is queued goes out before and after the
-    /// next request's exchange, in order. Does nothing once the
-    /// incarnation is dead; a host that lets more than MaxPendingReleases pile up kills it. Queuing
-    /// allocates: running out of memory there ends the process (std::terminate), as the destructors calling
-    /// this cannot report it.
+    /// next request's exchange, in order. Does nothing once the incarnation is dead; a host that lets more
+    /// than MaxPendingReleases pile up kills it. Queuing allocates: running out of memory there ends the
+    /// process (std::terminate), as the destructors calling this cannot report it.
     /// @param release What is gone.
     void release(proto::Release release) noexcept;
 
