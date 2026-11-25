@@ -12,6 +12,7 @@
 #include <core/FNV.hpp>
 
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -109,6 +110,14 @@ class ImageRenderer: public Renderable, public TextRendererEvents
     /// Forgets the textures the backend failed to create, freeing what they charged to the budget.
     void dropFailedTextures();
 
+    /// Releases the textures of images that have died.
+    ///
+    /// A discard is the prompt path, but not every death reaches it: a session forwards discards only to
+    /// the display it is attached to, so an image that dies in a background tab -- or with a tab closed
+    /// while another was on screen -- sends none, and its texture would sit charged to the budget until
+    /// LRU pressure happened to reach it.
+    void releaseOrphanedTextures();
+
     /// Paints the part of a cell the image does not reach, in the image's gap colour.
     ///
     /// @param pos       the cell's top-left, in item pixels.
@@ -145,6 +154,9 @@ class ImageRenderer: public Renderable, public TextRendererEvents
         atlas::ImageTextureId id;
         size_t bytes = 0;           ///< GPU bytes the texture occupies.
         uint64_t lastUsedFrame = 0; ///< The frame this was last drawn in; the LRU key.
+        /// The image the texture was uploaded from, watched rather than held: once it dies the texture
+        /// names nothing that can be drawn again, discard or no discard. See releaseOrphanedTextures().
+        std::weak_ptr<vtbackend::Image const> image;
     };
 
     /// Hashes an ImageKey by packing its pool and id into one 64-bit value.

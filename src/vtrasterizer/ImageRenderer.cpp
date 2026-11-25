@@ -101,7 +101,10 @@ std::optional<atlas::ImageTextureId> ImageRenderer::textureFor(
     // RGBA8 whatever the protocol sent (widenToRgba() below makes sure of it), with its mip chain.
     auto const bytes = imageTextureBytes(image.size());
     _imageTextures.emplace(imageKey,
-                           ImageTextureEntry { .id = id, .bytes = bytes, .lastUsedFrame = _frameCounter });
+                           ImageTextureEntry { .id = id,
+                                               .bytes = bytes,
+                                               .lastUsedFrame = _frameCounter,
+                                               .image = rasterizedImage.imagePointer() });
     _residentBytes += bytes;
 
     // An already-RGBA pixmap uploads straight out of the Image's own buffer, holding the image alive
@@ -141,6 +144,23 @@ void ImageRenderer::dropFailedTextures()
         _residentBytes -= entry->second.bytes;
         _imageTextures.erase(entry);
     }
+}
+
+void ImageRenderer::releaseOrphanedTextures()
+{
+    if (!renderTargetAvailable())
+        return;
+
+    // An image that shares a key with a dead one -- a status-line copy of a pool image -- simply uploads
+    // again on its next sight, exactly as it would after a discard of the original.
+    std::erase_if(_imageTextures, [this](auto const& kv) {
+        auto const& entry = kv.second;
+        if (!entry.image.expired())
+            return false;
+        imageScheduler().destroyImageTexture(atlas::DestroyImageTexture { .id = entry.id });
+        _residentBytes -= entry.bytes;
+        return true;
+    });
 }
 
 void ImageRenderer::evictToBudget()
@@ -283,6 +303,7 @@ void ImageRenderer::beginFrame()
     ++_frameCounter;
 
     dropFailedTextures();
+    releaseOrphanedTextures();
 }
 
 void ImageRenderer::beginPass()

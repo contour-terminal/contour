@@ -734,3 +734,45 @@ TEST_CASE("ImageRenderer.keeps images of different pools apart under a shared id
     REQUIRE(backend.quadCommands.size() == 3);
     CHECK(backend.quadCommands[2].texture == secondTexture);
 }
+
+TEST_CASE("ImageRenderer.releases the texture of an image that died without a discard", "[image][renderer]")
+{
+    // A session forwards discards only to the display it is attached to. An image that dies in a
+    // background tab -- or with its tab closed while another is on screen -- sends none, so the
+    // renderer must notice the death itself rather than keep the texture until LRU pressure reaches it.
+    auto renderTarget = MockRenderTarget {};
+    auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
+    auto imageRenderer = ImageRenderer { testGridMetrics, CellSize };
+    imageRenderer.setRenderTarget(renderTarget, directMappingAllocator);
+
+    auto& backend = renderTarget.getMockImageBackend();
+    auto survivor = makeImage(
+        GridSize { .lines = LineCount(1), .columns = ColumnCount(1) }, ImageLayer::Replace, ImageId(1));
+    {
+        auto const doomed = makeImage(
+            GridSize { .lines = LineCount(1), .columns = ColumnCount(1) }, ImageLayer::Replace, ImageId(2));
+        renderRow(imageRenderer, doomed, 1);
+        renderRow(imageRenderer, survivor, 1);
+        REQUIRE(backend.createCommands.size() == 2);
+
+        // A real backend lets go of each upload's owner once it has executed the command (RhiRenderer
+        // drops its queued creates with the frame); the mock keeps the commands for inspection, so drop
+        // the owners here or they would keep the image alive.
+        for (auto& create: backend.createCommands)
+            create.owner.reset();
+    }
+    auto const doomedTexture = backend.createCommands[0].id;
+
+    // The death itself issues nothing: the renderer learns of it when it next opens a frame.
+    CHECK(backend.destroyCommands.empty());
+
+    // The next frame finds it dead and releases exactly its texture.
+    renderRow(imageRenderer, survivor, 1);
+    REQUIRE(backend.destroyCommands.size() == 1);
+    CHECK(backend.destroyCommands.front().id == doomedTexture);
+    CHECK(backend.createCommands.size() == 2); // the survivor is still resident
+
+    // Once released, it is not released again.
+    renderRow(imageRenderer, survivor, 1);
+    CHECK(backend.destroyCommands.size() == 1);
+}
