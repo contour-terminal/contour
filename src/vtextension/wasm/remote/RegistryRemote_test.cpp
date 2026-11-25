@@ -33,6 +33,7 @@
 #include <vtextension/wasm/WasmRuntime.hpp>
 #include <vtextension/wasm/host/HostServer.hpp>
 #include <vtextension/wasm/host/InProcessHost.hpp>
+#include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/testing/DecoratedEngine.hpp>
 #include <vtextension/wasm/testing/HostedEngine.hpp>
 
@@ -156,14 +157,16 @@ class DyingOnRead final: public wasm::testing::ForwardingInstance
     std::shared_ptr<DeathOnRead> _death;
 };
 
-/// @return A connector whose hosts' instances die on the read @p death arms.
+/// @return A connector whose hosts' instances die on the read @p death arms. They copy memory: a read of
+///         shared memory never reaches the host.
 [[nodiscard]] std::shared_ptr<InProcessHostConnector> makeDyingConnector(
     std::shared_ptr<DeathOnRead> const& death)
 {
     return std::make_shared<InProcessHostConnector>(
         [death] {
             return std::make_unique<wasm::testing::DecoratedEngine>(
-                wasm::testing::makeHostedEngine(), [death](std::unique_ptr<wasm::IWasmInstance> instance) {
+                wasm::testing::makeHostedEngine(wasm::remote::proto::MemoryMode::Copy),
+                [death](std::unique_ptr<wasm::IWasmInstance> instance) {
                     return std::unique_ptr<wasm::IWasmInstance> { std::make_unique<DyingOnRead>(
                         std::move(instance), death) };
                 });

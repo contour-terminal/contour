@@ -62,18 +62,14 @@ namespace
         return HostRefusal::LockdownFailed;
     }
 
-    /// @return Why a host that said @p hello is not driven; nothing if it is: it speaks this protocol, is
-    ///         confined as @p requirement asks, and copies memory, which is how this parent reaches it.
+    /// @return Why a host that said @p hello is not driven; nothing if it is: it speaks this protocol, and is
+    ///         confined as @p requirement asks. Whether it copies memory or shares it, both are driven.
     [[nodiscard]] std::optional<HostRefusal> refusalOf(proto::Hello const& hello,
                                                        LockdownRequirement requirement) noexcept
     {
         if (hello.version != proto::ProtocolVersion)
             return HostRefusal::ProtocolVersion;
-        if (auto const refusal = lockdownRefusalOf(hello.lockdown, requirement))
-            return refusal;
-        if (hello.memoryMode != proto::MemoryMode::Copy)
-            return HostRefusal::MemoryMode;
-        return std::nullopt;
+        return lockdownRefusalOf(hello.lockdown, requirement);
     }
 
     /// @return The parent's end of @p channel as a stream of @p kind.
@@ -120,14 +116,16 @@ std::expected<std::shared_ptr<HelperIncarnation>, ExtensionError> HelperIncarnat
         auto const hello = incarnation->_control.receive();
         if (!hello || !std::holds_alternative<proto::Hello>(*hello))
             return false;
-        if (auto const refusal = refusalOf(std::get<proto::Hello>(*hello), policy.lockdown))
+        auto const& said = std::get<proto::Hello>(*hello);
+        if (auto const refusal = refusalOf(said, policy.lockdown))
         {
             refusals.refused(*refusal);
             return false;
         }
+        incarnation->_memoryMode = said.memoryMode;
         auto request = runtime;
         request.runtimeId = RuntimeId;
-        auto const reply = incarnation->exchange(request);
+        auto const reply = incarnation->exchange(request, {}, nullptr);
         return reply
                && *reply
                       == proto::Pdu { proto::RuntimeCreated { .runtimeId = RuntimeId,
@@ -143,6 +141,7 @@ std::expected<std::shared_ptr<HelperIncarnation>, ExtensionError> HelperIncarnat
 
 HelperIncarnation::HelperIncarnation(HostConnection connection, HostTimeouts timeouts):
     _timeouts { timeouts },
+    _objectBytesCap { connection.objectBytesCap },
     _control { parentEnd(std::move(connection.control), proto::ChannelKind::Control) },
     _handle { std::move(connection.handle) }
 {
@@ -155,6 +154,22 @@ HelperIncarnation::~HelperIncarnation() = default;
 
 std::expected<proto::Pdu, StreamError> HelperIncarnation::request(proto::Pdu const& pdu, HostStep step)
 {
+    return requestHolding(pdu, step, {}, nullptr);
+}
+
+std::expected<proto::Pdu, StreamError> HelperIncarnation::request(proto::Pdu const& pdu,
+                                                                  HostStep step,
+                                                                  transport::HandleGrant const& grant,
+                                                                  GrowAnswer const& answer)
+{
+    return requestHolding(pdu, step, grant, &answer);
+}
+
+std::expected<proto::Pdu, StreamError> HelperIncarnation::requestHolding(proto::Pdu const& pdu,
+                                                                         HostStep step,
+                                                                         transport::HandleGrant const& grant,
+                                                                         GrowAnswer const* answer)
+{
     auto reply = [&]() -> std::expected<proto::Pdu, StreamError> {
         auto const lock = std::scoped_lock { _controlMutex };
         // Armed only once the channel is this request's: waiting for another's is not the host's time.
@@ -165,7 +180,7 @@ std::expected<proto::Pdu, StreamError> HelperIncarnation::request(proto::Pdu con
         // the next only after the host heard of it -- and what was released meanwhile goes right after.
         if (!sendReleases())
             return std::unexpected(StreamError::Closed);
-        auto exchanged = exchange(pdu);
+        auto exchanged = exchange(pdu, grant, answer);
         if (exchanged)
             std::ignore = sendReleases();
         return exchanged;
@@ -176,11 +191,13 @@ std::expected<proto::Pdu, StreamError> HelperIncarnation::request(proto::Pdu con
     return reply;
 }
 
-std::expected<proto::Pdu, StreamError> HelperIncarnation::exchange(proto::Pdu const& pdu)
+std::expected<proto::Pdu, StreamError> HelperIncarnation::exchange(proto::Pdu const& pdu,
+                                                                   transport::HandleGrant const& grant,
+                                                                   GrowAnswer const* answer)
 {
     if (!isAlive())
         return std::unexpected(StreamError::Closed);
-    if (auto const sent = _control.send(pdu); !sent)
+    if (auto const sent = _control.send(pdu, grant); !sent)
     {
         // A PDU over its cap was not sent, and the stream is intact: the request fails, the host lives on.
         if (sent.error() != StreamError::OverCap)
@@ -188,9 +205,48 @@ std::expected<proto::Pdu, StreamError> HelperIncarnation::exchange(proto::Pdu co
         return std::unexpected(sent.error());
     }
     auto reply = _control.receive();
+    // Growth the request's own work asks for is answered here, on the channel the request holds: nothing
+    // else is sent on it until the reply came.
+    while (answer && reply && std::holds_alternative<proto::Grow>(*reply))
+    {
+        auto const verdict = (*answer)(std::get<proto::Grow>(*reply));
+        if (verdict == GrowVerdict::Violation)
+        {
+            markDead();
+            return std::unexpected(StreamError::Malformed);
+        }
+        if (auto const sent = _control.send(proto::Grown { .status = growStatusOf(verdict) }); !sent)
+        {
+            markDead();
+            return std::unexpected(sent.error());
+        }
+        reply = _control.receive();
+    }
     if (!reply)
         markDead();
     return reply;
+}
+
+std::optional<ObjectBytesLease> HelperIncarnation::leaseObjectBytes(uint64_t bytes) noexcept
+{
+    auto live = _liveObjectBytes.load();
+    do
+    {
+        if (_objectBytesCap != 0 && (bytes > _objectBytesCap || live > _objectBytesCap - bytes))
+            return std::nullopt;
+    } while (!_liveObjectBytes.compare_exchange_weak(live, live + bytes));
+    return ObjectBytesLease { *this, bytes };
+}
+
+void HelperIncarnation::returnObjectBytes(uint64_t bytes) noexcept
+{
+    _liveObjectBytes.fetch_sub(bytes);
+}
+
+ObjectBytesLease::~ObjectBytesLease()
+{
+    if (_incarnation)
+        _incarnation->returnObjectBytes(_bytes);
 }
 
 StepWatch HelperIncarnation::watch(HostStep step)

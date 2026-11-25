@@ -33,6 +33,7 @@
 #include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
 #include <vtextension/wasm/remote/process/testing/RecordingLauncher.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
+#include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
 #include <vtextension/wasm/remote/transport/PduStream.hpp>
 #include <vtextension/wasm/testing/BackendContract.hpp>
 #include <vtextension/wasm/testing/ProcessModules.hpp>
@@ -115,9 +116,13 @@ struct LimitValues
                                proto::PduLimits {} };
     auto const hello = control.receive();
     REQUIRE(hello.has_value());
+    // It shares memory wherever this system can map it, as it says.
+    auto const memoryMode = vtextension::wasm::remote::transport::canMapGuestMemory()
+                                ? proto::MemoryMode::Shared
+                                : proto::MemoryMode::Copy;
     CHECK(*hello
           == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
-                                         .memoryMode = proto::MemoryMode::Copy,
+                                         .memoryMode = memoryMode,
                                          .lockdown = proto::LockdownState::Unsandboxed } });
     return control;
 }

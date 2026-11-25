@@ -45,10 +45,6 @@ namespace
                               .text =
                                   "The extension host runs without a sandbox on this system, which Contour "
                                   "requires, and was refused. Extensions do not run." },
-        HandshakeRefusalRow {
-            .refusal = HostRefusal::MemoryMode,
-            .text = "The extension host shares memory where Contour copies it, and was refused: "
-                    "it is not the one installed with this Contour. Extensions do not run." },
     };
     static_assert(std::to_underlying(LastHostRefusal) < 32, "a bit per reason in HostRefusalLog's word");
 

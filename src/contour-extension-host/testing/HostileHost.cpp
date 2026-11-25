@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <deque>
 #include <expected>
 #include <memory>
 #include <mutex>
@@ -33,6 +34,7 @@
 #include <vtextension/wasm/remote/proto/Wire.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
+#include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
 #include <vtextension/wasm/remote/transport/WakeSignal.hpp>
 #include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
 
@@ -52,6 +54,7 @@ using contour::extension_host::testing::HostileIncident;
 using contour::extension_host::testing::hostileModeNamed;
 using contour::extension_host::testing::HostileModeRow;
 using contour::extension_host::testing::HostileOption;
+using contour::extension_host::testing::HostMemory;
 using contour::extension_host::testing::WakeSource;
 
 namespace
@@ -73,13 +76,24 @@ constexpr auto Limits = proto::PduLimits {};
     return HostileSetupFailed;
 }
 
-/// Runs the real host on @p arguments.
-[[nodiscard]] int serve(std::vector<std::string> const& arguments)
+/// @return What makes the real host's engine, reaching memory as @p memory says.
+[[nodiscard]] vtextension::wasm::host::EngineFactory enginesOf(HostMemory memory)
+{
+    switch (memory)
+    {
+        case HostMemory::AsBuilt: return &vtextension::wasm::host::makeHelperEngine;
+        case HostMemory::Copied: return &vtextension::wasm::host::makeCopyingHelperEngine;
+    }
+    return &vtextension::wasm::host::makeHelperEngine;
+}
+
+/// Runs the real host on @p arguments, its engine reaching memory as @p memory says.
+[[nodiscard]] int serve(std::vector<std::string> const& arguments, HostMemory memory = HostMemory::AsBuilt)
 {
     auto views = std::vector<std::string_view> {};
     for (auto const& argument: arguments)
         views.emplace_back(argument);
-    return vtextension::wasm::host::runExtensionHost(views, &vtextension::wasm::host::makeHelperEngine);
+    return vtextension::wasm::host::runExtensionHost(views, enginesOf(memory));
 }
 
 /// Has the crash that follows end the process at once: without a core dump, which a system that collects
@@ -161,7 +175,8 @@ enum class Verdict : uint8_t
 };
 
 /// Relays every channel between Contour's end and the real host's, both ways, frame by frame -- until the
-/// incident's trigger, once, where its action happens.
+/// incident's trigger, once, where its action happens. The descriptor Contour grants with an Instantiate is
+/// forwarded with it.
 class Relay
 {
   public:
@@ -239,14 +254,41 @@ class Relay
         return uint32_t { 1 } << std::to_underlying(kind);
     }
 
+    /// @return Whether @p way is where Contour grants descriptors: its control channel, towards the host.
+    [[nodiscard]] static bool isGranting(Way const& way) noexcept
+    {
+        return way.channel.kind == proto::ChannelKind::Control && way.direction == proto::Direction::ToHelper;
+    }
+
+    /// Receives some bytes on @p way into @p chunk. A descriptor that comes with them on the way Contour
+    /// grants them is kept, for the Instantiate it came with.
+    /// @return How many arrived; nothing once the way ended.
+    [[nodiscard]] std::optional<std::size_t> receiveOn(Way const& way, std::span<uint8_t> chunk)
+    {
+#ifndef _WIN32
+        if (isGranting(way))
+        {
+            auto arrived = std::vector<transport::OwnedHandle> {};
+            auto const received = way.source().receiveSomeWithHandles(chunk, arrived);
+            if (!received)
+                return std::nullopt;
+            for (auto& handle: arrived)
+                _grantedHandles.push_back(std::move(handle));
+            return *received;
+        }
+#endif
+        auto const received = way.source().receiveSome(chunk);
+        return received ? std::optional { *received } : std::nullopt;
+    }
+
     /// Receives on @p way until @p pending holds @p size bytes.
     /// @return Whether they arrived.
-    [[nodiscard]] static bool complete(Way const& way, std::vector<uint8_t>& pending, std::size_t size)
+    [[nodiscard]] bool complete(Way const& way, std::vector<uint8_t>& pending, std::size_t size)
     {
         auto chunk = std::array<uint8_t, 4096> {};
         while (pending.size() < size)
         {
-            auto const received = way.source().receiveSome(chunk);
+            auto const received = receiveOn(way, chunk);
             if (!received)
                 return false;
             pending.insert(
@@ -255,11 +297,35 @@ class Relay
         return true;
     }
 
+    /// Forwards the Instantiate whose frame, @p size bytes, @p pending starts with, with the descriptor
+    /// Contour granted with it (POSIX).
+    /// @return What becomes of the frame.
+    [[nodiscard]] Verdict relayInstantiate(Way const& way, std::vector<uint8_t>& pending, std::size_t size)
+    {
+        if (!complete(way, pending, size))
+            return Verdict::Stop;
+        auto const frame = std::span<uint8_t const> { pending }.first(size);
+        auto const decoded = proto::decodeFrame(frame, way.direction, way.channel.kind, Limits);
+        auto const* const instantiate = decoded ? std::get_if<proto::Instantiate>(&decoded->pdu) : nullptr;
+        if (instantiate == nullptr || instantiate->memory.objectBytes == 0)
+            return Verdict::Forward;
+#ifdef _WIN32
+        // The handle's value travels in the frame itself, and is this process's: the real host serves in it.
+        return Verdict::Forward;
+#else
+        if (_grantedHandles.empty())
+            return Verdict::Forward;
+        auto const object = std::move(_grantedHandles.front());
+        _grantedHandles.pop_front();
+        return way.target().sendWithHandle(frame, object.get()) ? Verdict::Discard : Verdict::Stop;
+#endif
+    }
+
     /// @return The MemoryRead whose frame, @p size bytes, @p pending starts with; nothing if it does not
     ///         arrive.
-    [[nodiscard]] static std::optional<proto::MemoryRead> memoryRead(Way const& way,
-                                                                     std::vector<uint8_t>& pending,
-                                                                     std::size_t size)
+    [[nodiscard]] std::optional<proto::MemoryRead> memoryRead(Way const& way,
+                                                              std::vector<uint8_t>& pending,
+                                                              std::size_t size)
     {
         if (!complete(way, pending, size))
             return std::nullopt;
@@ -359,7 +425,12 @@ class Relay
                 if (size)
                 {
                     auto const kind = kindAtFront(pending);
-                    verdict = isIncident(way, kind) ? act(way, pending, *size) : Verdict::Forward;
+                    if (isIncident(way, kind))
+                        verdict = act(way, pending, *size);
+                    else if (isGranting(way) && kind == proto::PduKind::Instantiate)
+                        verdict = relayInstantiate(way, pending, *size);
+                    else
+                        verdict = Verdict::Forward;
                     _passed.fetch_or(bitOf(kind));
                     if (verdict == Verdict::Stop)
                         return;
@@ -388,7 +459,7 @@ class Relay
             }
             if (isStopped(way))
                 return;
-            auto const received = way.source().receiveSome(chunk);
+            auto const received = receiveOn(way, chunk);
             if (!received)
             {
                 way.target().shutdown();
@@ -404,6 +475,8 @@ class Relay
 
     HostileIncident _incident;
     std::vector<std::unique_ptr<RelayedChannel>> _channels;
+    /// Descriptors Contour granted, not forwarded yet: read and taken by the control channel's pump alone.
+    std::deque<transport::OwnedHandle> _grantedHandles;
     std::atomic<Progress> _progress { Progress::Pending };
     std::atomic<ContourReads> _contourReads { ContourReads::Open };
     std::atomic<uint32_t> _passed { 0 }; ///< One bit per kind of frame passed so far, either way.
@@ -468,7 +541,7 @@ class Relay
         relay.emplace(*row.incident, std::move(channels));
     }
 
-    auto const served = serve(transport::formatHelperArguments(*parsed));
+    auto const served = serve(transport::formatHelperArguments(*parsed), row.memory);
     if (served != 0 || row.afterEnd == AfterContourEnds::Exit)
         return served;
 #ifndef _WIN32

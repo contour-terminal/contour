@@ -170,6 +170,8 @@ add_library(vtextension_remote STATIC
     RemoteBackend.hpp
     RemoteKindState.cpp
     RemoteKindState.hpp
+    SharedGuestMemory.cpp
+    SharedGuestMemory.hpp
 )
 target_link_libraries(vtextension_remote PUBLIC vtextension vtextension_remote_wire vtextension_remote_process)
 
@@ -209,6 +211,7 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
         ../host/HostServer_test.cpp
         RegistryRemote_test.cpp
         RemoteBackend_test.cpp
+        SharedGuestMemory_test.cpp
         testing/RemoteDefaultBackend.cpp
         ${PROJECT_SOURCE_DIR}/src/vtextension/Bundled_test.cpp
         ${PROJECT_SOURCE_DIR}/src/vtextension/ControlImports_test.cpp

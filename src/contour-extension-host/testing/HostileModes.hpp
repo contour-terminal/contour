@@ -8,8 +8,8 @@
 /// A row whose misbehaviour is an incident runs the real host behind a relay: every channel Contour handed
 /// over, both ways, is split into frames (proto::frameSizeOf()) and forwarded as it came, until the first
 /// frame the row's trigger names -- once per process, so once per incarnation. There the row's action
-/// happens in place of, or after, forwarding it. Adding a misbehaviour is adding a row; only a new kind of
-/// action needs code (HostileHost.cpp).
+/// happens in place of, or after, forwarding it. A descriptor Contour grants with an Instantiate is forwarded
+/// with it. Adding a misbehaviour is adding a row; only a new kind of action needs code (HostileHost.cpp).
 
 #include <algorithm>
 #include <array>
@@ -31,6 +31,13 @@ enum class WakeSource : uint8_t
     Silent,  ///< One of its own that nobody signals: the host never reads the interrupt page.
 };
 
+/// How the real host reaches its instances' memory.
+enum class HostMemory : uint8_t
+{
+    AsBuilt, ///< As the real host does: shared wherever the system can map it.
+    Copied,  ///< Copied over the protocol, as a host that cannot map memory does; its Hello says so.
+};
+
 /// What the host does once it ended because Contour's channels did.
 enum class AfterContourEnds : uint8_t
 {
@@ -38,7 +45,8 @@ enum class AfterContourEnds : uint8_t
     SleepUntilKilled, ///< Neither exits nor heeds SIGTERM: it sleeps until it is killed.
 };
 
-/// What the hostile host does at the frame its trigger names.
+/// What the hostile host does at the frame its trigger names. The actions on memory reads act where memory is
+/// copied: their rows run a host that copies it (HostMemory::Copied).
 enum class HostileAction : uint8_t
 {
     Abort,                   ///< std::abort(): the host crashes.
@@ -90,6 +98,7 @@ struct HostileModeRow
     WakeSource wake = WakeSource::Contour;              ///< The wake signal the host listens on.
     AfterContourEnds afterEnd = AfterContourEnds::Exit; ///< What it does once Contour's channels ended.
     std::optional<HostileIncident> incident {}; ///< What it does wrong in the protocol; nothing to relay.
+    HostMemory memory = HostMemory::AsBuilt;    ///< How the real host reaches memory.
 };
 
 namespace detail
@@ -143,15 +152,18 @@ inline constexpr auto HostileModes = std::array {
     HostileModeRow { .name = "over-cap",
                      .incident =
                          HostileIncident { .trigger = detail::contourOnLane(proto::PduKind::MemoryRead),
-                                           .action = HostileAction::AnswerOverCapMemory } },
+                                           .action = HostileAction::AnswerOverCapMemory },
+                     .memory = HostMemory::Copied },
     HostileModeRow { .name = "bogus-size",
                      .incident =
                          HostileIncident { .trigger = detail::contourOnLane(proto::PduKind::MemoryRead),
-                                           .action = HostileAction::AnswerShortMemory } },
+                                           .action = HostileAction::AnswerShortMemory },
+                     .memory = HostMemory::Copied },
     HostileModeRow { .name = "stall-after-header",
                      .incident =
                          HostileIncident { .trigger = detail::contourOnLane(proto::PduKind::MemoryRead),
-                                           .action = HostileAction::AnswerHalfMemory } },
+                                           .action = HostileAction::AnswerHalfMemory },
+                     .memory = HostMemory::Copied },
     HostileModeRow { .name = "exit-before-hello",
                      .incident = HostileIncident { .trigger = detail::hostOnControl(proto::PduKind::Hello),
                                                    .action = HostileAction::Exit } },

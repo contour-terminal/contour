@@ -43,6 +43,7 @@
 #include <vtextension/wasm/WasiAllowList.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 #include <vtextension/wasm/testing/FeatureModules.hpp>
+#include <vtextension/wasm/testing/ProcessModules.hpp>
 #include <vtextension/wasm/wasi/Preview1Shim.hpp>
 
 namespace vtextension::wasm::testing::contract
@@ -1195,6 +1196,28 @@ void memoryCapRefusesGrowth()
     CHECK(instance->memory(0, 2 * PageBytes).error() == MemoryFailure::OutOfBounds);
 }
 
+/// A memory that grew is seen at its new size: what the guest stores in the page it grew, memory() reads.
+template <typename T>
+void grownMemoryIsVisible()
+{
+    constexpr auto Address = uint32_t { 65540 };
+    constexpr auto Value = uint32_t { 0xC0DE };
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, GrowModule);
+    auto context = RecordingHostContext {};
+    auto const instance = instantiate(*module, context);
+    CHECK(instance->memory(Address, 4).error() == MemoryFailure::OutOfBounds);
+
+    auto grown = std::array<uint32_t, 1> { 1 };
+    REQUIRE(instance->call(functionOf(*instance, "grow"), grown).has_value());
+    CHECK(grown[0] == 1);
+    auto stored = std::array<uint32_t, 2> { Address, Value };
+    REQUIRE(instance->call(functionOf(*instance, "store"), stored).has_value());
+    CHECK(wordAt(*instance, Address) == Value);
+}
+
 /// A call that trapped leaves its instance callable: the next call runs as if none had failed.
 template <typename T>
 void callAfterTrapRuns()
@@ -1675,6 +1698,7 @@ void wasiStdioGoesNowhere()
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoRuntimesShareHostImports)            \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, olderRuntimeOutlivesNewer)              \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesGrowth)                 \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, grownMemoryIsVisible)                   \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callAfterTrapRuns)                      \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesInitialSize)            \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesUnexportedInitialSize)  \

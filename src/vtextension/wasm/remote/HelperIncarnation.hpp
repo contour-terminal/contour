@@ -11,9 +11,11 @@
 #include <cstdint>
 #include <deque>
 #include <expected>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include <vtextension/ExtensionError.hpp>
@@ -21,8 +23,10 @@
 #include <vtextension/wasm/remote/HostConnector.hpp>
 #include <vtextension/wasm/remote/HostRefusals.hpp>
 #include <vtextension/wasm/remote/LaneWatch.hpp>
+#include <vtextension/wasm/remote/SharedGuestMemory.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/ControlPage.hpp>
+#include <vtextension/wasm/remote/transport/HandleGrant.hpp>
 #include <vtextension/wasm/remote/transport/PduStream.hpp>
 
 namespace vtextension::wasm::remote
@@ -73,6 +77,38 @@ class InterruptSlots
     uint32_t _cursor = 0;                                           ///< Where the next search begins.
 };
 
+/// Answers a host that asks, in the middle of a control request, to grow the memory of the instance being
+/// made: its start function grows it.
+using GrowAnswer = std::function<GrowVerdict(proto::Grow const& grow)>;
+
+class HelperIncarnation;
+
+/// The bytes of memory objects one live instance holds of its incarnation's cap
+/// (HostConnection::objectBytesCap), given back when the lease goes. Move-only; must not outlive the
+/// incarnation.
+class ObjectBytesLease
+{
+  public:
+    ObjectBytesLease(ObjectBytesLease&& other) noexcept:
+        _incarnation { std::exchange(other._incarnation, nullptr) }, _bytes { other._bytes }
+    {
+    }
+    ObjectBytesLease& operator=(ObjectBytesLease&&) = delete;
+    ObjectBytesLease(ObjectBytesLease const&) = delete;
+    ObjectBytesLease& operator=(ObjectBytesLease const&) = delete;
+    ~ObjectBytesLease();
+
+  private:
+    friend class HelperIncarnation;
+    ObjectBytesLease(HelperIncarnation& incarnation, uint64_t bytes) noexcept:
+        _incarnation { &incarnation }, _bytes { bytes }
+    {
+    }
+
+    HelperIncarnation* _incarnation; ///< Whose cap; null once moved from.
+    uint64_t _bytes;                 ///< How many bytes it holds.
+};
+
 /// One incarnation of a host: started, handshaken, and holding the one runtime its parent created in it.
 ///
 /// The control channel is shared by every thread, one request at a time under a mutex; each lane is used only
@@ -94,9 +130,9 @@ class HelperIncarnation
     /// @param policy The budgets, and which confinement a host must report.
     /// @param refusals Where why a host's Hello was refused is logged, once per reason: one per backend.
     /// @return The incarnation; `HostUnavailable` if the host could not be started, speaks another protocol
-    ///         version, failed to confine itself or is not confined as @p policy requires, shares memory
-    ///         where the parent copies it, did not create the runtime, or overstayed the handshake. A host
-    ///         refused after it was started is terminated.
+    ///         version, failed to confine itself or is not confined as @p policy requires, did not create the
+    ///         runtime, or overstayed the handshake. A host refused after it was started is terminated.
+    ///         Whether it copies memory or shares it, its Hello says, and both are driven (memoryMode()).
     [[nodiscard]] static std::expected<std::shared_ptr<HelperIncarnation>, ExtensionError> connect(
         IHostConnector& connector,
         proto::CreateRuntime const& runtime,
@@ -124,6 +160,35 @@ class HelperIncarnation
     /// @return The reply; why there is none: `Closed` if the incarnation is dead already, or died meanwhile.
     [[nodiscard]] std::expected<proto::Pdu, transport::StreamError> request(proto::Pdu const& pdu,
                                                                             HostStep step);
+
+    /// request(), with what @p grant attaches travelling with the request's frame, and every Grow the host
+    /// sends before its reply answered on the control channel: a start function growing the memory of the
+    /// instance being made. The channel is this request's alone throughout, so that nothing else -- a release
+    /// least of all -- is read as the answer to a Grow. A Grow @p answer judges a violation kills the
+    /// incarnation.
+    /// @param pdu The request.
+    /// @param step The step it is: what its budget is.
+    /// @param grant What travels with it: the object an Instantiate grants.
+    /// @param answer Judges each Grow before the reply.
+    /// @return The reply; why there is none, as request() fails, and `Malformed` for a Grow judged a
+    ///         violation.
+    [[nodiscard]] std::expected<proto::Pdu, transport::StreamError> request(
+        proto::Pdu const& pdu, HostStep step, transport::HandleGrant const& grant, GrowAnswer const& answer);
+
+    /// @return How its host reaches its instances' memory, as its Hello said.
+    [[nodiscard]] proto::MemoryMode memoryMode() const noexcept { return _memoryMode; }
+
+    /// @return What handles are granted to its host through.
+    [[nodiscard]] transport::HandleTarget const& handleTarget() const noexcept
+    {
+        return _handle->handleTarget();
+    }
+
+    /// Takes @p bytes of the cap on the memory objects of its live instances (HostConnection::objectBytesCap)
+    /// for one instance.
+    /// @return The lease, giving them back when it goes; nothing if they would take the live objects past the
+    ///         cap.
+    [[nodiscard]] std::optional<ObjectBytesLease> leaseObjectBytes(uint64_t bytes) noexcept;
 
     /// Tells the host a module or an instance is gone, without ever blocking: the release is queued, and
     /// sent at once only if no other thread holds the control channel and the channel takes it now; if one
@@ -174,8 +239,20 @@ class HelperIncarnation
     [[nodiscard]] uint32_t nextInstanceId() noexcept { return _nextInstanceId.fetch_add(1); }
 
   private:
-    /// request()'s exchange, its caller holding the control mutex, under no watch of its own.
-    [[nodiscard]] std::expected<proto::Pdu, transport::StreamError> exchange(proto::Pdu const& pdu);
+    friend class ObjectBytesLease;
+
+    /// request()'s whole exchange, as the overload with a grant describes it.
+    [[nodiscard]] std::expected<proto::Pdu, transport::StreamError> requestHolding(
+        proto::Pdu const& pdu, HostStep step, transport::HandleGrant const& grant, GrowAnswer const* answer);
+
+    /// request()'s exchange, its caller holding the control mutex, under no watch of its own: sends @p pdu,
+    /// with what @p grant attaches, and receives the reply, answering each Grow before it with @p answer
+    /// (when there is one; otherwise a Grow is the reply).
+    [[nodiscard]] std::expected<proto::Pdu, transport::StreamError> exchange(
+        proto::Pdu const& pdu, transport::HandleGrant const& grant, GrowAnswer const* answer);
+
+    /// Gives back @p bytes a lease held.
+    void returnObjectBytes(uint64_t bytes) noexcept;
 
     /// @return A watch over @p step, with its budget.
     [[nodiscard]] StepWatch watch(HostStep step);
@@ -214,6 +291,9 @@ class HelperIncarnation
     void shutdownChannels() noexcept;
 
     HostTimeouts _timeouts;
+    uint64_t _objectBytesCap;                                ///< HostConnection::objectBytesCap; 0: none.
+    std::atomic<uint64_t> _liveObjectBytes { 0 };            ///< What the leases hold together.
+    proto::MemoryMode _memoryMode = proto::MemoryMode::Copy; ///< As its Hello said; set before it is shared.
     std::mutex _controlMutex;           ///< Held for each request, and for sending queued releases.
     std::mutex _outboxMutex;            ///< Guards _outbox; never held across I/O.
     std::deque<proto::Release> _outbox; ///< Releases not sent yet, oldest first.

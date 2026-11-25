@@ -26,12 +26,11 @@ enum class HostRefusal : uint8_t
     ProtocolVersion, ///< It speaks another protocol version than Contour.
     LockdownFailed,  ///< It failed to confine itself.
     Unsandboxed,     ///< It runs without a sandbox, which Contour requires.
-    MemoryMode,      ///< It shares memory, where Contour copies it.
 };
 
 /// The last reason: what every table and loop over the reasons ends at. refusalSource()'s switch, which has
 /// no default, keeps it the last: a reason added after it fails to compile until this names it.
-inline constexpr auto LastHostRefusal = HostRefusal::MemoryMode;
+inline constexpr auto LastHostRefusal = HostRefusal::Unsandboxed;
 
 /// Where a reason's line comes from.
 enum class RefusalSource : uint8_t
@@ -53,8 +52,7 @@ enum class RefusalSource : uint8_t
         case HostRefusal::LaunchRefused: return RefusalSource::Launch;
         case HostRefusal::ProtocolVersion:
         case HostRefusal::LockdownFailed:
-        case HostRefusal::Unsandboxed:
-        case HostRefusal::MemoryMode: return RefusalSource::Handshake;
+        case HostRefusal::Unsandboxed: return RefusalSource::Handshake;
     }
     return RefusalSource::None;
 }

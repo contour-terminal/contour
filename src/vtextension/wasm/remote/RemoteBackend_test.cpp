@@ -49,8 +49,16 @@
 #include <vtextension/wasm/remote/transport/ControlPage.hpp>
 #include <vtextension/wasm/remote/transport/PduStream.hpp>
 #include <vtextension/wasm/testing/BackendContract.hpp>
+#ifndef _WIN32
+    #include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
+#endif
 #include <vtextension/wasm/testing/HostedEngine.hpp>
 #include <vtextension/wasm/testing/RenderMeasurement.hpp>
+
+#ifdef _WIN32
+    #define WIN32_LEAN_AND_MEAN
+    #include <Windows.h>
+#endif
 
 using vtextension::ExtensionError;
 using vtextension::testing::toModule;
@@ -108,10 +116,13 @@ namespace
     return kind;
 }
 
-/// @return A connector starting each host in this process, on an engine of its own.
-[[nodiscard]] std::shared_ptr<InProcessHostConnector> makeConnector()
+/// @return A connector starting each host in this process, on an engine of its own, sharing memory with the
+///         parent as the extension host executable does; or as @p memoryMode says.
+[[nodiscard]] std::shared_ptr<InProcessHostConnector> makeConnector(
+    proto::MemoryMode memoryMode = proto::MemoryMode::Shared)
 {
-    return std::make_shared<InProcessHostConnector>([] { return makeHostedEngine(); }, HostServerConfig {});
+    return std::make_shared<InProcessHostConnector>([memoryMode] { return makeHostedEngine(memoryMode); },
+                                                    HostServerConfig {});
 }
 
 /// @return A remote backend of the shared kind, starting its hosts through @p connector and driving those
@@ -125,10 +136,23 @@ namespace
         BackendConfig { .timeouts = {}, .connector = std::move(connector), .lockdown = lockdown });
 }
 
+/// Hosts that share memory with the parent, as the extension host executable does.
 struct RemoteTraits
 {
     [[nodiscard]] static std::unique_ptr<IWasmBackend> make() { return makeBackend(makeConnector()); }
 };
+
+/// Hosts that copy memory, as one that cannot map it does: the parent's copy path.
+struct RemoteCopyTraits
+{
+    [[nodiscard]] static std::unique_ptr<IWasmBackend> make()
+    {
+        return makeBackend(makeConnector(proto::MemoryMode::Copy));
+    }
+};
+
+/// Both ways a host reaches memory.
+constexpr auto MemoryModes = std::array { proto::MemoryMode::Copy, proto::MemoryMode::Shared };
 
 /// Reads and writes its memory around a host call: `load(a)` returns the word at `a`; `ping-then-load(a)`
 /// calls `ping(7)`, then returns the word at `a`.
@@ -453,7 +477,12 @@ class ScriptedConnector final: public IHostConnector
     /// What a connection's host does, given the helper's ends and how many connections came before it.
     using Script = std::function<void(HelperEnds&, std::size_t)>;
 
-    explicit ScriptedConnector(Script script): _script { std::move(script) } {}
+    /// @param objectBytesCap What each connection holds its instances' memory objects to.
+    explicit ScriptedConnector(Script script,
+                               uint64_t objectBytesCap = vtextension::wasm::remote::DefaultObjectBytesCap):
+        _script { std::move(script) }, _objectBytesCap { objectBytesCap }
+    {
+    }
     ScriptedConnector(ScriptedConnector const&) = delete;
     ScriptedConnector(ScriptedConnector&&) = delete;
     ScriptedConnector& operator=(ScriptedConnector const&) = delete;
@@ -467,7 +496,8 @@ class ScriptedConnector final: public IHostConnector
             return std::unexpected(ExtensionError::HostUnavailable);
         auto connection = HostConnection { .control = std::move(control->parent),
                                            .lanes = {},
-                                           .handle = std::make_unique<CountingHandle>(_records) };
+                                           .handle = std::make_unique<CountingHandle>(_records),
+                                           .objectBytesCap = _objectBytesCap };
         auto ends = HelperEnds { .control = std::move(control->helper), .lanes = {}, .received = {} };
         for ([[maybe_unused]] auto const index: std::views::iota(std::size_t { 0 }, MaxLaneChannels))
         {
@@ -523,6 +553,7 @@ class ScriptedConnector final: public IHostConnector
 
   private:
     Script _script;
+    uint64_t _objectBytesCap;
     std::shared_ptr<HandleRecords> _records = std::make_shared<HandleRecords>();
     std::vector<std::jthread> _threads;
 };
@@ -603,6 +634,13 @@ struct ScriptedInstance
     std::unique_ptr<IWasmInstance> instance = contract::instantiate(*module, context);
 };
 
+/// The limits of a runtime that holds a host's every interrupt slot at once: memory of one page, so that the
+/// memory objects of InterruptSlotCount instances stay well within a host's cap on them.
+constexpr auto OnePageLimits =
+    vtextension::wasm::RuntimeLimits { .memoryBytes = proto::WasmPageBytes,
+                                       .stackBytes = contract::Limits.stackBytes,
+                                       .tableElements = contract::Limits.tableElements };
+
 /// @return What calling `load(0)` of @p instance fails with; nothing if it returned.
 [[nodiscard]] std::optional<CallFailure> loadFailure(IWasmInstance& instance)
 {
@@ -664,6 +702,7 @@ void checkLaneBytesKillTheHelper(std::span<uint8_t const> bytes)
 } // namespace
 
 CONTOUR_WASM_BACKEND_CONTRACT(RemoteTraits)
+CONTOUR_WASM_BACKEND_CONTRACT(RemoteCopyTraits)
 
 TEST_CASE("RemoteBackend.sameIdentitySharesAHelper", "[vtextension][remote]")
 {
@@ -742,57 +781,72 @@ TEST_CASE("RemoteBackend.instantiateRespawnsLazily", "[vtextension][remote]")
 
 TEST_CASE("RemoteBackend.writesFlushBeforeCall", "[vtextension][remote]")
 {
-    auto const backend = makeBackend(makeConnector());
-    auto const runtime = contract::createRuntime(*backend);
-    auto const guard = contract::enterThread(*backend);
-    auto const module = contract::load(*runtime, PeekModule);
-    auto context = contract::RecordingHostContext {};
-    auto const instance = contract::instantiate(*module, context);
+    // Written in place where the host shares memory, flushed where it copies it: the same either way.
+    for (auto const memoryMode: MemoryModes)
+    {
+        INFO(std::to_underlying(memoryMode));
+        auto const backend = makeBackend(makeConnector(memoryMode));
+        auto const runtime = contract::createRuntime(*backend);
+        auto const guard = contract::enterThread(*backend);
+        auto const module = contract::load(*runtime, PeekModule);
+        auto context = contract::RecordingHostContext {};
+        auto const instance = contract::instantiate(*module, context);
 
-    constexpr auto Address = uint32_t { 128 };
-    writeAt(*instance, Address, std::to_array<uint8_t>({ 1, 2, 3, 4 }));
-    CHECK(callWord(*instance, "load", Address) == 0x0403'0201);
-    // Read back from the instance itself, the cache being dropped by the call.
-    CHECK(contract::wordAt(*instance, Address) == 0x0403'0201);
+        constexpr auto Address = uint32_t { 128 };
+        writeAt(*instance, Address, std::to_array<uint8_t>({ 1, 2, 3, 4 }));
+        CHECK(callWord(*instance, "load", Address) == 0x0403'0201);
+        // Read back from the instance itself, the cache being dropped by the call.
+        CHECK(contract::wordAt(*instance, Address) == 0x0403'0201);
+    }
 }
 
 TEST_CASE("RemoteBackend.writesFlushBeforeHostResult", "[vtextension][remote]")
 {
-    // The host function writes to the guest's memory; the guest reads it once the host function returned.
-    auto const backend = makeBackend(makeConnector());
-    auto const runtime = contract::createRuntime(*backend);
-    auto const guard = contract::enterThread(*backend);
-    auto const module = contract::load(*runtime, PeekModule);
-    auto context = WritingHostContext {};
-    auto const instance = contract::instantiate(*module, context);
-    context.attach(*instance);
+    // Written in place where the host shares memory, flushed where it copies it: the same either way.
+    for (auto const memoryMode: MemoryModes)
+    {
+        INFO(std::to_underlying(memoryMode));
+        // The host function writes to the guest's memory; the guest reads it once the host function returned.
+        auto const backend = makeBackend(makeConnector(memoryMode));
+        auto const runtime = contract::createRuntime(*backend);
+        auto const guard = contract::enterThread(*backend);
+        auto const module = contract::load(*runtime, PeekModule);
+        auto context = WritingHostContext {};
+        auto const instance = contract::instantiate(*module, context);
+        context.attach(*instance);
 
-    CHECK(callWord(*instance, "ping-then-load", WritingHostContext::Address) == 0x0607'0809);
+        CHECK(callWord(*instance, "ping-then-load", WritingHostContext::Address) == 0x0607'0809);
+    }
 }
 
 TEST_CASE("RemoteBackend.overlappingViewsSeePendingWrites", "[vtextension][remote]")
 {
-    auto const backend = makeBackend(makeConnector());
-    auto const runtime = contract::createRuntime(*backend);
-    auto const guard = contract::enterThread(*backend);
-    auto const module = contract::load(*runtime, PeekModule);
-    auto context = contract::RecordingHostContext {};
-    auto const instance = contract::instantiate(*module, context);
+    // Written in place where the host shares memory, flushed where it copies it: the same either way.
+    for (auto const memoryMode: MemoryModes)
+    {
+        INFO(std::to_underlying(memoryMode));
+        auto const backend = makeBackend(makeConnector(memoryMode));
+        auto const runtime = contract::createRuntime(*backend);
+        auto const guard = contract::enterThread(*backend);
+        auto const module = contract::load(*runtime, PeekModule);
+        auto context = contract::RecordingHostContext {};
+        auto const instance = contract::instantiate(*module, context);
 
-    constexpr auto Address = uint32_t { 256 };
-    writeAt(*instance, Address, std::to_array<uint8_t>({ 1, 2, 3, 4, 5, 6, 7, 8 }));
-    auto const later = instance->memory(Address + 4, 8);
-    REQUIRE(later.has_value());
-    CHECK(std::ranges::equal(
-        later->first(4),
-        std::to_array({ std::byte { 5 }, std::byte { 6 }, std::byte { 7 }, std::byte { 8 } })));
-    std::ranges::copy(
-        std::to_array({ std::byte { 9 }, std::byte { 10 }, std::byte { 11 }, std::byte { 12 } }),
-        later->begin() + 4);
+        constexpr auto Address = uint32_t { 256 };
+        writeAt(*instance, Address, std::to_array<uint8_t>({ 1, 2, 3, 4, 5, 6, 7, 8 }));
+        auto const later = instance->memory(Address + 4, 8);
+        REQUIRE(later.has_value());
+        CHECK(std::ranges::equal(
+            later->first(4),
+            std::to_array({ std::byte { 5 }, std::byte { 6 }, std::byte { 7 }, std::byte { 8 } })));
+        std::ranges::copy(
+            std::to_array({ std::byte { 9 }, std::byte { 10 }, std::byte { 11 }, std::byte { 12 } }),
+            later->begin() + 4);
 
-    CHECK(callWord(*instance, "load", Address) == 0x0403'0201);
-    CHECK(callWord(*instance, "load", Address + 4) == 0x0807'0605);
-    CHECK(callWord(*instance, "load", Address + 8) == 0x0C0B'0A09);
+        CHECK(callWord(*instance, "load", Address) == 0x0403'0201);
+        CHECK(callWord(*instance, "load", Address + 4) == 0x0807'0605);
+        CHECK(callWord(*instance, "load", Address + 8) == 0x0C0B'0A09);
+    }
 }
 
 TEST_CASE("RemoteBackend.versionMismatchIsHostUnavailable", "[vtextension][remote]")
@@ -841,13 +895,10 @@ TEST_CASE("RemoteBackend.refusedHelloIsLoggedOncePerReason", "[vtextension][remo
     versioned.version = proto::ProtocolVersion + 1;
     auto failed = HonestHello;
     failed.lockdown = proto::LockdownState::Failed;
-    auto shared = HonestHello;
-    shared.memoryMode = proto::MemoryMode::Shared;
     auto const rows = std::array {
         RefusalRow { versioned, LockdownRequirement::AcceptUnsandboxed, HostRefusal::ProtocolVersion },
         RefusalRow { failed, LockdownRequirement::AcceptUnsandboxed, HostRefusal::LockdownFailed },
         RefusalRow { HonestHello, LockdownRequirement::RequireLockedDown, HostRefusal::Unsandboxed },
-        RefusalRow { shared, LockdownRequirement::AcceptUnsandboxed, HostRefusal::MemoryMode },
     };
     auto const runtime = proto::CreateRuntime {
         .runtimeId = HelperIncarnation::RuntimeId, .memoryBytes = 65536, .stackBytes = 65536, .functions = {}
@@ -1213,7 +1264,7 @@ TEST_CASE("RemoteBackend.slotExhaustionIsRuntimeUnavailable", "[vtextension][rem
 {
     auto const connector = makeConnector();
     auto const backend = makeBackend(connector);
-    auto const runtime = contract::createRuntime(*backend);
+    auto const runtime = contract::createRuntime(*backend, OnePageLimits);
     auto const guard = contract::enterThread(*backend);
     auto const module = contract::load(*runtime, contract::InstanceModule);
     auto context = contract::RecordingHostContext {};
@@ -1246,7 +1297,7 @@ TEST_CASE("RemoteBackend.releasedSlotIsLowered", "[vtextension][remote][threadin
     // wake of the host's listener.
     using namespace std::chrono_literals;
     auto const backend = makeBackend(makeConnector());
-    auto const runtime = contract::createRuntime(*backend);
+    auto const runtime = contract::createRuntime(*backend, OnePageLimits);
     auto const guard = contract::enterThread(*backend);
     auto const module = contract::load(*runtime, contract::InstanceModule);
     auto context = contract::RecordingHostContext {};
@@ -1703,6 +1754,547 @@ TEST_CASE("RemoteBackend.preparedGenerationFollowsTheOutermostGuard", "[vtextens
     CHECK(generations
           == std::array<uint64_t, 3> { 0, backend->runtimeGeneration(), backend->runtimeGeneration() });
     CHECK(vtextension::wasm::remote::preparedGeneration() == 0);
+}
+
+namespace
+{
+
+/// The Hello of an honest helper that shares memory.
+constexpr auto SharingHello = proto::Hello { .version = proto::ProtocolVersion,
+                                             .memoryMode = proto::MemoryMode::Shared,
+                                             .lockdown = proto::LockdownState::Unsandboxed };
+
+/// The object the parent grants each instance of a runtime of the contract's limits.
+constexpr auto ContractObjectBytes = proto::memoryObjectBytes(contract::Limits.memoryBytes);
+
+/// What a scripted honest host does, beyond answering every Load and Instantiate.
+struct HonestScript
+{
+    proto::Hello hello = SharingHello; ///< What it opens with.
+    /// Describes the module it is asked to load.
+    std::function<proto::Loaded(uint32_t moduleId)> describe = &peekDescription;
+    /// The export ordinals it offers to call.
+    std::vector<uint32_t> callables = { PeekCallables.begin(), PeekCallables.end() };
+    /// Runs on the control channel once an Instantiate arrived, before it is answered: where a start function
+    /// asks to grow. It returns whether the host serves on.
+    std::function<bool(HelperEnds&, proto::Instantiate const&)> beforeInstantiated = {};
+    /// Serves the first lane once the first instance was answered for, on a thread of its own, until it ends.
+    std::function<void(PduStream&, proto::Instantiate const&)> onLane = {};
+};
+
+/// Plays an honest host as @p script says, recording in @p transcript every control PDU after the handshake,
+/// until the parent closes its ends.
+void serveHonestly(HelperEnds& ends, HonestScript const& script, Transcript& transcript)
+{
+    if (!ends.send(script.hello))
+        return;
+    auto const create = ends.receive<proto::CreateRuntime>();
+    if (!create
+        || !ends.send(proto::RuntimeCreated { .runtimeId = create->runtimeId, .error = std::nullopt }))
+        return;
+    auto laneThread = std::jthread {};
+    while (auto pdu = ends.receivePdu())
+    {
+        transcript.record(*pdu);
+        if (auto const* const load = std::get_if<proto::Load>(&*pdu))
+        {
+            if (!ends.send(script.describe(load->moduleId)))
+                break;
+        }
+        else if (auto const* const instantiate = std::get_if<proto::Instantiate>(&*pdu))
+        {
+            if (script.beforeInstantiated && !script.beforeInstantiated(ends, *instantiate))
+                break;
+            if (!ends.send(proto::Instantiated { .instanceId = instantiate->instanceId,
+                                                 .error = std::nullopt,
+                                                 .callableExports = script.callables }))
+                break;
+            if (script.onLane && !laneThread.joinable())
+                laneThread = std::jthread { [&ends, &script, granted = *instantiate] {
+                    auto lane = PduStream { std::move(ends.lanes.front()),
+                                            proto::ChannelKind::Lane,
+                                            proto::Direction::ToHelper,
+                                            proto::PduLimits {} };
+                    script.onLane(lane, granted);
+                } };
+        }
+    }
+    ends.drain();
+}
+
+/// A connector whose every host plays @p script honestly, recording into @p transcript; its hosts hold their
+/// instances' memory objects to @p objectBytesCap.
+[[nodiscard]] std::shared_ptr<ScriptedConnector> honestConnector(
+    HonestScript script,
+    std::shared_ptr<Transcript> transcript,
+    uint64_t objectBytesCap = vtextension::wasm::remote::DefaultObjectBytesCap)
+{
+    return std::make_shared<ScriptedConnector>(
+        [script = std::move(script), transcript = std::move(transcript)](
+            HelperEnds& ends, std::size_t /*connection*/) { serveHonestly(ends, script, *transcript); },
+        objectBytesCap);
+}
+
+/// @return The Instantiates among @p pdus.
+[[nodiscard]] std::vector<proto::Instantiate> instantiatesAmong(std::vector<proto::Pdu> const& pdus)
+{
+    auto found = std::vector<proto::Instantiate> {};
+    for (auto const& pdu: pdus)
+        if (auto const* const instantiate = std::get_if<proto::Instantiate>(&pdu))
+            found.push_back(*instantiate);
+    return found;
+}
+
+/// Serves one call on @p lane: asks to grow to @p bytes on behalf of @p instanceId, and returns `load`'s
+/// result once answered.
+/// @return What the parent answered; nothing if it answered no Grown, or nothing at all.
+[[nodiscard]] std::optional<proto::GrowStatus> growDuringACall(PduStream& lane,
+                                                               uint32_t instanceId,
+                                                               uint64_t bytes)
+{
+    if (!lane.receive() || !lane.send(proto::Grow { .instanceId = instanceId, .bytes = bytes }))
+        return std::nullopt;
+    auto const answer = lane.receive();
+    auto const* const grown = answer ? std::get_if<proto::Grown>(&*answer) : nullptr;
+    if (grown == nullptr)
+        return std::nullopt;
+    std::ignore = lane.send(proto::CallResult { .failure = std::nullopt, .argv = { 0 } });
+    return grown->status;
+}
+
+/// Two pages of memory, exported, and nothing else.
+///
+///     (module (memory (export "memory") 2))
+constexpr auto TwoPageModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,                       // magic, version 1
+    0x05, 0x03, 0x01, 0x00, 0x02,                                         // memory section: min 2
+    0x07, 0x0a, 0x01, 0x06, 'm',  'e',  'm',  'o',  'r', 'y', 0x02, 0x00, // export section: memory 0
+});
+
+/// TwoPageModule's description, as a host describes it.
+[[nodiscard]] proto::Loaded twoPageDescription(uint32_t moduleId)
+{
+    return proto::Loaded {
+        .moduleId = moduleId,
+        .error = std::nullopt,
+        .imports = {},
+        .exports = { ExportDescription {
+            .name = "memory", .kind = ExternKind::Memory, .signature = {}, .initialPages = 2 } },
+    };
+}
+
+/// A bump allocator that grows its memory for every allocation: `cabi_realloc` returns the end of the memory
+/// and grows it by the pages the allocation takes (trapping if it cannot); `load8` reads a byte.
+///
+///     (module
+///       (memory (export "memory") 1)
+///       (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32) (local $p i32)
+///         (local.set $p (i32.mul (memory.size) (i32.const 65536)))
+///         (if (i32.eq (memory.grow (i32.shr_u (i32.add (local.get 3) (i32.const 65535)) (i32.const 16)))
+///                     (i32.const -1))
+///           (then unreachable))
+///         (local.get $p))
+///       (func (export "load8") (param i32) (result i32) (i32.load8_u (local.get 0))))
+constexpr auto GrowingReallocModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,       // magic, version 1
+    0x01, 0x0e, 0x02,                                     // type section: two types
+    0x60, 0x04, 0x7f, 0x7f, 0x7f, 0x7f, 0x01, 0x7f,       //   (i32, i32, i32, i32) -> (i32)
+    0x60, 0x01, 0x7f, 0x01, 0x7f,                         //   (i32) -> (i32)
+    0x03, 0x03, 0x02, 0x00, 0x01,                         // function section: cabi_realloc, load8
+    0x05, 0x03, 0x01, 0x00, 0x01,                         // memory section: min 1
+    0x07, 0x21, 0x03,                                     // export section: three exports
+    0x06, 'm',  'e',  'm',  'o',  'r',  'y',  0x02, 0x00, //   memory 0
+    0x0c, 'c',  'a',  'b',  'i',  '_',  'r',  'e',  'a',  'l',  'l', 'o', //   cabi_realloc:
+    'c',  0x00, 0x00,                                                     //     function 0
+    0x05, 'l',  'o',  'a',  'd',  '8',  0x00, 0x01,                       //   function 1
+    0x0a, 0x2c, 0x02,                                                     // code section: two bodies
+    0x22, 0x01, 0x01, 0x7f,                                               //   34 bytes, one i32 local
+    0x3f, 0x00, 0x41, 0x80, 0x80, 0x04, 0x6c, 0x21, 0x04,                 //   memory.size * 65536 -> $p
+    0x20, 0x03, 0x41, 0xff, 0xff, 0x03, 0x6a, 0x41, 0x10, 0x76,           //   (size + 65535) >> 16
+    0x40, 0x00, 0x41, 0x7f, 0x46, 0x04, 0x40, 0x00, 0x0b,                 //   memory.grow == -1: unreachable
+    0x20, 0x04, 0x0b,                                                     //   $p; end
+    0x07, 0x00, 0x20, 0x00, 0x2d, 0x00, 0x00, 0x0b,                       //   local.get 0, i32.load8_u; end
+});
+
+/// @return How many handles (Windows) or descriptors (POSIX) this process holds open.
+[[nodiscard]] std::size_t openHandleCount()
+{
+#ifdef _WIN32
+    auto count = DWORD { 0 };
+    REQUIRE(GetProcessHandleCount(GetCurrentProcess(), &count));
+    return count;
+#else
+    return vtextension::wasm::remote::transport::testing::openDescriptorCount();
+#endif
+}
+
+} // namespace
+
+TEST_CASE("RemoteBackend.helloMaySayEitherMode", "[vtextension][remote]")
+{
+    // Both are driven: a host that copies memory is granted nothing, one that shares it the object.
+    for (auto const memoryMode: MemoryModes)
+    {
+        INFO(std::to_underlying(memoryMode));
+        auto const transcript = std::make_shared<Transcript>();
+        auto hello = SharingHello;
+        hello.memoryMode = memoryMode;
+        auto const connector = honestConnector(HonestScript { .hello = hello }, transcript);
+        {
+            auto const backend = makeBackend(connector);
+            auto const runtime = contract::createRuntime(*backend);
+            auto const module = contract::load(*runtime, PeekModule);
+            auto context = contract::RecordingHostContext {};
+            auto const instance = contract::instantiate(*module, context);
+        }
+        auto const instantiates = instantiatesAmong(transcript->awaitAtLeast(2));
+        REQUIRE(instantiates.size() == 1);
+        auto const& memory = instantiates.front().memory;
+        if (memoryMode == proto::MemoryMode::Copy)
+            CHECK(memory == proto::MemoryGrant {});
+        else
+        {
+            CHECK(memory.objectBytes == ContractObjectBytes);
+            CHECK(memory.initialBytes == proto::WasmPageBytes);
+#ifndef _WIN32
+            CHECK(memory.handle == 0);
+#endif
+        }
+        CHECK(connector->terminations() == 0);
+    }
+}
+
+TEST_CASE("RemoteBackend.sharedMemoryNeedsNoMemoryPdus", "[vtextension][remote][threading]")
+{
+    // Reads and writes are the parent's own: none reaches the host, and a call is the first thing its lane
+    // carries.
+    auto const transcript = std::make_shared<Transcript>();
+    auto laneKinds = std::make_shared<std::promise<std::vector<proto::Pdu>>>();
+    auto const connector = honestConnector(
+        HonestScript {
+            .onLane =
+                [laneKinds](PduStream& lane, proto::Instantiate const& /*instantiate*/) {
+                    auto first = lane.receive();
+                    if (first)
+                        std::ignore = lane.send(proto::CallResult { .failure = std::nullopt, .argv = { 0 } });
+                    laneKinds->set_value(first ? std::vector { *first } : std::vector<proto::Pdu> {});
+                } },
+        transcript);
+    auto rig = ScriptedRig { .connector = connector };
+    auto const module = contract::load(*rig.runtime, PeekModule);
+    auto context = contract::RecordingHostContext {};
+    auto const instance = contract::instantiate(*module, context);
+
+    auto read = std::async(std::launch::async, [&]() -> std::optional<uint32_t> {
+        auto const guard = rig.backend->enterThread();
+        if (!guard)
+            return std::nullopt;
+        writeAt(*instance, 64, std::to_array<uint8_t>({ 0x11, 0x22, 0x33, 0x44 }));
+        auto const word = contract::wordAt(*instance, 64);
+        // The call goes out with no write before it: the host reads the memory itself.
+        auto argv = std::array<uint32_t, 1> { 64 };
+        if (!instance->call(contract::functionOf(*instance, "load"), argv))
+            return std::nullopt;
+        return word;
+    });
+    CHECK(within(read, "a memory access waited for the host") == std::optional { uint32_t { 0x4433'2211 } });
+    auto kinds = laneKinds->get_future();
+    auto const carried = within(kinds, "the call never reached the host");
+    REQUIRE(carried.size() == 1);
+    CHECK(std::holds_alternative<proto::Call>(carried.front()));
+}
+
+TEST_CASE("RemoteBackend.growIsAnsweredAndBoundsFollow", "[vtextension][remote][threading]")
+{
+    auto const transcript = std::make_shared<Transcript>();
+    auto answered = std::make_shared<std::promise<std::optional<proto::GrowStatus>>>();
+    auto const connector = honestConnector(
+        HonestScript { .onLane =
+                           [answered](PduStream& lane, proto::Instantiate const& instantiate) {
+                               answered->set_value(
+                                   growDuringACall(lane, instantiate.instanceId, 2 * proto::WasmPageBytes));
+                           } },
+        transcript);
+    auto rig = ScriptedRig { .connector = connector };
+    auto const module = contract::load(*rig.runtime, PeekModule);
+    auto context = contract::RecordingHostContext {};
+    auto const instance = contract::instantiate(*module, context);
+    constexpr auto SecondPage = static_cast<uint32_t>(proto::WasmPageBytes);
+
+    CHECK(instance->memory(SecondPage, 4) == std::unexpected(MemoryFailure::OutOfBounds));
+    auto called = std::async(std::launch::async, [&] {
+        auto const guard = rig.backend->enterThread();
+        auto argv = std::array<uint32_t, 1> { 0 };
+        return guard ? instance->call(contract::functionOf(*instance, "load"), argv)
+                     : std::expected<void, CallFailure> { std::unexpected(CallFailure::Trap) };
+    });
+    CHECK(within(called, "the call did not return").has_value());
+    auto answer = answered->get_future();
+    CHECK(within(answer, "the growth was not answered") == std::optional { proto::GrowStatus::Granted });
+    // The parent's bound followed its own answer: the second page is there now, and no more.
+    CHECK(instance->memory(SecondPage, static_cast<uint32_t>(proto::WasmPageBytes)).has_value());
+    CHECK(instance->memory(2 * SecondPage, 1) == std::unexpected(MemoryFailure::OutOfBounds));
+    CHECK(connector->terminations() == 0);
+}
+
+TEST_CASE("RemoteBackend.badGrowKillsTheHost", "[vtextension][remote][threading]")
+{
+    struct BadGrow
+    {
+        std::string_view what;
+        uint64_t bytes;
+        uint32_t instanceOffset; ///< Added to the instance's id.
+    };
+    for (auto const& [what, bytes, instanceOffset]: {
+             BadGrow { .what = "not larger", .bytes = proto::WasmPageBytes, .instanceOffset = 0 },
+             BadGrow { .what = "unaligned", .bytes = (2 * proto::WasmPageBytes) + 1, .instanceOffset = 0 },
+             BadGrow { .what = "past the cap",
+                       .bytes = ContractObjectBytes + proto::WasmPageBytes,
+                       .instanceOffset = 0 },
+             BadGrow { .what = "another instance", .bytes = 2 * proto::WasmPageBytes, .instanceOffset = 1 },
+         })
+    {
+        INFO(what);
+        auto const transcript = std::make_shared<Transcript>();
+        auto const connector = honestConnector(
+            HonestScript {
+                .onLane =
+                    [bytes, instanceOffset](PduStream& lane, proto::Instantiate const& instantiate) {
+                        std::ignore = growDuringACall(lane, instantiate.instanceId + instanceOffset, bytes);
+                    } },
+            transcript);
+        auto rig = ScriptedRig { .connector = connector };
+        auto const module = contract::load(*rig.runtime, PeekModule);
+        auto context = contract::RecordingHostContext {};
+        auto const instance = contract::instantiate(*module, context);
+        auto called = std::async(std::launch::async, [&]() -> std::optional<CallFailure> {
+            auto const guard = rig.backend->enterThread();
+            return guard ? loadFailure(*instance) : std::optional { CallFailure::Trap };
+        });
+        CHECK(within(called, "the call did not return") == CallFailure::HostCrashed);
+        CHECK(connector->terminations() == 1);
+        CHECK(instance->memory(static_cast<uint32_t>(proto::WasmPageBytes), 1)
+              == std::unexpected(MemoryFailure::HostCrashed));
+    }
+}
+
+TEST_CASE("RemoteBackend.growWhileInterruptedIsRefused", "[vtextension][remote][threading]")
+{
+    using namespace std::chrono_literals;
+    auto const transcript = std::make_shared<Transcript>();
+    auto arrived = std::make_shared<std::promise<void>>();
+    auto go = std::make_shared<std::promise<void>>();
+    auto answered = std::make_shared<std::promise<std::optional<proto::GrowStatus>>>();
+    auto const connector = honestConnector(
+        HonestScript { .onLane =
+                           [arrived, proceed = go->get_future().share(), answered](
+                               PduStream& lane, proto::Instantiate const& instantiate) {
+                               if (!lane.receive())
+                                   return;
+                               arrived->set_value();
+                               // The guest runs on, interrupted, and grows its memory.
+                               if (proceed.wait_for(5s) != std::future_status::ready
+                                   || !lane.send(proto::Grow { .instanceId = instantiate.instanceId,
+                                                               .bytes = 2 * proto::WasmPageBytes }))
+                                   return;
+                               auto const answer = lane.receive();
+                               auto const* const grown =
+                                   answer ? std::get_if<proto::Grown>(&*answer) : nullptr;
+                               answered->set_value(grown ? std::optional { grown->status } : std::nullopt);
+                               std::ignore = lane.send(
+                                   proto::CallResult { .failure = CallFailure::Interrupted, .argv = {} });
+                           } },
+        transcript);
+    auto rig = ScriptedRig { .connector = connector };
+    auto const module = contract::load(*rig.runtime, PeekModule);
+    auto context = contract::RecordingHostContext {};
+    auto const instance = contract::instantiate(*module, context);
+
+    auto called = std::async(std::launch::async, [&] {
+        auto const guard = rig.backend->enterThread();
+        auto argv = std::array<uint32_t, 1> { 0 };
+        return guard ? instance->call(contract::functionOf(*instance, "load"), argv)
+                     : std::expected<void, CallFailure> { std::unexpected(CallFailure::Trap) };
+    });
+    auto arrival = arrived->get_future();
+    within(arrival, "the call never reached the host");
+    instance->interrupt();
+    go->set_value();
+    auto answer = answered->get_future();
+    CHECK(within(answer, "the growth was not answered") == std::optional { proto::GrowStatus::Refused });
+    CHECK(within(called, "the call did not return")
+          == std::expected<void, CallFailure> { std::unexpected(CallFailure::Interrupted) });
+    CHECK(instance->memory(static_cast<uint32_t>(proto::WasmPageBytes), 1)
+          == std::unexpected(MemoryFailure::OutOfBounds));
+    CHECK(connector->terminations() == 0);
+}
+
+TEST_CASE("RemoteBackend.initialSizeComesFromTheModule", "[vtextension][remote]")
+{
+    auto const transcript = std::make_shared<Transcript>();
+    auto const connector =
+        honestConnector(HonestScript { .describe = &twoPageDescription, .callables = {} }, transcript);
+    auto const backend = makeBackend(connector);
+    auto context = contract::RecordingHostContext {};
+
+    SECTION("within the cap")
+    {
+        auto const runtime = contract::createRuntime(*backend);
+        auto const module = contract::load(*runtime, TwoPageModule);
+        auto const instance = contract::instantiate(*module, context);
+        auto const instantiates = instantiatesAmong(transcript->awaitAtLeast(2));
+        REQUIRE(instantiates.size() == 1);
+        CHECK(instantiates.front().memory.initialBytes == 2 * proto::WasmPageBytes);
+        CHECK(instance->memory(static_cast<uint32_t>((2 * proto::WasmPageBytes) - 4), 4).has_value());
+        CHECK(instance->memory(static_cast<uint32_t>(2 * proto::WasmPageBytes), 1)
+              == std::unexpected(MemoryFailure::OutOfBounds));
+    }
+
+    SECTION("past the cap")
+    {
+        // A cap of one page: the module's two are refused before anything is made or sent.
+        auto const runtime = contract::createRuntime(*backend, OnePageLimits);
+        auto const module = contract::load(*runtime, TwoPageModule);
+        auto const instance = module->instantiate(context);
+        REQUIRE_FALSE(instance.has_value());
+        CHECK(instance == std::unexpected(ExtensionError::OutOfMemory));
+        // The Load, and nothing after it.
+        CHECK(instantiatesAmong(transcript->awaitAtLeast(1)).empty());
+    }
+    CHECK(connector->terminations() == 0);
+}
+
+TEST_CASE("RemoteBackend.unexportedMemoryIsOutOfBounds", "[vtextension][remote]")
+{
+    // The host maps the memory whether it is exported or not; the parent reaches it only if it is.
+    auto const backend = makeBackend(makeConnector());
+    auto const runtime = contract::createRuntime(*backend);
+    auto const guard = contract::enterThread(*backend);
+    auto const module = contract::load(*runtime, contract::UnexportedMemoryModule);
+    auto context = contract::RecordingHostContext {};
+    auto const instance = contract::instantiate(*module, context);
+    CHECK(instance->memory(0, 4) == std::unexpected(MemoryFailure::OutOfBounds));
+}
+
+TEST_CASE("RemoteBackend.instancesHoldNoDescriptor", "[vtextension][remote]")
+{
+    // Every object's handle is closed once granted, by the parent and by a host in this process alike: a
+    // thousand live instances hold no handle, and once let go leave as many open as before.
+    constexpr auto Instances = 1000;
+    auto const backend = makeBackend(makeConnector());
+    auto const runtime = contract::createRuntime(*backend, OnePageLimits);
+    auto const guard = contract::enterThread(*backend);
+    auto const module = contract::load(*runtime, contract::InstanceModule);
+    auto context = contract::RecordingHostContext {};
+    // One instance first: whatever a host opens once, it opens before the count.
+    std::ignore = contract::instantiate(*module, context);
+    auto const before = openHandleCount();
+    auto instances = std::vector<std::unique_ptr<IWasmInstance>> {};
+    for ([[maybe_unused]] auto const index: std::views::iota(0, Instances))
+        if (auto instance = module->instantiate(context))
+            instances.push_back(*std::move(instance));
+    CHECK(instances.size() == Instances);
+    CHECK(openHandleCount() == before);
+    instances.clear();
+    CHECK(openHandleCount() == before);
+}
+
+TEST_CASE("RemoteBackend.growDuringLoweringIsSeen", "[vtextension][remote]")
+{
+    // Lowering a 256 KiB string allocates it through the guest's cabi_realloc, which grows the memory to make
+    // room: the parent's view of the allocation is there as soon as the call returns, and what it writes
+    // there the guest reads.
+    constexpr auto StringBytes = uint32_t { 256 * 1024 };
+    auto const backend = makeBackend(makeConnector());
+    auto const runtime = contract::createRuntime(*backend);
+    auto const guard = contract::enterThread(*backend);
+    auto const module = contract::load(*runtime, GrowingReallocModule);
+    auto context = contract::RecordingHostContext {};
+    auto const instance = contract::instantiate(*module, context);
+
+    auto argv = std::array<uint32_t, 4> { 0, 0, 1, StringBytes };
+    REQUIRE(instance->call(contract::functionOf(*instance, "cabi_realloc"), argv).has_value());
+    auto const address = argv[0];
+    CHECK(address == proto::WasmPageBytes);
+    auto const string = instance->memory(address, StringBytes);
+    REQUIRE(string.has_value());
+    std::ranges::fill(*string, std::byte { 'x' });
+    string->back() = std::byte { 'y' };
+
+    auto last = std::array<uint32_t, 1> { address + StringBytes - 1 };
+    REQUIRE(instance->call(contract::functionOf(*instance, "load8"), last).has_value());
+    CHECK(last[0] == uint32_t { 'y' });
+}
+
+TEST_CASE("RemoteBackend.instantiateHoldsControlWhileAStartFunctionGrows", "[vtextension][remote][threading]")
+{
+    // A release queued while an Instantiate's start function grows the memory waits for the Instantiated: the
+    // host reads the channel's next PDU as the answer to its Grow.
+    using namespace std::chrono_literals;
+    auto const transcript = std::make_shared<Transcript>();
+    auto growing = std::make_shared<std::promise<void>>();
+    auto released = std::make_shared<std::promise<void>>();
+    auto answer = std::make_shared<std::promise<std::optional<proto::Pdu>>>();
+    auto const connector = honestConnector(
+        HonestScript {
+            .beforeInstantiated =
+                [count = std::make_shared<int>(0), growing, proceed = released->get_future().share(), answer](
+                    HelperEnds& ends, proto::Instantiate const& instantiate) {
+                    if (++*count != 2)
+                        return true;
+                    growing->set_value();
+                    if (proceed.wait_for(5s) != std::future_status::ready
+                        || !ends.send(proto::Grow { .instanceId = instantiate.instanceId,
+                                                    .bytes = 2 * proto::WasmPageBytes }))
+                        return false;
+                    auto reply = ends.receivePdu();
+                    answer->set_value(reply);
+                    return reply.has_value();
+                } },
+        transcript);
+    auto rig = ScriptedRig { .connector = connector };
+    auto const module = contract::load(*rig.runtime, PeekModule);
+    auto context = contract::RecordingHostContext {};
+    auto older = contract::instantiate(*module, context);
+
+    auto newer = std::async(std::launch::async, [&] { return module->instantiate(context); });
+    auto atGrowth = growing->get_future();
+    within(atGrowth, "the second Instantiate never reached the host");
+    older.reset();
+    released->set_value();
+
+    auto replied = answer->get_future();
+    CHECK(within(replied, "the Grow was not answered")
+          == std::optional { proto::Pdu { proto::Grown { .status = proto::GrowStatus::Granted } } });
+    auto made = within(newer, "the instantiation did not return");
+    REQUIRE(made.has_value());
+    CHECK((*made)->memory(static_cast<uint32_t>(proto::WasmPageBytes), 4).has_value());
+    // The release went out after the Instantiated.
+    auto const pdus = transcript->awaitAtLeast(4);
+    CHECK(indexOf(pdus, [](proto::Pdu const& pdu) { return releasesInstance(pdu, 1); }) == 3);
+    CHECK(connector->terminations() == 0);
+}
+
+TEST_CASE("RemoteBackend.liveObjectsStayWithinTheDataCap", "[vtextension][remote]")
+{
+    // A host's live instances hold at most its cap of memory objects: two fit here, a third waits for one of
+    // them to go, and is refused without anything sent.
+    auto const transcript = std::make_shared<Transcript>();
+    auto const connector = honestConnector(HonestScript {}, transcript, 2 * ContractObjectBytes);
+    auto rig = ScriptedRig { .connector = connector };
+    auto const module = contract::load(*rig.runtime, PeekModule);
+    auto context = contract::RecordingHostContext {};
+    auto first = contract::instantiate(*module, context);
+    auto const second = contract::instantiate(*module, context);
+
+    auto const third = module->instantiate(context);
+    REQUIRE_FALSE(third.has_value());
+    CHECK(third == std::unexpected(ExtensionError::OutOfMemory));
+    CHECK(instantiatesAmong(transcript->awaitAtLeast(3)).size() == 2);
+
+    first.reset();
+    CHECK(module->instantiate(context).has_value());
+    CHECK(connector->terminations() == 0);
 }
 
 TEST_CASE("Remote.measureRender", "[.measure]")

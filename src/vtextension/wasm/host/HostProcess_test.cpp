@@ -182,7 +182,7 @@ struct Confined
 {
     return [confined = std::move(confined)]() -> std::unique_ptr<IHostedEngine> {
         confined->engineMadeAt.store(confined->steps.fetch_add(1));
-        return makeHostedEngine();
+        return makeHostedEngine(proto::MemoryMode::Copy);
     };
 }
 
@@ -261,7 +261,7 @@ void closeAll(HelperArguments const& arguments) noexcept
 {
     return [calls = std::move(calls)]() -> std::unique_ptr<IHostedEngine> {
         calls->fetch_add(1);
-        return makeHostedEngine();
+        return makeHostedEngine(proto::MemoryMode::Copy);
     };
 }
 
@@ -275,7 +275,8 @@ struct ServingHost
     std::shared_ptr<Confined> confined = std::make_shared<Confined>();
     std::vector<std::string> arguments = formatHelperArguments(parent.arguments);
     std::packaged_task<int()> task { [this] {
-        return runHost(arguments, [] { return makeHostedEngine(); }, testConfinement(confined));
+        return runHost(
+            arguments, [] { return makeHostedEngine(proto::MemoryMode::Copy); }, testConfinement(confined));
     } };
     std::future<int> exitCode = task.get_future();
     std::jthread host { std::move(task) };
@@ -414,7 +415,8 @@ TEST_CASE("HostProcess.servesOverAdoptedEndpoints", "[vtextension][host]")
     auto confined = std::make_shared<Confined>();
     auto const arguments = formatHelperArguments(parent.arguments);
     auto task = std::packaged_task<int()> { [&] {
-        return runHost(arguments, [] { return makeHostedEngine(); }, testConfinement(confined));
+        return runHost(
+            arguments, [] { return makeHostedEngine(proto::MemoryMode::Copy); }, testConfinement(confined));
     } };
     auto exitCode = task.get_future();
     auto host = std::jthread { std::move(task) };

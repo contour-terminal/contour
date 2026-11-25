@@ -131,8 +131,11 @@ std::expected<remote::HostConnection, ExtensionError> ProcessHostConnector::conn
         return std::unexpected(ExtensionError::HostUnavailable);
     }
     // The helper's ends are the child's alone now: the parent's copies close as they go out of scope.
-    auto connection =
-        remote::HostConnection { .control = std::move(control->parent), .lanes = {}, .handle = {} };
+    // The memory objects of its instances are held to the data cap it is started with.
+    auto connection = remote::HostConnection { .control = std::move(control->parent),
+                                               .lanes = {},
+                                               .handle = {},
+                                               .objectBytesCap = _config.caps.dataBytes };
     for (auto& lane: lanes)
         connection.lanes.push_back(std::move(lane.parent));
     connection.handle =

@@ -135,12 +135,20 @@ class IHostHandle
     [[nodiscard]] virtual transport::HandleTarget const& handleTarget() const noexcept = 0;
 };
 
+/// How many bytes the memory objects of one host's live instances may take together, unless its connector
+/// says otherwise: as much as a host process's data cap allows by default.
+inline constexpr uint64_t DefaultObjectBytesCap = uint64_t { 1 } << 30;
+
 /// A host process started and connected: the parent's ends of its channels, and the handle on it.
 struct HostConnection
 {
     transport::Channel control;            ///< The control channel's parent end.
     std::vector<transport::Channel> lanes; ///< The lanes' parent ends; MaxLaneChannels of them.
     std::unique_ptr<IHostHandle> handle;   ///< The host itself.
+    /// How many bytes the memory objects the parent grants the host's live instances may take together: the
+    /// most memory a host that shares it can dirty. An instantiation past it fails `OutOfMemory` before
+    /// anything is made or sent. 0: no cap.
+    uint64_t objectBytesCap = DefaultObjectBytesCap;
 };
 
 /// Starts host processes.

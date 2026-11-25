@@ -31,7 +31,9 @@
 #include <vtextension/wasm/remote/HostRefusals.hpp>
 #include <vtextension/wasm/remote/LaneWatch.hpp>
 #include <vtextension/wasm/remote/RemoteKindState.hpp>
+#include <vtextension/wasm/remote/SharedGuestMemory.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
+#include <vtextension/wasm/remote/transport/HandleGrant.hpp>
 #include <vtextension/wasm/remote/transport/PduStream.hpp>
 
 namespace vtextension::wasm::remote
@@ -104,6 +106,20 @@ namespace
 
       private:
         LaneWatch& _watch;
+    };
+
+    /// Whether a module exports a memory: what its instances' memory() reaches.
+    enum class MemoryExport : uint8_t
+    {
+        None,     ///< It exports none: memory() reaches nothing, whatever the instance's memory holds.
+        Exported, ///< It exports one.
+    };
+
+    /// What the parent reads of a module's memory from its own bytes, never from a host's description of it.
+    struct ModuleMemory
+    {
+        uint64_t initialBytes = 0;                  ///< The largest initial size of the memories it defines.
+        MemoryExport exported = MemoryExport::None; ///< Whether it exports one.
     };
 
     /// A module as one incarnation describes it, under the id it was loaded with there.
@@ -352,11 +368,13 @@ namespace
         RemoteModule(std::shared_ptr<RemoteRuntime> runtime,
                      std::shared_ptr<HelperSlot> slot,
                      std::vector<std::byte> bytes,
+                     ModuleMemory memory,
                      std::shared_ptr<HelperIncarnation> loadedIn,
                      LoadedModule loaded) noexcept:
             _runtime { std::move(runtime) },
             _slot { std::move(slot) },
             _bytes { std::move(bytes) },
+            _memory { memory },
             _imports { std::move(loaded.imports) },
             _exports { std::move(loaded.exports) },
             _loadedIn { std::move(loadedIn) },
@@ -391,7 +409,11 @@ namespace
         /// trying again in a new one, whereas this module's imports and exports were checked against its
         /// world as first described, and what a host would run now is not that module. Refusing the module is
         /// what keeps it from running unchecked; the next instantiation respawns a host and checks again.
+        /// Where the host shares memory, the parent makes the instance's memory object, of the runtime's cap
+        /// and opened to the module's initial size as the parent reads it, and grants it with the request.
         /// @return The instance; `InvalidComponent` if a respawned host describes the module differently,
+        ///         `OutOfMemory` if the module's initial memory is past the runtime's cap or the memory
+        ///         objects of the host's live instances would take more than it allows, nothing sent then,
         ///         `HostUnavailable` if the host died or broke the protocol, else the host's own error.
         [[nodiscard]] std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> instantiate(
             IHostContext& context) override;
@@ -399,10 +421,14 @@ namespace
         /// @return The runtime it was loaded on.
         [[nodiscard]] RemoteRuntime const& runtime() const noexcept { return *_runtime; }
 
+        /// @return Whether it exports a memory.
+        [[nodiscard]] MemoryExport memoryExport() const noexcept { return _memory.exported; }
+
       private:
         std::shared_ptr<RemoteRuntime> _runtime; // First, so that it goes last.
         std::shared_ptr<HelperSlot> _slot;
         std::vector<std::byte> _bytes;
+        ModuleMemory _memory;
         std::vector<ImportDescription> _imports;
         std::vector<ExportDescription> _exports;
         std::mutex _mutex; ///< Guards what follows.
@@ -410,25 +436,34 @@ namespace
         uint32_t _moduleId;
     };
 
-    /// An instance in a host. Its calls, host calls and memory accesses travel on the calling thread's lane.
+    /// The memory a shared-memory instance holds: its object, and its share of the host's cap on them.
+    struct SharedInstanceMemory
+    {
+        SharedGuestMemory memory; ///< The object, mapped.
+        ObjectBytesLease lease;   ///< Its bytes of HostConnection::objectBytesCap.
+    };
+
+    /// An instance in a host. Its calls and host calls travel on the calling thread's lane, and so do its
+    /// memory accesses where its host copies memory; where the host shares it, the parent maps the memory.
     class RemoteInstance final: public IWasmInstance
     {
       public:
+        /// @param shared The instance's memory where its host shares memory; nothing where the host copies
+        /// it.
         RemoteInstance(std::shared_ptr<RemoteModule> module,
                        std::shared_ptr<HelperIncarnation> incarnation,
                        uint32_t instanceId,
                        uint32_t interruptSlot,
                        std::vector<uint32_t> callableExports,
-                       IHostContext& context):
+                       IHostContext& context,
+                       std::optional<SharedInstanceMemory> shared):
             _module { std::move(module) },
             _incarnation { std::move(incarnation) },
             _instanceId { instanceId },
             _interruptSlot { interruptSlot },
             _callableExports { std::move(callableExports) },
             _context { context },
-            _memory { instanceId,
-                      std::min(_module->runtime().limits().memoryBytes, MaxCopiedBytes),
-                      [this](uint32_t address, uint32_t size) { return fetch(address, size); } }
+            _memory { memoryOf(std::move(shared)) }
         {
         }
 
@@ -470,7 +505,15 @@ namespace
                 return std::span<std::byte> {};
             if (!_incarnation->isAlive())
                 return std::unexpected(MemoryFailure::HostCrashed);
-            return _memory.view(address, size);
+            if (auto* const shared = std::get_if<SharedInstanceMemory>(&_memory))
+            {
+                // Bounded by what the parent acknowledged; a memory the module does not export is not
+                // reached.
+                if (_module->memoryExport() == MemoryExport::None)
+                    return std::unexpected(MemoryFailure::OutOfBounds);
+                return shared->memory.view(address, size);
+            }
+            return std::get<CopyPathMemory>(_memory).view(address, size);
         }
 
         /// Wait-free: stores the sticky flag, then arms the backstop and raises the slot
@@ -483,6 +526,23 @@ namespace
         }
 
       private:
+        /// The instance's memory, as its host reaches it.
+        using InstanceMemory = std::variant<CopyPathMemory, SharedInstanceMemory>;
+
+        /// @return The memory of an instance whose shared memory is @p shared; a copy of the host's where it
+        ///         has none.
+        [[nodiscard]] InstanceMemory memoryOf(std::optional<SharedInstanceMemory> shared)
+        {
+            if (shared)
+                return InstanceMemory { std::in_place_type<SharedInstanceMemory>, *std::move(shared) };
+            return InstanceMemory { std::in_place_type<CopyPathMemory>,
+                                    _instanceId,
+                                    std::min(_module->runtime().limits().memoryBytes, MaxCopiedBytes),
+                                    [this](uint32_t address, uint32_t size) {
+                                        return fetch(address, size);
+                                    } };
+        }
+
         /// @return The index of the calling thread's lane of the host; nothing if the thread has none.
         [[nodiscard]] std::optional<std::size_t> laneOfCurrentThread()
         {
@@ -508,6 +568,12 @@ namespace
         /// is about to run.
         [[nodiscard]] std::expected<void, CallFailure> flushTo(PduStream& lane);
 
+        /// Answers the host's @p request to grow the instance's memory, on @p lane: a violation, which kills
+        /// the host, unless the instance shares its memory and the request names it, and passes the memory's
+        /// checks (SharedGuestMemory::grow()); refused once the instance was interrupted.
+        [[nodiscard]] std::expected<void, CallFailure> answerGrow(PduStream& lane,
+                                                                  proto::Grow const& request);
+
         /// Runs the host call @p request asks for, and answers it on @p lane, whose watch is @p watch.
         [[nodiscard]] std::expected<void, CallFailure> serveHostCall(PduStream& lane,
                                                                      LaneWatch& watch,
@@ -520,7 +586,8 @@ namespace
         std::vector<uint32_t> _callableExports; ///< The export ordinals the host offers to call.
         IHostContext& _context;
         std::atomic<InterruptState> _interrupt { InterruptState::Running };
-        CopyPathMemory _memory;
+        // After the incarnation, so that its share of the host's cap goes back before it does.
+        InstanceMemory _memory;
     };
 
     /// @return The failure a call reports for what the host said it failed with: refused growth is not told
@@ -548,9 +615,20 @@ namespace
         auto loaded = loadInto(**incarnation, bytes);
         if (!loaded)
             return std::unexpected(loaded.error());
+        // The parent's own reading of the module's memory: a host loaded it, so it is well-formed.
+        auto const initialPages = binary::largestInitialMemoryPages(bytes);
+        if (!initialPages)
+            return std::unexpected(ExtensionError::InvalidComponent);
+        auto const memory = ModuleMemory {
+            .initialBytes = uint64_t { *initialPages } * proto::WasmPageBytes,
+            .exported = std::ranges::contains(loaded->exports, ExternKind::Memory, &ExportDescription::kind)
+                            ? MemoryExport::Exported
+                            : MemoryExport::None,
+        };
         return std::make_shared<RemoteModule>(shared_from_this(),
                                               std::move(slot),
                                               std::move(bytes),
+                                              memory,
                                               std::move(*incarnation),
                                               std::move(*loaded));
     }
@@ -581,6 +659,12 @@ namespace
             _moduleId = reloaded->moduleId;
         }
 
+        // A memory past the cap is refused here, before anything is made or sent: by the parent's own reading
+        // of the module, whatever a host would make of it.
+        auto const capBytes = uint64_t { _runtime->limits().memoryBytes };
+        if (_memory.initialBytes > capBytes)
+            return std::unexpected(ExtensionError::OutOfMemory);
+
         // Every live instance holds a slot of the host's interrupt page; with none left, the host takes no
         // more instances, which is no fault of the host's.
         auto const interruptSlot = host.interruptSlots().acquire();
@@ -592,12 +676,42 @@ namespace
         };
 
         auto const instanceId = host.nextInstanceId();
-        // No object yet: every host copies memory.
+        // Where the host shares memory, the instance's object is made, and granted with the request; one that
+        // copies it is granted nothing.
+        auto shared = std::optional<SharedInstanceMemory> {};
+        auto grant = transport::HandleGrant {};
+        auto wire = proto::MemoryGrant {};
+        if (host.memoryMode() == proto::MemoryMode::Shared)
+        {
+            auto lease = host.leaseObjectBytes(proto::memoryObjectBytes(capBytes));
+            if (!lease)
+                return refused(ExtensionError::OutOfMemory);
+            auto made = SharedGuestMemory::create(capBytes, _memory.initialBytes);
+            if (!made)
+                return refused(made.error());
+            auto granted = transport::grantHandle(host.handleTarget(), made->object());
+            if (!granted)
+                return refused(ExtensionError::RuntimeUnavailable);
+            grant = *granted;
+            wire = made->grant(granted->wireValue);
+            shared.emplace(SharedInstanceMemory { .memory = *std::move(made), .lease = *std::move(lease) });
+        }
+        // A start function growing the memory asks on the control channel, before the reply.
+        auto const answer = GrowAnswer { [&](proto::Grow const& grow) {
+            if (!shared || grow.instanceId != instanceId)
+                return GrowVerdict::Violation;
+            return shared->memory.grow(grow.bytes);
+        } };
         auto reply = host.request(proto::Instantiate { .moduleId = _moduleId,
                                                        .instanceId = instanceId,
                                                        .interruptSlot = *interruptSlot,
-                                                       .memory = {} },
-                                  HostStep::Instantiate);
+                                                       .memory = wire },
+                                  HostStep::Instantiate,
+                                  grant,
+                                  answer);
+        // Sent, or never to be: the object is the host's to keep alive now, and the parent's mapping.
+        if (shared)
+            shared->memory.closeObject();
         if (!reply)
             return refused(ExtensionError::HostUnavailable);
         auto* const instantiated = std::get_if<proto::Instantiated>(&*reply);
@@ -620,7 +734,8 @@ namespace
                                                 instanceId,
                                                 *interruptSlot,
                                                 std::move(instantiated->callableExports),
-                                                context);
+                                                context,
+                                                std::move(shared));
     }
 
     std::expected<void, CallFailure> RemoteInstance::call(ExportFunction function, std::span<uint32_t> argv)
@@ -663,6 +778,12 @@ namespace
             {
                 if (auto const served = serveHostCall(*lane, watch, *hostCall); !served)
                     return served;
+                continue;
+            }
+            if (auto const* const grow = std::get_if<proto::Grow>(&*reply))
+            {
+                if (auto const answered = answerGrow(*lane, *grow); !answered)
+                    return answered;
                 continue;
             }
             auto* const result = std::get_if<proto::CallResult>(&*reply);
@@ -712,10 +833,32 @@ namespace
         return {};
     }
 
+    std::expected<void, CallFailure> RemoteInstance::answerGrow(PduStream& lane, proto::Grow const& request)
+    {
+        // Only the instance whose call this lane runs, innermost, may grow; and only memory the parent maps.
+        auto* const shared = std::get_if<SharedInstanceMemory>(&_memory);
+        if (!shared || request.instanceId != _instanceId)
+            return crashed();
+        // An interrupted instance grows no further: it is not to run on, and its growth is not to be paid
+        // for.
+        auto const verdict = _interrupt.load() == InterruptState::Interrupted
+                                 ? shared->memory.refuseGrowth(request.bytes)
+                                 : shared->memory.grow(request.bytes);
+        if (verdict == GrowVerdict::Violation)
+            return crashed();
+        if (!lane.send(proto::Grown { .status = growStatusOf(verdict) }))
+            return crashed();
+        return {};
+    }
+
     std::expected<void, CallFailure> RemoteInstance::flushTo(PduStream& lane)
     {
-        auto const writes = _memory.flush();
-        _memory.clear();
+        // A shared memory is written in place: nothing to send.
+        auto* const copied = std::get_if<CopyPathMemory>(&_memory);
+        if (!copied)
+            return {};
+        auto const writes = copied->flush();
+        copied->clear();
         for (auto const& write: writes)
             if (!lane.send(write))
                 return crashed();

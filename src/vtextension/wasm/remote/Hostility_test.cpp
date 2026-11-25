@@ -301,6 +301,13 @@ enum class Operation : uint8_t
 /// How many instances Operation::ReleaseFlood drops.
 constexpr auto FloodInstances = 1000;
 
+/// The limits of the runtime Operation::ReleaseFlood floods: memory of one page, so that the memory objects
+/// of FloodInstances live instances stay well within a host's cap on them.
+constexpr auto FloodLimits =
+    vtextension::wasm::RuntimeLimits { .memoryBytes = proto::WasmPageBytes,
+                                       .stackBytes = contract::Limits.stackBytes,
+                                       .tableElements = contract::Limits.tableElements };
+
 /// How long dropping one instance may take: it never waits for the host.
 constexpr auto DropBound = 100ms;
 
@@ -587,7 +594,8 @@ TEST_CASE("Hostility.modes", "[vtextension][process][hostility]")
             {
                 auto const stamps = std::make_shared<StepStamps>();
                 auto const backend = stampedBackend(composition, hostileHelper(row.mode), stamps);
-                auto const runtime = contract::createRuntime(*backend);
+                auto const runtime = contract::createRuntime(
+                    *backend, row.operation == Operation::ReleaseFlood ? FloodLimits : contract::Limits);
 
                 auto outcome = operate(row, *backend, *runtime);
                 CHECK(outcome.failure == row.failure);

@@ -125,7 +125,7 @@ class ScriptedParent
 {
   public:
     explicit ScriptedParent(HostServerConfig config = {}, LaneZero laneZero = LaneZero::Framed):
-        ScriptedParent { makeHostedEngine(), std::move(config), laneZero }
+        ScriptedParent { makeHostedEngine(proto::MemoryMode::Copy), std::move(config), laneZero }
     {
     }
 
@@ -363,7 +363,7 @@ class ProbedInstance final: public vtextension::wasm::testing::ForwardingInstanc
     std::shared_ptr<StackProbe> probe)
 {
     return std::make_unique<vtextension::wasm::testing::DecoratedEngine>(
-        makeHostedEngine(),
+        makeHostedEngine(proto::MemoryMode::Copy),
         [probe = std::move(probe)](std::unique_ptr<vtextension::wasm::IWasmInstance> instance)
             -> std::unique_ptr<vtextension::wasm::IWasmInstance> {
             return std::make_unique<ProbedInstance>(std::move(instance), probe);
@@ -488,7 +488,7 @@ TEST_CASE("HostServer.loadDescribes", "[vtextension][host]")
     auto const loaded = parent.loadOk(1, 1, toModule(contract::DescribedModule));
 
     // What the same engine says of the module in this process.
-    auto const engine = makeHostedEngine();
+    auto const engine = makeHostedEngine(proto::MemoryMode::Copy);
     auto const runtime = engine->createRuntime(contract::Limits, contract::HostFunctions);
     REQUIRE(runtime.has_value());
     auto const guard = engine->enterThread();
@@ -987,7 +987,7 @@ TEST_CASE("HostServer.stopEndsAParkedCall", "[vtextension][host]")
 
 TEST_CASE("HostServer.stopBeforeRun", "[vtextension][host]")
 {
-    auto const engine = makeHostedEngine();
+    auto const engine = makeHostedEngine(proto::MemoryMode::Copy);
     auto control = makeChannelPair();
     REQUIRE(control.has_value());
     auto server = HostServer { *engine, {}, std::move(control->helper), HostServerConfig {} };
@@ -1571,7 +1571,8 @@ TEST_CASE("HostServer.onlyAnInstantiateBringsAHandle", "[vtextension][host]")
 
 TEST_CASE("InProcessHost.connectStartsAServingHost", "[vtextension][host]")
 {
-    auto connector = InProcessHostConnector { [] { return makeHostedEngine(); }, HostServerConfig {} };
+    auto connector = InProcessHostConnector { [] { return makeHostedEngine(proto::MemoryMode::Copy); },
+                                              HostServerConfig {} };
     auto connection = connector.connect();
     REQUIRE(connection.has_value());
     CHECK(connection->lanes.size() == MaxLaneChannels);
@@ -1592,7 +1593,8 @@ TEST_CASE("InProcessHost.connectStartsAServingHost", "[vtextension][host]")
 
 TEST_CASE("InProcessHost.droppingTheHandleStopsTheHost", "[vtextension][host]")
 {
-    auto connector = InProcessHostConnector { [] { return makeHostedEngine(); }, HostServerConfig {} };
+    auto connector = InProcessHostConnector { [] { return makeHostedEngine(proto::MemoryMode::Copy); },
+                                              HostServerConfig {} };
     auto connection = connector.connect();
     REQUIRE(connection.has_value());
     auto control = parentControl(std::move(connection->control), proto::PduLimits {});
@@ -1605,7 +1607,8 @@ TEST_CASE("InProcessHost.droppingTheHandleStopsTheHost", "[vtextension][host]")
 
 TEST_CASE("InProcessHost.handleInterrupts", "[vtextension][host]")
 {
-    auto connector = InProcessHostConnector { [] { return makeHostedEngine(); }, HostServerConfig {} };
+    auto connector = InProcessHostConnector { [] { return makeHostedEngine(proto::MemoryMode::Copy); },
+                                              HostServerConfig {} };
     auto connection = connector.connect();
     REQUIRE(connection.has_value());
     auto control = parentControl(std::move(connection->control), proto::PduLimits {});
