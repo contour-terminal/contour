@@ -183,6 +183,10 @@ struct DashboardFixture
     /// the dashboard the engine changed.
     void answerHeld();
 
+    /// Reads the lists again now (RefreshNow), answering every command as @ref world says now; then tells the
+    /// dashboard the engine changed.
+    void poll();
+
     World world;                  ///< What the engine was started from.
     std::vector<RunCommand> held; ///< The commands not answered yet.
     Engine engine;

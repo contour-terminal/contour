@@ -156,6 +156,8 @@ add_library(orchestrator_view STATIC
     view/Palette.hpp
     view/Sections.cpp
     view/Sections.hpp
+    view/StartDialog.cpp
+    view/StartDialog.hpp
     view/BoardMarkdown.cpp
     view/BoardMarkdown.hpp
     view/StatusBoard.cpp
@@ -232,6 +234,7 @@ if(ORCHESTRATOR_TESTING)
         view/Keys_test.cpp
         view/Palette_test.cpp
         view/Sections_test.cpp
+        view/StartDialog_test.cpp
         view/BoardMarkdown_test.cpp
         view/StatusBoard_test.cpp
         view/TextEdit_test.cpp

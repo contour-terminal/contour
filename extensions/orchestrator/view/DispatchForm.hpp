@@ -41,6 +41,7 @@ enum class FormField : uint8_t
     Note,        ///< An item's note: a text field.
     Repo,        ///< A topic form's: ←/→ cycle the configured repositories.
     Permissions, ///< ←/→ cycle the permission profiles.
+    Worker,      ///< ←/→ cycle the workers.
 };
 
 /// How far the user got past the warning that the agents' setup is incomplete (status hooks or a plugin).
@@ -61,6 +62,7 @@ struct DispatchFormState
     std::size_t task = 0;        ///< The task: an index into Config::tasks(), one that applies to the item.
     std::size_t model = 0;       ///< The model: an index into Config::models().
     std::size_t permissions = 0; ///< The permission profile: an index into Config::profiles().
+    std::size_t worker = 0;      ///< The worker this run starts on: an index into Config::workers().
     std::string note = {};       ///< An item's note, added to its prompt; empty: none.
     std::string topic = {};      ///< A topic's text; empty for an item.
     std::string session = {};    ///< The agent's session UUID, minted as the form opens.
@@ -83,7 +85,8 @@ inline constexpr std::string_view HooksMissingWarning =
 
 /// @param form An open form.
 /// @param engine The engine.
-/// @return The worker the form's task runs on; nullptr while the engine has no configuration.
+/// @return The worker the form runs on (DispatchFormState::worker); nullptr while the engine has no
+///         configuration.
 [[nodiscard]] WorkerDef const* workerOf(DispatchFormState const& form, Engine const& engine) noexcept;
 
 /// @param engine The engine.
@@ -113,21 +116,39 @@ inline constexpr std::string_view HooksMissingWarning =
 /// @param item The item.
 /// @param task The id of the task the form starts on; it must apply to the item.
 /// @param session The agent's session UUID.
-/// @return The form, on the task's own model; std::nullopt when the engine is not configured, does not list
-///         the item, or the task does not apply to it.
+/// @return The form, on the task's own model and its default worker (defaultWorker()); std::nullopt when the
+///         engine is not configured, does not list the item, or the task does not apply to it.
 [[nodiscard]] std::optional<DispatchFormState> openDispatchForm(Engine const& engine,
                                                                 std::string_view repo,
                                                                 ItemRef const& item,
                                                                 std::string_view task,
                                                                 std::string session);
 
+/// Opens a form on an item as a caller found it listed, such as a Work board row.
+/// @param engine The engine: its configuration and its runs.
+/// @param repo The repository's configured name.
+/// @param item The item.
+/// @param url The item's web page, as listed.
+/// @param title The item's title, as listed, sanitised.
+/// @param task The id of the task the form starts on; it must apply to the item.
+/// @param session The agent's session UUID.
+/// @return The form, on the task's own model and its default worker (defaultWorker()); std::nullopt when the
+///         engine is not configured or the task does not apply to the item.
+[[nodiscard]] std::optional<DispatchFormState> openItemForm(Engine const& engine,
+                                                            std::string_view repo,
+                                                            ItemRef const& item,
+                                                            std::string url,
+                                                            std::string title,
+                                                            std::string_view task,
+                                                            std::string session);
+
 /// The choices for a topic: the launcher's topic row.
 /// @param engine The engine: its configuration and whether the hooks are installed.
 /// @param repo The repository's configured name; one the configuration lacks starts on its first.
 /// @param topic The topic's text to start with; empty for a new one.
 /// @param session The agent's session UUID.
-/// @return The form, on the first task that applies to topics and its model; std::nullopt when the engine is
-///         not configured or configures no repository.
+/// @return The form, on the first task that applies to topics, its model and its default worker
+///         (defaultWorker()); std::nullopt when the engine is not configured or configures no repository.
 [[nodiscard]] std::optional<DispatchFormState> openTopicForm(Engine const& engine,
                                                              std::string_view repo,
                                                              std::string topic,
@@ -154,8 +175,8 @@ inline constexpr std::string_view HooksMissingWarning =
 [[nodiscard]] bool canConfirm(DispatchFormState const& form, Engine const& engine);
 
 /// Changes one of a dispatch's settings by a step, wrapping around: the task (among those that apply to the
-/// item, bringing its own model and profile), the model, a topic's repository, or the profile. The note is
-/// text, and is not stepped.
+/// item, bringing its own model, profile and default worker), the model, a topic's repository, the profile,
+/// or the worker. The note is text, and is not stepped.
 /// @param form The choices.
 /// @param field Which setting.
 /// @param step 1 for the next value, -1 for the one before.

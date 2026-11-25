@@ -19,6 +19,7 @@
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Naming.hpp>
 #include <orchestrator/core/Permissions.hpp>
+#include <orchestrator/core/WorkItems.hpp>
 #include <orchestrator/view/Sections.hpp>
 
 using namespace std::string_view_literals;
@@ -58,6 +59,16 @@ namespace
         auto const profiles = config.profiles();
         auto const& profile = config.profileFor(taskId);
         return static_cast<std::size_t>(&profile - profiles.data());
+    }
+
+    /// @return The index into Config::workers() of the worker @p taskId's runs start on now
+    /// (defaultWorker()).
+    [[nodiscard]] std::size_t workerIndexFor(Engine const& engine,
+                                             Config const& config,
+                                             std::string_view taskId)
+    {
+        auto const& worker = defaultWorker(config, engine.runs(), taskId);
+        return static_cast<std::size_t>(&worker - config.workers().data());
     }
 
     // }}}
@@ -121,6 +132,23 @@ std::optional<DispatchFormState> openDispatchForm(Engine const& engine,
                                                   std::string_view task,
                                                   std::string session)
 {
+    if (engine.config() == nullptr)
+        return std::nullopt;
+    auto listed = listedItem(engine, repo, item);
+    if (!listed)
+        return std::nullopt;
+    return openItemForm(
+        engine, repo, item, std::move(listed->url), std::move(listed->title), task, std::move(session));
+}
+
+std::optional<DispatchFormState> openItemForm(Engine const& engine,
+                                              std::string_view repo,
+                                              ItemRef const& item,
+                                              std::string url,
+                                              std::string title,
+                                              std::string_view task,
+                                              std::string session)
+{
     auto const* const config = engine.config();
     if (config == nullptr)
         return std::nullopt;
@@ -128,21 +156,19 @@ std::optional<DispatchFormState> openDispatchForm(Engine const& engine,
     auto const found = std::ranges::find(tasks, task, &TaskDef::id);
     if (found == tasks.end() || found->appliesTo != appliesToOf(item))
         return std::nullopt;
-    auto listed = listedItem(engine, repo, item);
-    if (!listed)
-        return std::nullopt;
     auto const models = config->models();
     auto const model = std::ranges::find(models, found->model);
     return DispatchFormState {
         .repo = std::string { repo },
         .item = item,
-        .url = std::move(listed->url),
-        .title = std::move(listed->title),
+        .url = std::move(url),
+        .title = std::move(title),
         .task = static_cast<std::size_t>(std::ranges::distance(tasks.begin(), found)),
         .model = model != models.end()
                      ? static_cast<std::size_t>(std::ranges::distance(models.begin(), model))
                      : 0,
         .permissions = profileIndexFor(*config, found->id),
+        .worker = workerIndexFor(engine, *config, found->id),
         .note = {},
         .topic = {},
         .session = std::move(session),
@@ -172,6 +198,7 @@ std::optional<DispatchFormState> openTopicForm(Engine const& engine,
                      ? static_cast<std::size_t>(std::ranges::distance(models.begin(), model))
                      : 0,
         .permissions = task != nullptr ? profileIndexFor(*config, task->id) : 0,
+        .worker = workerIndexFor(engine, *config, task != nullptr ? std::string_view { task->id } : ""sv),
         .note = {},
         .topic = std::move(topic),
         .session = std::move(session),
@@ -193,6 +220,9 @@ DispatchAction actionOf(DispatchFormState const& form, Engine const& engine, std
         .permissions = config != nullptr && form.permissions < config->profiles().size()
                            ? config->profiles()[form.permissions].name
                            : std::string {},
+        .worker = config != nullptr && form.worker < config->workers().size()
+                      ? config->workers()[form.worker].id
+                      : std::string {},
         .note = form.note.empty() ? std::nullopt : std::optional { form.note },
         .session = form.session,
         .nearTab = std::string { nearTab },
@@ -244,8 +274,10 @@ void changeSetting(DispatchFormState& form, FormField field, int step, Engine co
             if (auto const model = std::ranges::find(models, tasks[form.task].model); model != models.end())
                 form.model = static_cast<std::size_t>(std::ranges::distance(models.begin(), model));
             form.permissions = profileIndexFor(*config, tasks[form.task].id);
+            form.worker = workerIndexFor(engine, *config, tasks[form.task].id);
             break;
         }
+        case FormField::Worker: form.worker = cycled(form.worker, config->workers().size(), step, any); break;
         case FormField::Model: form.model = cycled(form.model, config->models().size(), step, any); break;
         case FormField::Permissions:
             form.permissions = cycled(form.permissions, config->profiles().size(), step, any);
@@ -280,6 +312,9 @@ WorkerDef const* workerOf(DispatchFormState const& form, Engine const& engine) n
     auto const* const config = engine.config();
     if (config == nullptr)
         return nullptr;
+    auto const workers = config->workers();
+    if (form.worker < workers.size())
+        return &workers[form.worker];
     auto const tasks = config->tasks();
     return &config->workerFor(form.task < tasks.size() ? std::string_view { tasks[form.task].id } : ""sv);
 }

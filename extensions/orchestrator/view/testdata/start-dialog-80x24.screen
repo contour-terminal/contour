@@ -1,0 +1,24 @@
+ ✦ Agents  Work                                                      ⬢ 1/4 ▰▱▱▱ 
+╭─ Work 14 ────────────────────────────────────────────────────────────────────╮
+│ / filter                              ‹ all repositories ›  sort: importance │
+│ ▾ Needs you  3                                                               │
+│▍#2375 PRJ-1234 PRJ-1234: fix the fla… ✗ pipeline · ◆ In Progress             │
+│ #2╭─ ▶ Start agent ──────────────────────────────────────────────────────╮e  │
+│ #2│ #2375 · contour · PRJ-1234: fix the flaky test                       │   │
+│ ▾ │                                                                      │   │
+│ #2│ task      ‹ fix CI ›  pipeline fails: test-windows                   │   │
+│ ▾ │ worker     claude 1                                                  │   │
+│ #2│ model     ‹ sonnet ›                                                 │   │
+│ ▾ │ perms     ‹ standard ›                                               │   │
+│   │ note      none                                                       │   │
+│   │ ──────────────────────────────────────────────────────────────────── │   │
+│   │ checkout  gh pr checkout 2375 --branch agent/pr-2375-…               │   │
+│   │ worktree  /home/u/worktrees/contour/pr-2375-…                        │   │
+│   │                                                                      │   │
+│   │ enter start · tab next · ←→ change · ctrl+p more · esc close         │   │
+│ ▸ ╰──────────────────────────────────────────────────────────────────────╯   │
+│                                                                              │
+│                                                                              │
+│ #2375 · contour · pipeline fails: test-windows · PRJ-1234 In Progress        │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ o open · z fold · / filter · s sort · → repository · w agents · ^k all actions 

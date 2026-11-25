@@ -445,3 +445,72 @@ TEST_CASE("the worker refusals are said and told apart", "[orchestrator][view][f
     CHECK_FALSE(refusalText(DispatchRefusal::WorkerTakesNoProfile).empty());
     CHECK(refusalText(DispatchRefusal::UnknownWorker) != refusalText(DispatchRefusal::WorkerTakesNoProfile));
 }
+
+namespace
+{
+/// Two Claude workers, a and b; the pull-request task and the topic task both run on b.
+constexpr auto TwoWorkersConfig = R"({ "worktree_root": "~/worktrees", "models": ["opus", "sonnet"],
+  "workers": [ { "id": "a", "agent": "claude" }, { "id": "b", "agent": "claude" } ],
+  "repos": [ { "name": "contour", "path": "~/projects/contour", "forge": "github",
+               "issues": [ { "source": "forge", "query": "assignee:@me" } ] } ],
+  "tasks": [
+    { "id": "fix_ci", "key": "f", "label": "fix CI", "applies_to": "pr", "model": "sonnet",
+      "worker": "b", "prompt": "/contour-workflows:fix-ci {url}" },
+    { "id": "plan", "key": "p", "label": "plan", "applies_to": "topic", "model": "opus",
+      "worker": "b", "prompt": "/contour-workflows:writing-plans {topic}" } ] })"sv;
+} // namespace
+
+TEST_CASE("the forms open on the task's worker, else on the least busy one",
+          "[orchestrator][view][form][workers]")
+{
+    SECTION("the task's worker runs nothing")
+    {
+        auto const engine = bootEngine(World { .configJson = std::string { TwoWorkersConfig } });
+        REQUIRE(engine.config() != nullptr);
+        auto const form = openDispatchForm(engine, "contour", ChangeRequestRef { 2375 }, "fix_ci", {});
+        REQUIRE(form.has_value());
+        CHECK(form->worker == 1);
+        CHECK(workerOf(*form, engine)->id == "b");
+        auto const topic = openTopicForm(engine, "contour", "tidy the docs", {});
+        REQUIRE(topic.has_value());
+        CHECK(topic->worker == 1);
+    }
+
+    SECTION("the task's worker runs an agent")
+    {
+        auto busy = storedRun(Running {}, "pr-2369-20261113-150847", ChangeRequestRef { 2369 });
+        busy.worker = "b";
+        auto const engine =
+            bootEngine(World { .configJson = std::string { TwoWorkersConfig }, .stored = { busy } });
+        REQUIRE(engine.config() != nullptr);
+        auto const form = openDispatchForm(engine, "contour", ChangeRequestRef { 2375 }, "fix_ci", {});
+        REQUIRE(form.has_value());
+        CHECK(form->worker == 0);
+        auto const topic = openTopicForm(engine, "contour", "tidy the docs", {});
+        REQUIRE(topic.has_value());
+        CHECK(topic->worker == 0);
+    }
+}
+
+TEST_CASE("the worker setting cycles the workers, and the action carries it",
+          "[orchestrator][view][form][workers]")
+{
+    auto const engine = bootEngine(World { .configJson = std::string { TwoWorkersConfig } });
+    REQUIRE(engine.config() != nullptr);
+    auto form = openDispatchForm(
+        engine, "contour", ChangeRequestRef { 2375 }, "fix_ci", "123e4567-e89b-12d3-a456-426614174000");
+    REQUIRE(form.has_value());
+    CHECK(actionOf(*form, engine, "t1").worker == "b");
+    // b, the last, wraps around to a; a step back returns to b.
+    changeSetting(*form, FormField::Worker, 1, engine);
+    CHECK(form->worker == 0);
+    CHECK(actionOf(*form, engine, "t1").worker == "a");
+    changeSetting(*form, FormField::Worker, -1, engine);
+    CHECK(form->worker == 1);
+    changeSetting(*form, FormField::Worker, 1, engine);
+    REQUIRE(form->worker == 0);
+    // A task brings its own worker back.
+    changeSetting(*form, FormField::Task, 1, engine);
+    CHECK(form->worker == 1);
+    CHECK(previewOf(*form, engine).has_value());
+}

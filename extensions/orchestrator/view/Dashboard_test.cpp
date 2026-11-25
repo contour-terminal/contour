@@ -287,6 +287,8 @@ struct Scene
         Scene { .name = "work-flat", .world = workWorld(), .keys = "ws", .sizes = { Medium, Wide } },
         // The filter being typed.
         Scene { .name = "work-filter", .world = workWorld(), .keys = "w/prj", .sizes = { Medium, Wide } },
+        // The start dialog on Needs you's first item: its suggested task with the reason, the worker chips.
+        Scene { .name = "start-dialog", .world = workWorld(), .keys = "w\r", .sizes = { Narrow, Medium, Wide } },
     };
 }
 

@@ -20,6 +20,7 @@
 #include <orchestrator/view/DispatchForm.hpp>
 #include <orchestrator/view/Fleet.hpp>
 #include <orchestrator/view/Launcher.hpp>
+#include <orchestrator/view/StartDialog.hpp>
 
 namespace orchestrator::view
 {
@@ -368,6 +369,9 @@ struct Interaction
                                   ///< again, as folding from one of its runs asks; empty: none.
     View view = View::Agents;     ///< Which view is shown.
     WorkState work = {};          ///< Where the user is in the Work view.
+    /// The start dialog, while it is open: it takes every key. Here rather than in WorkState, since a
+    /// finished run's "run again" opens it from the Agents view too.
+    std::optional<StartDialogState> startDialog = {};
     [[nodiscard]] bool operator==(Interaction const&) const = default;
 };
 
@@ -479,9 +483,9 @@ void dropLastCodepoint(std::string& text) noexcept;
 /// @return It as one line: line ends and tabs folded to a space each, every other control character dropped.
 [[nodiscard]] std::string pastedText(std::string_view text);
 
-/// Applies a paste: into the palette's or the launcher's query while one is open, into the message box while
-/// it has the keys (its line feeds kept), into the filter while it is typed; dropped anywhere else. A paste
-/// is text, never keys: nothing in it confirms, moves or acts.
+/// Applies a paste: into the start dialog's note while it is open, into the palette's or the launcher's query
+/// while one is open, into the message box while it has the keys (its line feeds kept), into the filter while
+/// it is typed; dropped anywhere else. A paste is text, never keys: nothing in it confirms, moves or acts.
 /// @param interaction Where the user is; its query, draft or filter extended.
 /// @param context The engine the launcher lists from, and the selected row.
 /// @param text What was pasted.

@@ -715,6 +715,8 @@ namespace
                     if (form.note.starts_with('-'))
                         line.left.back().role = Role::Failing;
                     break;
+                // The launcher offers no worker: its form runs on the task's default one.
+                case FormField::Worker: break;
             }
         return line;
     }

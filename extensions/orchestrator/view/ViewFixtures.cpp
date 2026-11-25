@@ -156,6 +156,14 @@ void DashboardFixture::answerHeld()
     dashboard.engineChanged();
 }
 
+void DashboardFixture::poll()
+{
+    auto queue = std::deque<RunCommand> {};
+    queueCommands(engine.step(RefreshNow { .monoMs = monoMs() }), queue);
+    answerAll(engine, world, queue, nullptr);
+    dashboard.engineChanged();
+}
+
 std::vector<UiAction> DashboardFixture::escapeTimesOut()
 {
     clock.advance(std::chrono::milliseconds { 60 });

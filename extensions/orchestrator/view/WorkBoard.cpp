@@ -22,6 +22,7 @@
 
 #include <orchestrator/view/Band.hpp>
 #include <orchestrator/view/Sections.hpp>
+#include <orchestrator/view/StartDialog.hpp>
 #include <orchestrator/view/Theme.hpp>
 
 using namespace std::string_view_literals;
@@ -408,7 +409,7 @@ namespace
                 selectLine(interaction.work, context, interaction.work.selected + pageOf(context.pageRows));
                 return std::nullopt;
             } },
-        // ⏎ folds on a heading, steps a chip that has the keys; on an item, the start dialog (Task 10).
+        // ⏎ folds on a heading, steps a chip that has the keys; on an item, opens the start dialog.
         WorkHandlerRow {
             .command = KeyCommand::Enter,
             .handler = [](Interaction& interaction, WorkContext const& context) -> std::optional<UiAction> {
@@ -422,9 +423,18 @@ namespace
                     case WorkFocus::Filter: break;
                 }
                 auto const* const line = selectedLine(work, context.lines);
-                if (line == nullptr || line->kind != WorkLineKind::Heading)
+                if (line == nullptr)
                     return std::nullopt;
-                return foldGroup(work, line->group);
+                if (line->kind == WorkLineKind::Heading)
+                    return foldGroup(work, line->group);
+                // Its session id is left empty for the dashboard, which holds the source of them, to mint.
+                auto const& item = context.items[line->item];
+                auto dialog = openStartDialog(context.engine, item, {}, {});
+                if (dialog)
+                    interaction.startDialog = std::move(*dialog);
+                else
+                    interaction.notice = startRefusalNotice(dialog.error(), itemLabel(item.item));
+                return std::nullopt;
             } },
         WorkHandlerRow {
             .command = KeyCommand::Fold,

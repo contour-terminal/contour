@@ -661,6 +661,11 @@ std::string pastedText(std::string_view text)
 
 void pasteInto(Interaction& interaction, KeyContext const& context, std::string_view text)
 {
+    if (interaction.startDialog)
+    {
+        pasteIntoStartDialog(interaction.startDialog, pastedText(text));
+        return;
+    }
     if (interaction.palette)
     {
         interaction.palette->query += pastedText(text);
