@@ -213,8 +213,7 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime AND _process_source)
     #
     # Beside them, the contract and the suites vtextension_test runs on the default backend, here composed by
     # testing/ProcessDefaultBackend.cpp as the remote backend over real helper processes: their real guests
-    # run through a process boundary. Cases that cannot are tagged [in-process], and are left out of a run
-    # with ~[in-process].
+    # run through a process boundary.
     add_executable(vtextension_helper_test
         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
         Helper_test.cpp
@@ -248,7 +247,7 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime AND _process_source)
         target_compile_definitions(vtextension_helper_test PRIVATE
             VTEXTENSION_TEST_MODULE_DIR="${VTEXTENSION_TEST_MODULE_DIR}")
     endif()
-    add_test(NAME vtextension_helper_test COMMAND vtextension_helper_test "~[in-process]")
+    add_test(NAME vtextension_helper_test COMMAND vtextension_helper_test)
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
         target_compile_options(vtextension_helper_test PRIVATE -Wno-c2y-extensions)
