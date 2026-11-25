@@ -2,12 +2,14 @@
 #pragma once
 
 /// @file
-/// An instance's linear memory as the parent sees it while its host copies memory rather than sharing it: the
-/// ranges the parent read, kept until the instance next runs, and what the parent wrote into them.
+/// An instance's linear memory as the parent sees it while its host copies memory rather than sharing it: a
+/// shadow of the whole memory, filled page by page as the parent reads it, until the instance next runs.
 
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <span>
 #include <vector>
@@ -22,57 +24,70 @@ namespace vtextension::wasm::remote
 ///         the host could not be reached.
 using MemoryFetch = std::function<std::optional<std::vector<std::byte>>(uint32_t address, uint32_t size)>;
 
-/// The ranges of one instance's memory the parent read since the instance last ran, as local copies it may
-/// write to. A view is served from a copy holding all of it as long as no other copy wrote into those bytes
-/// since that copy was fetched, so that views alternating between overlapping ranges fetch each range once.
-/// Otherwise the view's range is fetched anew, starting out with what flush() would leave there, so that two
-/// views of the same bytes agree when they are taken. What was written goes back to the instance (flush())
-/// before it next runs, after which the copies are dropped (clear()).
+/// The parts of one instance's memory the parent read since the instance last ran, in a shadow of the whole
+/// memory, at the same offsets. A page is fetched the first time a view reaches it, and every view of the
+/// same bytes is the same shadow memory: a write through one view is what every other view of those bytes
+/// reads. What was written goes back to the instance (flush()) before it next runs, after which the fetched
+/// pages are forgotten (clear()).
+///
+/// The shadow is allocated once and left untouched until a page is fetched into it, so that only the pages
+/// read take memory where the system commits it lazily (Linux, macOS, the BSDs). Windows commits the
+/// allocation up front, charging it against the commit limit while its pages stay unused.
 ///
 /// Not thread-safe: used by the thread calling into its instance.
 class CopyPathMemory
 {
   public:
-    /// @param instanceId The instance the writes flush() returns are addressed to.
-    /// @param capBytes The most bytes the copies may hold at once; a view that would take more is refused.
-    /// @param fetch Where ranges not held yet are read from.
-    CopyPathMemory(uint32_t instanceId, std::size_t capBytes, MemoryFetch fetch);
+    /// The granularity pages are fetched at, in bytes.
+    static constexpr auto PageBytes = std::size_t { 4096 };
 
-    /// A view of [@p address, @p address + @p size), served from a copy that holds all of it, or else from a
-    /// range fetched for it. Valid until clear().
+    /// @param instanceId The instance the writes flush() returns are addressed to.
+    /// @param memoryBytes The largest the instance's memory may be; no view reaches past it.
+    /// @param fetch Where pages not held yet are read from.
+    CopyPathMemory(uint32_t instanceId, std::size_t memoryBytes, MemoryFetch fetch);
+
+    /// A view of [@p address, @p address + @p size) in the shadow, fetching the pages of it not held yet: one
+    /// fetch per run of adjacent missing pages. Valid until the CopyPathMemory goes; its bytes are the
+    /// instance's only until clear().
     /// @param address The guest address the view starts at.
     /// @param size The view's size in bytes; 0 yields an empty span, fetching nothing.
-    /// @return The view; nothing if the range lies outside the memory or the 32-bit address space, could not
-    ///         be fetched, or would take the copies past their cap.
+    /// @return The view; nothing if the range reaches past the memory's limit or could not be fetched.
     [[nodiscard]] std::optional<std::span<std::byte>> view(uint32_t address, uint32_t size);
 
-    /// @return One write per maximal run of bytes changed since its range was fetched, range by range in the
-    ///         order they were fetched: where two ranges overlap and both were written to, the later fetched
-    ///         one's bytes land last.
-    [[nodiscard]] std::vector<proto::MemoryWrite> flush() const;
+    /// @return One write per maximal run of bytes changed since they were fetched or last flushed, in address
+    ///         order. What they return counts as unchanged from then on.
+    [[nodiscard]] std::vector<proto::MemoryWrite> flush();
 
-    /// Drops every copy, and with them every view handed out.
+    /// Forgets every fetched page: the next view of it fetches it again.
     void clear() noexcept;
 
   private:
-    /// @return Per byte of [@p begin, @p end), what flush() would leave there: the latest fetched range's
-    /// write
-    ///         to it, else what its first holder fetched; nothing where no range holds it.
-    [[nodiscard]] std::vector<std::optional<std::byte>> settledBytes(uint64_t begin, uint64_t end) const;
-
-    /// One fetched range: what the parent sees and writes, and what it held when it was fetched.
-    struct Range
+    /// Whether a page of the shadow holds the instance's bytes.
+    enum class PageState : uint8_t
     {
-        uint32_t address = 0;            ///< Where it starts.
-        std::vector<std::byte> bytes;    ///< Its bytes, as written since.
-        std::vector<std::byte> snapshot; ///< Its bytes when fetched, earlier ranges' overlaid.
+        Absent,  ///< Not fetched since the instance last ran.
+        Fetched, ///< Fetched: the shadow holds it, as written since.
     };
 
+    /// Why pages could not be fetched.
+    enum class FetchError : uint8_t
+    {
+        Unreachable, ///< The host refused the range, or could not be reached.
+    };
+
+    /// Fetches pages [@p first, @p end) into the shadow and their snapshot, all of them absent.
+    [[nodiscard]] std::expected<void, FetchError> fetchPages(std::size_t first, std::size_t end);
+
+    /// @return The address one past page @p page's last byte.
+    [[nodiscard]] std::size_t pageEnd(std::size_t page) const noexcept;
+
     uint32_t _instanceId;
-    std::size_t _capBytes;
+    std::size_t _memoryBytes;
     MemoryFetch _fetch;
-    std::vector<Range> _ranges; ///< In the order they were fetched.
-    std::size_t _heldBytes = 0; ///< What _ranges' bytes take together.
+    std::unique_ptr<std::byte[]> _shadow;   ///< The memory as the parent sees and writes it.
+    std::unique_ptr<std::byte[]> _snapshot; ///< The fetched pages as fetched or last flushed.
+    std::vector<PageState> _pages;          ///< Per page of the memory.
+    std::vector<std::size_t> _fetched;      ///< The pages fetched since clear(), in fetch order.
 };
 
 } // namespace vtextension::wasm::remote
