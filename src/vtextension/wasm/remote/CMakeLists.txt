@@ -37,6 +37,21 @@ if(WIN32)
     target_link_libraries(vtextension_remote_wire PRIVATE advapi32)
 endif()
 
+# vtextension_remote: the backend that runs extensions in a separate host, over the channels above. It links no
+# engine and starts no process itself: a connector (HostConnector.hpp) the composition root injects does.
+add_library(vtextension_remote STATIC
+    CopyPathMemory.cpp
+    CopyPathMemory.hpp
+    HelperIncarnation.cpp
+    HelperIncarnation.hpp
+    HostConnector.hpp
+    RemoteBackend.cpp
+    RemoteBackend.hpp
+    RemoteKindState.cpp
+    RemoteKindState.hpp
+)
+target_link_libraries(vtextension_remote PUBLIC vtextension vtextension_remote_wire)
+
 option(VTEXTENSION_FUZZING "Builds the extension host protocol's libFuzzer target (Clang only) [default: OFF]" OFF)
 if(VTEXTENSION_FUZZING)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -59,16 +74,17 @@ if(VTEXTENSION_FUZZING)
 endif()
 
 if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
-    # The host's server, and (later) the backend that reaches it, driven over real channels on a real engine:
+    # The host's server, and the backend that reaches it, driven over real channels on a real engine:
     # Wasmtime's, the engine a host process runs, reached through its directory's neutral test probe
     # (vtextension_wasmtime_hosted_engine).
     add_executable(vtextension_remote_test
         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
         ../host/ExecutorThread_test.cpp
         ../host/HostServer_test.cpp
+        RemoteBackend_test.cpp
     )
     target_link_libraries(vtextension_remote_test PRIVATE
-        vtextension vtextension_remote_wire vtextension_host vtextension_wasmtime vtextension_wasmtime_hosted_engine
+        vtextension vtextension_remote vtextension_remote_wire vtextension_host vtextension_wasmtime vtextension_wasmtime_hosted_engine
         contour::wasmtime core::testing Catch2::Catch2 contour_test_trace)
     add_test(NAME vtextension_remote_test COMMAND vtextension_remote_test)
     if(NOT WIN32)
