@@ -110,6 +110,23 @@ void keepWorkSelection(WorkState& state,
 /// @return The ToggleFoldAction of the group's fold key.
 [[nodiscard]] UiAction foldWorkGroup(WorkState& state, WorkGroup group);
 
+/// Folds every group whose heading @p lines show open, but @p group: what FoldOthers and a right-click on a
+/// heading do. The selection stays where it was.
+/// @param state The Work view's interaction.
+/// @param lines The lines as drawn: their headings are the groups shown.
+/// @param engine The engine: its folds.
+/// @param group The group kept open.
+/// @return One foldWorkGroup() per group folded, in the order shown.
+[[nodiscard]] std::vector<UiAction> foldOtherGroups(WorkState& state,
+                                                    std::span<WorkLine const> lines,
+                                                    Engine const& engine,
+                                                    WorkGroup group);
+
+/// @param command A command.
+/// @return Whether the Work view has a command of its own for it (applyWorkCommand()'s table): such a command
+///         chosen from the palette in the Work view runs there.
+[[nodiscard]] bool isWorkCommand(KeyCommand command) noexcept;
+
 /// Selects a line, as a click on it does, and scrolls it into view.
 /// @param state The Work view's interaction.
 /// @param data The lines as drawn, and how many the list shows.
@@ -141,21 +158,22 @@ void jumpWorkList(WorkState& state, WorkBoardData const& data, std::size_t row);
 /// Applies one Work-view command. Fold on a line, or Enter on a heading, folds its group by ToggleFoldAction
 /// of the group's key and selects the heading; Sort toggles SortByUpdateKey; Enter on an item opens the start
 /// dialog on it (its session id left for the caller to mint), or says on the action bar why it cannot.
-/// RowMenu opens the row menu on a selected item, its place left for the caller to set. SwitchView, NewTask
-/// and Palette act as in the Agents view (dispatch()).
+/// RowMenu opens the row menu on a selected item, its place left for the caller to set; FoldOthers folds
+/// every group shown open but the selected line's (foldOtherGroups()). SwitchView, NewTask and Palette act as
+/// in the Agents view (dispatch()).
 /// @param command The command (KeyCommand).
 /// @param interaction Where the user is; its WorkState changed.
 /// @param lines The lines as drawn.
 /// @param items The items they index.
 /// @param engine The engine: its repositories and their forges.
 /// @param pageRows How many lines the list shows: what a page key moves by.
-/// @return What the engine is asked, if anything.
-[[nodiscard]] std::optional<UiAction> applyWorkCommand(KeyCommand command,
-                                                       Interaction& interaction,
-                                                       std::span<WorkLine const> lines,
-                                                       std::span<WorkItem const> items,
-                                                       Engine const& engine,
-                                                       std::size_t pageRows);
+/// @return What the engine is asked, in order; empty: nothing.
+[[nodiscard]] std::vector<UiAction> applyWorkCommand(KeyCommand command,
+                                                     Interaction& interaction,
+                                                     std::span<WorkLine const> lines,
+                                                     std::span<WorkItem const> items,
+                                                     Engine const& engine,
+                                                     std::size_t pageRows);
 
 /// Applies one key in the Work view: to its filter while it is typed (Enter or Esc give the list the keys
 /// again), else by workKeyRows().
@@ -165,13 +183,13 @@ void jumpWorkList(WorkState& state, WorkBoardData const& data, std::size_t row);
 /// @param items The items they index.
 /// @param engine The engine.
 /// @param pageRows How many lines the list shows.
-/// @return What the engine is asked, if anything.
-[[nodiscard]] std::optional<UiAction> applyWorkKey(core::tui::KeyEvent const& key,
-                                                   Interaction& interaction,
-                                                   std::span<WorkLine const> lines,
-                                                   std::span<WorkItem const> items,
-                                                   Engine const& engine,
-                                                   std::size_t pageRows);
+/// @return What the engine is asked, in order; empty: nothing.
+[[nodiscard]] std::vector<UiAction> applyWorkKey(core::tui::KeyEvent const& key,
+                                                 Interaction& interaction,
+                                                 std::span<WorkLine const> lines,
+                                                 std::span<WorkItem const> items,
+                                                 Engine const& engine,
+                                                 std::size_t pageRows);
 
 /// The Work view: the filter bar (the filter, the repository chip, the sort chip), the lines that fit, the
 /// scrollbar on the list's right edge, and the details line of the selected one; the hovered item line

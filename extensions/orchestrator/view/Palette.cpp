@@ -104,6 +104,15 @@ std::vector<PaletteMatch> paletteMatches(std::span<PaletteEntry const> entries, 
            | std::ranges::to<std::vector>();
 }
 
+std::optional<KeyCommand> highlightedCommand(PaletteState const& palette, KeyContext const& context)
+{
+    auto const entries = paletteEntries(context.selected, context.engine);
+    auto const matches = paletteMatches(entries, palette.query);
+    if (palette.highlighted >= matches.size())
+        return std::nullopt;
+    return entries[matches[palette.highlighted].entry].command;
+}
+
 std::optional<UiAction> applyPaletteKey(core::tui::KeyEvent const& key,
                                         Interaction& interaction,
                                         KeyContext const& context)
@@ -139,14 +148,12 @@ std::optional<UiAction> applyPaletteKey(core::tui::KeyEvent const& key,
             return std::nullopt;
         }
         case KeyCode::Enter: {
-            auto const entries = paletteEntries(context.selected, context.engine);
-            auto const matches = paletteMatches(entries, palette.query);
-            if (palette.highlighted >= matches.size())
+            auto const command = highlightedCommand(palette, context);
+            if (!command)
                 return std::nullopt;
-            auto const command = entries[matches[palette.highlighted].entry].command;
             interaction.palette.reset();
             // As its key would: a command that does not apply says why on the bar.
-            return dispatch(command, interaction, context);
+            return dispatch(*command, interaction, context);
         }
         default: break;
     }

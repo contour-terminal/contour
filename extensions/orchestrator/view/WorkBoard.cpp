@@ -326,34 +326,34 @@ namespace
     }
 
     /// What `o` opens: the selected MR, else the selected ticket.
-    [[nodiscard]] std::optional<UiAction> openSelected(Interaction& interaction, WorkContext const& context)
+    [[nodiscard]] std::vector<UiAction> openSelected(Interaction& interaction, WorkContext const& context)
     {
         auto const* const line = selectedLine(interaction.work, context.lines);
         if (line == nullptr || line->kind != WorkLineKind::Item)
         {
             interaction.notice = "o open · select a merge request or a ticket";
-            return std::nullopt;
+            return {};
         }
         auto const& item = context.items[line->item];
         if (item.changeRequest)
-            return UiAction { OpenUrlAction { .url = item.changeRequest->url,
-                                              .label = workMrLabel(context.engine, item) } };
+            return { OpenUrlAction { .url = item.changeRequest->url,
+                                     .label = workMrLabel(context.engine, item) } };
         if (item.ticket)
-            return UiAction { OpenUrlAction { .url = item.ticket->url, .label = item.ticketKey } };
-        return std::nullopt;
+            return { OpenUrlAction { .url = item.ticket->url, .label = item.ticketKey } };
+        return {};
     }
 
     /// What `m` opens: the row menu on the selected item, below its row once the dashboard places it.
-    [[nodiscard]] std::optional<UiAction> openMenu(Interaction& interaction, WorkContext const& context)
+    [[nodiscard]] std::vector<UiAction> openMenu(Interaction& interaction, WorkContext const& context)
     {
         auto const* const line = selectedLine(interaction.work, context.lines);
         if (line == nullptr || line->kind != WorkLineKind::Item)
         {
             interaction.notice = "m menu · select a merge request or a ticket";
-            return std::nullopt;
+            return {};
         }
         interaction.work.menu = RowMenuState { .itemKey = workItemKey(context.items[line->item]) };
-        return std::nullopt;
+        return {};
     }
 
     /// Keeps the selection among the lines shown once the list scrolled: on the first one shown when it was
@@ -376,7 +376,7 @@ namespace
         return data.lines.size() > data.listRows ? data.lines.size() - data.listRows : 0;
     }
 
-    using WorkHandler = std::optional<UiAction> (*)(Interaction&, WorkContext const&);
+    using WorkHandler = std::vector<UiAction> (*)(Interaction&, WorkContext const&);
 
     /// One Work-view command and what it does.
     struct WorkHandlerRow
@@ -388,61 +388,61 @@ namespace
     constexpr auto WorkHandlers = std::array {
         WorkHandlerRow {
             .command = KeyCommand::Up,
-            .handler = [](Interaction& interaction, WorkContext const& context) -> std::optional<UiAction> {
+            .handler = [](Interaction& interaction, WorkContext const& context) -> std::vector<UiAction> {
                 auto const at = interaction.work.selected;
                 selectLine(interaction.work, context, at == 0 ? 0 : at - 1);
-                return std::nullopt;
+                return {};
             } },
         WorkHandlerRow {
             .command = KeyCommand::Down,
-            .handler = [](Interaction& interaction, WorkContext const& context) -> std::optional<UiAction> {
+            .handler = [](Interaction& interaction, WorkContext const& context) -> std::vector<UiAction> {
                 selectLine(interaction.work, context, interaction.work.selected + 1);
-                return std::nullopt;
+                return {};
             } },
         WorkHandlerRow {
             .command = KeyCommand::Home,
-            .handler = [](Interaction& interaction, WorkContext const& context) -> std::optional<UiAction> {
+            .handler = [](Interaction& interaction, WorkContext const& context) -> std::vector<UiAction> {
                 selectLine(interaction.work, context, 0);
-                return std::nullopt;
+                return {};
             } },
         WorkHandlerRow {
             .command = KeyCommand::End,
-            .handler = [](Interaction& interaction, WorkContext const& context) -> std::optional<UiAction> {
+            .handler = [](Interaction& interaction, WorkContext const& context) -> std::vector<UiAction> {
                 selectLine(interaction.work, context, context.lines.empty() ? 0 : context.lines.size() - 1);
-                return std::nullopt;
+                return {};
             } },
         WorkHandlerRow {
             .command = KeyCommand::ScrollPageUp,
-            .handler = [](Interaction& interaction, WorkContext const& context) -> std::optional<UiAction> {
+            .handler = [](Interaction& interaction, WorkContext const& context) -> std::vector<UiAction> {
                 auto const at = interaction.work.selected;
                 auto const page = pageOf(context.pageRows);
                 selectLine(interaction.work, context, at > page ? at - page : 0);
-                return std::nullopt;
+                return {};
             } },
         WorkHandlerRow {
             .command = KeyCommand::ScrollPageDown,
-            .handler = [](Interaction& interaction, WorkContext const& context) -> std::optional<UiAction> {
+            .handler = [](Interaction& interaction, WorkContext const& context) -> std::vector<UiAction> {
                 selectLine(interaction.work, context, interaction.work.selected + pageOf(context.pageRows));
-                return std::nullopt;
+                return {};
             } },
         // ⏎ folds on a heading, steps a chip that has the keys; on an item, opens the start dialog.
         WorkHandlerRow {
             .command = KeyCommand::Enter,
-            .handler = [](Interaction& interaction, WorkContext const& context) -> std::optional<UiAction> {
+            .handler = [](Interaction& interaction, WorkContext const& context) -> std::vector<UiAction> {
                 auto& work = interaction.work;
                 switch (work.focus)
                 {
-                    case WorkFocus::RepoChip: stepRepoChip(work, context.engine, 1); return std::nullopt;
+                    case WorkFocus::RepoChip: stepRepoChip(work, context.engine, 1); return {};
                     case WorkFocus::SortChip:
-                        return UiAction { ToggleFoldAction { .group = std::string { SortByUpdateKey } } };
+                        return { ToggleFoldAction { .group = std::string { SortByUpdateKey } } };
                     case WorkFocus::List:
                     case WorkFocus::Filter: break;
                 }
                 auto const* const line = selectedLine(work, context.lines);
                 if (line == nullptr)
-                    return std::nullopt;
+                    return {};
                 if (line->kind == WorkLineKind::Heading)
-                    return foldWorkGroup(work, line->group);
+                    return { foldWorkGroup(work, line->group) };
                 // Its session id is left empty for the dashboard, which holds the source of them, to mint.
                 auto const& item = context.items[line->item];
                 auto dialog = openStartDialog(context.engine, item, {}, {});
@@ -450,60 +450,68 @@ namespace
                     interaction.startDialog = std::move(*dialog);
                 else
                     interaction.notice = startRefusalNotice(dialog.error(), itemLabel(item.item));
-                return std::nullopt;
+                return {};
             } },
         WorkHandlerRow {
             .command = KeyCommand::Fold,
-            .handler = [](Interaction& interaction, WorkContext const& context) -> std::optional<UiAction> {
+            .handler = [](Interaction& interaction, WorkContext const& context) -> std::vector<UiAction> {
                 auto const* const line = selectedLine(interaction.work, context.lines);
                 if (line == nullptr)
-                    return std::nullopt;
-                return foldWorkGroup(interaction.work, line->group);
+                    return {};
+                return { foldWorkGroup(interaction.work, line->group) };
             } },
         WorkHandlerRow {
             .command = KeyCommand::Filter,
-            .handler = [](Interaction& interaction, WorkContext const&) -> std::optional<UiAction> {
+            .handler = [](Interaction& interaction, WorkContext const&) -> std::vector<UiAction> {
                 interaction.work.filtering = Filtering::Typing;
                 interaction.work.focus = WorkFocus::Filter;
-                return std::nullopt;
+                return {};
             } },
         // esc clears the filter, and gives the list the keys.
         WorkHandlerRow {
             .command = KeyCommand::Back,
-            .handler = [](Interaction& interaction, WorkContext const&) -> std::optional<UiAction> {
+            .handler = [](Interaction& interaction, WorkContext const&) -> std::vector<UiAction> {
                 interaction.work.filter.clear();
                 interaction.work.filtering = Filtering::Off;
                 interaction.work.focus = WorkFocus::List;
-                return std::nullopt;
+                return {};
             } },
         WorkHandlerRow { .command = KeyCommand::Sort,
-                         .handler = [](Interaction&, WorkContext const&) -> std::optional<UiAction> {
-                             return UiAction { ToggleFoldAction { .group =
-                                                                      std::string { SortByUpdateKey } } };
+                         .handler = [](Interaction&, WorkContext const&) -> std::vector<UiAction> {
+                             return { ToggleFoldAction { .group = std::string { SortByUpdateKey } } };
                          } },
         WorkHandlerRow {
             .command = KeyCommand::RepoPrevious,
-            .handler = [](Interaction& interaction, WorkContext const& context) -> std::optional<UiAction> {
+            .handler = [](Interaction& interaction, WorkContext const& context) -> std::vector<UiAction> {
                 stepRepoChip(interaction.work, context.engine, -1);
-                return std::nullopt;
+                return {};
             } },
         WorkHandlerRow {
             .command = KeyCommand::RepoNext,
-            .handler = [](Interaction& interaction, WorkContext const& context) -> std::optional<UiAction> {
+            .handler = [](Interaction& interaction, WorkContext const& context) -> std::vector<UiAction> {
                 stepRepoChip(interaction.work, context.engine, 1);
-                return std::nullopt;
+                return {};
             } },
         WorkHandlerRow { .command = KeyCommand::OpenLink, .handler = openSelected },
         WorkHandlerRow { .command = KeyCommand::RowMenu, .handler = openMenu },
+        // Every group shown open but the selected line's folds.
+        WorkHandlerRow {
+            .command = KeyCommand::FoldOthers,
+            .handler = [](Interaction& interaction, WorkContext const& context) -> std::vector<UiAction> {
+                auto const* const line = selectedLine(interaction.work, context.lines);
+                if (line == nullptr)
+                    return {};
+                return foldOtherGroups(interaction.work, context.lines, context.engine, line->group);
+            } },
         // tab moves the keys along the list and the filter bar's chips; the filter types while it has them.
         WorkHandlerRow {
             .command = KeyCommand::Tab,
-            .handler = [](Interaction& interaction, WorkContext const&) -> std::optional<UiAction> {
+            .handler = [](Interaction& interaction, WorkContext const&) -> std::vector<UiAction> {
                 auto& work = interaction.work;
                 constexpr auto Count = std::to_underlying(WorkFocus::SortChip) + 1;
                 work.focus = static_cast<WorkFocus>((std::to_underlying(work.focus) + 1) % Count);
                 work.filtering = work.focus == WorkFocus::Filter ? Filtering::Typing : Filtering::Off;
-                return std::nullopt;
+                return {};
             } },
     };
 
@@ -676,38 +684,62 @@ uint64_t untilAgeChanges(uint64_t ms) noexcept
     return unit - (ms % unit);
 }
 
-std::optional<UiAction> applyWorkCommand(KeyCommand command,
-                                         Interaction& interaction,
-                                         std::span<WorkLine const> lines,
-                                         std::span<WorkItem const> items,
-                                         Engine const& engine,
-                                         std::size_t pageRows)
+std::vector<UiAction> applyWorkCommand(KeyCommand command,
+                                       Interaction& interaction,
+                                       std::span<WorkLine const> lines,
+                                       std::span<WorkItem const> items,
+                                       Engine const& engine,
+                                       std::size_t pageRows)
 {
     // The commands both views share act as they do in the Agents view.
     if (command == KeyCommand::SwitchView || command == KeyCommand::NewTask || command == KeyCommand::Palette)
-        return dispatch(command, interaction, KeyContext { .engine = &engine });
+    {
+        auto action = dispatch(command, interaction, KeyContext { .engine = &engine });
+        return action ? std::vector { std::move(*action) } : std::vector<UiAction> {};
+    }
     auto const context =
         WorkContext { .lines = lines, .items = items, .engine = engine, .pageRows = pageRows };
     auto const row = std::ranges::find(WorkHandlers, command, &WorkHandlerRow::command);
-    return row != WorkHandlers.end() ? row->handler(interaction, context) : std::nullopt;
+    return row != WorkHandlers.end() ? row->handler(interaction, context) : std::vector<UiAction> {};
 }
 
-std::optional<UiAction> applyWorkKey(core::tui::KeyEvent const& key,
-                                     Interaction& interaction,
-                                     std::span<WorkLine const> lines,
-                                     std::span<WorkItem const> items,
-                                     Engine const& engine,
-                                     std::size_t pageRows)
+bool isWorkCommand(KeyCommand command) noexcept
+{
+    return std::ranges::contains(WorkHandlers, command, &WorkHandlerRow::command);
+}
+
+std::vector<UiAction> foldOtherGroups(WorkState& state,
+                                      std::span<WorkLine const> lines,
+                                      Engine const& engine,
+                                      WorkGroup group)
+{
+    // Each fold would select its heading: the selection stays where it was.
+    auto const selected = state.selectedKey;
+    auto actions = std::vector<UiAction> {};
+    for (auto const& line: lines)
+        if (line.kind == WorkLineKind::Heading && line.group != group && !isGroupFolded(engine, line.group))
+            actions.push_back(foldWorkGroup(state, line.group));
+    state.selectedKey = selected;
+    return actions;
+}
+
+std::vector<UiAction> applyWorkKey(core::tui::KeyEvent const& key,
+                                   Interaction& interaction,
+                                   std::span<WorkLine const> lines,
+                                   std::span<WorkItem const> items,
+                                   Engine const& engine,
+                                   std::size_t pageRows)
 {
     auto& work = interaction.work;
     if (typeIntoFilter(key, work.filtering, work.filter) == FilterInput::Taken)
     {
         if (work.filtering == Filtering::Off)
             work.focus = WorkFocus::List;
-        return std::nullopt;
+        return {};
     }
     auto const command = workCommandFor(key);
-    return command ? applyWorkCommand(*command, interaction, lines, items, engine, pageRows) : std::nullopt;
+    return command ? applyWorkCommand(*command, interaction, lines, items, engine, pageRows)
+                   : std::vector<UiAction> {};
 }
 
 // {{{ the view

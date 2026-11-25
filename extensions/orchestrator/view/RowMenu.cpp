@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <orchestrator/view/RowMenu.hpp>
 
-#include <core/Base64.hpp>
 #include <core/tui/Canvas.hpp>
 #include <core/tui/KeyCode.hpp>
 
@@ -30,18 +29,12 @@ bool menuApplies(RowMenuCommand command, WorkItem const& item) noexcept
 {
     switch (command)
     {
-        case RowMenuCommand::OpenMr:
-        case RowMenuCommand::CopyBranch: return item.changeRequest.has_value();
+        case RowMenuCommand::OpenMr: return item.changeRequest.has_value();
         case RowMenuCommand::OpenTicket: return item.ticket.has_value() && !item.ticket->url.empty();
         case RowMenuCommand::StartAgent:
         case RowMenuCommand::FoldGroup: break;
     }
     return true;
-}
-
-std::string clipboardWrite(std::string_view text)
-{
-    return std::format("\033]52;c;{}\a", core::base64::encode(text));
 }
 
 WorkItem const* workItemOf(std::span<WorkItem const> items, std::string_view key) noexcept

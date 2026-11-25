@@ -86,6 +86,9 @@ namespace
                      .scope = CommandScope::Global },
         CommandRow {
             .command = KeyCommand::SwitchView, .label = "switch view"sv, .scope = CommandScope::Global },
+        CommandRow { .command = KeyCommand::FoldOthers,
+                     .label = "fold the other groups"sv,
+                     .scope = CommandScope::Global },
         // The replies: a row's chip names each by the configuration's label (actionLabel()).
         CommandRow { .command = KeyCommand::Reply1, .label = "answer 1"sv, .unoffered = NoReply },
         CommandRow { .command = KeyCommand::Reply2, .label = "answer 2"sv, .unoffered = NoReply },

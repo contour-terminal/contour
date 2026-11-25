@@ -185,6 +185,7 @@ enum class KeyCommand : uint8_t
     RepoPrevious,   ///< The Work view: step the repository chip back.
     RepoNext,       ///< The Work view: step the repository chip on.
     RowMenu,        ///< The Work view: open the row menu on the selected item.
+    FoldOthers,     ///< The Work view: fold every group shown open but the selected line's.
     Reply1,         ///< Answer the selected agent that asks with the quick reply on `1`.
     Reply2,         ///< … on `2`.
     Reply3,         ///< … on `3`.

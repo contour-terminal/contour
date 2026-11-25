@@ -1020,7 +1020,8 @@ constexpr auto FirstMr = "contour/!2375"sv;
 [[nodiscard]] World twoWorkersWorld()
 {
     auto world = workWorld();
-    world.configJson = std::format(R"({{ "worktree_root": "~/worktrees", "models": ["opus", "sonnet"],
+    world.configJson =
+        std::format(R"({{ "worktree_root": "~/worktrees", "models": ["opus", "sonnet", "haiku"],
   "workers": [ {{ "id": "a", "agent": "claude" }}, {{ "id": "b", "agent": "claude" }} ],
   "repos": {},
   "tasks": [
@@ -1028,7 +1029,7 @@ constexpr auto FirstMr = "contour/!2375"sv;
        "prompt": "/contour-workflows:fix-ci {{url}}" }},
     {{ "id": "review", "key": "v", "label": "address review", "applies_to": "pr", "model": "sonnet",
        "worker": "a", "prompt": "/contour-workflows:address-review {{url}}" }} ] }})",
-                                   WorkRepository);
+                    WorkRepository);
     world.stored = {};
     return world;
 }
@@ -1054,21 +1055,18 @@ TEST_CASE("Work mouse: a right-click on a row opens its menu; Open MR opens it",
               OpenUrlAction { .url = "https://github.com/example/contour/pull/2375", .label = "#2375" } });
     CHECK_FALSE(dashboard.interaction().work.menu.has_value());
 
-    SECTION("on a ticket row, Open MR and Copy branch name do nothing")
+    SECTION("on a ticket row, Open MR does nothing")
     {
         static_cast<void>(dashboard.frame());
         auto const ticket = regionOf(
             dashboard, Hit { .kind = HitKind::WorkRow, .value = workLineOf(*fixture, "contour/PRJ-1302") });
         CHECK(dashboard.input(rightClickAt(ticket.x + 30, ticket.y)).empty());
         static_cast<void>(dashboard.frame());
-        for (auto const entry: { std::size_t { 1 }, std::size_t { 3 } })
-        {
-            auto const region = regionOf(dashboard, Hit { .kind = HitKind::MenuEntry, .value = entry });
-            CHECK(dashboard.input(clickAt(region.x + 1, region.y)).empty());
-            REQUIRE(dashboard.interaction().work.menu.has_value());
-            static_cast<void>(dashboard.frame());
-        }
-        CHECK(core::tui::test::canvasToString(dashboard.rendered()).contains("Copy branch name"));
+        auto const region = regionOf(dashboard, Hit { .kind = HitKind::MenuEntry, .value = 1 });
+        CHECK(dashboard.input(clickAt(region.x + 1, region.y)).empty());
+        REQUIRE(dashboard.interaction().work.menu.has_value());
+        static_cast<void>(dashboard.frame());
+        CHECK(core::tui::test::canvasToString(dashboard.rendered()).contains("Open MR"));
         // A click beside the menu closes it.
         CHECK(dashboard.input(clickAt(0, 0)).empty());
         CHECK_FALSE(dashboard.interaction().work.menu.has_value());
@@ -1097,7 +1095,8 @@ TEST_CASE("Work mouse: m opens the menu under the selected row; the keys run it"
     CHECK_FALSE(dashboard.interaction().startDialog->form.session.empty());
 }
 
-TEST_CASE("Work mouse: copy branch name writes OSC 52", "[orchestrator][view][mouse][work]")
+TEST_CASE("Work mouse: a press on a menu entry the menu closed before does nothing",
+          "[orchestrator][view][mouse][work]")
 {
     auto const fixture = workFixture();
     auto& dashboard = fixture->dashboard;
@@ -1105,14 +1104,37 @@ TEST_CASE("Work mouse: copy branch name writes OSC 52", "[orchestrator][view][mo
         regionOf(dashboard, Hit { .kind = HitKind::WorkRow, .value = workLineOf(*fixture, FirstMr) });
     CHECK(dashboard.input(rightClickAt(row.x + 30, row.y)).empty());
     static_cast<void>(dashboard.frame());
-    auto const copy = regionOf(dashboard, Hit { .kind = HitKind::MenuEntry, .value = 3 });
-    CHECK(dashboard.input(clickAt(copy.x + 1, copy.y)).empty());
-    auto const frame = dashboard.frame();
-    CHECK(frame.contains(clipboardWrite("fix/flaky-test")));
-    CHECK(core::tui::test::canvasToString(dashboard.rendered()).contains("copied fix/flaky-test"));
-    // Written once.
-    CHECK(dashboard.input("j").empty());
-    CHECK_FALSE(dashboard.frame().contains("\x1b]52;"));
+    auto const start = regionOf(dashboard, Hit { .kind = HitKind::MenuEntry, .value = 0 });
+    auto const openMr = regionOf(dashboard, Hit { .kind = HitKind::MenuEntry, .value = 1 });
+    // One input, no frame between: the first press chooses Open MR and closes the menu; the second lands on
+    // Start agent…'s cell, which the last frame still maps.
+    CHECK(dashboard.input(clickAt(openMr.x + 1, openMr.y) + clickAt(start.x + 1, start.y))
+          == std::vector<UiAction> {
+              OpenUrlAction { .url = "https://github.com/example/contour/pull/2375", .label = "#2375" } });
+    CHECK_FALSE(dashboard.interaction().work.menu.has_value());
+    CHECK_FALSE(dashboard.interaction().startDialog.has_value());
+}
+
+TEST_CASE("Work palette: fold the other groups", "[orchestrator][view][work]")
+{
+    auto const fixture = workFixture();
+    auto& dashboard = fixture->dashboard;
+    REQUIRE(dashboard.interaction().work.selectedKey == FirstMr);
+    CHECK(dashboard.input("other groups").empty());
+    CHECK(dashboard.input("")
+          == std::vector<UiAction> { ToggleFoldAction { .group = "work/ready" },
+                                     ToggleFoldAction { .group = "work/in-review" },
+                                     ToggleFoldAction { .group = "work/no-mr" } });
+    CHECK_FALSE(dashboard.interaction().palette.has_value());
+    // The selection stays where it was.
+    CHECK(dashboard.interaction().work.selectedKey == FirstMr);
+
+    SECTION("the Agents view says where it applies")
+    {
+        CHECK(dashboard.input("w").empty());
+        CHECK(dashboard.input("other groups").empty());
+        CHECK(dashboard.interaction().notice.contains("Work view only"));
+    }
 }
 
 TEST_CASE("Work mouse: a click on a heading folds; a right-click folds the others",
@@ -1299,6 +1321,17 @@ TEST_CASE("Work mouse: the dialog's settings step under the pointer", "[orchestr
     CHECK(dialog->form.task == taskBefore);
     static_cast<void>(dashboard.frame());
 
+    // A double click on a stepper steps twice and starts nothing.
+    auto const modelOn = regionOf(
+        dashboard,
+        Hit { .kind = HitKind::DialogStep, .value = (2 * std::to_underlying(FormField::Model)) + 1 });
+    auto const modelAt = dialog->form.model;
+    auto const twice = clickAt(modelOn.x + 1, modelOn.y);
+    CHECK(dashboard.input(twice + twice).empty());
+    REQUIRE(dialog.has_value());
+    CHECK(dialog->form.model == (modelAt + 2) % 3);
+    static_cast<void>(dashboard.frame());
+
     // A click on a label picks the setting.
     auto const note = regionOf(
         dashboard, Hit { .kind = HitKind::DialogSetting, .value = std::to_underlying(FormField::Note) });
@@ -1398,7 +1431,7 @@ TEST_CASE("Row menu: a poll that drops its item closes it", "[orchestrator][view
     fixture->poll();
     static_cast<void>(dashboard.frame());
     CHECK_FALSE(dashboard.interaction().work.menu.has_value());
-    CHECK_FALSE(core::tui::test::canvasToString(dashboard.rendered()).contains("Copy branch name"));
+    CHECK_FALSE(core::tui::test::canvasToString(dashboard.rendered()).contains("Open ticket"));
 }
 
 // }}}

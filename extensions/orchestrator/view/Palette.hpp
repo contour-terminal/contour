@@ -54,6 +54,12 @@ struct PaletteMatch
 [[nodiscard]] std::vector<PaletteMatch> paletteMatches(std::span<PaletteEntry const> entries,
                                                        std::string_view query);
 
+/// @param palette The open palette.
+/// @param context The selected row and the engine: what the entries are.
+/// @return The command of the highlighted entry; std::nullopt when the query matches none.
+[[nodiscard]] std::optional<KeyCommand> highlightedCommand(PaletteState const& palette,
+                                                           KeyContext const& context);
+
 /// Applies one key to the open palette. Printable keys and Backspace edit the query; ↑/↓ move the highlight;
 /// ⏎ closes it and runs the highlighted command as its key would (dispatch()), which says why where it does
 /// not apply; esc, or a key with Alt (an esc and the key after it, read together), closes it keeping the

@@ -618,6 +618,12 @@ namespace
                          interaction.view = interaction.view == View::Agents ? View::Work : View::Agents;
                          return std::nullopt;
                      } },
+        // The Work view folds its groups; the Agents view has none of them to fold.
+        HandlerRow { .command = KeyCommand::FoldOthers,
+                     .handler = [](Interaction& interaction, KeyContext const&) -> std::optional<UiAction> {
+                         interaction.notice = "fold the other groups · in the Work view only, w shows it";
+                         return std::nullopt;
+                     } },
         HandlerRow { .command = KeyCommand::Timeline,
                      .handler = [](Interaction& interaction, KeyContext const&) -> std::optional<UiAction> {
                          interaction.overlay = Overlay::Timeline;

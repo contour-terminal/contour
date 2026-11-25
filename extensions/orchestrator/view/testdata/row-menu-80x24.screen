@@ -2,13 +2,13 @@
 ╭─ Work 14 ────────────────────────────────────────────────────────────────────╮
 │ / filter                              ‹ all repositories ›  sort: importance │
 │ ▾ Needs you  3                                                               │
-│▍#2375 PRJ-1234 PRJ-1234: fix╭──────────────────╮ · ◆ In Progress             │
-│ #2376 ·        address the r│ Start agent…     │ ⟲ ·               ⬢ claude  │
-│ #2377 PRJ-1301 PRJ-1301: reb│ Open MR          │ ⚠ ◆ In Review               │
-│ ▾ Ready to merge  1         │ Open ticket      │                             │
-│ #2378 ·        ready one    │ Copy branch name │ ✓ ·                         │
-│ ▾ In review  1              │ Fold group       │                             │
-│ #2379 PRJ-1999 PRJ-1999: run╰──────────────────╯ … ◆ In Review               │
+│▍#2375 PRJ-1234 PRJ-1234: fix╭──────────────╮line · ◆ In Progress             │
+│ #2376 ·        address the r│ Start agent… │line ⟲ ·               ⬢ claude  │
+│ #2377 PRJ-1301 PRJ-1301: reb│ Open MR      │line ⚠ ◆ In Review               │
+│ ▾ Ready to merge  1         │ Open ticket  │                                 │
+│ #2378 ·        ready one    │ Fold group   │line ✓ ·                         │
+│ ▾ In review  1              ╰──────────────╯                                 │
+│ #2379 PRJ-1999 PRJ-1999: running      ◌ running  … ◆ In Review               │
 │ ▾ No MR yet  6                                                               │
 │       #2162    OSC 9;9 (ConEmu cwd) … ·          · ● open                    │
 │       #2163    OSC 133: optional non… ·          · ● open                    │

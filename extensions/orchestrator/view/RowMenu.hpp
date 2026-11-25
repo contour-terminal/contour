@@ -29,7 +29,6 @@ enum class RowMenuCommand : uint8_t
     StartAgent = 0, ///< Open the start dialog on the item.
     OpenMr,         ///< Open its merge request in the browser.
     OpenTicket,     ///< Open its ticket in the browser.
-    CopyBranch,     ///< Put its merge request's head branch on the clipboard (OSC 52).
     FoldGroup,      ///< Fold the item's group.
 };
 
@@ -45,7 +44,6 @@ inline constexpr auto RowMenuEntries = std::array {
     RowMenuEntry { .command = RowMenuCommand::StartAgent, .label = "Start agent…" },
     RowMenuEntry { .command = RowMenuCommand::OpenMr, .label = "Open MR" },
     RowMenuEntry { .command = RowMenuCommand::OpenTicket, .label = "Open ticket" },
-    RowMenuEntry { .command = RowMenuCommand::CopyBranch, .label = "Copy branch name" },
     RowMenuEntry { .command = RowMenuCommand::FoldGroup, .label = "Fold group" },
 };
 
@@ -60,12 +58,8 @@ struct RowMenuState
 
 /// @param command A menu command.
 /// @param item The item the menu is about.
-/// @return Whether @p command applies to @p item: OpenMr and CopyBranch need an MR, OpenTicket a ticket URL.
+/// @return Whether @p command applies to @p item: OpenMr needs an MR, OpenTicket a ticket URL.
 [[nodiscard]] bool menuApplies(RowMenuCommand command, WorkItem const& item) noexcept;
-
-/// @param text What goes on the clipboard.
-/// @return The OSC 52 bytes that put @p text on the clipboard: `\033]52;c;<base64>\a` (core::base64::encode).
-[[nodiscard]] std::string clipboardWrite(std::string_view text);
 
 /// @param items The Work view's items.
 /// @param key workItemKey() of one of them.

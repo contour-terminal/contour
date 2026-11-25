@@ -8,14 +8,14 @@
 │   │  refresh the lists                                      palette only │   │
 │   │  show the last 24 hours                                 palette only │   │
 ╰───│  switch view                                                       w │───╯
-╭───│  open · no run selected                                 palette only │───╮
-│ No│  run again · no run selected                            palette only │   │
-│ yo│  end · no run selected                                             e │   │
-│ On│  agent tab · no run selected                                       r │   │
-│ es│  open link · no run selected                                       o │   │
-│ Ev│  retry removal · no run selected                                   x │   │
-│   │  dismiss · no run selected                                       del │   │
-│   │  ↓ 5 more                                                            │   │
+╭───│  fold the other groups                                  palette only │───╮
+│ No│  open · no run selected                                 palette only │   │
+│ yo│  run again · no run selected                            palette only │   │
+│ On│  end · no run selected                                             e │   │
+│ es│  agent tab · no run selected                                       r │   │
+│ Ev│  open link · no run selected                                       o │   │
+│   │  retry removal · no run selected                                   x │   │
+│   │  ↓ 6 more                                                            │   │
 │   │                                                                      │   │
 │   │ ⏎ run · ↑↓ choose · esc close                                        │   │
 │   ╰──────────────────────────────────────────────────────────────────────╯   │

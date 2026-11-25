@@ -399,7 +399,6 @@ struct Dashboard::State
     std::optional<LastClick> lastClick; ///< The last press of the left button, for a double click.
     /// The Work view's scrollbar while the left button, pressed on it, is held: the list follows the pointer.
     std::optional<Rect> scrollbarDrag;
-    std::string clipboard; ///< OSC 52 writes the next frame carries, as a copy from the row menu asked.
     std::unique_ptr<LauncherView> launcherView;       ///< Draws interaction.launcher.
     std::unique_ptr<StartDialogView> startDialogView; ///< Draws interaction.startDialog.
     std::unique_ptr<TaskBoxView> taskBoxView;         ///< Draws interaction.taskBox.
@@ -1171,9 +1170,21 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
         // The Work view takes its own keys while nothing is over it.
         if (view == View::Work && !interaction.palette && interaction.overlay == Overlay::None)
         {
-            if (auto action = applyWorkKey(*key, interaction, work.lines, work.items, engine, work.listRows))
-                actions.push_back(std::move(*action));
+            std::ranges::move(applyWorkKey(*key, interaction, work.lines, work.items, engine, work.listRows),
+                              std::back_inserter(actions));
             anchorMenu(std::nullopt);
+        }
+        // In the Work view a palette entry the Work view has a command for runs there, as its key would.
+        else if (auto const command = view == View::Work && interaction.palette
+                                              && key->key == core::tui::KeyCode::Enter
+                                              && key->modifiers == core::tui::Modifier::None
+                                          ? highlightedCommand(*interaction.palette, keyContext())
+                                          : std::nullopt;
+                 command && isWorkCommand(*command))
+        {
+            interaction.palette.reset();
+            run(*command, actions);
+            continue;
         }
         else if (auto action = applyKey(*key, interaction, keyContext()))
             actions.push_back(std::move(*action));
@@ -1506,31 +1517,30 @@ namespace
                    .wheel = scrollWork },
         // A group's heading: a click folds or unfolds it (the second press of a double click adds nothing),
         // the right button folds every other group shown open.
-        MouseRow {
-            .kind = HitKind::WorkHeading,
-            .layer = Layer::Dashboard,
-            .click =
-                [](State& state,
-                   std::size_t value,
-                   Clicks clicks,
-                   Pointer const&,
-                   std::vector<UiAction>& actions) {
-                    if (clicks == Clicks::Double)
-                        return;
-                    state.interaction.work.focus = WorkFocus::List;
-                    state.interaction.work.filtering = Filtering::Off;
-                    actions.push_back(foldWorkGroup(state.interaction.work, static_cast<WorkGroup>(value)));
-                },
-            .rightClick =
-                [](State& state, std::size_t value, Pointer const&, std::vector<UiAction>& actions) {
-                    for (auto const& line: state.work.lines)
-                        if (line.kind == WorkLineKind::Heading && std::to_underlying(line.group) != value
-                            && !isGroupFolded(state.engine, line.group))
-                            actions.emplace_back(ToggleFoldAction {
-                                .group =
-                                    std::string { WorkGroupRows[std::to_underlying(line.group)].foldKey } });
-                },
-            .wheel = scrollWork },
+        MouseRow { .kind = HitKind::WorkHeading,
+                   .layer = Layer::Dashboard,
+                   .click =
+                       [](State& state,
+                          std::size_t value,
+                          Clicks clicks,
+                          Pointer const&,
+                          std::vector<UiAction>& actions) {
+                           if (clicks == Clicks::Double)
+                               return;
+                           state.interaction.work.focus = WorkFocus::List;
+                           state.interaction.work.filtering = Filtering::Off;
+                           actions.push_back(
+                               foldWorkGroup(state.interaction.work, static_cast<WorkGroup>(value)));
+                       },
+                   .rightClick =
+                       [](State& state, std::size_t value, Pointer const&, std::vector<UiAction>& actions) {
+                           std::ranges::move(foldOtherGroups(state.interaction.work,
+                                                             state.work.lines,
+                                                             state.engine,
+                                                             static_cast<WorkGroup>(value)),
+                                             std::back_inserter(actions));
+                       },
+                   .wheel = scrollWork },
         // The list's right edge: a press jumps there, and the list follows the pointer while it is held.
         MouseRow { .kind = HitKind::WorkScrollbar,
                    .layer = Layer::Dashboard,
@@ -1583,19 +1593,13 @@ namespace
                        [](State& state, std::size_t value, int steps, std::vector<UiAction>&) {
                            stepDialogSetting(state, value, steps);
                        } },
-        // A setting's value or arrows: a click steps it, a double click starts.
+        // A setting's value or arrows: each press steps it, a double click's second too.
         MouseRow { .kind = HitKind::DialogStep,
                    .layer = Layer::Popup,
                    .click =
-                       [](State& state,
-                          std::size_t value,
-                          Clicks clicks,
-                          Pointer const&,
-                          std::vector<UiAction>& actions) {
-                           if (clicks == Clicks::Double)
-                               state.press(core::tui::KeyCode::Enter, actions);
-                           else
-                               stepDialogSetting(state, stepField(value), stepWay(value));
+                       [](State& state, std::size_t value, Clicks, Pointer const&, std::vector<UiAction>&) {
+                           // The second press of a double click steps again: a stepper never starts.
+                           stepDialogSetting(state, stepField(value), stepWay(value));
                        },
                    .rightClick =
                        [](State& state, std::size_t value, Pointer const&, std::vector<UiAction>&) {
@@ -1636,7 +1640,12 @@ namespace
             .layer = Layer::Popup,
             .click =
                 [](State& state, std::size_t value, Clicks, Pointer const&, std::vector<UiAction>& actions) {
-                    state.interaction.work.menu->highlighted = value;
+                    // A hit the last frame recorded may outlive the menu: a second press, or a poll, closed
+                    // it.
+                    auto& menu = state.interaction.work.menu;
+                    if (!menu)
+                        return;
+                    menu->highlighted = value;
                     state.press(core::tui::KeyCode::Enter, actions);
                 },
             .wheel = nullptr },
@@ -1691,15 +1700,6 @@ namespace
                           actions.emplace_back(
                               OpenUrlAction { .url = item.ticket->url, .label = item.ticketKey });
                       } },
-        // The branch goes to the clipboard of the terminal the user sits at, in the next frame.
-        MenuRow { .command = RowMenuCommand::CopyBranch,
-                  .handler =
-                      [](State& state, WorkItem const& item, std::vector<UiAction>&) {
-                          auto const& branch = item.changeRequest->head;
-                          state.clipboard += clipboardWrite(branch);
-                          state.interaction.notice = std::format("copied {}", branch);
-                          state.repaint = State::Repaint::Needed;
-                      } },
         MenuRow { .command = RowMenuCommand::FoldGroup,
                   .handler =
                       [](State& state, WorkItem const& item, std::vector<UiAction>& actions) {
@@ -1730,10 +1730,11 @@ void Dashboard::State::run(KeyCommand command, std::vector<UiAction>& actions)
 {
     auto const view = interaction.view;
     auto const menu = interaction.work.menu;
-    auto action = view == View::Work
-                      ? applyWorkCommand(command, interaction, work.lines, work.items, engine, work.listRows)
-                      : dispatch(command, interaction, keyContext());
-    if (action)
+    if (view == View::Work)
+        std::ranges::move(
+            applyWorkCommand(command, interaction, work.lines, work.items, engine, work.listRows),
+            std::back_inserter(actions));
+    else if (auto action = dispatch(command, interaction, keyContext()))
         actions.push_back(std::move(*action));
     anchorMenu(menu);
     afterCommand(view);
@@ -2402,8 +2403,6 @@ std::string Dashboard::frame()
     // Bracketed paste on, in every frame, so that a tab the host drew in the meantime gets it back: a paste
     // arrives as text, never as the keys it spells (an Enter in it would confirm the form).
     auto bytes = std::exchange(state.frameBytes, {});
-    // What the row menu copied goes to the clipboard of the terminal the user sits at (OSC 52).
-    bytes += std::exchange(state.clipboard, {});
     bytes += BracketedPasteOn;
     bytes += MouseReportingOn;
     // The Work view asks for the pointer's every move, for hovering and dragging; the view after it, no more.

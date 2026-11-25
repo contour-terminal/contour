@@ -16,7 +16,7 @@ using namespace orchestrator::view;
 namespace
 {
 
-/// A merge request's row, its head branch `fix/flaky-test`, linked to PRJ-1234.
+/// A merge request's row, linked to PRJ-1234.
 [[nodiscard]] WorkItem mrItem()
 {
     return WorkItem { .group = WorkGroup::NeedsYou,
@@ -48,12 +48,6 @@ namespace
 
 } // namespace
 
-TEST_CASE("Row menu: OSC 52 carries the text in base64", "[orchestrator][view][work]")
-{
-    CHECK(clipboardWrite("ab") == "\x1b]52;c;YWI=\x07");
-    CHECK(clipboardWrite("fix/flaky-test") == "\x1b]52;c;Zml4L2ZsYWt5LXRlc3Q=\x07");
-}
-
 TEST_CASE("Row menu: what applies to an MR row and to a ticket row", "[orchestrator][view][work]")
 {
     auto const mr = mrItem();
@@ -63,7 +57,6 @@ TEST_CASE("Row menu: what applies to an MR row and to a ticket row", "[orchestra
     CHECK(menuApplies(RowMenuCommand::StartAgent, ticket));
     CHECK_FALSE(menuApplies(RowMenuCommand::OpenMr, ticket));
     CHECK(menuApplies(RowMenuCommand::OpenTicket, ticket));
-    CHECK_FALSE(menuApplies(RowMenuCommand::CopyBranch, ticket));
     CHECK(menuApplies(RowMenuCommand::FoldGroup, ticket));
 
     // A key the lookup could not find has no web page to open.
