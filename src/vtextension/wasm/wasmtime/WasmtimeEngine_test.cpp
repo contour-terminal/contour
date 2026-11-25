@@ -35,7 +35,7 @@
 #include <vtextension/wasm/testing/BackendContract.hpp>
 #include <vtextension/wasm/testing/FeatureModules.hpp>
 #include <vtextension/wasm/testing/RenderMeasurement.hpp>
-#include <vtextension/wasm/wasmtime/WasmtimeBackend.hpp>
+#include <vtextension/wasm/wasmtime/WasmtimeEngine.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeRuntime.hpp>
 
@@ -47,7 +47,7 @@ using vtextension::wasm::ModuleIdentity;
 using vtextension::wasm::RuntimeLimits;
 using vtextension::wasm::wasmtime::KindState;
 using vtextension::wasm::wasmtime::makeKindState;
-using vtextension::wasm::wasmtime::makeWasmtimeBackend;
+using vtextension::wasm::wasmtime::makeWasmtimeEngine;
 using vtextension::wasm::wasmtime::TrapMode;
 using vtextension::wasm::wasmtime::WasmtimeConfig;
 
@@ -60,7 +60,7 @@ struct WasmtimeTraits
     /// @return A Wasmtime backend of the one kind state this test binary shares, as a process would.
     [[nodiscard]] static std::unique_ptr<IWasmBackend> make()
     {
-        return makeWasmtimeBackend(kind(), WasmtimeConfig { .trapMode = TrapMode::Software });
+        return makeWasmtimeEngine(kind(), WasmtimeConfig { .trapMode = TrapMode::Software });
     }
 
     /// @return The one kind state this test binary shares.
@@ -216,7 +216,7 @@ class InterruptingHostContext final: public vtextension::wasm::IHostContext
 
 CONTOUR_WASM_BACKEND_CONTRACT(WasmtimeTraits)
 
-TEST_CASE("WasmtimeBackend.hostFunctionArities", "[wasmtime]")
+TEST_CASE("WasmtimeEngine.hostFunctionArities", "[wasmtime]")
 {
     // A host function takes from none up to MaxHostParameters i32s, each reaching the host in order. One
     // taking more cannot be provided, and the runtime is refused.
@@ -252,7 +252,7 @@ TEST_CASE("WasmtimeBackend.hostFunctionArities", "[wasmtime]")
     CHECK(refused.error() == ExtensionError::RuntimeUnavailable);
 }
 
-TEST_CASE("WasmtimeBackend.hostFunctionCallsBackIn", "[wasmtime]")
+TEST_CASE("WasmtimeEngine.hostFunctionCallsBackIn", "[wasmtime]")
 {
     // A host function calling back into its instance, as the extension host does to allocate in guest
     // memory, gets its answer from the same store; its own failure after that still fails the outer call
@@ -273,7 +273,7 @@ TEST_CASE("WasmtimeBackend.hostFunctionCallsBackIn", "[wasmtime]")
     CHECK(contract::wordAt(*instance, 0) == 0);
 }
 
-TEST_CASE("WasmtimeBackend.callsWideExports", "[wasmtime]")
+TEST_CASE("WasmtimeEngine.callsWideExports", "[wasmtime]")
 {
     // An export taking more values than a call passes without allocating still receives every one, in
     // order: `sum` returns the first of 20 parameters plus twice the second, and so on.
@@ -303,7 +303,7 @@ TEST_CASE("WasmtimeBackend.callsWideExports", "[wasmtime]")
     CHECK(argv[0] == 2870);
 }
 
-TEST_CASE("WasmtimeBackend.refusesWhatWasmtimeEnablesByDefault", "[wasmtime]")
+TEST_CASE("WasmtimeEngine.refusesWhatWasmtimeEnablesByDefault", "[wasmtime]")
 {
     // A feature Wasmtime enables unless told otherwise is refused only because the backend switched it
     // off. Each such module is checked against both: a default engine accepts it, the backend refuses it.
@@ -338,7 +338,7 @@ TEST_CASE("WasmtimeBackend.refusesWhatWasmtimeEnablesByDefault", "[wasmtime]")
 #endif
 }
 
-TEST_CASE("WasmtimeBackend.refusesAZeroStack", "[wasmtime]")
+TEST_CASE("WasmtimeEngine.refusesAZeroStack", "[wasmtime]")
 {
     // Wasmtime aborts the process on an engine whose stack cap is zero; the backend refuses it first.
     auto const runtime = WasmtimeTraits::make()->createRuntime(
@@ -350,12 +350,19 @@ TEST_CASE("WasmtimeBackend.refusesAZeroStack", "[wasmtime]")
     CHECK(runtime.error() == ExtensionError::RuntimeUnavailable);
 }
 
-TEST_CASE("WasmtimeBackend.leavesMemoryGrowthUnreported", "[wasmtime]")
+TEST_CASE("WasmtimeEngine.leavesMemoryGrowthUnreported", "[wasmtime]")
 {
     CHECK(WasmtimeTraits::make()->capabilities().memoryGrowth == MemoryGrowthReporting::Unreported);
 }
 
-TEST_CASE("WasmtimeBackend.wasiReadsTheConfiguredEnvironment", "[wasmtime]")
+TEST_CASE("WasmtimeEngine.copiesMemoryToTheParent", "[wasmtime]")
+{
+    // Until a host process can map memory its parent created, the parent reads and writes it by copy.
+    auto const engine = makeWasmtimeEngine(WasmtimeTraits::kind(), WasmtimeConfig {});
+    CHECK(engine->memoryMode() == vtextension::wasm::remote::proto::MemoryMode::Copy);
+}
+
+TEST_CASE("WasmtimeEngine.wasiReadsTheConfiguredEnvironment", "[wasmtime]")
 {
     namespace contract = vtextension::wasm::testing::contract;
     // A clock reading 7 seconds past its id, and random bytes that are all 0x5A.
@@ -370,7 +377,7 @@ TEST_CASE("WasmtimeBackend.wasiReadsTheConfiguredEnvironment", "[wasmtime]")
                 return {};
             } },
     };
-    auto const backend = makeWasmtimeBackend(WasmtimeTraits::kind(), std::move(config));
+    auto const backend = makeWasmtimeEngine(WasmtimeTraits::kind(), std::move(config));
     auto const runtime = contract::createRuntime(*backend);
     auto const guard = contract::enterThread(*backend);
     auto const module = contract::load(*runtime, contract::EveryWasiFunctionModule);

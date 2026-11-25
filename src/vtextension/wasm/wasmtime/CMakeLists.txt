@@ -3,16 +3,16 @@
 # yet: nothing but its own tests links it. scripts/check-wasm-runtime-containment.py keeps it contained.
 
 add_library(vtextension_wasmtime STATIC
-    WasmtimeBackend.cpp
+    WasmtimeEngine.cpp
     WasmtimeInstance.cpp
     WasmtimeModule.cpp
-    WasmtimeBackend.hpp
+    WasmtimeEngine.hpp
     WasmtimeHandles.hpp
     WasmtimeRuntime.hpp
 )
 target_link_libraries(vtextension_wasmtime PUBLIC vtextension PRIVATE contour::wasmtime)
 
-# The backstop WasmtimeBackend.cpp includes: it stops the build unless the Wasmtime headers have every
+# The backstop WasmtimeEngine.cpp includes: it stops the build unless the Wasmtime headers have every
 # feature the backend switches, from the same list the configure-time probe checks an installed Wasmtime
 # against (cmake/ContourThirdParties.cmake).
 ContourThirdParties_WasmtimeFeatureChecks(_wasmtime_feature_checks ${_WASMTIME_REQUIRED_FEATURES})
@@ -33,7 +33,7 @@ elseif(VTEXTENSION_TESTING)
     add_executable(vtextension_wasmtime_test
         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
         PreparedGeneration.cpp
-        WasmtimeBackend_test.cpp
+        WasmtimeEngine_test.cpp
     )
     target_link_libraries(vtextension_wasmtime_test PRIVATE
         vtextension vtextension_wasmtime contour::wasmtime core::testing Catch2::Catch2 contour_test_trace)

@@ -142,7 +142,7 @@ def self_test() -> int:
         ("WAMR header is not Wasmtime", bool(WASMTIME.c_header.search("#include <wasm_export.h>")), False),
         ("a .hpp of the same stem is not Wasmtime", bool(WASMTIME.c_header.search("#include <wasm.hpp>")), False),
         ("similar name is not Wasmtime", bool(WASMTIME.c_header.search("#include <my_wasm.h>")), False),
-        ("Wasmtime backend header", bool(WASMTIME.backend_header.search("#include <vtextension/wasm/wasmtime/WasmtimeBackend.hpp>")), True),
+        ("Wasmtime backend header", bool(WASMTIME.backend_header.search("#include <vtextension/wasm/wasmtime/WasmtimeEngine.hpp>")), True),
         ("WAMR backend header is not Wasmtime's", bool(WASMTIME.backend_header.search("#include <vtextension/wasm/wamr/WamrBackend.hpp>")), False),
         ("link of contour::wasmtime", bool(WASMTIME.link.search("target_link_libraries(x PRIVATE contour::wasmtime)")), True),
         ("contour::wasmtime is not contour::wamr", bool(WAMR.link.search("target_link_libraries(x contour::wasmtime)")), False),

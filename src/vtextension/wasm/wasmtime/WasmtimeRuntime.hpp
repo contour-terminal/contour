@@ -19,7 +19,7 @@
 #include <vtextension/wasm/WasmBinary.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 #include <vtextension/wasm/wasi/Preview1Shim.hpp>
-#include <vtextension/wasm/wasmtime/WasmtimeBackend.hpp>
+#include <vtextension/wasm/wasmtime/WasmtimeEngine.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
 
 struct wasmtime_context;

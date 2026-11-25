@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtextension/wasm/wasmtime/WasmtimeBackend.hpp>
+#include <vtextension/wasm/wasmtime/WasmtimeEngine.hpp>
 
 #include <core/Assert.hpp>
 #include <core/Utils.hpp>
@@ -310,11 +310,11 @@ namespace
         return linker;
     }
 
-    /// A Wasmtime backend: a facade over the kind's shared state.
-    class WasmtimeBackend final: public IWasmBackend
+    /// A Wasmtime engine: a facade over the kind's shared state.
+    class WasmtimeEngine final: public host::IHostedEngine
     {
       public:
-        WasmtimeBackend(std::shared_ptr<KindState> kind, WasmtimeConfig config) noexcept:
+        WasmtimeEngine(std::shared_ptr<KindState> kind, WasmtimeConfig config) noexcept:
             _kind { std::move(kind) }, _config { std::move(config) }
         {
         }
@@ -343,6 +343,11 @@ namespace
         [[nodiscard]] BackendCapabilities capabilities() const noexcept override
         {
             return BackendCapabilities { .memoryGrowth = MemoryGrowthReporting::Unreported };
+        }
+
+        [[nodiscard]] remote::proto::MemoryMode memoryMode() const noexcept override
+        {
+            return remote::proto::MemoryMode::Copy;
         }
 
       private:
@@ -460,9 +465,10 @@ std::shared_ptr<KindState> makeKindState()
     return std::make_shared<KindState>();
 }
 
-std::unique_ptr<IWasmBackend> makeWasmtimeBackend(std::shared_ptr<KindState> kind, WasmtimeConfig config)
+std::unique_ptr<host::IHostedEngine> makeWasmtimeEngine(std::shared_ptr<KindState> kind,
+                                                        WasmtimeConfig config)
 {
-    return std::make_unique<WasmtimeBackend>(std::move(kind), std::move(config));
+    return std::make_unique<WasmtimeEngine>(std::move(kind), std::move(config));
 }
 
 } // namespace vtextension::wasm::wasmtime
