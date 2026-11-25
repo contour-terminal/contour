@@ -287,7 +287,9 @@ class IWasmModule
 
     /// Instantiates the module under the runtime's limits, with WASI preview 1 as the backend provides
     /// it: no arguments, no environment, no preopened directory, and standard streams whose writes
-    /// reach nobody. May run on another prepared thread than the one that loaded the module.
+    /// reach nobody. May run on another prepared thread than the one that loaded the module, and on several
+    /// prepared threads at once: concurrent instantiations of one module neither fail nor disturb one another
+    /// (the panes sharing one compiled extension instantiate it on their own workers).
     ///
     /// A WASI reactor (a module that imports WASI and exports `_initialize`, as every Rust guest built
     /// with Rust 1.100 or newer does) is not initialized here: the backend never runs its `_initialize`,
@@ -349,9 +351,9 @@ class IThreadGuard
 /// about whether a thread is prepared or which generation is current.
 ///
 /// **Threading.** Calls into one instance never overlap, but may come from any prepared thread; a module
-/// may be loaded on one prepared thread and instantiated on another; different instances of one
-/// runtime may run on different threads at once. A runtime with single-entry execution contexts meets
-/// this internally.
+/// may be loaded on one prepared thread and instantiated on another, or on several at once; different
+/// instances of one runtime may run on different threads at once. A runtime with single-entry execution
+/// contexts meets this internally.
 ///
 /// **Synchronous execution.** An export call runs on the calling thread, and every host function it
 /// calls runs synchronously on that same thread before the call returns.

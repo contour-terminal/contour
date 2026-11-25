@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <expected>
 #include <future>
+#include <latch>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -1442,6 +1443,70 @@ void instanceCrossesThreads()
     CHECK(*sum == std::expected<uint32_t, CallFailure> { 5 });
 }
 
+/// One module is instantiated on two prepared threads at once, as the panes sharing a compiled extension do:
+/// every instance is whole and runs, and neither instantiation disturbs the other. So too for a module whose
+/// import is unsatisfied, which some runtimes try to link anew on each instantiation: each thread meets the
+/// outcome one instantiation alone has.
+template <typename T>
+void instantiatesConcurrently()
+{
+    /// What one thread achieved: how many instantiations went as the reference did, and how many of the
+    /// instances added right (none of a module without `add`).
+    struct Tally
+    {
+        int asReference = 0;
+        int added = 0;
+    };
+    constexpr auto Rounds = 25;
+
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const guard = enterThread(*backend);
+
+    // Each thread instantiates `module` Rounds times at once with the other, and adds with what it created.
+    auto const onTwoThreads = [&](IWasmModule& module) {
+        auto context = RecordingHostContext {};
+        auto const reference = module.instantiate(context).transform([](auto const&) { return 0; });
+        auto start = std::latch { 2 };
+        auto const instantiateMany = [&] {
+            auto tally = Tally {};
+            auto const threadGuard = backend->enterThread();
+            start.arrive_and_wait();
+            if (!threadGuard)
+                return tally;
+            for (auto const round: std::views::iota(uint32_t { 0 }, uint32_t { Rounds }))
+            {
+                auto ownContext = RecordingHostContext {};
+                auto const instance = module.instantiate(ownContext);
+                if (instance.has_value() != reference.has_value()
+                    || (!instance && instance.error() != reference.error()))
+                    continue;
+                ++tally.asReference;
+                if (!instance)
+                    continue;
+                auto const add = (*instance)->function("add");
+                auto argv = std::array<uint32_t, 2> { round, 3 };
+                if (add && (*instance)->call(*add, argv) && argv[0] == round + 3)
+                    ++tally.added;
+            }
+            return tally;
+        };
+        auto first = std::async(std::launch::async, instantiateMany);
+        auto second = std::async(std::launch::async, instantiateMany);
+        return std::array { first.get(), second.get() };
+    };
+
+    auto const module = load(*runtime, InstanceModule);
+    for (auto const tally: onTwoThreads(*module))
+    {
+        CHECK(tally.asReference == Rounds);
+        CHECK(tally.added == Rounds);
+    }
+    auto const unsatisfied = load(*runtime, UnknownImportModule);
+    for (auto const tally: onTwoThreads(*unsatisfied))
+        CHECK(tally.asReference == Rounds);
+}
+
 /// What each export of EveryWasiFunctionModule, named after the WASI function it calls, ends with: the
 /// errno it returns, or ShimOutcome::Exit for a call that ends as a trap.
 inline constexpr auto EveryWasiFunctionOutcomes =
@@ -1576,6 +1641,13 @@ void wasiStdioGoesNowhere()
         ::vtextension::wasm::testing::contract::Name<TestType>();        \
     }
 
+/// One contract case that runs threads of its own, run against the backend of @p Traits.
+#define CONTOUR_WASM_BACKEND_CONTRACT_THREADING_CASE(Traits, Name)                  \
+    TEMPLATE_TEST_CASE("WasmContract." #Name, "[wasm-contract][threading]", Traits) \
+    {                                                                               \
+        ::vtextension::wasm::testing::contract::Name<TestType>();                   \
+    }
+
 /// Instantiates the whole contract suite against the backend @p Traits::make() creates.
 #define CONTOUR_WASM_BACKEND_CONTRACT(Traits)                                          \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, loadRejectsNonModule)                   \
@@ -1616,4 +1688,5 @@ void wasiStdioGoesNowhere()
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptStopsLoop)                     \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptIsFinal)                       \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instanceCrossesThreads)                 \
+    CONTOUR_WASM_BACKEND_CONTRACT_THREADING_CASE(Traits, instantiatesConcurrently)     \
     CONTOUR_WASM_BACKEND_CONTRACT_POSIX(Traits)
