@@ -1,0 +1,708 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <vtextension/wasm/host/HostServer.hpp>
+
+#include <core/Utils.hpp>
+
+#include <algorithm>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <span>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <variant>
+#include <vector>
+
+#include <vtextension/ExtensionError.hpp>
+#include <vtextension/wasm/WasmRuntime.hpp>
+#include <vtextension/wasm/remote/proto/Pdu.hpp>
+#include <vtextension/wasm/remote/transport/PduStream.hpp>
+
+namespace vtextension::wasm::host
+{
+
+namespace proto = remote::proto;
+using remote::transport::Channel;
+using remote::transport::PduStream;
+using remote::transport::StreamError;
+
+namespace
+{
+    /// What a request was served with: nothing to go on, or the reason the connection ends.
+    using Served = std::expected<void, ServerExit>;
+
+    /// @return The reason a stream's failure ends the connection with.
+    [[nodiscard]] ServerExit exitOf(StreamError error) noexcept
+    {
+        switch (error)
+        {
+            case StreamError::Closed:
+            case StreamError::Io: return ServerExit::PeerClosed;
+            case StreamError::Malformed:
+            case StreamError::OverCap: return ServerExit::ProtocolViolation;
+        }
+        return ServerExit::ProtocolViolation;
+    }
+
+    /// Sends @p pdu on @p stream.
+    /// @return Nothing once it is sent; why the connection ends if it could not be.
+    [[nodiscard]] Served send(PduStream& stream, proto::Pdu const& pdu)
+    {
+        return stream.send(pdu).transform_error(exitOf);
+    }
+
+    /// Sends @p pdu on @p stream, unless it is larger than its caps allow: @p refusal is sent instead, so
+    /// that a reply too large to carry fails its request rather than the connection.
+    /// @return Whether @p pdu itself was sent; why the connection ends if neither could be.
+    [[nodiscard]] std::expected<proto::Pdu const*, ServerExit> sendOrRefuse(PduStream& stream,
+                                                                            proto::Pdu const& pdu,
+                                                                            proto::Pdu const& refusal)
+    {
+        auto const sent = stream.send(pdu);
+        if (sent)
+            return &pdu;
+        if (sent.error() != StreamError::OverCap)
+            return std::unexpected(exitOf(sent.error()));
+        return send(stream, refusal).transform([&] { return &refusal; });
+    }
+
+    /// @return Whether a call can carry @p signature's parameters and results: every value an i32, and no
+    /// more
+    ///         of them than a Call or a CallResult holds.
+    [[nodiscard]] bool isCallable(FunctionSignature const& signature) noexcept
+    {
+        return signature.isAllI32() && signature.parameters.size() <= proto::MaxCallValues
+               && signature.results.size() <= proto::MaxCallValues;
+    }
+
+    /// A runtime, and the host function strings it was created with: kept for as long as anything created
+    /// from it lives, since a backend's registry of host functions may outlive the call that created it.
+    struct RuntimeSlot
+    {
+        std::vector<proto::WireHostFunction> functions; ///< Declared first, so released last.
+        std::shared_ptr<IWasmRuntime> runtime;
+    };
+
+    /// A module, and the runtime it was loaded on.
+    struct ModuleSlot
+    {
+        std::shared_ptr<RuntimeSlot> runtime; ///< Declared first, so released after the module.
+        std::shared_ptr<IWasmModule> module;
+    };
+
+    /// One export a Call may name.
+    struct CallableExport
+    {
+        ExportFunction function;    ///< Its handle on the instance.
+        std::size_t parameters = 0; ///< How many i32s it takes.
+        std::size_t results = 0;    ///< How many i32s it returns.
+    };
+
+    /// No lane uses an instance.
+    constexpr auto NoLane = uint32_t { 0 };
+
+    /// An instance, what may be called on it, and which lane uses it.
+    struct InstanceSlot
+    {
+        std::shared_ptr<ModuleSlot> module; ///< Declared first, so released after the instance.
+        std::unique_ptr<IWasmInstance> instance;
+        std::unordered_map<uint32_t, CallableExport> exports; ///< By ordinal; fixed once instantiated.
+        /// The tag of the lane using it (its index + 1), NoLane if none: a call or memory access holds it,
+        /// and a lane's nested calls into it share it.
+        std::atomic<uint32_t> lane { NoLane };
+    };
+
+    /// Whether a lane serves on.
+    enum class LaneState : uint8_t
+    {
+        Serving,
+        Ended,
+    };
+
+    /// Whether a MemoryWrite failed since the call it belongs to was served.
+    enum class WriteState : uint8_t
+    {
+        Clean,
+        Failed, ///< Fails the next Call, or the HostResult awaited, on the lane.
+    };
+
+    /// Whether a lane's hold on an instance is the one that releases it.
+    enum class HoldRole : uint8_t
+    {
+        Nested,    ///< The lane held it already, further up its stack.
+        Outermost, ///< The lane took it.
+    };
+
+    /// A lane's hold on an instance, for one call or memory access: refused while another lane holds it.
+    class InstanceHold
+    {
+      public:
+        /// @return The hold; nothing if another lane holds the instance.
+        [[nodiscard]] static std::optional<InstanceHold> take(InstanceSlot& slot, uint32_t laneTag) noexcept
+        {
+            auto expected = NoLane;
+            if (slot.lane.compare_exchange_strong(expected, laneTag))
+                return InstanceHold { slot, HoldRole::Outermost };
+            if (expected == laneTag)
+                return InstanceHold { slot, HoldRole::Nested };
+            return std::nullopt;
+        }
+
+        InstanceHold(InstanceHold&& other) noexcept:
+            _slot { std::exchange(other._slot, nullptr) }, _role { other._role }
+        {
+        }
+        InstanceHold(InstanceHold const&) = delete;
+        InstanceHold& operator=(InstanceHold const&) = delete;
+        InstanceHold& operator=(InstanceHold&&) = delete;
+        ~InstanceHold()
+        {
+            if (_slot && _role == HoldRole::Outermost)
+                _slot->lane.store(NoLane);
+        }
+
+      private:
+        InstanceHold(InstanceSlot& slot, HoldRole role) noexcept: _slot { &slot }, _role { role } {}
+
+        InstanceSlot* _slot;
+        HoldRole _role;
+    };
+} // namespace
+
+class HostServer::Impl
+{
+  public:
+    Impl(IHostedEngine& engine, std::vector<Channel> lanes, Channel control, HostServerConfig config);
+
+    [[nodiscard]] ServerExit run();
+    void stop() noexcept { finish(ServerExit::Stopped); }
+    void interrupt(uint32_t instanceId) noexcept;
+
+  private:
+    /// One lane, served by an executor thread of its own; only that thread touches it, but for shutdown().
+    struct Lane
+    {
+        Impl* server;                         ///< The server it belongs to.
+        PduStream stream;                     ///< The helper's end.
+        uint32_t tag;                         ///< Its index + 1: what it holds instances with.
+        std::optional<ServerExit> ended;      ///< Why it stopped serving; nothing while it serves.
+        WriteState write = WriteState::Clean; ///< Whether a MemoryWrite failed.
+        /// The executor thread's preparation: entered at its first call, renewed for a later generation.
+        std::unique_ptr<IThreadGuard> guard;
+    };
+
+    /// The host context of every instance: a host call is sent on the lane whose call made it.
+    class LaneHostContext final: public IHostContext
+    {
+      public:
+        [[nodiscard]] std::expected<void, ExtensionError> callHost(
+            std::size_t functionIndex, std::span<uint32_t const> arguments) noexcept override;
+    };
+
+    /// The lane whose call runs on this thread; null outside a call, and on the control thread.
+    static thread_local Lane* CurrentLane;
+
+    /// Ends the connection for @p reason, unless it ended already: interrupts every live instance, then shuts
+    /// every channel down, so that every thread blocked on one returns. Repeating it is harmless.
+    void finish(ServerExit reason) noexcept;
+
+    /// Prepares the calling thread for the engine's current generation, unless it is.
+    /// @param guard The thread's guard, replaced if it is for an earlier generation.
+    [[nodiscard]] std::expected<void, ExtensionError> prepare(std::unique_ptr<IThreadGuard>& guard);
+
+    // The control channel's requests, on the thread that runs the server.
+    [[nodiscard]] Served serve(proto::CreateRuntime const& request);
+    [[nodiscard]] Served serve(proto::Load& request);
+    [[nodiscard]] Served serve(proto::Instantiate const& request);
+    [[nodiscard]] Served serve(proto::Release const& request);
+    /// Anything else on control is a violation; the codec refuses what travels the other way already.
+    template <typename Other>
+    [[nodiscard]] Served serve(Other const& /*request*/)
+    {
+        return std::unexpected(ServerExit::ProtocolViolation);
+    }
+
+    // A lane's requests, on its executor thread.
+    void runLane(Lane& lane);
+    [[nodiscard]] Served serve(Lane& lane, proto::Call const& request);
+    [[nodiscard]] Served serve(Lane& lane, proto::MemoryRead const& request);
+    [[nodiscard]] Served serve(Lane& lane, proto::MemoryWrite const& request);
+    /// Anything else on a lane is a violation; a HostResult is one too, unless a host call awaits it.
+    template <typename Other>
+    [[nodiscard]] Served serve(Lane& /*lane*/, Other const& /*request*/)
+    {
+        return std::unexpected(ServerExit::ProtocolViolation);
+    }
+    /// Sends a host call on @p lane and serves the lane until its HostResult arrives.
+    [[nodiscard]] std::expected<void, ExtensionError> awaitHost(Lane& lane,
+                                                                std::size_t functionIndex,
+                                                                std::span<uint32_t const> arguments);
+
+    /// @return The live instance @p id; null if there is none.
+    [[nodiscard]] std::shared_ptr<InstanceSlot> instanceOf(uint32_t id);
+
+    IHostedEngine& _engine;
+    HostServerConfig _config;
+    PduStream _control;
+    std::vector<Lane> _lanes; ///< Never resized once constructed: each executor holds its lane's address.
+    LaneHostContext _hostContext;
+    /// The control thread's preparation, for loads and instantiations; renewed for a later generation.
+    std::unique_ptr<IThreadGuard> _controlGuard;
+
+    // Every id each kind of object was ever created under; the control thread's alone.
+    std::unordered_set<uint32_t> _runtimeIds;
+    std::unordered_set<uint32_t> _moduleIds;
+    std::unordered_set<uint32_t> _instanceIds;
+
+    std::mutex _mutex; ///< Guards what follows; never held across I/O.
+    std::unordered_map<uint32_t, std::shared_ptr<RuntimeSlot>> _runtimes;
+    std::unordered_map<uint32_t, std::shared_ptr<ModuleSlot>> _modules;
+    std::unordered_map<uint32_t, std::shared_ptr<InstanceSlot>> _instances;
+    std::optional<ServerExit> _exit; ///< Why the connection ended; nothing while it serves.
+};
+
+thread_local HostServer::Impl::Lane* HostServer::Impl::CurrentLane = nullptr;
+
+HostServer::Impl::Impl(IHostedEngine& engine,
+                       std::vector<Channel> lanes,
+                       Channel control,
+                       HostServerConfig config):
+    _engine { engine },
+    _config { config },
+    _control { std::move(control), proto::ChannelKind::Control, proto::Direction::ToHelper, config.limits }
+{
+    _lanes.reserve(lanes.size());
+    for (auto&& [index, channel]: core::views::enumerate(lanes))
+        _lanes.push_back(Lane { .server = this,
+                                .stream = PduStream { std::move(channel),
+                                                      proto::ChannelKind::Lane,
+                                                      proto::Direction::ToHelper,
+                                                      config.limits },
+                                .tag = static_cast<uint32_t>(index) + 1,
+                                .ended = std::nullopt,
+                                .write = WriteState::Clean,
+                                .guard = nullptr });
+}
+
+ServerExit HostServer::Impl::run()
+{
+    auto executors = std::vector<std::jthread> {};
+    auto const hello = send(_control,
+                            proto::Hello { .version = proto::ProtocolVersion,
+                                           .memoryMode = _engine.memoryMode(),
+                                           .lockdown = _config.lockdown });
+    if (hello)
+    {
+        executors.reserve(_lanes.size());
+        for (auto& lane: _lanes)
+            executors.emplace_back([this, &lane] { runLane(lane); });
+        while (true)
+        {
+            auto request = _control.receive();
+            if (!request)
+            {
+                finish(exitOf(request.error()));
+                break;
+            }
+            auto const served = std::visit([&](auto& pdu) { return serve(pdu); }, *request);
+            if (!served)
+            {
+                finish(served.error());
+                break;
+            }
+        }
+    }
+    else
+        finish(hello.error());
+
+    // Every channel is shut down by now, and every instance interrupted: each executor returns.
+    executors.clear();
+
+    // What the parent never released goes here, still on a prepared thread; outside the lock, which an
+    // interrupt() racing this takes.
+    auto runtimes = decltype(_runtimes) {};
+    auto modules = decltype(_modules) {};
+    auto instances = decltype(_instances) {};
+    auto exit = ServerExit::Stopped;
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        runtimes = std::exchange(_runtimes, {});
+        modules = std::exchange(_modules, {});
+        instances = std::exchange(_instances, {});
+        exit = _exit.value_or(ServerExit::Stopped);
+    }
+    instances.clear();
+    modules.clear();
+    runtimes.clear();
+    _controlGuard.reset();
+    return exit;
+}
+
+void HostServer::Impl::finish(ServerExit reason) noexcept
+{
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        if (!_exit)
+            _exit = reason;
+        for (auto const& [id, slot]: _instances)
+            slot->instance->interrupt();
+    }
+    _control.shutdown();
+    for (auto& lane: _lanes)
+        lane.stream.shutdown();
+}
+
+void HostServer::Impl::interrupt(uint32_t instanceId) noexcept
+{
+    auto const lock = std::scoped_lock { _mutex };
+    if (auto const found = _instances.find(instanceId); found != _instances.end())
+        found->second->instance->interrupt();
+}
+
+std::expected<void, ExtensionError> HostServer::Impl::prepare(std::unique_ptr<IThreadGuard>& guard)
+{
+    if (guard && _engine.isCurrentThreadPrepared())
+        return {};
+    // A guard for an earlier generation is replaced; ending it then leaves the new one's preparation alone.
+    return _engine.enterThread().transform(
+        [&](std::unique_ptr<IThreadGuard> entered) { guard = std::move(entered); });
+}
+
+std::shared_ptr<InstanceSlot> HostServer::Impl::instanceOf(uint32_t id)
+{
+    auto const lock = std::scoped_lock { _mutex };
+    auto const found = _instances.find(id);
+    return found != _instances.end() ? found->second : nullptr;
+}
+
+Served HostServer::Impl::serve(proto::CreateRuntime const& request)
+{
+    if (!_runtimeIds.insert(request.runtimeId).second)
+        return std::unexpected(ServerExit::ProtocolViolation);
+    // The engine is handed views of the server's own copy of the strings, which outlives the runtime.
+    auto slot =
+        std::make_shared<RuntimeSlot>(RuntimeSlot { .functions = request.functions, .runtime = nullptr });
+    auto table = std::vector<HostFunction> {};
+    table.reserve(slot->functions.size());
+    for (auto const& function: slot->functions)
+        table.push_back(HostFunction {
+            .module = function.module, .name = function.name, .parameterCount = function.parameterCount });
+    auto created =
+        _engine.createRuntime(RuntimeLimits { .memoryBytes = static_cast<std::size_t>(request.memoryBytes),
+                                              .stackBytes = static_cast<std::size_t>(request.stackBytes) },
+                              table);
+    auto error = std::optional<ExtensionError> {};
+    if (created)
+    {
+        slot->runtime = std::move(*created);
+        auto const lock = std::scoped_lock { _mutex };
+        _runtimes.emplace(request.runtimeId, std::move(slot));
+    }
+    else
+        error = created.error();
+    return send(_control, proto::RuntimeCreated { .runtimeId = request.runtimeId, .error = error });
+}
+
+Served HostServer::Impl::serve(proto::Load& request)
+{
+    auto runtime = std::shared_ptr<RuntimeSlot> {};
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        if (auto const found = _runtimes.find(request.runtimeId); found != _runtimes.end())
+            runtime = found->second;
+    }
+    if (!runtime || !_moduleIds.insert(request.moduleId).second)
+        return std::unexpected(ServerExit::ProtocolViolation);
+
+    // The helper is the host the identity names: there is no other to pick.
+    auto loaded = prepare(_controlGuard).and_then([&] {
+        return runtime->runtime->load(ModuleIdentity {}, std::move(request.bytes));
+    });
+    if (!loaded)
+        return send(
+            _control,
+            proto::Loaded {
+                .moduleId = request.moduleId, .error = loaded.error(), .imports = {}, .exports = {} });
+
+    auto const& module = *loaded;
+    auto const description =
+        proto::Pdu { proto::Loaded { .moduleId = request.moduleId,
+                                     .error = std::nullopt,
+                                     .imports = { module->imports().begin(), module->imports().end() },
+                                     .exports = { module->exports().begin(), module->exports().end() } } };
+    // A description too large to carry fails the load: the module is dropped, and its id stays used.
+    auto const refusal = proto::Pdu { proto::Loaded { .moduleId = request.moduleId,
+                                                      .error = ExtensionError::InvalidComponent,
+                                                      .imports = {},
+                                                      .exports = {} } };
+    return sendOrRefuse(_control, description, refusal).transform([&](proto::Pdu const* sent) {
+        if (sent != &description)
+            return;
+        auto const lock = std::scoped_lock { _mutex };
+        _modules.emplace(request.moduleId,
+                         std::make_shared<ModuleSlot>(ModuleSlot { .runtime = runtime, .module = module }));
+    });
+}
+
+Served HostServer::Impl::serve(proto::Instantiate const& request)
+{
+    auto module = std::shared_ptr<ModuleSlot> {};
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        if (auto const found = _modules.find(request.moduleId); found != _modules.end())
+            module = found->second;
+    }
+    if (!module || !_instanceIds.insert(request.instanceId).second)
+        return std::unexpected(ServerExit::ProtocolViolation);
+
+    // A start function runs here, on the control thread, where a host call finds no lane and fails.
+    auto instance =
+        prepare(_controlGuard).and_then([&] { return module->module->instantiate(_hostContext); });
+    if (!instance)
+        return send(_control,
+                    proto::Instantiated {
+                        .instanceId = request.instanceId, .error = instance.error(), .callableExports = {} });
+
+    auto slot = std::make_shared<InstanceSlot>();
+    slot->module = module;
+    slot->instance = std::move(*instance);
+    auto callable = std::vector<uint32_t> {};
+    for (auto const [ordinal, description]: core::views::enumerate(module->module->exports()))
+    {
+        if (description.kind != ExternKind::Function || !isCallable(description.signature))
+            continue;
+        if (auto const function = slot->instance->function(description.name))
+        {
+            slot->exports.emplace(static_cast<uint32_t>(ordinal),
+                                  CallableExport { .function = *function,
+                                                   .parameters = description.signature.parameters.size(),
+                                                   .results = description.signature.results.size() });
+            callable.push_back(static_cast<uint32_t>(ordinal));
+        }
+    }
+
+    // Live before it is announced: the parent may call it on a lane the moment the answer arrives.
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        if (_exit)
+            slot->instance->interrupt();
+        _instances.emplace(request.instanceId, slot);
+    }
+    auto const answer = proto::Pdu { proto::Instantiated {
+        .instanceId = request.instanceId, .error = std::nullopt, .callableExports = std::move(callable) } };
+    auto const refusal = proto::Pdu { proto::Instantiated { .instanceId = request.instanceId,
+                                                            .error = ExtensionError::InvalidComponent,
+                                                            .callableExports = {} } };
+    return sendOrRefuse(_control, answer, refusal).transform([&](proto::Pdu const* sent) {
+        if (sent == &answer)
+            return;
+        auto const lock = std::scoped_lock { _mutex };
+        _instances.erase(request.instanceId);
+    });
+}
+
+Served HostServer::Impl::serve(proto::Release const& request)
+{
+    // Released outside the lock; a lane still holding it releases it when its call returns.
+    auto released = std::shared_ptr<void> {};
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        auto const take = [&](auto& map) {
+            if (auto const found = map.find(request.id); found != map.end())
+            {
+                released = std::move(found->second);
+                map.erase(found);
+            }
+        };
+        switch (request.target)
+        {
+            case proto::ReleaseTarget::Instance:
+                // Stopped for good, should a lane still run a call of it: the parent holds it no more.
+                if (auto const found = _instances.find(request.id); found != _instances.end())
+                    found->second->instance->interrupt();
+                take(_instances);
+                break;
+            case proto::ReleaseTarget::Module: take(_modules); break;
+            case proto::ReleaseTarget::Runtime: take(_runtimes); break;
+        }
+    }
+    if (!released)
+        return std::unexpected(ServerExit::ProtocolViolation);
+    return {};
+}
+
+void HostServer::Impl::runLane(Lane& lane)
+{
+    while (!lane.ended)
+    {
+        auto request = lane.stream.receive();
+        if (!request)
+        {
+            lane.ended = exitOf(request.error());
+            break;
+        }
+        auto const served = std::visit([&](auto const& pdu) { return serve(lane, pdu); }, *request);
+        if (!served)
+            lane.ended = served.error();
+    }
+    finish(*lane.ended);
+    // Ended on the thread that entered it.
+    lane.guard.reset();
+}
+
+Served HostServer::Impl::serve(Lane& lane, proto::Call const& request)
+{
+    auto const slot = instanceOf(request.instanceId);
+    if (!slot)
+        return std::unexpected(ServerExit::ProtocolViolation);
+    auto const callable = slot->exports.find(request.exportOrdinal);
+    if (callable == slot->exports.end() || request.argv.size() != callable->second.parameters)
+        return std::unexpected(ServerExit::ProtocolViolation);
+
+    auto result = proto::CallResult {};
+    {
+        auto const hold = InstanceHold::take(*slot, lane.tag);
+        if (!hold)
+            return std::unexpected(ServerExit::ProtocolViolation);
+        if (std::exchange(lane.write, WriteState::Clean) == WriteState::Failed || !prepare(lane.guard))
+            result.failure = CallFailure::Trap;
+        else
+        {
+            auto argv = request.argv;
+            argv.resize(std::max(callable->second.parameters, callable->second.results));
+            auto const outer = std::exchange(CurrentLane, &lane);
+            auto const called = slot->instance->call(callable->second.function, argv);
+            CurrentLane = outer;
+            if (called)
+            {
+                argv.resize(callable->second.results);
+                result.argv = std::move(argv);
+            }
+            else
+                result.failure = called.error();
+        }
+    }
+    // A lane that ended inside the call (its host call's stream failed, or the parent broke the protocol
+    // there) answers nothing more.
+    if (lane.ended)
+        return std::unexpected(*lane.ended);
+    // Released before the answer goes out: the parent may call the instance on another lane once it arrives.
+    return send(lane.stream, result);
+}
+
+Served HostServer::Impl::serve(Lane& lane, proto::MemoryRead const& request)
+{
+    auto const slot = instanceOf(request.instanceId);
+    if (!slot)
+        return std::unexpected(ServerExit::ProtocolViolation);
+    auto data = proto::MemoryData {};
+    {
+        auto const hold = InstanceHold::take(*slot, lane.tag);
+        if (!hold)
+            return std::unexpected(ServerExit::ProtocolViolation);
+        if (auto const view = slot->instance->memory(request.address, request.size))
+            data = proto::MemoryData { .status = proto::MemoryStatus::Ok,
+                                       .bytes = { view->begin(), view->end() } };
+    }
+    // A range larger than the stream's memory cap is out of the bounds the parent may read.
+    return sendOrRefuse(lane.stream, data, proto::MemoryData {}).transform([](proto::Pdu const*) {});
+}
+
+Served HostServer::Impl::serve(Lane& lane, proto::MemoryWrite const& request)
+{
+    auto const slot = instanceOf(request.instanceId);
+    if (!slot)
+        return std::unexpected(ServerExit::ProtocolViolation);
+    auto const hold = InstanceHold::take(*slot, lane.tag);
+    if (!hold)
+        return std::unexpected(ServerExit::ProtocolViolation);
+    // The stream's memory cap keeps the size within 32 bits.
+    if (auto const view =
+            slot->instance->memory(request.address, static_cast<uint32_t>(request.bytes.size())))
+        std::ranges::copy(request.bytes, view->begin());
+    else
+        lane.write = WriteState::Failed;
+    return {};
+}
+
+std::expected<void, ExtensionError> HostServer::Impl::awaitHost(Lane& lane,
+                                                                std::size_t functionIndex,
+                                                                std::span<uint32_t const> arguments)
+{
+    // Every way out but a HostResult fails the host call, which stops the guest's call; the lane's reason
+    // then ends the connection once that call returned.
+    auto const sent = send(lane.stream,
+                           proto::CallHost { .functionIndex = static_cast<uint32_t>(functionIndex),
+                                             .arguments = { arguments.begin(), arguments.end() } });
+    if (!sent)
+    {
+        lane.ended = sent.error();
+        return std::unexpected(ExtensionError::HostUnavailable);
+    }
+    while (!lane.ended)
+    {
+        auto request = lane.stream.receive();
+        if (!request)
+        {
+            lane.ended = exitOf(request.error());
+            break;
+        }
+        if (auto const* result = std::get_if<proto::HostResult>(&*request))
+        {
+            if (std::exchange(lane.write, WriteState::Clean) == WriteState::Failed)
+                return std::unexpected(ExtensionError::Trapped);
+            if (result->error)
+                return std::unexpected(*result->error);
+            return {};
+        }
+        // A call back in, or the guest's memory: served on this thread, as the parent is parked on this lane.
+        auto const served = std::visit([&](auto const& pdu) { return serve(lane, pdu); }, *request);
+        if (!served)
+            lane.ended = served.error();
+    }
+    return std::unexpected(ExtensionError::HostUnavailable);
+}
+
+std::expected<void, ExtensionError> HostServer::Impl::LaneHostContext::callHost(
+    std::size_t functionIndex, std::span<uint32_t const> arguments) noexcept
+{
+    // A host call no lane's call made (a start function's, during instantiation) has nowhere to go.
+    auto* const lane = CurrentLane;
+    if (!lane)
+        return std::unexpected(ExtensionError::RuntimeUnavailable);
+    return lane->server->awaitHost(*lane, functionIndex, arguments);
+}
+
+HostServer::HostServer(IHostedEngine& engine,
+                       std::vector<Channel> lanes,
+                       Channel control,
+                       HostServerConfig config):
+    _impl { std::make_unique<Impl>(engine, std::move(lanes), std::move(control), config) }
+{
+}
+
+HostServer::~HostServer() = default;
+
+ServerExit HostServer::run()
+{
+    return _impl->run();
+}
+
+void HostServer::stop() noexcept
+{
+    _impl->stop();
+}
+
+void HostServer::interrupt(uint32_t instanceId) noexcept
+{
+    _impl->interrupt(instanceId);
+}
+
+} // namespace vtextension::wasm::host

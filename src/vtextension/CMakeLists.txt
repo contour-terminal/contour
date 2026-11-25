@@ -183,9 +183,6 @@ if(VTEXTENSION_TESTING)
     endif()
 endif()
 
-# The protocol and channels between Contour and its extension host process; no engine, always built.
-add_subdirectory(wasm/remote)
-
 # The backend this build selected (CONTOUR_WASM_RUNTIME, validated in the top-level CMakeLists.txt), and the one
 # name everything that composes a program links: the GUI, contour_cli (`contour daemon`), bench-headless and the
 # test executables. vtextension and vthost do not. Its target defines vtextension::wasm::makeDefaultBackend().
@@ -195,5 +192,10 @@ if(CONTOUR_HAVE_WASMTIME AND NOT CONTOUR_WASM_RUNTIME STREQUAL "wasmtime")
     # program links it yet.
     add_subdirectory(wasm/wasmtime)
 endif()
+
+# The protocol and channels between Contour and its extension host process, and the host's server; no engine,
+# always built. After the backends: the host's tests run on Wasmtime's engine, where there is one.
+add_subdirectory(wasm/remote)
+add_subdirectory(wasm/host)
 add_library(vtextension_runtime INTERFACE)
 target_link_libraries(vtextension_runtime INTERFACE vtextension_${CONTOUR_WASM_RUNTIME})
