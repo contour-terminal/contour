@@ -53,6 +53,14 @@ std::string systemErrorText(int code)
         "{}, HRESULT 0x{:08X}", std::system_category().message(code), static_cast<uint32_t>(code));
 }
 
+std::array<HeldDescriptor, 3> standardStreams() noexcept
+{
+    return { HeldDescriptor { .role = DescriptorRole::IdleStream, .handle = GetStdHandle(STD_INPUT_HANDLE) },
+             HeldDescriptor { .role = DescriptorRole::IdleStream, .handle = GetStdHandle(STD_OUTPUT_HANDLE) },
+             HeldDescriptor { .role = DescriptorRole::StandardError,
+                              .handle = GetStdHandle(STD_ERROR_HANDLE) } };
+}
+
 std::expected<void, ConfinementFailure> capResources([[maybe_unused]] uint64_t dataBytes,
                                                      [[maybe_unused]] CapPolicy policy) noexcept
 {

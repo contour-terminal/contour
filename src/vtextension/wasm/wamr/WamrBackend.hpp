@@ -64,6 +64,14 @@ class NullDevice
     ///         `RuntimeUnavailable` if none could be opened.
     [[nodiscard]] std::expected<std::shared_ptr<OpenNullDevice const>, ExtensionError> forRuntime() const;
 
+    /// @return The raw handle of the device every runtime shares; nothing where each runtime opens its own.
+    [[nodiscard]] std::optional<int64_t> sharedHandle() const noexcept
+    {
+        if (!_shared)
+            return std::nullopt;
+        return _shared->handle();
+    }
+
   private:
     NullDevice(NullDeviceOpener open, std::shared_ptr<OpenNullDevice const> shared) noexcept:
         _open { std::move(open) }, _shared { std::move(shared) }

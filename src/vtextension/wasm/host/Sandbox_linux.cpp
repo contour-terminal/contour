@@ -104,7 +104,10 @@ namespace
                      GuestCode code,
                      LandlockSystem landlock,
                      std::function<void(std::string_view)> tell):
-            _descriptors { descriptors }, _code { code }, _landlock { landlock }, _tell { std::move(tell) }
+            _descriptors { std::move(descriptors) },
+            _code { code },
+            _landlock { landlock },
+            _tell { std::move(tell) }
         {
         }
 
@@ -153,9 +156,16 @@ namespace
     };
 } // namespace
 
+DescriptorLimit limitOf([[maybe_unused]] HeldDescriptor descriptor)
+{
+    // Its sandbox confines system calls, not what each descriptor may be used for.
+    return DescriptorLimit::Unlimited;
+}
+
 std::unique_ptr<ISandbox> makeSystemSandbox(SandboxDescriptors descriptors, GuestCode code)
 {
-    return std::make_unique<LinuxSandbox>(descriptors, code, systemLandlock(), &tellOnStandardError);
+    return std::make_unique<LinuxSandbox>(
+        std::move(descriptors), code, systemLandlock(), &tellOnStandardError);
 }
 
 } // namespace vtextension::wasm::host

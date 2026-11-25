@@ -74,6 +74,13 @@ struct HostEndpoints
 [[nodiscard]] std::expected<HostEndpoints, HostProcessExit> adoptEndpoints(
     remote::transport::HelperArguments const& arguments);
 
+/// @param endpoints What a host serves over.
+/// @param engine What it runs modules on.
+/// @return Every handle the host keeps once it is locked down, each with its role: its endpoints, the stop
+///         pipe of its wake receiver, its standard streams and the devices its engine holds.
+[[nodiscard]] SandboxDescriptors sandboxDescriptorsOf(HostEndpoints const& endpoints,
+                                                      IHostedEngine const& engine);
+
 /// A host's whole serving side over its endpoints: the server, and the listener that hands it the interrupts
 /// raised on the page.
 class HostProcess

@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <core/Utils.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -64,6 +66,7 @@ using vtextension::wasm::host::CapPolicy;
 using vtextension::wasm::host::capResources;
 using vtextension::wasm::host::ConfinementFailure;
 using vtextension::wasm::host::confinementFailureText;
+using vtextension::wasm::host::DescriptorRole;
 using vtextension::wasm::host::EngineFactory;
 using vtextension::wasm::host::ExecutorStackBytes;
 using vtextension::wasm::host::ExecutorThread;
@@ -72,6 +75,7 @@ using vtextension::wasm::host::GuestCode;
 using vtextension::wasm::host::HardeningRow;
 using vtextension::wasm::host::hardeningSteps;
 using vtextension::wasm::host::hardenProcess;
+using vtextension::wasm::host::HeldDescriptor;
 using vtextension::wasm::host::HostConfinement;
 using vtextension::wasm::host::HostProcessExit;
 using vtextension::wasm::host::hostProcessExitOf;
@@ -82,6 +86,7 @@ using vtextension::wasm::host::NullSandbox;
 using vtextension::wasm::host::runExtensionHost;
 using vtextension::wasm::host::SandboxDescriptors;
 using vtextension::wasm::host::ServerExit;
+using vtextension::wasm::host::standardStreams;
 using vtextension::wasm::remote::MaxLaneChannels;
 using vtextension::wasm::remote::transport::Channel;
 using vtextension::wasm::remote::transport::ControlPage;
@@ -95,6 +100,19 @@ using vtextension::wasm::remote::transport::StreamError;
 using vtextension::wasm::remote::transport::WakeSender;
 using vtextension::wasm::remote::transport::testing::closeHandle;
 using vtextension::wasm::remote::transport::testing::duplicate;
+
+namespace
+{
+
+/// The roles the wake receiver's stop handles are held in: a pipe's two ends on POSIX, one event in both
+/// roles on Windows (WakeStopHandles).
+#ifdef _WIN32
+constexpr auto WakeStopRoles = std::array { DescriptorRole::StopEvent };
+#else
+constexpr auto WakeStopRoles = std::array { DescriptorRole::StopReceiver, DescriptorRole::StopSender };
+#endif
+
+} // namespace
 using vtextension::wasm::testing::makeHostedEngine;
 using vtextension::wasm::testing::PreparationHookEngine;
 
@@ -155,6 +173,9 @@ struct Confined
     proto::LockdownState sandboxState = proto::LockdownState::Unsandboxed;
     /// The control handle the sandbox was made for.
     std::atomic<NativeHandle> sandboxedControl {};
+    /// The other handles the sandbox was made for, each with its role.
+    std::mutex sandboxedLock;
+    std::vector<HeldDescriptor> sandboxedHeld;
     /// The code the sandbox was made for: its engine's.
     std::atomic<GuestCode> sandboxedCode { GuestCode::Interpreted };
     /// How many threads the host started, and how many it had when the sandbox restricted it.
@@ -236,8 +257,13 @@ class RecordingSandbox final: public ISandbox
                 confined->record("adopt");
                 return vtextension::wasm::host::adoptEndpoints(arguments);
             },
-        .sandbox = [confined](SandboxDescriptors descriptors, GuestCode code) -> std::unique_ptr<ISandbox> {
+        .sandbox = [confined](SandboxDescriptors const& descriptors,
+                              GuestCode code) -> std::unique_ptr<ISandbox> {
             confined->sandboxedControl.store(descriptors.control);
+            {
+                auto const lock = std::scoped_lock { confined->sandboxedLock };
+                confined->sandboxedHeld = descriptors.held;
+            }
             confined->sandboxedCode.store(code);
             return std::make_unique<RecordingSandbox>(confined);
         },
@@ -559,7 +585,30 @@ namespace
     confined->record("hello");
     // The sandbox, if the test's, was made for the control end the host adopted: the one it was handed.
     if (auto const sandboxed = confined->sandboxedControl.load(); sandboxed != NativeHandle {})
+    {
         CHECK(sandboxed == parent.arguments.control);
+        // ... and for every other handle it keeps, each with its role: the engine, Wasmtime's, holds none.
+        // The wake receiver's stop handles are its own, which the host made as it adopted the wake end.
+        auto expected = std::vector<HeldDescriptor> {};
+        for (auto const lane: parent.arguments.lanes)
+            expected.push_back(HeldDescriptor { .role = DescriptorRole::Lane, .handle = lane });
+        expected.push_back(
+            HeldDescriptor { .role = DescriptorRole::Page, .handle = parent.arguments.controlPage });
+        expected.push_back(HeldDescriptor { .role = DescriptorRole::Wake, .handle = parent.arguments.wake });
+        auto const lock = std::scoped_lock { confined->sandboxedLock };
+        auto const& held = confined->sandboxedHeld;
+        REQUIRE(held.size() == expected.size() + WakeStopRoles.size() + standardStreams().size());
+        auto const stop = std::span { held }.subspan(expected.size(), WakeStopRoles.size());
+        for (auto const [index, role]: core::views::enumerate(WakeStopRoles))
+        {
+            CHECK(stop[index].role == role);
+            expected.push_back(stop[index]);
+        }
+        // Each a handle of its own: none is held twice.
+        CHECK(std::ranges::adjacent_find(stop, {}, &HeldDescriptor::handle) == stop.end());
+        std::ranges::copy(standardStreams(), std::back_inserter(expected));
+        CHECK(confined->sandboxedHeld == expected);
+    }
     {
         auto const closed = std::move(parent.control);
     }
@@ -700,7 +749,7 @@ TEST_CASE("HostProcess.nullSandboxSaysUnsandboxed", "[vtextension][host]")
     // What every system does until it has a sandbox of its own: confines nothing, and says so.
     auto confined = std::make_shared<Confined>();
     auto confinement = testConfinement(confined);
-    confinement.sandbox = [](SandboxDescriptors, GuestCode) -> std::unique_ptr<ISandbox> {
+    confinement.sandbox = [](SandboxDescriptors const&, GuestCode) -> std::unique_ptr<ISandbox> {
         return std::make_unique<NullSandbox>();
     };
     CHECK(helloOf(confined, confinement) == helloSaying(proto::LockdownState::Unsandboxed));

@@ -9,11 +9,13 @@
 #include <expected>
 #include <functional>
 #include <memory>
+#include <vector>
 
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 #include <vtextension/wasm/host/GuestCode.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
+#include <vtextension/wasm/remote/transport/Channel.hpp>
 
 namespace vtextension::wasm::host
 {
@@ -34,6 +36,11 @@ class IHostedEngine: public IWasmBackend
     /// @return How the engine runs a module's code: what the host's sandbox lets it do with executable
     ///         memory once it is locked down.
     [[nodiscard]] virtual GuestCode guestCode() const noexcept = 0;
+
+    /// @return The devices the engine opened before the host locked itself down and keeps using after it:
+    ///         what the host's sandbox leaves an engine's device (DescriptorRole::EngineDevice). Empty for an
+    ///         engine that keeps none.
+    [[nodiscard]] virtual std::vector<remote::transport::NativeHandle> heldDevices() const = 0;
 
     /// Prepares the calling thread to run guests, before the host locks itself down: does once what running
     /// a guest on it would do the first time -- installing the engine's signal handlers, the thread's

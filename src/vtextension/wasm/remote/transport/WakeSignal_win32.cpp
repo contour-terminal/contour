@@ -139,6 +139,11 @@ NativeHandle WakeReceiver::nativeHandle() const noexcept
     return _handle;
 }
 
+WakeStopHandles WakeReceiver::stopHandles() const noexcept
+{
+    return WakeStopHandles { .waitedOn = _stopEvent, .signalled = _stopEvent };
+}
+
 std::expected<WakePair, ChannelError> makeWakePair()
 {
     auto* const wake = makeEvent();

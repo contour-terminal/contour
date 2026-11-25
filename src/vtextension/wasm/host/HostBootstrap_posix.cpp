@@ -140,6 +140,13 @@ std::string systemErrorText(int code)
     return std::system_category().message(code);
 }
 
+std::array<HeldDescriptor, 3> standardStreams() noexcept
+{
+    return { HeldDescriptor { .role = DescriptorRole::IdleStream, .handle = STDIN_FILENO },
+             HeldDescriptor { .role = DescriptorRole::IdleStream, .handle = STDOUT_FILENO },
+             HeldDescriptor { .role = DescriptorRole::StandardError, .handle = STDERR_FILENO } };
+}
+
 std::expected<void, ConfinementFailure> capResources(uint64_t dataBytes, CapPolicy policy) noexcept
 {
     if (policy == CapPolicy::Skip)

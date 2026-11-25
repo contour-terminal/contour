@@ -154,6 +154,11 @@ class DecoratedEngine final: public host::IHostedEngine
 
     [[nodiscard]] host::GuestCode guestCode() const noexcept override { return _inner->guestCode(); }
 
+    [[nodiscard]] std::vector<remote::transport::NativeHandle> heldDevices() const override
+    {
+        return _inner->heldDevices();
+    }
+
     [[nodiscard]] std::expected<void, ExtensionError> prepareThread() override
     {
         return _inner->prepareThread();

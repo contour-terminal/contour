@@ -480,6 +480,9 @@ namespace
             return host::GuestCode::Compiled;
         }
 
+        /// Its guests' standard streams are the shim's, which opens nothing.
+        [[nodiscard]] std::vector<remote::transport::NativeHandle> heldDevices() const override { return {}; }
+
         /// Runs PrimingModule on the calling thread, which installs Wasmtime's signal handlers (once in the
         /// process, under TrapMode::Signals) and the thread's alternate signal stack, both of which Wasmtime
         /// does lazily, the first time a guest runs. Compiled once per engine, on the first thread primed.

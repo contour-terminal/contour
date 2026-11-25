@@ -105,6 +105,24 @@ TEST_CASE("WakeSignal.stopEndsAWait", "[vtextension]")
     CHECK(pair->helper.wait() == WakeWait::Stopped);
 }
 
+TEST_CASE("WakeSignal.stopHandlesAreTheReceiversOwn", "[vtextension]")
+{
+    // What stop() works through is named, so that a sandbox can leave it what it needs: handles of its own,
+    // open, and on POSIX the two ends of one pipe.
+    auto pair = makeWakePair();
+    REQUIRE(pair.has_value());
+    auto const stop = pair->helper.stopHandles();
+    CHECK(stop.waitedOn != pair->helper.nativeHandle());
+    CHECK(stop.signalled != pair->helper.nativeHandle());
+#ifndef _WIN32
+    CHECK(stop.waitedOn != stop.signalled);
+    CHECK(::fcntl(stop.waitedOn, F_GETFD) != -1);
+    CHECK(::fcntl(stop.signalled, F_GETFD) != -1);
+#else
+    CHECK(stop.waitedOn == stop.signalled);
+#endif
+}
+
 #ifndef _WIN32
 TEST_CASE("WakeSignal.senderGoneIsPeerGone", "[vtextension]")
 {

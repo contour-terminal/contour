@@ -104,7 +104,7 @@ constexpr auto Limits = proto::PduLimits {};
     // refuse what the hostile modes do to the host itself.
     auto confinement = vtextension::wasm::host::systemConfinement();
     confinement.sandbox =
-        [](vtextension::wasm::host::SandboxDescriptors,
+        [](vtextension::wasm::host::SandboxDescriptors const&,
            vtextension::wasm::host::GuestCode) -> std::unique_ptr<vtextension::wasm::host::ISandbox> {
         return std::make_unique<vtextension::wasm::host::NullSandbox>();
     };

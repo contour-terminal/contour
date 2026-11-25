@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <expected>
 #include <format>
+#include <iterator>
 #include <memory>
 #include <ranges>
 #include <string_view>
@@ -185,6 +186,29 @@ HostConfinement systemConfinement()
     };
 }
 
+SandboxDescriptors sandboxDescriptorsOf(HostEndpoints const& endpoints, IHostedEngine const& engine)
+{
+    auto held = std::vector<HeldDescriptor> {};
+    for (auto const& lane: endpoints.lanes)
+        held.push_back(HeldDescriptor { .role = DescriptorRole::Lane, .handle = lane.nativeHandle() });
+    held.push_back(
+        HeldDescriptor { .role = DescriptorRole::Page, .handle = endpoints.controlPage.nativeHandle() });
+    held.push_back(HeldDescriptor { .role = DescriptorRole::Wake, .handle = endpoints.wake.nativeHandle() });
+    // Two ends of a pipe on POSIX; on Windows one event in both roles, held once.
+    auto const stop = endpoints.wake.stopHandles();
+    if (stop.waitedOn == stop.signalled)
+        held.push_back(HeldDescriptor { .role = DescriptorRole::StopEvent, .handle = stop.waitedOn });
+    else
+    {
+        held.push_back(HeldDescriptor { .role = DescriptorRole::StopReceiver, .handle = stop.waitedOn });
+        held.push_back(HeldDescriptor { .role = DescriptorRole::StopSender, .handle = stop.signalled });
+    }
+    std::ranges::copy(standardStreams(), std::back_inserter(held));
+    for (auto const device: engine.heldDevices())
+        held.push_back(HeldDescriptor { .role = DescriptorRole::EngineDevice, .handle = device });
+    return SandboxDescriptors { .control = endpoints.control.nativeHandle(), .held = std::move(held) };
+}
+
 int runExtensionHost(std::span<std::string_view const> arguments,
                      EngineFactory const& engines,
                      HostConfinement const& confinement)
@@ -213,8 +237,7 @@ int runExtensionHost(std::span<std::string_view const> arguments,
     if (!engine)
         return endWith(HostProcessExit::EngineUnavailable);
     // Still before any thread: what the sandbox restricts now, every thread inherits.
-    auto const sandbox = confinement.sandbox(
-        SandboxDescriptors { .control = endpoints->control.nativeHandle() }, engine->guestCode());
+    auto const sandbox = confinement.sandbox(sandboxDescriptorsOf(*endpoints, *engine), engine->guestCode());
     auto const restricted = sandbox->restrictBeforeThreads();
     tellOf("sandbox", restricted);
 

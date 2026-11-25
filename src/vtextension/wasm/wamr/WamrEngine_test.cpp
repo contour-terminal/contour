@@ -100,6 +100,25 @@ TEST_CASE("WamrEngine.runtimesShareOneNullDevice", "[vtextension][wamr]")
     CHECK(openDescriptors() == before);
 }
 
+TEST_CASE("WamrEngine.holdsTheNullDeviceItOpened", "[vtextension][wamr]")
+{
+    // The one device the engine keeps is the one a sandbox that limits descriptor by descriptor must leave
+    // it, and it is what the opener returned.
+    auto opened = std::optional<int64_t> {};
+    auto const made =
+        makeWamrEngine(WamrEngineConfig { .openNullDevice = [&opened, open = systemNullDeviceOpener()] {
+            opened = open();
+            return opened;
+        } });
+    REQUIRE(made.has_value());
+    REQUIRE(opened.has_value());
+    auto const held = (*made)->heldDevices();
+    REQUIRE(held.size() == 1);
+#ifndef _WIN32
+    CHECK(held.front() == static_cast<int>(*opened));
+#endif
+}
+
 TEST_CASE("WamrEngine.prepareThreadIsIdempotent", "[vtextension][wamr]")
 {
     auto const made = makeWamrEngine();

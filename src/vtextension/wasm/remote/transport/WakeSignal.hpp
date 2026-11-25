@@ -57,6 +57,14 @@ class WakeSender
     NativeHandle _handle;
 };
 
+/// The handles by which a WakeReceiver stops its own wait: on POSIX a pipe's two ends, on Windows one event,
+/// which both name.
+struct WakeStopHandles
+{
+    NativeHandle waitedOn;  ///< What wait() waits on beside the wake end.
+    NativeHandle signalled; ///< What stop() signals.
+};
+
 /// The helper's end. Move-only; closed when destroyed.
 class WakeReceiver
 {
@@ -81,6 +89,10 @@ class WakeReceiver
 
     /// @return The end's handle, still owned by it.
     [[nodiscard]] NativeHandle nativeHandle() const noexcept;
+
+    /// @return The handles stop() works through, still owned by it: what a sandbox that limits handle by
+    ///         handle must leave it.
+    [[nodiscard]] WakeStopHandles stopHandles() const noexcept;
 
   private:
     friend std::expected<WakePair, ChannelError> makeWakePair();

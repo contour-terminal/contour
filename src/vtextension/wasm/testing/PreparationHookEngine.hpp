@@ -10,6 +10,7 @@
 #include <memory>
 #include <span>
 #include <utility>
+#include <vector>
 
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
@@ -61,6 +62,11 @@ class PreparationHookEngine final: public host::IHostedEngine
     [[nodiscard]] uint64_t memoryGuardBytes() const noexcept override { return _inner->memoryGuardBytes(); }
 
     [[nodiscard]] host::GuestCode guestCode() const noexcept override { return _inner->guestCode(); }
+
+    [[nodiscard]] std::vector<remote::transport::NativeHandle> heldDevices() const override
+    {
+        return _inner->heldDevices();
+    }
 
     [[nodiscard]] std::expected<void, ExtensionError> prepareThread() override
     {

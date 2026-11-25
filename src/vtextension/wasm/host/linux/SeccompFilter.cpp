@@ -97,7 +97,7 @@ namespace
 
     /// @return @p check as a comparison, the descriptors and process filled in.
     [[nodiscard]] Comparison comparisonOf(ArgumentCheck const& check,
-                                          SandboxDescriptors descriptors,
+                                          SandboxDescriptors const& descriptors,
                                           int ownProcess) noexcept
     {
         auto const fixed = [&](uint64_t value) {
@@ -207,14 +207,17 @@ uint32_t seccompReturnOf(SystemCallAction action, int error) noexcept
 }
 
 std::expected<std::vector<sock_filter>, ConfinementFailure> assembleFilter(
-    std::span<SystemCallRow const> rows, SandboxDescriptors descriptors, int ownProcess, AuditArch arch)
+    std::span<SystemCallRow const> rows,
+    SandboxDescriptors const& descriptors,
+    int ownProcess,
+    AuditArch arch)
 {
     return assembleFilter(rows, descriptors, ownProcess, arch, SystemCallAction::Kill);
 }
 
 std::expected<std::vector<sock_filter>, ConfinementFailure> assembleFilter(
     std::span<SystemCallRow const> rows,
-    SandboxDescriptors descriptors,
+    SandboxDescriptors const& descriptors,
     int ownProcess,
     AuditArch arch,
     SystemCallAction unlisted)

@@ -8,6 +8,12 @@
 namespace vtextension::wasm::host
 {
 
+DescriptorLimit limitOf([[maybe_unused]] HeldDescriptor descriptor)
+{
+    // There is no sandbox here to limit it.
+    return DescriptorLimit::Unlimited;
+}
+
 std::unique_ptr<ISandbox> makeSystemSandbox([[maybe_unused]] SandboxDescriptors descriptors,
                                             [[maybe_unused]] GuestCode code)
 {

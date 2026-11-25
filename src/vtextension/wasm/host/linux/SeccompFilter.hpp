@@ -36,7 +36,10 @@ namespace vtextension::wasm::host
 /// @return The program; `SystemCalls` with `E2BIG` if it exceeds what the kernel runs or a jump reaches,
 ///         with `EINVAL` if a check names no argument or a `Refuse` no errno.
 [[nodiscard]] std::expected<std::vector<sock_filter>, ConfinementFailure> assembleFilter(
-    std::span<SystemCallRow const> rows, SandboxDescriptors descriptors, int ownProcess, AuditArch arch);
+    std::span<SystemCallRow const> rows,
+    SandboxDescriptors const& descriptors,
+    int ownProcess,
+    AuditArch arch);
 
 /// assembleFilter(), with the action of a call @p rows do not name given: what an outer sandbox's filter,
 /// which lets through all it does not refuse, is made of. A call whose row's argument checks fail takes
@@ -50,7 +53,7 @@ namespace vtextension::wasm::host
 /// @return The program, or why it cannot be assembled.
 [[nodiscard]] std::expected<std::vector<sock_filter>, ConfinementFailure> assembleFilter(
     std::span<SystemCallRow const> rows,
-    SandboxDescriptors descriptors,
+    SandboxDescriptors const& descriptors,
     int ownProcess,
     AuditArch arch,
     SystemCallAction unlisted);

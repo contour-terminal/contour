@@ -28,6 +28,8 @@ if(VTEXTENSION_LINUX_SANDBOX)
 endif()
 
 add_library(vtextension_host STATIC
+    DescriptorRights.cpp
+    DescriptorRights.hpp
     ExecutorThread.cpp
     ExecutorThread.hpp
     GuestCode.hpp

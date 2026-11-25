@@ -15,7 +15,9 @@
 #include <expected>
 #include <memory>
 #include <string>
+#include <vector>
 
+#include <vtextension/wasm/host/DescriptorRights.hpp>
 #include <vtextension/wasm/host/GuestCode.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
@@ -56,11 +58,37 @@ struct ConfinementFailure
 ///         the error.
 [[nodiscard]] std::string confinementFailureText(ConfinementFailure const& failure);
 
+/// A handle the host keeps using once it is locked down, beside its control channel, and what for.
+struct HeldDescriptor
+{
+    DescriptorRole role;                    ///< What it is used for: what a sandbox may leave it.
+    remote::transport::NativeHandle handle; ///< The handle.
+
+    bool operator==(HeldDescriptor const&) const = default;
+};
+
 /// What a sandbox confines the host to: the handles it keeps using once it is locked down.
 struct SandboxDescriptors
 {
     remote::transport::NativeHandle control; ///< The control channel's helper end, adopted by the host.
+    /// Every other handle it keeps using, each with its role: what a sandbox that limits handle by handle
+    /// (FreeBSD's) limits. A handle the host holds and that is not here keeps every right it has.
+    std::vector<HeldDescriptor> held = {};
 };
+
+/// How far the system limits what a descriptor may be used for.
+enum class DescriptorLimit : uint8_t
+{
+    Unlimited, ///< Not at all: everywhere the sandbox does not limit descriptor by descriptor.
+    AsItsRole, ///< To its role's rights (rightsOf()), of the fcntls that need a right to F_GETFL where they
+               ///< include it, and to no ioctl.
+    Otherwise, ///< To something else, or the system would not say.
+};
+
+/// @param descriptor A descriptor this process holds, with its role.
+/// @return How far the system limits it: what proves a sandbox limited it as its role says. Defined per
+///         system; `Unlimited` where the sandbox limits no descriptor.
+[[nodiscard]] DescriptorLimit limitOf(HeldDescriptor descriptor);
 
 /// The host's sandbox. Each step is taken once, in order; a step that failed leaves the other to be taken
 /// all the same, so that a host is as confined as the system lets it be.

@@ -12,6 +12,7 @@
 /// hardening step is the place for; and RLIMIT_NPROC counts threads, so a cap applied before exec would keep
 /// the helper from starting its own.
 
+#include <array>
 #include <cstdint>
 #include <expected>
 #include <span>
@@ -70,6 +71,10 @@ struct HardeningRow
 /// @param code An error code a confinement step returned: errno on POSIX, an HRESULT on Windows.
 /// @return What the system says of it, user-readable.
 [[nodiscard]] std::string systemErrorText(int code);
+
+/// @return This process's standard streams, each with its role: input and output, which the host never uses,
+///         and standard error, which it tells why it fails on. Handles it keeps once it is locked down.
+[[nodiscard]] std::array<HeldDescriptor, 3> standardStreams() noexcept;
 
 /// Whether the host caps its own resources.
 enum class CapPolicy : uint8_t
