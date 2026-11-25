@@ -1210,7 +1210,7 @@ TEST_CASE("a run in a large clean repository ends removed", "[orchestrator][engi
     // A listing larger than the host keeps of a stream: the host drops its unmarked entries as declared, and
     // the check reads what is left. Once the host kept it whole the listing was cut, and every run was kept.
     auto const printed = indexListing(30'000);
-    REQUIRE(printed.size() > HostStreamCap);
+    REQUIRE(printed.size() > hostStreamCap());
     auto const kept = keptByHost("git-index-flags", printed);
     auto outcome = ok(kept.text);
     outcome.extent = kept.extent;
@@ -1242,8 +1242,8 @@ TEST_CASE("a run whose index check output was cut is kept, saying what to do", "
     REQUIRE(finished);
     CHECK(finished->fate == Fate::Kept);
     REQUIRE(finished->entries.size() == 1);
-    CHECK(finished->entries.front().starts_with(
-        "the index check failed: its output was cut at the host's limit; git ls-files -v --stage there"));
+    CHECK(finished->entries.front().starts_with("the index check failed: its output was cut at the host's "
+                                                "limit; check git ls-files -v --stage | grep -v"));
     CHECK(!harness.pending("git-head-reachable"));
 }
 

@@ -222,6 +222,9 @@ if(VTEXTENSION_TESTING)
     target_compile_definitions(vtextension_test PRIVATE
         VTEXTENSION_MANIFEST_CORPUS_DIR="${PROJECT_SOURCE_DIR}/extensions/orchestrator/contract/manifest-v2")
     # The Windows path grammar is checked against the corpus the orchestrator's guest-side copy is tested with.
+    # What the host keeps of a command's output, which the orchestrator's tests simulate.
+    target_compile_definitions(vtextension_test PRIVATE
+        VTEXTENSION_HOST_LIMITS_DIR="${PROJECT_SOURCE_DIR}/extensions/orchestrator/contract/host-limits")
     target_compile_definitions(vtextension_test PRIVATE
         VTEXTENSION_WINDOWS_PATHS_CORPUS_DIR="${PROJECT_SOURCE_DIR}/extensions/orchestrator/contract/windows-paths")
     # The golden texts the tests compare against.

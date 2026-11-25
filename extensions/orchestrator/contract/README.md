@@ -69,3 +69,17 @@ declared `arg <arg> = name` (`invalid/env-set-argument-not-name.manifest`,
 every variable, listed once, must be on the host's user-settable list -- `CLAUDE_CONFIG_DIR`,
 `COPILOT_HOME`, `ANTHROPIC_BASE_URL`, `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`
 (`invalid/env-set-forbidden-variable.manifest`).
+
+A `command-drop-lines <command> = <prefix>` line (version 2) has the host drop each line of a declared
+command's standard output that begins with `<prefix>` -- the whole value, single spaces included -- as it
+reads it, before the cap on what it keeps of a stream applies. The command must be declared earlier
+(`invalid/drop-lines-undeclared-command.manifest`); a prefix is not empty (`invalid/drop-lines-empty.manifest`),
+holds at most 64 bytes (`invalid/drop-lines-too-long.manifest`) and is given once per command
+(`invalid/drop-lines-repeated.manifest`), and a command has at most 16 (`invalid/drop-lines-too-many.manifest`,
+`valid/command-drop-lines-limits.manifest`).
+
+## `host-limits/`
+
+What the host keeps of a declared command's output, which the extension's tests simulate:
+`stream-cap.txt` is the bytes kept of one stream, in decimal. Contour's test compares it with the host's
+default; the extension's tests read it instead of spelling the number themselves.

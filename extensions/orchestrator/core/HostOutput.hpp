@@ -3,22 +3,34 @@
 
 // Test support: what Contour's host hands the guest of what a declared command printed.
 
+#include <catch2/catch_test_macros.hpp>
+
 #include <algorithm>
+#include <charconv>
 #include <cstddef>
 #include <format>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 #include <orchestrator/core/Commands.hpp>
+#include <orchestrator/core/Fixtures.hpp>
 #include <orchestrator/core/Model.hpp>
 
 namespace orchestrator
 {
 
-/// The most bytes the host keeps of one stream of a declared command (vtextension's
-/// ProcessLimits::streamCap).
-inline constexpr auto HostStreamCap = std::size_t { 1 } << 20;
+/// @return The most bytes the host keeps of one stream of a declared command, as the contract names it
+///         (contract/host-limits/stream-cap.txt, which Contour's test compares with the host's own).
+[[nodiscard]] inline std::size_t hostStreamCap()
+{
+    auto const text = readFixture(FixtureRoot::Contract, "host-limits/stream-cap.txt");
+    auto cap = std::size_t {};
+    auto const parsed = std::from_chars(text.data(), text.data() + text.size(), cap);
+    REQUIRE(parsed.ec == std::errc {});
+    return cap;
+}
 
 /// What the host keeps of one stream.
 struct HostOutput
@@ -28,7 +40,8 @@ struct HostOutput
 };
 
 /// What the host keeps of what @p command printed, as vtpty's StreamKeeper does: each line that begins with
-/// one of the command's declared dropped prefixes goes, and of the rest at most HostStreamCap bytes are kept.
+/// one of the command's declared dropped prefixes goes, and of the rest at most hostStreamCap() bytes are
+/// kept.
 /// @param command A declared command's name.
 /// @param printed What it printed to its standard output.
 /// @return What the guest is handed.
@@ -52,9 +65,10 @@ struct HostOutput
         if (!isLast)
             kept += '\n';
     }
-    if (kept.size() <= HostStreamCap)
+    auto const cap = hostStreamCap();
+    if (kept.size() <= cap)
         return HostOutput { .text = std::move(kept), .extent = OutputExtent::Whole };
-    kept.resize(HostStreamCap);
+    kept.resize(cap);
     return HostOutput { .text = std::move(kept), .extent = OutputExtent::Truncated };
 }
 

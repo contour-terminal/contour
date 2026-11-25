@@ -1,0 +1,6 @@
+# A dropped-line prefix that is empty: it would drop every line.
+name = sieved
+version = 2
+root worktrees = config:worktree_root
+command list short @worktrees = git ls-files -v --stage
+command-drop-lines list =

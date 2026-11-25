@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/StreamKeeper.hpp>
 
+#include <core/Assert.hpp>
+
 #include <algorithm>
+#include <ranges>
 #include <utility>
 
 namespace vtpty
@@ -11,9 +14,20 @@ StreamKeeper::StreamKeeper(std::size_t cap, std::vector<std::string> droppedPref
     _cap { cap },
     _droppedPrefixes { std::move(droppedPrefixes) },
     _state { _droppedPrefixes.empty() ? LineState::Keeping : LineState::Deciding },
+    _live {},
     _lineStart {},
     _captured {}
 {
+    Require(std::ranges::none_of(_droppedPrefixes, [](std::string const& prefix) { return prefix.empty(); }));
+    if (!_droppedPrefixes.empty())
+        startLine();
+}
+
+void StreamKeeper::startLine()
+{
+    _state = LineState::Deciding;
+    _live.assign(_droppedPrefixes.size(), Live::Yes);
+    _lineStart.clear();
 }
 
 void StreamKeeper::keep(std::string_view bytes)
@@ -24,23 +38,37 @@ void StreamKeeper::keep(std::string_view bytes)
         _captured.extent = OutputExtent::Truncated;
 }
 
-void StreamKeeper::decide()
+void StreamKeeper::decide(char byte)
 {
-    if (std::ranges::contains(_droppedPrefixes, _lineStart))
+    // Only the new byte is compared, and only with the prefixes the line still matches: a line costs at most
+    // the prefixes times the longest of them, however long it is.
+    auto const at = _lineStart.size();
+    _lineStart.push_back(byte);
+    auto anyLive = false;
+    for (auto const index: std::views::iota(std::size_t { 0 }, _droppedPrefixes.size()))
     {
-        _state = LineState::Dropping;
-        _lineStart.clear();
+        if (_live[index] == Live::No)
+            continue;
+        auto const& prefix = _droppedPrefixes[index];
+        ++_comparisons;
+        if (prefix[at] != byte)
+        {
+            _live[index] = Live::No;
+            continue;
+        }
+        if (prefix.size() == at + 1)
+        {
+            _state = LineState::Dropping;
+            _lineStart.clear();
+            return;
+        }
+        anyLive = true;
+    }
+    if (anyLive)
         return;
-    }
-    auto const couldBecome = [this](std::string const& prefix) {
-        return prefix.starts_with(_lineStart);
-    };
-    if (std::ranges::none_of(_droppedPrefixes, couldBecome))
-    {
-        _state = LineState::Keeping;
-        keep(_lineStart);
-        _lineStart.clear();
-    }
+    _state = LineState::Keeping;
+    keep(_lineStart);
+    _lineStart.clear();
 }
 
 void StreamKeeper::take(std::string_view bytes)
@@ -56,15 +84,15 @@ void StreamKeeper::take(std::string_view bytes)
         {
             auto const byte = bytes.front();
             bytes.remove_prefix(1);
-            _lineStart.push_back(byte);
             if (byte != '\n')
             {
-                decide();
+                decide(byte);
                 continue;
             }
             // The line ended shorter than every prefix it could have become.
+            _lineStart.push_back(byte);
             keep(_lineStart);
-            _lineStart.clear();
+            startLine();
             continue;
         }
         auto const end = bytes.find('\n');
@@ -73,7 +101,7 @@ void StreamKeeper::take(std::string_view bytes)
             keep(bytes.substr(0, length));
         bytes.remove_prefix(length);
         if (end != std::string_view::npos)
-            _state = LineState::Deciding;
+            startLine();
     }
 }
 

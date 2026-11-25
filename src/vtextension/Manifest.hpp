@@ -239,10 +239,19 @@ enum class ManifestFault : uint8_t
     ForbiddenGitConfig,   ///< A git configuration key an extension may not set, or a value it may not take.
     EnvSetNotName,        ///< A pane-env-set or command-env-set whose argument is not of kind name.
     DropForUndeclared,    ///< `command-drop-lines` naming no such command.
+    BadDropPrefix, ///< A `command-drop-lines` prefix longer than MaxDroppedLinePrefixBytes, or one too many
+                   ///< for a command (MaxDroppedLinePrefixes).
 };
 
 /// The most characters (code points) a manifest's `title`, or an `action`'s title, may hold.
 inline constexpr std::size_t MaxTitleLength = 40;
+
+/// The most bytes a `command-drop-lines` prefix may hold: what the host holds back of a line while it
+/// decides.
+inline constexpr std::size_t MaxDroppedLinePrefixBytes = 64;
+
+/// The most `command-drop-lines` prefixes one command may declare: each live one is compared per byte.
+inline constexpr std::size_t MaxDroppedLinePrefixes = 16;
 
 /// One row of the fault-description table.
 struct ManifestFaultText
@@ -314,9 +323,12 @@ inline constexpr auto ManifestFaultTexts = std::array {
                         .text = "a variable-set argument that is not of kind name" },
     ManifestFaultText { .fault = ManifestFault::DropForUndeclared,
                         .text = "dropped output lines for a command that is not declared" },
+    ManifestFaultText { .fault = ManifestFault::BadDropPrefix,
+                        .text =
+                            "a dropped-line prefix longer than 64 bytes, or more than 16 for one command" },
 };
 
-static_assert(ManifestFaultTexts.size() == std::to_underlying(ManifestFault::DropForUndeclared) + 1U,
+static_assert(ManifestFaultTexts.size() == std::to_underlying(ManifestFault::BadDropPrefix) + 1U,
               "every ManifestFault has a row");
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ManifestFaultTexts.size()),
                                   [](std::size_t index) {

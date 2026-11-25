@@ -173,8 +173,8 @@ namespace
     /// What a kept run says to do when the index check gives no answer: its command failed, or its output, of
     /// which the host already dropped every unmarked entry, was still cut.
     constexpr auto IndexCheckRemedy =
-        "; git ls-files -v --stage there lists what is marked: remove the worktree by hand once nothing is"sv
-        " marked and no submodule is listed"sv;
+        "; check git ls-files -v --stage | grep -v '^H 1[02]' there, and remove the worktree by hand once it"sv
+        " prints nothing"sv;
 
     constexpr auto EndSteps = std::array {
         EndStepRow { .step = EndStep::ClosePane,
@@ -223,6 +223,14 @@ namespace
                                           return static_cast<std::size_t>(EndSteps[index].step) == index;
                                       }),
                   "EndSteps lists every EndStep, in order");
+
+    /// What a failed step's reason keeps at least, its remedy after it: enough to say the output was cut.
+    constexpr auto ReasonRoom = std::size_t { 80 };
+    static_assert(std::ranges::all_of(EndSteps,
+                                      [](EndStepRow const& row) {
+                                          return row.remedy.size() + ReasonRoom <= MaxEntryChars;
+                                      }),
+                  "every remedy leaves a kept run's entry room for its reason");
 
     [[nodiscard]] constexpr EndStepRow const& endStep(EndStep step) noexcept
     {

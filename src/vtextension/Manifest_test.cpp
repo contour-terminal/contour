@@ -543,6 +543,9 @@ constexpr auto InvalidRows = std::array {
     InvalidRow { .file = "env-set-without-placeholder", .fault = ManifestFault::UnknownLine },
     InvalidRow { .file = "drop-lines-undeclared-command", .fault = ManifestFault::DropForUndeclared },
     InvalidRow { .file = "drop-lines-repeated", .fault = ManifestFault::Duplicate },
+    InvalidRow { .file = "drop-lines-too-long", .fault = ManifestFault::BadDropPrefix },
+    InvalidRow { .file = "drop-lines-too-many", .fault = ManifestFault::BadDropPrefix },
+    InvalidRow { .file = "drop-lines-empty", .fault = ManifestFault::EmptyName },
 };
 
 [[nodiscard]] std::optional<ManifestFault> faultOf(std::string_view text)

@@ -292,6 +292,7 @@ enum class Fault : uint8_t
               ///< text.
     EnvSetNotName,     ///< A `pane-env-set` or `command-env-set` whose argument is not of kind name.
     ForbiddenVariable, ///< A `pane-env-set` or `command-env-set` variable a user's set may not hold.
+    BadDropPrefix,     ///< A `command-drop-lines` prefix of more than 64 bytes, or a 17th for one command.
 };
 
 enum class Valued : uint8_t
@@ -387,6 +388,11 @@ constexpr auto LineKinds = std::array {
     LineKind {
         .keyword = "title", .headWords = 1, .keyWords = 1, .valued = Valued::Yes, .since = 2, .rootAt = 0 },
 };
+
+/// The most bytes a `command-drop-lines` prefix may hold, and the most such lines one command may have. The
+/// host keeps the same limits (vtextension's MaxDroppedLinePrefixBytes and MaxDroppedLinePrefixes).
+constexpr auto MaxDroppedLinePrefixBytes = std::size_t { 64 };
+constexpr auto MaxDroppedLinePrefixes = std::size_t { 16 };
 
 /// The most characters (code points) a `title` line's value, or an `action` line's title, may hold.
 constexpr auto MaxTitleLength = std::size_t { 40 };
@@ -593,6 +599,14 @@ struct ManifestLine
          && !state.isDeclared("command", head[1]))
         || (keyword == "pane-env" && !state.isDeclared("pane", head[1])))
         return Fault::UndeclaredTarget;
+    // The host holds back at most a prefix's bytes of a line, and compares each byte with every live prefix.
+    if (keyword == "command-drop-lines"
+        && (line.value.size() > MaxDroppedLinePrefixBytes
+            || std::ranges::count_if(state.declared,
+                                     [prefix = "command-drop-lines " + std::string(head[1]) + " = "](
+                                         std::string const& key) { return key.starts_with(prefix); })
+                   > std::ptrdiff_t { MaxDroppedLinePrefixes }))
+        return Fault::BadDropPrefix;
     if ((keyword == "title" || keyword == "action") && !isShownAsWritten(line.value))
         return Fault::BadTitle;
     if (keyword == "pane-env-set" || keyword == "command-env-set")
@@ -709,6 +723,7 @@ constexpr auto CorpusRows = std::array {
     CorpusRow { .file = "valid/command-env-for.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/command-env.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/command-drop-lines.manifest", .expected = Fault::None },
+    CorpusRow { .file = "valid/command-drop-lines-limits.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/command-env-set.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/command.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/crlf.manifest", .expected = Fault::None },
@@ -768,6 +783,9 @@ constexpr auto CorpusRows = std::array {
     CorpusRow { .file = "invalid/drop-lines-undeclared-command.manifest",
                 .expected = Fault::UndeclaredTarget },
     CorpusRow { .file = "invalid/drop-lines-repeated.manifest", .expected = Fault::Duplicate },
+    CorpusRow { .file = "invalid/drop-lines-too-long.manifest", .expected = Fault::BadDropPrefix },
+    CorpusRow { .file = "invalid/drop-lines-too-many.manifest", .expected = Fault::BadDropPrefix },
+    CorpusRow { .file = "invalid/drop-lines-empty.manifest", .expected = Fault::EmptyValue },
     CorpusRow { .file = "invalid/env-set-without-placeholder.manifest", .expected = Fault::UnknownLine },
 };
 

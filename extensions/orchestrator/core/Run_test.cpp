@@ -1063,11 +1063,11 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
                       .kept = "Finished(completed, kept, new: the reachability check failed: timed out)" },
         CommandStep { .step = EndStep::OperationState,
                       .kept = "Finished(completed, kept, new: the operation-state check failed: timed out)" },
-        CommandStep { .step = EndStep::IndexFlags,
-                      .kept =
-                          "Finished(completed, kept, new: the index check failed: timed out; git ls-files -v "
-                          "--stage there lists what is marked: remove the worktree by hand once nothing is "
-                          "marked and no submodule is listed)" },
+        CommandStep {
+            .step = EndStep::IndexFlags,
+            .kept = "Finished(completed, kept, new: the index check failed: timed out; check git ls-files -v "
+                    "--stage "
+                    "| grep -v '^H 1[02]' there, and remove the worktree by hand once it prints nothing)" },
         CommandStep { .step = EndStep::Status,
                       .kept = "Finished(completed, kept, new: git status failed: timed out)" },
         CommandStep { .step = EndStep::CleanStatusBoard,
@@ -1172,10 +1172,10 @@ TEST_CASE("the index check decides on what the host keeps of a listing of any si
         return lines;
     }();
     constexpr auto CutKept =
-        "Finished(completed, kept, new: the index check failed: its output was cut at the host's limit; git "
-        "ls-files -v --stage there lists what is marked: remove the worktree by hand once nothing is marked "
-        "and "
-        "no submodule is listed)"sv;
+        "Finished(completed, kept, new: the index check failed: its output was cut at the host's limit; "
+        "check "
+        "git ls-files -v --stage | grep -v '^H 1[02]' there, and remove the worktree by hand once it prints "
+        "nothing)"sv;
 
     struct Row
     {
@@ -1198,7 +1198,7 @@ TEST_CASE("the index check decides on what the host keeps of a listing of any si
         // Even the marked entries alone exceed the host's cap: what is kept is no whole answer.
         { .name = "more marked entries than the host keeps", .listing = manyFlagged, .to = CutKept },
     };
-    REQUIRE(indexListing(Files).size() > orchestrator::HostStreamCap);
+    REQUIRE(indexListing(Files).size() > orchestrator::hostStreamCap());
     for (auto const& row: rows)
     {
         CAPTURE(row.name);

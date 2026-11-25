@@ -132,6 +132,30 @@ TEST_CASE("StreamKeeper without prefixes keeps up to its cap", "[vtpty][StreamKe
     CHECK(keptOf(0, {}, "", Reads::Whole).extent == OutputExtent::Whole);
 }
 
+TEST_CASE("StreamKeeper judges a line in at most the prefixes times the longest of them",
+          "[vtpty][StreamKeeper]")
+{
+    // The most a manifest allows: 16 prefixes of 64 bytes, each a run of 'a' ended by a byte of its own, so
+    // that every line of 'a's keeps all 16 live for 63 bytes and is then kept.
+    constexpr auto Prefixes = std::size_t { 16 };
+    constexpr auto PrefixBytes = std::size_t { 64 };
+    auto prefixes = std::vector<std::string> {};
+    for (auto const index: std::views::iota(std::size_t { 0 }, Prefixes))
+        prefixes.push_back(std::string(PrefixBytes - 1, 'a') + static_cast<char>('b' + index));
+    constexpr auto Lines = std::size_t { 64 };
+    constexpr auto LineBytes = std::size_t { 64 } * 1024;
+    auto const line = std::string(LineBytes - 1, 'a') + '\n';
+
+    auto keeper = StreamKeeper { Lines * LineBytes, std::move(prefixes) };
+    for ([[maybe_unused]] auto const _: std::views::iota(std::size_t { 0 }, Lines))
+        for (auto const read: std::views::iota(std::size_t { 0 }, LineBytes / 4096))
+            keeper.take(std::string_view(line).substr(read * 4096, 4096));
+    CHECK(keeper.comparisons() <= Lines * Prefixes * PrefixBytes);
+    auto const kept = std::move(keeper).finish();
+    CHECK(kept.bytes.size() == Lines * LineBytes);
+    CHECK(kept.extent == OutputExtent::Whole);
+}
+
 TEST_CASE("StreamKeeper keeps a large index listing's flagged lines whole under a small cap",
           "[vtpty][StreamKeeper]")
 {

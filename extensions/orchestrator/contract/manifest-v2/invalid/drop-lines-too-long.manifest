@@ -1,0 +1,6 @@
+# A dropped-line prefix of 65 bytes: at most 64 are held back while a line is judged.
+name = sieved
+version = 2
+root worktrees = config:worktree_root
+command list short @worktrees = git ls-files -v --stage
+command-drop-lines list = xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx

@@ -1,0 +1,22 @@
+# Seventeen dropped-line prefixes for one command: at most 16 are compared per byte.
+name = sieved
+version = 2
+root worktrees = config:worktree_root
+command list short @worktrees = git ls-files -v --stage
+command-drop-lines list = p1
+command-drop-lines list = p2
+command-drop-lines list = p3
+command-drop-lines list = p4
+command-drop-lines list = p5
+command-drop-lines list = p6
+command-drop-lines list = p7
+command-drop-lines list = p8
+command-drop-lines list = p9
+command-drop-lines list = p10
+command-drop-lines list = p11
+command-drop-lines list = p12
+command-drop-lines list = p13
+command-drop-lines list = p14
+command-drop-lines list = p15
+command-drop-lines list = p16
+command-drop-lines list = p17

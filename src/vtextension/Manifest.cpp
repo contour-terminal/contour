@@ -625,6 +625,9 @@ namespace
             std::ranges::find(state.manifest.commands, line.head.front(), &DeclaredCommand::name);
         if (command == state.manifest.commands.end())
             return refuse(ManifestFault::DropForUndeclared);
+        if (line.value->size() > MaxDroppedLinePrefixBytes
+            || command->droppedOutputLines.size() >= MaxDroppedLinePrefixes)
+            return refuse(ManifestFault::BadDropPrefix);
         if (std::ranges::contains(command->droppedOutputLines, *line.value))
             return refuse(ManifestFault::Duplicate);
         command->droppedOutputLines.emplace_back(*line.value);

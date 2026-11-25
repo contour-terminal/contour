@@ -20,6 +20,7 @@
 #include <expected>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <functional>
 #include <latch>
 #include <memory>
@@ -483,6 +484,16 @@ TEST_CASE("DeclaredProcesses: timeout classes", "[daemon][processes]")
     CHECK(started.at(0).spec.outputCap == MiB);
     CHECK(started.at(0).spec.standardOutput == vtpty::StreamCapture::Capture);
     CHECK(started.at(0).spec.standardError == vtpty::StreamCapture::Capture);
+}
+
+TEST_CASE("DeclaredProcesses: the stream cap is the one the orchestrator's contract names",
+          "[daemon][processes]")
+{
+    auto file = std::ifstream(std::filesystem::path(VTEXTENSION_HOST_LIMITS_DIR) / "stream-cap.txt");
+    REQUIRE(file);
+    auto named = std::size_t {};
+    file >> named;
+    CHECK(named == ProcessLimits {}.streamCap);
 }
 
 TEST_CASE("DeclaredProcesses: a command's dropped output lines reach the runner", "[daemon][processes]")
