@@ -6,7 +6,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <limits>
 #include <span>
 #include <string>
 #include <string_view>
@@ -77,9 +80,9 @@ namespace detail
     }
 } // namespace detail
 
-/// The guest's linear memory as the codec reaches it: every view is bounds-checked by the runtime,
-/// allocations go through the guest's `cabi_realloc` and are checked as well, and what lifting may
-/// spend on the host is bounded per host call.
+/// The guest's linear memory as the codec reaches it: every access is bounds-checked by the runtime, what
+/// lifting reads is copied out once, allocations go through the guest's `cabi_realloc` and are checked as
+/// well, and what lifting may spend on the host is bounded per host call.
 class Instance::GuestMemory final: public abi::IGuestMemory
 {
   public:
@@ -88,7 +91,20 @@ class Instance::GuestMemory final: public abi::IGuestMemory
     /// Gives the next lift the full budget of one host call.
     void resetLiftBudget() noexcept { _liftBudget = _instance._limits.maxHostCallBytes; }
 
-    [[nodiscard]] abi::Result<std::span<std::byte>> view(abi::Address address, uint32_t size) override
+    [[nodiscard]] abi::Result<void> read(abi::Address address, std::span<std::byte> into) override
+    {
+        if (into.size() > std::numeric_limits<uint32_t>::max())
+            return std::unexpected(ExtensionError::Trapped);
+        // One copy, of a range the runtime bounds: by the size the memory has when it is taken (a shared
+        // memory's acknowledged size), however the guest's side writes or grows it meanwhile.
+        return writable(address, static_cast<uint32_t>(into.size()))
+            .transform([&](std::span<std::byte> bytes) {
+                if (!bytes.empty())
+                    std::memcpy(into.data(), bytes.data(), bytes.size());
+            });
+    }
+
+    [[nodiscard]] abi::Result<std::span<std::byte>> writable(abi::Address address, uint32_t size) override
     {
         // A guest that names memory it does not have traps; a host that died meanwhile is the host's fault,
         // and counts as such.
@@ -111,7 +127,7 @@ class Instance::GuestMemory final: public abi::IGuestMemory
         auto const address = argv[0];
         if (alignment == 0 || address % alignment != 0)
             return std::unexpected(ExtensionError::Trapped);
-        return view(address, size).transform([&](std::span<std::byte>) { return address; });
+        return writable(address, size).transform([&](std::span<std::byte>) { return address; });
     }
 
     [[nodiscard]] abi::Result<void> chargeLift(uint64_t bytes) override

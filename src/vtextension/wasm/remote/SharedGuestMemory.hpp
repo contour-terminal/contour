@@ -76,7 +76,8 @@ class SharedGuestMemory
     [[nodiscard]] proto::MemoryGrant grant(uint64_t wireValue) const noexcept;
 
     /// A view of [@p address, @p address + @p size) of the memory, bounded by the acknowledged size, never by
-    /// what the host reports. Valid as long as the memory: growth moves nothing.
+    /// what the host reports. Valid as long as the memory: growth moves nothing. The host may write it at any
+    /// time, so what is decoded from it is copied out once (abi::IGuestMemory::read()), never read twice.
     /// @param address The guest address the view starts at.
     /// @param size The view's size in bytes.
     /// @return The view; `OutOfBounds` if any of it lies past the acknowledged size.

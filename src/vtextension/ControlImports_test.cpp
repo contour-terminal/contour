@@ -106,9 +106,9 @@ struct GuestCall
     /// @return Whether the result slot is untouched: all zeros, as it was allocated.
     [[nodiscard]] bool resultUntouched()
     {
-        auto const bytes = memory.view(resultAddress, ResultSlotBytes);
-        REQUIRE(bytes.has_value());
-        return std::ranges::all_of(*bytes, [](std::byte byte) { return byte == std::byte { 0 }; });
+        auto bytes = std::vector<std::byte>(ResultSlotBytes);
+        REQUIRE(memory.read(resultAddress, bytes).has_value());
+        return std::ranges::all_of(bytes, [](std::byte byte) { return byte == std::byte { 0 }; });
     }
 
     FakeMemory memory;

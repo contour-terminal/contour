@@ -6,6 +6,7 @@
 //   extension_host_probe --report <helper arguments> [--check-handle=H]…
 //   extension_host_probe --parent <helper arguments> <helper executable> [its extra arguments]…
 //   extension_host_probe --receive-grant <helper arguments>
+//   extension_host_probe --mutate <helper arguments> --seed=N
 //
 // Before it reports, it does to itself what the extension host does: it binds itself to its parent (exiting
 // as the host does if that is not the process named), and caps its resources to its `--data-bytes`.
@@ -20,6 +21,12 @@
 // writes `probe` at its start. It reports `granted=ok`, or `granted=refused` if any of that failed, and `end`
 // on its first lane; then `heard` and `end` there once another PDU arrives on control, and waits for its
 // control channel to end.
+//
+// With --mutate, it is a hostile extension host's memory: it takes the grant of one Instantiate as
+// --receive-grant does, and flips bytes of the whole object at random (a Mersenne twister seeded with
+// `--seed`, so that a run is repeated by its seed) on a thread of its own while Contour reads it. It reports
+// `mutating` and `end` on its first lane once the thread runs, or `granted=refused` and `end`; then, once its
+// control channel ended, `mutations=N` (how many bytes it flipped) and `end`, and exits.
 //
 // The report is one `key=value` line each: `cwd=` its working directory, `env=NAME` per environment variable,
 // `stdin=`, `stdout=` and `stderr=` each `null` if it is the null device, `terminal` if a terminal, else
@@ -39,9 +46,12 @@
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <random>
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <thread>
 #include <tuple>
 #include <utility>
 #include <variant>
@@ -308,10 +318,9 @@ enum class StandardStream : uint8_t
 /// What the probe writes at the start of a granted object.
 constexpr auto GrantMark = std::string_view { "probe" };
 
-/// Claims the handle @p request names off @p control, maps it as the object @p request promises, and marks
-/// it.
+/// Claims the handle @p request names off @p control, and maps it as the object @p request promises.
 /// @return The mapping, which keeps the object; nothing if the grant is refused.
-[[nodiscard]] std::optional<vtextension::wasm::remote::transport::SharedMapping> takeGrant(
+[[nodiscard]] std::optional<vtextension::wasm::remote::transport::SharedMapping> claimGrant(
     vtextension::wasm::remote::transport::PduStream& control,
     vtextension::wasm::remote::proto::Instantiate const& request)
 {
@@ -327,12 +336,24 @@ constexpr auto GrantMark = std::string_view { "probe" };
         return std::nullopt;
     // The object, proved: the mapping keeps it, and the handle is closed.
     std::ignore = std::move(*handle).adopt();
+    return *std::move(mapping);
+}
+
+/// Claims and maps the object @p request grants (claimGrant()), and marks it.
+/// @return The mapping, which keeps the object; nothing if the grant is refused.
+[[nodiscard]] std::optional<vtextension::wasm::remote::transport::SharedMapping> takeGrant(
+    vtextension::wasm::remote::transport::PduStream& control,
+    vtextension::wasm::remote::proto::Instantiate const& request)
+{
+    auto mapping = claimGrant(control, request);
+    if (!mapping)
+        return std::nullopt;
     auto const first =
         std::min<uint64_t>(request.memory.objectBytes, vtextension::wasm::remote::proto::WasmPageBytes);
     if (GrantMark.size() > first || !mapping->commit(0, first))
         return std::nullopt;
     std::ranges::copy(std::as_bytes(std::span { GrantMark }), mapping->bytes().begin());
-    return *std::move(mapping);
+    return mapping;
 }
 
 /// Takes one grant, reports how it went on the first lane, then waits for its control channel to end.
@@ -376,6 +397,81 @@ constexpr auto GrantMark = std::string_view { "probe" };
     return ProbeExit::Reported;
 }
 
+/// Sends @p text on @p channel.
+/// @return Whether it was sent.
+[[nodiscard]] bool sendText(Channel& channel, std::string_view text)
+{
+    return channel.send(std::span { reinterpret_cast<uint8_t const*>(text.data()), text.size() }).has_value();
+}
+
+/// The prefix of the option naming what --mutate seeds its random flips with.
+constexpr auto Seed = std::string_view { "--seed=" };
+
+/// Takes one grant, flips bytes of it at random until its control channel ends, then reports how many.
+[[nodiscard]] ProbeExit mutate(std::span<std::string_view const> arguments)
+{
+    namespace remote = vtextension::wasm::remote;
+    auto helperArguments = std::vector<std::string_view> {};
+    auto seed = std::optional<std::mt19937::result_type> {};
+    for (auto const argument: arguments)
+    {
+        if (!argument.starts_with(Seed))
+        {
+            helperArguments.push_back(argument);
+            continue;
+        }
+        auto const digits = argument.substr(Seed.size());
+        auto value = std::mt19937::result_type {};
+        if (std::from_chars(digits.data(), digits.data() + digits.size(), value).ec != std::errc {})
+            return ProbeExit::Usage;
+        seed = value;
+    }
+    auto const parsed = parseHelperArguments(helperArguments);
+    if (!parsed || !seed)
+        return ProbeExit::Usage;
+    if (!vtextension::wasm::host::bindToParent(parsed->parentProcessId))
+        return ProbeExit::ParentGone;
+    auto controlEnd = Channel::adopt(parsed->control);
+    if (!controlEnd)
+        return ProbeExit::NoControl;
+    auto lane = Channel::adopt(parsed->lanes.front());
+    if (!lane)
+        return ProbeExit::NoControl;
+    auto control = remote::transport::PduStream { *std::move(controlEnd),
+                                                  remote::proto::ChannelKind::Control,
+                                                  remote::proto::Direction::ToHelper,
+                                                  remote::proto::PduLimits {} };
+
+    auto const request = control.receive();
+    auto const* const instantiate = request ? std::get_if<remote::proto::Instantiate>(&*request) : nullptr;
+    auto mapping =
+        instantiate ? claimGrant(control, *instantiate) : std::optional<remote::transport::SharedMapping> {};
+    if (!mapping || mapping->bytes().empty() || !mapping->commit(0, mapping->bytes().size()))
+        return sendText(*lane, "granted=refused\nend\n") ? ProbeExit::Reported : ProbeExit::ReportFailed;
+
+    auto mutations = uint64_t { 0 };
+    {
+        auto const bytes = mapping->bytes();
+        auto mutator = std::jthread { [bytes, seed = *seed, &mutations](std::stop_token const& stop) {
+            auto random = std::mt19937 { seed };
+            auto offsets = std::uniform_int_distribution<std::size_t> { 0, bytes.size() - 1 };
+            auto masks = std::uniform_int_distribution<unsigned> { 1, 0xFF };
+            while (!stop.stop_requested())
+            {
+                bytes[offsets(random)] ^= std::byte { static_cast<uint8_t>(masks(random)) };
+                ++mutations;
+            }
+        } };
+        if (!sendText(*lane, "mutating\nend\n"))
+            return ProbeExit::ReportFailed;
+        while (control.receive())
+        {
+        }
+    }
+    return sendText(*lane, std::format("mutations={}\nend\n", mutations)) ? ProbeExit::Reported
+                                                                          : ProbeExit::ReportFailed;
+}
+
 } // namespace
 
 // The third parameter is what POSIX systems pass and Windows' C runtime passes too: the environment, read
@@ -393,6 +489,8 @@ int main(int argc, char const* argv[], char const* envp[])
             return parent(rest);
         if (arguments.front() == "--receive-grant")
             return receiveGrant(rest);
+        if (arguments.front() == "--mutate")
+            return mutate(rest);
         return ProbeExit::Usage;
     }();
     if (exit == ProbeExit::ParentGone)

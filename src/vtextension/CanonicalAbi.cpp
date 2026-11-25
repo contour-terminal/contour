@@ -10,9 +10,7 @@ Result<std::string> loadByteString(IGuestMemory& memory, Address address, std::s
         .and_then([&](detail::PointerAndLength list) -> Result<std::string> {
             if (list.length > maxLength)
                 return std::unexpected(ExtensionError::OutputTooLarge);
-            return detail::viewElements(memory, list, 1).transform([](std::span<std::byte> bytes) {
-                return detail::copyBytes<std::string>(bytes);
-            });
+            return detail::readBytes<std::string>(memory, list, 1);
         });
 }
 
