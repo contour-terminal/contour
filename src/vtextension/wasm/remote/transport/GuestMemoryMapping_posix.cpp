@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Guest memory on POSIX: an inaccessible reservation of the object and its guard (PROT_NONE, MAP_NORESERVE,
-// so that it charges nothing), the object mapped shared over its start (MAP_FIXED), writable to prove the
-// handle grants writing, and every byte past the open ones closed again. Opening more is one mprotect().
+// Guest memory on POSIX: an inaccessible reservation of the object and its guard, the object mapped shared
+// over its start (MAP_FIXED), writable to prove the handle grants writing, and every byte past the open ones
+// closed again. Opening more is one mprotect().
+//
+// The reservation is private and PROT_NONE, which charges nothing without MAP_NORESERVE: Linux accounts only
+// writable private mappings against its commit limit, and the guard never becomes writable. The flag is left
+// out rather than guarded, as FreeBSD 11 and later no longer define it.
 #include <sys/mman.h>
 
 #include <cstddef>
@@ -36,8 +40,7 @@ std::expected<GuestMemoryMapping, MappingError> GuestMemoryMapping::map(NativeHa
 
     auto const objectSize = static_cast<std::size_t>(objectBytes);
     auto const reservationSize = static_cast<std::size_t>(objectBytes + guardBytes);
-    auto* const reservation =
-        ::mmap(nullptr, reservationSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    auto* const reservation = ::mmap(nullptr, reservationSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (reservation == MAP_FAILED)
         return std::unexpected(MappingError::Io);
     // From here on the mapping owns the reservation, and unmaps it on every way out.
