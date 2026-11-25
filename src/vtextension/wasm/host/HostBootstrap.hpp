@@ -14,6 +14,8 @@
 
 #include <cstdint>
 #include <expected>
+#include <span>
+#include <string_view>
 
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 
@@ -35,13 +37,46 @@ enum class BootstrapError : uint8_t
 /// @return Nothing once bound; why not otherwise.
 [[nodiscard]] std::expected<void, BootstrapError> bindToParent(int64_t parentProcessId) noexcept;
 
-/// Hardens this process, before it starts any thread of its own: no core dump, which would stall a crash
-/// while it is written and put an extension's memory on disk (RLIMIT_CORE 0, soft and hard, on POSIX); on
-/// Linux not dumpable (PR_SET_DUMPABLE 0), on FreeBSD not traceable (PROC_TRACE_CTL_DISABLE), so that
-/// another process of the same user can neither attach to it nor read its memory; on Windows no fault report
-/// with its dialog (WerSetFlags), where the job Contour started it in ends it on an unhandled exception.
-/// @return `Unsandboxed`; `Failed` if the system refused any of it.
-[[nodiscard]] remote::proto::LockdownState hardenProcess() noexcept;
+/// A step of the host's hardening.
+enum class HardeningStep : uint8_t
+{
+    CoreDumps,    ///< No core dump (POSIX: RLIMIT_CORE 0, soft and hard).
+    Dumpable,     ///< Not dumpable (Linux: PR_SET_DUMPABLE 0).
+    Tracing,      ///< Not traceable (FreeBSD: PROC_TRACE_CTL_DISABLE).
+    FaultReports, ///< No fault report with its dialog (Windows: WerSetFlags).
+};
+
+/// One step of the hardening, as this system takes it.
+struct HardeningRow
+{
+    HardeningStep step;    ///< The step.
+    std::string_view text; ///< What failed if it fails, user-readable: a sentence's end.
+    /// Takes the step.
+    /// @return Nothing once taken; the system's error code otherwise (errno on POSIX, an HRESULT on Windows).
+    std::expected<void, int> (*apply)() noexcept;
+};
+
+/// @return The steps this system's hardening takes, in order: no core dump, which would stall a crash while
+/// it
+///         is written and put an extension's memory on disk; on Linux not dumpable, on FreeBSD not traceable,
+///         so that another process of the same user can neither attach to it nor read its memory; on Windows
+///         no fault report with its dialog, where the job Contour started it in ends it on an unhandled
+///         exception.
+[[nodiscard]] std::span<HardeningRow const> hardeningSteps() noexcept;
+
+/// Takes every step of @p steps, even past one that failed, so that a host is as hard as the system lets it
+/// be.
+/// @param steps The steps, in order.
+/// @return Nothing if every step was taken; the first that failed otherwise.
+[[nodiscard]] std::expected<void, HardeningStep> hardenProcess(std::span<HardeningRow const> steps) noexcept;
+
+/// Hardens this process by this system's steps (hardeningSteps()), before it starts any thread of its own.
+/// @return Nothing if every step was taken; the first that failed otherwise.
+[[nodiscard]] std::expected<void, HardeningStep> hardenProcess() noexcept;
+
+/// @param step A step of the hardening.
+/// @return What failed when it fails, as this system's row says; empty if this system takes no such step.
+[[nodiscard]] std::string_view hardeningStepText(HardeningStep step) noexcept;
 
 /// Whether the host caps its own resources.
 enum class CapPolicy : uint8_t

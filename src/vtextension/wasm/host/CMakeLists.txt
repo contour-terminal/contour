@@ -14,6 +14,7 @@ add_library(vtextension_host STATIC
     ExecutorThread.cpp
     ExecutorThread.hpp
     HelperEngine.hpp
+    HostBootstrap.cpp
     HostBootstrap.hpp
     ${_bootstrap_source}
     HostProcess.cpp

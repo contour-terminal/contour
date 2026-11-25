@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <expected>
+#include <format>
 #include <ranges>
 #include <string_view>
 #include <tuple>
@@ -166,7 +167,7 @@ HostConfinement systemConfinement()
 {
     return HostConfinement {
         .bindToParent = &bindToParent,
-        .beforeThreads = &hardenProcess,
+        .beforeThreads = [] { return hardenProcess(); },
         .confine =
             [](uint64_t dataBytes) {
                 if constexpr (BuildCapPolicy == CapPolicy::Skip)
@@ -188,6 +189,8 @@ int runExtensionHost(std::span<std::string_view const> arguments,
         return endWith(HostProcessExit::ParentGone);
     // While the main thread is the only one: what is set per thread then reaches every thread started later.
     auto const hardened = confinement.beforeThreads();
+    if (!hardened)
+        tell(std::format("hardening failed: {}", hardeningStepText(hardened.error())));
     auto endpoints = adoptEndpoints(*parsed);
     if (!endpoints)
         return endWith(endpoints.error());
@@ -198,7 +201,7 @@ int runExtensionHost(std::span<std::string_view const> arguments,
     auto config = HostServerConfig {};
     config.confine = [&confinement, hardened, dataBytes = parsed->dataBytes] {
         auto const confined = confinement.confine(dataBytes);
-        return hardened == remote::proto::LockdownState::Failed ? hardened : confined;
+        return hardened ? confined : remote::proto::LockdownState::Failed;
     };
     auto host = HostProcess { *engine, *std::move(endpoints), std::move(config) };
     return endWith(hostProcessExitOf(host.run()));

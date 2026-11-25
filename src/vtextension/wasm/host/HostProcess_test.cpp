@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -56,6 +57,11 @@ using vtextension::wasm::host::CapPolicy;
 using vtextension::wasm::host::capResources;
 using vtextension::wasm::host::EngineFactory;
 using vtextension::wasm::host::exitCodeOf;
+using vtextension::wasm::host::HardeningRow;
+using vtextension::wasm::host::HardeningStep;
+using vtextension::wasm::host::hardeningSteps;
+using vtextension::wasm::host::hardeningStepText;
+using vtextension::wasm::host::hardenProcess;
 using vtextension::wasm::host::HostConfinement;
 using vtextension::wasm::host::HostProcessExit;
 using vtextension::wasm::host::hostProcessExitOf;
@@ -128,7 +134,7 @@ struct Confined
     std::atomic<std::size_t> threadsWhenHardened { 0 };
     std::atomic<std::size_t> threadsWhenConfined { 0 };
     /// What beforeThreads returns.
-    proto::LockdownState hardening = proto::LockdownState::Unsandboxed;
+    std::expected<void, HardeningStep> hardening {};
 };
 
 /// @return A confinement that touches nothing of this process: it binds to TheParent alone, and hardens and
@@ -421,44 +427,108 @@ TEST_CASE("HostProcess.servesOverAdoptedEndpoints", "[vtextension][host]")
     CHECK(exitCodeOf(HostProcessExit::Served) == 0);
 }
 
-TEST_CASE("HostProcess.hardensBeforeAnyThreadStarts", "[vtextension][host]")
+namespace
 {
-    for (auto const hardening: { proto::LockdownState::Unsandboxed, proto::LockdownState::Failed })
-    {
-        auto parent = makeParentEnds();
-        auto confined = std::make_shared<Confined>();
-        confined->hardening = hardening;
-        auto const arguments = formatHelperArguments(parent.arguments);
-        auto task = std::packaged_task<int()> { [&] {
-            return runHost(arguments, recordingEngines(confined), testConfinement(confined));
-        } };
-        auto exitCode = task.get_future();
-        auto host = std::jthread { std::move(task) };
 
-        auto const hello = parent.control.receive();
-        REQUIRE(hello.has_value());
-        // A hardening that failed is what Hello states, whatever the caps did.
-        CHECK(*hello
-              == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
-                                             .memoryMode = proto::MemoryMode::Copy,
-                                             .lockdown = hardening } });
-        // Hardened once, before the engine was made, and so before any thread of the host started; capped
-        // once they all ran.
-        CHECK(confined->hardenings.load() == 1);
-        CHECK(confined->hardenedAt.load() == 0);
-        CHECK(confined->engineMadeAt.load() == 1);
-        CHECK(confined->confinedAt.load() == 2);
+/// Runs a host whose hardening ends as @p hardening, and checks what Hello states and when it hardened.
+void checkHardening(std::expected<void, HardeningStep> hardening, proto::LockdownState expected)
+{
+    auto parent = makeParentEnds();
+    auto confined = std::make_shared<Confined>();
+    confined->hardening = hardening;
+    auto const arguments = formatHelperArguments(parent.arguments);
+    auto task = std::packaged_task<int()> { [&] {
+        return runHost(arguments, recordingEngines(confined), testConfinement(confined));
+    } };
+    auto exitCode = task.get_future();
+    auto host = std::jthread { std::move(task) };
+
+    auto const hello = parent.control.receive();
+    REQUIRE(hello.has_value());
+    CHECK(*hello
+          == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
+                                         .memoryMode = proto::MemoryMode::Copy,
+                                         .lockdown = expected } });
+    // Hardened once, before the engine was made, and so before any thread of the host started; capped once
+    // they all ran.
+    CHECK(confined->hardenings.load() == 1);
+    CHECK(confined->hardenedAt.load() == 0);
+    CHECK(confined->engineMadeAt.load() == 1);
+    CHECK(confined->confinedAt.load() == 2);
 #ifdef __linux__
-        // Between the two, the host started a thread per lane and its interrupt listener.
-        auto const started = confined->threadsWhenConfined.load() - confined->threadsWhenHardened.load();
-        CHECK(started >= MaxLaneChannels + 1);
+    // Between the two, the host started a thread per lane and its interrupt listener.
+    auto const started = confined->threadsWhenConfined.load() - confined->threadsWhenHardened.load();
+    CHECK(started >= MaxLaneChannels + 1);
 #endif
 
-        {
-            auto const closed = std::move(parent.control);
-        }
-        REQUIRE(exitCode.wait_for(HostPatience) == std::future_status::ready);
-        CHECK(exitCode.get() == exitCodeOf(HostProcessExit::Served));
+    {
+        auto const closed = std::move(parent.control);
+    }
+    REQUIRE(exitCode.wait_for(HostPatience) == std::future_status::ready);
+    CHECK(exitCode.get() == exitCodeOf(HostProcessExit::Served));
+}
+
+/// How many times each fake hardening step ran.
+std::atomic<int> firstStepRuns { 0 };
+std::atomic<int> secondStepRuns { 0 };
+std::atomic<int> thirdStepRuns { 0 };
+
+} // namespace
+
+TEST_CASE("HostProcess.hardensBeforeAnyThreadStarts", "[vtextension][host]")
+{
+    checkHardening({}, proto::LockdownState::Unsandboxed);
+}
+
+TEST_CASE("HostProcess.failedHardeningSaysWhichStep", "[vtextension][host]")
+{
+    // A hardening that failed is what Hello states, whatever the caps did; the host tells which step failed.
+    auto const step = hardeningSteps().front().step;
+    checkHardening(std::unexpected(step), proto::LockdownState::Failed);
+    CHECK_FALSE(hardeningStepText(step).empty());
+}
+
+TEST_CASE("HostBootstrap.hardeningNamesTheFirstFailedStep", "[vtextension][host]")
+{
+    firstStepRuns.store(0);
+    secondStepRuns.store(0);
+    thirdStepRuns.store(0);
+    auto const rows = std::array {
+        HardeningRow { .step = HardeningStep::CoreDumps,
+                       .text = "first",
+                       .apply = []() noexcept -> std::expected<void, int> {
+                           firstStepRuns.fetch_add(1);
+                           return {};
+                       } },
+        HardeningRow { .step = HardeningStep::Dumpable,
+                       .text = "second",
+                       .apply = []() noexcept -> std::expected<void, int> {
+                           secondStepRuns.fetch_add(1);
+                           return std::unexpected(1);
+                       } },
+        HardeningRow { .step = HardeningStep::Tracing,
+                       .text = "third",
+                       .apply = []() noexcept -> std::expected<void, int> {
+                           thirdStepRuns.fetch_add(1);
+                           return std::unexpected(2);
+                       } },
+    };
+    auto const hardened = hardenProcess(rows);
+    REQUIRE_FALSE(hardened.has_value());
+    CHECK(hardened.error() == rows[1].step);
+    // Every step ran, past the one that failed.
+    CHECK(firstStepRuns.load() == 1);
+    CHECK(secondStepRuns.load() == 1);
+    CHECK(thirdStepRuns.load() == 1);
+}
+
+TEST_CASE("HostBootstrap.everyStepSaysWhatFailed", "[vtextension][host]")
+{
+    CHECK_FALSE(hardeningSteps().empty());
+    for (auto const& row: hardeningSteps())
+    {
+        CHECK_FALSE(row.text.empty());
+        CHECK(hardeningStepText(row.step) == row.text);
     }
 }
 

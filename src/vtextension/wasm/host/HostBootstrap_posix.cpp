@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <csignal>
 #include <cstdint>
 #include <expected>
@@ -54,6 +55,52 @@ namespace
     constexpr auto Caps = std::array<ResourceCap, 0> {};
 #endif
 
+    /// @return Nothing if @p result is 0; errno otherwise.
+    [[nodiscard]] std::expected<void, int> errnoOf(int result) noexcept
+    {
+        if (result != 0)
+            return std::unexpected(errno);
+        return {};
+    }
+
+    /// Refuses core dumps, soft and hard.
+    [[nodiscard]] std::expected<void, int> refuseCoreDumps() noexcept
+    {
+        auto const noCore = rlimit { .rlim_cur = 0, .rlim_max = 0 };
+        return errnoOf(::setrlimit(RLIMIT_CORE, &noCore));
+    }
+
+#ifdef __linux__
+    /// Makes this process not dumpable: no other process of its user attaches to it or reads its memory.
+    [[nodiscard]] std::expected<void, int> refuseDumping() noexcept
+    {
+        return errnoOf(::prctl(PR_SET_DUMPABLE, 0));
+    }
+#elifdef __FreeBSD__
+    /// Makes this process not traceable: no other process of its user attaches to it or reads its memory.
+    [[nodiscard]] std::expected<void, int> refuseTracing() noexcept
+    {
+        auto traceControl = PROC_TRACE_CTL_DISABLE;
+        return errnoOf(::procctl(P_PID, 0, PROC_TRACE_CTL, &traceControl));
+    }
+#endif
+
+    /// The steps this system's hardening takes.
+    constexpr auto HardeningSteps = std::array {
+        HardeningRow { .step = HardeningStep::CoreDumps,
+                       .text = "core dumps cannot be turned off",
+                       .apply = &refuseCoreDumps },
+#ifdef __linux__
+        HardeningRow { .step = HardeningStep::Dumpable,
+                       .text = "the process cannot be kept from being dumped or attached to",
+                       .apply = &refuseDumping },
+#elifdef __FreeBSD__
+        HardeningRow { .step = HardeningStep::Tracing,
+                       .text = "the process cannot be kept from being traced",
+                       .apply = &refuseTracing },
+#endif
+    };
+
     /// Asks the system to kill this process when its parent ends.
     /// @return Nothing once it took the request, or where there is no such request to make; `Refused` if it
     ///         did not take it.
@@ -84,17 +131,9 @@ std::expected<void, BootstrapError> bindToParent(int64_t parentProcessId) noexce
     });
 }
 
-remote::proto::LockdownState hardenProcess() noexcept
+std::span<HardeningRow const> hardeningSteps() noexcept
 {
-    auto const noCore = rlimit { .rlim_cur = 0, .rlim_max = 0 };
-    auto hardened = ::setrlimit(RLIMIT_CORE, &noCore) == 0;
-#ifdef __linux__
-    hardened = ::prctl(PR_SET_DUMPABLE, 0) == 0 && hardened;
-#elifdef __FreeBSD__
-    auto traceControl = PROC_TRACE_CTL_DISABLE;
-    hardened = ::procctl(P_PID, 0, PROC_TRACE_CTL, &traceControl) == 0 && hardened;
-#endif
-    return hardened ? remote::proto::LockdownState::Unsandboxed : remote::proto::LockdownState::Failed;
+    return HardeningSteps;
 }
 
 remote::proto::LockdownState capResources(uint64_t dataBytes, CapPolicy policy) noexcept
