@@ -68,7 +68,9 @@ class ControlPage
     [[nodiscard]] bool isRaised(uint32_t slot) const noexcept;
 
     /// @return The page's handle, still owned by the page: for handing it to a child process. On Windows it
-    ///         grants read access only, so that the child cannot map the page writable.
+    ///         grants read access only, so that a well-behaved child cannot map the page writable; a hostile
+    ///         one can widen its own handle (an unnamed section's access is not checked), which grants it
+    ///         nothing, since this process never reads the page back.
     [[nodiscard]] NativeHandle nativeHandle() const noexcept;
 
   private:

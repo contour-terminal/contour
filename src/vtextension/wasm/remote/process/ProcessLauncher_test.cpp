@@ -473,6 +473,30 @@ TEST_CASE("ExitWaitSet.deadlineEndsAWait", "[vtextension]")
     CHECK(clock.now() - start >= std::chrono::milliseconds { 20 });
 }
 
+#if defined(__linux__) || defined(__FreeBSD__)
+TEST_CASE("ExitWaitSet.closedWatchedHandleIsAnError", "[vtextension]")
+{
+    auto probe = launchProbe(process::makeSystemProcessLauncher());
+    REQUIRE(probe.has_value());
+    auto clock = core::SteadyClock {};
+    auto set = probe->launcher->makeWaitSet(clock);
+    REQUIRE(set.has_value());
+    REQUIRE((*set)->watch(5, *probe->process).has_value());
+
+    // The process descriptor closes out from under the set; a copy keeps the process's own handle restorable.
+    auto const descriptor = probe->process->waitable();
+    auto const saved = ::fcntl(descriptor, F_DUPFD_CLOEXEC, 0);
+    REQUIRE(saved >= 0);
+    REQUIRE(::close(descriptor) == 0);
+    auto const waited = (*set)->wait(clock.now() + ChildPatience);
+    REQUIRE(::dup3(saved, descriptor, O_CLOEXEC) == descriptor);
+    ::close(saved);
+
+    CHECK_FALSE(waited.has_value());
+    (*set)->unwatch(5);
+}
+#endif
+
 TEST_CASE("Channel.peerProcessExitIsClosed", "[vtextension]")
 {
     auto probe = launchProbe(process::makeSystemProcessLauncher());

@@ -2,8 +2,11 @@
 //
 // The interrupt page on Windows: an unnamed, pagefile-backed section of one page, not inheritable until it is
 // handed over. A section cannot be resized once created, so it needs no seal. Contour maps it writable and
-// then keeps only a handle that grants FILE_MAP_READ, the one it hands over: the helper cannot map the page
-// writable through it.
+// then keeps only a handle that grants FILE_MAP_READ, the one it hands over: a well-behaved helper cannot map
+// the page writable through it. A hostile one can: an unnamed section carries no security descriptor that is
+// checked, so DuplicateHandle can widen the access of the helper's own handle. That grants nothing, because
+// Contour only stores to the page and never reads it back; an AppContainer around the helper narrows it
+// further.
 #include <atomic>
 #include <cstddef>
 #include <cstdint>

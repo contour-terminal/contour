@@ -144,9 +144,10 @@ class IExitWaitSet
     /// Blocks until a watched process exits, wake() is called, or @p deadline passes (by the clock the set
     /// was made with).
     /// @return The keys whose process may have exited -- each is reported for as long as it is watched and
-    ///         has ended; empty on a wake or the deadline. `Io` if the system cannot wait at all -- a watched
-    ///         process's handle closed while watched, which breaks watch()'s contract: a caller that waits
-    ///         again at once would spin, so it must stop waiting on this set.
+    ///         has ended; empty on a wake or the deadline. An error (any LaunchError) if the system cannot
+    ///         wait at all -- for instance a watched process's handle closed while watched, which breaks
+    ///         watch()'s contract: a caller that waits again at once would spin, so it must stop waiting on
+    ///         this set.
     [[nodiscard]] virtual std::expected<std::vector<uint64_t>, LaunchError> wait(
         std::optional<core::SteadyTimePoint> deadline) = 0;
 
