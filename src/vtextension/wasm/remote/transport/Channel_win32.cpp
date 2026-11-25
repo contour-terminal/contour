@@ -400,8 +400,10 @@ std::expected<ChannelPair, ChannelError> makeChannelPair()
         else if (error != ERROR_PIPE_CONNECTED)
             return std::unexpected(ChannelError::Io);
     }
+    // No handle travels beside a pipe's bytes: the helper has nothing to send up.
     return ChannelPair { .parent = Channel { std::make_unique<Channel::Native>(server.release()) },
-                         .helper = Channel { std::make_unique<Channel::Native>(client.release()) } };
+                         .helper = Channel { std::make_unique<Channel::Native>(client.release()) },
+                         .upward = UpwardDescriptors::Refused };
 }
 
 void closeNativeHandle(NativeHandle handle) noexcept

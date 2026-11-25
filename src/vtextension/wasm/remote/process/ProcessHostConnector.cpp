@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtextension/wasm/remote/process/ProcessHostConnector.hpp>
 
+#include <core/log/LogStore.hpp>
+
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
@@ -8,6 +10,7 @@
 #include <expected>
 #include <iterator>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -28,6 +31,23 @@ using transport::NativeHandle;
 
 namespace
 {
+    /// Debug notes about how extension host processes are connected; off unless asked for.
+    auto const connectionLog = core::log::Category("vtextension.host.connection",
+                                                   "Logs how extension host processes are connected.");
+
+    /// Notes once, at debug level, that this system discards rather than refuses descriptors a host sends
+    /// up: nothing is installed either way, but a discarded one is closed on a thread of Contour's.
+    void noteUpwardDescriptors(transport::UpwardDescriptors upward)
+    {
+        if (upward == transport::UpwardDescriptors::Refused)
+            return;
+        static auto noted = std::once_flag {};
+        std::call_once(noted, [] {
+            connectionLog()("This system cannot make Contour's ends refuse descriptors an extension host "
+                            "sends; it discards them instead.");
+        });
+    }
+
     /// A host process, as its parent holds it: the supervisor's grip on it, and the parent's ends of its
     /// interrupt page and wake signal.
     class ProcessHostHandle final: public remote::IHostHandle
@@ -96,6 +116,7 @@ std::expected<remote::HostConnection, ExtensionError> ProcessHostConnector::conn
             return std::unexpected(ExtensionError::HostUnavailable);
         lanes.push_back(*std::move(lane));
     }
+    noteUpwardDescriptors(control->upward);
 
     // The child sees them in this order (HelperArguments): control, the lanes, the page, the wake signal.
     auto spec = LaunchSpec { .executable = _config.helper,

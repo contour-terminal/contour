@@ -28,6 +28,8 @@
     #define WIN32_LEAN_AND_MEAN
     #include <Windows.h>
 #else
+    #include <sys/socket.h>
+
     #include <csignal>
 
     #include <fcntl.h>
@@ -41,7 +43,9 @@
 
 using vtextension::wasm::remote::transport::Channel;
 using vtextension::wasm::remote::transport::ChannelError;
+using vtextension::wasm::remote::transport::ChannelPair;
 using vtextension::wasm::remote::transport::makeChannelPair;
+using vtextension::wasm::remote::transport::UpwardDescriptors;
 using vtextension::wasm::remote::transport::testing::closeHandle;
 using vtextension::wasm::remote::transport::testing::duplicate;
 
@@ -290,6 +294,22 @@ struct Pipe
     return Pipe { .reader = OwnedHandle { ends[0] }, .writer = OwnedHandle { ends[1] } };
 }
 
+/// @return A connected pair whose ends both take descriptors in, as a system without `SO_PASSRIGHTS` makes
+///         them: for the path where the system discards what a helper sends up, which makeChannelPair()'s
+///         pairs never reach on a kernel that refuses it.
+[[nodiscard]] ChannelPair discardingPair()
+{
+    auto ends = std::array<int, 2> { -1, -1 };
+    REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, ends.data()) == 0);
+    auto parent = Channel::adopt(ends[0]);
+    auto helper = Channel::adopt(ends[1]);
+    REQUIRE(parent.has_value());
+    REQUIRE(helper.has_value());
+    return ChannelPair { .parent = *std::move(parent),
+                         .helper = *std::move(helper),
+                         .upward = UpwardDescriptors::Discarded };
+}
+
 } // namespace
 
 TEST_CASE("Channel.handleTravelsWithItsBytes", "[vtextension]")
@@ -320,13 +340,40 @@ TEST_CASE("Channel.handleTravelsWithItsBytes", "[vtextension]")
     CHECK(none.empty());
 }
 
-TEST_CASE("Channel.parentInstallsNoDescriptorFromTheHelper", "[vtextension]")
+    #ifdef __linux__
+TEST_CASE("Channel.parentEndRefusesDescriptors", "[vtextension]")
 {
-    // A helper attaches a descriptor to every frame it sends; Contour's reader takes in none of them.
+    // Contour's end refuses what a helper attaches: the helper's sendmsg fails (EPERM, reported as Refused)
+    // with nothing sent, so no descriptor enters Contour's process -- not even to be discarded, a close that
+    // could block a thread of Contour's. The helper's end still takes Contour's grants.
     auto pair = makeChannelPair();
     REQUIRE(pair.has_value());
+    if (pair->upward != UpwardDescriptors::Refused)
+        SKIP("this kernel predates SO_PASSRIGHTS (Linux 6.16)");
+    auto const pipe = makePipe();
+    auto const bytes = std::array<uint8_t, 3> { 1, 2, 3 };
+    CHECK(pair->helper.sendWithHandle(bytes, pipe.writer.get()) == std::unexpected(ChannelError::Refused));
+
+    // Only what is sent after it arrives, and with nothing attached.
+    REQUIRE(pair->helper.send(bytes).has_value());
+    auto received = std::array<uint8_t, 8> {};
+    auto handles = std::vector<OwnedHandle> {};
+    CHECK(pair->parent.receiveSomeWithHandles(received, handles) == std::size_t { 3 });
+    CHECK(handles.empty());
+
+    REQUIRE(pair->parent.sendWithHandle(bytes, pipe.writer.get()).has_value());
+    CHECK(pair->helper.receiveSomeWithHandles(received, handles) == std::size_t { 3 });
+    CHECK(handles.size() == 1);
+}
+    #endif
+
+TEST_CASE("Channel.parentInstallsNoDescriptorFromTheHelper", "[vtextension]")
+{
+    // A helper attaches a descriptor to every frame it sends, to an end that does not refuse them (as on a
+    // system without SO_PASSRIGHTS); Contour's reader takes in none of them.
+    auto pair = discardingPair();
     auto parent = vtextension::wasm::remote::transport::PduStream {
-        std::move(pair->parent), proto::ChannelKind::Control, proto::Direction::ToParent, proto::PduLimits {}
+        std::move(pair.parent), proto::ChannelKind::Control, proto::Direction::ToParent, proto::PduLimits {}
     };
     auto const frame = proto::encodeFrame(proto::RuntimeCreated { .runtimeId = 7, .error = std::nullopt });
     REQUIRE(frame.has_value());
@@ -338,7 +385,7 @@ TEST_CASE("Channel.parentInstallsNoDescriptorFromTheHelper", "[vtextension]")
         // Sent and received one at a time, so that the socket's buffer never fills.
         {
             auto const pipe = makePipe();
-            REQUIRE(pair->helper.sendWithHandle(*frame, pipe.writer.get()).has_value());
+            REQUIRE(pair.helper.sendWithHandle(*frame, pipe.writer.get()).has_value());
         }
         auto const received = parent.receive();
         REQUIRE(received.has_value());

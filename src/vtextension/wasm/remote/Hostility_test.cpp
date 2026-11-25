@@ -841,8 +841,9 @@ constexpr auto ScribbledRenders = 200;
 #ifndef _WIN32
 TEST_CASE("Hostility.descriptorUpIsNeverInstalled", "[vtextension][process][hostility]")
 {
-    // The host attaches a descriptor to its CallResult: Contour reads its lanes with plain receives, so the
-    // system drops it, and the call is answered as if nothing came with it.
+    // The host attaches a descriptor to its CallResult. Where Contour's ends refuse descriptors (Linux 6.16+)
+    // its send fails and it passes the frame on bare; elsewhere Contour's plain receives leave the system to
+    // drop it. Either way the call is answered as if nothing came with it, and the host serves on.
     auto const deadline = CaseDeadline { "Hostility.descriptorUpIsNeverInstalled" };
     auto const composition = HelperComposition { HelperTeardownGrace, &withoutHostileMode };
     {

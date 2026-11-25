@@ -24,7 +24,8 @@ enum class ChannelError : uint8_t
     Closed, ///< The peer closed its end, or this end was shut down.
     Io,     ///< The operating system reported any other failure.
     /// The peer attached what no message carries: more descriptors than a receive takes in, or ancillary
-    /// data other than descriptors (receiveSomeWithHandles()).
+    /// data other than descriptors (receiveSomeWithHandles()); or, sending, the peer's end refuses
+    /// descriptors (sendWithHandle()).
     Refused,
 };
 
@@ -91,7 +92,9 @@ class Channel
     /// (SCM_RIGHTS): the peer receives it with that byte, as receiveSomeWithHandles() does.
     /// @param bytes The bytes to send; not empty.
     /// @param handle The descriptor; still the caller's.
-    /// @return Nothing once every byte is sent; `Closed` if the peer is gone or this end was shut down.
+    /// @return Nothing once every byte is sent; `Closed` if the peer is gone or this end was shut down;
+    ///         `Refused`, with nothing sent, if the peer's end refuses descriptors
+    ///         (UpwardDescriptors::Refused).
     [[nodiscard]] std::expected<void, ChannelError> sendWithHandle(std::span<uint8_t const> bytes,
                                                                    NativeHandle handle);
 
@@ -128,15 +131,31 @@ class Channel
     std::unique_ptr<Native> _native;
 };
 
+/// What becomes of a descriptor the extension host process attaches to what it sends Contour.
+///
+/// Contour reads its ends with plain receives, so nothing a helper attaches is ever installed. But where the
+/// system merely discards such a descriptor, it closes it in the receiving thread, and a last close can block
+/// without bound (a socket lingering on a full send buffer): a compromised helper could hang a thread of
+/// Contour's. Where the system lets an end refuse descriptors outright (Linux 6.16 and later,
+/// `SO_PASSRIGHTS`), the helper's send fails instead, and no descriptor ever reaches Contour's process.
+enum class UpwardDescriptors : uint8_t
+{
+    Discarded, ///< The system takes them in and closes them, in the receiving thread (older kernels, BSDs).
+    Refused,   ///< The system refuses to send them: nothing reaches Contour (Linux 6.16+, and Windows, where
+               ///< no handle travels beside the bytes).
+};
+
 /// Two connected ends: what one sends, the other receives.
 struct ChannelPair
 {
     Channel parent; ///< Contour's end.
-    Channel helper; ///< The extension host process's end.
+    Channel helper; ///< The extension host process's end; it takes descriptors (Contour's grants).
+    UpwardDescriptors upward {}; ///< What becomes of a descriptor sent from the helper's end to Contour's.
 };
 
 /// Creates a connected pair. Neither end is inherited by a child process unless it is handed over on
-/// purpose.
+/// purpose. Contour's end refuses descriptors where the system can (UpwardDescriptors); the helper's end
+/// never does, so that it still receives the grants Contour sends.
 /// @return The pair; `Io` if the operating system refused.
 [[nodiscard]] std::expected<ChannelPair, ChannelError> makeChannelPair();
 

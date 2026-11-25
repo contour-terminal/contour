@@ -432,7 +432,8 @@ class Relay
     }
 
     /// Forwards the frame, @p size bytes, @p pending starts with, to Contour with a descriptor of /dev/null
-    /// attached; as it is on Windows, where nothing travels beside a frame.
+    /// attached; as it is where Contour's end refuses descriptors, and on Windows, where nothing travels
+    /// beside a frame.
     /// @return What becomes of the frame.
     [[nodiscard]] Verdict forwardWithDescriptor(Way const& way,
                                                 std::vector<uint8_t>& pending,
@@ -450,9 +451,12 @@ class Relay
         if (!devNull)
             return Verdict::Forward;
         auto const lock = std::scoped_lock { way.channel.contourSends };
-        return way.target().sendWithHandle(std::span { pending }.first(size), devNull.get())
-                   ? Verdict::Discard
-                   : Verdict::Stop;
+        auto const sent = way.target().sendWithHandle(std::span { pending }.first(size), devNull.get());
+        if (sent)
+            return Verdict::Discard;
+        // Contour's end refuses descriptors (UpwardDescriptors::Refused): nothing was sent, so the frame
+        // goes on as it came, and the host serves on.
+        return sent.error() == transport::ChannelError::Refused ? Verdict::Forward : Verdict::Stop;
 #endif
     }
 

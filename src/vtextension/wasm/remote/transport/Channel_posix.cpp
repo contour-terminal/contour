@@ -5,7 +5,8 @@
 // closed only when the channel is destroyed, so that no thread can find its number reused.
 //
 // A descriptor travels as SCM_RIGHTS on a message's first byte. Only receiveSomeWithHandles() installs what
-// arrives; a plain recv() leaves the system to discard it.
+// arrives; a plain recv() leaves the system to discard it. Contour's end of a pair refuses descriptors where
+// Linux lets it (SO_PASSRIGHTS), so that none is even discarded there (UpwardDescriptors).
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -77,6 +78,36 @@ namespace
             return std::unexpected(ChannelError::Io);
 #endif
         return {};
+    }
+
+#ifdef __linux__
+    #ifdef SO_PASSRIGHTS
+    constexpr auto PassRightsOption = SO_PASSRIGHTS;
+    #else
+    /// `SO_PASSRIGHTS` (Linux 6.16, asm-generic/socket.h), for C libraries whose headers predate it.
+    constexpr auto PassRightsOption = 83;
+    #endif
+#endif
+
+    /// Makes Contour's end @p descriptor refuse descriptors its peer sends, where the system can: a
+    /// descriptor the system took in only to discard it would be closed in the receiving thread, and a last
+    /// close can block without bound (UpwardDescriptors).
+    /// @return What becomes of descriptors sent to it; `Io` if the system failed otherwise than by lacking
+    /// it.
+    [[nodiscard]] std::expected<UpwardDescriptors, ChannelError> refuseDescriptors(
+        [[maybe_unused]] int descriptor) noexcept
+    {
+#ifdef __linux__
+        auto const disable = 0;
+        if (::setsockopt(descriptor, SOL_SOCKET, PassRightsOption, &disable, sizeof(disable)) == 0)
+            return UpwardDescriptors::Refused;
+        // A kernel older than 6.16 does not know the option.
+        if (errno == ENOPROTOOPT || errno == EINVAL)
+            return UpwardDescriptors::Discarded;
+        return std::unexpected(ChannelError::Io);
+#else
+        return UpwardDescriptors::Discarded;
+#endif
     }
 
     /// The types of msghdr::msg_controllen and cmsghdr::cmsg_len: size_t on Linux, socklen_t on macOS.
@@ -210,6 +241,9 @@ std::expected<void, ChannelError> Channel::sendWithHandle(std::span<uint8_t cons
         {
             if (errno == EINTR)
                 continue;
+            // The peer's end refuses descriptors (SO_PASSRIGHTS off): nothing was sent.
+            if (errno == EPERM)
+                return std::unexpected(ChannelError::Refused);
             return std::unexpected(channelErrorOf(errno));
         }
         // The descriptor went with the first byte; the rest are plain bytes.
@@ -300,9 +334,11 @@ std::expected<ChannelPair, ChannelError> makeChannelPair()
     auto helper = std::make_unique<Channel::Native>(descriptors[1]);
     return configureEnd(parent->descriptor, PairCloseOnExec)
         .and_then([&] { return configureEnd(helper->descriptor, PairCloseOnExec); })
-        .transform([&] {
+        .and_then([&] { return refuseDescriptors(parent->descriptor); })
+        .transform([&](UpwardDescriptors upward) {
             return ChannelPair { .parent = Channel { std::move(parent) },
-                                 .helper = Channel { std::move(helper) } };
+                                 .helper = Channel { std::move(helper) },
+                                 .upward = upward };
         });
 }
 
