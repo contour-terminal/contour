@@ -743,9 +743,12 @@ TEST_CASE("Instance.hostile.hugeOutput", "[vtextension][guest]")
     // succeed fails, without entering the guest.
     CHECK(errorOf(guest->instance().update(TimerFired {})) == ExtensionError::OutputTooLarge);
 
-    // Under a higher limit, the same output is fine.
+    // Under a higher limit, the same output is fine. Its deadline is generous too: copying two megabytes out
+    // of a host process takes longer than the default under a sanitizer, and the deadline is not what is
+    // tested.
     auto limits = ExtensionLimits {};
     limits.maxRenderBytes = std::size_t { 4 } * 1024 * 1024;
+    limits.callDeadline = std::chrono::seconds { 5 };
     auto generous = hostile("huge-output", limits);
     CHECK(generous->instance().render(surface(80, 1)).value().size() == std::size_t { 2 } * 1024 * 1024);
 }
