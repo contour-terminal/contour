@@ -105,6 +105,37 @@ namespace
         return ConfinementFailure { .step = remote::proto::LockdownStep::FileSystem,
                                     .code = static_cast<int>(-error) };
     }
+    /// Enforces @p abi's ruleset, granting @p allowed beneath it.
+    /// @return `Restricted`, or `Unavailable` where the ruleset cannot be made; the `-errno` of any other
+    ///         failure.
+    [[nodiscard]] std::expected<LandlockOutcome, long> enforceAbi(LandlockAbiRow const& abi,
+                                                                  std::span<PathBeneathRule const> allowed,
+                                                                  LandlockSystem const& system)
+    {
+        auto const attr = LandlockRulesetAttr { .handledAccessFs = abi.fsRights,
+                                                .handledAccessNet = abi.netRights,
+                                                .scoped = abi.scopes };
+        auto const ruleset = system.createRuleset(&attr, sizeof(attr), 0);
+        if (isUnavailable(ruleset))
+            return LandlockOutcome::Unavailable;
+        if (ruleset < 0)
+            return std::unexpected(ruleset);
+        auto const descriptor = static_cast<int>(ruleset);
+        auto const enforced = [&]() -> std::expected<LandlockOutcome, long> {
+            for (auto const& rule: allowed)
+            {
+                auto const granted = PathBeneathRule { .parent = rule.parent,
+                                                       .allowedAccess = rule.allowedAccess & abi.fsRights };
+                if (auto const added = system.addPathBeneathRule(descriptor, granted); added < 0)
+                    return std::unexpected(added);
+            }
+            if (auto const restricted = system.restrictSelf(descriptor, abi.restrictFlags); restricted < 0)
+                return std::unexpected(restricted);
+            return LandlockOutcome::Restricted;
+        }();
+        system.closeRuleset(descriptor);
+        return enforced;
+    }
 } // namespace
 
 std::span<LandlockAbiRow const> landlockAbis() noexcept
@@ -143,37 +174,23 @@ std::expected<LandlockOutcome, ConfinementFailure> restrictFileSystem(
         return LandlockOutcome::Unavailable;
     if (version < 0)
         return std::unexpected(fileSystemFailure(version));
-    // The best ABI both know: the kernel's, or our newest if the kernel's is newer still.
-    auto const newestFirst = AbiTable | std::views::reverse;
-    auto const known = std::ranges::find_if(
-        newestFirst, [version](LandlockAbiRow const& row) { return row.abi <= version; });
-    if (known == newestFirst.end())
-        return LandlockOutcome::Unavailable;
-    auto const& abi = *known;
-
-    auto const attr = LandlockRulesetAttr { .handledAccessFs = abi.fsRights,
-                                            .handledAccessNet = abi.netRights,
-                                            .scoped = abi.scopes };
-    auto const ruleset = system.createRuleset(&attr, sizeof(attr), 0);
-    if (isUnavailable(ruleset))
-        return LandlockOutcome::Unavailable;
-    if (ruleset < 0)
-        return std::unexpected(fileSystemFailure(ruleset));
-    auto const descriptor = static_cast<int>(ruleset);
-    auto const restricted = [&]() -> std::expected<LandlockOutcome, ConfinementFailure> {
-        for (auto const& rule: allowed)
-        {
-            auto const granted =
-                PathBeneathRule { .parent = rule.parent, .allowedAccess = rule.allowedAccess & abi.fsRights };
-            if (auto const added = system.addPathBeneathRule(descriptor, granted); added < 0)
-                return std::unexpected(fileSystemFailure(added));
-        }
-        if (auto const enforced = system.restrictSelf(descriptor, abi.restrictFlags); enforced < 0)
-            return std::unexpected(fileSystemFailure(enforced));
-        return LandlockOutcome::Restricted;
-    }();
-    system.closeRuleset(descriptor);
-    return restricted;
+    // The best ABI both know: the kernel's, or our newest if the kernel's is newer still. Should the kernel
+    // refuse what our row claims for its ABI (EINVAL: a right, scope or flag it does not know), the row
+    // before it is tried, down to the first: a wrong row of ours costs that ABI's additions, not every
+    // extension.
+    auto refused = false;
+    for (auto const& abi: AbiTable | std::views::reverse)
+    {
+        if (abi.abi > version)
+            continue;
+        auto const enforced = enforceAbi(abi, allowed, system);
+        if (enforced || enforced.error() != -EINVAL)
+            return enforced.transform_error(&fileSystemFailure);
+        refused = true;
+    }
+    if (refused)
+        return std::unexpected(fileSystemFailure(-EINVAL));
+    return LandlockOutcome::Unavailable;
 }
 
 } // namespace vtextension::wasm::host

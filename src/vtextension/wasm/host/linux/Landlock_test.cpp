@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include <linux/landlock.h>
 #include <vtextension/wasm/host/linux/Landlock.hpp>
 
 using namespace vtextension::wasm::host;
@@ -26,6 +27,12 @@ struct Answers
     long version = 0;    ///< The version query.
     long created = 0;    ///< Creating the ruleset.
     long restricted = 0; ///< Restricting.
+    /// The file system rights it does not know: a ruleset handling any of them is refused with EINVAL.
+    uint64_t unknownFsRights = 0;
+    /// Likewise its unknown network rights.
+    uint64_t unknownNetRights = 0;
+    /// Likewise its unknown flags of landlock_restrict_self().
+    uint32_t unknownRestrictFlags = 0;
 };
 
 /// The kernel the fake system calls answer as, and what they were asked. One case at a time.
@@ -36,6 +43,7 @@ struct FakeKernel
     std::vector<PathBeneathRule> rules;      ///< What was added.
     std::optional<uint32_t> restrictFlags;   ///< What restricting was passed.
     std::vector<int> closed;                 ///< What was closed.
+    int attempts = 0;                        ///< How many rulesets it was asked to create.
 };
 
 /// @return The fake kernel the fake system calls answer as: they are plain functions, which capture nothing.
@@ -49,13 +57,19 @@ constexpr auto Ruleset = 42;
 
 [[nodiscard]] LandlockSystem fakeSystem(Answers answers)
 {
-    kernel() = FakeKernel { .answers = answers, .attr = {}, .rules = {}, .restrictFlags = {}, .closed = {} };
+    kernel() = FakeKernel {
+        .answers = answers, .attr = {}, .rules = {}, .restrictFlags = {}, .closed = {}, .attempts = 0
+    };
     return LandlockSystem {
         .createRuleset =
             [](LandlockRulesetAttr const* attr, std::size_t size, uint32_t flags) noexcept -> long {
             if (attr == nullptr)
                 return size == 0 && flags == 1 ? kernel().answers.version : -EINVAL;
             kernel().attr = *attr;
+            kernel().attempts += 1;
+            if ((attr->handledAccessFs & kernel().answers.unknownFsRights) != 0
+                || (attr->handledAccessNet & kernel().answers.unknownNetRights) != 0)
+                return -EINVAL;
             return kernel().answers.created;
         },
         .addPathBeneathRule = [](int ruleset, PathBeneathRule rule) noexcept -> long {
@@ -68,6 +82,8 @@ constexpr auto Ruleset = 42;
             if (ruleset != Ruleset)
                 return -EBADF;
             kernel().restrictFlags = flags;
+            if ((flags & kernel().answers.unknownRestrictFlags) != 0)
+                return -EINVAL;
             return kernel().answers.restricted;
         },
         .closeRuleset = [](int ruleset) noexcept { kernel().closed.push_back(ruleset); },
@@ -182,4 +198,84 @@ TEST_CASE("Landlock.otherErrorsAreFailures", "[vtextension][sandbox]")
           == ConfinementFailure { .step = LockdownStep::FileSystem, .code = EFAULT });
     CHECK(restrictFileSystem({}, fakeSystem(Answers { .version = 4, .created = -ENOMEM })).error()
           == ConfinementFailure { .step = LockdownStep::FileSystem, .code = ENOMEM });
+}
+
+TEST_CASE("Landlock.aKernelRefusingAnAbiRowFallsBackToTheOneBefore", "[vtextension][sandbox]")
+{
+    // A kernel that says ABI 10 but refuses the UDP rights row 10 adds: restricted at row 9.
+    auto const udp = abiRow(10).netRights & ~abiRow(9).netRights;
+    REQUIRE(udp != 0);
+    REQUIRE(restrictFileSystem(
+                {}, fakeSystem(Answers { .version = 10, .created = Ruleset, .unknownNetRights = udp }))
+            == LandlockOutcome::Restricted);
+    REQUIRE(kernel().attr.has_value());
+    CHECK(kernel().attr->handledAccessFs == abiRow(9).fsRights);
+    CHECK(kernel().attr->handledAccessNet == abiRow(9).netRights);
+    CHECK(kernel().restrictFlags == abiRow(9).restrictFlags);
+    CHECK(kernel().attempts == 2);
+
+    // One that refuses TSYNC at restricting: restricted at row 7, every ruleset made closed again.
+    auto const threadSync = abiRow(8).restrictFlags;
+    REQUIRE(
+        restrictFileSystem(
+            {}, fakeSystem(Answers { .version = 10, .created = Ruleset, .unknownRestrictFlags = threadSync }))
+        == LandlockOutcome::Restricted);
+    CHECK(kernel().attr->handledAccessFs == abiRow(7).fsRights);
+    CHECK(kernel().restrictFlags == 0U);
+    CHECK(kernel().closed.size() == 4);
+
+    // One that refuses even the first row's rights fails, after trying every row it could have.
+    auto const refusedEverywhere = restrictFileSystem(
+        {}, fakeSystem(Answers { .version = 5, .created = Ruleset, .unknownFsRights = abiRow(1).fsRights }));
+    REQUIRE_FALSE(refusedEverywhere.has_value());
+    CHECK(refusedEverywhere.error()
+          == ConfinementFailure { .step = LockdownStep::FileSystem, .code = EINVAL });
+    CHECK(kernel().attempts == 5);
+
+    // Any other error is no reason to try an older row.
+    REQUIRE_FALSE(
+        restrictFileSystem({}, fakeSystem(Answers { .version = 10, .created = -ENOMEM })).has_value());
+    CHECK(kernel().attempts == 1);
+}
+
+TEST_CASE("Landlock.abiTableAgreesWithTheSystemHeaders", "[vtextension][sandbox]")
+{
+    // Where this build's headers name a constant, our table's value is the kernel's: each ABI's additions.
+    auto const added = [](auto LandlockAbiRow::* field, int abi) {
+        return abiRow(abi).*field & ~(abi > 1 ? abiRow(abi - 1).*field : decltype(abiRow(abi).*field) {});
+    };
+#ifdef LANDLOCK_ACCESS_FS_MAKE_SYM
+    CHECK(added(&LandlockAbiRow::fsRights, 1) == ((LANDLOCK_ACCESS_FS_MAKE_SYM << 1U) - 1U));
+#endif
+#ifdef LANDLOCK_ACCESS_FS_REFER
+    CHECK(added(&LandlockAbiRow::fsRights, 2) == LANDLOCK_ACCESS_FS_REFER);
+#endif
+#ifdef LANDLOCK_ACCESS_FS_TRUNCATE
+    CHECK(added(&LandlockAbiRow::fsRights, 3) == LANDLOCK_ACCESS_FS_TRUNCATE);
+    CHECK(LandlockTruncate == LANDLOCK_ACCESS_FS_TRUNCATE);
+#endif
+#ifdef LANDLOCK_ACCESS_NET_BIND_TCP
+    CHECK(added(&LandlockAbiRow::netRights, 4)
+          == (LANDLOCK_ACCESS_NET_BIND_TCP | LANDLOCK_ACCESS_NET_CONNECT_TCP));
+#endif
+#ifdef LANDLOCK_ACCESS_FS_IOCTL_DEV
+    CHECK(added(&LandlockAbiRow::fsRights, 5) == LANDLOCK_ACCESS_FS_IOCTL_DEV);
+#endif
+#ifdef LANDLOCK_SCOPE_SIGNAL
+    CHECK(added(&LandlockAbiRow::scopes, 6) == (LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET | LANDLOCK_SCOPE_SIGNAL));
+#endif
+#ifdef LANDLOCK_RESTRICT_SELF_TSYNC
+    CHECK(added(&LandlockAbiRow::restrictFlags, 8) == LANDLOCK_RESTRICT_SELF_TSYNC);
+#endif
+#ifdef LANDLOCK_ACCESS_FS_RESOLVE_UNIX
+    CHECK(added(&LandlockAbiRow::fsRights, 9) == LANDLOCK_ACCESS_FS_RESOLVE_UNIX);
+#endif
+#ifdef LANDLOCK_ACCESS_NET_BIND_UDP
+    CHECK(added(&LandlockAbiRow::netRights, 10)
+          == (LANDLOCK_ACCESS_NET_BIND_UDP | LANDLOCK_ACCESS_NET_CONNECT_SEND_UDP));
+#endif
+    CHECK(LandlockReadFile == LANDLOCK_ACCESS_FS_READ_FILE);
+    CHECK(LandlockWriteFile == LANDLOCK_ACCESS_FS_WRITE_FILE);
+    CHECK(LandlockReadDirectory == LANDLOCK_ACCESS_FS_READ_DIR);
+    CHECK(LandlockMakeRegular == LANDLOCK_ACCESS_FS_MAKE_REG);
 }
