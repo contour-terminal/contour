@@ -471,6 +471,18 @@ inline constexpr auto TwoTablesModule = std::to_array<uint8_t>({
     0x01,
 });
 
+/// Exports a function over i64s beside one over i32s.
+///
+///     (module
+///       (func (export "wide") (param i64) (result i64) (local.get 0))
+///       (func (export "narrow") (param i32) (result i32) (local.get 0)))
+inline constexpr auto WideExportModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x0b, 0x02, 0x60, 0x01, 0x7e, 0x01,
+    0x7e, 0x60, 0x01, 0x7f, 0x01, 0x7f, 0x03, 0x03, 0x02, 0x00, 0x01, 0x07, 0x11, 0x02, 0x04,
+    0x77, 0x69, 0x64, 0x65, 0x00, 0x00, 0x06, 0x6e, 0x61, 0x72, 0x72, 0x6f, 0x77, 0x00, 0x01,
+    0x0a, 0x0b, 0x02, 0x04, 0x00, 0x20, 0x00, 0x0b, 0x04, 0x00, 0x20, 0x00, 0x0b,
+});
+
 /// The WebAssembly page size, in bytes.
 inline constexpr auto PageBytes = uint32_t { 64 } * 1024;
 
@@ -1296,6 +1308,24 @@ void tableCapAboveMaximumIsRefused()
     CHECK(runtime.error() == ExtensionError::RuntimeUnavailable);
 }
 
+/// Only a function export whose parameters and results are all i32 can be looked up; any other is not
+/// offered (IWasmInstance::function).
+template <typename T>
+void onlyI32ExportsAreOffered()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, WideExportModule);
+    auto context = RecordingHostContext {};
+    auto const instance = instantiate(*module, context);
+
+    CHECK_FALSE(instance->function("wide").has_value());
+    auto argv = std::array<uint32_t, 1> { 42 };
+    REQUIRE(instance->call(functionOf(*instance, "narrow"), argv).has_value());
+    CHECK(argv[0] == 42);
+}
+
 /// Unbounded recursion runs into the stack cap and traps.
 template <typename T>
 void unboundedRecursionTraps()
@@ -1562,6 +1592,7 @@ void wasiStdioGoesNowhere()
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableInitialSizeIsCapped)              \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableCountIsCapped)                    \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableCapAboveMaximumIsRefused)         \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, onlyI32ExportsAreOffered)              \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unboundedRecursionTraps)               \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptStopsLoop)                    \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptIsFinal)                      \

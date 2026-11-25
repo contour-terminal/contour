@@ -11,6 +11,7 @@
 // labelled may vary between backends (see MemoryGrowthReporting), never whether it is stopped.
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -83,6 +84,16 @@ struct FunctionSignature
     std::vector<ValueType> parameters; ///< The parameter types, in order.
     std::vector<ValueType> results;    ///< The result types, in order.
 
+    /// @return Whether every parameter and every result is an i32: the only exports an instance offers
+    ///         (IWasmInstance::function).
+    [[nodiscard]] bool isAllI32() const noexcept
+    {
+        auto const isI32 = [](ValueType type) {
+            return type == ValueType::I32;
+        };
+        return std::ranges::all_of(parameters, isI32) && std::ranges::all_of(results, isI32);
+    }
+
     /// @return Whether both signatures name the same types in the same order.
     bool operator==(FunctionSignature const&) const = default;
 };
@@ -128,11 +139,15 @@ struct RuntimeLimits
     uint32_t tableElements = MaxTableElements;
 };
 
+/// The most i32 parameters a host function can take, on every backend. The Canonical ABI passes at most 16
+/// flat parameters (more go through memory), and a func with a result that does not flatten to one value
+/// takes the result's address after them: 17.
+inline constexpr auto MaxHostParameters = uint32_t { 17 };
+
 /// One host import. Every world host function takes only i32s and returns nothing.
 ///
-/// A host function may take no parameter at all. A backend may cap how many it can take (the WAMR
-/// backend's cap is `wamr::MaxHostParameters`, 17); createRuntime() refuses a table holding one above
-/// the cap with `RuntimeUnavailable`.
+/// A host function may take no parameter at all, and at most MaxHostParameters; createRuntime() refuses a
+/// table holding one above that with `RuntimeUnavailable`.
 struct HostFunction
 {
     std::string_view module;     ///< The import module name it is provided under.
@@ -193,9 +208,12 @@ class IWasmInstance
     /// Releases the instance; the module (and with it the runtime) may go with it.
     virtual ~IWasmInstance() = default;
 
-    /// Looks a function export up, once, for later calls.
+    /// Looks a function export up, once, for later calls. Only an export whose parameters and results are
+    /// all i32 (FunctionSignature::isAllI32) is offered, as call() passes nothing but u32 cells: every
+    /// export the host calls is one, and any other is not offered by any backend.
     /// @param name The export's name.
-    /// @return Its handle; nothing if the instance exports no function of that name.
+    /// @return Its handle; nothing if the instance exports no function of that name with an all-i32
+    ///         signature.
     [[nodiscard]] virtual std::optional<ExportFunction> function(std::string_view name) const = 0;
 
     /// Calls a function export on the calling thread, which must be prepared.

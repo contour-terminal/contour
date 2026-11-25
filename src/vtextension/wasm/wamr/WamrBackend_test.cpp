@@ -207,10 +207,8 @@ TEST_CASE("Wamr.hostFunctionArities")
 
     SECTION("too many")
     {
-        auto const hostFunctions =
-            std::array { HostFunction { .module = "arity",
-                                        .name = "wide",
-                                        .parameterCount = vtextension::wasm::wamr::MaxHostParameters + 1 } };
+        auto const hostFunctions = std::array { HostFunction {
+            .module = "arity", .name = "wide", .parameterCount = vtextension::wasm::MaxHostParameters + 1 } };
         auto const runtime = backend->createRuntime(contract::Limits, hostFunctions);
         REQUIRE_FALSE(runtime.has_value());
         CHECK(runtime.error() == ExtensionError::RuntimeUnavailable);

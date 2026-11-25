@@ -45,9 +45,9 @@ constexpr auto Untouched = std::byte { 0xEE };
 constexpr auto FirstRandomByte = uint8_t { 0xA0 };
 
 /// @return Nanoseconds from the test environment's clock @p clockId: 1000 plus its id.
-[[nodiscard]] uint64_t testClock(uint32_t clockId)
+[[nodiscard]] uint64_t testClock(ClockId clockId)
 {
-    return 1000 + uint64_t { clockId };
+    return 1000 + uint64_t { static_cast<uint8_t>(clockId) };
 }
 
 /// Fills @p bytes with FirstRandomByte, FirstRandomByte + 1, and so on.
@@ -62,7 +62,7 @@ std::expected<void, Errno> testRandom(std::span<std::byte> bytes)
 /// @return An environment whose clocks and random source give the same values on every run.
 [[nodiscard]] ShimEnvironment testEnvironment()
 {
-    return ShimEnvironment { .clock = &testClock, .random = &testRandom };
+    return ShimEnvironment { &testClock, &testRandom };
 }
 
 /// One guest memory, filled with Untouched, and the shim functions called on it.
@@ -345,11 +345,10 @@ TEST_CASE("Preview1Shim.random_get")
 TEST_CASE("Preview1Shim.random_getFailsWithTheSource")
 {
     // A random source that refuses fails the guest's random_get, and nothing else: no byte is written.
-    auto environment = testEnvironment();
-    environment.random = [](std::span<std::byte>) -> std::expected<void, Errno> {
-        return std::unexpected(Errno::Io);
-    };
-    auto guest = Guest { std::move(environment) };
+    auto guest =
+        Guest { ShimEnvironment { &testClock, [](std::span<std::byte>) -> std::expected<void, Errno> {
+                                     return std::unexpected(Errno::Io);
+                                 } } };
     CHECK(guest.errnoOf("random_get", { 600, 16 }) == Errno::Io);
     CHECK(guest.isUntouched());
     CHECK(guest.errnoOf("clock_time_get", { 0, 1, 600 }) == Errno::Success);
@@ -402,11 +401,11 @@ TEST_CASE("Preview1Shim.outOfBoundsPointerFaults")
 TEST_CASE("Preview1Shim.systemEnvironment")
 {
     auto const environment = systemEnvironment();
-    auto const realtime = environment.clock(static_cast<uint32_t>(ClockId::Realtime));
+    auto const realtime = environment.clock(ClockId::Realtime);
     // 2020-01-01, in nanoseconds since the epoch: any real clock reads later.
     CHECK(realtime > uint64_t { 1'577'836'800 } * 1'000'000'000);
-    auto const before = environment.clock(static_cast<uint32_t>(ClockId::Monotonic));
-    auto const after = environment.clock(static_cast<uint32_t>(ClockId::Monotonic));
+    auto const before = environment.clock(ClockId::Monotonic);
+    auto const after = environment.clock(ClockId::Monotonic);
     CHECK(after >= before);
 
     // 64 random bytes are all zero with a chance of 2^-512.

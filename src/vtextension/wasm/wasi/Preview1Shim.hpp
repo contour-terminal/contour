@@ -41,15 +41,38 @@ enum class Errno : uint8_t
 
 /// What the shim reads from outside guest memory: injected, so that tests are deterministic.
 /// Neither function may throw: an engine calls the shim from code an exception must not unwind through.
-struct ShimEnvironment
+class ShimEnvironment
 {
-    /// @return The time of the clock @p clockId (ClockId::Realtime or ClockId::Monotonic only), in
-    ///         nanoseconds.
-    std::function<uint64_t(uint32_t clockId)> clock;
+  public:
+    /// Reads a clock, ClockId::Realtime or ClockId::Monotonic only (the shim asks for no other).
+    /// @return The clock's time, in nanoseconds.
+    using Clock = std::function<uint64_t(ClockId clockId)>;
+
     /// Fills its argument with random bytes.
     /// @return Nothing once filled; `Io` if the source refused, which fails only the calling guest's
     ///         random_get, never the process.
-    std::function<std::expected<void, Errno>(std::span<std::byte>)> random;
+    using Random = std::function<std::expected<void, Errno>(std::span<std::byte>)>;
+
+    /// Both functions are required: an empty one would end the process the first time a guest reached
+    /// it, deep inside a guest call, so it ends it here instead (a precondition, as passing one is a
+    /// programmer error).
+    /// @param clock Where clock_time_get reads its clocks.
+    /// @param random Where random_get takes its bytes.
+    ShimEnvironment(Clock clock, Random random);
+
+    /// @return The time of @p clockId, ClockId::Realtime or ClockId::Monotonic, in nanoseconds.
+    [[nodiscard]] uint64_t clock(ClockId clockId) const { return _clock(clockId); }
+
+    /// Fills @p bytes with random bytes.
+    /// @return Nothing once filled; `Io` if the source refused.
+    [[nodiscard]] std::expected<void, Errno> random(std::span<std::byte> bytes) const
+    {
+        return _random(bytes);
+    }
+
+  private:
+    Clock _clock;
+    Random _random;
 };
 
 /// How a shim function ended.

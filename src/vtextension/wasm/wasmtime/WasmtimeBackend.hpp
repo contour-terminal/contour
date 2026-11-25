@@ -14,11 +14,6 @@
 namespace vtextension::wasm::wasmtime
 {
 
-/// The most i32 parameters a host function can take; createRuntime() refuses a table holding one taking
-/// more. The same cap as the WAMR backend's: the Canonical ABI passes at most 16 flat parameters, and a
-/// result that does not flatten to one value adds its address.
-inline constexpr auto MaxHostParameters = uint32_t { 17 };
-
 /// How compiled guest code detects an out-of-bounds access or a stack overflow.
 enum class TrapMode : uint8_t
 {

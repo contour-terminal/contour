@@ -59,12 +59,6 @@ namespace
         uint32_t resultCount = 0;    ///< How many i32 results it returns.
     };
 
-    /// @return Whether every type of @p types is an i32: the cells IWasmInstance::call() passes.
-    [[nodiscard]] bool allI32(std::span<ValueType const> types) noexcept
-    {
-        return std::ranges::all_of(types, [](ValueType type) { return type == ValueType::I32; });
-    }
-
     /// How far beyond the current epoch a guest's deadline lies: one tick. Only an interrupt moves the
     /// epoch, so a guest that is never interrupted never reaches it and nothing ever wakes to poll it;
     /// one that is reaches it at its next epoch check.
@@ -357,7 +351,7 @@ namespace
             // not kept, and released.
             if (item.kind == WASMTIME_EXTERN_FUNC)
             {
-                if (allI32(entry.signature.parameters) && allI32(entry.signature.results))
+                if (entry.signature.isAllI32())
                     functions.push_back(FunctionEntry {
                         .name = entry.name,
                         .function = item.of.func,

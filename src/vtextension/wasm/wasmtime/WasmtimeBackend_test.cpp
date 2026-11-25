@@ -221,7 +221,7 @@ TEST_CASE("WasmtimeBackend.hostFunctionArities", "[wasmtime]")
     // taking more cannot be provided, and the runtime is refused.
     namespace contract = vtextension::wasm::testing::contract;
     using vtextension::wasm::HostFunction;
-    using vtextension::wasm::wasmtime::MaxHostParameters;
+    using vtextension::wasm::MaxHostParameters;
     auto const backend = WasmtimeTraits::make();
 
     for (auto const arity: { uint32_t { 0 }, uint32_t { 1 }, MaxHostParameters })
@@ -358,9 +358,11 @@ TEST_CASE("WasmtimeBackend.wasiReadsTheConfiguredEnvironment", "[wasmtime]")
     // A clock reading 7 seconds past its id, and random bytes that are all 0x5A.
     auto config = WasmtimeConfig {
         .trapMode = TrapMode::Software,
-        .wasiEnvironment = {
-            .clock = [](uint32_t clockId) { return 7'000'000'000 + uint64_t { clockId }; },
-            .random = [](std::span<std::byte> bytes) -> std::expected<void, vtextension::wasm::wasi::Errno> {
+        .wasiEnvironment = vtextension::wasm::wasi::ShimEnvironment {
+            [](vtextension::wasm::wasi::ClockId clockId) {
+                return 7'000'000'000 + uint64_t { static_cast<uint8_t>(clockId) };
+            },
+            [](std::span<std::byte> bytes) -> std::expected<void, vtextension::wasm::wasi::Errno> {
                 std::ranges::fill(bytes, std::byte { 0x5A });
                 return {};
             } },

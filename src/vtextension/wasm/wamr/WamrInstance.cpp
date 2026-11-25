@@ -292,7 +292,8 @@ namespace
 
         auto functions = std::vector<FunctionEntry> {};
         for (auto const& entry: exports | std::views::filter([](ExportDescription const& candidate) {
-                                    return candidate.kind == ExternKind::Function;
+                                    return candidate.kind == ExternKind::Function
+                                           && candidate.signature.isAllI32();
                                 }))
         {
             // The exports are described by the names the module gave them; WAMR knows a hidden one by its

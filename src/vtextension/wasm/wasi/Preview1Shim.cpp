@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtextension/wasm/wasi/Preview1Shim.hpp>
 
+#include <core/Assert.hpp>
+
 #include <algorithm>
 #include <array>
 #include <concepts>
@@ -11,6 +13,7 @@
 #include <ranges>
 #include <span>
 #include <string_view>
+#include <utility>
 
 #include <vtextension/wasm/WasiAllowList.hpp>
 
@@ -181,7 +184,7 @@ namespace
     {
         return returned(providedClock(args[0]).and_then([&](ClockId clock) {
             return range(memory, asU32(args[2]), sizeof(uint64_t)).transform([&](auto bytes) {
-                storeLittleEndian(bytes, environment.clock(static_cast<uint32_t>(clock)));
+                storeLittleEndian(bytes, environment.clock(clock));
             });
         }));
     }
@@ -327,6 +330,12 @@ namespace
                                      AllowedWasiFunctions),
                   "ShimTable implements AllowedWasiFunctions, in its order");
 } // namespace
+
+ShimEnvironment::ShimEnvironment(Clock clock, Random random):
+    _clock { std::move(clock) }, _random { std::move(random) }
+{
+    Require(_clock && _random);
+}
 
 std::span<ShimFunction const> shimFunctions() noexcept
 {

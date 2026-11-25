@@ -74,8 +74,9 @@ struct FeatureRow
     FeatureSwitch featureSwitch = FeatureSwitch::Configurable; ///< Whether an engine can refuse it.
 };
 
-/// The one table both engines configure from and the world check reports by name: one row per
-/// EngineFeature, in the enum's order. A feature no engine may be told to refuse is On.
+/// The one table both engines are configured from -- Wasmtime's switches by the backend, WAMR's build
+/// options checked by the backend contract, which names a feature by its row's name in its reports. One
+/// row per EngineFeature, in the enum's order. A feature no engine may be told to refuse is On.
 inline constexpr auto EngineFeatures = std::to_array<FeatureRow>({
     { .feature = EngineFeature::BulkMemory, .state = FeatureState::On, .name = "bulk-memory" },
     { .feature = EngineFeature::SignExtension,

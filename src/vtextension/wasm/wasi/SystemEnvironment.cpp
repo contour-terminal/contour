@@ -35,10 +35,10 @@ namespace
     }
 
     /// @return The time of the clock @p clockId, ClockId::Realtime or ClockId::Monotonic, in nanoseconds.
-    [[nodiscard]] uint64_t readClock(uint32_t clockId) noexcept
+    [[nodiscard]] uint64_t readClock(ClockId clockId) noexcept
     {
         // The shim asks for no other clock (Preview1Shim.cpp, Clocks).
-        if (clockId == static_cast<uint32_t>(ClockId::Realtime))
+        if (clockId == ClockId::Realtime)
             return nanosecondsOf<std::chrono::system_clock>();
         return nanosecondsOf<std::chrono::steady_clock>();
     }
@@ -82,7 +82,7 @@ namespace
 
 ShimEnvironment systemEnvironment()
 {
-    return ShimEnvironment { .clock = &readClock, .random = &fillRandom };
+    return ShimEnvironment { &readClock, &fillRandom };
 }
 
 } // namespace vtextension::wasm::wasi
