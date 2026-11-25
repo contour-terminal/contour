@@ -1242,7 +1242,8 @@ TEST_CASE("keys: what is refused, and where", "[config]")
     CHECK(notAKey.error().problem == ConfigProblem::NotAKeyName);
     CHECK(
         message(notAKey.error(), sourceTables())
-        == "keys.move_up[1]: is not a key: one printable character, ^ and a letter (not h, i, j or m), two "
+        == "keys.move_up[1]: is not a key: one printable character, ^ and a lower-case letter (not h, i, j "
+           "or m), two "
            "characters such as gg, or one of: up, down, left, right, home, end, pgup, pgdn, enter, esc, tab, "
            "del");
 

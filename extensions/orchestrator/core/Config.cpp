@@ -344,10 +344,12 @@ namespace
                       .text = "is a permission profile, which a Copilot worker does not take" },
         ProblemText {
             .problem = ConfigProblem::UnknownRole, .text = "must be one of", .listing = Listing::TaskRoles },
-        ProblemText { .problem = ConfigProblem::NotAKeyName,
-                      .text = "is not a key: one printable character, ^ and a letter (not h, i, j or m), two "
-                              "characters such as gg, or one of",
-                      .listing = Listing::KeyNames },
+        ProblemText {
+            .problem = ConfigProblem::NotAKeyName,
+            .text =
+                "is not a key: one printable character, ^ and a lower-case letter (not h, i, j or m), two "
+                "characters such as gg, or one of",
+            .listing = Listing::KeyNames },
         ProblemText { .problem = ConfigProblem::KeyTaken, .text = "is already bound" },
         ProblemText { .problem = ConfigProblem::TypesText,
                       .text =

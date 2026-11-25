@@ -92,8 +92,12 @@ namespace
         CommandKey { .name = "^k"sv, .does = "open the palette"sv, .context = Typing },
         CommandKey { .name = "^u"sv, .does = "clear the text"sv, .context = Typing },
         CommandKey { .name = "^w"sv, .does = "drop a word"sv, .context = Typing },
-        CommandKey { .name = "^p"sv, .does = "show the prompt"sv, .context = Typing },
+        CommandKey { .name = "^p"sv,
+                     .does = "show the prompt or choose the previous palette entry"sv,
+                     .context = Typing },
         CommandKey { .name = "^n"sv, .does = "choose the next palette entry"sv, .context = Typing },
+        CommandKey { .name = "up"sv, .does = "choose the previous palette entry"sv, .context = Typing },
+        CommandKey { .name = "down"sv, .does = "choose the next palette entry"sv, .context = Typing },
     };
 
     /// OwnCommandKeys, then the message box's pass-through keys as Typing rows: one table each, no drift.
