@@ -7,7 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
-#include <vector>
+#include <memory>
 
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
@@ -25,6 +25,13 @@ enum class StreamError : uint8_t
                ///< direction or channel.
     OverCap,   ///< The peer sent a frame larger than its kind may be; or, from send(), the PDU holds a
                ///< list over its cap or is larger than its kind may be, and was not sent.
+};
+
+/// What a stream's receive buffer cost so far; a test hook.
+struct ReceiveBufferStats
+{
+    std::size_t allocations = 0; ///< How often the buffer was allocated anew.
+    std::size_t peakBytes = 0;   ///< The most bytes it held allocated at once.
 };
 
 /// One channel's PDUs. Owns the channel and a receive buffer; used by one thread at a time, which may both
@@ -53,13 +60,23 @@ class PduStream
     /// Shuts the channel down: a receive blocked on it, from any thread, fails `Closed`.
     void shutdown() noexcept;
 
+    /// Test hook.
+    /// @return What the receive buffer cost since the stream was made.
+    [[nodiscard]] ReceiveBufferStats receiveBufferStats() const noexcept { return _stats; }
+
   private:
+    /// Replaces the receive buffer with one of @p capacity bytes, keeping the bytes buffered.
+    /// @param capacity At least _buffered; 0 lets the buffer go.
+    void reallocate(std::size_t capacity);
+
     Channel _channel;
     proto::ChannelKind _kind;
     proto::Direction _arriving;
     proto::PduLimits _limits;
-    std::vector<uint8_t> _buffer; ///< Received bytes; the first _buffered of them are not consumed yet.
+    std::unique_ptr<uint8_t[]> _buffer; ///< Received bytes; the first _buffered of them are not consumed yet.
+    std::size_t _capacity = 0;          ///< How many bytes _buffer holds.
     std::size_t _buffered = 0;
+    ReceiveBufferStats _stats;
 };
 
 } // namespace vtextension::wasm::remote::transport

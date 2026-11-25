@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <expected>
 #include <future>
+#include <ranges>
 #include <utility>
 #include <vector>
 
@@ -23,6 +24,9 @@ using transport::StreamError;
 
 namespace
 {
+
+/// What a large frame's buffer may take beyond the frame itself.
+constexpr auto LargeFrameHeadroom = std::size_t { 64 };
 
 /// The control channel's two ends, as Contour and the extension host process hold them.
 struct ControlPair
@@ -164,4 +168,38 @@ TEST_CASE("PduStream.garbageIsMalformed", "[vtextension]")
         REQUIRE(channels->helper.send(*frame).has_value());
         CHECK(stream.receive() == std::unexpected(StreamError::Malformed));
     }
+}
+
+TEST_CASE("PduStream.largeFrameAllocatesItsSizeOnce", "[vtextension]")
+{
+    // A module near the largest a Load carries: the buffer grows once, to the frame's size, without doubling
+    // past it.
+    auto pair = makeControlPair();
+    auto const load = proto::Pdu { proto::Load {
+        .runtimeId = 1,
+        .moduleId = 2,
+        .bytes = std::vector<std::byte>(proto::PduLimits {}.maxModuleBytes - 64, std::byte { 7 }) } };
+    auto const frameBytes = proto::encodeFrame(load).value().size();
+    auto sent = std::async(std::launch::async, [&] { return pair.parent.send(load); });
+    CHECK(pair.helper.receive() == load);
+    REQUIRE(sent.get().has_value());
+    auto const stats = pair.helper.receiveBufferStats();
+    CHECK(stats.peakBytes <= frameBytes + LargeFrameHeadroom);
+    CHECK(stats.allocations <= 2); // the first chunk, then the frame
+}
+
+TEST_CASE("PduStream.keepsAModerateBufferBetweenFrames", "[vtextension]")
+{
+    // Frames of a few hundred KiB each, as memory reads of a busy instance are: the buffer grown for the
+    // first serves the rest.
+    auto pair = makeControlPair();
+    auto const load = proto::Pdu { proto::Load {
+        .runtimeId = 1, .moduleId = 2, .bytes = std::vector<std::byte>(std::size_t { 512 } * 1024) } };
+    for ([[maybe_unused]] auto const round: std::views::iota(0, 4))
+    {
+        auto sent = std::async(std::launch::async, [&] { return pair.parent.send(load); });
+        CHECK(pair.helper.receive() == load);
+        REQUIRE(sent.get().has_value());
+    }
+    CHECK(pair.helper.receiveBufferStats().allocations <= 2);
 }

@@ -484,45 +484,83 @@ std::expected<std::vector<uint8_t>, EncodeError> encodeFrame(Pdu const& pdu)
     return frame.take();
 }
 
+namespace
+{
+    /// A frame's header, read and checked.
+    struct FrameHeader
+    {
+        std::size_t frameStart; ///< Where the frame's length ends and its kind begins.
+        std::size_t length;     ///< How many bytes the kind and body span.
+        std::size_t kindBytes;  ///< How many bytes of them the kind spans.
+        PduRow const* row;      ///< The kind's row.
+    };
+
+    /// Reads and checks the header of the frame at the front of @p buffer. @see frameSizeOf
+    [[nodiscard]] std::expected<FrameHeader, DecodeError> readHeader(std::span<uint8_t const> buffer,
+                                                                     Direction arriving,
+                                                                     ChannelKind channel,
+                                                                     PduLimits const& limits)
+    {
+        auto header = Reader { buffer };
+        auto const length = header.varint64();
+        if (!length)
+            return std::unexpected(length.error() == DecodeError::Truncated ? DecodeError::NeedMoreData
+                                                                            : length.error());
+        // Refused before the kind is known, so that no header makes the reader wait for more than any kind
+        // holds.
+        if (*length > largestFrameLength(limits))
+            return std::unexpected(DecodeError::OverCap);
+        auto const frameStart = header.consumed();
+        auto const available = buffer.size() - frameStart;
+        auto const complete = available >= *length;
+
+        // The kind lies inside the frame: running past what arrived waits, running past the frame is a lie.
+        auto frame =
+            Reader { buffer.subspan(frameStart, complete ? static_cast<std::size_t>(*length) : available) };
+        auto const kind = frame.varint32();
+        if (!kind)
+            return std::unexpected(kind.error() == DecodeError::Truncated && !complete
+                                       ? DecodeError::NeedMoreData
+                                       : kind.error());
+        if (*kind == 0 || *kind > PduTable.size())
+            return std::unexpected(DecodeError::UnknownKind);
+        auto const& row = PduTable[*kind - 1];
+        if (row.direction != arriving)
+            return std::unexpected(DecodeError::WrongDirection);
+        if (row.channel != channel)
+            return std::unexpected(DecodeError::WrongChannel);
+        if (*length - frame.consumed() > row.sizeCap(limits))
+            return std::unexpected(DecodeError::OverCap);
+        return FrameHeader { .frameStart = frameStart,
+                             .length = static_cast<std::size_t>(*length),
+                             .kindBytes = frame.consumed(),
+                             .row = &row };
+    }
+} // namespace
+
+std::expected<std::size_t, DecodeError> frameSizeOf(std::span<uint8_t const> buffer,
+                                                    Direction arriving,
+                                                    ChannelKind channel,
+                                                    PduLimits const& limits)
+{
+    return readHeader(buffer, arriving, channel, limits).transform([](FrameHeader const& header) {
+        return header.frameStart + header.length;
+    });
+}
+
 std::expected<DecodedFrame, DecodeError> decodeFrame(std::span<uint8_t const> buffer,
                                                      Direction arriving,
                                                      ChannelKind channel,
                                                      PduLimits const& limits)
 {
-    auto header = Reader { buffer };
-    auto const length = header.varint64();
-    if (!length)
-        return std::unexpected(length.error() == DecodeError::Truncated ? DecodeError::NeedMoreData
-                                                                        : length.error());
-    // Refused before the kind is known, so that no header makes the reader wait for more than any kind holds.
-    if (*length > largestFrameLength(limits))
-        return std::unexpected(DecodeError::OverCap);
-    auto const frameStart = header.consumed();
-    auto const available = buffer.size() - frameStart;
-    auto const complete = available >= *length;
-
-    // The kind lies inside the frame: running past what arrived waits, running past the frame is a lie.
-    auto frame =
-        Reader { buffer.subspan(frameStart, complete ? static_cast<std::size_t>(*length) : available) };
-    auto const kind = frame.varint32();
-    if (!kind)
-        return std::unexpected(kind.error() == DecodeError::Truncated && !complete ? DecodeError::NeedMoreData
-                                                                                   : kind.error());
-    if (*kind == 0 || *kind > PduTable.size())
-        return std::unexpected(DecodeError::UnknownKind);
-    auto const& row = PduTable[*kind - 1];
-    if (row.direction != arriving)
-        return std::unexpected(DecodeError::WrongDirection);
-    if (row.channel != channel)
-        return std::unexpected(DecodeError::WrongChannel);
-    auto const bodySize = *length - frame.consumed();
-    if (bodySize > row.sizeCap(limits))
-        return std::unexpected(DecodeError::OverCap);
-    if (!complete)
+    auto const header = readHeader(buffer, arriving, channel, limits);
+    if (!header)
+        return std::unexpected(header.error());
+    auto const consumed = header->frameStart + header->length;
+    if (buffer.size() < consumed)
         return std::unexpected(DecodeError::NeedMoreData);
-
-    auto const consumed = frameStart + static_cast<std::size_t>(*length);
-    return row.decode(buffer.subspan(frameStart + frame.consumed(), static_cast<std::size_t>(bodySize)))
+    return header->row
+        ->decode(buffer.subspan(header->frameStart + header->kindBytes, header->length - header->kindBytes))
         .transform(
             [consumed](Pdu&& pdu) { return DecodedFrame { .pdu = std::move(pdu), .consumed = consumed }; });
 }

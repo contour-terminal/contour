@@ -5,9 +5,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <memory>
 #include <span>
 #include <utility>
-#include <vector>
 
 #include <vtextension/wasm/remote/proto/Codec.hpp>
 #include <vtextension/wasm/remote/proto/PduTable.hpp>
@@ -18,9 +18,13 @@ namespace vtextension::wasm::remote::transport
 
 namespace
 {
-    /// How many bytes a receive asks the channel for at least. A frame larger than this grows the buffer to
-    /// hold it; the buffer drops back to this once it drains, so that one large module does not pin its size.
+    /// How many bytes a receive asks the channel for at least: the receive buffer's least size, which holds
+    /// many small frames at once.
     constexpr auto ReceiveChunk = std::size_t { 64 } * 1024;
+
+    /// The largest receive buffer kept once it drains. One a larger frame grew is let go, so that one large
+    /// module does not pin its size; the frames of a busy instance's memory reads, up to this, reuse it.
+    constexpr auto RetainedBufferBytes = (std::size_t { 1024 } * 1024) + ReceiveChunk;
 
     /// @return The stream's reason for a channel's failure.
     [[nodiscard]] StreamError streamErrorOf(ChannelError error) noexcept
@@ -72,26 +76,45 @@ std::expected<proto::Pdu, StreamError> PduStream::receive()
 {
     while (true)
     {
-        auto decoded = proto::decodeFrame(std::span { _buffer }.first(_buffered), _arriving, _kind, _limits);
+        auto const buffered = std::span<uint8_t const> { _buffer.get(), _buffered };
+        auto decoded = proto::decodeFrame(buffered, _arriving, _kind, _limits);
         if (decoded)
         {
             // Moves what follows the frame to the front, and lets a buffer a large frame grew go.
-            std::ranges::copy(std::span { _buffer }.subspan(decoded->consumed, _buffered - decoded->consumed),
-                              _buffer.begin());
+            std::ranges::copy(buffered.subspan(decoded->consumed), _buffer.get());
             _buffered -= decoded->consumed;
-            if (_buffered == 0 && _buffer.size() > ReceiveChunk)
-                _buffer = std::vector<uint8_t> {};
+            if (_buffered == 0 && _capacity > RetainedBufferBytes)
+                reallocate(0);
             return std::move(decoded->pdu);
         }
         if (decoded.error() != proto::DecodeError::NeedMoreData)
             return std::unexpected(streamErrorOf(decoded.error()));
 
-        if (_buffer.size() - _buffered < ReceiveChunk)
-            _buffer.resize(std::max(_buffered + ReceiveChunk, _buffer.size() * 2));
-        auto const received = _channel.receiveSome(std::span { _buffer }.subspan(_buffered));
+        // Grown once to hold the whole frame as soon as its header tells its size, never past it: a frame's
+        // bytes arrive straight where it is decoded from, with no doubling and nothing zero-filled.
+        auto const frameBytes =
+            proto::frameSizeOf(buffered, _arriving, _kind, _limits).value_or(_buffered + 1);
+        if (_capacity < frameBytes || _capacity == _buffered)
+            reallocate(std::max({ frameBytes, _buffered + 1, ReceiveChunk }));
+        auto const received = _channel.receiveSome(std::span { _buffer.get(), _capacity }.subspan(_buffered));
         if (!received)
             return std::unexpected(streamErrorOf(received.error()));
         _buffered += *received;
+    }
+}
+
+void PduStream::reallocate(std::size_t capacity)
+{
+    // Default-initialized: only what is received is written, and the bytes buffered are copied over.
+    auto buffer =
+        capacity ? std::make_unique_for_overwrite<uint8_t[]>(capacity) : std::unique_ptr<uint8_t[]> {};
+    std::ranges::copy(std::span { _buffer.get(), _buffered }, buffer.get());
+    _buffer = std::move(buffer);
+    _capacity = capacity;
+    if (capacity)
+    {
+        ++_stats.allocations;
+        _stats.peakBytes = std::max(_stats.peakBytes, capacity);
     }
 }
 

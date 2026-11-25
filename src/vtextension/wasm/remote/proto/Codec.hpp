@@ -49,6 +49,20 @@ struct DecodedFrame
     std::size_t consumed; ///< How many bytes of the buffer the frame spans.
 };
 
+/// Reads the header of the frame at the front of @p buffer, and checks it as decodeFrame() does: its length,
+/// and its kind's direction, channel and size cap. What a reader waiting for a frame's body allocates for it.
+/// @param buffer The bytes received so far; the frame starts at its first byte.
+/// @param arriving The way the frame travels: a PDU of the other direction is `WrongDirection`.
+/// @param channel The channel it arrived on: a PDU of the other channel is `WrongChannel`.
+/// @param limits The caps of the PDUs whose size follows the stream's limits.
+/// @return How many bytes the whole frame spans, header included, whether or not all of them arrived yet.
+///         `NeedMoreData` while its header is incomplete; any other error is a violation that ends the
+///         stream.
+[[nodiscard]] std::expected<std::size_t, DecodeError> frameSizeOf(std::span<uint8_t const> buffer,
+                                                                  Direction arriving,
+                                                                  ChannelKind channel,
+                                                                  PduLimits const& limits);
+
 /// Decodes the frame at the front of @p buffer.
 /// @param buffer The bytes received so far; the frame starts at its first byte.
 /// @param arriving The way the frame travels: a PDU of the other direction is `WrongDirection`.
