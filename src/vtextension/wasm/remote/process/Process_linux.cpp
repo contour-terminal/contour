@@ -10,7 +10,10 @@
 // Right after the spawn the child is pinned by a pidfd: kill() signals the pidfd, tryReap() waits on it, and
 // the wait set polls it, so that no number is ever used after the process behind it could have been reaped
 // and the number reused. A kernel that cannot wait on a pidfd (before 5.4; pidfds themselves came in 5.3)
-// is found out once, when the launcher is made, and every launch is refused as Unsupported.
+// is found out once, by makeSystemProcessLauncher(), and the launcher it makes refuses every launch as
+// Unsupported.
+#include <vtextension/wasm/remote/process/Process_linux.hpp>
+
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -47,25 +50,6 @@ namespace
         if (pidfd == -1)
             return std::unexpected(errno);
         return UniqueFd { pidfd };
-    }
-
-    /// Whether the kernel waits on pidfds.
-    enum class PidfdWaits : uint8_t
-    {
-        Unsupported, ///< Before Linux 5.4: no waitid(P_PIDFD), or (before 5.3) no pidfd at all.
-        Supported,
-    };
-
-    /// @return Whether the kernel waits on pidfds, asked of this process's own: waitid(P_PIDFD) on it fails
-    ///         ECHILD where the id type is known, as a process is no child of its own, and EINVAL where not.
-    [[nodiscard]] PidfdWaits probePidfdWaits() noexcept
-    {
-        auto const own = openPidfd(::getpid());
-        if (!own)
-            return own.error() == ENOSYS ? PidfdWaits::Unsupported : PidfdWaits::Supported;
-        auto info = siginfo_t {};
-        auto const waited = ::waitid(PidfdIdType, static_cast<id_t>(own->get()), &info, WEXITED | WNOHANG);
-        return waited == -1 && errno == EINVAL ? PidfdWaits::Unsupported : PidfdWaits::Supported;
     }
 
     class LinuxProcessHandle final: public IProcessHandle
@@ -116,7 +100,7 @@ namespace
     class LinuxProcessLauncher final: public IProcessLauncher
     {
       public:
-        LinuxProcessLauncher() noexcept: _pidfdWaits { probePidfdWaits() } {}
+        explicit LinuxProcessLauncher(PidfdWaits pidfdWaits) noexcept: _pidfdWaits { pidfdWaits } {}
 
         [[nodiscard]] std::expected<std::unique_ptr<IProcessHandle>, LaunchError> launch(
             LaunchSpec const& spec) override
@@ -157,9 +141,24 @@ namespace
     };
 } // namespace
 
+PidfdWaits probePidfdWaits() noexcept
+{
+    auto const own = openPidfd(::getpid());
+    if (!own)
+        return own.error() == ENOSYS ? PidfdWaits::Unsupported : PidfdWaits::Supported;
+    auto info = siginfo_t {};
+    auto const waited = ::waitid(PidfdIdType, static_cast<id_t>(own->get()), &info, WEXITED | WNOHANG);
+    return waited == -1 && errno == EINVAL ? PidfdWaits::Unsupported : PidfdWaits::Supported;
+}
+
+std::shared_ptr<IProcessLauncher> makeLinuxProcessLauncher(PidfdWaits pidfdWaits)
+{
+    return std::make_shared<LinuxProcessLauncher>(pidfdWaits);
+}
+
 std::shared_ptr<IProcessLauncher> makeSystemProcessLauncher()
 {
-    return std::make_shared<LinuxProcessLauncher>();
+    return makeLinuxProcessLauncher(probePidfdWaits());
 }
 
 std::vector<std::pair<std::string, std::string>> defaultHelperEnvironment()

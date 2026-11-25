@@ -32,6 +32,9 @@
 #include <vector>
 
 #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+#ifdef __linux__
+    #include <vtextension/wasm/remote/process/Process_linux.hpp>
+#endif
 #include <vtextension/wasm/remote/process/testing/FakeProcessLauncher.hpp>
 #include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
 #include <vtextension/wasm/remote/process/testing/RecordingLauncher.hpp>
@@ -345,6 +348,33 @@ TEST_CASE("ProcessLauncher.missingExecutableIsNotFound", "[vtextension]")
                                    .caps = {} };
     CHECK(launcher->launch(spec) == std::unexpected(LaunchError::NotFound));
 }
+
+#ifdef __linux__
+TEST_CASE("ProcessLauncher.unsupportedPidfdWaitsRefuseEveryLaunch", "[vtextension]")
+{
+    auto const launcher = process::makeLinuxProcessLauncher(process::PidfdWaits::Unsupported);
+    auto control = transport::makeChannelPair();
+    REQUIRE(control.has_value());
+    auto const spec = LaunchSpec { .executable = VTEXTENSION_PROBE_PATH,
+                                   .inherited = { control->helper.nativeHandle() },
+                                   .arguments = [](auto) { return std::vector<std::string> { "--report" }; },
+                                   .environment = {},
+                                   .caps = {} };
+    CHECK(launcher->launch(spec) == std::unexpected(LaunchError::Unsupported));
+    // Refused before anything started: once Contour lets go of the helper's end, no child holds it.
+    {
+        auto const dropped = std::move(control->helper);
+    }
+    auto buffer = std::array<uint8_t, 16> {};
+    CHECK(control->parent.receiveSome(buffer) == std::unexpected(ChannelError::Closed));
+}
+
+TEST_CASE("ProcessLauncher.thisKernelWaitsOnPidfds", "[vtextension]")
+{
+    // Every kernel this is tested on is 5.4 or later.
+    CHECK(process::probePidfdWaits() == process::PidfdWaits::Supported);
+}
+#endif
 
 #ifdef _WIN32
 TEST_CASE("ProcessLauncher.childIsInAKillOnCloseJob", "[vtextension]")

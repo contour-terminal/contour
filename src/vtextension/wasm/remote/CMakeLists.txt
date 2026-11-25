@@ -55,7 +55,7 @@ endif()
 # vtextension_remote_process: starting extension host processes and knowing when they end, one source per
 # operating system. It stays std-only -- the wire library and core-cpp, no engine and no vtbackend -- so that it,
 # and its tests, cross-build for Windows and run under wine. Systems with none of the four have no launcher yet.
-set(_process_sources_Linux process/Process_linux.cpp)
+set(_process_sources_Linux process/Process_linux.cpp process/Process_linux.hpp)
 set(_process_sources_FreeBSD process/Process_freebsd.cpp)
 set(_process_sources_Darwin process/Process_macos.cpp)
 set(_process_sources_Windows process/Process_win32.cpp)
