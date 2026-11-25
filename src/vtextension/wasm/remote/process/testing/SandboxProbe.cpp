@@ -67,6 +67,19 @@ namespace
     constexpr auto SandboxedOption = std::string_view { "--sandboxed" };
     constexpr auto OuterFilterOption = std::string_view { "--outer-filter=" };
     constexpr auto OperationOption = std::string_view { "--sandbox-op=" };
+    constexpr auto GuestCodeOption = std::string_view { "--guest-code=" };
+
+    /// A row set the probe can lock down with: the engine's GuestCode, by the name the option gives it.
+    struct GuestCodeName
+    {
+        std::string_view name;
+        host::GuestCode code;
+    };
+
+    constexpr auto GuestCodeNames = std::array {
+        GuestCodeName { .name = "interpreted", .code = host::GuestCode::Interpreted },
+        GuestCodeName { .name = "compiled", .code = host::GuestCode::Compiled },
+    };
 
     /// Exit codes of the sandboxed mode, beside the host's for a parent that is gone.
     enum class SandboxProbeExit : uint8_t
@@ -222,16 +235,39 @@ namespace
         return mapAnonymous(PROT_READ | PROT_WRITE, MAP_SHARED);
     }
 
-    [[nodiscard]] std::string protectWritableExecutable(OperationContext&)
+    /// What an engine that compiles does: maps memory writable, then makes it @p protection.
+    [[nodiscard]] std::string protectAnonymous(int protection)
     {
         constexpr auto Bytes = std::size_t { 4096 };
         auto* const mapped =
             ::mmap(nullptr, Bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (mapped == MAP_FAILED)
             return outcomeOf(-1);
-        auto outcome = outcomeOf(::syscall(SYS_mprotect, mapped, Bytes, PROT_READ | PROT_WRITE | PROT_EXEC));
+        auto outcome = outcomeOf(::syscall(SYS_mprotect, mapped, Bytes, protection));
         ::munmap(mapped, Bytes);
         return outcome;
+    }
+
+    [[nodiscard]] std::string protectWritableExecutable(OperationContext&)
+    {
+        return protectAnonymous(PROT_READ | PROT_WRITE | PROT_EXEC);
+    }
+
+    /// Compiled code turning executable once written: read and execute, never write.
+    [[nodiscard]] std::string protectExecutable(OperationContext&)
+    {
+        return protectAnonymous(PROT_READ | PROT_EXEC);
+    }
+
+    /// What every engine's host does as guest memory opens: no execute bit.
+    [[nodiscard]] std::string protectReadable(OperationContext&)
+    {
+        return protectAnonymous(PROT_READ);
+    }
+
+    [[nodiscard]] std::string mapExecutable(OperationContext&)
+    {
+        return mapAnonymous(PROT_READ | PROT_EXEC, MAP_PRIVATE);
     }
 
     [[nodiscard]] std::string channelPair(OperationContext&)
@@ -314,6 +350,9 @@ namespace
         Operation { .name = "map-writable-executable", .run = &mapWritableExecutable },
         Operation { .name = "map-shared-unfixed", .run = &mapSharedUnfixed },
         Operation { .name = "protect-writable-executable", .run = &protectWritableExecutable },
+        Operation { .name = "map-executable", .run = &mapExecutable },
+        Operation { .name = "protect-executable", .run = &protectExecutable },
+        Operation { .name = "protect-readable", .run = &protectReadable },
         Operation { .name = "channel-pair", .run = &channelPair },
         Operation { .name = "permitted", .run = &permitted },
     };
@@ -457,6 +496,7 @@ namespace
         Sandboxing sandboxing = Sandboxing::None;
         OuterFilter const* outer = nullptr;
         Operation const* operation = &Operations.front();
+        host::GuestCode guestCode = host::GuestCode::Compiled;
         std::vector<std::string_view> helperArguments;
     };
 
@@ -483,6 +523,14 @@ namespace
                     return std::nullopt;
                 request.operation = &*found;
             }
+            else if (argument.starts_with(GuestCodeOption))
+            {
+                auto const name = argument.substr(GuestCodeOption.size());
+                auto const found = std::ranges::find(GuestCodeNames, name, &GuestCodeName::name);
+                if (found == GuestCodeNames.end())
+                    return std::nullopt;
+                request.guestCode = found->code;
+            }
             else
                 request.helperArguments.push_back(argument);
         }
@@ -499,7 +547,7 @@ bool asksForSandboxProbe(std::span<std::string_view const> arguments) noexcept
 {
     return std::ranges::any_of(arguments, [](std::string_view argument) {
         return argument == SandboxedOption || argument.starts_with(OuterFilterOption)
-               || argument.starts_with(OperationOption);
+               || argument.starts_with(OperationOption) || argument.starts_with(GuestCodeOption);
     });
 }
 
@@ -558,9 +606,8 @@ int runSandboxProbe(std::span<std::string_view const> arguments)
 
     auto const sandbox =
         request->sandboxing == Sandboxing::System
-            // The wider row set, of an engine that compiles: what it forbids, every engine's forbids.
             ? host::makeSystemSandbox(host::SandboxDescriptors { .control = controlDescriptor },
-                                      host::GuestCode::Compiled)
+                                      request->guestCode)
             : std::unique_ptr<host::ISandbox> {};
     auto const restricted =
         sandbox ? sandbox->restrictBeforeThreads() : std::expected<void, host::ConfinementFailure> {};

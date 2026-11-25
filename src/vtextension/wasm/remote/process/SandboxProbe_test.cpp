@@ -30,6 +30,7 @@
 #include <unistd.h>
 
 #include <vtextension/wasm/BuildInstrumentation.hpp>
+#include <vtextension/wasm/host/GuestCode.hpp>
 #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
 #include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
@@ -42,6 +43,7 @@ using process::ExitKind;
 using process::ExitStatus;
 using process::testing::LaunchedHelper;
 using process::testing::readReport;
+using vtextension::wasm::host::GuestCode;
 
 namespace
 {
@@ -61,14 +63,30 @@ enum class ProbeSandbox : uint8_t
     System, ///< --sandboxed.
 };
 
-/// @return The probe started sandboxed (or not) under @p outerFilter, to run @p op.
+/// The name the probe's `--guest-code=` gives @p code.
+[[nodiscard]] constexpr std::string_view guestCodeName(GuestCode code) noexcept
+{
+    switch (code)
+    {
+        case GuestCode::Interpreted: return "interpreted";
+        case GuestCode::Compiled: return "compiled";
+    }
+    return "compiled";
+}
+
+/// @return The probe started sandboxed (or not), with the rows of an engine running @p guestCode, under
+///         @p outerFilter, to run @p op.
 [[nodiscard]] LaunchedHelper launchProbe(std::string_view op,
                                          std::string_view outerFilter,
-                                         ProbeSandbox sandbox)
+                                         ProbeSandbox sandbox,
+                                         GuestCode guestCode = GuestCode::Compiled)
 {
     auto leading = std::vector<std::string> { "--receive-grant", std::format("--sandbox-op={}", op) };
     if (sandbox == ProbeSandbox::System)
+    {
         leading.emplace_back("--sandboxed");
+        leading.push_back(std::format("--guest-code={}", guestCodeName(guestCode)));
+    }
     if (!outerFilter.empty())
         leading.push_back(std::format("--outer-filter={}", outerFilter));
     auto probe = process::testing::launchHelper(
@@ -90,12 +108,14 @@ enum class ProbeSandbox : uint8_t
     return status;
 }
 
-/// Runs @p op in a probe, sandboxed unless said otherwise, under @p outerFilter.
+/// Runs @p op in a probe, sandboxed unless said otherwise, under @p outerFilter, with the rows of an engine
+/// running @p guestCode.
 [[nodiscard]] ProbeRun runProbe(std::string_view op,
                                 std::string_view outerFilter = {},
-                                ProbeSandbox sandbox = ProbeSandbox::System)
+                                ProbeSandbox sandbox = ProbeSandbox::System,
+                                GuestCode guestCode = GuestCode::Compiled)
 {
-    auto probe = launchProbe(op, outerFilter, sandbox);
+    auto probe = launchProbe(op, outerFilter, sandbox, guestCode);
     auto run = ProbeRun {};
     auto const lockdown = readReport(probe.lanes.front());
     REQUIRE(lockdown.has_value());
@@ -190,6 +210,40 @@ TEST_CASE("Sandbox.forbiddenOperationsFailFromAnExecutor", "[vtextension][sandbo
             CHECK_FALSE(run.op.has_value());
             CHECK(run.exit == Killed);
         }
+    }
+}
+
+TEST_CASE("Sandbox.onlyCompiledCodeTurnsExecutable", "[vtextension][sandbox]")
+{
+    struct Expectation
+    {
+        GuestCode guestCode;
+        std::string_view op;
+        ExitStatus exit; ///< Killed, or Clean once the op worked.
+    };
+    // An interpreter writes no code: nothing of its host's turns executable, by mapping or protecting --
+    // while memory it protects without the execute bit, as guest memory opens, is protected as asked. An
+    // engine that compiles turns what it wrote read-and-execute; it never maps memory executable.
+    constexpr auto Expectations = std::array {
+        Expectation { .guestCode = GuestCode::Interpreted, .op = "protect-readable", .exit = Clean },
+        Expectation { .guestCode = GuestCode::Interpreted, .op = "protect-executable", .exit = Killed },
+        Expectation { .guestCode = GuestCode::Interpreted, .op = "map-executable", .exit = Killed },
+        Expectation { .guestCode = GuestCode::Compiled, .op = "protect-executable", .exit = Clean },
+        Expectation { .guestCode = GuestCode::Compiled, .op = "map-executable", .exit = Killed },
+    };
+    for (auto const& expectation: Expectations)
+    {
+        INFO(guestCodeName(expectation.guestCode) << ": " << expectation.op);
+        auto const run = runProbe(expectation.op, {}, ProbeSandbox::System, expectation.guestCode);
+        CHECK(valueOf(run.lockdown, "lockdown") == "locked");
+        CHECK(run.exit == expectation.exit);
+        if (expectation.exit == Clean)
+        {
+            REQUIRE(run.op.has_value());
+            CHECK(valueOf(*run.op, "op") == "ok");
+        }
+        else
+            CHECK_FALSE(run.op.has_value());
     }
 }
 
