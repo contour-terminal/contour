@@ -1582,6 +1582,63 @@ void everyAllowedWasiFunctionWorks()
     }
 }
 
+/// Asks WASI's clocks: `time(clock)` calls clock_time_get(clock, 1, 64), `resolution(clock)` calls
+/// clock_res_get(clock, 64); each returns the errno.
+///
+///     (module
+///       (import "wasi_snapshot_preview1" "clock_time_get" (func $time (param i32 i64 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "clock_res_get" (func $res (param i32 i32) (result i32)))
+///       (memory (export "memory") 1)
+///       (func (export "time") (param i32) (result i32)
+///         (call $time (local.get 0) (i64.const 1) (i32.const 64)))
+///       (func (export "resolution") (param i32) (result i32)
+///         (call $res (local.get 0) (i32.const 64))))
+inline constexpr auto ClockModule = std::to_array<uint8_t>(
+    { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x13, 0x03, 0x60, 0x03, 0x7f, 0x7e, 0x7f, 0x01,
+      0x7f, 0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7f, 0x60, 0x01, 0x7f, 0x01, 0x7f, 0x02, 0x50, 0x02, 0x16, 0x77,
+      0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76,
+      0x69, 0x65, 0x77, 0x31, 0x0e, 0x63, 0x6c, 0x6f, 0x63, 0x6b, 0x5f, 0x74, 0x69, 0x6d, 0x65, 0x5f, 0x67,
+      0x65, 0x74, 0x00, 0x00, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f,
+      0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31, 0x0d, 0x63, 0x6c, 0x6f, 0x63, 0x6b, 0x5f,
+      0x72, 0x65, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x01, 0x03, 0x03, 0x02, 0x02, 0x02, 0x05, 0x03, 0x01,
+      0x00, 0x01, 0x07, 0x1e, 0x03, 0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00, 0x04, 0x74, 0x69,
+      0x6d, 0x65, 0x00, 0x02, 0x0a, 0x72, 0x65, 0x73, 0x6f, 0x6c, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x00, 0x03,
+      0x0a, 0x17, 0x02, 0x0b, 0x00, 0x20, 0x00, 0x42, 0x01, 0x41, 0xc0, 0x00, 0x10, 0x00, 0x0b, 0x09, 0x00,
+      0x20, 0x00, 0x41, 0xc0, 0x00, 0x10, 0x01, 0x0b });
+
+/// What clock_time_get and clock_res_get answer for each clock id of preview 1, and one past them: the
+/// realtime and monotonic clocks are provided; the CPU-time clocks are withheld (`Nosys`), as the time an
+/// instance's process or thread spent running tells of every other guest it runs beside; an unknown id is
+/// `Inval`.
+inline constexpr auto ClockOutcomes = std::to_array<std::pair<uint32_t, wasi::Errno>>({
+    { 0, wasi::Errno::Success },
+    { 1, wasi::Errno::Success },
+    { 2, wasi::Errno::Nosys },
+    { 3, wasi::Errno::Nosys },
+    { 4, wasi::Errno::Inval },
+});
+
+/// Every engine answers the same for every clock id: the CPU-time clocks withheld, whatever its own WASI
+/// would read.
+template <typename T>
+void clocksAnswerAlike()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, ClockModule);
+    auto context = RecordingHostContext {};
+    auto const instance = instantiate(*module, context);
+    for (auto const& [clock, expected]: ClockOutcomes)
+        for (auto const* function: { "time", "resolution" })
+        {
+            INFO(function << "(" << clock << ")");
+            auto argv = std::array<uint32_t, 1> { clock };
+            REQUIRE(instance->call(functionOf(*instance, function), argv).has_value());
+            CHECK(argv[0] == static_cast<uint32_t>(expected));
+        }
+}
+
 #ifndef _WIN32
 /// The signals whose disposition a backend must leave alone.
 inline constexpr auto GuardedSignals = std::array { SIGSEGV, SIGUSR1 };
@@ -1682,6 +1739,7 @@ void wasiStdioGoesNowhere()
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureWasiIsUnsatisfied)        \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, allowListedWasiIsSatisfied)             \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, everyAllowedWasiFunctionWorks)          \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, clocksAnswerAlike)                      \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNeedsARuntime)               \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNests)                       \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, generationFollowsBringUp)               \

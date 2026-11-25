@@ -11,12 +11,14 @@ add_library(vtextension_wamr STATIC
     WamrInstance.cpp
     WamrModule.cpp
     WamrThreadEnv.cpp
+    WasiOverrides.cpp
     HiddenExports.hpp
     TableCaps.hpp
     WamrBackend.hpp
     WamrHandles.hpp
     WamrRuntime.hpp
     WamrThreadEnv.hpp
+    WasiOverrides.hpp
 )
 target_link_libraries(vtextension_wamr PUBLIC vtextension PRIVATE contour::wamr)
 

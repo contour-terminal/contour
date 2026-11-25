@@ -21,6 +21,7 @@
 #include <vtextension/wasm/wamr/WamrHandles.hpp>
 #include <vtextension/wasm/wamr/WamrRuntime.hpp>
 #include <vtextension/wasm/wamr/WamrThreadEnv.hpp>
+#include <vtextension/wasm/wamr/WasiOverrides.hpp>
 
 #ifdef _WIN32
     #include <Windows.h>
@@ -210,6 +211,11 @@ std::expected<std::shared_ptr<WamrRuntime>, ExtensionError> WamrRuntime::create(
         return std::unexpected(acquired.error());
 
     detail::installMemoryGrowthHandler();
+    if (!detail::registerWasiOverrides())
+    {
+        releaseRuntime();
+        return std::unexpected(ExtensionError::RuntimeUnavailable);
+    }
     auto hostRegistrations = HostRegistrations::create(hostFunctions);
     if (!hostRegistrations)
     {
