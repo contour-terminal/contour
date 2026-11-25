@@ -48,6 +48,19 @@ inline constexpr std::size_t MaxSignatureValues = 1'000;
 /// The most host functions a CreateRuntime provides.
 inline constexpr std::size_t MaxHostFunctions = 1'024;
 
+/// The most guest calls one lane runs at once: its outermost call, and those the parent makes back in while
+/// host calls wait. A Call past it is a protocol violation.
+inline constexpr std::size_t MaxCallDepth = 8;
+
+/// The largest stack a runtime may give each instance's calls (RuntimeLimits::stackBytes); a CreateRuntime
+/// asking for more is refused (`RuntimeUnavailable`), by the parent before it is sent. Each guest call on a
+/// lane sets its own limit from where the lane's stack stands, so the lane's thread must hold MaxCallDepth of
+/// them.
+inline constexpr std::size_t MaxRuntimeStackBytes = std::size_t { 1024 } * 1024;
+
+static_assert(MaxRuntimeStackBytes >= ExtensionLimits {}.stackBytes,
+              "a host runs the stack the parent gives");
+
 /// How the helper shares an instance's linear memory with the parent.
 enum class MemoryMode : uint8_t
 {

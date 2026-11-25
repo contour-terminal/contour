@@ -415,7 +415,7 @@ Served HostServer::Impl::serve(proto::CreateRuntime const& request)
         std::make_shared<RuntimeSlot>(RuntimeSlot { .functions = request.functions, .runtime = nullptr });
     // A stack the executors cannot hold MaxCallDepth of is refused, before the engine sees it.
     // So is a table cap no engine accepts, before it is narrowed to RuntimeLimits' width.
-    if (request.stackBytes > MaxRuntimeStackBytes || request.tableElements > MaxTableElements)
+    if (request.stackBytes > proto::MaxRuntimeStackBytes || request.tableElements > MaxTableElements)
         return send(_control,
                     proto::RuntimeCreated { .runtimeId = request.runtimeId,
                                             .error = ExtensionError::RuntimeUnavailable });
@@ -601,7 +601,7 @@ Served HostServer::Impl::serve(Lane& lane, proto::Call const& request)
 
     // Each guest call on the lane runs on its executor's stack, with a stack limit of its own: the depth
     // bounds what they take together (ExecutorStackBytes).
-    if (lane.calls.size() >= MaxCallDepth)
+    if (lane.calls.size() >= proto::MaxCallDepth)
         return std::unexpected(ServerExit::ProtocolViolation);
 
     auto result = proto::CallResult {};

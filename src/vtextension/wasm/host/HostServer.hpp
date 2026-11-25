@@ -19,7 +19,6 @@
 #include <system_error>
 #include <vector>
 
-#include <vtextension/ExtensionLimits.hpp>
 #include <vtextension/wasm/host/ExecutorThread.hpp>
 #include <vtextension/wasm/host/IHostedEngine.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
@@ -28,24 +27,13 @@
 namespace vtextension::wasm::host
 {
 
-/// The most guest calls one lane runs at once: its outermost call, and those the parent makes back in while
-/// host calls wait. A Call past it is a protocol violation.
-inline constexpr std::size_t MaxCallDepth = 8;
-
-/// The largest stack a runtime may give each instance's calls (RuntimeLimits::stackBytes); a CreateRuntime
-/// asking for more is refused (`RuntimeUnavailable`). Each guest call on a lane sets its own limit from where
-/// the lane's stack stands, so the lane's thread must hold MaxCallDepth of them.
-inline constexpr std::size_t MaxRuntimeStackBytes = std::size_t { 1024 } * 1024;
-
 /// What one guest call on a lane may take of its thread's stack besides the guest's own: the engine's entry,
 /// the host call's way out and the server's frames serving the lane meanwhile, sanitizers included.
 inline constexpr std::size_t HostFrameBytes = std::size_t { 256 } * 1024;
 
 /// The stack each lane's executor thread runs on: MaxCallDepth guest calls at their largest.
-inline constexpr std::size_t ExecutorStackBytes = MaxCallDepth * (MaxRuntimeStackBytes + HostFrameBytes);
-
-static_assert(MaxRuntimeStackBytes >= ExtensionLimits {}.stackBytes,
-              "a host runs the stack the parent gives");
+inline constexpr std::size_t ExecutorStackBytes =
+    remote::proto::MaxCallDepth * (remote::proto::MaxRuntimeStackBytes + HostFrameBytes);
 
 /// Starts the thread a lane's executor runs on, with the stack it asks for, as ExecutorThread::start does.
 using ExecutorStarter =

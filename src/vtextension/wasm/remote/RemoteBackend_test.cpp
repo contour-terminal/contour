@@ -552,6 +552,25 @@ TEST_CASE("RemoteBackend.sameIdentitySharesAHelper", "[vtextension][remote]")
     CHECK(connector->liveHosts() == 4);
 }
 
+TEST_CASE("RemoteBackend.refusesAStackNoHostRuns", "[vtextension][remote]")
+{
+    // Refused before any host is started: a host would refuse it too, and be started and stopped for nothing
+    // on every load.
+    auto const connector = makeConnector();
+    auto const backend = makeBackend(connector);
+    auto limits = contract::Limits;
+    limits.stackBytes = proto::MaxRuntimeStackBytes + 1;
+    auto const refused = backend->createRuntime(limits, contract::HostFunctions);
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(refused.error() == ExtensionError::RuntimeUnavailable);
+    CHECK(connector->connects() == 0);
+
+    limits.stackBytes = proto::MaxRuntimeStackBytes;
+    auto const runtime = contract::createRuntime(*backend, limits);
+    auto const module = loadAs(*runtime, "", contract::InstanceModule);
+    CHECK(connector->connects() == 1);
+}
+
 TEST_CASE("RemoteBackend.helperDeathFailsCallsHostCrashed", "[vtextension][remote]")
 {
     auto const connector = makeConnector();

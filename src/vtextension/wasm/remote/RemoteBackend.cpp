@@ -21,6 +21,7 @@
 #include <vector>
 
 #include <vtextension/ExtensionError.hpp>
+#include <vtextension/ExtensionWorkerPool.hpp>
 #include <vtextension/wasm/WasmBinary.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 #include <vtextension/wasm/remote/CopyPathMemory.hpp>
@@ -35,6 +36,9 @@ namespace vtextension::wasm::remote
 
 using transport::PduStream;
 using transport::StreamError;
+
+// Every worker calls on a lane of its own: a host serving fewer would leave a worker without one.
+static_assert(MaxLaneChannels == MaxExtensionWorkers, "one lane per extension worker");
 
 namespace
 {
@@ -563,7 +567,8 @@ namespace
         {
             // What no host accepts is refused here, as an in-process backend refuses it, rather than when the
             // first module is loaded.
-            if (limits.tableElements > MaxTableElements || hostFunctions.size() > proto::MaxHostFunctions
+            if (limits.stackBytes > proto::MaxRuntimeStackBytes || limits.tableElements > MaxTableElements
+                || hostFunctions.size() > proto::MaxHostFunctions
                 || std::ranges::any_of(hostFunctions, [](HostFunction const& function) {
                        return function.parameterCount > MaxHostParameters;
                    }))
