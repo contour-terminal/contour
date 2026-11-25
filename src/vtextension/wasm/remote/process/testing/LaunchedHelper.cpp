@@ -99,8 +99,7 @@ void LaunchedHelper::closeControl() noexcept
     auto const closed = std::move(control);
 }
 
-std::expected<LaunchedHelper, LaunchError> launchHelper(std::shared_ptr<IProcessLauncher> launcher,
-                                                        HelperLaunch launch)
+PreparedHelperLaunch prepareHelperLaunch(HelperLaunch launch)
 {
     auto control = transport::makeChannelPair();
     REQUIRE(control.has_value());
@@ -148,18 +147,33 @@ std::expected<LaunchedHelper, LaunchError> launchHelper(std::shared_ptr<IProcess
             std::ranges::copy(trailing(handles), std::back_inserter(result));
         return result;
     };
+    return PreparedHelperLaunch { .spec = std::move(spec),
+                                  .control = *std::move(control),
+                                  .lanes = std::move(lanes),
+                                  .page = *std::move(page),
+                                  .wake = *std::move(wake),
+                                  .childHandles = std::move(childHandles) };
+}
 
-    auto process = launcher->launch(spec);
+std::expected<LaunchedHelper, LaunchError> launchHelper(std::shared_ptr<IProcessLauncher> launcher,
+                                                        HelperLaunch launch)
+{
+    auto prepared = prepareHelperLaunch(std::move(launch));
+    auto process = launcher->launch(prepared.spec);
     if (!process)
         return std::unexpected(process.error());
     // The helper's ends are the child's alone now: the parent's copies close here, as a connector's do when
     // its spec goes out of scope.
     auto parentLanes = std::vector<Channel> {};
-    for (auto& lane: lanes)
+    for (auto& lane: prepared.lanes)
         parentLanes.push_back(std::move(lane.parent));
-    return LaunchedHelper { std::move(launcher),    *std::move(process), std::move(control->parent),
-                            std::move(parentLanes), *std::move(page),    std::move(wake->parent),
-                            std::move(childHandles) };
+    return LaunchedHelper { std::move(launcher),
+                            *std::move(process),
+                            std::move(prepared.control.parent),
+                            std::move(parentLanes),
+                            std::move(prepared.page),
+                            std::move(prepared.wake.parent),
+                            std::move(prepared.childHandles) };
 }
 
 } // namespace vtextension::wasm::remote::process::testing

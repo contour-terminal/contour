@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <format>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -49,19 +50,45 @@ namespace
             .text = "The extension host shares memory where Contour copies it, and was refused: "
                     "it is not the one installed with this Contour. Extensions do not run." },
     };
-    static_assert(std::to_underlying(HostRefusal::MemoryMode) < 32,
-                  "a bit per reason in HostRefusalLog's word");
+    static_assert(std::to_underlying(LastHostRefusal) < 32, "a bit per reason in HostRefusalLog's word");
+
+    /// The line for a host that could not be started for a reason the launcher's table does not name.
+    constexpr auto UnnamedLaunchLine =
+        std::string_view { "The extension host cannot be started. Extensions do not run." };
+
+    /// @return Whether every reason the handshake refuses for has its row.
+    [[nodiscard]] consteval bool everyHandshakeRefusalHasARow() noexcept
+    {
+        for (auto const value: std::views::iota(0, std::to_underlying(LastHostRefusal) + 1))
+        {
+            auto const refusal = static_cast<HostRefusal>(value);
+            if (refusalSource(refusal) == RefusalSource::Handshake
+                && std::ranges::find(HandshakeRefusals, refusal, &HandshakeRefusalRow::refusal)
+                       == HandshakeRefusals.end())
+                return false;
+        }
+        return true;
+    }
+    static_assert(everyHandshakeRefusalHasARow());
 } // namespace
 
 std::string refusalLine(HostRefusal refusal)
 {
-    for (auto const& row: process::launchErrors())
-        if (row.refusal == refusal)
-            return std::format(LaunchLine, row.text);
-    auto const handshake = std::ranges::find(HandshakeRefusals, refusal, &HandshakeRefusalRow::refusal);
-    if (handshake == HandshakeRefusals.end())
-        return {};
-    return std::string { handshake->text };
+    switch (refusalSource(refusal))
+    {
+        case RefusalSource::Launch:
+            for (auto const& row: process::launchErrors())
+                if (row.refusal == refusal)
+                    return std::format(LaunchLine, row.text);
+            return std::string { UnnamedLaunchLine };
+        case RefusalSource::Handshake:
+            // Every such reason has its row: checked at compile time.
+            return std::string {
+                std::ranges::find(HandshakeRefusals, refusal, &HandshakeRefusalRow::refusal)->text
+            };
+        case RefusalSource::None: break;
+    }
+    return std::string { UnnamedLaunchLine };
 }
 
 HostRefusalLog::HostRefusalLog(Writer writer): _writer { std::move(writer) }

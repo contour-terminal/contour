@@ -12,6 +12,8 @@
 #include <cstdint>
 #include <expected>
 #include <span>
+#include <string>
+#include <system_error>
 
 #include <unistd.h>
 
@@ -134,6 +136,11 @@ std::expected<void, BootstrapError> bindToParent(int64_t parentProcessId) noexce
 std::span<HardeningRow const> hardeningSteps() noexcept
 {
     return HardeningSteps;
+}
+
+std::string systemErrorText(int code)
+{
+    return std::system_category().message(code);
 }
 
 remote::proto::LockdownState capResources(uint64_t dataBytes, CapPolicy policy) noexcept

@@ -53,6 +53,7 @@
     #include <csignal>
 
     #include <fcntl.h>
+    #include <poll.h>
     #include <unistd.h>
 #endif
 
@@ -390,20 +391,25 @@ TEST_CASE("ProcessLauncher.missingExecutableIsNotFound", "[vtextension]")
 TEST_CASE("ProcessLauncher.unsupportedPidfdWaitsRefuseEveryLaunch", "[vtextension]")
 {
     auto const launcher = process::makeLinuxProcessLauncher(process::PidfdWaits::Unsupported);
-    auto control = transport::makeChannelPair();
-    REQUIRE(control.has_value());
-    auto const spec = LaunchSpec { .executable = VTEXTENSION_PROBE_PATH,
-                                   .inherited = { control->helper.nativeHandle() },
-                                   .arguments = [](auto) { return std::vector<std::string> { "--report" }; },
-                                   .environment = {},
-                                   .caps = {} };
-    CHECK(launcher->launch(spec) == std::unexpected(LaunchError::Unsupported));
-    // Refused before anything started: once Contour lets go of the helper's end, no child holds it.
+    // Everything the probe needs to write its report, so that a child started anyway would write one.
+    auto prepared = process::testing::prepareHelperLaunch(process::testing::HelperLaunch {
+        .executable = VTEXTENSION_PROBE_PATH, .leading = { "--report" }, .dataBytes = ProbeDataBytes });
+    // Kept alive to the end, so that a child started anyway is neither killed nor reaped before it reported.
+    auto launched = launcher->launch(prepared.spec);
+    CHECK(launched == std::unexpected(LaunchError::Unsupported));
+    // Refused before anything started: once Contour lets go of the helper's ends, no child holds them, and
+    // the control channel ends at once -- rather than carry a report, or stay open past the patience.
+    auto control = std::move(prepared.control.parent);
     {
-        auto const dropped = std::move(control->helper);
+        auto const dropped = std::move(prepared);
     }
+    auto readable = pollfd { .fd = control.nativeHandle(), .events = POLLIN, .revents = 0 };
+    auto const patience = std::chrono::duration_cast<std::chrono::milliseconds>(ChildPatience);
+    REQUIRE(::poll(&readable, 1, static_cast<int>(patience.count())) == 1);
     auto buffer = std::array<uint8_t, 16> {};
-    CHECK(control->parent.receiveSome(buffer) == std::unexpected(ChannelError::Closed));
+    CHECK(control.receiveSome(buffer) == std::unexpected(ChannelError::Closed));
+    if (launched)
+        CHECK(endAndReap(*launcher, **launched));
 }
 
 TEST_CASE("ProcessLauncher.thisKernelWaitsOnPidfds", "[vtextension]")

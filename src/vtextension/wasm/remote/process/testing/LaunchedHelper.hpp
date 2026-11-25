@@ -89,6 +89,23 @@ class LaunchedHelper
     void closeControl() noexcept;
 };
 
+/// Everything a launch of a helper is made of, before it starts: the spec, and both ends of what the spec
+/// hands the child. The helper's ends are Contour's to close once the launch is done.
+struct PreparedHelperLaunch
+{
+    LaunchSpec spec;                           ///< What the launcher is given.
+    transport::ChannelPair control;            ///< The control channel.
+    std::vector<transport::ChannelPair> lanes; ///< The lane channels.
+    transport::ControlPage page;               ///< The interrupt page.
+    transport::WakePair wake;                  ///< The wake signal.
+    std::shared_ptr<std::vector<transport::NativeHandle>>
+        childHandles; ///< What its arguments were made from.
+};
+
+/// Makes fresh channels, page and wake for @p launch, and the spec that hands them over.
+/// @return The spec and the ends.
+[[nodiscard]] PreparedHelperLaunch prepareHelperLaunch(HelperLaunch launch);
+
 /// Starts @p launch with fresh channels, page and wake.
 /// @return The child; why it could not be started otherwise.
 [[nodiscard]] std::expected<LaunchedHelper, LaunchError> launchHelper(

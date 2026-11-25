@@ -6,7 +6,10 @@
 #include <array>
 #include <cstdint>
 #include <expected>
+#include <format>
 #include <span>
+#include <string>
+#include <system_error>
 
 #include <vtextension/wasm/host/HostBootstrap.hpp>
 
@@ -42,6 +45,13 @@ std::expected<void, BootstrapError> bindToParent([[maybe_unused]] int64_t parent
 std::span<HardeningRow const> hardeningSteps() noexcept
 {
     return HardeningSteps;
+}
+
+std::string systemErrorText(int code)
+{
+    // The system's message names an HRESULT it knows; the value itself names every one.
+    return std::format(
+        "{}, HRESULT 0x{:08X}", std::system_category().message(code), static_cast<uint32_t>(code));
 }
 
 remote::proto::LockdownState capResources([[maybe_unused]] uint64_t dataBytes,

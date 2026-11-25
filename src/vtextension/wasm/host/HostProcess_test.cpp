@@ -57,10 +57,11 @@ using vtextension::wasm::host::CapPolicy;
 using vtextension::wasm::host::capResources;
 using vtextension::wasm::host::EngineFactory;
 using vtextension::wasm::host::exitCodeOf;
+using vtextension::wasm::host::HardeningFailure;
+using vtextension::wasm::host::hardeningFailureText;
 using vtextension::wasm::host::HardeningRow;
 using vtextension::wasm::host::HardeningStep;
 using vtextension::wasm::host::hardeningSteps;
-using vtextension::wasm::host::hardeningStepText;
 using vtextension::wasm::host::hardenProcess;
 using vtextension::wasm::host::HostConfinement;
 using vtextension::wasm::host::HostProcessExit;
@@ -69,6 +70,7 @@ using vtextension::wasm::host::hostProcessExits;
 using vtextension::wasm::host::IHostedEngine;
 using vtextension::wasm::host::runExtensionHost;
 using vtextension::wasm::host::ServerExit;
+using vtextension::wasm::host::systemErrorText;
 using vtextension::wasm::remote::MaxLaneChannels;
 using vtextension::wasm::remote::transport::Channel;
 using vtextension::wasm::remote::transport::ControlPage;
@@ -134,7 +136,7 @@ struct Confined
     std::atomic<std::size_t> threadsWhenHardened { 0 };
     std::atomic<std::size_t> threadsWhenConfined { 0 };
     /// What beforeThreads returns.
-    std::expected<void, HardeningStep> hardening {};
+    std::expected<void, HardeningFailure> hardening {};
 };
 
 /// @return A confinement that touches nothing of this process: it binds to TheParent alone, and hardens and
@@ -431,7 +433,7 @@ namespace
 {
 
 /// Runs a host whose hardening ends as @p hardening, and checks what Hello states and when it hardened.
-void checkHardening(std::expected<void, HardeningStep> hardening, proto::LockdownState expected)
+void checkHardening(std::expected<void, HardeningFailure> hardening, proto::LockdownState expected)
 {
     auto parent = makeParentEnds();
     auto confined = std::make_shared<Confined>();
@@ -483,9 +485,9 @@ TEST_CASE("HostProcess.hardensBeforeAnyThreadStarts", "[vtextension][host]")
 TEST_CASE("HostProcess.failedHardeningSaysWhichStep", "[vtextension][host]")
 {
     // A hardening that failed is what Hello states, whatever the caps did; the host tells which step failed.
-    auto const step = hardeningSteps().front().step;
-    checkHardening(std::unexpected(step), proto::LockdownState::Failed);
-    CHECK_FALSE(hardeningStepText(step).empty());
+    auto const& row = hardeningSteps().front();
+    checkHardening(std::unexpected(HardeningFailure { .step = row.step, .text = row.text, .code = 1 }),
+                   proto::LockdownState::Failed);
 }
 
 TEST_CASE("HostBootstrap.hardeningNamesTheFirstFailedStep", "[vtextension][host]")
@@ -515,7 +517,10 @@ TEST_CASE("HostBootstrap.hardeningNamesTheFirstFailedStep", "[vtextension][host]
     };
     auto const hardened = hardenProcess(rows);
     REQUIRE_FALSE(hardened.has_value());
-    CHECK(hardened.error() == rows[1].step);
+    // Named by the row that ran, whether or not this system takes such a step, with the error it returned.
+    CHECK(hardened.error().step == rows[1].step);
+    CHECK(hardened.error().text == rows[1].text);
+    CHECK(hardened.error().code == 1);
     // Every step ran, past the one that failed.
     CHECK(firstStepRuns.load() == 1);
     CHECK(secondStepRuns.load() == 1);
@@ -526,10 +531,19 @@ TEST_CASE("HostBootstrap.everyStepSaysWhatFailed", "[vtextension][host]")
 {
     CHECK_FALSE(hardeningSteps().empty());
     for (auto const& row: hardeningSteps())
-    {
         CHECK_FALSE(row.text.empty());
-        CHECK(hardeningStepText(row.step) == row.text);
-    }
+}
+
+TEST_CASE("HostBootstrap.failureSaysWhatTheSystemSaid", "[vtextension][host]")
+{
+    // The error code is read, not printed as a bare number: the line carries the system's word on it.
+    auto const failure = HardeningFailure { .step = HardeningStep::CoreDumps, .text = "first", .code = 1 };
+    auto const text = hardeningFailureText(failure);
+    INFO(text);
+    CHECK(text.starts_with("first ("));
+    CHECK(text.ends_with(")"));
+    CHECK(text.contains(systemErrorText(1)));
+    CHECK_FALSE(systemErrorText(1).empty());
 }
 
 TEST_CASE("HostProcess.badArgumentsExit", "[vtextension][host]")

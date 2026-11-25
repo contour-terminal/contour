@@ -190,7 +190,7 @@ int runExtensionHost(std::span<std::string_view const> arguments,
     // While the main thread is the only one: what is set per thread then reaches every thread started later.
     auto const hardened = confinement.beforeThreads();
     if (!hardened)
-        tell(std::format("hardening failed: {}", hardeningStepText(hardened.error())));
+        tell(std::format("hardening failed: {}", hardeningFailureText(hardened.error())));
     auto endpoints = adoptEndpoints(*parsed);
     if (!endpoints)
         return endWith(endpoints.error());

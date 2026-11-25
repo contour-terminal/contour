@@ -4,36 +4,34 @@
 // HostBootstrap_win32.cpp), taking them is not.
 #include <vtextension/wasm/host/HostBootstrap.hpp>
 
-#include <algorithm>
 #include <expected>
+#include <format>
 #include <optional>
 #include <span>
-#include <string_view>
+#include <string>
 
 namespace vtextension::wasm::host
 {
 
-std::expected<void, HardeningStep> hardenProcess(std::span<HardeningRow const> steps) noexcept
+std::expected<void, HardeningFailure> hardenProcess(std::span<HardeningRow const> steps) noexcept
 {
-    auto failed = std::optional<HardeningStep> {};
+    auto failed = std::optional<HardeningFailure> {};
     for (auto const& row: steps)
-        if (!row.apply() && !failed)
-            failed = row.step;
+        if (auto const applied = row.apply(); !applied && !failed)
+            failed = HardeningFailure { .step = row.step, .text = row.text, .code = applied.error() };
     if (failed)
         return std::unexpected(*failed);
     return {};
 }
 
-std::expected<void, HardeningStep> hardenProcess() noexcept
+std::expected<void, HardeningFailure> hardenProcess() noexcept
 {
     return hardenProcess(hardeningSteps());
 }
 
-std::string_view hardeningStepText(HardeningStep step) noexcept
+std::string hardeningFailureText(HardeningFailure const& failure)
 {
-    auto const steps = hardeningSteps();
-    auto const row = std::ranges::find(steps, step, &HardeningRow::step);
-    return row != steps.end() ? row->text : std::string_view {};
+    return std::format("{} ({})", failure.text, systemErrorText(failure.code));
 }
 
 } // namespace vtextension::wasm::host

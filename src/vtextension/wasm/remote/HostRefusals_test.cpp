@@ -3,6 +3,7 @@
 // Why no extension host serves, said once per reason.
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <cstddef>
 #include <format>
@@ -20,7 +21,10 @@
 
 using vtextension::wasm::remote::HostRefusal;
 using vtextension::wasm::remote::HostRefusalLog;
+using vtextension::wasm::remote::LastHostRefusal;
 using vtextension::wasm::remote::refusalLine;
+using vtextension::wasm::remote::RefusalSource;
+using vtextension::wasm::remote::refusalSource;
 using vtextension::wasm::remote::process::LaunchError;
 using vtextension::wasm::remote::process::launchErrors;
 using vtextension::wasm::remote::process::launchErrorText;
@@ -57,11 +61,16 @@ struct Lines
 
 TEST_CASE("HostRefusals.everyRefusalHasALine", "[vtextension]")
 {
-    for (auto const value: std::views::iota(0, std::to_underlying(HostRefusal::MemoryMode) + 1))
+    for (auto const value: std::views::iota(0, std::to_underlying(LastHostRefusal) + 1))
     {
         auto const line = refusalLine(static_cast<HostRefusal>(value));
         INFO(line);
         CHECK_FALSE(line.empty());
+        // A launch reason says what the launcher's own row says.
+        if (refusalSource(static_cast<HostRefusal>(value)) == RefusalSource::Launch)
+            CHECK(std::ranges::any_of(launchErrors(), [value](auto const& row) {
+                return row.refusal == static_cast<HostRefusal>(value);
+            }));
         // Users read these: they name the role, never the engine.
         for (auto const engine: { "wasm", "wamr", "wasmtime", "webassembly" })
             CHECK_FALSE(lowered(line).contains(engine));

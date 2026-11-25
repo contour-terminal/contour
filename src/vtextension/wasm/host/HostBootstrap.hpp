@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <expected>
 #include <span>
+#include <string>
 #include <string_view>
 
 #include <vtextension/wasm/BuildInstrumentation.hpp>
@@ -65,19 +66,32 @@ struct HardeningRow
 ///         exception.
 [[nodiscard]] std::span<HardeningRow const> hardeningSteps() noexcept;
 
+/// A step of the hardening that failed, and how.
+struct HardeningFailure
+{
+    HardeningStep step;    ///< The step.
+    std::string_view text; ///< What failed, as the step's row says.
+    int code;              ///< The system's error code (errno on POSIX, an HRESULT on Windows).
+};
+
 /// Takes every step of @p steps, even past one that failed, so that a host is as hard as the system lets it
 /// be.
 /// @param steps The steps, in order.
-/// @return Nothing if every step was taken; the first that failed otherwise.
-[[nodiscard]] std::expected<void, HardeningStep> hardenProcess(std::span<HardeningRow const> steps) noexcept;
+/// @return Nothing if every step was taken; the first that failed otherwise, as its row says.
+[[nodiscard]] std::expected<void, HardeningFailure> hardenProcess(
+    std::span<HardeningRow const> steps) noexcept;
 
 /// Hardens this process by this system's steps (hardeningSteps()), before it starts any thread of its own.
 /// @return Nothing if every step was taken; the first that failed otherwise.
-[[nodiscard]] std::expected<void, HardeningStep> hardenProcess() noexcept;
+[[nodiscard]] std::expected<void, HardeningFailure> hardenProcess() noexcept;
 
-/// @param step A step of the hardening.
-/// @return What failed when it fails, as this system's row says; empty if this system takes no such step.
-[[nodiscard]] std::string_view hardeningStepText(HardeningStep step) noexcept;
+/// @param code An error code a hardening step returned: errno on POSIX, an HRESULT on Windows.
+/// @return What the system says of it, user-readable.
+[[nodiscard]] std::string systemErrorText(int code);
+
+/// @param failure A step that failed.
+/// @return What failed and why, user-readable: its row's text, then the system's word on the error.
+[[nodiscard]] std::string hardeningFailureText(HardeningFailure const& failure);
 
 /// Whether the host caps its own resources.
 enum class CapPolicy : uint8_t
