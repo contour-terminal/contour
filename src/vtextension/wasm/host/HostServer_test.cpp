@@ -13,8 +13,10 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string_view>
 #include <system_error>
 #include <thread>
@@ -36,11 +38,16 @@
 #include <vtextension/wasm/testing/BackendContract.hpp>
 #include <vtextension/wasm/testing/HostedEngine.hpp>
 
+#if defined(_MSC_VER) && !defined(__clang__)
+    #include <intrin.h>
+#endif
+
 using vtextension::ExtensionError;
 using vtextension::testing::toModule;
 using vtextension::wasm::CallFailure;
 using vtextension::wasm::ModuleIdentity;
 using vtextension::wasm::host::ExecutorThread;
+using vtextension::wasm::host::HostFrameBytes;
 using vtextension::wasm::host::HostServer;
 using vtextension::wasm::host::HostServerConfig;
 using vtextension::wasm::host::InProcessHostConnector;
@@ -89,7 +96,17 @@ class ScriptedParent
 {
   public:
     explicit ScriptedParent(HostServerConfig config = {}, LaneZero laneZero = LaneZero::Framed):
-        _engine { makeHostedEngine() }
+        ScriptedParent { makeHostedEngine(), std::move(config), laneZero }
+    {
+    }
+
+    /// @param engine What the server runs modules on.
+    /// @param config How the server runs.
+    /// @param laneZero How lane 0's parent end is held.
+    ScriptedParent(std::unique_ptr<vtextension::wasm::host::IHostedEngine> engine,
+                   HostServerConfig config,
+                   LaneZero laneZero = LaneZero::Framed):
+        _engine { std::move(engine) }
     {
         auto helperLanes = std::vector<Channel> {};
         for ([[maybe_unused]] auto const index: std::views::iota(std::size_t { 0 }, MaxLaneChannels))
@@ -106,7 +123,7 @@ class ScriptedParent
         REQUIRE(controlPair.has_value());
         control.emplace(parentControl(std::move(controlPair->parent), config.limits));
         server = std::make_unique<HostServer>(
-            *_engine, std::move(helperLanes), std::move(controlPair->helper), config);
+            *_engine, std::move(helperLanes), std::move(controlPair->helper), std::move(config));
         auto task = std::packaged_task<ServerExit()> { [this] { return server->run(); } };
         exit = task.get_future();
         _thread = std::jthread { std::move(task) };
@@ -225,6 +242,171 @@ class ScriptedParent
 
   private:
     std::jthread _thread;
+};
+
+/// Where each export call into an instance of a probed engine began on its thread's stack, in call order.
+class StackProbe
+{
+  public:
+    /// Records that a call began at @p frame.
+    void record(std::uintptr_t frame)
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        _frames.push_back(frame);
+    }
+
+    /// @return Where each call began, in the order they began.
+    [[nodiscard]] std::vector<std::uintptr_t> frames() const
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        return _frames;
+    }
+
+  private:
+    mutable std::mutex _mutex;
+    std::vector<std::uintptr_t> _frames;
+};
+
+/// An instance of a probed engine: records where each call begins, and forwards everything.
+class ProbedInstance final: public vtextension::wasm::IWasmInstance
+{
+  public:
+    ProbedInstance(std::unique_ptr<vtextension::wasm::IWasmInstance> inner,
+                   std::shared_ptr<StackProbe> probe):
+        _inner { std::move(inner) }, _probe { std::move(probe) }
+    {
+    }
+
+    [[nodiscard]] std::optional<vtextension::wasm::ExportFunction> function(
+        std::string_view name) const override
+    {
+        return _inner->function(name);
+    }
+
+    [[nodiscard]] std::expected<void, CallFailure> call(vtextension::wasm::ExportFunction function,
+                                                        std::span<uint32_t> argv) override
+    {
+        // The frame's own address, not a local's: a sanitizer may keep locals on a stack of its own. MSVC has
+        // no __builtin_frame_address; the slot of the frame's return address lies in the frame all the same.
+#if defined(_MSC_VER) && !defined(__clang__)
+        _probe->record(reinterpret_cast<std::uintptr_t>(_AddressOfReturnAddress()));
+#else
+        _probe->record(reinterpret_cast<std::uintptr_t>(__builtin_frame_address(0)));
+#endif
+        return _inner->call(function, argv);
+    }
+
+    [[nodiscard]] std::optional<std::span<std::byte>> memory(uint32_t address, uint32_t size) override
+    {
+        return _inner->memory(address, size);
+    }
+
+    void interrupt() noexcept override { _inner->interrupt(); }
+
+  private:
+    std::unique_ptr<vtextension::wasm::IWasmInstance> _inner;
+    std::shared_ptr<StackProbe> _probe;
+};
+
+/// A module of a probed engine, whose instances are probed.
+class ProbedModule final: public vtextension::wasm::IWasmModule
+{
+  public:
+    ProbedModule(std::shared_ptr<vtextension::wasm::IWasmModule> inner, std::shared_ptr<StackProbe> probe):
+        _inner { std::move(inner) }, _probe { std::move(probe) }
+    {
+    }
+
+    [[nodiscard]] std::span<vtextension::wasm::ImportDescription const> imports() const noexcept override
+    {
+        return _inner->imports();
+    }
+
+    [[nodiscard]] std::span<vtextension::wasm::ExportDescription const> exports() const noexcept override
+    {
+        return _inner->exports();
+    }
+
+    [[nodiscard]] std::expected<std::unique_ptr<vtextension::wasm::IWasmInstance>, ExtensionError>
+    instantiate(vtextension::wasm::IHostContext& context) override
+    {
+        return _inner->instantiate(context).transform(
+            [this](std::unique_ptr<vtextension::wasm::IWasmInstance> instance)
+                -> std::unique_ptr<vtextension::wasm::IWasmInstance> {
+                return std::make_unique<ProbedInstance>(std::move(instance), _probe);
+            });
+    }
+
+  private:
+    std::shared_ptr<vtextension::wasm::IWasmModule> _inner;
+    std::shared_ptr<StackProbe> _probe;
+};
+
+/// A runtime of a probed engine, whose modules are probed.
+class ProbedRuntime final: public vtextension::wasm::IWasmRuntime
+{
+  public:
+    ProbedRuntime(std::shared_ptr<vtextension::wasm::IWasmRuntime> inner, std::shared_ptr<StackProbe> probe):
+        _inner { std::move(inner) }, _probe { std::move(probe) }
+    {
+    }
+
+    [[nodiscard]] std::expected<std::shared_ptr<vtextension::wasm::IWasmModule>, ExtensionError> load(
+        ModuleIdentity identity, std::vector<std::byte> bytes) override
+    {
+        return _inner->load(std::move(identity), std::move(bytes))
+            .transform([this](std::shared_ptr<vtextension::wasm::IWasmModule> module)
+                           -> std::shared_ptr<vtextension::wasm::IWasmModule> {
+                return std::make_shared<ProbedModule>(std::move(module), _probe);
+            });
+    }
+
+  private:
+    std::shared_ptr<vtextension::wasm::IWasmRuntime> _inner;
+    std::shared_ptr<StackProbe> _probe;
+};
+
+/// A hosted engine whose instances record where each of their calls begins on its thread's stack.
+class ProbedEngine final: public vtextension::wasm::host::IHostedEngine
+{
+  public:
+    ProbedEngine(std::unique_ptr<vtextension::wasm::host::IHostedEngine> inner,
+                 std::shared_ptr<StackProbe> probe):
+        _inner { std::move(inner) }, _probe { std::move(probe) }
+    {
+    }
+
+    [[nodiscard]] std::expected<std::shared_ptr<vtextension::wasm::IWasmRuntime>, ExtensionError>
+    createRuntime(vtextension::wasm::RuntimeLimits limits,
+                  std::span<vtextension::wasm::HostFunction const> hostFunctions) override
+    {
+        return _inner->createRuntime(limits, hostFunctions)
+            .transform([this](std::shared_ptr<vtextension::wasm::IWasmRuntime> runtime)
+                           -> std::shared_ptr<vtextension::wasm::IWasmRuntime> {
+                return std::make_shared<ProbedRuntime>(std::move(runtime), _probe);
+            });
+    }
+
+    [[nodiscard]] std::expected<std::unique_ptr<vtextension::wasm::IThreadGuard>, ExtensionError>
+    enterThread() override
+    {
+        return _inner->enterThread();
+    }
+
+    [[nodiscard]] bool isCurrentThreadPrepared() const override { return _inner->isCurrentThreadPrepared(); }
+
+    [[nodiscard]] uint64_t runtimeGeneration() const noexcept override { return _inner->runtimeGeneration(); }
+
+    [[nodiscard]] vtextension::wasm::BackendCapabilities capabilities() const noexcept override
+    {
+        return _inner->capabilities();
+    }
+
+    [[nodiscard]] proto::MemoryMode memoryMode() const noexcept override { return _inner->memoryMode(); }
+
+  private:
+    std::unique_ptr<vtextension::wasm::host::IHostedEngine> _inner;
+    std::shared_ptr<StackProbe> _probe;
 };
 
 /// @return The ordinal of the export named @p name, which @p loaded must describe.
@@ -581,7 +763,9 @@ TEST_CASE("HostServer.nestedCallsFitTheExecutorStack", "[vtextension][host]")
     // Each instance's calls get a stack limit of their own, counted from where the lane's stack stands when
     // they begin: MaxCallDepth calls into as many instances, each nearly filling the largest stack a runtime
     // may give, must fit one executor's stack.
-    auto parent = ScriptedParent {};
+    auto const probe = std::make_shared<StackProbe>();
+    auto parent =
+        ScriptedParent { std::make_unique<ProbedEngine>(makeHostedEngine(), probe), HostServerConfig {} };
     parent.skipHello();
     auto functions = std::vector<proto::WireHostFunction> {};
     for (auto const& function: contract::HostFunctions)
@@ -620,16 +804,49 @@ TEST_CASE("HostServer.nestedCallsFitTheExecutorStack", "[vtextension][host]")
     // Within a few frames of the limit: the calls take nearly MaxCallDepth whole stacks between them.
     auto const depth = shallow - 64;
 
-    for (auto const instance: std::views::iota(uint32_t { 1 }, static_cast<uint32_t>(MaxCallDepth) + 1))
+    // Nests MaxCallDepth calls on lane 0, each `depth` guest frames deep, and unwinds them.
+    // @return What each nesting level took of the lane's stack, from one call's beginning to the next's.
+    auto const nestOnLaneZero = [&](uint32_t guestDepth) {
+        auto const before = probe->frames().size();
+        for (auto const instance: std::views::iota(uint32_t { 1 }, static_cast<uint32_t>(MaxCallDepth) + 1))
+        {
+            parent.send(
+                0, proto::Call { .instanceId = instance, .exportOrdinal = down, .argv = { guestDepth } });
+            REQUIRE(parent.receive(0)
+                    == proto::Pdu { proto::CallHost { .functionIndex = 1, .arguments = { 0, 0 } } });
+        }
+        for ([[maybe_unused]] auto const instance: std::views::iota(std::size_t { 0 }, MaxCallDepth))
+        {
+            parent.send(0, proto::HostResult { .error = std::nullopt });
+            CHECK(parent.receive(0)
+                  == proto::Pdu { proto::CallResult { .failure = std::nullopt, .argv = {} } });
+        }
+        auto const frames = probe->frames();
+        REQUIRE(frames.size() == before + MaxCallDepth);
+        auto const nested = std::span { frames }.subspan(before);
+        auto levels = std::vector<std::size_t> {};
+        for (auto const [outer, inner]: std::views::zip(nested, nested | std::views::drop(1)))
+        {
+            REQUIRE(outer > inner); // the stack grows down
+            levels.push_back(outer - inner);
+        }
+        return levels;
+    };
+
+    // Nearly whole guest stacks: every level fits what ExecutorStackBytes reserves for it.
+    for (auto const levelBytes: nestOnLaneZero(depth))
     {
-        parent.send(0, proto::Call { .instanceId = instance, .exportOrdinal = down, .argv = { depth } });
-        REQUIRE(parent.receive(0)
-                == proto::Pdu { proto::CallHost { .functionIndex = 1, .arguments = { 0, 0 } } });
+        CAPTURE(levelBytes);
+        CHECK(levelBytes < MaxRuntimeStackBytes + HostFrameBytes);
     }
-    for ([[maybe_unused]] auto const instance: std::views::iota(std::size_t { 0 }, MaxCallDepth))
+
+    // One guest frame each: what is left is the host's share of a level, the engine's entry and exit and the
+    // server's frames. It stays within half of HostFrameBytes, so that an engine whose frames grow fails here
+    // first, not in a host.
+    for (auto const levelBytes: nestOnLaneZero(0))
     {
-        parent.send(0, proto::HostResult { .error = std::nullopt });
-        CHECK(parent.receive(0) == proto::Pdu { proto::CallResult { .failure = std::nullopt, .argv = {} } });
+        CAPTURE(levelBytes);
+        CHECK(levelBytes < HostFrameBytes / 2);
     }
 }
 
