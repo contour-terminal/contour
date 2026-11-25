@@ -50,6 +50,7 @@ add_library(vtextension_remote_wire STATIC
     transport/PduStream.hpp
     transport/SharedObject.cpp
     transport/SharedObject.hpp
+    transport/SharedObjectName.hpp
     transport/WakeSignal.hpp
     transport/WouldBlock.hpp
     ${_transport_sources}

@@ -5,13 +5,17 @@
 // object, inherit it unasked, or find more of a reserved one committed than was asked for.
 #include <catch2/catch_test_macros.hpp>
 
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <initializer_list>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include <vtextension/wasm/remote/transport/SharedObject.hpp>
+#include <vtextension/wasm/remote/transport/SharedObjectName.hpp>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -20,18 +24,19 @@
     #include <sys/mman.h>
     #include <sys/types.h>
 
-    #include <cerrno>
-
     #include <fcntl.h>
     #include <unistd.h>
 #endif
 
 using vtextension::wasm::remote::transport::createSharedObject;
+using vtextension::wasm::remote::transport::createUnderFreshName;
 using vtextension::wasm::remote::transport::fitsSharedObject;
 using vtextension::wasm::remote::transport::MapAccess;
 using vtextension::wasm::remote::transport::sealSharedObject;
 using vtextension::wasm::remote::transport::SharedMapping;
 using vtextension::wasm::remote::transport::SharedObjectError;
+using vtextension::wasm::remote::transport::sharedObjectName;
+using vtextension::wasm::remote::transport::SharedObjectNameAttempts;
 using vtextension::wasm::remote::transport::SharedObjectUse;
 #ifndef _WIN32
 using vtextension::wasm::remote::transport::checkSharedObjectSize;
@@ -47,6 +52,58 @@ constexpr auto MiB = 1024 * KiB;
 constexpr auto GuestBytes = 64 * KiB;
 
 } // namespace
+
+TEST_CASE("SharedObject.nameFitsMacOS", "[vtextension]")
+{
+    // macOS refuses shm_open names longer than 31 characters (PSHMNAMLEN); its process ids stay below 100000.
+    CHECK(sharedObjectName(99999, ~uint64_t { 0 }) == "/contour-eh-99999-ffffffffffff");
+    CHECK(sharedObjectName(99999, ~uint64_t { 0 }).size() <= 31);
+    CHECK(sharedObjectName(42, 0xABC) == "/contour-eh-42-000000000abc");
+}
+
+TEST_CASE("SharedObject.takenNamesAreTriedAgain", "[vtextension]")
+{
+    // A name someone else holds is tried again under a fresh suffix, a bounded number of times; any other
+    // failure ends the attempt at once.
+    auto suffix = uint64_t { 0 };
+    auto const nextSuffix = [&] {
+        return ++suffix;
+    };
+    auto tried = std::vector<std::string> {};
+    auto const takenUntil = [&](std::size_t freeAt) {
+        return [&tried, freeAt](std::string const& name) -> std::expected<int, int> {
+            tried.push_back(name);
+            if (tried.size() < freeAt)
+                return std::unexpected(EEXIST);
+            return static_cast<int>(tried.size());
+        };
+    };
+
+    SECTION("a free name at the third try")
+    {
+        CHECK(createUnderFreshName(7, nextSuffix, takenUntil(3)) == std::expected<int, int> { 3 });
+        CHECK(tried
+              == std::vector<std::string> {
+                  "/contour-eh-7-000000000001", "/contour-eh-7-000000000002", "/contour-eh-7-000000000003" });
+    }
+    SECTION("every name taken")
+    {
+        CHECK(createUnderFreshName(7, nextSuffix, takenUntil(100))
+              == std::expected<int, int> { std::unexpect, EEXIST });
+        auto const attempts = static_cast<std::size_t>(SharedObjectNameAttempts);
+        CHECK(tried.size() == attempts);
+    }
+    SECTION("another failure is not retried")
+    {
+        auto const denied = [&](std::string const& name) -> std::expected<int, int> {
+            tried.push_back(name);
+            return std::unexpected(EACCES);
+        };
+        CHECK(createUnderFreshName(7, nextSuffix, denied)
+              == std::expected<int, int> { std::unexpect, EACCES });
+        CHECK(tried.size() == 1);
+    }
+}
 
 TEST_CASE("SharedObject.sizeMayBeRoundedUpToTheLargestPage", "[vtextension]")
 {

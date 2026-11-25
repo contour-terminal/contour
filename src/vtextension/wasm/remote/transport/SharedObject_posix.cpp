@@ -29,9 +29,10 @@
 #include <vtextension/wasm/remote/transport/SharedObject.hpp>
 
 #ifdef __APPLE__
-    #include <atomic>
-    #include <format>
+    #include <random>
     #include <string>
+
+    #include <vtextension/wasm/remote/transport/SharedObjectName.hpp>
 #endif
 
 namespace vtextension::wasm::remote::transport
@@ -93,15 +94,25 @@ namespace
         [[maybe_unused]] UseRow const& row) noexcept
     {
 #ifdef __APPLE__
-        static auto serial = std::atomic<uint64_t> { 0 };
-        auto const name = std::format("/contour-eh-{}-{}", ::getpid(), serial.fetch_add(1));
-        auto object = OwnedHandle { ::shm_open(name.c_str(), O_RDWR | O_CREAT | O_EXCL, 0600) };
-        if (!object)
-            return std::unexpected(sharedObjectErrorOf(errno));
-        ::shm_unlink(name.c_str());
-        return succeeded(::fcntl(object.get(), F_SETFD, FD_CLOEXEC)).transform([&] {
-            return std::move(object);
-        });
+        // A random name, tried again while it is taken (SharedObjectName.hpp), and unlinked once open.
+        auto random = std::random_device {};
+        auto const nextSuffix = [&] {
+            return (uint64_t { random() } << 32) | random();
+        };
+        auto const createNamed = [](std::string const& name) -> std::expected<OwnedHandle, int> {
+            auto object = OwnedHandle { ::shm_open(name.c_str(), O_RDWR | O_CREAT | O_EXCL, 0600) };
+            if (!object)
+                return std::unexpected(errno);
+            ::shm_unlink(name.c_str());
+            return object;
+        };
+        return createUnderFreshName(::getpid(), nextSuffix, createNamed)
+            .transform_error(sharedObjectErrorOf)
+            .and_then([](OwnedHandle object) -> std::expected<OwnedHandle, SharedObjectError> {
+                return succeeded(::fcntl(object.get(), F_SETFD, FD_CLOEXEC)).transform([&] {
+                    return std::move(object);
+                });
+            });
 #else
         auto object = OwnedHandle { ::memfd_create(row.memfdName, MFD_CLOEXEC | MFD_ALLOW_SEALING) };
         if (!object)
