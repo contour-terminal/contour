@@ -35,6 +35,9 @@ inline constexpr auto ModuleHeader =
 /// The id of a custom section, the only kind that carries a name.
 inline constexpr auto CustomSectionId = uint8_t { 0 };
 
+/// The id of the import section.
+inline constexpr auto ImportSectionId = uint8_t { 2 };
+
 /// The id of the table section, which declares the tables a module defines.
 inline constexpr auto TableSectionId = uint8_t { 4 };
 
@@ -297,6 +300,42 @@ struct TableDeclaration
     for (auto const& table: tables)
         largest = std::max(largest, table.initialElements);
     return largest;
+}
+
+/// How many imports and exports a module declares.
+struct DeclaredCounts
+{
+    uint32_t imports = 0; ///< The entries of its import section.
+    uint32_t exports = 0; ///< The entries of its export section.
+
+    /// @return Whether both name the same counts.
+    bool operator==(DeclaredCounts const&) const = default;
+};
+
+/// How many imports and exports a module declares, read off the counts that open the two sections, without
+/// reading their entries: what bounds a description of the module that someone else read.
+/// @param module A WebAssembly core module's bytes.
+/// @return The counts; 0 for a section the module lacks. `Malformed` for a second import or export section.
+[[nodiscard]] inline std::expected<DeclaredCounts, BinaryError> declaredCounts(
+    std::span<std::byte const> module)
+{
+    return sections(module).and_then([](std::vector<Section> const& all) {
+        // The count opening the one section of @p id; 0 without one.
+        auto const countOf = [&all](uint8_t id) -> std::expected<uint32_t, BinaryError> {
+            auto matching = all | std::views::filter([id](Section const& entry) { return entry.id == id; });
+            auto const first = matching.begin();
+            if (first == matching.end())
+                return 0;
+            if (std::ranges::next(first) != matching.end())
+                return std::unexpected(BinaryError::Malformed);
+            return Reader { first->content, first->offset }.u32();
+        };
+        return countOf(ImportSectionId).and_then([&](uint32_t imports) {
+            return countOf(ExportSectionId).transform([imports](uint32_t exports) {
+                return DeclaredCounts { .imports = imports, .exports = exports };
+            });
+        });
+    });
 }
 
 } // namespace vtextension::wasm::binary

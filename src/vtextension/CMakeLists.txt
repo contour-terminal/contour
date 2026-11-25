@@ -119,6 +119,9 @@ if(VTEXTENSION_TESTING)
         Surface_test.cpp
         Wit_test.cpp
         wasm/WasmBinary_test.cpp
+        wasm/remote/proto/Codec_test.cpp
+        wasm/remote/transport/Channel_test.cpp
+        wasm/remote/transport/PduStream_test.cpp
         wasm/wasi/Preview1Shim_test.cpp
         testing/FakeGuestMemory.hpp
         testing/FakeWasmBackend.hpp
@@ -163,7 +166,7 @@ if(VTEXTENSION_TESTING)
         message(STATUS "[vtextension] CONTOUR_EXTENSIONS_BUNDLED is OFF: the Rust-guest test cases are compiled out, and SKIP.")
     endif()
     # The tests run real guests, so they link the selected backend; its own tests are added by its directory.
-    target_link_libraries(vtextension_test PRIVATE vtextension_runtime glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
+    target_link_libraries(vtextension_test PRIVATE vtextension_runtime vtextension_remote_wire glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
 
     # Compiles the headers other modules include (the GUI, vthost) without glaze on the include path: a public
     # header that pulled in ControlCodec.hpp, or anything else naming glaze, fails to build here, as it would in
@@ -178,6 +181,9 @@ if(VTEXTENSION_TESTING)
         target_compile_options(vtextension_test PRIVATE -Wno-c2y-extensions)
     endif()
 endif()
+
+# The protocol and channels between Contour and its extension host process; no engine, always built.
+add_subdirectory(wasm/remote)
 
 # The backend this build selected (CONTOUR_WASM_RUNTIME, validated in the top-level CMakeLists.txt), and the one
 # name everything that composes a program links: the GUI, contour_cli (`contour daemon`), bench-headless and the

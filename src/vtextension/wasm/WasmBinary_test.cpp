@@ -12,9 +12,13 @@
 #include <string_view>
 #include <vector>
 
+#include <vtextension/testing/TestModules.hpp>
 #include <vtextension/wasm/WasmBinary.hpp>
+#include <vtextension/wasm/testing/BackendContract.hpp>
 
 using vtextension::wasm::binary::BinaryError;
+using vtextension::wasm::binary::DeclaredCounts;
+using vtextension::wasm::binary::declaredCounts;
 using vtextension::wasm::binary::largestInitialElements;
 using vtextension::wasm::binary::largestInitialMemoryPages;
 using vtextension::wasm::binary::Reader;
@@ -233,4 +237,41 @@ TEST_CASE("WasmBinary.largestInitialElements", "[vtextension]")
     };
     CHECK(largestInitialElements(tables) == 7);
     CHECK(largestInitialElements({}) == 0);
+}
+
+TEST_CASE("WasmBinary.declaredCounts", "[vtextension]")
+{
+    auto const described =
+        vtextension::testing::toModule(vtextension::wasm::testing::contract::DescribedModule);
+    CHECK(declaredCounts(described) == DeclaredCounts { .imports = 2, .exports = 2 });
+    CHECK(declaredCounts(raw({ 0x00 })) == std::unexpected(BinaryError::NotAModule));
+
+    struct Case
+    {
+        std::string_view description;
+        std::vector<std::byte> sections;
+        std::expected<DeclaredCounts, BinaryError> counts;
+    };
+    auto const cases = std::vector<Case> {
+        { .description = "no sections",
+          .sections = {},
+          .counts = DeclaredCounts { .imports = 0, .exports = 0 } },
+        { .description = "the counts alone, read without their entries",
+          .sections = raw({ 0x02, 0x02, 0xe5, 0x0e, 0x07, 0x01, 0x03 }),
+          .counts = DeclaredCounts { .imports = 1893, .exports = 3 } },
+        { .description = "a count running past its section",
+          .sections = raw({ 0x07, 0x01, 0x80 }),
+          .counts = std::unexpected(BinaryError::Truncated) },
+        { .description = "a second import section",
+          .sections = raw({ 0x02, 0x01, 0x00, 0x02, 0x01, 0x00 }),
+          .counts = std::unexpected(BinaryError::Malformed) },
+    };
+    auto const header = raw({ 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 });
+    for (auto const& [description, body, counts]: cases)
+    {
+        INFO(description);
+        auto module = header;
+        module.insert(module.end(), body.begin(), body.end());
+        CHECK(declaredCounts(module) == counts);
+    }
 }

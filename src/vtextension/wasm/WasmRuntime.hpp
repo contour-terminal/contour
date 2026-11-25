@@ -107,6 +107,9 @@ struct ImportDescription
     FunctionSignature signature;            ///< The function's signature; empty unless kind is Function.
     /// Whether the runtime provides it; decided at load time and final.
     Linkage linkage = Linkage::Unsatisfied;
+
+    /// @return Whether both describe the same import, alike in every field.
+    bool operator==(ImportDescription const&) const = default;
 };
 
 /// One export a module declares.
@@ -116,6 +119,9 @@ struct ExportDescription
     ExternKind kind = ExternKind::Function; ///< What is exported.
     FunctionSignature signature;            ///< The function's signature; empty unless kind is Function.
     uint32_t initialPages = 0; ///< The memory's initial size in 64 KiB pages; 0 unless kind is Memory.
+
+    /// @return Whether both describe the same export, alike in every field.
+    bool operator==(ExportDescription const&) const = default;
 };
 
 /// The most elements RuntimeLimits::tableElements may allow one table, and its default. It is WAMR's own
