@@ -139,7 +139,13 @@ std::expected<ControlPage, SharedObjectError> ControlPage::adopt(NativeHandle ha
     struct stat status {};
     if (::fstat(handle, &status) == -1)
         return std::unexpected(SharedObjectError::Io);
-    if (std::cmp_not_equal(status.st_size, ControlPageBytes))
+    // Not exactly ControlPageBytes: XNU reports a shared memory object rounded up to the page. Only the
+    // first ControlPageBytes are mapped, so that a size the kernel rounded up maps nothing more. Shared
+    // memory sized by the guest's needs must not trust fstat() either: on macOS it is a page multiple, not
+    // the size asked for.
+    auto const pageBytes = ::sysconf(_SC_PAGESIZE);
+    if (status.st_size < 0 || pageBytes <= 0
+        || !isControlPageSize(static_cast<uint64_t>(status.st_size), static_cast<uint64_t>(pageBytes)))
         return std::unexpected(SharedObjectError::WrongSize);
     if (::fcntl(handle, F_SETFD, FD_CLOEXEC) == -1)
         return std::unexpected(SharedObjectError::Io);

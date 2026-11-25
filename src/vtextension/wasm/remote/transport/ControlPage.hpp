@@ -25,6 +25,20 @@ inline constexpr std::size_t ControlPageBytes = 4096;
 /// How many interrupt slots the page holds: a 32-bit flag each.
 inline constexpr uint32_t InterruptSlotCount = ControlPageBytes / sizeof(std::atomic<uint32_t>);
 
+/// Whether a shared memory object of @p objectBytes, as fstat() reports it, is the interrupt page: at least
+/// ControlPageBytes, and at most that rounded up to the system's page. XNU rounds a POSIX shared memory
+/// object's size up to the page at ftruncate(), and fstat() reports the rounded size -- 16 KiB on Apple
+/// silicon -- while a memfd and a Windows section keep the size they were given. Whatever lies beyond
+/// ControlPageBytes is never mapped.
+/// @param objectBytes The object's size.
+/// @param pageBytes The system's page size, a power of two.
+/// @return Whether it is the page's size.
+[[nodiscard]] constexpr bool isControlPageSize(uint64_t objectBytes, uint64_t pageBytes) noexcept
+{
+    auto const rounded = (uint64_t { ControlPageBytes } + pageBytes - 1) / pageBytes * pageBytes;
+    return objectBytes >= ControlPageBytes && objectBytes <= rounded;
+}
+
 /// Why a shared memory object could not be made or mapped.
 enum class SharedObjectError : uint8_t
 {
@@ -45,7 +59,8 @@ class ControlPage
     /// Maps a page this process inherited, read-only: the helper's side, which only reads the flags. Takes
     /// ownership of @p handle, made close-on-exec (not inheritable) again.
     /// @param handle The page's handle.
-    /// @return The page; `WrongSize` if the object is not ControlPageBytes large, `Io` if it cannot be
+    /// @return The page; `WrongSize` if the object is not of the page's size (isControlPageSize()), `Io` if
+    /// it cannot be
     ///         mapped. On failure @p handle stays the caller's.
     [[nodiscard]] static std::expected<ControlPage, SharedObjectError> adopt(NativeHandle handle);
 

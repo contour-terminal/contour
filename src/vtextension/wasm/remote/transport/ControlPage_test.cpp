@@ -4,6 +4,7 @@
 // through the other, the helper refuses a page of the wrong size, and nobody can resize it or inherit it.
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cstdint>
 #include <expected>
 #include <optional>
@@ -28,6 +29,8 @@
 #endif
 
 using vtextension::wasm::remote::transport::ControlPage;
+using vtextension::wasm::remote::transport::ControlPageBytes;
+using vtextension::wasm::remote::transport::isControlPageSize;
 using vtextension::wasm::remote::transport::SharedObjectError;
 using vtextension::wasm::remote::transport::testing::duplicate;
 
@@ -69,22 +72,49 @@ TEST_CASE("ControlPage.helperViewSeesTheRaise", "[vtextension]")
     CHECK_FALSE(helper->isRaised(9));
 }
 
+TEST_CASE("ControlPage.sizeMayBeRoundedUpToThePage", "[vtextension]")
+{
+    // 4 KiB pages: the object is exactly the page.
+    CHECK(isControlPageSize(ControlPageBytes, 4096));
+    CHECK_FALSE(isControlPageSize(ControlPageBytes - 1, 4096));
+    CHECK_FALSE(isControlPageSize(ControlPageBytes + 1, 4096));
+    // 16 KiB pages (Apple silicon): XNU reports the object rounded up to the page.
+    CHECK(isControlPageSize(ControlPageBytes, 16384));
+    CHECK(isControlPageSize(16384, 16384));
+    CHECK_FALSE(isControlPageSize(16385, 16384));
+    CHECK_FALSE(isControlPageSize(32768, 16384));
+    CHECK_FALSE(isControlPageSize(ControlPageBytes - 1, 16384));
+}
+
 #ifndef _WIN32
 TEST_CASE("ControlPage.adoptRefusesAWrongSize", "[vtextension]")
 {
+    // Larger than any page the page's size rounds up to, 16 KiB on Apple silicon included; and, where the
+    // object keeps the size it is given (not XNU's shared memory, which rounds it up to the page), smaller.
+    auto const pageBytes = static_cast<off_t>(::sysconf(_SC_PAGESIZE));
     #ifdef __APPLE__
-    auto const name = std::format("/contour-eh-test-{}", ::getpid());
-    auto const descriptor = ::shm_open(name.c_str(), O_RDWR | O_CREAT | O_EXCL, 0600);
-    REQUIRE(descriptor != -1);
-    ::shm_unlink(name.c_str());
+    auto const sizes = std::array { 4 * pageBytes };
     #else
-    auto const descriptor = ::memfd_create("contour-eh-test", MFD_CLOEXEC);
-    REQUIRE(descriptor != -1);
+    auto const sizes = std::array { 4 * pageBytes, off_t { ControlPageBytes / 2 } };
     #endif
-    REQUIRE(::ftruncate(descriptor, 8192) == 0);
-    CHECK(ControlPage::adopt(descriptor) == std::unexpected(SharedObjectError::WrongSize));
-    // A refused handle stays its owner's.
-    CHECK(::close(descriptor) == 0);
+    for (auto const size: sizes)
+    {
+        INFO(size);
+    #ifdef __APPLE__
+        // XNU sizes a shared memory object once: a fresh one per size.
+        auto const name = std::format("/contour-eh-test-{}", ::getpid());
+        auto const descriptor = ::shm_open(name.c_str(), O_RDWR | O_CREAT | O_EXCL, 0600);
+        REQUIRE(descriptor != -1);
+        ::shm_unlink(name.c_str());
+    #else
+        auto const descriptor = ::memfd_create("contour-eh-test", MFD_CLOEXEC);
+        REQUIRE(descriptor != -1);
+    #endif
+        REQUIRE(::ftruncate(descriptor, size) == 0);
+        CHECK(ControlPage::adopt(descriptor) == std::unexpected(SharedObjectError::WrongSize));
+        // A refused handle stays its owner's.
+        CHECK(::close(descriptor) == 0);
+    }
 }
 #endif
 
