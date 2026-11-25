@@ -6,7 +6,7 @@
 │ · pr-2369 · fix CI                   removed │ │   parts require approval: echo one, mkdir sub, ls -a ..             │
 │   completed                                  │ │                                                                     │
 │                                              │ │ tool Write · 18:36                                                  │
-│ + new agent                                  │ │   {"file_path":"/home/user/proj/one.txt","content":"one\n"}         │
+│ + new task                                   │ │   {"file_path":"/home/user/proj/one.txt","content":"one\n"}         │
 │                                              │ │                                                                     │
 │                                              │ │ result · 18:36                                                      │
 │                                              │ │   File created successfully at: /home/user/proj/one.txt (file state │

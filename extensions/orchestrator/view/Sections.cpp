@@ -800,11 +800,11 @@ std::vector<Row> buildRows(Engine const& engine, uint64_t nowMonoMs)
                              .status = std::format("{}", orphans.size()) });
         std::ranges::move(orphans, std::back_inserter(rows));
     }
-    rows.push_back(Row { .kind = RowKind::NewAgent,
+    rows.push_back(Row { .kind = RowKind::NewTask,
                          .mark = "+",
                          .markRole = Role::Accent,
-                         .text = "new agent",
-                         .rowState = RowState::NewAgent });
+                         .text = "new task",
+                         .rowState = RowState::NewTask });
     return rows;
 }
 
@@ -835,7 +835,7 @@ std::vector<std::size_t> visibleRows(std::span<Row const> rows, std::string_view
                           && matchesFilter(item, filter);
                }))
             continue;
-        if (row.isSelectable() && row.kind != RowKind::Heading && row.kind != RowKind::NewAgent
+        if (row.isSelectable() && row.kind != RowKind::Heading && row.kind != RowKind::NewTask
             && !filter.empty() && !matchesFilter(row, filter))
             continue;
         kept.push_back(index);

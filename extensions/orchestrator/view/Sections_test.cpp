@@ -45,13 +45,13 @@ constexpr auto SixMinutes = uint64_t { 360'000 };
 
 } // namespace
 
-TEST_CASE("the Fleet lists runs only, then + new agent", "[orchestrator][view]")
+TEST_CASE("the Fleet lists runs only, then + new task", "[orchestrator][view]")
 {
     auto const engine = bootEngine({});
     auto const rows = buildRows(engine, StartMonoMs);
-    // The pull requests and issues are the launcher's: with no run, the Fleet holds `+ new agent` alone.
+    // The pull requests and issues are the Work view's: with no run, the Fleet holds `+ new task` alone.
     REQUIRE(rows.size() == 1);
-    CHECK(rows.front().kind == RowKind::NewAgent);
+    CHECK(rows.front().kind == RowKind::NewTask);
     CHECK(rows.front().isSelectable());
 }
 
@@ -350,7 +350,7 @@ TEST_CASE("a filter keeps the runs that hold it, and their groups' headings", "[
                                                  storedRun(Done {}, DoneId, ChangeRequestRef { 2379 }) } });
     auto const rows = buildRows(engine, StartMonoMs);
     auto const filtered = visibleRows(rows, "2379");
-    // The run, its heading, and `+ new agent`, which every filter keeps.
+    // The run, its heading, and `+ new task`, which every filter keeps.
     CHECK(selectableCount(rows, filtered) == 2);
     CHECK(std::ranges::count_if(filtered,
                                 [&](std::size_t index) { return rows[index].kind == RowKind::Heading; })
@@ -489,7 +489,7 @@ TEST_CASE("orphans have their own section", "[orchestrator][view]")
     REQUIRE(engine.orphans("contour").size() == 3);
     auto const rows = buildRows(engine, StartMonoMs);
     CHECK(textsOf(rows, RowKind::Heading).back() == "LEFTOVER WORKTREES");
-    CHECK(rows.back().kind == RowKind::NewAgent);
+    CHECK(rows.back().kind == RowKind::NewTask);
     CHECK(std::ranges::count(rows, RowKind::Orphan, &Row::kind) == 3);
 
     auto const* const quoted = rowOfOrphan(rows, QuotedOrphan);

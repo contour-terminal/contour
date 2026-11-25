@@ -314,8 +314,9 @@ void Focus::render(Canvas& canvas)
         else if (_frame.content == FleetContent::Empty)
             for (auto const line: Primer)
                 lines.emplace_back(line, Role::Text);
-        else if (row != nullptr && row->kind == RowKind::NewAgent)
-            lines.emplace_back("⏎ or n starts an agent on a pull request, an issue, or anything you type.",
+        else if (row != nullptr && row->kind == RowKind::NewTask)
+            lines.emplace_back("⏎ or n starts an agent on anything you type; w lists the pull requests and "
+                               "tickets to start one on.",
                                Role::Text);
         else if (row != nullptr && row->kind == RowKind::Heading)
             lines.emplace_back(std::format("{} · {} · enter or z unfolds it", row->text, row->status),

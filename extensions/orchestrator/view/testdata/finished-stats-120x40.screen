@@ -4,7 +4,7 @@
 │▍· pr-2379 · fix CI                   removed │ │ Transcript  Details                                                 │
 │▍  completed                                  │ │ task      fix CI                                                    │
 │                                              │ │ model     sonnet                                                    │
-│ + new agent                                  │ │ state     completed, worktree removed, seen                         │
+│ + new task                                   │ │ state     completed, worktree removed, seen                         │
 │                                              │ │ time      30m 40s wall · 2m 30s active · 1m 35s waiting for you     │
 │                                              │ │ tokens    42.3k out · 152 in · 12.9M cache read · 192.7k cache      │
 │                                              │ │             write                                                   │
@@ -37,4 +37,4 @@
 │                                              │ │ │ · removed · completed · ⏎ run again · t transcript              │ │
 │                                              │ │ ╰─────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
- ⏎ run again · t transcript · del dismiss · n new agent · ^k all actions                                                
+ ⏎ run again · t transcript · del dismiss · n new task · ^k all actions                                                 

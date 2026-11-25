@@ -94,7 +94,7 @@ TEST_CASE("commandFor names keys by the table", "[orchestrator][view][keys]")
         Case { .key = special(KeyCode::Delete), .expected = KeyCommand::Dismiss },
         Case { .key = character(U'o'), .expected = KeyCommand::OpenLink },
         Case { .key = character(U'r'), .expected = KeyCommand::Reveal },
-        Case { .key = character(U'n'), .expected = KeyCommand::NewAgent },
+        Case { .key = character(U'n'), .expected = KeyCommand::NewTask },
         Case { .key = character(U'?'), .expected = KeyCommand::Palette },
         Case { .key = character(U'k', Modifier::Ctrl), .expected = KeyCommand::Palette },
         Case { .key = character(U'R', Modifier::Shift), .expected = std::nullopt },

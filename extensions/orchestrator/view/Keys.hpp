@@ -21,6 +21,7 @@
 #include <orchestrator/view/Fleet.hpp>
 #include <orchestrator/view/Launcher.hpp>
 #include <orchestrator/view/StartDialog.hpp>
+#include <orchestrator/view/TaskBox.hpp>
 
 namespace orchestrator::view
 {
@@ -170,12 +171,13 @@ enum class KeyCommand : uint8_t
     PreviousPage,   ///< Show the transcript's previous page.
     NextPage,       ///< Show the transcript's next page; its last follows the agent again.
     Fold,           ///< Fold or unfold the group of the selected row, and select its heading.
-    NewAgent,       ///< Open the launcher, empty: to browse the items, or to type a topic.
+    NewTask,        ///< Open the `n` box: a custom task, typed and started at once.
     InstallPlugins, ///< Install the Claude Code plugins the agents need and lack; the palette's.
     Reveal,         ///< Bring the selected run's agent tab in front.
     OpenLink,       ///< Open the selected run's link on the machine the user sits at (`url-open`).
     Open,           ///< To the Focus of the selected row: to write to its agent, or to read it.
-    RunAgain,       ///< Open the launcher on the selected finished run's item, task and model.
+    RunAgain,       ///< Start the selected finished run again: a topic's text in the `n` box, an item in the
+                    ///< start dialog on its task.
     Timeline,       ///< Show the last 24 hours, an hour a bar; the palette's.
     SwitchView,     ///< Show the other view: Agents ⇄ Work.
     Sort,           ///< The Work view: sort by importance ⇄ by last update.
@@ -372,6 +374,8 @@ struct Interaction
     /// The start dialog, while it is open: it takes every key. Here rather than in WorkState, since a
     /// finished run's "run again" opens it from the Agents view too.
     std::optional<StartDialogState> startDialog = {};
+    /// The `n` box, while it is open: it takes every key. Opened from either view.
+    std::optional<TaskBoxState> taskBox = {};
     [[nodiscard]] bool operator==(Interaction const&) const = default;
 };
 
@@ -439,23 +443,29 @@ void selectRow(Interaction& interaction, KeyContext const& context, std::size_t 
 /// @param lines How far: negative is up.
 void scrollFocus(Interaction& interaction, KeyContext const& context, std::ptrdiff_t lines) noexcept;
 
-/// Opens the launcher on an item, as Enter does on a finished run (run again): on @p task while it
-/// still applies to the item, else on the first task that does. The launcher previews and refuses as every
-/// dispatch does (an item with an active run shows the refusal); nothing starts before it is confirmed. When
-/// it does not open, the action bar says why.
-/// @param interaction Where the user is: its launcher opened, or its notice set. Its session id is left empty
-///        for the caller, which holds the source of them, to mint.
-/// @param engine The engine: its configuration and its lists.
+/// Opens the start dialog on an item, as running a finished run again does: on @p task while it still applies
+/// to the item, else on the one its state suggests. The dialog previews and refuses as every dispatch does
+/// (an item with an active run shows the refusal); nothing starts before it is confirmed. When it does not
+/// open, such as for an item the engine no longer lists among its Work items, the action bar says why.
+/// @param interaction Where the user is: its start dialog opened, or its notice set. Its session id is left
+///        empty for the caller, which holds the source of them, to mint.
+/// @param engine The engine: its configuration and its Work items.
 /// @param repo The repository's configured name.
-/// @param item The item; a TopicRef opens the launcher on @p topic, its topic row highlighted.
+/// @param item The item.
 /// @param task The id of the task it starts on, such as the run's.
-/// @param topic A topic's text, such as the run's; empty for any other item.
-void openLauncherFor(Interaction& interaction,
-                     Engine const& engine,
-                     std::string_view repo,
-                     ItemRef const& item,
-                     std::string_view task,
-                     std::string_view topic);
+void openStartDialogFor(Interaction& interaction,
+                        Engine const& engine,
+                        std::string_view repo,
+                        ItemRef const& item,
+                        std::string_view task);
+
+/// Opens the `n` box (openTaskBox()), or says on the action bar why it does not open.
+/// @param interaction Where the user is: its box opened, or its notice set. Its session id is left empty for
+///        the caller, which holds the source of them, to mint.
+/// @param engine The engine: its configuration and its runs.
+/// @param repo The repository it starts in while configured, such as a run's; empty: the first.
+/// @param text The text it opens with, such as a finished topic run's; empty for a new one.
+void openTaskBoxFor(Interaction& interaction, Engine const& engine, std::string_view repo, std::string text);
 
 /// @param key A key the terminal sent.
 /// @param letter A lower-case letter.
@@ -483,9 +493,10 @@ void dropLastCodepoint(std::string& text) noexcept;
 /// @return It as one line: line ends and tabs folded to a space each, every other control character dropped.
 [[nodiscard]] std::string pastedText(std::string_view text);
 
-/// Applies a paste: into the start dialog's note while it is open, into the palette's or the launcher's query
-/// while one is open, into the message box while it has the keys (its line feeds kept), into the filter while
-/// it is typed; dropped anywhere else. A paste is text, never keys: nothing in it confirms, moves or acts.
+/// Applies a paste: into the start dialog's note or the `n` box's text while one is open, into the palette's
+/// or the launcher's query while one is open, into the message box while it has the keys (its line feeds
+/// kept), into the filter while it is typed; dropped anywhere else. A paste is text, never keys: nothing in
+/// it confirms, moves or acts.
 /// @param interaction Where the user is; its query, draft or filter extended.
 /// @param context The engine the launcher lists from, and the selected row.
 /// @param text What was pasted.

@@ -95,6 +95,40 @@ inline constexpr std::string_view HooksMissingWarning =
 ///         A dispatch then asks for a second Enter. An agent that reads no Claude Code state lacks nothing.
 [[nodiscard]] bool isSetupIncomplete(Engine const& engine, WorkerDef const& worker) noexcept;
 
+/// @param form A dispatch's choices.
+/// @param engine The engine they would dispatch through.
+/// @return The warning a form opened on @p form shows: Shown while its worker's setup is incomplete
+///         (isSetupIncomplete()), else None.
+[[nodiscard]] HooksWarning setupWarningOf(DispatchFormState const& form, Engine const& engine) noexcept;
+
+/// Whether an Enter gets past the warning that the worker's setup is incomplete.
+enum class SetupGate : uint8_t
+{
+    Held = 0, ///< It only confirmed the warning, or belongs to the input that did: nothing dispatches.
+    Passed,   ///< The setup is complete, or the warning was confirmed by an earlier input.
+};
+
+/// Applies an Enter to the incomplete-setup warning: the first Enter confirms it, and only an Enter of a
+/// later input passes it, so that a paste or a held key cannot click through it.
+/// @param form The choices confirmed.
+/// @param engine The engine they would dispatch through.
+/// @param hooks The form's warning; set Confirmed by the first Enter.
+/// @param hooksAtInput @p hooks as the input that holds the Enter began.
+/// @return Whether the Enter dispatches.
+[[nodiscard]] SetupGate passSetupWarning(DispatchFormState const& form,
+                                         Engine const& engine,
+                                         HooksWarning& hooks,
+                                         HooksWarning hooksAtInput) noexcept;
+
+/// @param form The choices.
+/// @param engine The engine they would dispatch through.
+/// @param hooks The form's warning.
+/// @return What Enter does now, as a hint: `enter start`, or past an incomplete setup `enter confirms the
+///         warning` and then `enter starts it anyway`.
+[[nodiscard]] std::string_view enterHint(DispatchFormState const& form,
+                                         Engine const& engine,
+                                         HooksWarning hooks) noexcept;
+
 /// @param text Text that names a previewed run's id, such as its worktree.
 /// @param run The previewed run.
 /// @return @p text with the run's stamp, known only once the dispatch is confirmed, shown as `…`.

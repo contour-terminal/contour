@@ -21,8 +21,8 @@ namespace
 {
     // {{{ the commands
 
-    /// Why the launcher does not open.
-    [[nodiscard]] std::string_view whyNoLauncher(Engine const* engine)
+    /// Why the `n` box does not open.
+    [[nodiscard]] std::string_view whyNoTaskBox(Engine const* engine)
     {
         return engine == nullptr || engine->config() == nullptr
                    ? "the orchestrator is not configured: the line above says what is missing"sv
@@ -69,10 +69,10 @@ namespace
         CommandRow { .command = KeyCommand::DetailsTab, .label = "details"sv },
         CommandRow {
             .command = KeyCommand::Fold, .label = "fold its group"sv, .unoffered = "it is in no group"sv },
-        CommandRow { .command = KeyCommand::NewAgent,
-                     .label = "new agent"sv,
+        CommandRow { .command = KeyCommand::NewTask,
+                     .label = "new task"sv,
                      .scope = CommandScope::Global,
-                     .unavailable = whyNoLauncher },
+                     .unavailable = whyNoTaskBox },
         CommandRow {
             .command = KeyCommand::Filter, .label = "filter the agents"sv, .scope = CommandScope::Global },
         CommandRow {
@@ -113,7 +113,7 @@ namespace
         WorkHint { .command = KeyCommand::Sort, .label = "sort"sv },
         WorkHint { .command = KeyCommand::RepoNext, .label = "repository"sv },
         WorkHint { .command = KeyCommand::SwitchView, .label = "agents"sv },
-        WorkHint { .command = KeyCommand::NewAgent, .label = "new agent"sv },
+        WorkHint { .command = KeyCommand::NewTask, .label = "new task"sv },
     };
 
     // }}}
@@ -231,7 +231,7 @@ namespace
         ActionRow { .when = RowState::Kept, .command = KeyCommand::OpenLink, .hinted = Hinted::PaletteOnly },
         ActionRow { .when = RowState::Kept, .command = KeyCommand::Fold, .hinted = Hinted::PaletteOnly },
 
-        ActionRow { .when = RowState::NewAgent, .command = KeyCommand::NewAgent },
+        ActionRow { .when = RowState::NewTask, .command = KeyCommand::NewTask },
 
         ActionRow { .when = RowState::GroupHeader, .command = KeyCommand::Fold, .label = "unfold"sv },
 
@@ -259,7 +259,7 @@ namespace
 
     constexpr auto NotForRows = std::array {
         NotFor { .state = RowState::None, .reason = "no run selected"sv },
-        NotFor { .state = RowState::NewAgent, .reason = "no run selected"sv },
+        NotFor { .state = RowState::NewTask, .reason = "no run selected"sv },
         NotFor { .state = RowState::GroupHeader, .reason = "not on a group heading"sv },
         NotFor { .state = RowState::Leftover, .reason = "not for a leftover worktree"sv },
     };
@@ -338,7 +338,7 @@ std::string whyNot(Row const* row, KeyCommand command, Engine const* engine)
     if (listed == nullptr)
         return {};
     auto const state = stateOf(row);
-    // A global command the row's state makes its primary action, such as `+ new agent`'s, is still global.
+    // A global command the row's state makes its primary action, such as `+ new task`'s, is still global.
     if (listed->scope == CommandScope::Global)
         return listed->unavailable != nullptr ? std::string { listed->unavailable(engine) } : std::string {};
     if (!std::ranges::contains(actionsFor(state), command, &ActionRow::command))
@@ -376,7 +376,7 @@ std::vector<std::string> actionHints(Row const* row)
     {
         // The primary action is `⏎`'s; any other is hinted only with a key of its own.
         auto const key = rank == 0 ? keyNameOf(KeyCommand::Enter) : keyNameOf(action.command);
-        // A global command a state lists, such as `+ new agent`'s, is hinted wherever the bar is drawn.
+        // A global command a state lists, such as `+ new task`'s, is hinted wherever the bar is drawn.
         auto const isRowScoped = commandRowOf(action.command)->scope == CommandScope::Row;
         if (key.empty() || action.hinted == Hinted::PaletteOnly
             || (isRowScoped && !whyNot(row, action.command, nullptr).empty()))
@@ -405,8 +405,8 @@ std::string barText(Row const* row, Place place, MessageKeys keys, int columns)
     hints = actionHints(row);
     if (place == Place::Focus)
         hints.push_back(std::format("{} back", keyNameOf(KeyCommand::Back)));
-    if (!std::ranges::contains(actionsFor(stateOf(row)), KeyCommand::NewAgent, &ActionRow::command))
-        hints.push_back(std::format("{} {}", keyNameOf(KeyCommand::NewAgent), labelOf(KeyCommand::NewAgent)));
+    if (!std::ranges::contains(actionsFor(stateOf(row)), KeyCommand::NewTask, &ActionRow::command))
+        hints.push_back(std::format("{} {}", keyNameOf(KeyCommand::NewTask), labelOf(KeyCommand::NewTask)));
     // The palette always shows: whatever was cut is in it.
     auto const line = joined(columns - columnsOf(palette) - columnsOf(HintSeparator));
     if (line.empty())

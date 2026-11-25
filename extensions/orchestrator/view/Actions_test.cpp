@@ -28,9 +28,9 @@ constexpr auto RunId = "pr-1-20261113-150847"sv;
 
 /// Every state a row can be in but RowState::None.
 constexpr auto RowStates = std::array {
-    RowState::Asking,  RowState::Waiting,  RowState::Errored,     RowState::Starting,
-    RowState::Working, RowState::Done,     RowState::Ending,      RowState::Finished,
-    RowState::Kept,    RowState::NewAgent, RowState::GroupHeader, RowState::Leftover,
+    RowState::Asking,  RowState::Waiting, RowState::Errored,     RowState::Starting,
+    RowState::Working, RowState::Done,    RowState::Ending,      RowState::Finished,
+    RowState::Kept,    RowState::NewTask, RowState::GroupHeader, RowState::Leftover,
 };
 
 /// The commands that have no key of their own: only `⏎` runs them, as a state's primary action.
@@ -143,7 +143,7 @@ TEST_CASE("⏎ does each state's primary action", "[orchestrator][view][actions]
         Case { .state = RowState::Done, .primary = KeyCommand::Open, .label = "follow up" },
         Case { .state = RowState::Finished, .primary = KeyCommand::RunAgain, .label = "run again" },
         Case { .state = RowState::Kept, .primary = KeyCommand::RetryRemoval, .label = "retry removal" },
-        Case { .state = RowState::NewAgent, .primary = KeyCommand::NewAgent, .label = "new agent" },
+        Case { .state = RowState::NewTask, .primary = KeyCommand::NewTask, .label = "new task" },
         Case { .state = RowState::GroupHeader, .primary = KeyCommand::Fold, .label = "unfold" },
     };
     for (auto const& [state, primary, label]: cases)
@@ -171,9 +171,9 @@ TEST_CASE("whyNot names why an action does not apply", "[orchestrator][view][act
     // A key no table lists always applies.
     CHECK(whyNot(nullptr, KeyCommand::Up, nullptr).empty());
     // A global command asks the engine.
-    CHECK(whyNot(nullptr, KeyCommand::NewAgent, nullptr).starts_with("the orchestrator is not configured"));
+    CHECK(whyNot(nullptr, KeyCommand::NewTask, nullptr).starts_with("the orchestrator is not configured"));
     auto const engine = bootEngine(World {});
-    CHECK(whyNot(nullptr, KeyCommand::NewAgent, &engine).empty());
+    CHECK(whyNot(nullptr, KeyCommand::NewTask, &engine).empty());
     CHECK(whyNot(nullptr, KeyCommand::InstallPlugins, &engine) == "every plugin the tasks need is installed");
 
     CHECK(refusalNotice(&working, KeyCommand::Dismiss, nullptr) == "del dismiss · not while it is working");
@@ -187,14 +187,14 @@ TEST_CASE("the bar: the row's actions in rank order, then ^k all actions", "[orc
     CHECK(actionHints(&working)
           == std::vector<std::string> { "⏎ message", "t transcript", "b board", "e end" });
     CHECK(barText(&working, Place::Fleet, MessageKeys::Elsewhere, 200)
-          == "⏎ message · t transcript · b board · e end · n new agent · ^k all actions");
+          == "⏎ message · t transcript · b board · e end · n new task · ^k all actions");
     // Cut between hints, never inside one; the palette always shows.
     CHECK(barText(&working, Place::Fleet, MessageKeys::Elsewhere, 41)
           == "⏎ message · t transcript · ^k all actions");
     CHECK(barText(&working, Place::Fleet, MessageKeys::Elsewhere, 14) == "^k all actions");
     // In the Focus, esc steps back; in the message box, the box's keys.
     CHECK(barText(&working, Place::Focus, MessageKeys::Elsewhere, 200)
-          == "⏎ message · t transcript · b board · e end · esc back · n new agent · ^k all actions");
+          == "⏎ message · t transcript · b board · e end · esc back · n new task · ^k all actions");
     CHECK(barText(&working, Place::Focus, MessageKeys::InBox, 200)
           == "⏎ send · alt⏎ line · esc keep draft · ^k all actions · pgup pgdn scroll");
     // An action the row does not offer is not hinted: a finished run's board went with its worktree.
@@ -208,7 +208,7 @@ TEST_CASE("the bar: the row's actions in rank order, then ^k all actions", "[orc
     CHECK(actionHints(&finished)
           == std::vector<std::string> { "⏎ run again", "t transcript", "del dismiss" });
     // Nothing selected: what starts something.
-    CHECK(barText(nullptr, Place::Fleet, MessageKeys::Elsewhere, 200) == "n new agent · ^k all actions");
-    auto const newAgent = Row { .kind = RowKind::NewAgent, .rowState = RowState::NewAgent };
-    CHECK(barText(&newAgent, Place::Fleet, MessageKeys::Elsewhere, 200) == "⏎ new agent · ^k all actions");
+    CHECK(barText(nullptr, Place::Fleet, MessageKeys::Elsewhere, 200) == "n new task · ^k all actions");
+    auto const newAgent = Row { .kind = RowKind::NewTask, .rowState = RowState::NewTask };
+    CHECK(barText(&newAgent, Place::Fleet, MessageKeys::Elsewhere, 200) == "⏎ new task · ^k all actions");
 }

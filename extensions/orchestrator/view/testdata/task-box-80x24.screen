@@ -1,0 +1,24 @@
+ ✦ Agents  Work                                                      ⬢ 0/4 ▱▱▱▱ 
+╭─ Agents 0 ───────────────────────────────────────────────────────────────────╮
+│▍+ new task                                                                   │
+│                                                                              │
+│                                                                              │
+│   ╭─ + New task ─────────────────────────────────────────────────────────╮   │
+│   │ What should the agent do?                                            │   │
+│   │ investigate the flaky test▏                                          │   │
+│   │                                                                      │   │
+╰───│ repo      ‹ contour ›                                                │───╯
+╭───│ worker    ‹ claude 0 ›                                               │───╮
+│ No│ model     ‹ opus ›                                                   │   │
+│ yo│ ──────────────────────────────────────────────────────────────────── │   │
+│ On│ branch    agent/topic-investigate-the-flaky-test-…                   │   │
+│ es│ worktree  /home/u/worktrees/contour/topic-investigate-the-flaky-test │   │
+│ Ev│           -…                                                         │   │
+│   │                                                                      │   │
+│   │ enter start · tab settings · ←→ change · esc close                   │   │
+│   ╰──────────────────────────────────────────────────────────────────────╯   │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ ⏎ new task · ^k all actions                                                    

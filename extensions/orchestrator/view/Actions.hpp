@@ -120,7 +120,7 @@ enum class MessageKeys : uint8_t
 /// @param keys Whether the message box has them.
 /// @param columns The cells the line may take.
 /// @return The action bar's line, as many whole hints as fit: the message box's keys while it has them;
-///         else the row's actions, `esc back` in the Focus and `n new agent` where the row does not offer it
+///         else the row's actions, `esc back` in the Focus and `n new task` where the row does not offer it
 ///         already, then `^k all actions`, which always shows.
 [[nodiscard]] std::string barText(Row const* row, Place place, MessageKeys keys, int columns);
 

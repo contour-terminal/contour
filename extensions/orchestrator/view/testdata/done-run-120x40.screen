@@ -6,7 +6,7 @@
 │▍✓ pr-2379 · fix CI                      done │ │ Fixing CI                                                           │
 │▍  fix the reflow                      ▰▰▰▱▱▱ │ │ ☑ reproduced on master                                              │
 │                                              │ │ ☑ wrote the regression test                                         │
-│ + new agent                                  │ │ ☐ fix the reflow                                                    │
+│ + new task                                   │ │ ☐ fix the reflow                                                    │
 │                                              │ │ ☐ watch CI                                                          │
 │                                              │ │                                                                     │
 │                                              │ │                                                                     │
@@ -37,4 +37,4 @@
 │                                              │ │ │ ✓ reported done · ⏎ follow up · o open link · t transcript      │ │
 │                                              │ │ ╰─────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
- ⏎ follow up · o open link · t transcript · e end · n new agent · ^k all actions                                        
+ ⏎ follow up · o open link · t transcript · e end · n new task · ^k all actions                                         

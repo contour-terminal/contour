@@ -623,8 +623,7 @@ std::optional<UiAction> applyWorkCommand(KeyCommand command,
                                          std::size_t pageRows)
 {
     // The commands both views share act as they do in the Agents view.
-    if (command == KeyCommand::SwitchView || command == KeyCommand::NewAgent
-        || command == KeyCommand::Palette)
+    if (command == KeyCommand::SwitchView || command == KeyCommand::NewTask || command == KeyCommand::Palette)
         return dispatch(command, interaction, KeyContext { .engine = &engine });
     auto const context =
         WorkContext { .lines = lines, .items = items, .engine = engine, .pageRows = pageRows };

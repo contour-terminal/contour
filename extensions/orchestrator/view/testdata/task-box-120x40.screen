@@ -1,6 +1,6 @@
  ✦ Agents  Work                                                                                              ⬢ 0/4 ▱▱▱▱ 
 ╭─ Agents 0 ───────────────────────────────────╮ ╭─────────────────────────────────────────────────────────────────────╮
-│▍+ new agent                                  │ │ No agents yet. ⏎ or n starts one on a pull request, an issue, or    │
+│▍+ new task                                   │ │ No agents yet. ⏎ or n starts one on a pull request, an issue, or    │
 │                                              │ │ anything you type.                                                  │
 │                                              │ │ Once agents run: ⏎ talks to the selected one, 1 2 3 answers one     │
 │                                              │ │ that asks, esc steps back.                                          │
@@ -10,22 +10,22 @@
 │                                              │ │                                                                     │
 │                                              │ │                                                                     │
 │                                              │ │                                                                     │
-│              ╭─ ✦ New agent ──────────────────────────────────────────────────────────────────────────╮              │
-│              │ › #2375▏                                              pull requests · issues · a topic │              │
-│              │ repo  all  contour    show  all  needs attention  pull requests  issues                │              │
-│              │                                                                                        │              │
-│              │ MY PULL REQUESTS                                                                       │              │
-│              │ ▍#2375 Say why the stdio relay failed, and send a hello before half-closing i… ●       │              │
-│              │  ✎ topic “#2375”                                                            new branch │              │
-│              │ ────────────────────────────────────────────────────────────────────────────────────── │              │
-│              │ task ‹ fix CI ›   model ‹ sonnet ›   perms ‹ standard ›   note none                    │              │
-│              │ #2375 · contour · checks running                                                       │              │
-│              │ checkout  gh pr checkout 2375 --branch agent/pr-2375-…                                 │              │
-│              │ worktree  /home/u/worktrees/contour/pr-2375-…                                          │              │
-│              │ perms     standard · 19 allowed · 4 denied · edits need no approval                    │              │
-│              │                                                                                        │              │
-│              │ enter start · ↑↓ choose · ←→ repo · ctrl+←→ kind · tab settings · ctrl+p more          │              │
-│              ╰────────────────────────────────────────────────────────────────────────────────────────╯              │
+│                                              │ │                                                                     │
+│                   ╭─ + New task ─────────────────────────────────────────────────────────────────╮                   │
+│                   │ What should the agent do?                                                    │                   │
+│                   │ investigate the flaky test▏                                                  │                   │
+│                   │                                                                              │                   │
+│                   │ repo      ‹ contour ›                                                        │                   │
+│                   │ worker    ‹ claude 0 ›                                                       │                   │
+│                   │ model     ‹ opus ›                                                           │                   │
+│                   │ ──────────────────────────────────────────────────────────────────────────── │                   │
+│                   │ branch    agent/topic-investigate-the-flaky-test-…                           │                   │
+│                   │ worktree  /home/u/worktrees/contour/topic-investigate-the-flaky-test-…       │                   │
+│                   │                                                                              │                   │
+│                   │ enter start · tab settings · ←→ change · esc close                           │                   │
+│                   ╰──────────────────────────────────────────────────────────────────────────────╯                   │
+│                                              │ │                                                                     │
+│                                              │ │                                                                     │
 │                                              │ │                                                                     │
 │                                              │ │                                                                     │
 │                                              │ │                                                                     │
@@ -37,4 +37,4 @@
 │                                              │ │                                                                     │
 │                                              │ │                                                                     │
 ╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
- ⏎ new agent · ^k all actions                                                                                           
+ ⏎ new task · ^k all actions                                                                                            

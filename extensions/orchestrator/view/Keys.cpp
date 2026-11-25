@@ -8,6 +8,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <optional>
 #include <ranges>
@@ -17,6 +18,7 @@
 #include <variant>
 
 #include <orchestrator/core/Utf8.hpp>
+#include <orchestrator/core/WorkItems.hpp>
 #include <orchestrator/view/Actions.hpp>
 #include <orchestrator/view/Palette.hpp>
 #include <orchestrator/view/Sections.hpp>
@@ -45,7 +47,7 @@ namespace
         KeyRow { .key = "b"sv, .command = KeyCommand::BoardTab },
         KeyRow { .key = "t"sv, .command = KeyCommand::TranscriptTab },
         KeyRow { .key = "d"sv, .command = KeyCommand::DetailsTab },
-        KeyRow { .key = "n"sv, .command = KeyCommand::NewAgent },
+        KeyRow { .key = "n"sv, .command = KeyCommand::NewTask },
         KeyRow { .key = "/"sv, .command = KeyCommand::Filter },
         KeyRow { .key = "e"sv, .command = KeyCommand::EndRun },
         KeyRow { .key = "o"sv, .command = KeyCommand::OpenLink },
@@ -89,7 +91,7 @@ namespace
         KeyRow { .key = "left"sv, .command = KeyCommand::RepoPrevious },
         KeyRow { .key = "right"sv, .command = KeyCommand::RepoNext },
         KeyRow { .key = "o"sv, .command = KeyCommand::OpenLink },
-        KeyRow { .key = "n"sv, .command = KeyCommand::NewAgent },
+        KeyRow { .key = "n"sv, .command = KeyCommand::NewTask },
         KeyRow { .key = "w"sv, .command = KeyCommand::SwitchView },
         KeyRow { .key = "^k"sv, .command = KeyCommand::Palette },
         KeyRow { .key = "?"sv, .command = KeyCommand::Palette },
@@ -266,11 +268,29 @@ namespace
         return isFollowing(interaction, context) ? lastScroll(context) : interaction.scroll;
     }
 
-    /// Opens the launcher on a run's item and task (openLauncherFor()), as running it again does.
-    void openLauncherOnRun(Interaction& interaction, KeyContext const& context)
+    /// Starts the selected finished run again: a topic's text in the `n` box, in its repository; an item in
+    /// the start dialog, on its task.
+    void runAgain(Interaction& interaction, KeyContext const& context)
     {
-        if (auto const* const run = selectedRun(context))
-            openLauncherFor(interaction, *context.engine, run->repo, run->item, run->task, run->topic);
+        auto const* const run = selectedRun(context);
+        if (run == nullptr)
+            return;
+        if (std::holds_alternative<TopicRef>(run->item))
+            openTaskBoxFor(interaction, *context.engine, run->repo, run->topic);
+        else
+            openStartDialogFor(interaction, *context.engine, run->repo, run->item, run->task);
+    }
+
+    /// Shows the `n` box opened, or says on the action bar why it did not open.
+    void showTaskBox(Interaction& interaction, std::expected<TaskBoxState, StartRefusal> box)
+    {
+        if (!box)
+        {
+            interaction.notice = startRefusalNotice(box.error(), {});
+            return;
+        }
+        interaction.taskBox = std::move(*box);
+        interaction.overlay = Overlay::None;
     }
 
     /// Turns the transcript to @p page, within the pages it has; its last page follows the agent again.
@@ -371,11 +391,31 @@ namespace
             pick(TabCommands | std::views::reverse);
     }
 
-    /// Opens the launcher, empty: dispatch() said already when the orchestrator is not configured.
-    [[nodiscard]] std::optional<UiAction> openNewAgent(Interaction& interaction, KeyContext const& context)
+    /// Opens the `n` box, empty, in the repository the user looks at: the Work view's repository chip's, else
+    /// its selected item's; in the Agents view, the selected run's. dispatch() said already when the
+    /// orchestrator is not configured.
+    [[nodiscard]] std::optional<UiAction> openNewTask(Interaction& interaction, KeyContext const& context)
     {
-        if (context.engine != nullptr)
-            interaction.launcher = openLauncher(*context.engine, {}, {}, interaction.launcherScope);
+        if (context.engine == nullptr)
+            return std::nullopt;
+        auto const& engine = *context.engine;
+        auto chipRepo = std::string_view {};
+        auto selectedRepo = std::string {};
+        if (interaction.view == View::Work)
+        {
+            auto const& work = interaction.work;
+            auto const repos = engine.repositories();
+            if (work.repoChip > 0 && work.repoChip <= repos.size())
+                chipRepo = repos[work.repoChip - 1];
+            auto const items = engine.workItems();
+            auto const selected = std::ranges::find_if(
+                items, [&](WorkItem const& item) { return workItemKey(item) == work.selectedKey; });
+            if (selected != items.end())
+                selectedRepo = selected->repo;
+        }
+        else if (auto const* const run = selectedRun(context))
+            selectedRepo = run->repo;
+        showTaskBox(interaction, openTaskBox(engine, chipRepo, selectedRepo, {}, {}));
         return std::nullopt;
     }
 
@@ -538,7 +578,7 @@ namespace
         HandlerRow {
             .command = KeyCommand::RunAgain,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                openLauncherOnRun(interaction, context);
+                runAgain(interaction, context);
                 return std::nullopt;
             } },
         HandlerRow { .command = KeyCommand::Back,
@@ -584,7 +624,7 @@ namespace
                      } },
         // `z` folds the group of the selected row and selects its heading: the run it was on may be gone.
         HandlerRow { .command = KeyCommand::Fold, .handler = toggleFold },
-        HandlerRow { .command = KeyCommand::NewAgent, .handler = openNewAgent },
+        HandlerRow { .command = KeyCommand::NewTask, .handler = openNewTask },
         HandlerRow { .command = KeyCommand::Refresh,
                      .handler = [](Interaction&, KeyContext const&) -> std::optional<UiAction> {
                          return UiAction { RefreshNowAction {} };
@@ -664,6 +704,11 @@ void pasteInto(Interaction& interaction, KeyContext const& context, std::string_
     if (interaction.startDialog)
     {
         pasteIntoStartDialog(interaction.startDialog, pastedText(text));
+        return;
+    }
+    if (interaction.taskBox)
+    {
+        pasteIntoTaskBox(interaction.taskBox, pastedText(text));
         return;
     }
     if (interaction.palette)
@@ -784,52 +829,34 @@ void scrollFocus(Interaction& interaction, KeyContext const& context, std::ptrdi
     scrollTo(interaction, context, static_cast<std::size_t>(std::max<std::ptrdiff_t>(0, from + lines)));
 }
 
-void openLauncherFor(Interaction& interaction,
-                     Engine const& engine,
-                     std::string_view repo,
-                     ItemRef const& item,
-                     std::string_view task,
-                     std::string_view topic)
+void openStartDialogFor(Interaction& interaction,
+                        Engine const& engine,
+                        std::string_view repo,
+                        ItemRef const& item,
+                        std::string_view task)
 {
-    // What each refusal leaves on the action bar, indexed by LauncherRefusal, given the item's label. Each
-    // formats with a literal: a run-time format string would throw on a malformed one.
-    using RefusalNotice = std::string (*)(std::string_view label);
-    constexpr auto RefusalNotices = std::array<RefusalNotice, 3> {
-        // NotConfigured
-        [](std::string_view) { return std::string { "the orchestrator is not configured" }; },
-        // NotListed
-        [](std::string_view label) { return std::format("{} is not listed any more", label); },
-        // NoTask
-        [](std::string_view) { return std::string { "no task applies to this item" }; },
-    };
-    static_assert(RefusalNotices.size() == std::to_underlying(LauncherRefusal::NoTask) + 1U);
-
-    if (std::holds_alternative<TopicRef>(item))
+    if (engine.config() == nullptr)
     {
-        // A topic is listed nowhere: the launcher opens on its text, which its topic row then holds.
-        // In the run's repository: the list narrowed to it, which is where its topic row starts.
-        auto launcher = openLauncher(
-            engine,
-            std::string { topic },
-            {},
-            LauncherScope { .repo = std::string { repo }, .kind = interaction.launcherScope.kind });
-        if (!launcher)
-        {
-            interaction.notice = RefusalNotices[std::to_underlying(LauncherRefusal::NotConfigured)]({});
-            return;
-        }
-        interaction.launcher = std::move(launcher);
-        interaction.overlay = Overlay::None;
+        interaction.notice = startRefusalNotice(StartRefusal::NotConfigured, {});
         return;
     }
-    auto launcher = openLauncherOn(engine, repo, item, task, {});
-    if (!launcher)
+    auto const items = engine.workItems();
+    auto const listed = std::ranges::find_if(
+        items, [&](WorkItem const& candidate) { return candidate.repo == repo && candidate.item == item; });
+    auto dialog = listed != items.end() ? openStartDialog(engine, *listed, task, {})
+                                        : std::unexpected(StartRefusal::NotListed);
+    if (!dialog)
     {
-        interaction.notice = RefusalNotices[std::to_underlying(launcher.error())](itemLabel(item));
+        interaction.notice = startRefusalNotice(dialog.error(), itemLabel(item));
         return;
     }
-    interaction.launcher = std::move(*launcher);
+    interaction.startDialog = std::move(*dialog);
     interaction.overlay = Overlay::None;
+}
+
+void openTaskBoxFor(Interaction& interaction, Engine const& engine, std::string_view repo, std::string text)
+{
+    showTaskBox(interaction, openTaskBox(engine, repo, {}, std::move(text), {}));
 }
 
 bool isCtrl(core::tui::KeyEvent const& key, char32_t letter) noexcept

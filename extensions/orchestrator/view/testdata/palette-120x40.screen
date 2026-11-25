@@ -19,7 +19,7 @@
 │ ✗ pr-2114 · fix CI        │  details                                                   d │                           │
 │   preparation failed · age│  open link                                                 o │                           │
 │                           │  fold its group                                            z │                           │
-│ + new agent               │  new agent                                                 n │                           │
+│ + new task                │  new task                                                  n │                           │
 │                           │  filter the agents                                         / │                           │
 │                           │  refresh the lists                              palette only │                           │
 │                           │  show the last 24 hours                         palette only │                           │
@@ -37,4 +37,4 @@
 │                                              │ │ │ ⏎ to write to pr-2375                                           │ │
 │                                              │ │ ╰─────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
- ⏎ message · t transcript · b board · e end · n new agent · ^k all actions                                              
+ ⏎ message · t transcript · b board · e end · n new task · ^k all actions                                               

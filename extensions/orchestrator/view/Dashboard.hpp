@@ -99,15 +99,15 @@ class Dashboard
     ///         dueActions().
     [[nodiscard]] std::vector<UiAction> select(std::string_view run);
 
-    /// Opens the launcher on an item the engine lists, its session id taken from the dashboard's source: what
-    /// Enter does on a finished run, through the same openLauncherFor(). The launcher previews and refuses as
-    /// every dispatch does; nothing starts before it is confirmed. When the engine does not list the item, no
-    /// launcher opens and the action bar says why.
+    /// Opens the start dialog on an item the engine lists among its Work items, its session id taken from the
+    /// dashboard's source: what Enter does on a finished run, through the same openStartDialogFor(). The
+    /// dialog previews and refuses as every dispatch does; nothing starts before it is confirmed. When the
+    /// engine does not list the item, no dialog opens and the action bar says why (StartRefusal::NotListed).
     /// @param repo The repository's configured name.
     /// @param item The item.
     /// @param task The id of the task it starts on, such as a run's; when it no longer applies to the item,
-    ///        the first task that does.
-    void openLauncherOn(std::string_view repo, ItemRef const& item, std::string_view task);
+    ///        the one the item's state suggests.
+    void openStartDialogOn(std::string_view repo, ItemRef const& item, std::string_view task);
 
     /// @return The launcher while it is open.
     [[nodiscard]] std::optional<LauncherState> const& launcher() const noexcept;

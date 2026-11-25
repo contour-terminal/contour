@@ -1,6 +1,6 @@
  ✦ Agents  Work                        ⬢ 0/4 ▱▱▱▱ 
 ╭─ Agents 0 ─────────────────────────────────────╮
-│▍+ new agent                                    │
+│▍+ new task                                     │
 │                                                │
 │                                                │
 │                                                │
@@ -17,4 +17,4 @@
 │                                                │
 │                                                │
 ╰────────────────────────────────────────────────╯
- ⏎ new agent · ^k all actions                     
+ ⏎ new task · ^k all actions                      

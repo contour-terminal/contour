@@ -37,7 +37,7 @@ enum class RowKind : uint8_t
     Agent,      ///< A run that has not finished.
     Finished,   ///< A run of the Finished group.
     Orphan,     ///< A worktree no run accounts for; read-only.
-    NewAgent,   ///< `+ new agent`: Enter opens the launcher.
+    NewTask,    ///< `+ new task`: Enter opens the `n` box.
 };
 
 /// How a detail's value too wide for the panel is drawn.
@@ -104,7 +104,7 @@ struct Row
     std::vector<QuickReply> replies = {}; ///< An asking run's chips: the configured quick replies; empty for
                                           ///< any other row.
 
-    /// @return Whether the row can be selected: it stands for a run, a worktree or `+ new agent`; a heading
+    /// @return Whether the row can be selected: it stands for a run, a worktree or `+ new task`; a heading
     /// only while its group hides some of its runs.
     [[nodiscard]] bool isSelectable() const noexcept
     {
@@ -113,7 +113,7 @@ struct Row
 };
 
 /// The rows of the Fleet, in order: per group (fleetGroups()) its heading and its runs, longest waiting
-/// first, the Finished newest first; the worktrees no run accounts for; and `+ new agent`.
+/// first, the Finished newest first; the worktrees no run accounts for; and `+ new task`.
 /// @param engine The engine.
 /// @param nowMonoMs Now, in the monotonic milliseconds the engine's inputs carry: what an agent's age is
 ///        measured against.

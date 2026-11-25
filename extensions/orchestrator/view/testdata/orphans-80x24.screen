@@ -3,7 +3,7 @@
 │ ⚑ /home/u/worktrees/contour/pr-2-20260101-000000 · no run uses thi… detached │
 │▍⚑ /home/u/worktrees/contour/it's a test · no run… agent/pr-1-20260101-000000 │
 │                                                                              │
-│ + new agent                                                                  │
+│ + new task                                                                   │
 │                                                                              │
 │                                                                              │
 │                                                                              │
@@ -21,4 +21,4 @@
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- ⏎ details · n new agent · ^k all actions                            ⬢ 0/4 ▱▱▱▱ 
+ ⏎ details · n new task · ^k all actions                             ⬢ 0/4 ▱▱▱▱ 

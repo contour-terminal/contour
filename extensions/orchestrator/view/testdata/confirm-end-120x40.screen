@@ -7,7 +7,7 @@
 │ ✓ pr-2379 · fix CI                      done │ │ ☑ reproduced on master                                              │
 │   reported done                              │ │ ☑ wrote the regression test                                         │
 │                                              │ │ ☐ fix the reflow                                                    │
-│ + new agent                                  │ │ ☐ watch CI                                                          │
+│ + new task                                   │ │ ☐ watch CI                                                          │
 │                                              │ │                                                                     │
 │                                              │ │                                                                     │
 │                                              │ │                                                                     │

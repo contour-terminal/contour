@@ -101,7 +101,7 @@ enum class RowState : uint8_t
     Ending,      ///< Being ended: its worktree is checked and removed.
     Finished,    ///< Over, its worktree removed or gone.
     Kept,        ///< Over, its worktree kept: what kept it is listed.
-    NewAgent,    ///< `+ new agent`.
+    NewTask,     ///< `+ new task`.
     GroupHeader, ///< A group's heading.
     Leftover,    ///< A worktree no run accounts for.
 };

@@ -8,7 +8,7 @@
 │ ⚑ issue-2356 · work on issue            kept │ │ ☑ reproduced on master                                              │
 │   ended by you · 2 entries kept              │ │ ☑ wrote the regression test                                         │
 │                                              │ │ ☐ fix the reflow                                                    │
-│ + new agent                                  │ │ ☐ watch CI                                                          │
+│ + new task                                   │ │ ☐ watch CI                                                          │
 │                                              │ │                                                                     │
 │                                              │ │                                                                     │
 │                                              │ │                                                                     │
@@ -37,4 +37,4 @@
 │                                              │ │ │ ⏎ to write to pr-2375                                           │ │
 │                                              │ │ ╰─────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
- ⏎ message · t transcript · b board · e end · n new agent · ^k all actions                                              
+ ⏎ message · t transcript · b board · e end · n new task · ^k all actions                                               

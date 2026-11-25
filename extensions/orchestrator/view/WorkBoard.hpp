@@ -110,7 +110,7 @@ void keepWorkSelection(WorkState& state,
 /// Applies one Work-view command. Fold on a line, or Enter on a heading, folds its group by ToggleFoldAction
 /// of the group's key and selects the heading; Sort toggles SortByUpdateKey; Enter on an item opens the start
 /// dialog on it (its session id left for the caller to mint), or says on the action bar why it cannot.
-/// SwitchView, NewAgent and Palette act as in the Agents view (dispatch()).
+/// SwitchView, NewTask and Palette act as in the Agents view (dispatch()).
 /// @param command The command (KeyCommand).
 /// @param interaction Where the user is; its WorkState changed.
 /// @param lines The lines as drawn.

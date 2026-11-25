@@ -2,7 +2,7 @@
 │ WORKING 1 of 4                                                               │
 │▍◌ pr-2375 · fix CI · may be waiting for a folder-trust… waiting? see its tab │
 │                                                                              │
-│ + new agent                                                                  │
+│ + new task                                                                   │
 │                                                                              │
 │                                                                              │
 │                                                                              │
@@ -21,4 +21,4 @@
 │ │ ⏎ to write to pr-2375                                                    │ │
 │ ╰──────────────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- ⏎ message · r agent tab · e end · n new agent · ^k all actions      ⬢ 1/4 ▰▱▱▱ 
+ ⏎ message · r agent tab · e end · n new task · ^k all actions       ⬢ 1/4 ▰▱▱▱ 

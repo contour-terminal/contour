@@ -6,7 +6,7 @@
 │▍⚑ /home/u/worktrees/c… agent/pr-1-20260101-… │ │             orchestrator never removes it                           │
 │▍  no run uses this worktree                  │ │           a run ended without removing it, or it was made by hand   │
 │                                              │ │             under worktree_root                                     │
-│ + new agent                                  │ │ branch    agent/pr-1-20260101-000000                                │
+│ + new task                                   │ │ branch    agent/pr-1-20260101-000000                                │
 │                                              │ │ to remove git -C /home/u/projects/contour worktree remove '/home/u… │
 │                                              │ │           git refuses while it holds changes; its branch stays      │
 │                                              │ │                                                                     │
@@ -37,4 +37,4 @@
 │                                              │ │                                                                     │
 │                                              │ │                                                                     │
 ╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
- ⏎ details · n new agent · ^k all actions                                                                               
+ ⏎ details · n new task · ^k all actions                                                                                

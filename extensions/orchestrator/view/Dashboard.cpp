@@ -38,6 +38,7 @@
 #include <orchestrator/view/Sections.hpp>
 #include <orchestrator/view/StartDialog.hpp>
 #include <orchestrator/view/StatusBoard.hpp>
+#include <orchestrator/view/TaskBox.hpp>
 #include <orchestrator/view/Theme.hpp>
 #include <orchestrator/view/Transcript.hpp>
 #include <orchestrator/view/WorkBoard.hpp>
@@ -236,8 +237,8 @@ struct Dashboard::State
 
     /// Applies the filter to the rows, and keeps the selection as @p keep says.
     void refilter(Keep keep);
-    /// Applies keys the parser decoded: to the start dialog or the launcher while one is open, else by the
-    /// key table.
+    /// Applies keys the parser decoded: to the start dialog, the `n` box or the launcher while one is open,
+    /// else by the key table.
     /// @param events The keys.
     /// @param hooksAtInput The form's HooksWarning as the input that holds them began.
     /// @return What the engine is asked, in order.
@@ -256,13 +257,15 @@ struct Dashboard::State
     /// @param command The command.
     /// @param actions What the engine is asked, appended to.
     void run(KeyCommand command, std::vector<UiAction>& actions);
-    /// What follows every key and click: a launcher or a start dialog opened gets its session id, a view
-    /// switched to builds its rows, and the selection is kept on the rows of the view shown.
+    /// What follows every key and click: a launcher, a start dialog or an `n` box opened gets its session id,
+    /// a view switched to builds its rows, and the selection is kept on the rows of the view shown.
     /// @param before The view shown before the command.
     void afterCommand(View before);
-    /// @return Whether a popup is open: the start dialog, the launcher, the palette or the timeline.
+    /// @return Whether a popup is open: the start dialog, the `n` box, the launcher, the palette or the
+    ///         timeline.
     [[nodiscard]] bool popupOpen() const noexcept;
-    /// @return The HooksWarning of the start dialog or the launcher now: what the next input begins with.
+    /// @return The HooksWarning of the start dialog, the `n` box or the launcher now: what the next input
+    ///         begins with.
     [[nodiscard]] HooksWarning launcherHooks() const noexcept;
     /// Resolves a held ESC that waited past EscapeTimeout into the Escape key.
     /// @return What the engine is asked, in order.
@@ -270,12 +273,15 @@ struct Dashboard::State
     /// Shows the panes of the current place and band and hides the others; sets what the Focus draws; places
     /// the launcher, the palette and the timeline.
     void syncLayout();
-    /// Gives a launcher or a start dialog just opened its agent's session id, from the dashboard's source.
+    /// Gives a launcher, a start dialog or an `n` box just opened its agent's session id, from the
+    /// dashboard's source.
     void mintSession();
     /// Shows the launcher where the band puts it, or hides it.
     void syncLauncher();
     /// Shows the start dialog centred, or hides it.
     void syncStartDialog();
+    /// Shows the `n` box centred, or hides it.
+    void syncTaskBox();
     /// Shows the palette where the band puts it, listing what applies to the selected row; or hides it.
     void syncPalette();
     /// Shows @p overlay centred in the tab at @p wanted, or moves it there.
@@ -368,6 +374,7 @@ struct Dashboard::State
     std::optional<LastClick> lastClick;         ///< The last press of the left button, for a double click.
     std::unique_ptr<LauncherView> launcherView; ///< Draws interaction.launcher.
     std::unique_ptr<StartDialogView> startDialogView; ///< Draws interaction.startDialog.
+    std::unique_ptr<TaskBoxView> taskBoxView;         ///< Draws interaction.taskBox.
     std::unique_ptr<PaletteView> paletteView;         ///< Draws interaction.palette.
     std::unique_ptr<TimelineView> timelineView;       ///< Draws the last 24 hours while Overlay::Timeline.
     /// Where each shown overlay was last put: moving one repaints the whole tab, so an overlay is moved only
@@ -550,8 +557,8 @@ namespace
                 std::ranges::to<std::vector<int>>(rows | std::views::transform([&](std::size_t index) {
                                                       return heightOf(_state.rows[index]);
                                                   }));
-            // `+ new agent` stands apart from the runs above it, where there are any.
-            auto const apart = rows.size() > 1 && _state.rows[rows.back()].kind == RowKind::NewAgent;
+            // `+ new task` stands apart from the runs above it, where there are any.
+            auto const apart = rows.size() > 1 && _state.rows[rows.back()].kind == RowKind::NewTask;
             if (apart)
                 ++heights.back();
             auto const linesBetween = [&](std::size_t from, std::size_t to) {
@@ -601,7 +608,7 @@ namespace
             return _band == Band::Wide || row.attention == FleetGroup::NeedsYou;
         }
 
-        /// @return The lines @p row takes, the blank above `+ new agent` aside.
+        /// @return The lines @p row takes, the blank above `+ new task` aside.
         [[nodiscard]] int heightOf(Row const& row) const noexcept { return hasSecondLine(row) ? 2 : 1; }
 
         void drawRow(Canvas& canvas, int line, Row const& row, Selection selection) const
@@ -776,6 +783,7 @@ Dashboard::State::State(Engine const& engine,
     size { size },
     launcherView { std::make_unique<LauncherView>(engine, interaction.launcher, hits) },
     startDialogView { std::make_unique<StartDialogView>(engine, interaction.startDialog, hits) },
+    taskBoxView { std::make_unique<TaskBoxView>(engine, interaction.taskBox, hits) },
     paletteView { std::make_unique<PaletteView>(interaction.palette, hits) },
     timelineView { std::make_unique<TimelineView>(engine, hits) },
     spinner { core::tui::SpinnerType::Dots, clock },
@@ -793,8 +801,11 @@ Dashboard::State::State(Engine const& engine,
 
 Dashboard::State::~State()
 {
-    for (Component* const overlay: std::array<Component*, 4> {
-             launcherView.get(), startDialogView.get(), paletteView.get(), timelineView.get() })
+    for (Component* const overlay: std::array<Component*, 5> { launcherView.get(),
+                                                               startDialogView.get(),
+                                                               taskBoxView.get(),
+                                                               paletteView.get(),
+                                                               timelineView.get() })
         if (screen.isOverlayVisible(*overlay))
             screen.hideOverlay(*overlay);
     screen.root().removeChild(*root);
@@ -1047,7 +1058,7 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
     {
         // A launcher opened by a key of this input confirms nothing an earlier one of it, or of an earlier
         // input, did: the confirmation belongs to the launcher it was given in.
-        if (!interaction.launcher && !interaction.startDialog)
+        if (!interaction.launcher && !interaction.startDialog && !interaction.taskBox)
             hooksAtInput = HooksWarning::None;
         if (auto const* const paste = std::get_if<core::tui::PasteEvent>(&event))
         {
@@ -1070,6 +1081,16 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
                     applyStartDialogKey(*key, interaction.startDialog, engine, hooksAtInput, tab))
             {
                 // The run it starts is selected once it is listed: its session is the one the dialog minted.
+                startedSession = dispatched->session;
+                actions.emplace_back(std::move(*dispatched));
+            }
+            continue;
+        }
+        if (interaction.taskBox)
+        {
+            if (auto dispatched = applyTaskBoxKey(*key, interaction.taskBox, engine, hooksAtInput, tab))
+            {
+                // The run it starts is selected once it is listed: its session is the one the box minted.
                 startedSession = dispatched->session;
                 actions.emplace_back(std::move(*dispatched));
             }
@@ -1116,7 +1137,7 @@ namespace
     enum class Layer : uint8_t
     {
         Dashboard = 0, ///< The panes beneath.
-        Popup,         ///< A popup: the launcher, the palette or the timeline.
+        Popup,         ///< A popup: the start dialog, the `n` box, the launcher, the palette or the timeline.
     };
 
     /// What a click on a hit of one kind does.
@@ -1165,7 +1186,7 @@ namespace
                        [](State& state, int steps, std::vector<UiAction>& /*actions*/) {
                            scrollFocus(state.interaction, state.keyContext(), steps * WheelLines);
                        } },
-        // A click selects a row; a double click, or one on `+ new agent`, runs its primary action.
+        // A click selects a row; a double click, or one on `+ new task`, runs its primary action.
         MouseRow { .kind = HitKind::Row,
                    .layer = Layer::Dashboard,
                    .click =
@@ -1173,7 +1194,7 @@ namespace
                            selectRow(state.interaction, state.keyContext(), value);
                            state.refilter(State::Keep::Position);
                            auto const* const row = state.selectedRow();
-                           if (clicks == Clicks::Double || (row != nullptr && row->kind == RowKind::NewAgent))
+                           if (clicks == Clicks::Double || (row != nullptr && row->kind == RowKind::NewTask))
                                state.run(KeyCommand::Enter, actions);
                        },
                    .wheel = nullptr },
@@ -1264,7 +1285,7 @@ namespace
 
 bool Dashboard::State::popupOpen() const noexcept
 {
-    return interaction.startDialog || interaction.launcher || interaction.palette
+    return interaction.startDialog || interaction.taskBox || interaction.launcher || interaction.palette
            || interaction.overlay != Overlay::None;
 }
 
@@ -1418,6 +1439,8 @@ HooksWarning Dashboard::State::launcherHooks() const noexcept
 {
     if (interaction.startDialog)
         return interaction.startDialog->hooks;
+    if (interaction.taskBox)
+        return interaction.taskBox->hooks;
     return interaction.launcher ? interaction.launcher->hooks : HooksWarning::None;
 }
 
@@ -1437,7 +1460,7 @@ void Dashboard::State::syncLayout()
     focus.place = interaction.place;
     focus.box = bottomBoxOf(engine, row, interaction.place);
     auto const hasRuns = std::ranges::any_of(rows, [](Row const& candidate) {
-        return candidate.isSelectable() && candidate.kind != RowKind::NewAgent;
+        return candidate.isSelectable() && candidate.kind != RowKind::NewTask;
     });
     focus.content = FleetContent::Unconfigured;
     if (engine.config() != nullptr)
@@ -1479,6 +1502,7 @@ void Dashboard::State::syncLayout()
         problems->refresh();
     syncLauncher();
     syncStartDialog();
+    syncTaskBox();
     syncPalette();
     if (interaction.overlay == Overlay::Timeline)
     {
@@ -1540,6 +1564,8 @@ void Dashboard::State::mintSession()
 {
     if (auto& dialog = interaction.startDialog; dialog && dialog->form.session.empty())
         dialog->form.session = formatUuidV4(ids.next());
+    if (auto& box = interaction.taskBox; box && box->form.session.empty())
+        box->form.session = formatUuidV4(ids.next());
     if (!interaction.launcher || !interaction.launcher->session.empty())
         return;
     interaction.launcher->session = formatUuidV4(ids.next());
@@ -1581,6 +1607,21 @@ void Dashboard::State::syncStartDialog()
         Size { .width = width, .height = std::min(startDialogView->heightAt(width), size.height) };
     startDialogView->place(wanted);
     showCentred(*startDialogView, wanted);
+}
+
+void Dashboard::State::syncTaskBox()
+{
+    if (!interaction.taskBox)
+    {
+        if (screen.isOverlayVisible(*taskBoxView))
+            screen.hideOverlay(*taskBoxView);
+        return;
+    }
+    auto const width = popupWidthIn(band(), size.width, TaskBoxMaxColumns);
+    auto const wanted =
+        Size { .width = width, .height = std::min(taskBoxView->heightAt(width), size.height) };
+    taskBoxView->place(wanted);
+    showCentred(*taskBoxView, wanted);
 }
 
 // }}}
@@ -1706,10 +1747,10 @@ std::vector<UiAction> Dashboard::select(std::string_view run)
     return {};
 }
 
-void Dashboard::openLauncherOn(std::string_view repo, ItemRef const& item, std::string_view task)
+void Dashboard::openStartDialogOn(std::string_view repo, ItemRef const& item, std::string_view task)
 {
     auto& state = *_state;
-    openLauncherFor(state.interaction, state.engine, repo, item, task, {});
+    openStartDialogFor(state.interaction, state.engine, repo, item, task);
     state.mintSession();
     state.repaint = State::Repaint::Needed;
 }

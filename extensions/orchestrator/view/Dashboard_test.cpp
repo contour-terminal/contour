@@ -289,6 +289,8 @@ struct Scene
         Scene { .name = "work-filter", .world = workWorld(), .keys = "w/prj", .sizes = { Medium, Wide } },
         // The start dialog on Needs you's first item: its suggested task with the reason, the worker chips.
         Scene { .name = "start-dialog", .world = workWorld(), .keys = "w\r", .sizes = { Narrow, Medium, Wide } },
+        // The `n` box, a task typed: the defaults it starts on, the branch and worktree it makes.
+        Scene { .name = "task-box", .world = World {}, .keys = "ninvestigate the flaky test", .sizes = { Narrow, Medium, Wide } },
     };
 }
 
@@ -413,7 +415,7 @@ TEST_CASE("the Fleet lists the runs by what they need, the longest waiting first
                                         "pr-2366",
                                         "issue-2356",
                                         "pr-2114",
-                                        "new agent" });
+                                        "new task" });
     // An idle agent's reason is its second line; a blocked one asks.
     auto const waiting = std::ranges::find(rows, "issue-2253", &Row::name);
     REQUIRE(waiting != rows.end());
@@ -930,22 +932,6 @@ TEST_CASE("a click on a palette entry runs it; one beside the palette closes it"
     CHECK_FALSE(fixture.dashboard.interaction().palette.has_value());
 }
 
-TEST_CASE("a click on a launcher candidate highlights it", "[orchestrator][view][mouse]")
-{
-    auto fixture = Fixture { fleetWorld() };
-    static_cast<void>(fixture.dashboard.frame());
-    CHECK(fixture.dashboard.input("n").empty());
-    static_cast<void>(fixture.dashboard.frame());
-    REQUIRE(fixture.dashboard.launcher().has_value());
-    auto const regions = fixture.dashboard.hits().regions();
-    auto const second =
-        std::ranges::find(regions, Hit { .kind = HitKind::LauncherCandidate, .value = 1 }, &HitRegion::hit);
-    REQUIRE(second != regions.end());
-    CHECK(fixture.dashboard.input(clickAt(second->area.x + 2, second->area.y)).empty());
-    REQUIRE(fixture.dashboard.launcher().has_value());
-    CHECK(fixture.dashboard.launcher()->highlighted == 1);
-}
-
 // }}}
 
 TEST_CASE("a URL drawn is a hyperlink", "[orchestrator][view]")
@@ -1125,22 +1111,22 @@ TEST_CASE("key input", "[orchestrator][view]")
     }
 }
 
-TEST_CASE("n opens the launcher; enter on + new agent too", "[orchestrator][view]")
+TEST_CASE("n opens the box; enter on + new task too", "[orchestrator][view]")
 {
     auto fixture = Fixture { World {} };
     CHECK(fixture.dashboard.input("n").empty());
-    CHECK(fixture.dashboard.launcher().has_value());
+    CHECK(fixture.dashboard.interaction().taskBox.has_value());
     CHECK(fixture.dashboard.input("\x1b").empty());
     fixture.escapeTimesOut();
-    REQUIRE_FALSE(fixture.dashboard.launcher().has_value());
-    // `+ new agent` is the only row, selected.
+    REQUIRE_FALSE(fixture.dashboard.interaction().taskBox.has_value());
+    // `+ new task` is the only row, selected.
     CHECK(fixture.dashboard.input("\r").empty());
-    CHECK(fixture.dashboard.launcher().has_value());
+    CHECK(fixture.dashboard.interaction().taskBox.has_value());
 
     // Unconfigured, `n` says what is missing.
     auto unconfigured = Fixture { World { .configJson = "{}" } };
     CHECK(unconfigured.dashboard.input("n").empty());
-    CHECK_FALSE(unconfigured.dashboard.launcher().has_value());
+    CHECK_FALSE(unconfigured.dashboard.interaction().taskBox.has_value());
     CHECK(unconfigured.screen().contains("not configured"));
 }
 
@@ -1149,41 +1135,26 @@ TEST_CASE("a key in an open popup sends what changed and not the whole tab", "[o
     auto fixture = Fixture { World {} };
     std::ignore = fixture.dashboard.frame();
     CHECK(fixture.dashboard.input("n").empty());
+    std::ignore = fixture.dashboard.frame();
+    // A text typed shows what it starts: the popup grows, once.
+    CHECK(fixture.dashboard.input("x").empty());
     auto const opened = fixture.dashboard.frame();
     REQUIRE_FALSE(opened.empty());
-    // The popup stays where it is: the frame carries the highlight's move, no repaint.
-    CHECK(fixture.dashboard.input("\x1b[B").empty());
+    // The popup stays where it is: the frame carries the letter typed, no repaint.
+    CHECK(fixture.dashboard.input("y").empty());
     auto const typed = fixture.dashboard.frame();
     REQUIRE_FALSE(typed.empty());
     CHECK(typed.size() * 2 < opened.size());
 }
 
-TEST_CASE("the launcher opens again as it was narrowed", "[orchestrator][view]")
-{
-    auto fixture = Fixture { World {} };
-    CHECK(fixture.dashboard.input("n").empty());
-    // → narrows it to contour, ctrl+→ to what needs attention.
-    CHECK(fixture.dashboard.input("\x1b[C\x1b[1;5C").empty());
-    REQUIRE(fixture.dashboard.launcher().has_value());
-    CHECK(fixture.dashboard.launcher()->scope
-          == LauncherScope { .repo = "contour", .kind = KindScope::NeedsAttention });
-    CHECK(fixture.dashboard.input("\x1b").empty());
-    fixture.escapeTimesOut();
-    REQUIRE_FALSE(fixture.dashboard.launcher().has_value());
-    CHECK(fixture.dashboard.input("n").empty());
-    REQUIRE(fixture.dashboard.launcher().has_value());
-    CHECK(fixture.dashboard.launcher()->scope
-          == LauncherScope { .repo = "contour", .kind = KindScope::NeedsAttention });
-}
-
-TEST_CASE("enter on a finished run runs it again through the launcher", "[orchestrator][view]")
+TEST_CASE("enter on a finished run runs it again through the start dialog", "[orchestrator][view]")
 {
     auto fixture = Fixture { fleetWorld() };
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.select(NewId).empty());
-    // Its item is no longer listed: the launcher does not open, and the action bar says why.
+    // Its item is no longer listed: the dialog does not open, and the action bar says why.
     CHECK(fixture.dashboard.input("\r").empty());
-    CHECK_FALSE(fixture.dashboard.launcher().has_value());
+    CHECK_FALSE(fixture.dashboard.interaction().startDialog.has_value());
     CHECK(fixture.screen().contains("#2366 is not listed any more"));
 }
 
@@ -1411,7 +1382,7 @@ TEST_CASE("the e prompt answered no does nothing", "[orchestrator][view]")
     CHECK(fixture.screen().contains("end pr-2375? e again to end · esc keeps it"));
     CHECK(fixture.dashboard.input("n").empty());
     CHECK(fixture.dashboard.interaction().pendingEnd.empty());
-    CHECK_FALSE(fixture.dashboard.launcher().has_value());
+    CHECK_FALSE(fixture.dashboard.interaction().taskBox.has_value());
     // Asked once, answered: a second e asks again rather than ending it.
     CHECK(fixture.dashboard.input("e").empty());
     CHECK(fixture.dashboard.interaction().pendingEnd == RunningId);

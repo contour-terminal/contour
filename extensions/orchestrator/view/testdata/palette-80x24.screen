@@ -11,7 +11,7 @@
 ╭─ p│  details                                                           d │6m ╮
 │ up│  open link                                                         o │   │
 │ Fi│  fold its group                                                    z │   │
-│ ☑ │  new agent                                                         n │   │
+│ ☑ │  new task                                                          n │   │
 │ ☑ │  filter the agents                                                 / │   │
 │ ☐ │  refresh the lists                                      palette only │   │
 │ ☐ │  show the last 24 hours                                 palette only │   │

@@ -718,22 +718,21 @@ TEST_CASE("selecting another run reads its transcript", "[orchestrator][view][tr
 // }}}
 // {{{ running a finished run again
 
-TEST_CASE("enter on a Finished row opens the launcher on its item and task",
+TEST_CASE("enter on a Finished row opens the start dialog on its item and task",
           "[orchestrator][view][transcript]")
 {
     auto fixture = DashboardFixture { transcriptWorld(), Medium };
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.select(FinishedId).empty());
     CHECK(fixture.dashboard.input("\r").empty());
-    REQUIRE(fixture.dashboard.launcher().has_value());
-    auto const& form = fixture.dashboard.launcher()->form;
-    REQUIRE(form.has_value());
-    CHECK(form->repo == "contour");
-    CHECK(form->item == ItemRef { ChangeRequestRef { 2369 } });
-    CHECK(form->task == 0); // fix_ci
-    CHECK_FALSE(form->session.empty());
-    // Nothing starts before the launcher is confirmed.
-    CHECK(fixture.screen().contains("New agent"));
+    REQUIRE(fixture.dashboard.interaction().startDialog.has_value());
+    auto const& form = fixture.dashboard.interaction().startDialog->form;
+    CHECK(form.repo == "contour");
+    CHECK(form.item == ItemRef { ChangeRequestRef { 2369 } });
+    CHECK(form.task == 0); // fix_ci
+    CHECK_FALSE(form.session.empty());
+    // Nothing starts before the dialog is confirmed.
+    CHECK(fixture.screen().contains("Start agent"));
 }
 
 TEST_CASE("running again offers the item's default task when the run's task is gone",
@@ -746,9 +745,10 @@ TEST_CASE("running again offers the item's default task when the run's task is g
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.select(RetiredId).empty());
     CHECK(fixture.dashboard.input("\r").empty());
-    REQUIRE(fixture.dashboard.launcher().has_value());
-    CHECK(fixture.dashboard.launcher()->form->item == ItemRef { ChangeRequestRef { 2346 } });
-    CHECK(fixture.dashboard.launcher()->form->task == 0); // fix_ci, the first task for a pull request
+    REQUIRE(fixture.dashboard.interaction().startDialog.has_value());
+    CHECK(fixture.dashboard.interaction().startDialog->form.item == ItemRef { ChangeRequestRef { 2346 } });
+    CHECK(fixture.dashboard.interaction().startDialog->form.task
+          == 0); // fix_ci, the only task for a pull request
 }
 
 TEST_CASE("running again an item with an active run shows the refusal", "[orchestrator][view][transcript]")
@@ -760,7 +760,7 @@ TEST_CASE("running again an item with an active run shows the refusal", "[orches
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.select(EarlierId).empty());
     CHECK(fixture.dashboard.input("\r").empty());
-    REQUIRE(fixture.dashboard.launcher().has_value());
+    REQUIRE(fixture.dashboard.interaction().startDialog.has_value());
     CHECK(fixture.screen().contains("refused"));
     // Enter confirms nothing the preview refuses.
     CHECK(fixture.dashboard.input("\r").empty());
@@ -774,7 +774,7 @@ TEST_CASE("running again an item no longer listed says so", "[orchestrator][view
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.select(FinishedId).empty());
     CHECK(fixture.dashboard.input("\r").empty());
-    CHECK_FALSE(fixture.dashboard.launcher().has_value());
+    CHECK_FALSE(fixture.dashboard.interaction().startDialog.has_value());
     CHECK(fixture.dashboard.interaction().notice == "#2369 is not listed any more");
 }
 

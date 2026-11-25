@@ -4,7 +4,7 @@
 │▍⚑ issue-2356 · work on issue            kept │ │ Board  Transcript  Details                                          │
 │▍  ended by you · 1 entry kept                │ │ task      work on issue                                             │
 │                                              │ │ model     sonnet                                                    │
-│ + new agent                                  │ │ state     ended by you, worktree kept, seen: .git file was changed; │
+│ + new task                                   │ │ state     ended by you, worktree kept, seen: .git file was changed; │
 │                                              │ │             nothing was run there                                   │
 │                                              │ │ branch    agent/issue-2356-20261113-151001                          │
 │                                              │ │ worktree  /home/u/worktrees/contour/issue-2356-20261113-151001      │
@@ -37,4 +37,4 @@
 │                                              │ │ │ ⚑ kept · ended by you · 1 entry kept · ⏎ retry removal          │ │
 │                                              │ │ ╰─────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
- ⏎ retry removal · d details · del dismiss · n new agent · ^k all actions                                               
+ ⏎ retry removal · d details · del dismiss · n new task · ^k all actions                                                

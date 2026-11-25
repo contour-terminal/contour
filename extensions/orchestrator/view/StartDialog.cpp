@@ -77,13 +77,6 @@ namespace
         return from;
     }
 
-    /// @return Whether the dialog's worker lacks something a run needs.
-    [[nodiscard]] bool isIncomplete(StartDialogState const& dialog, Engine const& engine) noexcept
-    {
-        auto const* const worker = workerOf(dialog.form, engine);
-        return worker != nullptr && isSetupIncomplete(engine, *worker);
-    }
-
     /// Confirms the dialog: the dispatch of its choices, unless they cannot be confirmed, or the setup is
     /// incomplete and its warning was not confirmed by an earlier input.
     [[nodiscard]] std::optional<DispatchAction> confirm(StartDialogState& dialog,
@@ -91,20 +84,9 @@ namespace
                                                         HooksWarning hooksAtInput,
                                                         std::string_view nearTab)
     {
-        if (!canConfirm(dialog.form, engine))
+        if (!canConfirm(dialog.form, engine)
+            || passSetupWarning(dialog.form, engine, dialog.hooks, hooksAtInput) == SetupGate::Held)
             return std::nullopt;
-        if (isIncomplete(dialog, engine))
-        {
-            // The first Enter confirms the warning; only an Enter of a later input dispatches, so a paste or
-            // a held key cannot click through it.
-            if (dialog.hooks != HooksWarning::Confirmed)
-            {
-                dialog.hooks = HooksWarning::Confirmed;
-                return std::nullopt;
-            }
-            if (hooksAtInput != HooksWarning::Confirmed)
-                return std::nullopt;
-        }
         return actionOf(dialog.form, engine, nearTab);
     }
 
@@ -171,7 +153,7 @@ std::expected<StartDialogState, StartRefusal> openStartDialog(Engine const& engi
     if (!form)
         return std::unexpected(StartRefusal::NoTask);
     auto dialog = StartDialogState { .form = std::move(*form), .reason = std::move(suggestion.reason) };
-    dialog.hooks = isIncomplete(dialog, engine) ? HooksWarning::Shown : HooksWarning::None;
+    dialog.hooks = setupWarningOf(dialog.form, engine);
     return dialog;
 }
 
@@ -359,17 +341,14 @@ namespace
     }
 
     /// @return The hint line: what Enter does now, then the other keys, cut between hints.
-    [[nodiscard]] Line hintLine(StartDialogState const& dialog, bool confirmable, bool incomplete, int width)
+    [[nodiscard]] Line hintLine(StartDialogState const& dialog,
+                                Engine const& engine,
+                                bool confirmable,
+                                int width)
     {
-        // What Enter does while the setup is incomplete, indexed by HooksWarning.
-        constexpr auto IncompleteEnterHints = std::array { "enter confirms the warning"sv,
-                                                           "enter confirms the warning"sv,
-                                                           "enter starts it anyway"sv };
-        static_assert(IncompleteEnterHints.size() == std::to_underlying(HooksWarning::Confirmed) + 1U);
         auto hints = std::vector<std::string_view> {};
         if (confirmable)
-            hints.push_back(incomplete ? IncompleteEnterHints[std::to_underlying(dialog.hooks)]
-                                       : "enter start"sv);
+            hints.push_back(enterHint(dialog.form, engine, dialog.hooks));
         hints.insert(hints.end(),
                      { "tab next"sv,
                        "←→ change"sv,
@@ -483,7 +462,7 @@ namespace
         for (auto const& warning: warnings)
             appendText(lines, warning, Role::Warning, width);
         lines.emplace_back();
-        lines.push_back(hintLine(dialog, confirmable, !warnings.empty(), width));
+        lines.push_back(hintLine(dialog, engine, confirmable, width));
         return layout;
     }
 

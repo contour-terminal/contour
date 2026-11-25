@@ -4,7 +4,7 @@
 │▍✗ pr-2366 · fix CI                    failed │ │ Transcript  Details                                                 │
 │▍  preparation failed · agents can't start h… │ │ task      fix CI                                                    │
 │                                              │ │ model     sonnet                                                    │
-│ + new agent                                  │ │ state     preparation failed, worktree removed, seen: pane:         │
+│ + new task                                   │ │ state     preparation failed, worktree removed, seen: pane:         │
 │                                              │ │             not-supported-yet                                       │
 │                                              │ │ branch    agent/pr-2366-20261113-140211                             │
 │                                              │ │ worktree  /home/u/worktrees/contour/pr-2366-20261113-140211         │
@@ -37,4 +37,4 @@
 │                                              │ │ │ ✗ failed · preparation failed · agents can't sta… · ⏎ run again │ │
 │                                              │ │ ╰─────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────╯
- ⏎ run again · t transcript · del dismiss · n new agent · ^k all actions                                                
+ ⏎ run again · t transcript · del dismiss · n new task · ^k all actions                                                 

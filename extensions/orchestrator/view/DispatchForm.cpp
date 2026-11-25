@@ -327,6 +327,41 @@ bool isSetupIncomplete(Engine const& engine, WorkerDef const& worker) noexcept
            || !engine.missingPluginsFor(worker.envSet).empty();
 }
 
+HooksWarning setupWarningOf(DispatchFormState const& form, Engine const& engine) noexcept
+{
+    auto const* const worker = workerOf(form, engine);
+    return worker != nullptr && isSetupIncomplete(engine, *worker) ? HooksWarning::Shown : HooksWarning::None;
+}
+
+SetupGate passSetupWarning(DispatchFormState const& form,
+                           Engine const& engine,
+                           HooksWarning& hooks,
+                           HooksWarning hooksAtInput) noexcept
+{
+    if (setupWarningOf(form, engine) == HooksWarning::None)
+        return SetupGate::Passed;
+    // The first Enter confirms the warning; only an Enter of a later input dispatches, so a paste or a held
+    // key cannot click through it.
+    if (hooks != HooksWarning::Confirmed)
+    {
+        hooks = HooksWarning::Confirmed;
+        return SetupGate::Held;
+    }
+    return hooksAtInput == HooksWarning::Confirmed ? SetupGate::Passed : SetupGate::Held;
+}
+
+std::string_view enterHint(DispatchFormState const& form, Engine const& engine, HooksWarning hooks) noexcept
+{
+    // What Enter does while the setup is incomplete, indexed by HooksWarning.
+    constexpr auto IncompleteEnterHints = std::array { "enter confirms the warning"sv,
+                                                       "enter confirms the warning"sv,
+                                                       "enter starts it anyway"sv };
+    static_assert(IncompleteEnterHints.size() == std::to_underlying(HooksWarning::Confirmed) + 1U);
+    if (setupWarningOf(form, engine) == HooksWarning::None)
+        return "enter start"sv;
+    return IncompleteEnterHints[std::to_underlying(hooks)];
+}
+
 /// @return @p text with the run's stamp, which is known only once the form is confirmed, shown as `…`.
 std::string withoutStamp(std::string_view text, Run const& run)
 {

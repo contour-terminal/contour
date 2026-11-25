@@ -102,8 +102,8 @@ TEST_CASE("the palette lists the row's actions, then the global commands, then t
     auto const at = [&](std::string_view label) {
         return std::ranges::find(labels, label) - labels.begin();
     };
-    CHECK(at("end") < at("new agent"));
-    CHECK(at("new agent") < at("refresh the lists"));
+    CHECK(at("end") < at("new task"));
+    CHECK(at("new task") < at("refresh the lists"));
     // Commands without a key are the palette's only; one that does not apply says why.
     auto const refresh = std::ranges::find(entries, KeyCommand::Refresh, &PaletteEntry::command);
     CHECK(refresh->key.empty());
@@ -221,7 +221,7 @@ TEST_CASE("the timeline opens from the palette, and esc closes it", "[orchestrat
     CHECK(screen.contains("nothing ran in the last 24 hours"));
     // No letter acts behind it.
     CHECK(fixture.dashboard.input("n").empty());
-    CHECK_FALSE(fixture.dashboard.launcher().has_value());
+    CHECK_FALSE(fixture.dashboard.interaction().taskBox.has_value());
     CHECK(fixture.dashboard.input("\x1b").empty());
     fixture.escapeTimesOut();
     CHECK(fixture.dashboard.interaction().overlay == Overlay::None);
