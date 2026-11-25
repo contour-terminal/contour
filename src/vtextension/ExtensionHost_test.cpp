@@ -14,6 +14,7 @@
 
 #include <vtextension/ExtensionHost.hpp>
 #include <vtextension/ExtensionWorkerPool.hpp>
+#include <vtextension/testing/FakeWasmBackend.hpp>
 #include <vtextension/testing/LaneReport.hpp>
 #include <vtextension/testing/RunnerHarness.hpp>
 #include <vtextension/testing/TestModules.hpp>
@@ -104,6 +105,19 @@ TEST_CASE("ExtensionHost.runners", "[vtextension]")
     REQUIRE(host.snapshot("two") != nullptr);
     CHECK(host.snapshot("one") != host.snapshot("two"));
     CHECK(host.snapshot("three") == nullptr);
+}
+
+TEST_CASE("ExtensionHost.loadsUnderTheHostId", "[vtextension]")
+{
+    // The host id names the host process a module runs in: every load passes it on to the runtime.
+    auto backend = vtextension::testing::FakeWasmBackend {};
+    auto config = ExtensionHostConfig {};
+    config.extensions.push_back(minimal("one"));
+    auto const prepared = prepareExtensions(std::move(config), Engine::create(backend, ExtensionLimits {}));
+    REQUIRE(prepared.extensions.size() == 1);
+    CHECK(prepared.extensions.front().compiled.has_value());
+    CHECK(backend.loads() == 1);
+    CHECK(backend.lastIdentity() == wasm::ModuleIdentity { "minimal@test" });
 }
 
 TEST_CASE("ExtensionHost.unloadable", "[vtextension]")
