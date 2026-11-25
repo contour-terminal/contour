@@ -15,14 +15,16 @@
 namespace vtextension::wasm::remote::transport
 {
 
-/// Why a stream could not send or receive a PDU. Every one ends the stream.
+/// Why a stream could not send or receive a PDU. Every one ends the stream, except an OverCap from send(),
+/// which sent nothing.
 enum class StreamError : uint8_t
 {
     Closed,    ///< The channel closed, or was shut down.
     Io,        ///< The channel failed.
     Malformed, ///< The peer sent a frame the codec refuses: a malformed one, or one of the wrong kind,
                ///< direction or channel.
-    OverCap,   ///< The peer sent a frame larger than its kind may be.
+    OverCap,   ///< The peer sent a frame larger than its kind may be; or, from send(), the PDU holds a
+               ///< list over its cap, and was not sent.
 };
 
 /// One channel's PDUs. Owns the channel and a receive buffer; used by one thread at a time, which may both
@@ -38,7 +40,8 @@ class PduStream
 
     /// Sends one PDU.
     /// @param pdu The PDU.
-    /// @return Nothing once it is sent; why it was not.
+    /// @return Nothing once it is sent; why it was not. `OverCap` if a list it carries exceeds its cap
+    ///         (Pdu.hpp): nothing was sent, and the stream remains usable.
     [[nodiscard]] std::expected<void, StreamError> send(proto::Pdu const& pdu);
 
     /// Receives the next PDU, blocking until all of it has arrived. A frame larger than its kind may be fails

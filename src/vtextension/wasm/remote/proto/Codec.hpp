@@ -27,14 +27,20 @@
 namespace vtextension::wasm::remote::proto
 {
 
+/// Why a PDU could not be encoded.
+enum class EncodeError : uint8_t
+{
+    OverCap, ///< A list it carries holds more elements than its cap (Pdu.hpp): a reader would refuse it.
+};
+
 /// @return The kind of @p pdu.
 [[nodiscard]] PduKind kindOf(Pdu const& pdu) noexcept;
 
-/// Encodes @p pdu as one frame.
-/// @param pdu The PDU to encode. Its element counts are the caller's to keep within the caps Pdu.hpp names
-///            (MaxCallValues, MaxImports, ...); a reader refuses a frame that exceeds them.
-/// @return The frame's bytes.
-[[nodiscard]] std::vector<uint8_t> encodeFrame(Pdu const& pdu);
+/// Encodes @p pdu as one frame, unless a reader would refuse it for a list over its cap: a sender learns that
+/// its PDU cannot be sent, rather than its peer that the sender broke the protocol.
+/// @param pdu The PDU to encode.
+/// @return The frame's bytes; `OverCap` if a list exceeds its cap (MaxImports, MaxCallValues, ...).
+[[nodiscard]] std::expected<std::vector<uint8_t>, EncodeError> encodeFrame(Pdu const& pdu);
 
 /// One frame read off the front of a buffer.
 struct DecodedFrame

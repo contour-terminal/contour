@@ -71,6 +71,8 @@ class Channel
 
     /// @return The end's descriptor or handle, still owned by the channel: for handing it to a child
     ///         process, and for inspecting it. On Windows, INVALID_HANDLE_VALUE once shutdown() closed it.
+    ///         Not to be called, nor its value used, while another thread may call shutdown(): on Windows the
+    ///         handle may be closed, and its value reused, at any moment after shutdown() begins.
     [[nodiscard]] NativeHandle nativeHandle() const noexcept;
 
   private:

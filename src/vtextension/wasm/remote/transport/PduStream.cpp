@@ -48,9 +48,11 @@ PduStream::PduStream(Channel channel,
 
 std::expected<void, StreamError> PduStream::send(proto::Pdu const& pdu)
 {
-    return _channel.send(proto::encodeFrame(pdu)).transform_error([](ChannelError error) {
-        return streamErrorOf(error);
-    });
+    // A PDU the peer would refuse is not sent: the stream stays usable, and the caller learns why.
+    auto const frame = proto::encodeFrame(pdu);
+    if (!frame)
+        return std::unexpected(StreamError::OverCap);
+    return _channel.send(*frame).transform_error([](ChannelError error) { return streamErrorOf(error); });
 }
 
 std::expected<proto::Pdu, StreamError> PduStream::receive()

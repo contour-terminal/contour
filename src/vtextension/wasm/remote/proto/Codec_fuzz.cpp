@@ -26,7 +26,11 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t const* data, std::size_t size)
                 continue;
             if (decoded->consumed > input.size())
                 __builtin_trap();
-            auto const again = decodeFrame(encodeFrame(decoded->pdu), direction, channel, limits);
+            // What decoded is within every cap, so it encodes.
+            auto const frame = encodeFrame(decoded->pdu);
+            if (!frame)
+                __builtin_trap();
+            auto const again = decodeFrame(*frame, direction, channel, limits);
             if (!again || again->pdu != decoded->pdu)
                 __builtin_trap();
         }

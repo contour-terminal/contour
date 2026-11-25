@@ -43,6 +43,10 @@ if(VTEXTENSION_FUZZING)
     # linked from vtextension_remote_wire: the fuzzer is guided by the decoder's branches, and the library
     # every other target links stays uninstrumented (-fsanitize=fuzzer-no-link there would need the
     # coverage runtime in each of them).
+    #
+    # Not an OBJECT library both share: the fuzzer's copy needs the fuzzer's compile flags, which the
+    # library's must not have. The list below is therefore the codec's sources by hand: proto/Codec.cpp is
+    # the only one (Wire.hpp, Pdu.hpp and PduTable.hpp are header-only); a new codec source joins both lists.
     add_executable(vtextension_remote_fuzz proto/Codec_fuzz.cpp proto/Codec.cpp)
     target_include_directories(vtextension_remote_fuzz PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_compile_options(vtextension_remote_fuzz PRIVATE -fsanitize=fuzzer)

@@ -242,6 +242,35 @@ namespace
     template <typename T>
     concept Described = requires(T& value) { members(value); };
 
+    // Whether every list in a value, however deep, holds at most its cap: what a reader would refuse, an
+    // encoder refuses first. Declared before any is defined, as the writers below are.
+    template <typename T>
+    [[nodiscard]] constexpr bool withinCaps(T const& value) noexcept;
+    template <typename T>
+    [[nodiscard]] constexpr bool withinCaps(Capped<std::vector<T> const> const& field) noexcept;
+    template <Described T>
+    [[nodiscard]] constexpr bool withinCaps(T const& value) noexcept;
+
+    /// Scalars, strings and byte strings hold no capped list.
+    template <typename T>
+    constexpr bool withinCaps(T const& /*value*/) noexcept
+    {
+        return true;
+    }
+
+    template <typename T>
+    constexpr bool withinCaps(Capped<std::vector<T> const> const& field) noexcept
+    {
+        return field.values.size() <= field.maxCount
+               && std::ranges::all_of(field.values, [](T const& element) { return withinCaps(element); });
+    }
+
+    template <Described T>
+    constexpr bool withinCaps(T const& value) noexcept
+    {
+        return std::apply([](auto const&... list) { return (withinCaps(list) && ...); }, members(value));
+    }
+
     // Writers, declared before any is defined, so that each finds the others whatever it nests.
     void write(Writer& writer, uint32_t value);
     void write(Writer& writer, uint64_t value);
@@ -433,8 +462,11 @@ PduKind kindOf(Pdu const& pdu) noexcept
     return static_cast<PduKind>(pdu.index() + 1);
 }
 
-std::vector<uint8_t> encodeFrame(Pdu const& pdu)
+std::expected<std::vector<uint8_t>, EncodeError> encodeFrame(Pdu const& pdu)
 {
+    if (!std::visit([](auto const& value) { return withinCaps(value); }, pdu))
+        return std::unexpected(EncodeError::OverCap);
+
     // Every kind fits a one-byte varint, so the kind is its value's byte.
     static_assert(std::to_underlying(PduKind::MemoryWrite) < 0x80);
     auto body = Writer {};

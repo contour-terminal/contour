@@ -7,8 +7,9 @@
 //
 // A pipe has no half-close: its peer's stream ends only when this end's handle is closed. So shutdown()
 // cancels what is in flight and closes the handle as soon as the last transfer on it has returned. Every
-// transfer is counted while it may touch the handle, and whichever of shutdown() and the last transfer finds
-// the end shut down with nothing in flight closes it, exactly once.
+// transfer, and shutdown()'s own cancel, is counted while it may touch the handle, each counting itself
+// before it reads or changes the state; whichever finds the end shut down with nothing in flight closes the
+// handle, exactly once (a compare-exchange from ShutDown to Closed). All of it is sequentially consistent.
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
@@ -284,10 +285,18 @@ void Channel::shutdown() noexcept
 {
     if (!_native)
         return;
+    // Counted, as a transfer is, before the state changes: a closer acts only once it sees the end shut down,
+    // which is after this count is visible, so it finds the count non-zero until the cancel is done. Counting
+    // after the state change would leave a window where a finishing transfer closes the handle, and the
+    // cancel then reaches a closed handle whose value the system may already have handed out again.
+    _native->inFlight.fetch_add(1);
     auto expected = EndState::Open;
-    if (!_native->state.compare_exchange_strong(expected, EndState::ShutDown))
-        return;
-    ::CancelIoEx(_native->pipe, nullptr);
+    auto const shutsDown = _native->state.compare_exchange_strong(expected, EndState::ShutDown);
+    if (shutsDown)
+        ::CancelIoEx(_native->pipe, nullptr);
+    _native->inFlight.fetch_sub(1);
+    // Even a repeated shutdown() closes if it drained last: a transfer that finished while this one was
+    // counted left the close to it.
     _native->closeIfDrained();
 }
 

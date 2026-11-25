@@ -91,6 +91,25 @@ TEST_CASE("PduStream.overCapFailsWithoutWaitingForTheBody", "[vtextension]")
     CHECK(stream.receive() == std::unexpected(StreamError::OverCap));
 }
 
+TEST_CASE("PduStream.overCapIsNotSent", "[vtextension]")
+{
+    auto pair = makeControlPair();
+
+    // A runtime with more host functions than any reader accepts: refused here, so the helper never sees a
+    // protocol violation, and the stream carries on. Small enough to fit the socket's buffer, so that a
+    // sender that did send it fails the checks below rather than blocks.
+    auto const tooMany = proto::Pdu { proto::CreateRuntime {
+        .runtimeId = 1,
+        .memoryBytes = 0,
+        .stackBytes = 0,
+        .functions = std::vector<proto::WireHostFunction>(proto::MaxHostFunctions + 1) } };
+    CHECK(pair.parent.send(tooMany) == std::unexpected(StreamError::OverCap));
+
+    auto const release = proto::Pdu { proto::Release { .target = proto::ReleaseTarget::Runtime, .id = 1 } };
+    REQUIRE(pair.parent.send(release).has_value());
+    CHECK(pair.helper.receive() == release);
+}
+
 TEST_CASE("PduStream.peerCloseIsClosed", "[vtextension]")
 {
     auto pair = makeControlPair();
@@ -118,7 +137,8 @@ TEST_CASE("PduStream.garbageIsMalformed", "[vtextension]")
     {
         auto const frame =
             proto::encodeFrame(proto::Release { .target = proto::ReleaseTarget::Module, .id = 2 });
-        REQUIRE(channels->helper.send(frame).has_value());
+        REQUIRE(frame.has_value());
+        REQUIRE(channels->helper.send(*frame).has_value());
         CHECK(stream.receive() == std::unexpected(StreamError::Malformed));
     }
 }

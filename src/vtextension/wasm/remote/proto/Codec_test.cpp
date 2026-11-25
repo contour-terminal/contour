@@ -94,6 +94,14 @@ namespace
     };
 }
 
+/// @return @p pdu's frame, which the test expects to encode.
+[[nodiscard]] std::vector<uint8_t> encoded(Pdu const& pdu)
+{
+    auto frame = encodeFrame(pdu);
+    REQUIRE(frame.has_value());
+    return std::move(*frame);
+}
+
 /// @return The table row of @p pdu's kind.
 [[nodiscard]] PduRow const& rowOf(Pdu const& pdu)
 {
@@ -146,7 +154,7 @@ TEST_CASE("PduCodec.roundTrip", "[vtextension]")
         DYNAMIC_SECTION("kind " << static_cast<int>(kindOf(sample)))
         {
             auto const& row = rowOf(sample);
-            auto const frame = encodeFrame(sample);
+            auto const frame = encoded(sample);
             auto const decoded = decodeFrame(frame, row.direction, row.channel, PduLimits {});
             REQUIRE(decoded.has_value());
             CHECK(decoded->pdu == sample);
@@ -159,9 +167,9 @@ TEST_CASE("PduCodec.decodesOneFrameOffAStream", "[vtextension]")
 {
     auto const first = Pdu { Call { .instanceId = 1, .exportOrdinal = 2, .argv = { 3 } } };
     auto const second = Pdu { MemoryRead { .instanceId = 4, .address = 5, .size = 6 } };
-    auto stream = encodeFrame(first);
+    auto stream = encoded(first);
     auto const firstSize = stream.size();
-    auto const tail = encodeFrame(second);
+    auto const tail = encoded(second);
     stream.insert(stream.end(), tail.begin(), tail.end());
 
     auto const decoded = decodeFrame(stream, Direction::ToHelper, ChannelKind::Lane, PduLimits {});
@@ -175,7 +183,7 @@ TEST_CASE("PduCodec.everyPrefixNeedsMoreData", "[vtextension]")
     for (auto const& sample: samples())
     {
         auto const& row = rowOf(sample);
-        auto const frame = encodeFrame(sample);
+        auto const frame = encoded(sample);
         for (auto const size: std::views::iota(std::size_t { 0 }, frame.size()))
         {
             INFO("kind " << static_cast<int>(row.kind) << ", " << size << " of " << frame.size() << " bytes");
@@ -210,12 +218,11 @@ TEST_CASE("PduCodec.overCapIsRejectedFromTheHeader", "[vtextension]")
 
     // The stream's limits move the caps that follow them.
     auto const small = PduLimits { .maxModuleBytes = 100, .maxMemoryBytes = 200 };
-    auto const load =
-        encodeFrame(Load { .runtimeId = 1, .moduleId = 2, .bytes = std::vector<std::byte>(101) });
+    auto const load = encoded(Load { .runtimeId = 1, .moduleId = 2, .bytes = std::vector<std::byte>(101) });
     auto const& loadRow = PduTable.at(std::to_underlying(PduKind::Load) - 1);
     CHECK(decodeFrame(load, loadRow.direction, loadRow.channel, small).has_value());
     auto const tooLarge =
-        encodeFrame(Load { .runtimeId = 1, .moduleId = 2, .bytes = std::vector<std::byte>(200) });
+        encoded(Load { .runtimeId = 1, .moduleId = 2, .bytes = std::vector<std::byte>(200) });
     CHECK(decodeFrame(tooLarge, loadRow.direction, loadRow.channel, small).error() == DecodeError::OverCap);
 }
 
@@ -284,18 +291,91 @@ TEST_CASE("PduCodec.lyingBodyIsMalformed", "[vtextension]")
 
     SECTION("more values than a call carries is OverCap")
     {
+        // instance 1, export 0, then the count and as many zero values.
+        auto const callOf = [](std::size_t count) {
+            auto body = std::vector<uint8_t> { 1, 0, static_cast<uint8_t>(count) };
+            body.resize(body.size() + count, 0);
+            return frameOf(std::to_underlying(PduKind::Call), body);
+        };
         auto const& callRow = PduTable.at(std::to_underlying(PduKind::Call) - 1);
-        auto const call = encodeFrame(
-            Call { .instanceId = 1, .exportOrdinal = 0, .argv = std::vector<uint32_t>(MaxCallValues + 1) });
-        CHECK(errorOf(call, callRow) == DecodeError::OverCap);
-        auto const atMost = encodeFrame(
-            Call { .instanceId = 1, .exportOrdinal = 0, .argv = std::vector<uint32_t>(MaxCallValues) });
-        CHECK(errorOf(atMost, callRow) == std::nullopt);
+        CHECK(errorOf(callOf(MaxCallValues + 1), callRow) == DecodeError::OverCap);
+        CHECK(errorOf(callOf(MaxCallValues), callRow) == std::nullopt);
+    }
+}
 
-        auto const& hostRow = PduTable.at(std::to_underlying(PduKind::CallHost) - 1);
-        auto const host = encodeFrame(
-            CallHost { .functionIndex = 0, .arguments = std::vector<uint32_t>(MaxHostParameters + 1) });
-        CHECK(errorOf(host, hostRow) == DecodeError::OverCap);
+TEST_CASE("PduCodec.encoderRefusesWhatAReaderWould", "[vtextension]")
+{
+    // A list one past its cap is not encoded at all; at its cap, it is, and decodes.
+    struct Case
+    {
+        std::string_view description;
+        Pdu overCap;
+        Pdu atCap;
+    };
+    auto const signatureOf = [](std::size_t parameters) {
+        return Loaded { .moduleId = 1,
+                        .error = std::nullopt,
+                        .imports = { ImportDescription {
+                            .module = "m",
+                            .name = "f",
+                            .kind = ExternKind::Function,
+                            .signature = { .parameters = std::vector<ValueType>(parameters, ValueType::I32),
+                                           .results = {} },
+                            .linkage = Linkage::Satisfied } },
+                        .exports = {} };
+    };
+    auto const cases = std::vector<Case> {
+        { .description = "call values",
+          .overCap =
+              Call { .instanceId = 1, .exportOrdinal = 0, .argv = std::vector<uint32_t>(MaxCallValues + 1) },
+          .atCap =
+              Call { .instanceId = 1, .exportOrdinal = 0, .argv = std::vector<uint32_t>(MaxCallValues) } },
+        { .description = "host call arguments",
+          .overCap =
+              CallHost { .functionIndex = 0, .arguments = std::vector<uint32_t>(MaxHostParameters + 1) },
+          .atCap = CallHost { .functionIndex = 0, .arguments = std::vector<uint32_t>(MaxHostParameters) } },
+        { .description = "call results",
+          .overCap = CallResult { .failure = std::nullopt, .argv = std::vector<uint32_t>(MaxCallValues + 1) },
+          .atCap = CallResult { .failure = std::nullopt, .argv = std::vector<uint32_t>(MaxCallValues) } },
+        { .description = "imports",
+          .overCap = Loaded { .moduleId = 1,
+                              .error = std::nullopt,
+                              .imports = std::vector<ImportDescription>(MaxImports + 1),
+                              .exports = {} },
+          .atCap = Loaded { .moduleId = 1,
+                            .error = std::nullopt,
+                            .imports = std::vector<ImportDescription>(MaxImports),
+                            .exports = {} } },
+        { .description = "a signature, nested in an import",
+          .overCap = signatureOf(MaxSignatureValues + 1),
+          .atCap = signatureOf(MaxSignatureValues) },
+        { .description = "callable exports",
+          .overCap = Instantiated { .instanceId = 1,
+                                    .error = std::nullopt,
+                                    .callableExports = std::vector<uint32_t>(MaxExports + 1) },
+          .atCap = Instantiated { .instanceId = 1,
+                                  .error = std::nullopt,
+                                  .callableExports = std::vector<uint32_t>(MaxExports) } },
+        { .description = "host functions",
+          .overCap = CreateRuntime { .runtimeId = 1,
+                                     .memoryBytes = 0,
+                                     .stackBytes = 0,
+                                     .functions = std::vector<WireHostFunction>(MaxHostFunctions + 1) },
+          .atCap = CreateRuntime { .runtimeId = 1,
+                                   .memoryBytes = 0,
+                                   .stackBytes = 0,
+                                   .functions = std::vector<WireHostFunction>(MaxHostFunctions) } },
+    };
+    for (auto const& [description, overCap, atCap]: cases)
+    {
+        INFO(description);
+        CHECK(encodeFrame(overCap) == std::unexpected(EncodeError::OverCap));
+        auto const frame = encodeFrame(atCap);
+        REQUIRE(frame.has_value());
+        auto const& row = rowOf(atCap);
+        auto const decoded = decodeFrame(*frame, row.direction, row.channel, PduLimits {});
+        REQUIRE(decoded.has_value());
+        CHECK(decoded->pdu == atCap);
     }
 }
 
@@ -355,10 +435,10 @@ TEST_CASE("PduCodec.lyingCountsAreRefusedBeforeReading", "[vtextension]")
 
 TEST_CASE("PduCodec.directionAndChannelAreChecked", "[vtextension]")
 {
-    auto const call = encodeFrame(Call { .instanceId = 1, .exportOrdinal = 2, .argv = {} });
+    auto const call = encoded(Call { .instanceId = 1, .exportOrdinal = 2, .argv = {} });
     CHECK(decodeFrame(call, Direction::ToParent, ChannelKind::Lane, PduLimits {}).error()
           == DecodeError::WrongDirection);
-    auto const load = encodeFrame(Load { .runtimeId = 1, .moduleId = 2, .bytes = {} });
+    auto const load = encoded(Load { .runtimeId = 1, .moduleId = 2, .bytes = {} });
     CHECK(decodeFrame(load, Direction::ToHelper, ChannelKind::Lane, PduLimits {}).error()
           == DecodeError::WrongChannel);
 }
@@ -367,7 +447,7 @@ TEST_CASE("PduCodec.mutatedFramesNeverCrash", "[vtextension]")
 {
     auto const all = samples();
     auto const frames =
-        std::ranges::to<std::vector<std::vector<uint8_t>>>(all | std::views::transform(encodeFrame));
+        std::ranges::to<std::vector<std::vector<uint8_t>>>(all | std::views::transform(encoded));
     constexpr auto Seeds = std::array { uint32_t { 0x5eed } };
     for (auto const seed: Seeds)
     {
@@ -411,7 +491,7 @@ TEST_CASE("PduCodec.mutatedFramesNeverCrash", "[vtextension]")
             INFO("iteration " << iteration);
             CHECK(decoded->consumed <= frame.size());
             auto const redecoded =
-                decodeFrame(encodeFrame(decoded->pdu), row.direction, row.channel, PduLimits {});
+                decodeFrame(encoded(decoded->pdu), row.direction, row.channel, PduLimits {});
             REQUIRE(redecoded.has_value());
             CHECK(redecoded->pdu == decoded->pdu);
         }
