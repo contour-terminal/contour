@@ -692,8 +692,8 @@ namespace
                 return refused(made.error());
             // Production hosts are children: a grant is a duplicate in the child, and dies with it. A host in
             // this process (the in-process host, Windows) is granted a duplicate in this process, which leaks
-            // when the request fails before that host claims it -- one handle per such failure, which kills
-            // the incarnation.
+            // when the request fails before that host claims it -- one handle per such failure; a request
+            // that fails so means the host is gone.
             auto granted = transport::grantHandle(host.handleTarget(), made->object());
             if (!granted)
                 return refused(ExtensionError::RuntimeUnavailable);
