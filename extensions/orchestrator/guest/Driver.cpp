@@ -40,14 +40,16 @@ namespace
     };
 
     /// The names of DispatchRefusal, by value, for the log.
-    constexpr auto DispatchRefusalNames = std::array<std::string_view, 10> {
-        "not-configured", "agent-limit",     "repo-limit",   "unknown-repo", "unknown-task",
-        "unknown-model",  "already-running", "base-unknown", "bad-prompt",   "unknown-profile",
+    constexpr auto DispatchRefusalNames = std::array<std::string_view, 12> {
+        "not-configured", "agent-limit",     "repo-limit",      "unknown-repo",
+        "unknown-task",   "unknown-model",   "already-running", "base-unknown",
+        "bad-prompt",     "unknown-profile", "unknown-worker",  "worker-takes-no-profile",
     };
 
     static_assert(HostErrorNames.size() == HostErrorCount);
     static_assert(FileErrorNames.size() == FileErrorCount);
-    static_assert(DispatchRefusalNames.size() == std::to_underlying(DispatchRefusal::UnknownProfile) + 1U);
+    static_assert(DispatchRefusalNames.size()
+                  == std::to_underlying(DispatchRefusal::WorkerTakesNoProfile) + 1U);
 
     /// What a FileError tells the engine; every error a `.git` file read can meet that is not one of these is
     /// FileReadError::Unreadable.
@@ -522,6 +524,7 @@ void Driver::apply(std::string_view tab, view::UiAction const& action)
                                 .task = dispatch.task,
                                 .model = dispatch.model,
                                 .permissions = dispatch.permissions,
+                                .worker = dispatch.worker,
                                 .note = dispatch.note,
                                 .session = dispatch.session,
                                 .nearTab = dispatch.nearTab,

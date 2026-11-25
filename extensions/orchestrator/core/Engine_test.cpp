@@ -5389,4 +5389,61 @@ TEST_CASE("workItems joins the engine's lists in configuration order", "[orchest
     CHECK(std::ranges::find_if(items, ticket)->repo == "contour");
 }
 
+TEST_CASE("a dispatch's worker overrides the task's for that run only", "[orchestrator][engine][workers]")
+{
+    auto const settings = Settings {
+        .limits = R"("workers": [ { "id": "claude-a", "agent": "claude", "env_set": "a" },
+                                  { "id": "claude-b", "agent": "claude", "env_set": "b" } ],)",
+        .fixCiKeys = R"("worker": "claude-a",)",
+    };
+    auto harness = booted(settings);
+    auto request = prDispatch();
+    request.worker = "claude-b";
+    harness.runToRunning(request);
+
+    auto const* const run = harness.run(PrId);
+    REQUIRE(run != nullptr);
+    CHECK(run->worker == "claude-b");
+    CHECK(run->envSet == "b");
+    REQUIRE(harness.openedPanes().size() == 1);
+    CHECK(paneArgument(harness.openedPanes().front(), EnvSetArgument) == "b");
+
+    // Without a worker, the task's own runs on claude-a.
+    auto const second = harness.engine().preview(prDispatch(2369));
+    REQUIRE(second.has_value());
+    CHECK(second->run.worker == "claude-a");
+    CHECK(second->run.envSet == "a");
+
+    auto unknown = prDispatch(2369);
+    unknown.worker = "nobody";
+    CHECK(harness.engine().preview(unknown) == std::unexpected { DispatchRefusal::UnknownWorker });
+}
+
+TEST_CASE("a worker that takes no profile is refused for a task with one", "[orchestrator][engine][workers]")
+{
+    auto const limits = R"js("workers": [ { "id": "claude", "agent": "claude" },
+                                       { "id": "copilot", "agent": "copilot" } ],
+                         "permission_profiles": [ { "name": "read_only", "extends": "standard",
+                                                    "mode": "default", "deny": [ "Bash(git commit:*)" ] } ],)js"sv;
+    auto harness = booted(
+        Settings { .limits = limits, .fixCiKeys = R"("worker": "claude", "permissions": "read_only",)" });
+    auto request = prDispatch();
+    request.worker = "copilot";
+    request.permissions = "standard";
+    CHECK(harness.engine().preview(request) == std::unexpected { DispatchRefusal::WorkerTakesNoProfile });
+
+    // A task without a profile of its own runs on Copilot, as the dialog dispatches it: it names a profile.
+    auto harness2 = booted(Settings { .limits = R"("workers": [ { "id": "claude", "agent": "claude" },
+                                  { "id": "copilot", "agent": "copilot" } ],)",
+                                      .fixCiKeys = R"("worker": "claude",)" });
+    auto onCopilot = prDispatch();
+    onCopilot.worker = "copilot";
+    onCopilot.permissions = "standard";
+    harness2.feed(onCopilot);
+    auto const* const run = harness2.run(PrId);
+    REQUIRE(run != nullptr);
+    CHECK(run->agent == AgentKind::Copilot);
+    CHECK(run->permissions.empty());
+}
+
 // }}}

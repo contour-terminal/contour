@@ -42,8 +42,10 @@ namespace
         "the base branch is not known yet: it is read with the next refresh (R)"sv, // BaseUnknown
         "the prompt or the note cannot be passed to the agent"sv,                   // BadPrompt
         "the permission profile is no longer configured"sv,                         // UnknownProfile
+        "no worker has that id: check `workers`"sv,                                 // UnknownWorker
+        "that worker takes no permission profile, and this task has one: pick another worker"sv, // WorkerTakesNoProfile
     };
-    static_assert(RefusalTexts.size() == std::to_underlying(DispatchRefusal::UnknownProfile) + 1U,
+    static_assert(RefusalTexts.size() == std::to_underlying(DispatchRefusal::WorkerTakesNoProfile) + 1U,
                   "RefusalTexts has one row per DispatchRefusal");
 
     /// The arguments the command line shows by their placeholder, being long: lines of their own say what
@@ -208,6 +210,7 @@ std::expected<DispatchPreview, DispatchRefusal> previewOf(DispatchFormState cons
                                      .task = std::move(action.task),
                                      .model = std::move(action.model),
                                      .permissions = std::move(action.permissions),
+                                     .worker = std::move(action.worker),
                                      .note = std::move(action.note),
                                      .session = std::move(action.session),
                                      .nearTab = std::nullopt,

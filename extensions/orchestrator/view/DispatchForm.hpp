@@ -26,6 +26,7 @@ struct DispatchAction
     std::string task = {};                ///< The task's id.
     std::string model = {};               ///< The model.
     std::string permissions = {};         ///< The permission profile.
+    std::string worker = {};              ///< The worker, this run only; empty: the task's.
     std::optional<std::string> note = {}; ///< The user's note; absent when none was typed.
     std::string session = {};             ///< The agent's fresh session UUID.
     std::string nearTab = {};             ///< The dashboard tab the form was confirmed in.

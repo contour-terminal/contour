@@ -182,13 +182,14 @@ struct PaneOpenFailedFor
 /// The user confirmed the dispatch form.
 struct Dispatch
 {
-    std::string repo;                   ///< The repository's configured name.
-    ItemRef item;                       ///< The item to work on; a TopicRef's slug is made from @ref topic.
-    std::string url;                    ///< The item's web page; empty for a topic.
-    std::string topic = {};             ///< A topic's text, as the user typed it; empty for any other item.
-    std::string task;                   ///< The task's id.
-    std::string model;                  ///< The model; empty: the task's.
-    std::string permissions = {};       ///< The permission profile; empty: the task's, else the default.
+    std::string repo;             ///< The repository's configured name.
+    ItemRef item;                 ///< The item to work on; a TopicRef's slug is made from @ref topic.
+    std::string url;              ///< The item's web page; empty for a topic.
+    std::string topic = {};       ///< A topic's text, as the user typed it; empty for any other item.
+    std::string task;             ///< The task's id.
+    std::string model;            ///< The model; empty: the task's.
+    std::string permissions = {}; ///< The permission profile; empty: the task's, else the default.
+    std::string worker = {}; ///< The worker it runs on, this run only; empty: the task's (Config::workerFor).
     std::optional<std::string> note;    ///< The user's note, if any.
     std::string session;                ///< A fresh session UUID for the agent.
     std::optional<std::string> nearTab; ///< The dashboard tab the form was confirmed in, if known.
@@ -387,6 +388,8 @@ enum class DispatchRefusal : uint8_t
                     ///< branch was not read and no `base` is configured.
     BadPrompt,      ///< The prompt, or another value the dispatch carries, cannot be passed on or stored.
     UnknownProfile, ///< No permission profile has that name.
+    UnknownWorker,  ///< No worker has that id.
+    WorkerTakesNoProfile, ///< The worker's agent takes no permission profile, and the task has its own.
 };
 
 /// A dispatch was refused.

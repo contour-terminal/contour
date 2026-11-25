@@ -1140,3 +1140,12 @@ TEST_CASE("task keys w, s and o stay valid", "[config]")
     REQUIRE(others);
     CHECK(others->tasks()[1].key == 's');
 }
+
+TEST_CASE("takesNoProfileFor: a task's own profile on a worker whose agent takes none", "[config][workers]")
+{
+    CHECK(
+        takesNoProfileFor(TaskDef { .permissions = "read_only" }, WorkerDef { .agent = AgentKind::Copilot }));
+    CHECK_FALSE(
+        takesNoProfileFor(TaskDef { .permissions = "read_only" }, WorkerDef { .agent = AgentKind::Claude }));
+    CHECK_FALSE(takesNoProfileFor(TaskDef { .permissions = "" }, WorkerDef { .agent = AgentKind::Copilot }));
+}

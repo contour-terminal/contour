@@ -235,6 +235,12 @@ inline constexpr auto DefaultEndDoneAfter = std::chrono::milliseconds { 0 };
 /// How long a finished run is kept, unless `finished_retention` says otherwise.
 inline constexpr auto DefaultFinishedRetention = std::chrono::milliseconds { std::chrono::days { 30 } };
 
+/// @param task A task.
+/// @param worker A worker, the one the task runs on or another one.
+/// @return Whether @p task has its own permission profile (`permissions`) and @p worker's agent takes none.
+///         The configuration's ProfileOnCopilot rule and a dispatch's WorkerTakesNoProfile share it.
+[[nodiscard]] bool takesNoProfileFor(TaskDef const& task, WorkerDef const& worker) noexcept;
+
 /// The orchestrator's configuration, validated in full: a Config that exists is a usable one, and it never
 /// changes.
 class Config

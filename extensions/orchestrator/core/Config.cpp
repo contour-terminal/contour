@@ -1267,8 +1267,7 @@ namespace
     [[nodiscard]] bool profileRefused(TaskDef const& task, std::span<WorkerDef const> workers) noexcept
     {
         auto const worker = std::ranges::find(workers, task.worker, &WorkerDef::id);
-        return worker != workers.end() && agentRowOf(worker->agent).settings == SettingsProfile::NotTaken
-               && !task.permissions.empty();
+        return worker != workers.end() && takesNoProfileFor(task, *worker);
     }
 
     /// The permission profiles, resolved, and the default's name.
@@ -1567,6 +1566,11 @@ WorkerDef const& Config::workerFor(std::string_view taskId) const noexcept
     auto const* const task = findTask(taskId);
     auto const* const worker = task != nullptr ? findWorker(task->worker) : nullptr;
     return worker != nullptr ? *worker : _workers.front();
+}
+
+bool takesNoProfileFor(TaskDef const& task, WorkerDef const& worker) noexcept
+{
+    return agentRowOf(worker.agent).settings == SettingsProfile::NotTaken && !task.permissions.empty();
 }
 
 } // namespace orchestrator

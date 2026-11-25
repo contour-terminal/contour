@@ -96,6 +96,16 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
     auto const& model = request.model.empty() ? task->model : request.model;
     if (!std::ranges::contains(_config->models(), model))
         return std::unexpected { DispatchRefusal::UnknownModel };
+    // The request's worker stands for this run only; the task's own worker otherwise.
+    auto const* const chosen =
+        request.worker.empty() ? &_config->workerFor(task->id) : _config->findWorker(request.worker);
+    if (chosen == nullptr)
+        return std::unexpected { DispatchRefusal::UnknownWorker };
+    auto const& worker = *chosen;
+    // The task's own permission profile cannot go to an agent that takes none; the form's profile name does
+    // not count, since the form always sends one.
+    if (takesNoProfileFor(*task, worker))
+        return std::unexpected { DispatchRefusal::WorkerTakesNoProfile };
 
     // Only active runs count: a Finished entry is history, and Done is active until the user ends it.
     auto active = _runs | std::views::filter(countsAsActive);
@@ -149,7 +159,6 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
     }
     if (!prompt || !id)
         return std::unexpected { DispatchRefusal::BadPrompt };
-    auto const& worker = _config->workerFor(task->id);
     // An agent that takes no permission profile runs without one, and without a board.
     auto const takesProfile = agentRowOf(worker.agent).settings == SettingsProfile::Taken;
     auto const* const profile = request.permissions.empty() ? &_config->profileFor(task->id)

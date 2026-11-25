@@ -438,3 +438,10 @@ TEST_CASE("the palette installs the missing plugins it names", "[orchestrator][v
             "install the missing plugins · every plugin the tasks need is installed"));
     }
 }
+
+TEST_CASE("the worker refusals are said and told apart", "[orchestrator][view][form][workers]")
+{
+    CHECK_FALSE(refusalText(DispatchRefusal::UnknownWorker).empty());
+    CHECK_FALSE(refusalText(DispatchRefusal::WorkerTakesNoProfile).empty());
+    CHECK(refusalText(DispatchRefusal::UnknownWorker) != refusalText(DispatchRefusal::WorkerTakesNoProfile));
+}

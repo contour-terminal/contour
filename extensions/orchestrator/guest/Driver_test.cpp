@@ -1599,6 +1599,30 @@ TEST_CASE("a confirmed form dispatches with a fresh session", "[guest][driver][f
     CHECK(served.host.startsOf("git-fetch") == 1);
 }
 
+TEST_CASE("a dispatch action's worker is stepped as the engine's Dispatch", "[guest][driver][form]")
+{
+    auto served = Served {};
+    served.load();
+    served.invoke("open");
+
+    served.driver->apply(
+        "tab-1",
+        view::DispatchAction { .repo = "contour",
+                               .item = ChangeRequestRef { 2375 },
+                               .url = "https://github.com/contour-terminal/contour/pull/2375",
+                               .task = "fix_ci",
+                               .model = "sonnet",
+                               .permissions = "standard",
+                               .worker = "claude-b",
+                               .note = std::nullopt,
+                               .session = "00000001-0000-4000-8000-000000000000",
+                               .nearTab = "tab-1" });
+
+    auto const dispatched = served.observer.inputsOf<Dispatch>();
+    REQUIRE(dispatched.size() == 1);
+    CHECK(dispatched.front().worker == "claude-b");
+}
+
 TEST_CASE("a refused dispatch is drawn", "[guest][driver][form]")
 {
     auto served = Served {};
