@@ -2275,6 +2275,68 @@ TEST_CASE("RemoteBackend.instantiateHoldsControlWhileAStartFunctionGrows", "[vte
     CHECK(connector->terminations() == 0);
 }
 
+TEST_CASE("RemoteBackend.badGrowDuringInstantiateKillsTheHost", "[vtextension][remote]")
+{
+    // A start function's growth is judged as a call's is, against the instance being made: anything but an
+    // honest request -- or any request from a host that copies memory -- kills the host, and the instance is
+    // not made.
+    struct BadGrow
+    {
+        std::string_view what;
+        proto::MemoryMode memoryMode;
+        uint64_t bytes;
+        uint32_t instanceOffset; ///< Added to the id of the instance being made.
+    };
+    constexpr auto Shared = proto::MemoryMode::Shared;
+    for (auto const& [what, memoryMode, bytes, instanceOffset]: {
+             BadGrow { .what = "not larger",
+                       .memoryMode = Shared,
+                       .bytes = proto::WasmPageBytes,
+                       .instanceOffset = 0 },
+             BadGrow { .what = "unaligned",
+                       .memoryMode = Shared,
+                       .bytes = (2 * proto::WasmPageBytes) + 1,
+                       .instanceOffset = 0 },
+             BadGrow { .what = "past the cap",
+                       .memoryMode = Shared,
+                       .bytes = ContractObjectBytes + proto::WasmPageBytes,
+                       .instanceOffset = 0 },
+             BadGrow { .what = "another instance",
+                       .memoryMode = Shared,
+                       .bytes = 2 * proto::WasmPageBytes,
+                       .instanceOffset = 1 },
+             BadGrow { .what = "a host that copies memory",
+                       .memoryMode = proto::MemoryMode::Copy,
+                       .bytes = 2 * proto::WasmPageBytes,
+                       .instanceOffset = 0 },
+         })
+    {
+        INFO(what);
+        auto hello = SharingHello;
+        hello.memoryMode = memoryMode;
+        auto const transcript = std::make_shared<Transcript>();
+        auto const connector = honestConnector(
+            HonestScript {
+                .hello = hello,
+                .beforeInstantiated =
+                    [bytes, instanceOffset](HelperEnds& ends, proto::Instantiate const& instantiate) {
+                        // A parent that answered goes on to get its instance, as from an honest host: only
+                        // one that killed the host goes without.
+                        if (!ends.send(proto::Grow { .instanceId = instantiate.instanceId + instanceOffset,
+                                                     .bytes = bytes }))
+                            return false;
+                        auto const answer = ends.receivePdu();
+                        return answer && std::holds_alternative<proto::Grown>(*answer);
+                    } },
+            transcript);
+        auto rig = ScriptedRig { .connector = connector };
+        auto const module = contract::load(*rig.runtime, PeekModule);
+        auto context = contract::RecordingHostContext {};
+        CHECK(module->instantiate(context) == std::unexpected(ExtensionError::HostUnavailable));
+        CHECK(connector->terminations() == 1);
+    }
+}
+
 TEST_CASE("RemoteBackend.liveObjectsStayWithinTheDataCap", "[vtextension][remote]")
 {
     // A host's live instances hold at most its cap of memory objects: two fit here, a third waits for one of
