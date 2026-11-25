@@ -30,6 +30,10 @@ namespace vtextension::wasm::wasmtime
 class KindState
 {
   public:
+    /// Takes the next serial of the process: a thread's stamp names its kind by it, never by its address,
+    /// which a later kind may take.
+    KindState() noexcept;
+
     /// Counts one more runtime alive, bringing the engine up anew if it is the first.
     void acquireRuntime() noexcept;
 
@@ -60,7 +64,11 @@ class KindState
     /// @return The generation the calling thread's guard was entered for; 0 if none is held.
     [[nodiscard]] static uint64_t preparedGeneration() noexcept;
 
+    /// @return The kind's serial, unique in the process.
+    [[nodiscard]] uint64_t serial() const noexcept { return _serial; }
+
   private:
+    uint64_t _serial;                         ///< Names the kind in a thread's stamp.
     std::mutex _mutex;                        ///< Guards _liveRuntimes and each bring-up.
     std::size_t _liveRuntimes = 0;            ///< How many runtimes are alive.
     std::atomic<uint64_t> _generation {};     ///< The current bring-up generation.

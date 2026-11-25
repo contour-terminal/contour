@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -37,11 +38,14 @@ namespace vtextension::wasm::wasmtime
 
 namespace
 {
+    /// The serial the next kind takes; 0 names none.
+    auto nextSerial = std::atomic<uint64_t> { 1 };
+
     /// Which kind and generation the calling thread is prepared for; generation 0 for none.
     struct ThreadStamp
     {
-        KindState const* kind = nullptr; ///< The kind whose guard prepared the thread.
-        uint64_t generation = 0;         ///< The generation it was prepared for.
+        uint64_t kind = 0;       ///< The serial of the kind whose guard prepared the thread; 0 for none.
+        uint64_t generation = 0; ///< The generation it was prepared for.
     };
 
     thread_local auto threadStamp = ThreadStamp {};
@@ -58,7 +62,7 @@ namespace
     {
       public:
         ThreadGuard(KindState const& kind, uint64_t generation, GuardRole role) noexcept:
-            _kind { &kind }, _generation { generation }, _role { role }
+            _kind { kind.serial() }, _generation { generation }, _role { role }
         {
         }
 
@@ -78,7 +82,7 @@ namespace
         [[nodiscard]] uint64_t generation() const noexcept override { return _generation; }
 
       private:
-        KindState const* _kind;
+        uint64_t _kind; ///< The serial of the kind it was entered for, which it may outlive.
         uint64_t _generation;
         GuardRole _role;
     };
@@ -356,6 +360,10 @@ namespace
     };
 } // namespace
 
+KindState::KindState() noexcept: _serial { nextSerial.fetch_add(1) }
+{
+}
+
 void KindState::acquireRuntime() noexcept
 {
     auto const lock = std::scoped_lock { _mutex };
@@ -375,15 +383,15 @@ std::expected<std::unique_ptr<IThreadGuard>, ExtensionError> KindState::enterThr
     if (_liveRuntimes == 0)
         return std::unexpected(ExtensionError::RuntimeUnavailable);
     auto const current = _generation.load();
-    if (threadStamp.kind == this && threadStamp.generation == current)
+    if (threadStamp.kind == _serial && threadStamp.generation == current)
         return std::make_unique<ThreadGuard>(*this, current, GuardRole::Nested);
-    threadStamp = ThreadStamp { .kind = this, .generation = current };
+    threadStamp = ThreadStamp { .kind = _serial, .generation = current };
     return std::make_unique<ThreadGuard>(*this, current, GuardRole::Outermost);
 }
 
 bool KindState::isCurrentThreadPrepared() const noexcept
 {
-    return threadStamp.kind == this && threadStamp.generation != 0
+    return threadStamp.kind == _serial && threadStamp.generation != 0
            && threadStamp.generation == _generation.load();
 }
 

@@ -216,6 +216,33 @@ class InterruptingHostContext final: public vtextension::wasm::IHostContext
 
 CONTOUR_WASM_BACKEND_CONTRACT(WasmtimeTraits)
 
+TEST_CASE("WasmtimeEngine.kindStampsOutliveNoKind", "[wasmtime]")
+{
+    // A kind that comes after another, here at the very same address, is not prepared on a thread for having
+    // the generation its predecessor prepared it for: a thread's stamp names its kind by serial, not address.
+    auto kind = std::optional<KindState> {};
+    kind.emplace();
+    kind->acquireRuntime();
+    auto guard = kind->enterThread();
+    REQUIRE(guard.has_value());
+    REQUIRE(kind->isCurrentThreadPrepared());
+    auto const* const address = &*kind;
+    kind->releaseRuntime();
+    kind.reset();
+
+    kind.emplace();
+    REQUIRE(&*kind == address);
+    kind->acquireRuntime();
+    CHECK(kind->generation() == (*guard)->generation());
+    CHECK_FALSE(kind->isCurrentThreadPrepared());
+    auto const renewed = kind->enterThread();
+    REQUIRE(renewed.has_value());
+    CHECK(kind->isCurrentThreadPrepared());
+    guard->reset(); // the predecessor's guard leaves alone the stamp its successor holds
+    CHECK(kind->isCurrentThreadPrepared());
+    kind->releaseRuntime();
+}
+
 TEST_CASE("WasmtimeEngine.hostFunctionArities", "[wasmtime]")
 {
     // A host function takes from none up to MaxHostParameters i32s, each reaching the host in order. One
