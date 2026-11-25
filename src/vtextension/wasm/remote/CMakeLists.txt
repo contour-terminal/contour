@@ -125,9 +125,9 @@ if(_process_source)
             process/testing/SandboxProbe.hpp)
         target_link_libraries(extension_host_probe PRIVATE
             vtextension_host vtextension_remote_process vtextension_remote_wire)
-        # Where a sandbox is built (VTEXTENSION_LINUX_SANDBOX, VTEXTENSION_FREEBSD_SANDBOX), the probe also locks
+        # Where a sandbox is built (VTEXTENSION_{LINUX,FREEBSD,MACOS}_SANDBOX), the probe also locks
         # itself down as the host does, and process_test proves the sandbox with it and tests its pieces.
-        if(VTEXTENSION_LINUX_SANDBOX OR VTEXTENSION_FREEBSD_SANDBOX)
+        if(VTEXTENSION_LINUX_SANDBOX OR VTEXTENSION_FREEBSD_SANDBOX OR VTEXTENSION_MACOS_SANDBOX)
             target_sources(extension_host_probe PRIVATE process/testing/SandboxProbe.cpp)
             target_link_libraries(extension_host_probe PRIVATE vtextension_host_sanitizer_options)
         endif()
@@ -169,7 +169,7 @@ if(_process_source)
                 ../host/linux/testing/BpfEvaluator.hpp
             )
         endif()
-        if(VTEXTENSION_LINUX_SANDBOX OR VTEXTENSION_FREEBSD_SANDBOX)
+        if(VTEXTENSION_LINUX_SANDBOX OR VTEXTENSION_FREEBSD_SANDBOX OR VTEXTENSION_MACOS_SANDBOX)
             target_sources(vtextension_process_test PRIVATE process/SandboxProbe_test.cpp)
         endif()
         add_dependencies(vtextension_process_test extension_host_probe)

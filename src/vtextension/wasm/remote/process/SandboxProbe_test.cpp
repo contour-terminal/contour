@@ -3,8 +3,8 @@
 // The system's sandbox, for real: the probe locks itself down as the extension host does, in a process of its
 // own, and tries one operation from a thread that ran before the lockdown. What is forbidden fails -- on
 // Linux refused with an errno where a library may ask, the process killed by SIGSYS where nothing honest
-// asks; on FreeBSD refused by capability mode or by the descriptor's rights -- and what the host does still
-// works, on Linux also inside an outer sandbox's filter.
+// asks; on FreeBSD refused by capability mode or by the descriptor's rights; on macOS refused by the profile
+// -- and what the host does still works, on Linux also inside an outer sandbox's filter.
 #include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -12,6 +12,8 @@
     #include <sys/syscall.h>
 #elifdef __FreeBSD__
     #include <sys/procctl.h>
+#elifdef __APPLE__
+    #include <servers/bootstrap.h>
 #endif
 
 #include <algorithm>
@@ -238,6 +240,26 @@ constexpr auto ForbiddenOperations = std::array {
     Expectation { .op = "execve", .fate = Fate::Refused, .error = ECAPMODE },
     Expectation { .op = "ptrace-traceme", .fate = Fate::Refused, .error = ECAPMODE },
     Expectation { .op = "signal-parent", .fate = Fate::Refused, .error = ECAPMODE },
+};
+#elifdef __APPLE__
+// The profile refuses what it does not allow with EPERM: a file, a socket of any family, a new process, a
+// program, a signal to another process. A Mach service lookup it refuses is refused as unprivileged.
+constexpr auto ForbiddenOperations = std::array {
+    Expectation { .op = "open-file", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "open-directory", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "socket-inet", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "socket-unix", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "connect-inet", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "fork", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "execve", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "signal-parent", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "mach-lookup", .fate = Fate::Refused, .error = BOOTSTRAP_NOT_PRIVILEGED },
+    // What the profile leaves to other guards, or the system decides on its own, recorded: a descriptor sent
+    // up (Contour's end discards it), tracing, a thread, and memory both writable and executable.
+    Expectation { .op = "send-descriptor", .fate = Fate::Unasserted },
+    Expectation { .op = "ptrace-traceme", .fate = Fate::Unasserted },
+    Expectation { .op = "spawn-thread", .fate = Fate::Unasserted },
+    Expectation { .op = "protect-writable-executable", .fate = Fate::Unasserted },
 };
 #endif
 

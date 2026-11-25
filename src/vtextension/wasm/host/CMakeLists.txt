@@ -12,12 +12,15 @@ endif()
 
 # Each system's sandbox (Sandbox.hpp) is a file of its own, and a value of PlatformSandbox; a system that has none
 # yet runs the host unsandboxed, and its Hello says so. Linux's: where VTEXTENSION_LINUX_SANDBOX; FreeBSD's: where
-# VTEXTENSION_FREEBSD_SANDBOX (both ../../CMakeLists.txt).
+# VTEXTENSION_FREEBSD_SANDBOX; macOS's: where VTEXTENSION_MACOS_SANDBOX (all ../../CMakeLists.txt).
 set(_sandbox_source Sandbox_none.cpp)
 set(_platform_sandbox 0)
 if(VTEXTENSION_FREEBSD_SANDBOX)
     set(_sandbox_source Sandbox_freebsd.cpp)
     set(_platform_sandbox 2)
+elseif(VTEXTENSION_MACOS_SANDBOX)
+    set(_sandbox_source Sandbox_macos.cpp)
+    set(_platform_sandbox 3)
 elseif(VTEXTENSION_LINUX_SANDBOX)
     set(_sandbox_source
         Sandbox_linux.cpp
@@ -53,6 +56,7 @@ add_library(vtextension_host STATIC
     Sandbox.cpp
     Sandbox.hpp
     ${_sandbox_source}
+    macos/SandboxProfile.hpp
     ../remote/HostConnector.hpp
 )
 target_link_libraries(vtextension_host PUBLIC vtextension_remote_wire vtextension_memory_provision PRIVATE core::base)

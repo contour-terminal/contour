@@ -218,6 +218,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     set(VTEXTENSION_FREEBSD_SANDBOX ON)
     # That sandbox runs no Wasmtime: a row of _CONTOUR_SANDBOXES_WITHOUT_WASMTIME (../../CMakeLists.txt).
 endif()
+# Whether it locks itself down with macOS's (wasm/host/Sandbox_macos.cpp): a Seatbelt profile, on every
+# architecture. Built, tested and run by the extension host there, as FreeBSD's is, although macOS is not yet a row
+# of _CONTOUR_SANDBOXED_PLATFORMS either: that row is added once macOS's CI has run the sandbox's tests green.
+set(VTEXTENSION_MACOS_SANDBOX OFF)
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(VTEXTENSION_MACOS_SANDBOX ON)
+endif()
 
 # The protocol and channels between Contour and its extension host process, and the host's server; no engine,
 # always built. After the backends: the host's tests run on Wasmtime's engine, where there is one.

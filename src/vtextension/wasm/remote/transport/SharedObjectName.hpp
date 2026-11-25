@@ -17,6 +17,10 @@
 namespace vtextension::wasm::remote::transport
 {
 
+/// What every name starts with: what a sandbox that grants objects by name (macOS's profile) grants. A C
+/// string, as such a sandbox's C API takes it.
+inline constexpr auto SharedObjectNamePrefix = "/contour-eh-";
+
 /// How many names an object is tried under before its creation fails: a taken name is someone else's, and
 /// eight random ones all taken is someone squatting the namespace, not chance.
 inline constexpr auto SharedObjectNameAttempts = 8;
@@ -27,11 +31,11 @@ inline constexpr auto SharedObjectNameSuffixBits = 48;
 
 /// @param processId The process making the object.
 /// @param suffix What tells the name apart; only its low SharedObjectNameSuffixBits bits are used.
-/// @return The name: `/contour-eh-<processId>-<suffix as 12 hex digits>`.
+/// @return The name: `<SharedObjectNamePrefix><processId>-<suffix as 12 hex digits>`.
 [[nodiscard]] inline std::string sharedObjectName(int64_t processId, uint64_t suffix)
 {
     constexpr auto SuffixMask = (uint64_t { 1 } << SharedObjectNameSuffixBits) - 1;
-    return std::format("/contour-eh-{}-{:012x}", processId, suffix & SuffixMask);
+    return std::format("{}{}-{:012x}", SharedObjectNamePrefix, processId, suffix & SuffixMask);
 }
 
 /// Creates an object under a fresh name: tries up to SharedObjectNameAttempts names, each with a new suffix,

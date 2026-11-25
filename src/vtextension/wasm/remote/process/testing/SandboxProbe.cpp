@@ -13,6 +13,9 @@
 #elifdef __FreeBSD__
     #include <sys/procctl.h>
     #include <sys/procdesc.h>
+#elifdef __APPLE__
+    #include <mach/mach.h>
+    #include <servers/bootstrap.h>
 #endif
 
 #include <algorithm>
@@ -102,6 +105,28 @@ namespace
         SetupFailed = 5,
     };
 
+    /// A file the system has, which no locked-down host may read.
+#ifdef __APPLE__
+    constexpr auto ReadableFile = "/etc/hosts";
+#else
+    constexpr auto ReadableFile = "/etc/hostname";
+#endif
+
+    /// The type of the sockets the ops make: close-on-exec where the system takes it at creation.
+#ifdef SOCK_CLOEXEC
+    constexpr auto StreamSocket = SOCK_STREAM | SOCK_CLOEXEC;
+#else
+    constexpr auto StreamSocket = SOCK_STREAM;
+#endif
+
+    /// The flags of a send that must not raise SIGPIPE: none where the system has no MSG_NOSIGNAL (macOS),
+    /// whose channel sockets carry SO_NOSIGPIPE instead (Channel_posix.cpp).
+#ifdef MSG_NOSIGNAL
+    constexpr auto SendFlags = MSG_NOSIGNAL;
+#else
+    constexpr auto SendFlags = 0;
+#endif
+
     /// The stack of the probe's threads: what the host's executors get is more than enough.
     constexpr auto ThreadStackBytes = std::size_t { 1024 } * 1024;
 
@@ -133,7 +158,7 @@ namespace
 
     [[nodiscard]] std::string openFile(OperationContext&)
     {
-        return openPath("/etc/hostname", O_RDONLY);
+        return openPath(ReadableFile, O_RDONLY);
     }
 
     [[nodiscard]] std::string openDirectory(OperationContext&)
@@ -155,7 +180,7 @@ namespace
 
     [[nodiscard]] std::string socketOf(int family)
     {
-        auto const descriptor = ::socket(family, SOCK_STREAM | SOCK_CLOEXEC, 0);
+        auto const descriptor = ::socket(family, StreamSocket, 0);
         auto outcome = outcomeOf(descriptor);
         if (descriptor >= 0)
             ::close(descriptor);
@@ -176,7 +201,7 @@ namespace
     /// is the address that it refuses.
     [[nodiscard]] std::string connectInet(OperationContext&)
     {
-        auto const descriptor = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+        auto const descriptor = ::socket(AF_INET, StreamSocket, 0);
         if (descriptor < 0)
             return outcomeOf(descriptor);
         constexpr auto DiscardPort = uint16_t { 9 };
@@ -215,7 +240,7 @@ namespace
         header->cmsg_len = CMSG_LEN(sizeof(int));
         auto const attached = STDERR_FILENO;
         std::memcpy(CMSG_DATA(header), &attached, sizeof(attached));
-        return outcomeOf(::sendmsg(context.controlDescriptor, &message, MSG_NOSIGNAL));
+        return outcomeOf(::sendmsg(context.controlDescriptor, &message, SendFlags));
     }
 
     [[nodiscard]] std::string forkProcess(OperationContext&)
@@ -258,7 +283,7 @@ namespace
 
     [[nodiscard]] std::string traceMe(OperationContext&)
     {
-#ifdef __FreeBSD__
+#if defined(__FreeBSD__) || defined(__APPLE__)
         return outcomeOf(::ptrace(PT_TRACE_ME, 0, nullptr, 0));
 #else
         return outcomeOf(::ptrace(PTRACE_TRACEME, 0, nullptr, nullptr));
@@ -307,7 +332,12 @@ namespace
             ::mmap(nullptr, Bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (mapped == MAP_FAILED)
             return outcomeOf(-1);
+#ifdef __linux__
+        // Through the system call itself, as mapAnonymous() maps.
         auto outcome = outcomeOf(::syscall(SYS_mprotect, mapped, Bytes, protection));
+#else
+        auto outcome = outcomeOf(::mprotect(mapped, Bytes, protection));
+#endif
         ::munmap(mapped, Bytes);
         return outcome;
     }
@@ -380,6 +410,20 @@ namespace
 #endif
     }
 
+#ifdef __APPLE__
+    /// Looks up the system log's Mach service, as a library that logs does: what no locked-down host may
+    /// reach. `refused:<kern_return_t>` where the lookup failed.
+    [[nodiscard]] std::string lookUpMachService(OperationContext&)
+    {
+        auto port = mach_port_t { MACH_PORT_NULL };
+        auto const result = ::bootstrap_look_up(bootstrap_port, "com.apple.system.logger", &port);
+        if (result != KERN_SUCCESS)
+            return std::format("refused:{}", result);
+        ::mach_port_deallocate(::mach_task_self(), port);
+        return "ok";
+    }
+#endif
+
     [[nodiscard]] std::string nothing(OperationContext&)
     {
         return "ok";
@@ -407,11 +451,23 @@ namespace
             std::ranges::copy(std::as_bytes(std::span { Mark }), mapping->base());
         }
         auto random = std::array<std::byte, 8> {};
+#ifdef __APPLE__
+        // macOS has no getrandom(); getentropy() is what its C++ library draws on.
+        if (::getentropy(random.data(), random.size()) != 0)
+            return "failed:getentropy";
+#else
         if (::getrandom(random.data(), random.size(), 0) != static_cast<ssize_t>(random.size()))
             return "failed:getrandom";
+#endif
         auto now = timespec {};
+#ifdef __linux__
+        // Through the system call itself, as the filter sees it.
         if (::syscall(SYS_clock_gettime, CLOCK_MONOTONIC, &now) != 0)
             return "failed:clock";
+#else
+        if (::clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+            return "failed:clock";
+#endif
         auto mutex = std::mutex {};
         auto condition = std::condition_variable {};
         {
@@ -463,6 +519,9 @@ namespace
         Operation { .name = "channel-pair", .run = &channelPair },
         Operation { .name = "held-limits", .run = &heldLimits },
         Operation { .name = "permitted", .run = &permitted },
+#ifdef __APPLE__
+        Operation { .name = "mach-lookup", .run = &lookUpMachService },
+#endif
     };
 
 #ifdef __linux__
@@ -738,7 +797,7 @@ int runSandboxProbe(std::span<std::string_view const> arguments)
     auto afterRestrict = std::string {};
     auto early = host::ExecutorThread::start(ThreadStackBytes, [&] {
         openNow.wait();
-        beforeRestrict = openPath("/etc/hostname", O_RDONLY);
+        beforeRestrict = openPath(ReadableFile, O_RDONLY);
         opened.count_down();
         finish.wait();
     });
@@ -760,7 +819,7 @@ int runSandboxProbe(std::span<std::string_view const> arguments)
     auto reportSent = false;
     auto executor = host::ExecutorThread::start(ThreadStackBytes, [&] {
         openNow.wait();
-        afterRestrict = openPath("/etc/hostname", O_RDONLY);
+        afterRestrict = openPath(ReadableFile, O_RDONLY);
         opened.count_down();
         go.wait();
         auto const outcome = request->operation->run(context);

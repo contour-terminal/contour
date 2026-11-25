@@ -2,8 +2,8 @@
 #pragma once
 
 /// @file
-/// Test-only, Linux and FreeBSD: the probe's sandboxed mode, which locks itself down as the extension host
-/// does and then tries one operation on a thread that ran before the lockdown.
+/// Test-only, Linux, FreeBSD and macOS: the probe's sandboxed mode, which locks itself down as the extension
+/// host does and then tries one operation on a thread that ran before the lockdown.
 ///
 ///   extension_host_probe --receive-grant [--sandboxed] [--guest-code=<code>] [--outer-filter=<kind>]
 ///   [--sandbox-op=<op>] <helper arguments>
@@ -25,8 +25,8 @@
 /// op killed the process. It exits 0 once its control channel ended.
 ///
 /// The ops: open-file, open-directory, socket-inet, socket-unix, connect-inet, ioctl-control,
-/// send-descriptor, fork, pdfork (FreeBSD), spawn-thread, execve, ptrace-traceme, signal-parent,
-/// map-writable-executable, map-shared-unfixed, map-executable, protect-writable-executable,
+/// send-descriptor, fork, pdfork (FreeBSD), mach-lookup (macOS), spawn-thread, execve, ptrace-traceme,
+/// signal-parent, map-writable-executable, map-shared-unfixed, map-executable, protect-writable-executable,
 /// protect-executable, protect-readable, channel-pair, held-limits (how far the system limits each descriptor
 /// the sandbox was handed: lanes, then standard input, output and error, `unlimited`, `as-its-role` or
 /// `otherwise`, comma-separated), none, and permitted, which takes one Instantiate's

@@ -498,9 +498,9 @@ int main(int argc, char const* argv[], char const* envp[])
             return parent(rest);
         if (arguments.front() == "--receive-grant")
         {
-// Where this build has the Linux or the FreeBSD sandbox (PlatformSandbox::Linux, ::FreeBSD): what the
-// sandboxed mode is made of.
-#if CONTOUR_PLATFORM_SANDBOX == 1 || CONTOUR_PLATFORM_SANDBOX == 2
+// Where this build has the Linux, the FreeBSD or the macOS sandbox (PlatformSandbox::Linux, ::FreeBSD,
+// ::MacOS): what the sandboxed mode is made of.
+#if CONTOUR_PLATFORM_SANDBOX == 1 || CONTOUR_PLATFORM_SANDBOX == 2 || CONTOUR_PLATFORM_SANDBOX == 3
             namespace testing = vtextension::wasm::remote::process::testing;
             if (testing::asksForSandboxProbe(rest))
                 return static_cast<ProbeExit>(testing::runSandboxProbe(rest));
