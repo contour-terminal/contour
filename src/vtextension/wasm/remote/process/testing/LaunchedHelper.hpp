@@ -1,0 +1,91 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+/// @file
+/// Test-only: starts an executable the way Contour starts its extension host -- fresh channels, an interrupt
+/// page and a wake signal, inherited and named on its command line -- and holds Contour's ends of them. What
+/// the launcher's tests start the probe with, and the helper's tests the real executable.
+
+#include <chrono>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <span>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+#include <vtextension/wasm/remote/transport/Channel.hpp>
+#include <vtextension/wasm/remote/transport/ControlPage.hpp>
+#include <vtextension/wasm/remote/transport/WakeSignal.hpp>
+
+namespace vtextension::wasm::remote::process::testing
+{
+
+/// How long a test waits for a child to do what it was told.
+inline constexpr auto ChildPatience = std::chrono::seconds { 5 };
+
+/// @return This process's id.
+[[nodiscard]] ProcessId ownProcessId() noexcept;
+
+/// Reaps @p process, waiting up to ChildPatience for it to exit.
+/// @return Its status; nothing if it still ran when the patience ran out.
+[[nodiscard]] std::optional<ExitStatus> awaitReap(IProcessLauncher& launcher, IProcessHandle& process);
+
+/// Kills @p process if it still runs, and reaps it.
+/// @return Whether it is reaped: whether it is gone for good.
+[[nodiscard]] bool endAndReap(IProcessLauncher& launcher, IProcessHandle& process);
+
+/// What to start, and how.
+struct HelperLaunch
+{
+    std::filesystem::path executable;    ///< The program.
+    std::vector<std::string> leading {}; ///< Arguments before the helper arguments.
+    /// Arguments after them, given the handles' values in the child.
+    std::function<std::vector<std::string>(std::span<transport::NativeHandle const>)> trailing {};
+    ProcessId parentProcessId = ownProcessId();                      ///< What `--parent` names.
+    uint64_t dataBytes = DefaultDataBytes;                           ///< What `--data-bytes` names.
+    std::vector<std::pair<std::string, std::string>> environment {}; ///< The child's environment.
+};
+
+/// A started child: Contour's ends of everything it was handed, and the process. Its destructor ends and
+/// reaps a child that a failed assertion left running.
+class LaunchedHelper
+{
+  public:
+    LaunchedHelper(std::shared_ptr<IProcessLauncher> launcher,
+                   std::unique_ptr<IProcessHandle> process,
+                   transport::Channel control,
+                   std::vector<transport::Channel> lanes,
+                   transport::ControlPage page,
+                   transport::WakeSender wake,
+                   std::shared_ptr<std::vector<transport::NativeHandle>> childHandles) noexcept;
+    LaunchedHelper(LaunchedHelper&&) noexcept = default;
+    LaunchedHelper& operator=(LaunchedHelper&&) noexcept = delete;
+    LaunchedHelper(LaunchedHelper const&) = delete;
+    LaunchedHelper& operator=(LaunchedHelper const&) = delete;
+    ~LaunchedHelper();
+
+    std::shared_ptr<IProcessLauncher> launcher;
+    std::unique_ptr<IProcessHandle> process;
+    transport::Channel control;
+    std::vector<transport::Channel> lanes;
+    transport::ControlPage page;
+    transport::WakeSender wake;
+    std::shared_ptr<std::vector<transport::NativeHandle>>
+        childHandles; ///< What its arguments were made from.
+
+    /// Ends the child the way Contour lets a helper end: its control channel reaches end of stream.
+    void closeControl() noexcept;
+};
+
+/// Starts @p launch with fresh channels, page and wake.
+/// @return The child; why it could not be started otherwise.
+[[nodiscard]] std::expected<LaunchedHelper, LaunchError> launchHelper(
+    std::shared_ptr<IProcessLauncher> launcher, HelperLaunch launch);
+
+} // namespace vtextension::wasm::remote::process::testing

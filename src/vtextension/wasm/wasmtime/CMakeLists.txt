@@ -23,6 +23,17 @@ file(CONFIGURE
 )
 target_include_directories(vtextension_wasmtime PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
+# The engine the extension host executable runs (../host/HelperEngine.hpp): Wasmtime's, trapping through guard
+# pages and signals -- except where a sanitizer or coverage owns the signal handlers, which trap in software.
+add_library(vtextension_wasmtime_helper_engine STATIC
+    HelperEngine.cpp
+    ${PROJECT_SOURCE_DIR}/src/vtextension/wasm/host/HelperEngine.hpp
+)
+target_link_libraries(vtextension_wasmtime_helper_engine PUBLIC vtextension_host PRIVATE vtextension_wasmtime)
+if(CONTOUR_SANITIZE OR CONTOUR_COVERAGE)
+    target_compile_definitions(vtextension_wasmtime_helper_engine PRIVATE CONTOUR_HELPER_SOFTWARE_TRAPS)
+endif()
+
 if(VTEXTENSION_TESTING)
     # Test support for the extension host's suite (vtextension_remote_test): the engine a host process drives,
     # reached through a neutral probe (../testing/HostedEngine.hpp), so that the host's tests name no engine.

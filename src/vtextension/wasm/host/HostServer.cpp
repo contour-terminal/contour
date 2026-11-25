@@ -301,27 +301,29 @@ ServerExit HostServer::Impl::run()
     auto releaseAll = core::Finally { [this] { release(); } };
     auto executors = std::vector<ExecutorThread> {};
     auto endConnection = core::Finally { [this] { finish(ServerExit::ProtocolViolation); } };
-    auto const hello = send(_control,
-                            proto::Hello { .version = proto::ProtocolVersion,
-                                           .memoryMode = _engine.memoryMode(),
-                                           .lockdown = _config.lockdown });
-    if (hello)
+    executors.reserve(_lanes.size());
+    for (auto& lane: _lanes)
     {
-        executors.reserve(_lanes.size());
-        for (auto& lane: _lanes)
-        {
-            auto started = _config.startExecutor(ExecutorStackBytes, [this, &lane] { runLane(lane); });
-            if (!started)
-                break;
-            executors.push_back(std::move(*started));
-        }
-        if (executors.size() == _lanes.size())
+        auto started = _config.startExecutor(ExecutorStackBytes, [this, &lane] { runLane(lane); });
+        if (!started)
+            break;
+        executors.push_back(std::move(*started));
+    }
+    if (executors.size() == _lanes.size())
+    {
+        // Every thread the host needs runs now: it may cap itself, then say how far it did.
+        auto const lockdown = _config.confine ? _config.confine() : _config.lockdown;
+        auto const hello = send(_control,
+                                proto::Hello { .version = proto::ProtocolVersion,
+                                               .memoryMode = _engine.memoryMode(),
+                                               .lockdown = lockdown });
+        if (hello)
             serveControl();
         else
-            finish(ServerExit::ExecutorUnavailable);
+            finish(hello.error());
     }
     else
-        finish(hello.error());
+        finish(ServerExit::ExecutorUnavailable);
 
     // Every channel is shut down by now, and every instance interrupted: each executor returns.
     endConnection.run();

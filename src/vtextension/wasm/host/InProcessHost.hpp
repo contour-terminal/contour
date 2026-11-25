@@ -9,7 +9,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
-#include <functional>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -22,9 +21,6 @@
 
 namespace vtextension::wasm::host
 {
-
-/// Creates the engine one host runs on; null if none can be.
-using EngineFactory = std::function<std::unique_ptr<IHostedEngine>()>;
 
 /// The hosts one connector started that are still alive; shared with each of them.
 class InProcessHostRegistry;

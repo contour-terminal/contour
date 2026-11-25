@@ -43,8 +43,11 @@ using ExecutorStarter =
 struct HostServerConfig
 {
     remote::proto::PduLimits limits {}; ///< The caps of the PDUs it receives, and sends.
-    /// How far the host confined itself, as its Hello states.
+    /// How far the host confined itself, as its Hello states, when there is no confine.
     remote::proto::LockdownState lockdown = remote::proto::LockdownState::Unsandboxed;
+    /// Confines the host: called once every lane's thread started, before Hello, whose lockdown is what it
+    /// returns. Null: nothing is confined, and Hello states `lockdown`.
+    std::function<remote::proto::LockdownState()> confine {};
     /// How each lane's executor thread is started: the operating system's threads, but in a test that
     /// makes one fail.
     ExecutorStarter startExecutor = &ExecutorThread::start;
@@ -77,11 +80,12 @@ class HostServer
     HostServer& operator=(HostServer const&) = delete;
     HostServer& operator=(HostServer&&) = delete;
 
-    /// Sends Hello, starts one executor thread per lane (of ExecutorStackBytes), serves control on the
-    /// calling thread until EOF, a violation or stop(); then stops, joins the executors, releases every
-    /// instance, module, runtime. Called once.
+    /// Starts one executor thread per lane (of ExecutorStackBytes), confines the host (HostServerConfig::
+    /// confine), sends Hello, serves control on the calling thread until EOF, a violation or stop(); then
+    /// stops, joins the executors, releases every instance, module, runtime. Called once.
     /// @return Why it stopped serving: the first of the reasons that came up, on any channel;
-    ///         `ExecutorUnavailable` if a lane's thread could not be started, serving nothing then.
+    ///         `ExecutorUnavailable` if a lane's thread could not be started, neither confining nor sending
+    ///         anything then.
     [[nodiscard]] ServerExit run();
 
     /// Thread-safe, idempotent: interrupts every live instance, shuts every channel down. Callable before,

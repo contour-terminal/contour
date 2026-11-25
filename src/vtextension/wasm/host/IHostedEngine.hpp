@@ -5,6 +5,9 @@
 /// What the extension host process runs modules on: a WebAssembly backend, and how it shares an instance's
 /// memory with Contour.
 
+#include <functional>
+#include <memory>
+
 #include <vtextension/wasm/WasmRuntime.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 
@@ -19,5 +22,8 @@ class IHostedEngine: public IWasmBackend
     ///         its Hello, and so how the parent reaches that memory.
     [[nodiscard]] virtual remote::proto::MemoryMode memoryMode() const noexcept = 0;
 };
+
+/// Creates the engine one host runs on; null if none can be.
+using EngineFactory = std::function<std::unique_ptr<IHostedEngine>()>;
 
 } // namespace vtextension::wasm::host

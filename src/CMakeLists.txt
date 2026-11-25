@@ -21,7 +21,14 @@ add_subdirectory(vtcontrol)
 add_subdirectory(vtparser)
 add_subdirectory(vtbackend)
 if(CONTOUR_EXTENSIONS)
+    # Where contour-extension-host is installed on Unix, a private executable of Contour's, and the way there
+    # from the directory contour is installed in: how contour finds it (vtextension_remote_process).
+    include(GNUInstallDirs)
+    set(CONTOUR_EXTENSION_HOST_INSTALL_DIR "${CMAKE_INSTALL_LIBEXECDIR}/contour")
+    file(RELATIVE_PATH CONTOUR_EXTENSION_HOST_RELATIVE_DIR
+        "${CMAKE_INSTALL_FULL_BINDIR}" "${CMAKE_INSTALL_FULL_LIBEXECDIR}/contour")
     add_subdirectory(vtextension)
+    add_subdirectory(contour-extension-host)
 endif()
 add_subdirectory(vtconformance)
 add_subdirectory(vtworkspace)

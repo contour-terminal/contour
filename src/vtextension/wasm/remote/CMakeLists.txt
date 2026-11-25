@@ -66,24 +66,33 @@ if(_process_source AND NOT WIN32)
 endif()
 if(_process_source)
     add_library(vtextension_remote_process STATIC
+        process/HelperLocation.cpp
+        process/HelperLocation.hpp
         process/ProcessLauncher.hpp
         ${_process_source}
     )
     target_link_libraries(vtextension_remote_process PUBLIC vtextension_remote_wire core::base core::platform)
+    # Where the extension host is installed, from the directory contour is (../../../CMakeLists.txt).
+    target_compile_definitions(vtextension_remote_process PUBLIC
+        CONTOUR_EXTENSION_HOST_RELATIVE_DIR="${CONTOUR_EXTENSION_HOST_RELATIVE_DIR}")
 
     if(VTEXTENSION_TESTING)
-        # The probe the launcher's tests start: it reports what it was started with -- working directory,
-        # environment, open handles -- on its control channel, and exits once that channel ends. Never installed.
+        # The probe the launcher's tests start: it binds itself to its parent and caps itself as the host does,
+        # reports what it was started with -- working directory, environment, caps, open handles -- on its
+        # control channel, and exits once that channel ends. Never installed.
         add_executable(extension_host_probe process/testing/LaunchProbe.cpp)
-        target_link_libraries(extension_host_probe PRIVATE vtextension_remote_wire)
+        target_link_libraries(extension_host_probe PRIVATE vtextension_host vtextension_remote_wire)
 
         # The launcher against the probe, the transport's pieces the helper inherits, and the test launchers;
         # no engine, so that it cross-builds and runs under wine.
         add_executable(vtextension_process_test
             ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+            process/HelperLocation_test.cpp
             process/ProcessLauncher_test.cpp
             process/testing/FakeProcessLauncher.cpp
             process/testing/FakeProcessLauncher.hpp
+            process/testing/LaunchedHelper.cpp
+            process/testing/LaunchedHelper.hpp
             process/testing/RecordingLauncher.hpp
             transport/ControlPage_test.cpp
             transport/HelperArguments_test.cpp
@@ -149,6 +158,7 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
     add_executable(vtextension_remote_test
         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
         ../host/ExecutorThread_test.cpp
+        ../host/HostProcess_test.cpp
         ../host/HostServer_test.cpp
         RegistryRemote_test.cpp
         RemoteBackend_test.cpp
@@ -176,5 +186,27 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
         target_compile_options(vtextension_remote_test PRIVATE -Wno-c2y-extensions)
+    endif()
+endif()
+
+if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime AND TARGET vtextension_remote_process)
+    # The extension host executable itself (../../../contour-extension-host, built where Wasmtime is, as
+    # here), started as Contour starts it. Links no engine: the engine runs in the helper.
+    add_executable(vtextension_helper_test
+        ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+        Helper_test.cpp
+        process/testing/LaunchedHelper.cpp
+        process/testing/LaunchedHelper.hpp
+    )
+    target_link_libraries(vtextension_helper_test PRIVATE
+        vtextension vtextension_remote vtextension_remote_process vtextension_remote_wire
+        glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
+    add_dependencies(vtextension_helper_test contour-extension-host)
+    target_compile_definitions(vtextension_helper_test PRIVATE
+        VTEXTENSION_HELPER_PATH="$<TARGET_FILE:contour-extension-host>")
+    add_test(NAME vtextension_helper_test COMMAND vtextension_helper_test)
+    if(NOT WIN32)
+        # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+        target_compile_options(vtextension_helper_test PRIVATE -Wno-c2y-extensions)
     endif()
 endif()

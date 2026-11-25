@@ -5,9 +5,13 @@
 //
 //   extension_host_probe --report <helper arguments> [--check-handle=H]…
 //
+// Before it reports, it does to itself what the extension host does: it binds itself to its parent (exiting
+// as the host does if that is not the process named), and caps its resources to its `--data-bytes`.
+//
 // The report is one `key=value` line each: `cwd=` its working directory, `env=NAME` per environment variable,
-// `stdin=` and `stdout=` each `null` if it is the null device, else `other`; and `fd=N` per open descriptor
-// (POSIX) or `handle=H:valid|invalid` per --check-handle (Windows); then `end`.
+// `stdin=` and `stdout=` each `null` if it is the null device, else `other`; `caps=` `apply` or `skip` as
+// the build caps, and (POSIX) `nproc=` and `data=` its limits, a number or `unlimited`; and `fd=N` per open
+// descriptor (POSIX) or `handle=H:valid|invalid` per --check-handle (Windows); then `end`.
 #include <array>
 #include <bit>
 #include <charconv>
@@ -18,8 +22,11 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
+#include <vtextension/wasm/host/HostBootstrap.hpp>
+#include <vtextension/wasm/host/HostProcess.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
 
@@ -27,6 +34,7 @@
     #define WIN32_LEAN_AND_MEAN
     #include <Windows.h>
 #else
+    #include <sys/resource.h>
     #include <sys/stat.h>
 
     #include <algorithm>
@@ -49,6 +57,7 @@ enum class ProbeExit : uint8_t
     Usage = 2,        ///< Its command line is not what it takes.
     NoControl = 3,    ///< Its control channel cannot be adopted.
     ReportFailed = 4, ///< The report could not be sent.
+    ParentGone = 5,   ///< It is not its parent's child: it exits as the host does then.
 };
 
 /// The prefix of the option naming a handle whose validity is reported.
@@ -135,6 +144,23 @@ enum class StandardStream : uint8_t
     return lines;
 }
 
+/// @return The caps it runs under, one line each.
+[[nodiscard]] std::string capLines()
+{
+    namespace host = vtextension::wasm::host;
+    auto lines = std::format("caps={}\n", host::BuildCapPolicy == host::CapPolicy::Apply ? "apply" : "skip");
+#ifndef _WIN32
+    auto const limitText = [](int resource) {
+        struct rlimit limit {};
+        if (::getrlimit(resource, &limit) != 0)
+            return std::string { "unknown" };
+        return limit.rlim_cur == RLIM_INFINITY ? std::string { "unlimited" } : std::to_string(limit.rlim_cur);
+    };
+    lines += std::format("nproc={}\ndata={}\n", limitText(RLIMIT_NPROC), limitText(RLIMIT_DATA));
+#endif
+    return lines;
+}
+
 /// Reports what the probe was started with, then waits for its control channel to end.
 [[nodiscard]] ProbeExit report(std::span<std::string_view const> arguments, char const* const* environment)
 {
@@ -148,15 +174,20 @@ enum class StandardStream : uint8_t
     auto const parsed = parseHelperArguments(helperArguments);
     if (!parsed)
         return ProbeExit::Usage;
+    if (!vtextension::wasm::host::bindToParent(parsed->parentProcessId))
+        return ProbeExit::ParentGone;
     auto control = Channel::adopt(parsed->control);
     if (!control)
         return ProbeExit::NoControl;
+    std::ignore =
+        vtextension::wasm::host::capResources(parsed->dataBytes, vtextension::wasm::host::BuildCapPolicy);
 
-    auto const text = std::format("cwd={}\nstdin={}\nstdout={}\n{}{}end\n",
+    auto const text = std::format("cwd={}\nstdin={}\nstdout={}\n{}{}{}end\n",
                                   std::filesystem::current_path().string(),
                                   deviceOf(StandardStream::Input),
                                   deviceOf(StandardStream::Output),
                                   environmentLines(environment),
+                                  capLines(),
                                   handleLines(checked));
     auto const bytes = std::span { reinterpret_cast<uint8_t const*>(text.data()), text.size() };
     if (!control->send(bytes))
@@ -179,5 +210,8 @@ int main(int argc, char const* argv[], char const* envp[])
     auto const arguments = std::vector<std::string_view>(argv + 1, argv + argc);
     if (arguments.empty() || arguments.front() != "--report")
         return static_cast<int>(ProbeExit::Usage);
-    return static_cast<int>(report(std::span { arguments }.subspan(1), envp));
+    auto const exit = report(std::span { arguments }.subspan(1), envp);
+    if (exit == ProbeExit::ParentGone)
+        return vtextension::wasm::host::exitCodeOf(vtextension::wasm::host::HostProcessExit::ParentGone);
+    return static_cast<int>(exit);
 }

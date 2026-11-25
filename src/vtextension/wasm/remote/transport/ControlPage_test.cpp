@@ -10,6 +10,7 @@
 #include <utility>
 
 #include <vtextension/wasm/remote/transport/ControlPage.hpp>
+#include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -27,30 +28,8 @@
 #endif
 
 using vtextension::wasm::remote::transport::ControlPage;
-using vtextension::wasm::remote::transport::NativeHandle;
 using vtextension::wasm::remote::transport::SharedObjectError;
-
-namespace
-{
-
-/// @return A second handle on what @p handle names, as the helper inherits it; nothing if it failed.
-[[nodiscard]] std::optional<NativeHandle> duplicate(NativeHandle handle) noexcept
-{
-#ifdef _WIN32
-    auto copy = HANDLE { nullptr };
-    if (!::DuplicateHandle(
-            ::GetCurrentProcess(), handle, ::GetCurrentProcess(), &copy, 0, FALSE, DUPLICATE_SAME_ACCESS))
-        return std::nullopt;
-    return copy;
-#else
-    auto const copy = ::dup(handle);
-    if (copy == -1)
-        return std::nullopt;
-    return copy;
-#endif
-}
-
-} // namespace
+using vtextension::wasm::remote::transport::testing::duplicate;
 
 TEST_CASE("ControlPage.raiseIsSeenThroughASecondMapping", "[vtextension]")
 {

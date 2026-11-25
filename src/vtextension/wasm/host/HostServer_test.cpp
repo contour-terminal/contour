@@ -808,10 +808,61 @@ TEST_CASE("HostServer.executorThatCannotStartEndsTheServer", "[vtextension][host
         return ExecutorThread::start(stackBytes, std::move(body));
     };
     auto parent = ScriptedParent { std::move(config) };
-    parent.skipHello();
     CHECK(parent.exitWithinDeadline() == ServerExit::ExecutorUnavailable);
+    // Nothing was sent: a host that cannot serve every lane never says Hello.
     CHECK(parent.control->receive() == std::unexpected(StreamError::Closed));
     CHECK(starts->load() == 2);
+}
+
+TEST_CASE("HostServer.confineRunsAfterTheLanesStartAndBeforeHello", "[vtextension][host]")
+{
+    auto starts = std::make_shared<std::atomic<std::size_t>>(0);
+    auto startsAtConfine = std::make_shared<std::atomic<std::size_t>>(0);
+    auto config = HostServerConfig {};
+    config.startExecutor =
+        [starts](std::size_t stackBytes,
+                 std::function<void()> body) -> std::expected<ExecutorThread, std::error_code> {
+        starts->fetch_add(1);
+        return ExecutorThread::start(stackBytes, std::move(body));
+    };
+    config.confine = [starts, startsAtConfine] {
+        startsAtConfine->store(starts->load());
+        return proto::LockdownState::Failed;
+    };
+    auto parent = ScriptedParent { std::move(config) };
+    CHECK(parent.receiveControl()
+          == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
+                                         .memoryMode = proto::MemoryMode::Copy,
+                                         .lockdown = proto::LockdownState::Failed } });
+    CHECK(startsAtConfine->load() == MaxLaneChannels);
+}
+
+TEST_CASE("HostServer.noConfineSendsTheConfiguredLockdown", "[vtextension][host]")
+{
+    auto config = HostServerConfig {};
+    config.lockdown = proto::LockdownState::LockedDown;
+    auto parent = ScriptedParent { std::move(config) };
+    CHECK(parent.receiveControl()
+          == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
+                                         .memoryMode = proto::MemoryMode::Copy,
+                                         .lockdown = proto::LockdownState::LockedDown } });
+}
+
+TEST_CASE("HostServer.executorFailureSkipsConfine", "[vtextension][host]")
+{
+    auto confined = std::make_shared<std::atomic<int>>(0);
+    auto config = HostServerConfig {};
+    config.startExecutor =
+        [](std::size_t, std::function<void()> const&) -> std::expected<ExecutorThread, std::error_code> {
+        return std::unexpected(std::make_error_code(std::errc::resource_unavailable_try_again));
+    };
+    config.confine = [confined] {
+        confined->fetch_add(1);
+        return proto::LockdownState::Unsandboxed;
+    };
+    auto parent = ScriptedParent { std::move(config) };
+    CHECK(parent.exitWithinDeadline() == ServerExit::ExecutorUnavailable);
+    CHECK(confined->load() == 0);
 }
 
 TEST_CASE("HostServer.malformedFrameEndsTheConnection", "[vtextension][host]")

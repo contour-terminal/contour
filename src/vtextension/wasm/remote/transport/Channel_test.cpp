@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <vtextension/wasm/remote/transport/Channel.hpp>
+#include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -31,7 +32,8 @@
 using vtextension::wasm::remote::transport::Channel;
 using vtextension::wasm::remote::transport::ChannelError;
 using vtextension::wasm::remote::transport::makeChannelPair;
-using vtextension::wasm::remote::transport::NativeHandle;
+using vtextension::wasm::remote::transport::testing::closeHandle;
+using vtextension::wasm::remote::transport::testing::duplicate;
 
 namespace
 {
@@ -49,33 +51,6 @@ namespace
         filled += *some;
     }
     return received;
-}
-
-/// @return A second handle on what @p handle names, as a child process inherits one; nothing if it failed.
-[[nodiscard]] std::optional<NativeHandle> duplicate(NativeHandle handle) noexcept
-{
-#ifdef _WIN32
-    auto copy = HANDLE { nullptr };
-    if (!::DuplicateHandle(
-            ::GetCurrentProcess(), handle, ::GetCurrentProcess(), &copy, 0, FALSE, DUPLICATE_SAME_ACCESS))
-        return std::nullopt;
-    return copy;
-#else
-    auto const copy = ::dup(handle);
-    if (copy == -1)
-        return std::nullopt;
-    return copy;
-#endif
-}
-
-/// Closes a handle no channel owns.
-void closeHandle(NativeHandle handle) noexcept
-{
-#ifdef _WIN32
-    ::CloseHandle(handle);
-#else
-    ::close(handle);
-#endif
 }
 
 } // namespace
