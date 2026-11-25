@@ -372,7 +372,9 @@ worktree added (on a new branch for an issue or a topic, detached for a pull or 
 request checked out there (`gh pr checkout`, `glab mr checkout`). Each of these steps writes refs that every
 worktree of the repository shares, so two of them at once fail on each other's lock (`cannot lock ref`). A
 repository therefore runs one such step at a time: a second run started meanwhile waits, shown as preparing, and
-takes its turn when the step ahead of it answers. Runs of different repositories prepare side by side. A step that
+takes its turn when the step ahead of it answers. Runs of different repositories prepare side by side. The turn
+is kept per configured repository path: two configured repositories that are worktrees of one git repository, or
+the same directory spelled two ways, take their turns separately and can still meet on a ref. A step that
 still fails with `cannot lock ref` — another git, such as an IDE's background fetch, held the ref — is tried once
 more two seconds later; a second such failure, or any other, ends the run as `preparation-failed`.
 

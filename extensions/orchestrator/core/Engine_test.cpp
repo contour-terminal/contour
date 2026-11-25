@@ -2685,6 +2685,46 @@ TEST_CASE("a fetch that failed on a ref lock twice ends the preparation", "[orch
     CHECK(harness.commandsIssued("git-fetch") == 2);
 }
 
+TEST_CASE("a run that moved on while its retry waited frees its repository's refs", "[orchestrator][engine]")
+{
+    auto harness = booted(Settings { .limits = R"("max_agents_per_repo": 4,)" });
+    harness.feed(prDispatch());
+    harness.finish("git-fetch", ok());
+    harness.finish("git-worktree-add", ok());
+    harness.finish("gh-pr-checkout", failed(1, RefLockError));
+    harness.feed(prDispatch(2369));
+    REQUIRE(!harness.pending("git-fetch"));
+    // A preparing run cannot be ended by the user; a tab's failed opening is what moves it on here.
+    harness.feed(PaneOpenFailedFor { .run = std::string(PrId), .why = "not-supported-yet" });
+    REQUIRE(holds<Ending>(harness.run(PrId)));
+    // The waiting retry is dropped with its lock: the next run's fetch goes at once, and no checkout follows.
+    CHECK(harness.pending("git-fetch"));
+    harness.wake(static_cast<uint64_t>(RefLockRetryDelay.count()));
+    CHECK(harness.commandsIssued("gh-pr-checkout") == 1);
+    CHECK(!harness.pending("gh-pr-checkout"));
+}
+
+TEST_CASE("a ref-writing step abandoned at its deadline frees its repository's refs",
+          "[orchestrator][engine]")
+{
+    auto harness = booted(Settings { .limits = R"("max_agents_per_repo": 4,)" });
+    harness.feed(prDispatch());
+    harness.feed(prDispatch(2369));
+    REQUIRE(harness.commandsIssued("git-fetch") == 1);
+    auto const first = harness.pending("git-fetch");
+    REQUIRE(first);
+    harness.wake(static_cast<uint64_t>((LongTimeout + CallDeadlineMargin).count()));
+    auto const finished = finishedOf(harness.run(PrId));
+    REQUIRE(finished);
+    CHECK(finished->ended == Ended::PreparationFailed);
+    // The second run's fetch, held behind the first, is handed to the host.
+    auto const second = harness.pending("git-fetch");
+    REQUIRE(second);
+    CHECK(second->tag != first->tag);
+    CHECK(runOfTag(second->tag) == "pr-2369-20261113-150847");
+    CHECK(harness.commandsIssued("git-fetch") == 2);
+}
+
 // }}}
 // {{{ 17. orphans
 
