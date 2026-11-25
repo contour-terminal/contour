@@ -894,16 +894,28 @@ elseif(CONTOUR_MACOS_APP_BUNDLE)
         MACOSX_BUNDLE_ICON_FILE "contour.icns"
     )
     # The extension host travels inside the bundle, in Contents/Helpers, where contour looks for it first
-    # (locateExtensionHost()): copied in after each build of contour, which so builds it first. The copy is
-    # contour's, so that the helper never depends on the GUI.
+    # (locateExtensionHost()). The copy is a command whose output is the bundled helper itself, so it reruns
+    # whenever the helper is rebuilt, even when contour is not; contour depends on the copy, never the helper
+    # on the GUI. An OUTPUT may not name a target's directory by generator expression, so the bundle's place
+    # is spelled out: beside this directory's binaries, per configuration in a multi-config generator.
     if(TARGET contour-extension-host)
-        add_dependencies(contour contour-extension-host)
-        add_custom_command(TARGET contour POST_BUILD
-            COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_BUNDLE_CONTENT_DIR:contour>/Helpers"
-            COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:contour-extension-host>"
-                "$<TARGET_BUNDLE_CONTENT_DIR:contour>/Helpers/"
+        get_property(_contourIsMultiConfig GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+        if(_contourIsMultiConfig)
+            set(_contourBundleDir "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/contour.app")
+        else()
+            set(_contourBundleDir "${CMAKE_CURRENT_BINARY_DIR}/contour.app")
+        endif()
+        set(_bundledExtensionHost "${_contourBundleDir}/Contents/Helpers/contour-extension-host")
+        add_custom_command(
+            OUTPUT "${_bundledExtensionHost}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${_contourBundleDir}/Contents/Helpers"
+            COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:contour-extension-host>" "${_bundledExtensionHost}"
+            DEPENDS contour-extension-host "$<TARGET_FILE:contour-extension-host>"
+            COMMENT "Bundling contour-extension-host into Contents/Helpers"
             VERBATIM
         )
+        add_custom_target(contour_bundled_extension_host DEPENDS "${_bundledExtensionHost}")
+        add_dependencies(contour contour_bundled_extension_host)
     endif()
 endif()
 # }}}

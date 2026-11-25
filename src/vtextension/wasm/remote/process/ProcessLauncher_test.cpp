@@ -390,7 +390,10 @@ TEST_CASE("ExitWaitSet.closedWatchedHandleIsAnError", "[vtextension]")
     auto const copy = ::fcntl(probe->process->waitable(), F_DUPFD_CLOEXEC, 0);
     REQUIRE(copy >= 0);
     auto watched = CopiedWaitable { *probe->process, copy };
-    REQUIRE((*set)->watch(5, watched).has_value());
+    auto const watching = (*set)->watch(5, watched);
+    if (!watching)
+        ::close(copy); // the case ends at the REQUIRE below; the copy must not outlive it
+    REQUIRE(watching.has_value());
 
     // The watched descriptor closes out from under the set. It is the test's copy, so the process's own
     // handle stays whole, and nothing ever closes the number again.
