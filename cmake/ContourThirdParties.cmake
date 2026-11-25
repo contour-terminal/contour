@@ -189,9 +189,10 @@ endif()
 # software instead. Waking blocked WASI calls is off as well: it installs a process-wide SIGUSR1
 # handler, and guests cannot block (poll_oneoff is refused). An installed WAMR does not say how it was
 # built, so a system package is accepted only once cmake/WamrTerminateProbe.cpp has shown that
-# terminating works, that initializing the runtime leaves SIGSEGV and SIGUSR1 alone, and that it accepts
-# exactly the WebAssembly features src/vtextension/wasm/EngineFeatures.hpp allows; otherwise WAMR is
-# built from source.
+# terminating works, that initializing the runtime leaves SIGSEGV and SIGUSR1 alone, that it has no JIT
+# (the extension host's system call filter lets an interpreter make no memory executable), and that it
+# accepts exactly the WebAssembly features src/vtextension/wasm/EngineFeatures.hpp allows; otherwise
+# WAMR is built from source.
 #
 # First-party code links contour::wamr, whichever WAMR it resolves to.
 
@@ -214,10 +215,9 @@ set(_WAMR_PROBE_REASONS
 # ContourThirdParties_WamrTerminates(<target> <result-variable>)
 #
 # Sets <result-variable> to TRUE if a program linked against <target> stops a looping guest call
-# when another thread calls wasm_runtime_terminate() and its runtime initialization installs no
-# SIGSEGV or SIGUSR1 handler, it has no JIT running mode, and it loads exactly the WebAssembly features
-# extensions may use, FALSE
-# otherwise (including when the probe cannot run, as when cross-compiling).
+# when another thread calls wasm_runtime_terminate(), its runtime initialization installs no SIGSEGV or
+# SIGUSR1 handler, it has no JIT running mode, and it loads exactly the WebAssembly features extensions
+# may use; FALSE otherwise (including when the probe cannot run, as when cross-compiling).
 # Sets <result-variable>_REASON to why a WAMR was rejected.
 function(ContourThirdParties_WamrTerminates target resultVar)
     set(${resultVar} FALSE PARENT_SCOPE)

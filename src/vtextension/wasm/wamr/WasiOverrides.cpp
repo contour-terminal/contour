@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtextension/wasm/wamr/WasiOverrides.hpp>
 
+#include <core/Assert.hpp>
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -48,7 +50,7 @@ namespace
 
     /// The raw native WasiOverrides[Index] is registered as: its arguments in WAMR's 64-bit slots, each
     /// zero-extended to its type as the shim takes them, and its errno written back into the first slot,
-    /// where WAMR reads an i32 result.
+    /// where WAMR reads an i32 result. Registered only once symbols() found the shim's function.
     template <std::size_t Index>
     void shimTrampoline(wasm_exec_env_t execEnv, uint64_t* rawArguments) noexcept
     {
@@ -78,16 +80,21 @@ namespace
     /// The trampolines, indexed as WasiOverrides.
     constexpr auto Trampolines = makeTrampolines(std::make_index_sequence<WasiOverrides.size()> {});
 
-    /// What WAMR holds while registered, which it sorts in place: lives as long as the process.
+    /// What WAMR holds while registered, which it sorts in place: lives as long as the process. Fails, as a
+    /// broken contract does, should an override name a function the shim lacks: its trampoline would call
+    /// nothing.
     [[nodiscard]] std::array<NativeSymbol, WasiOverrides.size()>& symbols()
     {
         static auto table = [] {
             auto entries = std::array<NativeSymbol, WasiOverrides.size()> {};
             for (auto const index: std::views::iota(std::size_t { 0 }, WasiOverrides.size()))
+            {
+                Require(wasi::findShimFunction(WasiOverrides.at(index).name) != nullptr);
                 entries.at(index) = NativeSymbol { .symbol = WasiOverrides.at(index).name,
                                                    .func_ptr = reinterpret_cast<void*>(Trampolines.at(index)),
                                                    .signature = WasiOverrides.at(index).signature,
                                                    .attachment = nullptr };
+            }
             return entries;
         }();
         return table;

@@ -47,8 +47,7 @@ constexpr auto Both = std::array { AuditArch::Amd64, AuditArch::AArch64 };
 }
 
 /// @return What the filter of @p instrumentation's rows on @p arch, for an engine running @p code, decides
-/// for
-///         @p call with @p arguments.
+///         for @p call with @p arguments.
 [[nodiscard]] FilterVerdict decide(BuildInstrumentation instrumentation,
                                    AuditArch arch,
                                    long number,

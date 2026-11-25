@@ -20,7 +20,8 @@ std::unique_ptr<IHostedEngine> makeHelperEngine()
     if (engine)
         return std::move(*engine);
     // Why, before the host ends for the engine it lacks.
-    tellOnStandardError(std::format("no engine: {}", wamr::wamrEngineErrorText(engine.error())));
+    tellOnStandardError(std::format("the extension host cannot run extensions: {}",
+                                    wamr::wamrEngineErrorText(engine.error())));
     return nullptr;
 }
 
