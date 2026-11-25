@@ -1025,6 +1025,19 @@ TEST_CASE("permissions: the default profile, a task's own, and profiles of one's
     CHECK(own->findProfile("nope") == nullptr);
 }
 
+TEST_CASE("permissions: the mode message lists every mode PermissionModeNames spells", "[config]")
+{
+    CHECK(describe(ConfigProblem::NotPermissionMode, sourceTables())
+          == "must be one of: default, acceptEdits, plan, auto");
+    auto const config = parse(Input {
+        .find = R"("max_agents": 4,)",
+        .replace = R"js("max_agents": 4, "permission_profiles": [ { "name": "x", "mode": "yolo" } ],)js" });
+    REQUIRE_FALSE(config.has_value());
+    CHECK(message(config.error(), sourceTables()).starts_with("permission_profiles[0].mode"));
+    CHECK(message(config.error(), sourceTables())
+              .ends_with("must be one of: default, acceptEdits, plan, auto"));
+}
+
 TEST_CASE("permissions: what is refused, and where", "[config]")
 {
     struct Row
