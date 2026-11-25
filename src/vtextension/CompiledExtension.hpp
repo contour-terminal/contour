@@ -90,6 +90,7 @@ class CompiledExtension: public std::enable_shared_from_this<CompiledExtension>
             _breaker->recordHostFault(admission);
     }
 
+    /// Test hook: what the registry's tests observe the breaker by.
     /// @return What counts the deaths of the module's host; null if nothing does.
     [[nodiscard]] HostBreaker const* breaker() const noexcept { return _breaker.get(); }
 
