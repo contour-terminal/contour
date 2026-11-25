@@ -2808,3 +2808,14 @@ TEST_CASE("a Copilot run whose tab closed ends closed, whatever it last reported
     CHECK(describe(orchestrator::advance(claude, PaneGone {}, knownContext())) == "persist, read-git-file");
     CHECK(describe(claude.state) == "Ending(verify, never-reported)");
 }
+
+TEST_CASE("the steps that fetch or add a worktree write the repository's shared refs", "[orchestrator][run]")
+{
+    using orchestrator::PrepareStep;
+    using orchestrator::SharedRefs;
+    using orchestrator::sharedRefsOf;
+    CHECK(sharedRefsOf(PrepareStep::Fetch) == SharedRefs::Written);
+    CHECK(sharedRefsOf(PrepareStep::WorktreeAdd) == SharedRefs::Written);
+    CHECK(sharedRefsOf(PrepareStep::Checkout) == SharedRefs::Written);
+    CHECK(sharedRefsOf(PrepareStep::OpenPane) == SharedRefs::Untouched);
+}

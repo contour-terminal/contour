@@ -52,6 +52,10 @@ inline constexpr auto MaxPollBackoff = std::chrono::milliseconds { std::chrono::
 /// the wait before an honest "not known" to about an hour at worst: one failure could be a passing hiccup,
 /// and many more would leave a run hanging in its ending for hours.
 inline constexpr uint32_t MaxWorktreeListFailures = 3;
+/// How long a preparation step that failed on a ref another git held locked (`cannot lock ref`) waits before
+/// its one retry: the orchestrator runs one such step per repository at a time, so the other git is one it
+/// does not run, such as an IDE's background fetch, which is done within a moment.
+inline constexpr auto RefLockRetryDelay = std::chrono::milliseconds { std::chrono::seconds { 2 } };
 
 /// Whether a process started.
 enum class StartResult : uint8_t
@@ -671,6 +675,35 @@ class Engine
     {
         Priority priority = Priority::Poll; ///< Who it is for.
         RunCommand command;                 ///< The command.
+        /// The repository directory whose shared refs it writes (SharedRefs::Written); empty: none. It waits
+        /// while another command holds that repository's refs.
+        std::string sharedRefs {};
+    };
+
+    /// Whether a command holding a repository's refs may still be tried again.
+    enum class LockRetry : uint8_t
+    {
+        Available = 0, ///< Not tried again yet: a `cannot lock ref` failure is retried once.
+        Scheduled,     ///< It failed so, and is tried again at RefLock::retryAtMs.
+        Spent,         ///< It was tried again, or cannot be: its next failure is its run's.
+    };
+
+    /// A command that holds its repository's shared refs: from when it is handed to the host until its run
+    /// takes its result, across its one retry. Another command writing them waits in the queue meanwhile.
+    struct RefLock
+    {
+        std::string repo;                       ///< The repository's directory.
+        std::string tag;                        ///< The command's tag.
+        std::optional<RunCommand> command;      ///< The command, to try again; none: never tried again.
+        LockRetry retry = LockRetry::Available; ///< Whether it may still be tried again.
+        uint64_t retryAtMs = 0;                 ///< When it is tried again, while Scheduled.
+    };
+
+    /// What became of a reply to a command that may hold its repository's refs.
+    enum class LockReply : uint8_t
+    {
+        Settled = 0, ///< Its run takes it: the refs, if it held them, are free.
+        Retrying,    ///< It failed on a ref lock and is tried again later: its run awaits the retry.
     };
 
     /// Whether `gh` is logged in, as last checked.
@@ -737,8 +770,28 @@ class Engine
     void onProcessFinished(ProcessFinished const& finished, std::vector<Effect>& out);
     void onFileRead(FileRead const& read, std::vector<Effect>& out);
     void issue(RunCommand command, Priority priority, std::vector<Effect>& out);
+    /// Hands @p command to the host, or queues it: behind the runs' commands for a run's, and while another
+    /// command holds the refs it writes.
+    /// @param command The command.
+    /// @param priority Who it is for.
+    /// @param sharedRefs The repository directory whose shared refs it writes; empty: none.
+    /// @param out The effects.
+    void issue(RunCommand command, Priority priority, std::string sharedRefs, std::vector<Effect>& out);
     void drainQueue(std::vector<Effect>& out);
-    void emit(RunCommand command, std::vector<Effect>& out);
+    void emit(Queued queued, std::vector<Effect>& out);
+    /// @param repo A repository's directory; empty: none.
+    /// @param tag The tag of the command that asks.
+    /// @return Whether a command other than @p tag holds @p repo's shared refs.
+    [[nodiscard]] bool refsHeldByOther(std::string_view repo, std::string_view tag) const noexcept;
+    /// Releases the refs a command held once its reply came, or schedules its one retry for a reply that
+    /// failed on a ref lock.
+    /// @param tag The reply's tag.
+    /// @param outcome What became of the command.
+    /// @return Whether its run takes the reply now.
+    [[nodiscard]] LockReply onRefLockReply(std::string_view tag, ProcessOutcome const& outcome);
+    /// Issues each retry that fell due, ahead of every queued command, and drops the locks no run awaits and
+    /// the host no longer runs.
+    void retryDueRefLocks();
     void abandonOverdueCalls(std::string_view answered, std::vector<Effect>& out);
     void abandonOverduePaneOpenings(std::string_view answeredRun, std::vector<Effect>& out);
     void forgetSettledPaneOpenings();
@@ -925,6 +978,9 @@ class Engine
     /// starts again, so a run is never ended sooner than `end_done_after` says.
     std::map<std::string, uint64_t, std::less<>> _doneSinceMs;
     std::deque<Queued> _queue;
+    /// The commands that hold a repository's shared refs: one per repository, but for the calls a restart
+    /// found still running, which the host started before.
+    std::vector<RefLock> _refLocks;
     std::vector<std::string> _answeredAtStart; ///< During start(): the poll tags whose results it takes in.
     std::vector<std::string> _startProblems;   ///< The configuration's, the store's and the outside runs'.
     std::map<std::string, std::vector<std::string>, std::less<>> _pollProblems; ///< By poll tag.

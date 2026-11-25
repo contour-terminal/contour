@@ -2555,6 +2555,136 @@ TEST_CASE("never more than MaxInFlight commands, and runs ahead of polls", "[orc
     CHECK(harness.pendingCount() == MaxInFlight);
 }
 
+/// The preparation commands that write a repository's shared refs, as a GitHub repository runs them.
+constexpr auto RefWritingCommands = std::array { "git-fetch"sv, "git-worktree-add"sv, "gh-pr-checkout"sv };
+
+/// @return The pending commands of @p harness that write the refs of repository @p repo, at @p path.
+[[nodiscard]] std::vector<RunCommand> refWritersOf(Harness const& harness,
+                                                   std::string_view repo,
+                                                   std::string_view path)
+{
+    auto const worktrees = std::format("{}/{}", WorktreeRoot, repo);
+    auto writers = std::vector<RunCommand> {};
+    for (auto const& command: harness.pendingCommands())
+        if (std::ranges::contains(RefWritingCommands, command.command)
+            && (command.cwd == path || isUnder(command.cwd, worktrees)))
+            writers.push_back(command);
+    return writers;
+}
+
+/// What git prints when another git moved a ref it was about to update.
+constexpr auto RefLockError =
+    "error: cannot lock ref 'refs/remotes/origin/bugfix/x': is at 1111111 but expected 2222222"sv;
+
+TEST_CASE("two runs of one repository write its shared refs one step at a time", "[orchestrator][engine]")
+{
+    auto harness = booted(Settings { .limits = R"("max_agents_per_repo": 4,)" });
+    harness.feed(prDispatch(2375));
+    harness.feed(prDispatch(2369));
+    // The second run's fetch waits for the first's; both runs show as preparing.
+    REQUIRE(refWritersOf(harness, "contour", ContourPath).size() == 1);
+    CHECK(harness.commandsIssued("git-fetch") == 1);
+    auto const ids = std::array { std::string(PrId), std::string("pr-2369-20261113-150847") };
+    for (auto const& id: ids)
+        CHECK(holds<Preparing>(harness.run(id)));
+    // Each answer lets the next step in: never two at once, until both runs ask for their tabs.
+    auto answered = std::vector<std::string> {};
+    while (true)
+    {
+        auto const writers = refWritersOf(harness, "contour", ContourPath);
+        CHECK(writers.size() <= 1);
+        if (writers.empty())
+            break;
+        answered.push_back(std::format("{} {}", runOfTag(writers.front().tag), writers.front().command));
+        harness.finish(writers.front().command, ok());
+    }
+    CHECK(answered.size() == 6);
+    CHECK(harness.openedPanes().size() == 2);
+    // The second run's checkout ran only once the first's had answered.
+    auto const firstCheckout = std::ranges::find(answered, std::format("{} gh-pr-checkout", ids[0]));
+    auto const secondCheckout = std::ranges::find(answered, std::format("{} gh-pr-checkout", ids[1]));
+    CHECK(firstCheckout != answered.end());
+    CHECK(firstCheckout < secondCheckout);
+}
+
+TEST_CASE("runs of two repositories prepare side by side", "[orchestrator][engine]")
+{
+    auto harness = booted(
+        Settings { .repos = R"([ { "name": "contour", "path": "~/projects/contour", "forge": "github" },
+                                 { "name": "other", "path": "~/projects/other", "forge": "github" } ])",
+                   .repoPaths = { ContourPath, OtherPath } });
+    harness.feed(prDispatch(2375));
+    harness.feed(prDispatch(2369, "other"));
+    CHECK(refWritersOf(harness, "contour", ContourPath).size() == 1);
+    CHECK(refWritersOf(harness, "other", OtherPath).size() == 1);
+    CHECK(harness.commandsIssued("git-fetch") == 2);
+}
+
+TEST_CASE("a step that failed on a ref lock is tried once more", "[orchestrator][engine]")
+{
+    auto harness = booted(Settings { .limits = R"("max_agents_per_repo": 4,)" });
+    harness.feed(prDispatch());
+    harness.finish("git-fetch", ok());
+    harness.finish("git-worktree-add", ok());
+    // The lock is found past what gh printed first.
+    auto const lockFailure = failed(1, std::format("From github.com:o/r\n{}\n", RefLockError));
+
+    SECTION("and goes on when the retry succeeds")
+    {
+        harness.finish("gh-pr-checkout", lockFailure);
+        CHECK(harness.run(PrId)->state == RunState { Preparing { PrepareStep::Checkout } });
+        CHECK(!harness.run(PrId)->failure);
+        CHECK(!harness.pending("gh-pr-checkout"));
+        CHECK(harness.wakeAt() <= harness.now() + static_cast<uint64_t>(RefLockRetryDelay.count()));
+        // Another run of the repository waits for the retry, which still holds the refs.
+        harness.feed(prDispatch(2369));
+        CHECK(!harness.pending("git-fetch"));
+        harness.wake(static_cast<uint64_t>(RefLockRetryDelay.count()));
+        REQUIRE(harness.pending("gh-pr-checkout"));
+        CHECK(!harness.pending("git-fetch"));
+        CHECK(countOf<OpenPane>(harness.finish("gh-pr-checkout", ok())) == 1);
+        CHECK(harness.pending("git-fetch"));
+        CHECK(harness.commandsIssued("gh-pr-checkout") == 2);
+    }
+    SECTION("and fails as before when the retry fails so too")
+    {
+        harness.finish("gh-pr-checkout", lockFailure);
+        harness.wake(static_cast<uint64_t>(RefLockRetryDelay.count()));
+        harness.finish("gh-pr-checkout", lockFailure);
+        auto const* const run = harness.run(PrId);
+        REQUIRE(run->failure);
+        CHECK(run->failure->step == PrepareStep::Checkout);
+        CHECK(run->failure->why == "From github.com:o/r");
+        CHECK(holds<Ending>(run));
+        harness.wake(static_cast<uint64_t>(RefLockRetryDelay.count()));
+        CHECK(harness.commandsIssued("gh-pr-checkout") == 2);
+    }
+    SECTION("but any other failure fails at once")
+    {
+        harness.finish("gh-pr-checkout", failed(1, "GraphQL: Could not resolve to a PullRequest"));
+        auto const* const run = harness.run(PrId);
+        REQUIRE(run->failure);
+        CHECK(run->failure->why == "GraphQL: Could not resolve to a PullRequest");
+        harness.wake(static_cast<uint64_t>(RefLockRetryDelay.count()));
+        CHECK(harness.commandsIssued("gh-pr-checkout") == 1);
+    }
+}
+
+TEST_CASE("a fetch that failed on a ref lock twice ends the preparation", "[orchestrator][engine]")
+{
+    auto harness = booted();
+    harness.feed(prDispatch());
+    harness.finish("git-fetch", failed(1, RefLockError));
+    CHECK(holds<Preparing>(harness.run(PrId)));
+    harness.wake(static_cast<uint64_t>(RefLockRetryDelay.count()));
+    harness.finish("git-fetch", failed(1, RefLockError));
+    auto const finished = finishedOf(harness.run(PrId));
+    REQUIRE(finished);
+    CHECK(finished->ended == Ended::PreparationFailed);
+    CHECK(harness.run(PrId)->failure->why == RefLockError);
+    CHECK(harness.commandsIssued("git-fetch") == 2);
+}
+
 // }}}
 // {{{ 17. orphans
 

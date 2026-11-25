@@ -719,6 +719,11 @@ constexpr auto MeasuredConfig =
         REQUIRE(store.contains(key));
         text += std::format(
             "run\t{}\t{}\t{}\t{}\n", key, worktree.tag, worktree.command, store.find(key)->second);
+        // Its stored value is taken: the worktree is answered, so that the repository's refs are free for the
+        // next run's fetch, which would otherwise wait for them.
+        apply(engine.step(
+            ProcessFinished { .tag = worktree.tag, .outcome = runAnswer(worktree), .monoMs = StartMonoMs }));
+        calls.clear();
     }
     return text;
 }

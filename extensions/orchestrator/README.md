@@ -367,6 +367,15 @@ The search launcher that `n` opened before is gone. Its jobs moved: browsing the
 Work view; a query naming one item (`#2375`, its URL, `PRJ-1234`) to the Work view's filter; typing a topic to
 the `n` box.
 
+**Preparing a run.** A started agent's run is prepared before its tab opens: the remote is fetched, the
+worktree added (on a new branch for an issue or a topic, detached for a pull or merge request), and a pull or merge
+request checked out there (`gh pr checkout`, `glab mr checkout`). Each of these steps writes refs that every
+worktree of the repository shares, so two of them at once fail on each other's lock (`cannot lock ref`). A
+repository therefore runs one such step at a time: a second run started meanwhile waits, shown as preparing, and
+takes its turn when the step ahead of it answers. Runs of different repositories prepare side by side. A step that
+still fails with `cannot lock ref` — another git, such as an IDE's background fetch, held the ref — is tried once
+more two seconds later; a second such failure, or any other, ends the run as `preparation-failed`.
+
 **Topics.** Not everything an agent should do has a pull request or an issue. A topic's task is a `tasks`
 entry with `applies_to: topic`, whose prompt takes `{topic}` for the text. Without one, a built-in `topic`
 task makes the text the whole prompt. The run's id, branch and worktree are named from a slug of the text,

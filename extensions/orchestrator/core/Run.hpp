@@ -31,6 +31,19 @@ enum class PrepareStep : uint8_t
     OpenPane,    ///< Opening the agent's tab.
 };
 
+/// What a preparation step's command does to the refs every worktree of its repository shares.
+enum class SharedRefs : uint8_t
+{
+    Untouched = 0, ///< It writes none: it runs beside any other step.
+    Written,       ///< It may write them -- a fetch updates `refs/remotes/*`, a forge checkout fetches too, a
+                   ///< worktree may add a branch -- so one such step per repository runs at a time: two at
+                   ///< once fail on each other's ref lock (`cannot lock ref`).
+};
+
+/// @param step A preparation step.
+/// @return What its command does to its repository's shared refs, read from one row per step.
+[[nodiscard]] SharedRefs sharedRefsOf(PrepareStep step) noexcept;
+
 /// The steps that end a run, in order. Nothing touches the worktree while the agent's tab may still run.
 enum class EndStep : uint8_t
 {

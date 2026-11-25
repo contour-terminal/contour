@@ -91,6 +91,20 @@ namespace
         Spelling { PrepareStep::OpenPane, "open-pane"sv },
     };
 
+    /// One row per preparation step: what its command does to the refs its repository's worktrees share.
+    struct PrepareStepRefs
+    {
+        PrepareStep step;
+        SharedRefs refs;
+    };
+
+    constexpr auto PrepareStepRefRows = std::array {
+        PrepareStepRefs { .step = PrepareStep::Fetch, .refs = SharedRefs::Written },
+        PrepareStepRefs { .step = PrepareStep::WorktreeAdd, .refs = SharedRefs::Written },
+        PrepareStepRefs { .step = PrepareStep::Checkout, .refs = SharedRefs::Written },
+        PrepareStepRefs { .step = PrepareStep::OpenPane, .refs = SharedRefs::Untouched },
+    };
+
     constexpr auto AgentStatusNames = std::array {
         Spelling { AgentStatus::Idle, "idle"sv },   Spelling { AgentStatus::Working, "working"sv },
         Spelling { AgentStatus::Done, "done"sv },   Spelling { AgentStatus::Waiting, "waiting"sv },
@@ -692,6 +706,12 @@ namespace
             run.history.erase(run.history.begin() + 1);
     }
 } // namespace
+
+SharedRefs sharedRefsOf(PrepareStep step) noexcept
+{
+    auto const row = std::ranges::find(PrepareStepRefRows, step, &PrepareStepRefs::step);
+    return row != PrepareStepRefRows.end() ? row->refs : SharedRefs::Untouched;
+}
 
 std::expected<std::vector<RunEffect>, BeginError> beginRun(Run& run, StepContext const& context)
 {

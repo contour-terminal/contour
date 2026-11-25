@@ -119,6 +119,30 @@ namespace
     /// Why a deleting command was held back: no listing was known yet, so none can say that no tab is open.
     constexpr auto TabsNotKnown = "the open tabs are not known yet"sv;
 
+    /// What git prints when a ref it would update is locked or was moved by another git meanwhile: the one
+    /// failure a step writing its repository's shared refs is tried again for.
+    constexpr auto RefLockFailures = std::array { "cannot lock ref"sv };
+
+    /// @return Whether @p outcome is a command that ran and failed on a ref another git held.
+    [[nodiscard]] bool failedOnRefLock(ProcessOutcome const& outcome) noexcept
+    {
+        if (outcome.start != StartResult::Started || outcome.completion != Completion::Exited
+            || outcome.exitCode == 0)
+            return false;
+        return std::ranges::any_of(RefLockFailures, [&](std::string_view failure) {
+            return outcome.stderrText.contains(failure) || outcome.stdoutText.contains(failure);
+        });
+    }
+
+    /// @return The repository directory whose shared refs @p run's awaited step writes; empty: none.
+    [[nodiscard]] std::string sharedRefsOf(Run const& run)
+    {
+        auto const* const preparing = std::get_if<Preparing>(&run.state);
+        if (preparing == nullptr || sharedRefsOf(preparing->step) != SharedRefs::Written)
+            return {};
+        return run.repoPath;
+    }
+
     /// Whether @p effect makes the run await a tagged host call.
     [[nodiscard]] bool awaitsCall(RunEffect const& effect) noexcept
     {
@@ -472,6 +496,15 @@ void Engine::resolveStaleWork(std::span<std::string const> awaited,
                 .tag = *tag,
                 .deadlineMs =
                     later(_monoMs, static_cast<uint64_t>((LongTimeout + CallDeadlineMargin).count())) });
+            // A step still writing its repository's refs holds them; the command is not known here, so it is
+            // never tried again.
+            if (auto const* const preparing = std::get_if<Preparing>(&run->state);
+                preparing != nullptr && sharedRefsOf(preparing->step) == SharedRefs::Written)
+                _refLocks.push_back(RefLock { .repo = run->repoPath,
+                                              .tag = *tag,
+                                              .command = std::nullopt,
+                                              .retry = LockRetry::Spent,
+                                              .retryAtMs = 0 });
             continue;
         }
         auto const finished = std::ranges::find(context.finished, *tag, &FinishedResult::tag);
@@ -580,6 +613,7 @@ void Engine::apply(std::string_view runId, std::vector<RunEffect> effects, std::
                                        .arguments = std::move(declared.arguments),
                                        .cwd = command->root == Root::Repos ? run->repoPath : run->worktree },
                           Priority::Run,
+                          sharedRefsOf(*run),
                           out);
                 },
                 [&](ReadGitFile const&) {
@@ -657,6 +691,8 @@ void Engine::onProcessFinished(ProcessFinished const& finished, std::vector<Effe
     if (inFlight == _inFlight.end())
         return;
     _inFlight.erase(inFlight);
+    if (onRefLockReply(finished.tag, finished.outcome) == LockReply::Retrying)
+        return;
     if (finished.tag.starts_with(PollTagPrefix))
     {
         onPollResult(finished.tag, finished.outcome, out);
@@ -721,53 +757,123 @@ void Engine::onFileRead(FileRead const& read, std::vector<Effect>& out)
 
 void Engine::issue(RunCommand command, Priority priority, std::vector<Effect>& out)
 {
-    auto const isRun = [](Queued const& queued) {
-        return queued.priority == Priority::Run;
+    issue(std::move(command), priority, std::string {}, out);
+}
+
+void Engine::issue(RunCommand command, Priority priority, std::string sharedRefs, std::vector<Effect>& out)
+{
+    auto queued =
+        Queued { .priority = priority, .command = std::move(command), .sharedRefs = std::move(sharedRefs) };
+    auto const isRun = [](Queued const& entry) {
+        return entry.priority == Priority::Run;
     };
     auto const slotFree = _inFlight.size() < MaxInFlight;
-    if (priority == Priority::Run)
+    // A command writing a repository's refs waits while another holds them, and behind one that waits for
+    // them already.
+    auto const refsBusy = !queued.sharedRefs.empty()
+                          && (refsHeldByOther(queued.sharedRefs, queued.command.tag)
+                              || std::ranges::contains(_queue, queued.sharedRefs, &Queued::sharedRefs));
+    if (queued.priority == Priority::Run)
     {
-        if (slotFree && std::ranges::none_of(_queue, isRun))
+        if (slotFree && !refsBusy && std::ranges::none_of(_queue, isRun))
         {
-            emit(std::move(command), out);
+            emit(std::move(queued), out);
             return;
         }
         // Behind the other runs' commands, ahead of every poll.
         auto const firstPoll = std::ranges::find_if_not(_queue, isRun);
-        _queue.insert(firstPoll, Queued { .priority = priority, .command = std::move(command) });
+        _queue.insert(firstPoll, std::move(queued));
         return;
     }
     if (slotFree && _queue.empty())
     {
-        emit(std::move(command), out);
+        emit(std::move(queued), out);
         return;
     }
-    _queue.push_back(Queued { .priority = priority, .command = std::move(command) });
+    _queue.push_back(std::move(queued));
 }
 
 void Engine::drainQueue(std::vector<Effect>& out)
 {
-    while (_inFlight.size() < MaxInFlight && !_queue.empty())
+    auto at = _queue.begin();
+    while (_inFlight.size() < MaxInFlight && at != _queue.end())
     {
-        auto queued = std::move(_queue.front());
-        _queue.pop_front();
         // A run that moved on while its command waited does not await it any more.
-        if (queued.priority == Priority::Run && std::ranges::none_of(_runs, [&](Run const& run) {
-                return callTag(run) == queued.command.tag;
-            }))
+        if (at->priority == Priority::Run
+            && std::ranges::none_of(_runs, [&](Run const& run) { return callTag(run) == at->command.tag; }))
+        {
+            at = _queue.erase(at);
             continue;
-        emit(std::move(queued.command), out);
+        }
+        // Its repository's refs are held: it keeps its place, and the commands behind it go on.
+        if (refsHeldByOther(at->sharedRefs, at->command.tag))
+        {
+            ++at;
+            continue;
+        }
+        auto queued = std::move(*at);
+        at = _queue.erase(at);
+        emit(std::move(queued), out);
     }
 }
 
-void Engine::emit(RunCommand command, std::vector<Effect>& out)
+void Engine::emit(Queued queued, std::vector<Effect>& out)
 {
+    auto& command = queued.command;
     auto const* const decl = findCommand(command.command);
     auto const timeout = decl != nullptr && decl->timeout == Timeout::Short ? ShortTimeout : LongTimeout;
     _inFlight.push_back(InFlightCall {
         .tag = command.tag,
         .deadlineMs = later(_monoMs, static_cast<uint64_t>((timeout + CallDeadlineMargin).count())) });
+    // A retry already holds its repository's refs.
+    if (!queued.sharedRefs.empty() && !std::ranges::contains(_refLocks, command.tag, &RefLock::tag))
+        _refLocks.push_back(RefLock { .repo = std::move(queued.sharedRefs),
+                                      .tag = command.tag,
+                                      .command = command,
+                                      .retry = LockRetry::Available,
+                                      .retryAtMs = 0 });
     out.emplace_back(std::move(command));
+}
+
+bool Engine::refsHeldByOther(std::string_view repo, std::string_view tag) const noexcept
+{
+    return !repo.empty() && std::ranges::any_of(_refLocks, [&](RefLock const& lock) {
+        return lock.repo == repo && lock.tag != tag;
+    });
+}
+
+Engine::LockReply Engine::onRefLockReply(std::string_view tag, ProcessOutcome const& outcome)
+{
+    auto const lock = std::ranges::find(_refLocks, tag, &RefLock::tag);
+    if (lock == _refLocks.end())
+        return LockReply::Settled;
+    auto const awaited = std::ranges::any_of(_runs, [&](Run const& run) { return callTag(run) == tag; });
+    // Another git, one the orchestrator does not run, held a ref this step writes: it is tried once more a
+    // moment later, still holding the refs.
+    if (awaited && lock->retry == LockRetry::Available && lock->command && failedOnRefLock(outcome))
+    {
+        lock->retry = LockRetry::Scheduled;
+        lock->retryAtMs = later(_monoMs, static_cast<uint64_t>(RefLockRetryDelay.count()));
+        return LockReply::Retrying;
+    }
+    _refLocks.erase(lock);
+    return LockReply::Settled;
+}
+
+void Engine::retryDueRefLocks()
+{
+    std::erase_if(_refLocks, [&](RefLock const& lock) {
+        return !isInFlight(lock.tag)
+               && std::ranges::none_of(_runs, [&](Run const& run) { return callTag(run) == lock.tag; });
+    });
+    for (auto& lock: _refLocks)
+        if (lock.retry == LockRetry::Scheduled && lock.retryAtMs <= _monoMs && lock.command)
+        {
+            lock.retry = LockRetry::Spent;
+            // It still holds the refs: ahead of every queued command, which may wait for them.
+            _queue.push_front(
+                Queued { .priority = Priority::Run, .command = *lock.command, .sharedRefs = lock.repo });
+        }
 }
 
 void Engine::abandonOverdueCalls(std::string_view answered, std::vector<Effect>& out)
@@ -833,6 +939,7 @@ void Engine::endStep(std::vector<Effect>& out, uint64_t revision)
     endDoneRuns(out);
     relistAfterFinishedRuns(out);
     readDueStats(out);
+    retryDueRefLocks();
     drainQueue(out);
     forgetSettledPaneOpenings();
     refreshOrphans();
@@ -921,6 +1028,9 @@ std::optional<uint64_t> Engine::nextWake() const
         consider(call.deadlineMs);
     for (auto const& opening: _paneOpenings)
         consider(opening.deadlineMs);
+    for (auto const& lock: _refLocks)
+        if (lock.retry == LockRetry::Scheduled)
+            consider(lock.retryAtMs);
     // Every candidate lies ahead of now: one that did not would make the driver wake the engine at once, and
     // again, so it is not hidden by moving it.
     return wake;
