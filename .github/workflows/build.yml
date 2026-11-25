@@ -923,7 +923,9 @@ jobs:
   # }}}
   # {{{ FreeBSD
   freebsd:
-    if: github.event_name != 'pull_request'
+    # Pull requests skip this hour-long VM job unless they carry the `ci-freebsd` label, which a change to
+    # FreeBSD-only code (a sandbox, a platform layer) asks for so that it runs before the merge queue does.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci-freebsd')
     concurrency:
       group: ${{ github.ref }}-freebsd
       cancel-in-progress: false
