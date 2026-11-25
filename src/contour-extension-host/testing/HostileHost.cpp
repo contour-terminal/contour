@@ -39,6 +39,8 @@
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
     #include <Windows.h>
+#else
+    #include <sys/resource.h>
 #endif
 
 namespace proto = vtextension::wasm::remote::proto;
@@ -80,9 +82,22 @@ constexpr auto Limits = proto::PduLimits {};
     return vtextension::wasm::host::runExtensionHost(views, &vtextension::wasm::host::makeHelperEngine);
 }
 
+/// Has the crash that follows end the process at once: without a core dump, which a system that collects
+/// them (systemd-coredump) writes before the process is gone -- long enough for Contour to stop it first, and
+/// count the crash as a host it stopped rather than one that died on its own. Sanitizer runtimes disable
+/// core dumps themselves, so only plain builds need this.
+void withoutCoreDump() noexcept
+{
+#ifndef _WIN32
+    auto const none = rlimit { .rlim_cur = 0, .rlim_max = 0 };
+    std::ignore = ::setrlimit(RLIMIT_CORE, &none);
+#endif
+}
+
 /// Crashes as std::abort() does, with no dialog on Windows.
 [[noreturn]] void crashByAbort()
 {
+    withoutCoreDump();
 #ifdef _WIN32
     _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
 #endif
@@ -92,6 +107,7 @@ constexpr auto Limits = proto::PduLimits {};
 /// Dies as a segmentation fault does, past any handler a sanitizer runtime installed.
 [[noreturn]] void crashBySegfault()
 {
+    withoutCoreDump();
 #ifdef _WIN32
     ::TerminateProcess(::GetCurrentProcess(), static_cast<UINT>(STATUS_ACCESS_VIOLATION));
 #else
