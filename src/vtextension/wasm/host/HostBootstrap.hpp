@@ -49,7 +49,8 @@ inline constexpr CapPolicy BuildCapPolicy = CapPolicy::Apply;
 /// Caps this process's resources, as far as @p policy says: on Linux no further process or thread
 /// (RLIMIT_NPROC 0) and @p dataBytes of data memory (RLIMIT_DATA); on FreeBSD no further process or thread;
 /// on macOS and Windows nothing (Windows caps memory in the job Contour started it in). Soft and hard limits
-/// alike, so that they cannot be raised again.
+/// alike, so that they cannot be raised again; a hard limit it inherited that is stricter still is kept, as
+/// it caps already.
 /// @param dataBytes The cap on its data memory; 0 for none.
 /// @param policy Whether to cap at all.
 /// @return `Unsandboxed`; `Failed` if the system refused a cap.

@@ -491,6 +491,33 @@ TEST_CASE("HostBootstrap.capResourcesApplies", "[vtextension][host]")
 }
 #endif
 
+#ifdef __linux__
+TEST_CASE("HostBootstrap.stricterInheritedLimitCountsAsCapped", "[vtextension][host]")
+{
+    // A hosting process that runs under a stricter data limit than the cap: the helper cannot raise the hard
+    // limit it inherited, and needs not -- it stays capped at the stricter one.
+    constexpr auto Inherited = uint64_t { 128 } * 1024 * 1024;
+    constexpr auto DataBytes = uint64_t { 256 } * 1024 * 1024;
+    auto const child = ::fork();
+    REQUIRE(child != -1);
+    if (child == 0)
+    {
+        auto const inherited = rlimit { .rlim_cur = Inherited, .rlim_max = Inherited };
+        if (::setrlimit(RLIMIT_DATA, &inherited) != 0)
+            ::_exit(2);
+        auto const lockdown = capResources(DataBytes, CapPolicy::Apply);
+        auto data = rlimit {};
+        auto const dataHolds =
+            ::getrlimit(RLIMIT_DATA, &data) == 0 && data.rlim_cur == Inherited && data.rlim_max == Inherited;
+        ::_exit(lockdown == proto::LockdownState::Unsandboxed && dataHolds ? 0 : 1);
+    }
+    auto status = 0;
+    REQUIRE(::waitpid(child, &status, 0) == child);
+    CHECK(WIFEXITED(status));
+    CHECK(WEXITSTATUS(status) == 0);
+}
+#endif
+
 TEST_CASE("HostBootstrap.skipCapsNothing", "[vtextension][host]")
 {
     CHECK(capResources(TheDataBytes, CapPolicy::Skip) == proto::LockdownState::Unsandboxed);

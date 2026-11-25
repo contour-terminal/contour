@@ -90,7 +90,12 @@ remote::proto::LockdownState capResources(uint64_t dataBytes, CapPolicy policy) 
     auto const applied = std::ranges::all_of(Caps, [dataBytes](ResourceCap const& cap) {
         if (cap.value == CappedValue::DataBytes && dataBytes == 0)
             return true;
-        auto const value = cap.value == CappedValue::Zero ? rlim_t { 0 } : static_cast<rlim_t>(dataBytes);
+        auto inherited = rlimit {};
+        if (::getrlimit(cap.resource, &inherited) != 0)
+            return false;
+        // A hard limit cannot be raised: one stricter than the cap, inherited from Contour, caps already.
+        auto const wanted = cap.value == CappedValue::Zero ? rlim_t { 0 } : static_cast<rlim_t>(dataBytes);
+        auto const value = std::min(wanted, inherited.rlim_max);
         auto const limit = rlimit { .rlim_cur = value, .rlim_max = value };
         return ::setrlimit(cap.resource, &limit) == 0;
     });
