@@ -52,20 +52,53 @@ if(WIN32)
     target_link_libraries(vtextension_remote_wire PRIVATE advapi32)
 endif()
 
-if(VTEXTENSION_TESTING)
-    # The transport's pieces the helper inherits; no engine, so that it cross-builds and runs under wine.
-    add_executable(vtextension_process_test
-        ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
-        transport/ControlPage_test.cpp
-        transport/HelperArguments_test.cpp
-        transport/WakeSignal_test.cpp
+# vtextension_remote_process: starting extension host processes and knowing when they end, one source per
+# operating system. It stays std-only -- the wire library and core-cpp, no engine and no vtbackend -- so that it,
+# and its tests, cross-build for Windows and run under wine. Systems with none of the four have no launcher yet.
+set(_process_sources_Linux process/Process_linux.cpp)
+set(_process_sources_FreeBSD process/Process_freebsd.cpp)
+set(_process_sources_Darwin process/Process_macos.cpp)
+set(_process_sources_Windows process/Process_win32.cpp)
+set(_process_source "${_process_sources_${CMAKE_SYSTEM_NAME}}")
+if(_process_source AND NOT WIN32)
+    # What the POSIX launchers share.
+    list(APPEND _process_source process/PosixLaunch.cpp process/PosixLaunch.hpp)
+endif()
+if(_process_source)
+    add_library(vtextension_remote_process STATIC
+        process/ProcessLauncher.hpp
+        ${_process_source}
     )
-    target_link_libraries(vtextension_process_test PRIVATE
-        vtextension_remote_wire core::testing Catch2::Catch2 contour_test_trace)
-    add_test(NAME vtextension_process_test COMMAND vtextension_process_test)
-    if(NOT WIN32)
-        # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
-        target_compile_options(vtextension_process_test PRIVATE -Wno-c2y-extensions)
+    target_link_libraries(vtextension_remote_process PUBLIC vtextension_remote_wire core::base core::platform)
+
+    if(VTEXTENSION_TESTING)
+        # The probe the launcher's tests start: it reports what it was started with -- working directory,
+        # environment, open handles -- on its control channel, and exits once that channel ends. Never installed.
+        add_executable(extension_host_probe process/testing/LaunchProbe.cpp)
+        target_link_libraries(extension_host_probe PRIVATE vtextension_remote_wire)
+
+        # The launcher against the probe, the transport's pieces the helper inherits, and the test launchers;
+        # no engine, so that it cross-builds and runs under wine.
+        add_executable(vtextension_process_test
+            ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+            process/ProcessLauncher_test.cpp
+            process/testing/FakeProcessLauncher.cpp
+            process/testing/FakeProcessLauncher.hpp
+            process/testing/RecordingLauncher.hpp
+            transport/ControlPage_test.cpp
+            transport/HelperArguments_test.cpp
+            transport/WakeSignal_test.cpp
+        )
+        target_link_libraries(vtextension_process_test PRIVATE
+            vtextension_remote_process vtextension_remote_wire core::testing Catch2::Catch2 contour_test_trace)
+        add_dependencies(vtextension_process_test extension_host_probe)
+        target_compile_definitions(vtextension_process_test PRIVATE
+            VTEXTENSION_PROBE_PATH="$<TARGET_FILE:extension_host_probe>")
+        add_test(NAME vtextension_process_test COMMAND vtextension_process_test)
+        if(NOT WIN32)
+            # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+            target_compile_options(vtextension_process_test PRIVATE -Wno-c2y-extensions)
+        endif()
     endif()
 endif()
 
