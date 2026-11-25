@@ -360,6 +360,9 @@ std::expected<void, ExtensionError> Instance::callPostReturn(OptionalFunction fu
 
 ExtensionError Instance::guestFailure(wasm::CallFailure failure) const noexcept
 {
+    // A host that died ranks first: a host call failing meanwhile is its consequence, not the cause.
+    if (failure == wasm::CallFailure::HostCrashed)
+        return ExtensionError::HostUnavailable;
     if (_hostCallError)
         return *_hostCallError;
     if (isDeadlineExpired())

@@ -169,6 +169,30 @@ TEST_CASE("Instance.hostCrashedIsHostUnavailable", "[vtextension]")
     CHECK(errorOf((*instance)->render(surface(80, 1))) == ExtensionError::HostUnavailable);
 }
 
+TEST_CASE("Instance.hostCrashedOutranksAFailedHostCall", "[vtextension]")
+{
+    // The host died while a host call was failing: the failed host call is a consequence, the host the
+    // cause to report.
+    auto backend = vtextension::testing::FakeWasmBackend {};
+    backend.guest.exports["render"] =
+        [&](std::span<uint32_t> /*argv*/) -> std::expected<void, wasm::CallFailure> {
+        constexpr auto NoSuchFunction = std::size_t { 999 };
+        std::ignore = backend.lastInstance->callHost(NoSuchFunction, {});
+        return std::unexpected(wasm::CallFailure::HostCrashed);
+    };
+    auto const limits = ExtensionLimits {};
+    auto const engine = Engine::create(backend, limits);
+    REQUIRE(engine.has_value());
+    auto const compiled = CompiledExtension::load(
+        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule));
+    REQUIRE(compiled.has_value());
+    auto services = vtextension::testing::FakeHostServices {};
+    auto clock = core::platform::ManualClock {};
+    auto const instance = Instance::create(**engine, **compiled, services, clock, limits);
+    REQUIRE(instance.has_value());
+    CHECK(errorOf((*instance)->render(surface(80, 1))) == ExtensionError::HostUnavailable);
+}
+
 TEST_CASE("Instance.minimal", "[vtextension]")
 {
     auto guest = RunningGuest(toModule(vtextension::testing::MinimalModule));
