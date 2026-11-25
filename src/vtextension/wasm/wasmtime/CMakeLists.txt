@@ -23,7 +23,11 @@ file(CONFIGURE
 )
 target_include_directories(vtextension_wasmtime PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
-if(VTEXTENSION_TESTING)
+if(VTEXTENSION_TESTING AND CONTOUR_WASMTIME_MISSING_TEST_FEATURES)
+    list(JOIN CONTOUR_WASMTIME_MISSING_TEST_FEATURES ", " _wasmtime_missing_text)
+    message(STATUS "vtextension_wasmtime_test is not built: the installed Wasmtime lacks ${_wasmtime_missing_text}, "
+        "which its tests need.")
+elseif(VTEXTENSION_TESTING)
     # The backend's own suite: the contract, and what is Wasmtime's alone, which drives its C API directly.
     # PreparedGeneration.cpp defines the probe runtime-agnostic tests read (../testing/PreparedGeneration.hpp).
     add_executable(vtextension_wasmtime_test
