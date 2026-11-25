@@ -150,6 +150,8 @@ struct CreateRuntime
     uint32_t runtimeId = 0;   ///< The parent-chosen id the runtime is known by.
     uint64_t memoryBytes = 0; ///< RuntimeLimits::memoryBytes.
     uint64_t stackBytes = 0;  ///< RuntimeLimits::stackBytes.
+    /// RuntimeLimits::tableElements; the helper refuses more than MaxTableElements.
+    uint64_t tableElements = MaxTableElements;
     std::vector<WireHostFunction>
         functions; ///< Its host functions, indexed by CallHost; at most MaxHostFunctions.
 

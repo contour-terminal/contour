@@ -398,7 +398,8 @@ Served HostServer::Impl::serve(proto::CreateRuntime const& request)
     auto slot =
         std::make_shared<RuntimeSlot>(RuntimeSlot { .functions = request.functions, .runtime = nullptr });
     // A stack the executors cannot hold MaxCallDepth of is refused, before the engine sees it.
-    if (request.stackBytes > MaxRuntimeStackBytes)
+    // So is a table cap no engine accepts, before it is narrowed to RuntimeLimits' width.
+    if (request.stackBytes > MaxRuntimeStackBytes || request.tableElements > MaxTableElements)
         return send(_control,
                     proto::RuntimeCreated { .runtimeId = request.runtimeId,
                                             .error = ExtensionError::RuntimeUnavailable });
@@ -409,7 +410,8 @@ Served HostServer::Impl::serve(proto::CreateRuntime const& request)
             .module = function.module, .name = function.name, .parameterCount = function.parameterCount });
     auto created =
         _engine.createRuntime(RuntimeLimits { .memoryBytes = static_cast<std::size_t>(request.memoryBytes),
-                                              .stackBytes = static_cast<std::size_t>(request.stackBytes) },
+                                              .stackBytes = static_cast<std::size_t>(request.stackBytes),
+                                              .tableElements = static_cast<uint32_t>(request.tableElements) },
                               table);
     auto error = std::optional<ExtensionError> {};
     if (created)

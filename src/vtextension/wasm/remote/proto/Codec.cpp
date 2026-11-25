@@ -180,8 +180,11 @@ namespace
     }
     constexpr auto members(Of<CreateRuntime> auto& value) noexcept
     {
-        return fields(
-            value.runtimeId, value.memoryBytes, value.stackBytes, capped(value.functions, MaxHostFunctions));
+        return fields(value.runtimeId,
+                      value.memoryBytes,
+                      value.stackBytes,
+                      value.tableElements,
+                      capped(value.functions, MaxHostFunctions));
     }
     constexpr auto members(Of<RuntimeCreated> auto& value) noexcept
     {

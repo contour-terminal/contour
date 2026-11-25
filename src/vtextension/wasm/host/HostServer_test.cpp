@@ -147,6 +147,7 @@ class ScriptedParent
         sendControl(proto::CreateRuntime { .runtimeId = id,
                                            .memoryBytes = contract::Limits.memoryBytes,
                                            .stackBytes = contract::Limits.stackBytes,
+                                           .tableElements = contract::Limits.tableElements,
                                            .functions = std::move(functions) });
         CHECK(receiveControl()
               == proto::Pdu { proto::RuntimeCreated { .runtimeId = id, .error = std::nullopt } });
@@ -646,6 +647,32 @@ TEST_CASE("HostServer.refusesAStackTheLanesCannotHold", "[vtextension][host]")
                                               .functions = {} });
     CHECK(parent.receiveControl()
           == proto::Pdu { proto::RuntimeCreated { .runtimeId = 2, .error = std::nullopt } });
+}
+
+TEST_CASE("HostServer.runtimeHoldsTheParentsTableCap", "[vtextension][host]")
+{
+    auto parent = ScriptedParent {};
+    parent.skipHello();
+
+    // The contract's cap, below the engine's own: a table one element larger is not instantiated.
+    parent.createRuntime(1);
+    REQUIRE(!parent.load(1, 1, toModule(contract::OversizedTableModule)).error.has_value());
+    CHECK(parent.instantiate(1, 1).error == ExtensionError::OutOfMemory);
+
+    // A cap above what every engine accepts is refused, however far above.
+    for (auto const [runtimeId, tableElements]: std::to_array<std::pair<uint32_t, uint64_t>>(
+             { { 2, uint64_t { vtextension::wasm::MaxTableElements } + 1 },
+               { 3, (uint64_t { 1 } << 32) + 64 } }))
+    {
+        parent.sendControl(proto::CreateRuntime { .runtimeId = runtimeId,
+                                                  .memoryBytes = contract::Limits.memoryBytes,
+                                                  .stackBytes = contract::Limits.stackBytes,
+                                                  .tableElements = tableElements,
+                                                  .functions = {} });
+        CHECK(parent.receiveControl()
+              == proto::Pdu { proto::RuntimeCreated { .runtimeId = runtimeId,
+                                                      .error = ExtensionError::RuntimeUnavailable } });
+    }
 }
 
 TEST_CASE("HostServer.malformedFrameEndsTheConnection", "[vtextension][host]")

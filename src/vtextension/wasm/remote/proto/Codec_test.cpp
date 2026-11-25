@@ -51,6 +51,7 @@ namespace
             .runtimeId = 7,
             .memoryBytes = uint64_t { 32 } * 1024 * 1024,
             .stackBytes = uint64_t { 128 } * 1024,
+            .tableElements = 64,
             .functions = { WireHostFunction {
                                .module = "contour:ext/host@0", .name = "log", .parameterCount = 3 },
                            WireHostFunction { .module = "wasi", .name = "x", .parameterCount = 0 } },
@@ -413,7 +414,7 @@ TEST_CASE("PduCodec.lyingCountsAreRefusedBeforeReading", "[vtextension]")
           .cap = MaxExports },
         { .description = "host functions",
           .kind = PduKind::CreateRuntime,
-          .prefix = { 1, 2, 3 },
+          .prefix = { 1, 2, 3, 4 },
           .cap = MaxHostFunctions },
         { .description = "call values", .kind = PduKind::Call, .prefix = { 1, 2 }, .cap = MaxCallValues },
         { .description = "host call arguments",
