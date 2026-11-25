@@ -273,6 +273,7 @@ TEST_CASE("Channel.trySendNeverBlocks", "[vtextension]")
 #ifndef _WIN32
 namespace proto = vtextension::wasm::remote::proto;
 using vtextension::wasm::remote::transport::OwnedHandle;
+using vtextension::wasm::remote::transport::upwardDescriptorsWhenUnrefused;
 using vtextension::wasm::remote::transport::testing::inodeOf;
 using vtextension::wasm::remote::transport::testing::openDescriptorCount;
 
@@ -366,6 +367,16 @@ TEST_CASE("Channel.parentEndRefusesDescriptors", "[vtextension]")
     CHECK(handles.size() == 1);
 }
     #endif
+
+TEST_CASE("Channel.unrefusableDescriptorsAreDiscarded", "[vtextension]")
+{
+    // A system without SO_PASSRIGHTS, and one whose outer sandbox or security module refuses it, discard what
+    // a helper attaches instead; anything else is a failure of the system.
+    for (auto const error: { ENOPROTOOPT, EINVAL, EPERM, EACCES })
+        CHECK(upwardDescriptorsWhenUnrefused(error) == UpwardDescriptors::Discarded);
+    for (auto const error: { EBADF, ENOMEM, ENOTSOCK })
+        CHECK(upwardDescriptorsWhenUnrefused(error) == std::unexpected(ChannelError::Io));
+}
 
 TEST_CASE("Channel.parentInstallsNoDescriptorFromTheHelper", "[vtextension]")
 {

@@ -22,6 +22,7 @@
 #include <memory>
 #include <ranges>
 #include <span>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -101,10 +102,7 @@ namespace
         auto const disable = 0;
         if (::setsockopt(descriptor, SOL_SOCKET, PassRightsOption, &disable, sizeof(disable)) == 0)
             return UpwardDescriptors::Refused;
-        // A kernel older than 6.16 does not know the option.
-        if (errno == ENOPROTOOPT || errno == EINVAL)
-            return UpwardDescriptors::Discarded;
-        return std::unexpected(ChannelError::Io);
+        return upwardDescriptorsWhenUnrefused(errno);
 #else
         return UpwardDescriptors::Discarded;
 #endif
@@ -132,6 +130,30 @@ namespace
     constexpr auto ReceiveFlags = 0;
 #endif
 } // namespace
+
+namespace
+{
+    /// An errno setting SO_PASSRIGHTS may fail with that means the system cannot refuse descriptors here.
+    struct UnrefusableRow
+    {
+        int error;
+        std::string_view why;
+    };
+
+    constexpr auto UnrefusableRows = std::array {
+        UnrefusableRow { .error = ENOPROTOOPT, .why = "a kernel older than 6.16 does not know the option" },
+        UnrefusableRow { .error = EINVAL, .why = "nor do some of those that backport parts of it" },
+        UnrefusableRow { .error = EPERM, .why = "an outer sandbox's filter (Flatpak) refuses the call" },
+        UnrefusableRow { .error = EACCES, .why = "a security module refuses it" },
+    };
+} // namespace
+
+std::expected<UpwardDescriptors, ChannelError> upwardDescriptorsWhenUnrefused(int error) noexcept
+{
+    if (std::ranges::contains(UnrefusableRows, error, &UnrefusableRow::error))
+        return UpwardDescriptors::Discarded;
+    return std::unexpected(ChannelError::Io);
+}
 
 /// One socket of the pair, closed when it is destroyed.
 struct Channel::Native

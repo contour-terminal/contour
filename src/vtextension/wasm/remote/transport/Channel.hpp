@@ -153,6 +153,16 @@ struct ChannelPair
     UpwardDescriptors upward {}; ///< What becomes of a descriptor sent from the helper's end to Contour's.
 };
 
+/// What becomes of descriptors sent to Contour's end when making it refuse them failed with @p error: the
+/// system cannot refuse them there (an older kernel, or an outer sandbox's filter or security module that
+/// refuses the option), and they are discarded instead; any other error is the system failing.
+/// @param error The errno setting the option failed with.
+/// @return `Discarded`; `Io` for an error that says nothing about the option.
+#ifndef _WIN32
+[[nodiscard]] std::expected<UpwardDescriptors, ChannelError> upwardDescriptorsWhenUnrefused(
+    int error) noexcept;
+#endif
+
 /// Creates a connected pair. Neither end is inherited by a child process unless it is handed over on
 /// purpose. Contour's end refuses descriptors where the system can (UpwardDescriptors); the helper's end
 /// never does, so that it still receives the grants Contour sends.

@@ -311,3 +311,13 @@ TEST_CASE("Sandbox.threadSyncFailureFailsLockdown", "[vtextension][sandbox]")
           == std::format("failed:{}:{}", std::to_underlying(proto::LockdownStep::ThreadSync), EPERM));
     CHECK(run.exit == Clean);
 }
+
+TEST_CASE("Channel.refusingDescriptorsMayBeUnavailable", "[vtextension][sandbox]")
+{
+    // Where an outer filter refuses SO_PASSRIGHTS, Contour's end discards what a helper attaches instead.
+    auto const run = runProbe("channel-pair", "passrights", ProbeSandbox::None);
+    CHECK(valueOf(run.lockdown, "lockdown") == "none");
+    REQUIRE(run.op.has_value());
+    CHECK(valueOf(*run.op, "op") == "upward:discarded");
+    CHECK(run.exit == Clean);
+}
