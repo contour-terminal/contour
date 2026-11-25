@@ -52,6 +52,7 @@ set(vtextension_HEADERS
     ExtensionRegistry.hpp
     ExtensionScheduler.hpp
     ExtensionWorkerPool.hpp
+    GuestMemoryReads.hpp
     HostBindings.hpp
     HostBreaker.hpp
     HostState.hpp

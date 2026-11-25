@@ -8,8 +8,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
-#include <limits>
 #include <span>
 #include <string>
 #include <string_view>
@@ -19,6 +17,7 @@
 
 #include <vtextension/CanonicalAbi.hpp>
 #include <vtextension/ControlImports.hpp>
+#include <vtextension/GuestMemoryReads.hpp>
 #include <vtextension/HostBindings.hpp>
 #include <vtextension/StatuslineWorld.hpp>
 
@@ -93,29 +92,12 @@ class Instance::GuestMemory final: public abi::IGuestMemory
 
     [[nodiscard]] abi::Result<void> read(abi::Address address, std::span<std::byte> into) override
     {
-        if (into.size() > std::numeric_limits<uint32_t>::max())
-            return std::unexpected(ExtensionError::Trapped);
-        // One copy, of a range the runtime bounds: by the size the memory has when it is taken (a shared
-        // memory's acknowledged size), however the guest's side writes or grows it meanwhile.
-        return writable(address, static_cast<uint32_t>(into.size()))
-            .transform([&](std::span<std::byte> bytes) {
-                if (!bytes.empty())
-                    std::memcpy(into.data(), bytes.data(), bytes.size());
-            });
+        return detail::readOnce(*this, address, into);
     }
 
     [[nodiscard]] abi::Result<std::span<std::byte>> writable(abi::Address address, uint32_t size) override
     {
-        // A guest that names memory it does not have traps; a host that died meanwhile is the host's fault,
-        // and counts as such.
-        return _instance._instance->memory(address, size).transform_error([](wasm::MemoryFailure failure) {
-            switch (failure)
-            {
-                case wasm::MemoryFailure::OutOfBounds: return ExtensionError::Trapped;
-                case wasm::MemoryFailure::HostCrashed: return ExtensionError::HostUnavailable;
-            }
-            return ExtensionError::Trapped;
-        });
+        return detail::guestRange(_instance._instance->memory(address, size));
     }
 
     [[nodiscard]] abi::Result<abi::Address> allocate(uint32_t size, uint32_t alignment) override

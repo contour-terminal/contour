@@ -11,10 +11,8 @@
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <expected>
 #include <format>
-#include <limits>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -30,6 +28,7 @@
 #include <vtextension/ControlCodec.hpp>
 #include <vtextension/Event.hpp>
 #include <vtextension/ExtensionError.hpp>
+#include <vtextension/GuestMemoryReads.hpp>
 #include <vtextension/IHostServices.hpp>
 #include <vtextension/Instance.hpp>
 #include <vtextension/StatuslineWorld.hpp>
@@ -63,8 +62,8 @@ constexpr auto LiftBudget = uint64_t { 64 } * 1024;
 /// The most bytes an extension's output may hold.
 constexpr auto MaxOutputBytes = std::size_t { 4096 };
 
-/// An instance's shared memory as the codec reaches it, as Instance's own does: what lifting reads is one
-/// copy of a range bounded by the acknowledged size; allocation bumps through the memory, for laying it out.
+/// An instance's shared memory as the codec reaches it, read and reached as Instance's own is (one copy of a
+/// range bounded by the acknowledged size); allocation bumps through the memory, for laying it out.
 class ScribbledMemory final: public abi::IGuestMemory
 {
   public:
@@ -76,20 +75,12 @@ class ScribbledMemory final: public abi::IGuestMemory
 
     [[nodiscard]] abi::Result<void> read(abi::Address address, std::span<std::byte> into) override
     {
-        if (into.size() > std::numeric_limits<uint32_t>::max())
-            return std::unexpected(ExtensionError::Trapped);
-        return writable(address, static_cast<uint32_t>(into.size()))
-            .transform([&](std::span<std::byte> bytes) {
-                if (!bytes.empty())
-                    std::memcpy(into.data(), bytes.data(), bytes.size());
-            });
+        return detail::readOnce(*this, address, into);
     }
 
     [[nodiscard]] abi::Result<std::span<std::byte>> writable(abi::Address address, uint32_t size) override
     {
-        return _memory.view(address, size).transform_error([](vtextension::wasm::MemoryFailure) {
-            return ExtensionError::Trapped;
-        });
+        return detail::guestRange(_memory.view(address, size));
     }
 
     [[nodiscard]] abi::Result<abi::Address> allocate(uint32_t size, uint32_t alignment) override
