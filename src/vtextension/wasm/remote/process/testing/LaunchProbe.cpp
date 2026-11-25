@@ -36,8 +36,8 @@
 // The report is one `key=value` line each: `cwd=` its working directory, `env=NAME` per environment variable,
 // `stdin=`, `stdout=` and `stderr=` each `null` if it is the null device, `terminal` if a terminal, else
 // `other`; (POSIX) `pid=` its process id and `sid=` its session's; `caps=` `apply` or `skip` as
-// the build caps, and (POSIX) `nproc=` and `data=` its limits, a number or `unlimited`; and `fd=N` per open
-// descriptor (POSIX) or `handle=H:valid|invalid` per --check-handle (Windows); then `end`.
+// the build caps, and (POSIX) `nproc=`, `data=` and `as=` its limits, a number or `unlimited`; and `fd=N` per
+// open descriptor (POSIX) or `handle=H:valid|invalid` per --check-handle (Windows); then `end`.
 #include <core/Clock.hpp>
 
 #include <algorithm>
@@ -217,7 +217,8 @@ enum class StandardStream : uint8_t
             return std::string { "unknown" };
         return limit.rlim_cur == RLIM_INFINITY ? std::string { "unlimited" } : std::to_string(limit.rlim_cur);
     };
-    lines += std::format("nproc={}\ndata={}\n", limitText(RLIMIT_NPROC), limitText(RLIMIT_DATA));
+    lines += std::format(
+        "nproc={}\ndata={}\nas={}\n", limitText(RLIMIT_NPROC), limitText(RLIMIT_DATA), limitText(RLIMIT_AS));
 #endif
     return lines;
 }
@@ -497,8 +498,9 @@ int main(int argc, char const* argv[], char const* envp[])
             return parent(rest);
         if (arguments.front() == "--receive-grant")
         {
-// Where this build has the Linux sandbox (PlatformSandbox::Linux): what the sandboxed mode is made of.
-#if CONTOUR_PLATFORM_SANDBOX == 1
+// Where this build has the Linux or the FreeBSD sandbox (PlatformSandbox::Linux, ::FreeBSD): what the
+// sandboxed mode is made of.
+#if CONTOUR_PLATFORM_SANDBOX == 1 || CONTOUR_PLATFORM_SANDBOX == 2
             namespace testing = vtextension::wasm::remote::process::testing;
             if (testing::asksForSandboxProbe(rest))
                 return static_cast<ProbeExit>(testing::runSandboxProbe(rest));

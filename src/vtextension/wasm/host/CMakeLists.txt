@@ -11,10 +11,14 @@ if(WIN32)
 endif()
 
 # Each system's sandbox (Sandbox.hpp) is a file of its own, and a value of PlatformSandbox; a system that has none
-# yet runs the host unsandboxed, and its Hello says so. Linux's: where VTEXTENSION_LINUX_SANDBOX (../../CMakeLists.txt).
+# yet runs the host unsandboxed, and its Hello says so. Linux's: where VTEXTENSION_LINUX_SANDBOX; FreeBSD's: where
+# VTEXTENSION_FREEBSD_SANDBOX (both ../../CMakeLists.txt).
 set(_sandbox_source Sandbox_none.cpp)
 set(_platform_sandbox 0)
-if(VTEXTENSION_LINUX_SANDBOX)
+if(VTEXTENSION_FREEBSD_SANDBOX)
+    set(_sandbox_source Sandbox_freebsd.cpp)
+    set(_platform_sandbox 2)
+elseif(VTEXTENSION_LINUX_SANDBOX)
     set(_sandbox_source
         Sandbox_linux.cpp
         linux/Landlock.cpp

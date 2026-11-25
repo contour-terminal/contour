@@ -38,6 +38,11 @@ namespace
     {
         Zero,      ///< None at all.
         DataBytes, ///< The data bytes asked for; not capped when they are 0.
+        /// One: a process count that refuses every fork where 0 would mean no limit. FreeBSD charges a fork
+        /// to the real user's count of processes, which this one is among, and reads a limit of 0 as none
+        /// (chgproccnt() in kern_resource.c).
+        One,
+        AddressSpace, ///< addressSpaceCap() of the data bytes asked for; not capped when they are 0.
     };
 
     /// One resource cap.
@@ -55,10 +60,37 @@ namespace
         std::array { ResourceCap { .resource = RLIMIT_NPROC, .value = CappedValue::Zero },
                      ResourceCap { .resource = RLIMIT_DATA, .value = CappedValue::DataBytes } };
 #elifdef __FreeBSD__
-    constexpr auto Caps = std::array { ResourceCap { .resource = RLIMIT_NPROC, .value = CappedValue::Zero } };
+    // FreeBSD has no limit on private writable mappings, so RLIMIT_AS bounds what the host maps at all:
+    // 2 x dataBytes + AddressSpaceHeadroomBytes (addressSpaceCap()). WAMR, the engine the host runs there,
+    // reserves no address space beyond what a guest uses, but FreeBSD has no mremap, so a guest memory that
+    // grows is mapped anew at its new size and copied before the old is unmapped: for a moment both count,
+    // whence twice the data bytes. The headroom is the host's own text, libraries, stacks and heap. Wasmtime,
+    // whose reservations would exceed this, is refused beside this sandbox (src/vtextension/CMakeLists.txt).
+    constexpr auto Caps =
+        std::array { ResourceCap { .resource = RLIMIT_NPROC, .value = CappedValue::One },
+                     ResourceCap { .resource = RLIMIT_AS, .value = CappedValue::AddressSpace } };
 #else
     constexpr auto Caps = std::array<ResourceCap, 0> {};
 #endif
+
+    /// @return @p bytes as a limit: no more than the system's infinity, which on FreeBSD is signed.
+    [[nodiscard]] constexpr rlim_t asLimit(uint64_t bytes) noexcept
+    {
+        return static_cast<rlim_t>(std::min(bytes, static_cast<uint64_t>(RLIM_INFINITY)));
+    }
+
+    /// @return What @p value caps a resource to, @p dataBytes being the data bytes asked for.
+    [[nodiscard]] constexpr rlim_t cappedTo(CappedValue value, uint64_t dataBytes) noexcept
+    {
+        switch (value)
+        {
+            case CappedValue::Zero: return 0;
+            case CappedValue::DataBytes: return asLimit(dataBytes);
+            case CappedValue::One: return 1;
+            case CappedValue::AddressSpace: return asLimit(addressSpaceCap(dataBytes));
+        }
+        return 0;
+    }
 
     /// @return Nothing if @p result is 0; errno otherwise.
     [[nodiscard]] std::expected<void, int> errnoOf(int result) noexcept
@@ -154,13 +186,12 @@ std::expected<void, ConfinementFailure> capResources(uint64_t dataBytes, CapPoli
     auto failed = std::optional<int> {};
     for (auto const& cap: Caps)
     {
-        if (cap.value == CappedValue::DataBytes && dataBytes == 0)
+        if ((cap.value == CappedValue::DataBytes || cap.value == CappedValue::AddressSpace) && dataBytes == 0)
             continue;
         auto inherited = rlimit {};
         auto const capped = errnoOf(::getrlimit(cap.resource, &inherited)).and_then([&] {
             // A hard limit cannot be raised: one stricter than the cap, inherited from Contour, caps already.
-            auto const wanted =
-                cap.value == CappedValue::Zero ? rlim_t { 0 } : static_cast<rlim_t>(dataBytes);
+            auto const wanted = cappedTo(cap.value, dataBytes);
             auto const value = std::min(wanted, inherited.rlim_max);
             auto const limit = rlimit { .rlim_cur = value, .rlim_max = value };
             return errnoOf(::setrlimit(cap.resource, &limit));

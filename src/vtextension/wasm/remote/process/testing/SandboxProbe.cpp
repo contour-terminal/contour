@@ -1,13 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtextension/wasm/remote/process/testing/SandboxProbe.hpp>
 
+#include <sys/ioctl.h>
 #include <sys/mman.h>
-#include <sys/prctl.h>
 #include <sys/ptrace.h>
 #include <sys/random.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
+#ifdef __linux__
+    #include <sys/prctl.h>
+#elifdef __FreeBSD__
+    #include <sys/procctl.h>
+    #include <sys/procdesc.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -21,6 +27,7 @@
 #include <expected>
 #include <format>
 #include <functional>
+#include <iterator>
 #include <latch>
 #include <memory>
 #include <mutex>
@@ -37,13 +44,12 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include <linux/seccomp.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <vtextension/wasm/host/ExecutorThread.hpp>
 #include <vtextension/wasm/host/HostBootstrap.hpp>
 #include <vtextension/wasm/host/HostProcess.hpp>
 #include <vtextension/wasm/host/Sandbox.hpp>
-#include <vtextension/wasm/host/linux/SeccompFilter.hpp>
-#include <vtextension/wasm/host/linux/SystemCallRows.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 #include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
@@ -51,8 +57,13 @@
 #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
 #include <vtextension/wasm/remote/transport/PduStream.hpp>
 
-#ifdef __aarch64__
-    #include <linux/membarrier.h>
+#ifdef __linux__
+    #include <linux/seccomp.h>
+    #include <vtextension/wasm/host/linux/SeccompFilter.hpp>
+    #include <vtextension/wasm/host/linux/SystemCallRows.hpp>
+    #ifdef __aarch64__
+        #include <linux/membarrier.h>
+    #endif
 #endif
 
 namespace vtextension::wasm::remote::process::testing
@@ -100,6 +111,8 @@ namespace
         PduStream& control;    ///< The control channel, which the permitted op takes a grant off.
         int controlDescriptor; ///< Its descriptor, which send-descriptor sends on raw.
         int parentProcess;     ///< The parent, read before the lockdown.
+        /// The descriptors the sandbox was handed beside control, each with its role.
+        std::span<host::HeldDescriptor const> held;
     };
 
     /// @return `ok` for a call that returned @p result, `refused:<errno>` for one that failed.
@@ -159,6 +172,31 @@ namespace
         return socketOf(AF_UNIX);
     }
 
+    /// Reaches for an address: the loopback's discard port. Where a sandbox lets a socket be made at all, it
+    /// is the address that it refuses.
+    [[nodiscard]] std::string connectInet(OperationContext&)
+    {
+        auto const descriptor = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+        if (descriptor < 0)
+            return outcomeOf(descriptor);
+        constexpr auto DiscardPort = uint16_t { 9 };
+        auto address = sockaddr_in {};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(DiscardPort);
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        auto const outcome =
+            outcomeOf(::connect(descriptor, reinterpret_cast<sockaddr const*>(&address), sizeof(address)));
+        ::close(descriptor);
+        return outcome;
+    }
+
+    /// Asks the control channel how much it holds, by an ioctl no descriptor of the host needs.
+    [[nodiscard]] std::string ioctlControl(OperationContext& context)
+    {
+        auto pending = 0;
+        return outcomeOf(::ioctl(context.controlDescriptor, FIONREAD, &pending));
+    }
+
     /// Sends a byte to Contour with this process's stderr attached, as a helper handing a descriptor up
     /// would.
     [[nodiscard]] std::string sendDescriptor(OperationContext& context)
@@ -190,6 +228,20 @@ namespace
         return outcomeOf(child);
     }
 
+#ifdef __FreeBSD__
+    /// Forks as Capsicum lets a process in capability mode fork: to a process descriptor.
+    [[nodiscard]] std::string forkToDescriptor(OperationContext&)
+    {
+        auto descriptor = -1;
+        auto const child = ::pdfork(&descriptor, 0);
+        if (child == 0)
+            ::_exit(0);
+        if (child > 0)
+            ::close(descriptor);
+        return outcomeOf(child);
+    }
+#endif
+
     [[nodiscard]] std::string spawnThread(OperationContext&)
     {
         auto thread = host::ExecutorThread::start(ThreadStackBytes, [] {});
@@ -206,7 +258,11 @@ namespace
 
     [[nodiscard]] std::string traceMe(OperationContext&)
     {
+#ifdef __FreeBSD__
+        return outcomeOf(::ptrace(PT_TRACE_ME, 0, nullptr, 0));
+#else
         return outcomeOf(::ptrace(PTRACE_TRACEME, 0, nullptr, nullptr));
+#endif
     }
 
     [[nodiscard]] std::string signalParent(OperationContext& context)
@@ -217,11 +273,19 @@ namespace
     [[nodiscard]] std::string mapAnonymous(int protection, int flags)
     {
         constexpr auto Bytes = std::size_t { 4096 };
+#ifdef __linux__
         // Through the system call itself: what the filter sees, without the C library's wrapper in between.
         auto const mapped = ::syscall(SYS_mmap, nullptr, Bytes, protection, flags | MAP_ANONYMOUS, -1, 0);
         if (mapped < 0)
             return outcomeOf(mapped);
         ::syscall(SYS_munmap, mapped, Bytes);
+#else
+        // FreeBSD's syscall() returns an int, too narrow for an address; no filter sits between it and mmap.
+        auto* const mapped = ::mmap(nullptr, Bytes, protection, flags | MAP_ANONYMOUS, -1, 0);
+        if (mapped == MAP_FAILED)
+            return outcomeOf(-1);
+        ::munmap(mapped, Bytes);
+#endif
         return "ok";
     }
 
@@ -278,6 +342,44 @@ namespace
         return pair->upward == transport::UpwardDescriptors::Refused ? "upward:refused" : "upward:discarded";
     }
 
+    /// The word held-limits says for each DescriptorLimit, at its enumerator's index.
+    constexpr auto LimitWords = std::array<std::string_view, 3> { "unlimited", "as-its-role", "otherwise" };
+    static_assert(LimitWords.size()
+                      == std::size_t { std::to_underlying(host::DescriptorLimit::Otherwise) } + 1,
+                  "LimitWords names every DescriptorLimit");
+
+    /// Says how far the system limits each descriptor the sandbox was handed, in order, comma-separated.
+    [[nodiscard]] std::string heldLimits(OperationContext& context)
+    {
+        auto words = std::string {};
+        for (auto const& descriptor: context.held)
+        {
+            if (!words.empty())
+                words += ',';
+            words += LimitWords[std::to_underlying(host::limitOf(descriptor))];
+        }
+        return words;
+    }
+
+    /// @return Whether this process gains no privilege through exec: `on`, `off`, or `unknown` where the
+    ///         system does not say. Asked before the lockdown, which may refuse the question.
+    [[nodiscard]] std::string_view noNewPrivileges()
+    {
+#ifdef __linux__
+        auto const status = ::prctl(PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0);
+        if (status < 0)
+            return "unknown";
+        return status == 1 ? "on" : "off";
+#elif defined(__FreeBSD__) && defined(PROC_NO_NEW_PRIVS_STATUS)
+        auto status = 0;
+        if (::procctl(P_PID, 0, PROC_NO_NEW_PRIVS_STATUS, &status) != 0)
+            return "unknown";
+        return status == PROC_NO_NEW_PRIVS_ENABLE ? "on" : "off";
+#else
+        return "unknown";
+#endif
+    }
+
     [[nodiscard]] std::string nothing(OperationContext&)
     {
         return "ok";
@@ -319,7 +421,7 @@ namespace
         auto stack = stack_t {};
         if (::sigaltstack(nullptr, &stack) != 0)
             return "failed:sigaltstack";
-#ifdef __aarch64__
+#if defined(__linux__) && defined(__aarch64__)
         if (::syscall(SYS_membarrier, MEMBARRIER_CMD_QUERY, 0, 0) < 0)
             return "failed:membarrier";
 #endif
@@ -341,8 +443,13 @@ namespace
         Operation { .name = "open-other-process", .run = &openOtherProcess },
         Operation { .name = "socket-inet", .run = &socketInet },
         Operation { .name = "socket-unix", .run = &socketUnix },
+        Operation { .name = "connect-inet", .run = &connectInet },
+        Operation { .name = "ioctl-control", .run = &ioctlControl },
         Operation { .name = "send-descriptor", .run = &sendDescriptor },
         Operation { .name = "fork", .run = &forkProcess },
+#ifdef __FreeBSD__
+        Operation { .name = "pdfork", .run = &forkToDescriptor },
+#endif
         Operation { .name = "spawn-thread", .run = &spawnThread },
         Operation { .name = "execve", .run = &executeProgram },
         Operation { .name = "ptrace-traceme", .run = &traceMe },
@@ -354,9 +461,11 @@ namespace
         Operation { .name = "protect-executable", .run = &protectExecutable },
         Operation { .name = "protect-readable", .run = &protectReadable },
         Operation { .name = "channel-pair", .run = &channelPair },
+        Operation { .name = "held-limits", .run = &heldLimits },
         Operation { .name = "permitted", .run = &permitted },
     };
 
+#ifdef __linux__
     /// An outer sandbox's filter: what it refuses, and with which errno; only when the call's arguments pass
     /// `checks`, if any.
     struct OuterRefusal
@@ -470,6 +579,41 @@ namespace
         std::optional<host::ExecutorThread> _thread;
     };
 
+    /// Installs @p outer, as an outer sandbox would have before the host starts: on the process, or
+    /// (`thread`) on a thread of its own, @p filtered.
+    /// @return Whether it was installed.
+    [[nodiscard]] bool installOuter(OuterFilter const& outer, FilteredThread& filtered)
+    {
+        if (outer.name == "thread")
+            return filtered.start().has_value();
+        auto const program = outerProgram(outer.refusals);
+        return program && ::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0 && host::installFilter(*program);
+    }
+#else
+    /// An outer sandbox's filter, by name. There is none to install where the host's sandbox filters no
+    /// system call.
+    struct OuterFilter
+    {
+        std::string_view name;
+    };
+
+    constexpr auto OuterFilters = std::array<OuterFilter, 0> {};
+
+    /// A thread that runs a filter of its own: none here.
+    class FilteredThread
+    {
+      public:
+        void stop() noexcept {}
+    };
+
+    /// @return Never installed: OuterFilters names none.
+    [[nodiscard]] bool installOuter(OuterFilter const& /*outer*/, FilteredThread& /*filtered*/)
+    {
+        return false;
+    }
+
+#endif
+
     /// Sends @p text on @p channel.
     [[nodiscard]] bool sendText(Channel& channel, std::string_view text)
     {
@@ -561,32 +705,29 @@ int runSandboxProbe(std::span<std::string_view const> arguments)
         return exitWith(SandboxProbeExit::Usage);
     if (!host::bindToParent(parsed->parentProcessId))
         return host::exitCodeOf(host::HostProcessExit::ParentGone);
-    // As the host does: no core dump of a process its filter kills.
-    std::ignore = host::hardenProcess();
-    auto controlEnd = Channel::adopt(parsed->control);
-    // Each report on a lane of its own: a reader of the first must not take in the second.
-    auto lane = Channel::adopt(parsed->lanes.at(0));
-    auto opLane = Channel::adopt(parsed->lanes.at(1));
-    if (!controlEnd || !lane || !opLane)
+    // As the host does: no core dump of a process its filter kills; then every handle adopted.
+    auto const hardened = host::hardenProcess();
+    auto endpoints = host::adoptEndpoints(*parsed);
+    if (!endpoints || endpoints->lanes.size() < 2)
         return exitWith(SandboxProbeExit::NoControl);
-    auto const controlDescriptor = controlEnd->nativeHandle();
-    auto control = PduStream {
-        *std::move(controlEnd), proto::ChannelKind::Control, proto::Direction::ToHelper, proto::PduLimits {}
-    };
+    // What the host keeps, as it keeps it (an engine's devices aside: the probe runs none), taken before the
+    // probe takes its channels out of the endpoints. The page and the wake receiver stay held in them.
+    auto const descriptors =
+        host::sandboxDescriptorsOf(*endpoints, std::span<transport::NativeHandle const> {});
+    auto const& held = descriptors.held;
+    auto const controlDescriptor = descriptors.control;
+    // Each report on a lane of its own: a reader of the first must not take in the second.
+    auto lane = std::move(endpoints->lanes.at(0));
+    auto opLane = std::move(endpoints->lanes.at(1));
+    auto control = PduStream { std::move(endpoints->control),
+                               proto::ChannelKind::Control,
+                               proto::Direction::ToHelper,
+                               proto::PduLimits {} };
 
     // The outer sandbox, there before the host starts.
     auto filtered = FilteredThread {};
-    if (request->outer && request->outer->name == "thread")
-    {
-        if (!filtered.start())
-            return exitWith(SandboxProbeExit::SetupFailed);
-    }
-    else if (request->outer)
-    {
-        auto const program = outerProgram(request->outer->refusals);
-        if (!program || ::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 || !host::installFilter(*program))
-            return exitWith(SandboxProbeExit::SetupFailed);
-    }
+    if (request->outer && !installOuter(*request->outer, filtered))
+        return exitWith(SandboxProbeExit::SetupFailed);
 
     // Each thread opens a file once told to, between the restriction and the lockdown, then runs what it is
     // given once told to go.
@@ -604,17 +745,16 @@ int runSandboxProbe(std::span<std::string_view const> arguments)
     if (!early)
         return exitWith(SandboxProbeExit::SetupFailed);
 
-    auto const sandbox =
-        request->sandboxing == Sandboxing::System
-            ? host::makeSystemSandbox(host::SandboxDescriptors { .control = controlDescriptor },
-                                      request->guestCode)
-            : std::unique_ptr<host::ISandbox> {};
+    auto const sandbox = request->sandboxing == Sandboxing::System
+                             ? host::makeSystemSandbox(descriptors, request->guestCode)
+                             : std::unique_ptr<host::ISandbox> {};
     auto const restricted =
         sandbox ? sandbox->restrictBeforeThreads() : std::expected<void, host::ConfinementFailure> {};
+    auto const privileges = noNewPrivileges();
 
-    auto context = OperationContext { .control = control,
-                                      .controlDescriptor = controlDescriptor,
-                                      .parentProcess = ::getppid() };
+    auto context = OperationContext {
+        .control = control, .controlDescriptor = controlDescriptor, .parentProcess = ::getppid(), .held = held
+    };
     auto go = std::latch { 1 };
     auto reported = std::latch { 1 };
     auto reportSent = false;
@@ -624,7 +764,7 @@ int runSandboxProbe(std::span<std::string_view const> arguments)
         opened.count_down();
         go.wait();
         auto const outcome = request->operation->run(context);
-        reportSent = sendText(*opLane, std::format("op={}\nend\n", outcome));
+        reportSent = sendText(opLane, std::format("op={}\nend\n", outcome));
         reported.count_down();
         // Until Contour ends the connection.
         while (control.receive())
@@ -636,19 +776,23 @@ int runSandboxProbe(std::span<std::string_view const> arguments)
     openNow.count_down();
     opened.wait();
 
-    auto const lockedDown = sandbox ? sandbox->lockDown() : std::expected<void, host::ConfinementFailure> {};
+    // As the host does: its caps, then the lockdown; the first step that failed, its hardening's included, is
+    // the one stated.
+    using Confined = std::expected<void, host::ConfinementFailure>;
+    auto const capped = sandbox ? host::capResources(parsed->dataBytes, host::BuildCapPolicy) : Confined {};
+    auto const lockedDown = sandbox ? sandbox->lockDown() : Confined {};
     auto const lockdown = [&] {
         if (!sandbox)
             return std::string { "none" };
-        if (!restricted)
-            return failedLine(restricted.error());
-        if (!lockedDown)
-            return failedLine(lockedDown.error());
+        for (auto const& step: { hardened, restricted, capped, lockedDown })
+            if (!step)
+                return failedLine(step.error());
         return std::string { "locked" };
     }();
-    if (!sendText(*lane,
-                  std::format("lockdown={}\nbefore-restrict={}\nafter-restrict={}\nend\n",
+    if (!sendText(lane,
+                  std::format("lockdown={}\nno-new-privs={}\nbefore-restrict={}\nafter-restrict={}\nend\n",
                               lockdown,
+                              privileges,
                               beforeRestrict,
                               afterRestrict)))
         return exitWith(SandboxProbeExit::ReportFailed);

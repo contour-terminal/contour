@@ -209,6 +209,22 @@ set(VTEXTENSION_LINUX_SANDBOX OFF)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|aarch64|arm64)$")
     set(VTEXTENSION_LINUX_SANDBOX ON)
 endif()
+# Whether it locks itself down with FreeBSD's (wasm/host/Sandbox_freebsd.cpp): on FreeBSD, on every architecture,
+# as Capsicum names no system call by number. Built, tested and run by the extension host there although FreeBSD is
+# not yet a row of _CONTOUR_SANDBOXED_PLATFORMS: that row is what makes extensions run out of process by default,
+# and it is added once FreeBSD's CI has run the sandbox's tests green.
+set(VTEXTENSION_FREEBSD_SANDBOX OFF)
+if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+    set(VTEXTENSION_FREEBSD_SANDBOX ON)
+    # That sandbox caps the host's whole address space (RLIMIT_AS) at twice the memory its guests may hold and
+    # some headroom (wasm/host/HostBootstrap.hpp, addressSpaceCap()), which fits WAMR. Wasmtime reserves
+    # gigabytes of address space for each guest memory and its guard, which no such cap leaves it.
+    if(CONTOUR_EXTENSIONS AND CONTOUR_WASM_RUNTIME STREQUAL "wasmtime")
+        message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is wasmtime, which the extension host's FreeBSD sandbox cannot "
+                            "run: it caps the host's address space below what Wasmtime reserves for guest memory. "
+                            "Configure with CONTOUR_WASM_RUNTIME=wamr.")
+    endif()
+endif()
 
 # The protocol and channels between Contour and its extension host process, and the host's server; no engine,
 # always built. After the backends: the host's tests run on Wasmtime's engine, where there is one.

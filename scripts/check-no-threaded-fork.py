@@ -26,8 +26,9 @@ ALLOWED: dict[str, str] = {
     "src/vtpty/SpawnTrampoline_unix.cpp": "single-threaded trampoline",
     "src/crispy/StackTrace.cpp": "crash path, out of scope",
     "src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp": (
-        "test-only probe, never shipped: its `fork` op proves the extension host's system call filter kills a "
-        "fork, which it does before any child exists; unsandboxed, the child only _exit()s"
+        "test-only probe, never shipped: its `fork` and `pdfork` ops prove the extension host's sandbox stops a "
+        "fork -- Linux's filter kills it before any child exists, FreeBSD's process cap refuses it -- and where a "
+        "fork does succeed (unsandboxed, or as root on FreeBSD, whom the cap does not bind) the child only _exit()s"
     ),
     "src/vthost/keeper/PosixPorts.cpp": (
         "the PTY keeper: its child is async-signal-safe up to the exec; PR_SET_PDEATHSIG and the "

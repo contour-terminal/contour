@@ -619,7 +619,11 @@ TEST_CASE("HostBootstrap.capsHold", "[vtextension]")
     CHECK(valuesOf(*report, "nproc=") == std::vector<std::string> { "0" });
     CHECK(valuesOf(*report, "data=") == std::vector<std::string> { std::to_string(ProbeDataBytes) });
 #elifdef __FreeBSD__
-    CHECK(valuesOf(*report, "nproc=") == std::vector<std::string> { "0" });
+    // FreeBSD reads a process limit of 0 as none at all, so 1, which the user's count is at already.
+    CHECK(valuesOf(*report, "nproc=") == std::vector<std::string> { "1" });
+    CHECK(valuesOf(*report, "as=")
+          == std::vector<std::string> {
+              std::to_string(vtextension::wasm::host::addressSpaceCap(ProbeDataBytes)) });
 #endif
 }
 

@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// The Linux sandbox, for real: the probe locks itself down as the extension host does, in a process of its
-// own, and tries one operation from a thread that ran before the lockdown. What is forbidden fails -- refused
-// with an errno where a library may ask, the process killed by SIGSYS where nothing honest asks -- and what
-// the host does still works, also inside an outer sandbox's filter.
+// The system's sandbox, for real: the probe locks itself down as the extension host does, in a process of its
+// own, and tries one operation from a thread that ran before the lockdown. What is forbidden fails -- on
+// Linux refused with an errno where a library may ask, the process killed by SIGSYS where nothing honest
+// asks; on FreeBSD refused by capability mode or by the descriptor's rights -- and what the host does still
+// works, on Linux also inside an outer sandbox's filter.
 #include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <sys/syscall.h>
+#ifdef __linux__
+    #include <sys/syscall.h>
+#elifdef __FreeBSD__
+    #include <sys/procctl.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -31,10 +36,13 @@
 
 #include <vtextension/wasm/BuildInstrumentation.hpp>
 #include <vtextension/wasm/host/GuestCode.hpp>
+#include <vtextension/wasm/host/HostBootstrap.hpp>
+#include <vtextension/wasm/host/Sandbox.hpp>
 #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
 #include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/HandleGrant.hpp>
+#include <vtextension/wasm/remote/transport/HelperArguments.hpp>
 #include <vtextension/wasm/remote/transport/PduStream.hpp>
 #include <vtextension/wasm/remote/transport/SharedObject.hpp>
 
@@ -135,6 +143,7 @@ enum class ProbeSandbox : uint8_t
     return line->substr(prefix.size());
 }
 
+#ifdef __linux__
 /// @return The Landlock ABI this kernel has; 0 if none.
 [[nodiscard]] long landlockAbi()
 {
@@ -143,9 +152,11 @@ enum class ProbeSandbox : uint8_t
     return version < 0 ? 0 : version;
 }
 
+constexpr auto FirstAbiWithThreadSync = 8;
+#endif
+
 constexpr auto Killed = ExitStatus { .kind = ExitKind::Signalled, .value = SIGSYS };
 constexpr auto Clean = ExitStatus { .kind = ExitKind::Exited, .value = 0 };
-constexpr auto FirstAbiWithThreadSync = 8;
 
 /// The refusal an op's report says.
 [[nodiscard]] std::string refused(int error)
@@ -153,66 +164,161 @@ constexpr auto FirstAbiWithThreadSync = 8;
     return std::format("refused:{}", error);
 }
 
+/// What an op comes to in a locked-down probe.
+enum class Fate : uint8_t
+{
+    Allowed,    ///< It works.
+    Refused,    ///< It fails with an errno, and the probe lives on.
+    Killed,     ///< The process is killed before it can say anything.
+    Unasserted, ///< The probe lives on; what the op came to is recorded, not asserted.
+};
+
+/// Who an op the host's caps refuse is allowed to after all.
+enum class CapExemption : uint8_t
+{
+    None,     ///< No one: the sandbox refuses it, whatever the caps.
+    Uncapped, ///< A build that skips the caps (sanitizers), and the superuser, whom FreeBSD lets past them.
+};
+
+/// What one op comes to on this system.
+struct Expectation
+{
+    std::string_view op;
+    Fate fate;
+    int error = 0; ///< The errno, for Fate::Refused.
+    /// The instrumented build whose rows allow it after all: a sanitizer's reads its own maps, a coverage
+    /// build maps its counter files shared.
+    std::optional<vtextension::wasm::BuildInstrumentation> allowedIn = std::nullopt;
+    CapExemption exemption = CapExemption::None;
+};
+
+#ifdef __linux__
+constexpr auto ForbiddenOperations = std::array {
+    Expectation { .op = "open-file", .fate = Fate::Refused, .error = EACCES },
+    Expectation { .op = "open-directory", .fate = Fate::Refused, .error = EACCES },
+    Expectation { .op = "open-own-process",
+                  .fate = Fate::Refused,
+                  .error = EACCES,
+                  .allowedIn = vtextension::wasm::BuildInstrumentation::Sanitizers },
+    Expectation { .op = "open-other-process", .fate = Fate::Refused, .error = EACCES },
+    Expectation { .op = "socket-inet", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "socket-unix", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "connect-inet", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "send-descriptor", .fate = Fate::Killed },
+    Expectation { .op = "fork", .fate = Fate::Killed },
+    Expectation { .op = "spawn-thread", .fate = Fate::Killed },
+    Expectation { .op = "execve", .fate = Fate::Killed },
+    Expectation { .op = "ptrace-traceme", .fate = Fate::Killed },
+    Expectation { .op = "signal-parent", .fate = Fate::Killed },
+    Expectation { .op = "map-writable-executable", .fate = Fate::Killed },
+    Expectation { .op = "map-shared-unfixed",
+                  .fate = Fate::Killed,
+                  .allowedIn = vtextension::wasm::BuildInstrumentation::Coverage },
+    Expectation { .op = "protect-writable-executable", .fate = Fate::Killed },
+};
+#elifdef __FreeBSD__
+// Capability mode refuses what names something global -- a path, an address, another process -- with
+// ECAPMODE; a descriptor's rights refuse what its role does not use with ENOTCAPABLE. It refuses neither a
+// new socket, which reaches nothing without an address, nor a new process, which RLIMIT_NPROC does. It cannot
+// refuse SCM_RIGHTS over a socket that may send, so what send-descriptor comes to is recorded: Contour's end
+// discards what a helper attaches.
+constexpr auto ForbiddenOperations = std::array {
+    Expectation { .op = "open-file", .fate = Fate::Refused, .error = ECAPMODE },
+    Expectation { .op = "open-directory", .fate = Fate::Refused, .error = ECAPMODE },
+    Expectation { .op = "open-own-process", .fate = Fate::Refused, .error = ECAPMODE },
+    Expectation { .op = "open-other-process", .fate = Fate::Refused, .error = ECAPMODE },
+    Expectation { .op = "socket-inet", .fate = Fate::Allowed },
+    Expectation { .op = "socket-unix", .fate = Fate::Allowed },
+    Expectation { .op = "connect-inet", .fate = Fate::Refused, .error = ECAPMODE },
+    Expectation { .op = "ioctl-control", .fate = Fate::Refused, .error = ENOTCAPABLE },
+    Expectation { .op = "send-descriptor", .fate = Fate::Unasserted },
+    Expectation { .op = "fork", .fate = Fate::Refused, .error = EAGAIN, .exemption = CapExemption::Uncapped },
+    Expectation {
+        .op = "pdfork", .fate = Fate::Refused, .error = EAGAIN, .exemption = CapExemption::Uncapped },
+    Expectation { .op = "execve", .fate = Fate::Refused, .error = ECAPMODE },
+    Expectation { .op = "ptrace-traceme", .fate = Fate::Refused, .error = ECAPMODE },
+    Expectation { .op = "signal-parent", .fate = Fate::Refused, .error = ECAPMODE },
+};
+#endif
+
+/// @return What @p expectation's op comes to in this build, run by this user.
+[[nodiscard]] Fate fateOf(Expectation const& expectation)
+{
+    if (expectation.allowedIn == vtextension::wasm::ThisBuildInstrumentation)
+        return Fate::Allowed;
+    auto const uncapped = vtextension::wasm::host::BuildCapPolicy == vtextension::wasm::host::CapPolicy::Skip
+                          || ::geteuid() == 0;
+    if (expectation.exemption == CapExemption::Uncapped && uncapped)
+        return Fate::Allowed;
+    return expectation.fate;
+}
+
 } // namespace
 
 TEST_CASE("Sandbox.forbiddenOperationsFailFromAnExecutor", "[vtextension][sandbox]")
 {
-    struct Expectation
-    {
-        std::string_view op;
-        std::optional<int> refusedWith; ///< Nothing: the process is killed.
-        /// The instrumented build whose rows allow it after all: a coverage build maps its counter files
-        /// shared.
-        std::optional<vtextension::wasm::BuildInstrumentation> allowedIn = std::nullopt;
-    };
-    constexpr auto Expectations = std::array {
-        Expectation { .op = "open-file", .refusedWith = EACCES },
-        Expectation { .op = "open-directory", .refusedWith = EACCES },
-        // A sanitizer build reads its own maps for a report, and no other process's.
-        Expectation { .op = "open-own-process",
-                      .refusedWith = EACCES,
-                      .allowedIn = vtextension::wasm::BuildInstrumentation::Sanitizers },
-        Expectation { .op = "open-other-process", .refusedWith = EACCES },
-        Expectation { .op = "socket-inet", .refusedWith = EPERM },
-        Expectation { .op = "socket-unix", .refusedWith = EPERM },
-        Expectation { .op = "send-descriptor", .refusedWith = std::nullopt },
-        Expectation { .op = "fork", .refusedWith = std::nullopt },
-        Expectation { .op = "spawn-thread", .refusedWith = std::nullopt },
-        Expectation { .op = "execve", .refusedWith = std::nullopt },
-        Expectation { .op = "ptrace-traceme", .refusedWith = std::nullopt },
-        Expectation { .op = "signal-parent", .refusedWith = std::nullopt },
-        Expectation { .op = "map-writable-executable", .refusedWith = std::nullopt },
-        Expectation { .op = "map-shared-unfixed",
-                      .refusedWith = std::nullopt,
-                      .allowedIn = vtextension::wasm::BuildInstrumentation::Coverage },
-        Expectation { .op = "protect-writable-executable", .refusedWith = std::nullopt },
-    };
-    for (auto const& expectation: Expectations)
+    for (auto const& expectation: ForbiddenOperations)
     {
         INFO(expectation.op);
         auto const run = runProbe(expectation.op);
         CHECK(valueOf(run.lockdown, "lockdown") == "locked");
-        if (expectation.allowedIn == vtextension::wasm::ThisBuildInstrumentation)
+        switch (fateOf(expectation))
         {
-            REQUIRE(run.op.has_value());
-            CHECK(valueOf(*run.op, "op") == "ok");
-            CHECK(run.exit == Clean);
-        }
-        else if (expectation.refusedWith)
-        {
-            REQUIRE(run.op.has_value());
-            CHECK(valueOf(*run.op, "op") == refused(*expectation.refusedWith));
-            CHECK(run.exit == Clean);
-        }
-        else
-        {
-            // Killed before it could say anything: its report never came, and its status names the filter.
-            CHECK_FALSE(run.op.has_value());
-            CHECK(run.exit == Killed);
+            case Fate::Allowed:
+                REQUIRE(run.op.has_value());
+                CHECK(valueOf(*run.op, "op") == "ok");
+                CHECK(run.exit == Clean);
+                break;
+            case Fate::Refused:
+                REQUIRE(run.op.has_value());
+                CHECK(valueOf(*run.op, "op") == refused(expectation.error));
+                CHECK(run.exit == Clean);
+                break;
+            case Fate::Killed:
+                // Killed before it could say anything: its report never came, and its status names the
+                // filter.
+                CHECK_FALSE(run.op.has_value());
+                CHECK(run.exit == Killed);
+                break;
+            case Fate::Unasserted:
+                REQUIRE(run.op.has_value());
+                WARN(expectation.op << ": " << valueOf(*run.op, "op"));
+                CHECK(run.exit == Clean);
+                break;
         }
     }
 }
 
+TEST_CASE("Sandbox.heldDescriptorsAreLimitedToTheirRoles", "[vtextension][sandbox]")
+{
+    // Every descriptor the sandbox was handed beside control, as the host hands them
+    // (sandboxDescriptorsOf()): every lane, the interrupt page, the wake receiver and its stop pipe's two
+    // ends, then standard input, output and error. Each is limited to its role's rights where the sandbox
+    // limits descriptor by descriptor (FreeBSD), and left as it was where it confines system calls instead
+    // (Linux).
+    namespace host = vtextension::wasm::host;
+    auto const run = runProbe("held-limits");
+    CHECK(valueOf(run.lockdown, "lockdown") == "locked");
+    REQUIRE(run.op.has_value());
+    CHECK(run.exit == Clean);
+    constexpr auto HeldCount = MaxLaneChannels + 4 + 3;
+    auto const word = host::ThisPlatformSandbox == host::PlatformSandbox::FreeBSD
+                          ? std::string { "as-its-role" }
+                          : std::string { "unlimited" };
+    auto expected = std::string {};
+    for (auto const index: std::views::iota(std::size_t { 0 }, HeldCount))
+        expected += (index == 0 ? "" : ",") + word;
+    CHECK(valueOf(*run.op, "op") == expected);
+
+    // And it gains no privilege through exec, which the system says where it can.
+#if defined(__linux__) || (defined(__FreeBSD__) && defined(PROC_NO_NEW_PRIVS_STATUS))
+    CHECK(valueOf(run.lockdown, "no-new-privs") == "on");
+#else
+    CHECK(valueOf(run.lockdown, "no-new-privs") == "unknown");
+#endif
+}
+
+#ifdef __linux__
 TEST_CASE("Sandbox.onlyCompiledCodeTurnsExecutable", "[vtextension][sandbox]")
 {
     struct Expectation
@@ -247,9 +353,16 @@ TEST_CASE("Sandbox.onlyCompiledCodeTurnsExecutable", "[vtextension][sandbox]")
     }
 }
 
+#endif
+
 TEST_CASE("Sandbox.permittedOperationsWorkFromAnExecutor", "[vtextension][sandbox]")
 {
-    for (auto const outerFilter: { std::string_view {}, std::string_view { "flatpak" } })
+#ifdef __linux__
+    constexpr auto OuterFilters = std::array { std::string_view {}, std::string_view { "flatpak" } };
+#else
+    constexpr auto OuterFilters = std::array { std::string_view {} };
+#endif
+    for (auto const outerFilter: OuterFilters)
     {
         INFO("outer filter: " << outerFilter);
         auto probe = launchProbe("permitted", outerFilter, ProbeSandbox::System);
@@ -298,6 +411,7 @@ TEST_CASE("Sandbox.permittedOperationsWorkFromAnExecutor", "[vtextension][sandbo
     }
 }
 
+#ifdef __linux__
 TEST_CASE("Sandbox.landlockCoversEveryThread", "[vtextension][sandbox]")
 {
     auto probe = launchProbe("none", {}, ProbeSandbox::System);
@@ -380,3 +494,4 @@ TEST_CASE("Channel.refusingDescriptorsMayBeUnavailable", "[vtextension][sandbox]
     CHECK(valueOf(*run.op, "op") == "upward:discarded");
     CHECK(run.exit == Clean);
 }
+#endif

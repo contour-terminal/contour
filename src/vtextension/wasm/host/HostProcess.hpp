@@ -75,9 +75,16 @@ struct HostEndpoints
     remote::transport::HelperArguments const& arguments);
 
 /// @param endpoints What a host serves over.
-/// @param engine What it runs modules on.
+/// @param engineDevices The devices its engine holds (IHostedEngine::heldDevices()).
 /// @return Every handle the host keeps once it is locked down, each with its role: its endpoints, the stop
-///         pipe of its wake receiver, its standard streams and the devices its engine holds.
+///         pipe of its wake receiver, its standard streams and @p engineDevices. The one list the host and
+///         the sandbox probe both confine.
+[[nodiscard]] SandboxDescriptors sandboxDescriptorsOf(
+    HostEndpoints const& endpoints, std::span<remote::transport::NativeHandle const> engineDevices);
+
+/// @param endpoints What a host serves over.
+/// @param engine What it runs modules on.
+/// @return sandboxDescriptorsOf() with the devices @p engine holds.
 [[nodiscard]] SandboxDescriptors sandboxDescriptorsOf(HostEndpoints const& endpoints,
                                                       IHostedEngine const& engine);
 

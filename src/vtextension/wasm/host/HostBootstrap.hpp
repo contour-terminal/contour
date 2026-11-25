@@ -15,6 +15,7 @@
 #include <array>
 #include <cstdint>
 #include <expected>
+#include <limits>
 #include <span>
 #include <string>
 
@@ -87,8 +88,29 @@ enum class CapPolicy : uint8_t
 inline constexpr CapPolicy BuildCapPolicy =
     ThisBuildInstrumentation == BuildInstrumentation::Sanitizers ? CapPolicy::Skip : CapPolicy::Apply;
 
+/// What a host maps beside its guests' memory, under a cap on its whole address space (FreeBSD's
+/// RLIMIT_AS): its program text and libraries (16 MiB, measured for the WAMR host on Linux), its threads'
+/// stacks (four executors of ExecutorStackBytes, 10 MiB each, and the interrupt listener's 256 KiB), and what
+/// its heap maps for itself. That is some 57 MiB before the heap; 256 MiB leaves an allocator that keeps
+/// address space it freed several times that.
+inline constexpr uint64_t AddressSpaceHeadroomBytes = uint64_t { 256 } * 1024 * 1024;
+
+/// @param dataBytes The data bytes a host's guests may hold; not 0.
+/// @return The address space such a host may map: twice the data bytes, as a guest memory that grows is
+///         mapped anew at its new size and copied before the old one is unmapped (FreeBSD has no mremap, so
+///         WAMR moves it so), and AddressSpaceHeadroomBytes. Saturates rather than wrapping.
+[[nodiscard]] constexpr uint64_t addressSpaceCap(uint64_t dataBytes) noexcept
+{
+    constexpr auto Most = std::numeric_limits<uint64_t>::max();
+    if (dataBytes > (Most - AddressSpaceHeadroomBytes) / 2)
+        return Most;
+    return (2 * dataBytes) + AddressSpaceHeadroomBytes;
+}
+
 /// Caps this process's resources, as far as @p policy says: on Linux no further process or thread
-/// (RLIMIT_NPROC 0) and @p dataBytes of data memory (RLIMIT_DATA); on FreeBSD no further process or thread;
+/// (RLIMIT_NPROC 0) and @p dataBytes of data memory (RLIMIT_DATA); on FreeBSD no further process
+/// (RLIMIT_NPROC 1, as FreeBSD reads 0 as no limit) and addressSpaceCap(@p dataBytes) of address space
+/// (RLIMIT_AS);
 /// on macOS and Windows nothing (Windows caps memory in the job Contour started it in). Soft and hard limits
 /// alike, so that they cannot be raised again; a hard limit it inherited that is stricter still is kept, as
 /// it caps already.

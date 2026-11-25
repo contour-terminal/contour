@@ -188,6 +188,13 @@ HostConfinement systemConfinement()
 
 SandboxDescriptors sandboxDescriptorsOf(HostEndpoints const& endpoints, IHostedEngine const& engine)
 {
+    auto const devices = engine.heldDevices();
+    return sandboxDescriptorsOf(endpoints, devices);
+}
+
+SandboxDescriptors sandboxDescriptorsOf(HostEndpoints const& endpoints,
+                                        std::span<transport::NativeHandle const> engineDevices)
+{
     auto held = std::vector<HeldDescriptor> {};
     for (auto const& lane: endpoints.lanes)
         held.push_back(HeldDescriptor { .role = DescriptorRole::Lane, .handle = lane.nativeHandle() });
@@ -204,7 +211,7 @@ SandboxDescriptors sandboxDescriptorsOf(HostEndpoints const& endpoints, IHostedE
         held.push_back(HeldDescriptor { .role = DescriptorRole::StopSender, .handle = stop.signalled });
     }
     std::ranges::copy(standardStreams(), std::back_inserter(held));
-    for (auto const device: engine.heldDevices())
+    for (auto const device: engineDevices)
         held.push_back(HeldDescriptor { .role = DescriptorRole::EngineDevice, .handle = device });
     return SandboxDescriptors { .control = endpoints.control.nativeHandle(), .held = std::move(held) };
 }
