@@ -61,7 +61,7 @@ command glab-failed-jobs long @repos = glab api projects/:id/jobs?scope[]=failed
 command glab-issues long @repos = glab issue list --assignee=@me --per-page 100 --search {query} --output json
 command glab-mr-checkout long @worktrees = glab mr checkout {number} --branch {branch}
 command acli-auth short @repos = acli jira auth status
-command acli-issues long @repos = acli jira workitem search --jql {jql} --limit 100 --json
+command acli-issues long @repos = acli jira workitem search --jql {jql} --fields key,summary,status,issuetype --limit 100 --json
 command-env-for git-common-dir GIT_CONFIG_COUNT = 3
 command-env-for git-common-dir GIT_CONFIG_KEY_0 = core.fsmonitor
 command-env-for git-common-dir GIT_CONFIG_VALUE_0 = false

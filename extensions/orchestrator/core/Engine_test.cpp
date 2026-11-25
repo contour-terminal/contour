@@ -3968,7 +3968,7 @@ namespace
 {
 
 /// The work items in testdata/jira/issues-open.json.
-constexpr auto RecordedWorkItems = std::ptrdiff_t { 29 };
+constexpr auto RecordedWorkItems = std::ptrdiff_t { 31 };
 
 /// A GitHub repository whose issues come from its forge and from Jira.
 [[nodiscard]] StartContext jiraContext()

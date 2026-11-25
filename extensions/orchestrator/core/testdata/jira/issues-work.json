@@ -1,0 +1,212 @@
+[
+  {
+    "changelog": null,
+    "editmeta": null,
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+    "fields": {
+      "issuetype": {
+        "description": "x",
+        "hierarchyLevel": 0,
+        "iconUrl": "https://example.atlassian.net/images/icons/issuetypes/10002.svg",
+        "id": "10002",
+        "name": "Task",
+        "self": "https://example.atlassian.net/rest/api/3/issuetype/10002",
+        "subtask": false
+      },
+      "status": {
+        "description": "x",
+        "iconUrl": "https://example.atlassian.net/images/icons/statuses/3.png",
+        "id": "3",
+        "name": "In Progress",
+        "self": "https://example.atlassian.net/rest/api/3/status/3",
+        "statusCategory": {
+          "colorName": "yellow",
+          "id": 4,
+          "key": "indeterminate",
+          "name": "In Progress",
+          "self": "https://example.atlassian.net/rest/api/3/statuscategory/4"
+        }
+      },
+      "summary": "Example summary"
+    },
+    "fieldsToInclude": null,
+    "id": "10001",
+    "key": "PRJ-1234",
+    "names": null,
+    "operations": null,
+    "properties": null,
+    "renderedFields": null,
+    "schema": null,
+    "self": "https://example.atlassian.net/rest/api/3/issue/10001",
+    "transitions": null,
+    "versionedRepresentations": null
+  },
+  {
+    "changelog": null,
+    "editmeta": null,
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+    "fields": {
+      "issuetype": {
+        "description": "x",
+        "hierarchyLevel": 0,
+        "iconUrl": "https://example.atlassian.net/images/icons/issuetypes/10002.svg",
+        "id": "10002",
+        "name": "Task",
+        "self": "https://example.atlassian.net/rest/api/3/issuetype/10002",
+        "subtask": false
+      },
+      "status": {
+        "description": "x",
+        "iconUrl": "https://example.atlassian.net/images/icons/statuses/10100.png",
+        "id": "10100",
+        "name": "Selected for Development",
+        "self": "https://example.atlassian.net/rest/api/3/status/10100",
+        "statusCategory": {
+          "colorName": "blue-gray",
+          "id": 2,
+          "key": "new",
+          "name": "To Do",
+          "self": "https://example.atlassian.net/rest/api/3/statuscategory/2"
+        }
+      },
+      "summary": "Example summary"
+    },
+    "fieldsToInclude": null,
+    "id": "10002",
+    "key": "PRJ-1240",
+    "names": null,
+    "operations": null,
+    "properties": null,
+    "renderedFields": null,
+    "schema": null,
+    "self": "https://example.atlassian.net/rest/api/3/issue/10002",
+    "transitions": null,
+    "versionedRepresentations": null
+  },
+  {
+    "changelog": null,
+    "editmeta": null,
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+    "fields": {
+      "issuetype": {
+        "description": "x",
+        "hierarchyLevel": 0,
+        "iconUrl": "https://example.atlassian.net/images/icons/issuetypes/10002.svg",
+        "id": "10002",
+        "name": "Task",
+        "self": "https://example.atlassian.net/rest/api/3/issuetype/10002",
+        "subtask": false
+      },
+      "status": {
+        "description": "x",
+        "iconUrl": "https://example.atlassian.net/images/icons/statuses/10000.png",
+        "id": "10000",
+        "name": "To Do",
+        "self": "https://example.atlassian.net/rest/api/3/status/10000",
+        "statusCategory": {
+          "colorName": "blue-gray",
+          "id": 2,
+          "key": "new",
+          "name": "To Do",
+          "self": "https://example.atlassian.net/rest/api/3/statuscategory/2"
+        }
+      },
+      "summary": "Example summary"
+    },
+    "fieldsToInclude": null,
+    "id": "10003",
+    "key": "PRJ-1300",
+    "names": null,
+    "operations": null,
+    "properties": null,
+    "renderedFields": null,
+    "schema": null,
+    "self": "https://example.atlassian.net/rest/api/3/issue/10003",
+    "transitions": null,
+    "versionedRepresentations": null
+  },
+  {
+    "changelog": null,
+    "editmeta": null,
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+    "fields": {
+      "issuetype": {
+        "description": "x",
+        "hierarchyLevel": 0,
+        "iconUrl": "https://example.atlassian.net/images/icons/issuetypes/10002.svg",
+        "id": "10002",
+        "name": "Task",
+        "self": "https://example.atlassian.net/rest/api/3/issuetype/10002",
+        "subtask": false
+      },
+      "status": {
+        "description": "x",
+        "iconUrl": "https://example.atlassian.net/images/icons/statuses/10101.png",
+        "id": "10101",
+        "name": "In Review",
+        "self": "https://example.atlassian.net/rest/api/3/status/10101",
+        "statusCategory": {
+          "colorName": "yellow",
+          "id": 4,
+          "key": "indeterminate",
+          "name": "In Progress",
+          "self": "https://example.atlassian.net/rest/api/3/statuscategory/4"
+        }
+      },
+      "summary": "Example summary"
+    },
+    "fieldsToInclude": null,
+    "id": "10004",
+    "key": "PRJ-1301",
+    "names": null,
+    "operations": null,
+    "properties": null,
+    "renderedFields": null,
+    "schema": null,
+    "self": "https://example.atlassian.net/rest/api/3/issue/10004",
+    "transitions": null,
+    "versionedRepresentations": null
+  },
+  {
+    "changelog": null,
+    "editmeta": null,
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+    "fields": {
+      "issuetype": {
+        "description": "x",
+        "hierarchyLevel": 0,
+        "iconUrl": "https://example.atlassian.net/images/icons/issuetypes/10002.svg",
+        "id": "10002",
+        "name": "Task",
+        "self": "https://example.atlassian.net/rest/api/3/issuetype/10002",
+        "subtask": false
+      },
+      "status": {
+        "description": "x",
+        "iconUrl": "https://example.atlassian.net/images/icons/statuses/10102.png",
+        "id": "10102",
+        "name": "\u001b[31mBlocked",
+        "self": "https://example.atlassian.net/rest/api/3/status/10102",
+        "statusCategory": {
+          "colorName": "yellow",
+          "id": 4,
+          "key": "indeterminate",
+          "name": "In Progress",
+          "self": "https://example.atlassian.net/rest/api/3/statuscategory/4"
+        }
+      },
+      "summary": "Example summary"
+    },
+    "fieldsToInclude": null,
+    "id": "10005",
+    "key": "PRJ-1302",
+    "names": null,
+    "operations": null,
+    "properties": null,
+    "renderedFields": null,
+    "schema": null,
+    "self": "https://example.atlassian.net/rest/api/3/issue/10005",
+    "transitions": null,
+    "versionedRepresentations": null
+  }
+]

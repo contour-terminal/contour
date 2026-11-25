@@ -30,8 +30,13 @@ inline constexpr std::size_t MaxSiteBytes = 256;
 /// @return The issue's page: `<site>/browse/<key>`.
 [[nodiscard]] std::string browseUrl(std::string_view site, std::string_view key);
 
-/// Maps the output of the declared `acli-issues` command: a JSON array of work items, each with a `key` and
-/// `fields.summary`.
+/// @param key A `statusCategory.key`: `new`, `indeterminate` or `done`.
+/// @return ToDo, InProgress, Done; Unknown for anything else.
+[[nodiscard]] StatusCategory statusCategoryOf(std::string_view key) noexcept;
+
+/// Maps the output of the declared `acli-issues` command: a JSON array of work items, each with a `key`,
+/// `fields.summary` and `fields.status` (its `name` and `statusCategory.key`). Each issue's listRank is its
+/// index in the array, counting the entries left out.
 /// @param stdoutText What it printed.
 /// @param extent Whether the host kept all of it; a cut output is read up to its last whole entry.
 /// @param context The source's site, from which each issue's page is built: the URL is never read.

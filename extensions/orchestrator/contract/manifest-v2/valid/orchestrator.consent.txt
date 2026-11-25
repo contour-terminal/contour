@@ -112,7 +112,7 @@ glab-failed-jobs (long, in repos): glab api projects/:id/jobs?scope[]=failed&per
 glab-issues (long, in repos): glab issue list --assignee=@me --per-page 100 --search {query} --output json
 glab-mr-checkout (long, in worktrees): glab mr checkout {number} --branch {branch}
 acli-auth (short, in repos): acli jira auth status
-acli-issues (long, in repos): acli jira workitem search --jql {jql} --limit 100 --json
+acli-issues (long, in repos): acli jira workitem search --jql {jql} --fields key,summary,status,issuetype --limit 100 --json
 It may open tabs running: agent (in worktrees): claude --model {model} --session-id {session} --settings {settings} --append-system-prompt {board} {prompt}
   GIT_CONFIG_COUNT=2
   GIT_CONFIG_KEY_0=push.default

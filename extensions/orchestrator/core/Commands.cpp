@@ -272,6 +272,7 @@ namespace
     // `-F json` prints a sentence instead.
     // Jira, through Atlassian's `acli`: recorded from acli 1.3.41 (core/testdata/jira/). The search prints
     // one indented JSON array, `[]` when nothing matches; a JQL it refuses exits 1 with the reason on stderr.
+    // Its `--fields` takes only a fixed set of fields, and `updated` is not among them.
     constexpr auto GlabAuthArgv = std::array { "glab"sv, "auth"sv, "status"sv };
     constexpr auto GlabDefaultBranchArgv =
         std::array { "glab"sv, "repo"sv, "view"sv, "--output"sv, "json"sv };
@@ -290,7 +291,9 @@ namespace
     };
     constexpr auto AcliAuthArgv = std::array { "acli"sv, "jira"sv, "auth"sv, "status"sv };
     constexpr auto AcliIssuesArgv = std::array {
-        "acli"sv, "jira"sv, "workitem"sv, "search"sv, "--jql"sv, "{jql}"sv, "--limit"sv, "100"sv, "--json"sv,
+        "acli"sv,    "jira"sv,  "workitem"sv, "search"sv,
+        "--jql"sv,   "{jql}"sv, "--fields"sv, "key,summary,status,issuetype"sv,
+        "--limit"sv, "100"sv,   "--json"sv,
     };
     constexpr auto GlabMrCheckoutArgv =
         std::array { "glab"sv, "mr"sv, "checkout"sv, "{number}"sv, "--branch"sv, "{branch}"sv };

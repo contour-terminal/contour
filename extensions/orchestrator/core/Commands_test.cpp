@@ -1184,6 +1184,21 @@ TEST_CASE("every shipped command is in the manifest", "[orchestrator][commands][
     CHECK(manifestText() == readFixture(FixtureRoot::Contract, "manifest-v2/valid/orchestrator.manifest"));
 }
 
+TEST_CASE("Jira's search asks for the fields the mapping reads", "[orchestrator][commands][jira]")
+{
+    // acli 1.3.41's search refuses `updated` in `--fields` (core/testdata/jira/README.md).
+    auto const* const command = findCommand("acli-issues");
+    REQUIRE(command != nullptr);
+    auto const fields = std::ranges::find(command->argv, "--fields"sv);
+    REQUIRE(fields != command->argv.end());
+    REQUIRE(std::next(fields) != command->argv.end());
+    CHECK(*std::next(fields) == "key,summary,status,issuetype");
+    CHECK(
+        std::ranges::contains(manifestLines(),
+                              std::string("command acli-issues long @repos = acli jira workitem search --jql "
+                                          "{jql} --fields key,summary,status,issuetype --limit 100 --json")));
+}
+
 TEST_CASE("glab is asked for JSON with --output, never -F", "[orchestrator][commands][gitlab]")
 {
     // `-F` is `--output` on `glab mr list` and `glab repo view`, but `--output-format` on `glab issue list`,

@@ -172,12 +172,29 @@ struct FailedJob
     [[nodiscard]] bool operator==(FailedJob const&) const = default;
 };
 
+/// Jira's status category: `statusCategory.key`, whatever the project calls the status.
+enum class StatusCategory : uint8_t
+{
+    Unknown = 0, ///< No category, or one this mapping does not know; always so for a forge issue.
+    ToDo,        ///< `new`: not started.
+    InProgress,  ///< `indeterminate`: being worked on.
+    Done,        ///< `done`: finished.
+};
+
 /// One open issue, as a provider's mapping returns it.
 struct Issue
 {
-    ItemRef item;      ///< Its reference: an IssueRef for a forge issue.
-    std::string title; ///< Sanitised, at most MaxTitleChars.
-    std::string url;   ///< Its web page, as the forge reported it.
+    ItemRef item;            ///< Its reference: an IssueRef for a forge issue.
+    std::string title;       ///< Sanitised, at most MaxTitleChars.
+    std::string url;         ///< Its web page, as the forge reported it.
+    std::string status = {}; ///< A Jira status's name, sanitised; empty for a forge issue.
+    StatusCategory category = StatusCategory::Unknown; ///< Its category; Unknown for a forge issue.
+    /// When it was last updated, Unix ms; 0: unknown. Always 0 for a Jira ticket: acli 1.3.41's search
+    /// refuses `updated` in `--fields` (core/testdata/jira/README.md).
+    uint64_t updatedWallMs = 0;
+    /// The item's position in its source's result; a JQL ending ORDER BY updated DESC makes it
+    /// most-recent-first. Set for a Jira ticket only; 0 for a forge issue.
+    std::size_t listRank = 0;
     [[nodiscard]] bool operator==(Issue const&) const = default;
 };
 
