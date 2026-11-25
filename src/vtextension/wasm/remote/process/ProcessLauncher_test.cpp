@@ -53,6 +53,7 @@
 using namespace vtextension::wasm::remote;
 using process::ExitKind;
 using process::ExitStatus;
+using process::IProcessHandle;
 using process::IProcessLauncher;
 using process::LaunchError;
 using process::LaunchSpec;
@@ -358,6 +359,27 @@ TEST_CASE("ExitWaitSet.deadlineEndsAWait", "[vtextension]")
 }
 
 #if defined(__linux__) || defined(__FreeBSD__)
+namespace
+{
+
+/// A process handle whose exit is waited on by a descriptor of the test's own: a copy of the process's,
+/// which the test may close without touching the handle the process is owned by.
+class CopiedWaitable final: public IProcessHandle
+{
+  public:
+    CopiedWaitable(IProcessHandle& process, int copy) noexcept: _process { process }, _copy { copy } {}
+    [[nodiscard]] process::ProcessId id() const noexcept override { return _process.id(); }
+    void kill() noexcept override { _process.kill(); }
+    [[nodiscard]] std::optional<ExitStatus> tryReap() noexcept override { return _process.tryReap(); }
+    [[nodiscard]] process::Waitable waitable() const noexcept override { return _copy; }
+
+  private:
+    IProcessHandle& _process;
+    int _copy;
+};
+
+} // namespace
+
 TEST_CASE("ExitWaitSet.closedWatchedHandleIsAnError", "[vtextension]")
 {
     auto probe = launchProbe(process::makeSystemProcessLauncher());
@@ -365,19 +387,17 @@ TEST_CASE("ExitWaitSet.closedWatchedHandleIsAnError", "[vtextension]")
     auto clock = core::SteadyClock {};
     auto set = probe->launcher->makeWaitSet(clock);
     REQUIRE(set.has_value());
-    REQUIRE((*set)->watch(5, *probe->process).has_value());
+    auto const copy = ::fcntl(probe->process->waitable(), F_DUPFD_CLOEXEC, 0);
+    REQUIRE(copy >= 0);
+    auto watched = CopiedWaitable { *probe->process, copy };
+    REQUIRE((*set)->watch(5, watched).has_value());
 
-    // The process descriptor closes out from under the set; a copy keeps the process's own handle restorable.
-    auto const descriptor = probe->process->waitable();
-    auto const saved = ::fcntl(descriptor, F_DUPFD_CLOEXEC, 0);
-    REQUIRE(saved >= 0);
-    REQUIRE(::close(descriptor) == 0);
+    // The watched descriptor closes out from under the set. It is the test's copy, so the process's own
+    // handle stays whole, and nothing ever closes the number again.
+    REQUIRE(::close(copy) == 0);
     auto const waited = (*set)->wait(clock.now() + ChildPatience);
-    REQUIRE(::dup3(saved, descriptor, O_CLOEXEC) == descriptor);
-    ::close(saved);
-
-    CHECK_FALSE(waited.has_value());
     (*set)->unwatch(5);
+    CHECK_FALSE(waited.has_value());
 }
 #endif
 

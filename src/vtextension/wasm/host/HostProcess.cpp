@@ -7,8 +7,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <expected>
-#include <print>
 #include <ranges>
+#include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -57,13 +58,23 @@ namespace
                                       }),
                   "ExitTable lists every HostProcessExit at its own index");
 
+    /// Writes `contour-extension-host: <text>` to stderr. Never throws: a failed write is no reason to end
+    /// otherwise than the exit table says.
+    void tell(std::string_view text) noexcept
+    {
+        constexpr auto Prefix = std::string_view { "contour-extension-host: " };
+        std::ignore = std::fwrite(Prefix.data(), 1, Prefix.size(), stderr);
+        std::ignore = std::fwrite(text.data(), 1, text.size(), stderr);
+        std::ignore = std::fputc('\n', stderr);
+    }
+
     /// Writes why the host ends to stderr, unless it served.
     /// @return @p exit's code.
-    [[nodiscard]] int endWith(HostProcessExit exit)
+    [[nodiscard]] int endWith(HostProcessExit exit) noexcept
     {
         auto const& row = rowOf(exit);
         if (exit != HostProcessExit::Served)
-            std::println(stderr, "contour-extension-host: {}", row.text);
+            tell(row.text);
         return row.code;
     }
 } // namespace
@@ -145,7 +156,7 @@ HostConfinement systemConfinement()
         .confine =
             [](uint64_t dataBytes) {
                 if constexpr (BuildCapPolicy == CapPolicy::Skip)
-                    std::println(stderr, "contour-extension-host: resource caps are off in this build");
+                    tell("resource caps are off in this build");
                 return capResources(dataBytes, BuildCapPolicy);
             },
     };

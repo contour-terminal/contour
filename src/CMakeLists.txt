@@ -38,6 +38,7 @@ if(CONTOUR_EXTENSIONS)
     # from the directory contour is installed in: how contour finds it (vtextension_remote_process).
     include(GNUInstallDirs)
     set(CONTOUR_EXTENSION_HOST_INSTALL_DIR "${CMAKE_INSTALL_LIBEXECDIR}/contour")
+    # contour installs to CMAKE_INSTALL_BINDIR (../contour/CMakeLists.txt).
     file(RELATIVE_PATH CONTOUR_EXTENSION_HOST_RELATIVE_DIR
         "${CMAKE_INSTALL_FULL_BINDIR}" "${CMAKE_INSTALL_FULL_LIBEXECDIR}/contour")
     add_subdirectory(vtextension)

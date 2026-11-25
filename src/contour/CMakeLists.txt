@@ -893,6 +893,18 @@ elseif(CONTOUR_MACOS_APP_BUNDLE)
         # show the generic executable icon.
         MACOSX_BUNDLE_ICON_FILE "contour.icns"
     )
+    # The extension host travels inside the bundle, in Contents/Helpers, where contour looks for it first
+    # (locateExtensionHost()): copied in after each build of contour, which so builds it first. The copy is
+    # contour's, so that the helper never depends on the GUI.
+    if(TARGET contour-extension-host)
+        add_dependencies(contour contour-extension-host)
+        add_custom_command(TARGET contour POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_BUNDLE_CONTENT_DIR:contour>/Helpers"
+            COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:contour-extension-host>"
+                "$<TARGET_BUNDLE_CONTENT_DIR:contour>/Helpers/"
+            VERBATIM
+        )
+    endif()
 endif()
 # }}}
 
@@ -2467,7 +2479,8 @@ else()
     # build too. That one produces a plain command-line binary, so it installs like any other Unix
     # CLI tool: the executable and the data every platform wants, first.
     include(GNUInstallDirs)
-    install(TARGETS contour DESTINATION bin)
+    # CMAKE_INSTALL_BINDIR: where contour finds contour-extension-host is relative to it (../CMakeLists.txt).
+    install(TARGETS contour DESTINATION "${CMAKE_INSTALL_BINDIR}")
     install(DIRECTORY "cli/shell-integration" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(DIRECTORY "res/fonts/" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour/fonts" PATTERN "README.md" EXCLUDE)
     if(CONTOUR_NERD_FONT_SYMBOLS_DIR)

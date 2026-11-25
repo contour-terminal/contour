@@ -18,8 +18,7 @@ namespace vtextension::wasm::remote::transport::testing
 {
 
 /// @return A second handle on what @p handle names, as an inherited one is: not close-on-exec (POSIX);
-/// nothing
-///         if it failed.
+///         nothing if it failed.
 [[nodiscard]] inline std::optional<NativeHandle> duplicate(NativeHandle handle) noexcept
 {
 #ifdef _WIN32

@@ -191,7 +191,8 @@ endif()
 
 if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime AND TARGET vtextension_remote_process)
     # The extension host executable itself (../../../contour-extension-host, built where Wasmtime is, as
-    # here), started as Contour starts it. Links no engine: the engine runs in the helper.
+    # here), started as Contour starts it. Links no engine: the engine runs in the helper. vtextension_host
+    # only for the build's cap policy (HostBootstrap.hpp), which tells what the helper caps.
     add_executable(vtextension_helper_test
         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
         Helper_test.cpp
@@ -199,7 +200,7 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime AND TARGET vtextension_re
         process/testing/LaunchedHelper.hpp
     )
     target_link_libraries(vtextension_helper_test PRIVATE
-        vtextension vtextension_remote vtextension_remote_process vtextension_remote_wire
+        vtextension vtextension_host vtextension_remote vtextension_remote_process vtextension_remote_wire
         glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
     add_dependencies(vtextension_helper_test contour-extension-host)
     target_compile_definitions(vtextension_helper_test PRIVATE
