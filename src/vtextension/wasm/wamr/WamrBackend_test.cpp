@@ -19,6 +19,7 @@
 #include <vtextension/testing/Harness.hpp>
 #include <vtextension/testing/TestModules.hpp>
 #include <vtextension/wasm/testing/BackendContract.hpp>
+#include <vtextension/wasm/testing/RenderMeasurement.hpp>
 #include <vtextension/wasm/wamr/WamrBackend.hpp>
 #include <vtextension/wasm/wamr/WamrHandles.hpp>
 #include <vtextension/wasm/wamr/WamrRuntime.hpp>
@@ -213,4 +214,11 @@ TEST_CASE("Wamr.hostFunctionArities")
         REQUIRE_FALSE(runtime.has_value());
         CHECK(runtime.error() == ExtensionError::RuntimeUnavailable);
     }
+}
+
+TEST_CASE("Wamr.measureRender", "[.measure]")
+{
+    // Reported, not asserted; vtextension_wasmtime_test's twin measures Wasmtime the same way.
+    auto const backend = makeWamrBackend();
+    vtextension::wasm::testing::measureBundledRender(*backend, "WAMR");
 }

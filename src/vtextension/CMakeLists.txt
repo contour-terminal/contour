@@ -132,6 +132,7 @@ if(VTEXTENSION_TESTING)
         wasm/testing/BackendContract.hpp
         wasm/testing/FeatureModules.hpp
         wasm/testing/PreparedGeneration.hpp
+        wasm/testing/RenderMeasurement.hpp
     )
     # The WIT package is the normative spec of the extension ABI; the tests read it from the source tree.
     target_compile_definitions(vtextension_test PRIVATE VTEXTENSION_WIT_DIR="${PROJECT_SOURCE_DIR}/wit/statusline")

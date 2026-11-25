@@ -34,6 +34,7 @@
 #include <vtextension/wasm/EngineFeatures.hpp>
 #include <vtextension/wasm/testing/BackendContract.hpp>
 #include <vtextension/wasm/testing/FeatureModules.hpp>
+#include <vtextension/wasm/testing/RenderMeasurement.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeBackend.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeRuntime.hpp>
@@ -526,4 +527,11 @@ TEST_CASE("Wasmtime.interruptRacingACallStopsIt", "[wasmtime]")
             ++stopped;
     }
     CHECK(stopped == Rounds);
+}
+
+TEST_CASE("Wasmtime.measureRender", "[.measure]")
+{
+    // Reported, not asserted; vtextension_test's twin measures WAMR the same way.
+    auto const backend = WasmtimeTraits::make();
+    vtextension::wasm::testing::measureBundledRender(*backend, "Wasmtime");
 }

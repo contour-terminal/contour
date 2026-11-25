@@ -34,6 +34,12 @@ if(VTEXTENSION_TESTING)
     target_link_libraries(vtextension_wasmtime_test PRIVATE
         vtextension vtextension_wasmtime contour::wasmtime core::testing Catch2::Catch2 contour_test_trace)
     add_test(NAME vtextension_wasmtime_test COMMAND vtextension_wasmtime_test)
+    if(CONTOUR_WASM_GUESTS)
+        # The hidden measurement case renders a bundled extension, read from where vtextension_test reads it.
+        add_dependencies(vtextension_wasmtime_test contour_bundled_extensions)
+        target_compile_definitions(vtextension_wasmtime_test PRIVATE
+            VTEXTENSION_TEST_MODULE_DIR="${CONTOUR_CARGO_TARGET_DIR}/${CONTOUR_WASM_TARGET}/release")
+    endif()
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
         target_compile_options(vtextension_wasmtime_test PRIVATE -Wno-c2y-extensions)
