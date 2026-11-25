@@ -213,8 +213,8 @@ int runExtensionHost(std::span<std::string_view const> arguments,
     if (!engine)
         return endWith(HostProcessExit::EngineUnavailable);
     // Still before any thread: what the sandbox restricts now, every thread inherits.
-    auto const sandbox =
-        confinement.sandbox(SandboxDescriptors { .control = endpoints->control.nativeHandle() });
+    auto const sandbox = confinement.sandbox(
+        SandboxDescriptors { .control = endpoints->control.nativeHandle() }, engine->guestCode());
     auto const restricted = sandbox->restrictBeforeThreads();
     tellOf("sandbox", restricted);
 

@@ -103,8 +103,9 @@ constexpr auto Limits = proto::PduLimits {};
     // Hostility is measured against a host that confines nothing more than its hardening: a sandbox would
     // refuse what the hostile modes do to the host itself.
     auto confinement = vtextension::wasm::host::systemConfinement();
-    confinement.sandbox = [](vtextension::wasm::host::SandboxDescriptors)
-        -> std::unique_ptr<vtextension::wasm::host::ISandbox> {
+    confinement.sandbox =
+        [](vtextension::wasm::host::SandboxDescriptors,
+           vtextension::wasm::host::GuestCode) -> std::unique_ptr<vtextension::wasm::host::ISandbox> {
         return std::make_unique<vtextension::wasm::host::NullSandbox>();
     };
     return vtextension::wasm::host::runExtensionHost(views, enginesOf(memory), confinement);

@@ -17,6 +17,7 @@
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/wasm/WasmBinary.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
+#include <vtextension/wasm/wamr/WamrBackend.hpp>
 
 namespace vtextension::wasm::wamr
 {
@@ -32,21 +33,22 @@ class WamrRuntime final: public IWasmRuntime, public std::enable_shared_from_thi
     };
 
   public:
-    /// Brings the runtime up (or joins it), opens a null device and registers @p hostFunctions.
+    /// Brings the runtime up (or joins it), takes its null device and registers @p hostFunctions.
     /// @param limits The limits every instance of the runtime is held to.
     /// @param hostFunctions The host functions modules may import.
+    /// @param nullDevice Where its null device comes from: opened for it, or shared.
     /// @return The runtime; `RuntimeUnavailable` if WAMR could not initialize, the null device could
     ///         not be opened, or WAMR refused the host functions.
     [[nodiscard]] static std::expected<std::shared_ptr<WamrRuntime>, ExtensionError> create(
-        RuntimeLimits limits, std::span<HostFunction const> hostFunctions);
+        RuntimeLimits limits, std::span<HostFunction const> hostFunctions, NullDevice const& nullDevice);
 
     /// Use create(); public only so that std::make_shared can reach it.
     WamrRuntime(PrivateTag,
                 RuntimeLimits limits,
-                int64_t nullDevice,
+                std::shared_ptr<OpenNullDevice const> nullDevice,
                 std::unique_ptr<HostRegistrations> hostRegistrations) noexcept;
 
-    /// Unregisters the host functions, closes the null device, then releases the hold on the runtime.
+    /// Unregisters the host functions, lets go of the null device, then releases the hold on the runtime.
     ~WamrRuntime() override;
 
     WamrRuntime(WamrRuntime const&) = delete;
@@ -62,11 +64,11 @@ class WamrRuntime final: public IWasmRuntime, public std::enable_shared_from_thi
     [[nodiscard]] RuntimeLimits const& limits() const noexcept { return _limits; }
 
     /// @return The raw handle of the null device the guests' WASI standard streams are bound to.
-    [[nodiscard]] int64_t nullDevice() const noexcept { return _nullDevice; }
+    [[nodiscard]] int64_t nullDevice() const noexcept { return _nullDevice->handle(); }
 
   private:
     RuntimeLimits _limits;
-    int64_t _nullDevice;                                   ///< Owned; closed on destruction.
+    std::shared_ptr<OpenNullDevice const> _nullDevice;     ///< Closed with its last holder.
     std::unique_ptr<HostRegistrations> _hostRegistrations; ///< Unregistered before the runtime is released.
 };
 

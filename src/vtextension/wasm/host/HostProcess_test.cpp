@@ -68,6 +68,7 @@ using vtextension::wasm::host::EngineFactory;
 using vtextension::wasm::host::ExecutorStackBytes;
 using vtextension::wasm::host::ExecutorThread;
 using vtextension::wasm::host::exitCodeOf;
+using vtextension::wasm::host::GuestCode;
 using vtextension::wasm::host::HardeningRow;
 using vtextension::wasm::host::hardeningSteps;
 using vtextension::wasm::host::hardenProcess;
@@ -154,6 +155,8 @@ struct Confined
     proto::LockdownState sandboxState = proto::LockdownState::Unsandboxed;
     /// The control handle the sandbox was made for.
     std::atomic<NativeHandle> sandboxedControl {};
+    /// The code the sandbox was made for: its engine's.
+    std::atomic<GuestCode> sandboxedCode { GuestCode::Interpreted };
     /// How many threads the host started, and how many it had when the sandbox restricted it.
     std::atomic<int> threadsStarted { 0 };
     std::atomic<int> threadsWhenRestricted { -1 };
@@ -233,8 +236,9 @@ class RecordingSandbox final: public ISandbox
                 confined->record("adopt");
                 return vtextension::wasm::host::adoptEndpoints(arguments);
             },
-        .sandbox = [confined](SandboxDescriptors descriptors) -> std::unique_ptr<ISandbox> {
+        .sandbox = [confined](SandboxDescriptors descriptors, GuestCode code) -> std::unique_ptr<ISandbox> {
             confined->sandboxedControl.store(descriptors.control);
+            confined->sandboxedCode.store(code);
             return std::make_unique<RecordingSandbox>(confined);
         },
         .startThread = [confined](std::size_t stackBytes, std::function<void()> body)
@@ -522,6 +526,8 @@ TEST_CASE("HostProcess.servesOverAdoptedEndpoints", "[vtextension][host]")
     CHECK(confined->boundTo.load() == TheParent);
     CHECK(confined->cappedTo.load() == TheDataBytes);
     CHECK(confined->confines.load() == 1);
+    // The sandbox was made for the code the engine runs.
+    CHECK(confined->sandboxedCode.load() == makeHostedEngine(proto::MemoryMode::Copy)->guestCode());
 
     {
         // Contour closes the connection: the host serves no more, and ends as having served.
@@ -694,7 +700,7 @@ TEST_CASE("HostProcess.nullSandboxSaysUnsandboxed", "[vtextension][host]")
     // What every system does until it has a sandbox of its own: confines nothing, and says so.
     auto confined = std::make_shared<Confined>();
     auto confinement = testConfinement(confined);
-    confinement.sandbox = [](SandboxDescriptors) -> std::unique_ptr<ISandbox> {
+    confinement.sandbox = [](SandboxDescriptors, GuestCode) -> std::unique_ptr<ISandbox> {
         return std::make_unique<NullSandbox>();
     };
     CHECK(helloOf(confined, confinement) == helloSaying(proto::LockdownState::Unsandboxed));

@@ -15,6 +15,7 @@
 
 using vtextension::wasm::host::ConfinementFailure;
 using vtextension::wasm::host::confinementFailureText;
+using vtextension::wasm::host::GuestCode;
 using vtextension::wasm::host::makeSystemSandbox;
 using vtextension::wasm::host::NullSandbox;
 using vtextension::wasm::host::PlatformSandbox;
@@ -38,7 +39,7 @@ TEST_CASE("Sandbox.systemWithoutOneRunsUnsandboxed", "[vtextension][host]")
     // confine this very process: the probe proves it in a child of its own (SandboxProbe_test.cpp).
     if constexpr (ThisPlatformSandbox != PlatformSandbox::None)
         SKIP("this system has a sandbox");
-    auto const sandbox = makeSystemSandbox(SandboxDescriptors { .control = {} });
+    auto const sandbox = makeSystemSandbox(SandboxDescriptors { .control = {} }, GuestCode::Interpreted);
     REQUIRE(sandbox != nullptr);
     CHECK(sandbox->restrictBeforeThreads().has_value());
     CHECK(sandbox->lockDown().has_value());

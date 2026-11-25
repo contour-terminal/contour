@@ -30,6 +30,7 @@ endif()
 add_library(vtextension_host STATIC
     ExecutorThread.cpp
     ExecutorThread.hpp
+    GuestCode.hpp
     HelperEngine.hpp
     HostBootstrap.cpp
     HostBootstrap.hpp

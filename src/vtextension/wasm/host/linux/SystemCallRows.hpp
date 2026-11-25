@@ -9,8 +9,9 @@
 /// The rows were measured, not guessed: every call the unsandboxed helper made after it locked down, across
 /// the helper suites in the release, sanitizer and coverage trees, is a row here, or refused where refusing
 /// it is what the caller handles (a library probing a file it may do without). The release rows are the
-/// product's; the sanitizer and coverage rows widen them only in builds made for those, and replace a release
-/// row of the same call.
+/// product's, for every engine; the rows of the engine's GuestCode follow, an engine that compiles making
+/// memory executable and one that interprets never; the sanitizer and coverage rows widen them only in builds
+/// made for those. Each later set replaces an earlier row of the same call.
 
 #include <cstdint>
 #include <optional>
@@ -19,6 +20,7 @@
 #include <vector>
 
 #include <vtextension/wasm/BuildInstrumentation.hpp>
+#include <vtextension/wasm/host/GuestCode.hpp>
 
 namespace vtextension::wasm::host
 {
@@ -100,6 +102,7 @@ enum class SystemCall : uint8_t
     RtSigaction,
     RtSigprocmask,
     RtSigreturn,
+    SchedGetaffinity,
     SchedYield,
     Seccomp,
     Sendmmsg,
@@ -182,6 +185,14 @@ struct SystemCallRow
 [[nodiscard]] std::vector<SystemCallRow> releaseRows(AuditArch arch);
 
 /// @param arch The architecture the rows are numbered for.
+/// @return What an engine that compiles its modules to native code needs beyond the release rows.
+[[nodiscard]] std::vector<SystemCallRow> compiledRows(AuditArch arch);
+
+/// @param arch The architecture the rows are numbered for.
+/// @return What an engine that interprets its modules needs beyond the release rows.
+[[nodiscard]] std::vector<SystemCallRow> interpretedRows(AuditArch arch);
+
+/// @param arch The architecture the rows are numbered for.
 /// @return What a sanitizer's runtime needs beyond them.
 [[nodiscard]] std::vector<SystemCallRow> sanitizerRows(AuditArch arch);
 
@@ -189,15 +200,19 @@ struct SystemCallRow
 /// @return What writing coverage counters needs beyond them.
 [[nodiscard]] std::vector<SystemCallRow> coverageRows(AuditArch arch);
 
+/// @param code How the host's engine runs a module's code.
 /// @param instrumentation How the build is instrumented.
 /// @param arch The architecture the rows are numbered for.
-/// @return The rows such a build locks down with: releaseRows(), each replaced by a row of the same call in
-/// the
-///         set @p instrumentation names, and that set's other rows after them.
-[[nodiscard]] std::vector<SystemCallRow> rowsFor(BuildInstrumentation instrumentation, AuditArch arch);
+/// @return The rows such a host locks down with: releaseRows(), then the set @p code names, then the set
+///         @p instrumentation names; a row of a later set replaces an earlier row of the same call, and its
+///         other rows follow.
+[[nodiscard]] std::vector<SystemCallRow> rowsFor(GuestCode code,
+                                                 BuildInstrumentation instrumentation,
+                                                 AuditArch arch);
 
+/// @param code How the host's engine runs a module's code.
 /// @param arch The architecture the rows are numbered for.
-/// @return The rows this build locks down with: rowsFor(ThisBuildInstrumentation).
-[[nodiscard]] std::vector<SystemCallRow> buildRows(AuditArch arch);
+/// @return The rows a host of this build locks down with: rowsFor(@p code, ThisBuildInstrumentation).
+[[nodiscard]] std::vector<SystemCallRow> buildRows(GuestCode code, AuditArch arch);
 
 } // namespace vtextension::wasm::host

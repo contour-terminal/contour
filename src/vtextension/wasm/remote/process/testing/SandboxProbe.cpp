@@ -558,7 +558,9 @@ int runSandboxProbe(std::span<std::string_view const> arguments)
 
     auto const sandbox =
         request->sandboxing == Sandboxing::System
-            ? host::makeSystemSandbox(host::SandboxDescriptors { .control = controlDescriptor })
+            // The wider row set, of an engine that compiles: what it forbids, every engine's forbids.
+            ? host::makeSystemSandbox(host::SandboxDescriptors { .control = controlDescriptor },
+                                      host::GuestCode::Compiled)
             : std::unique_ptr<host::ISandbox> {};
     auto const restricted =
         sandbox ? sandbox->restrictBeforeThreads() : std::expected<void, host::ConfinementFailure> {};

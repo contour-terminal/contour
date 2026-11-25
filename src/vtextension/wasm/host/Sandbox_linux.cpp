@@ -101,9 +101,10 @@ namespace
     {
       public:
         LinuxSandbox(SandboxDescriptors descriptors,
+                     GuestCode code,
                      LandlockSystem landlock,
                      std::function<void(std::string_view)> tell):
-            _descriptors { descriptors }, _landlock { landlock }, _tell { std::move(tell) }
+            _descriptors { descriptors }, _code { code }, _landlock { landlock }, _tell { std::move(tell) }
         {
         }
 
@@ -134,7 +135,7 @@ namespace
 
         [[nodiscard]] std::expected<void, ConfinementFailure> lockDown() override
         {
-            auto const rows = buildRows(ThisAuditArch);
+            auto const rows = buildRows(_code, ThisAuditArch);
             return assembleFilter(rows, _descriptors, ::getpid(), ThisAuditArch)
                 .and_then([](std::vector<sock_filter> const& program) { return installFilter(program); });
         }
@@ -146,14 +147,15 @@ namespace
 
       private:
         SandboxDescriptors _descriptors;
+        GuestCode _code;
         LandlockSystem _landlock;
         std::function<void(std::string_view)> _tell;
     };
 } // namespace
 
-std::unique_ptr<ISandbox> makeSystemSandbox(SandboxDescriptors descriptors)
+std::unique_ptr<ISandbox> makeSystemSandbox(SandboxDescriptors descriptors, GuestCode code)
 {
-    return std::make_unique<LinuxSandbox>(descriptors, systemLandlock(), &tellOnStandardError);
+    return std::make_unique<LinuxSandbox>(descriptors, code, systemLandlock(), &tellOnStandardError);
 }
 
 } // namespace vtextension::wasm::host

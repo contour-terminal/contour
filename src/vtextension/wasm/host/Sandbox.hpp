@@ -16,6 +16,7 @@
 #include <memory>
 #include <string>
 
+#include <vtextension/wasm/host/GuestCode.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 
@@ -100,10 +101,11 @@ class NullSandbox final: public ISandbox
     }
 };
 
-/// Makes this system's sandbox for a host that keeps using @p descriptors. Defined per system: where there is
-/// no sandbox yet (Sandbox_none.cpp), a NullSandbox.
+/// Makes this system's sandbox for a host that keeps using @p descriptors and runs @p code. Defined per
+/// system: where there is no sandbox yet (Sandbox_none.cpp), a NullSandbox.
 /// @param descriptors The handles the host keeps using.
+/// @param code How its engine runs a module's code: whether it still makes memory executable.
 /// @return The sandbox; never null.
-[[nodiscard]] std::unique_ptr<ISandbox> makeSystemSandbox(SandboxDescriptors descriptors);
+[[nodiscard]] std::unique_ptr<ISandbox> makeSystemSandbox(SandboxDescriptors descriptors, GuestCode code);
 
 } // namespace vtextension::wasm::host

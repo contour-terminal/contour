@@ -269,6 +269,25 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
     endif()
 endif()
 
+if(VTEXTENSION_TESTING AND TARGET vtextension_wamr_engine)
+    # The contract through the protocol on WAMR's engine: the remote backend over hosts serving in this process.
+    # A binary of its own, apart from vtextension_remote_test, as one executable never links both engines: each
+    # defines the standard wasm.h C API, which MSVC's linker refuses twice (LNK2005) and an ELF linker silently
+    # resolves to whichever engine it meets first. scripts/check-wasm-runtime-containment.py keeps it that way.
+    add_executable(vtextension_remote_wamr_test
+        ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+        ../wamr/RemoteWamrEngine_test.cpp
+    )
+    target_link_libraries(vtextension_remote_wamr_test PRIVATE
+        vtextension vtextension_remote vtextension_remote_wire vtextension_host vtextension_wamr_engine
+        core::testing Catch2::Catch2 contour_test_trace)
+    add_test(NAME vtextension_remote_wamr_test COMMAND vtextension_remote_wamr_test)
+    if(NOT WIN32)
+        # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+        target_compile_options(vtextension_remote_wamr_test PRIVATE -Wno-c2y-extensions)
+    endif()
+endif()
+
 if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime AND _process_source)
     # The extension host executable itself (../../../contour-extension-host, built where Wasmtime is, as
     # here), started as Contour starts it. Links no engine: the engine runs in the helper. vtextension_host

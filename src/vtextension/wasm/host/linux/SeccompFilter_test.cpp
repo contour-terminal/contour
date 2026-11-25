@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+#include <fcntl.h>
+
 #include <vtextension/wasm/host/linux/SeccompFilter.hpp>
 #include <vtextension/wasm/host/linux/SystemCallRows.hpp>
 #include <vtextension/wasm/host/linux/testing/BpfEvaluator.hpp>
@@ -44,14 +46,17 @@ constexpr auto Both = std::array { AuditArch::Amd64, AuditArch::AArch64 };
     return *number;
 }
 
-/// @return What the filter of @p instrumentation's rows on @p arch decides for @p call with @p arguments.
+/// @return What the filter of @p instrumentation's rows on @p arch, for an engine running @p code, decides
+/// for
+///         @p call with @p arguments.
 [[nodiscard]] FilterVerdict decide(BuildInstrumentation instrumentation,
                                    AuditArch arch,
                                    long number,
                                    std::array<uint64_t, 6> arguments = {},
-                                   AuditArch madeOn = AuditArch::Amd64)
+                                   AuditArch madeOn = AuditArch::Amd64,
+                                   GuestCode code = GuestCode::Compiled)
 {
-    auto const rows = rowsFor(instrumentation, arch);
+    auto const rows = rowsFor(code, instrumentation, arch);
     auto const program = assembleFilter(rows, SandboxDescriptors { .control = Control }, OwnProcess, arch);
     REQUIRE(program.has_value());
     auto const returned =
@@ -214,7 +219,11 @@ TEST_CASE("SeccompFilter.noRowSetAllowsTheForbidden", "[vtextension][sandbox]")
         SystemCall::Seccomp,
     };
     for (auto const arch: Both)
-        for (auto const& rows: { releaseRows(arch), sanitizerRows(arch), coverageRows(arch) })
+        for (auto const& rows: { releaseRows(arch),
+                                 compiledRows(arch),
+                                 interpretedRows(arch),
+                                 sanitizerRows(arch),
+                                 coverageRows(arch) })
             for (auto const call: Forbidden)
                 if (auto const number = systemCallNumber(call, arch))
                     for (auto const& row: rows)
@@ -227,7 +236,11 @@ TEST_CASE("SeccompFilter.noRowSetAllowsTheForbidden", "[vtextension][sandbox]")
 TEST_CASE("SeccompFilter.everyRowSaysWhy", "[vtextension][sandbox]")
 {
     for (auto const arch: Both)
-        for (auto const& rows: { releaseRows(arch), sanitizerRows(arch), coverageRows(arch) })
+        for (auto const& rows: { releaseRows(arch),
+                                 compiledRows(arch),
+                                 interpretedRows(arch),
+                                 sanitizerRows(arch),
+                                 coverageRows(arch) })
         {
             auto numbers = std::set<long> {};
             for (auto const& row: rows)
@@ -251,24 +264,26 @@ TEST_CASE("SeccompFilter.assemblesForBothArchitectures", "[vtextension][sandbox]
     CHECK(systemCallNumber(SystemCall::Read, AuditArch::Amd64) == 0);
     CHECK(systemCallNumber(SystemCall::Read, AuditArch::AArch64) == 63);
     for (auto const arch: Both)
-        for (auto const instrumentation:
-             { BuildInstrumentation::None, BuildInstrumentation::Coverage, BuildInstrumentation::Sanitizers })
-        {
-            auto const rows = rowsFor(instrumentation, arch);
-            auto const program =
-                assembleFilter(rows, SandboxDescriptors { .control = Control }, OwnProcess, arch);
-            REQUIRE(program.has_value());
-            CHECK(program->size() <= BPF_MAXINSNS);
-            // Every row is reached: each number decides as its row says, arguments aside.
-            for (auto const& row: rows)
-                if (row.checks.empty())
-                {
-                    auto const returned =
-                        evaluateFilter(*program, SystemCallUse { .arch = arch, .number = row.number });
-                    REQUIRE(returned.has_value());
-                    CHECK(*returned == seccompReturnOf(row.action, row.error));
-                }
-        }
+        for (auto const code: { GuestCode::Interpreted, GuestCode::Compiled })
+            for (auto const instrumentation: { BuildInstrumentation::None,
+                                               BuildInstrumentation::Coverage,
+                                               BuildInstrumentation::Sanitizers })
+            {
+                auto const rows = rowsFor(code, instrumentation, arch);
+                auto const program =
+                    assembleFilter(rows, SandboxDescriptors { .control = Control }, OwnProcess, arch);
+                REQUIRE(program.has_value());
+                CHECK(program->size() <= BPF_MAXINSNS);
+                // Every row is reached: each number decides as its row says, arguments aside.
+                for (auto const& row: rows)
+                    if (row.checks.empty())
+                    {
+                        auto const returned =
+                            evaluateFilter(*program, SystemCallUse { .arch = arch, .number = row.number });
+                        REQUIRE(returned.has_value());
+                        CHECK(*returned == seccompReturnOf(row.action, row.error));
+                    }
+            }
     // A Refuse without an errno, or a check of a seventh argument, is no program.
     auto const noErrno = std::array { SystemCallRow {
         .number = 0, .checks = {}, .action = SystemCallAction::Refuse, .error = 0, .reason = "none" } };
@@ -350,4 +365,63 @@ TEST_CASE("SeccompFilter.failedChecksTakeTheUnlistedAction", "[vtextension][sand
         CHECK(verdictFor(54, Refused + 1) == otherwise);
         CHECK(verdictFor(55, Refused) == otherwise);
     }
+}
+
+TEST_CASE("SeccompFilter.anInterpreterMakesNothingExecutable", "[vtextension][sandbox]")
+{
+    // An engine that compiles makes its code executable once written; one that interprets never does, and
+    // asks only what the rows of its own allow.
+    constexpr auto Executable = uint64_t { PROT_READ | PROT_EXEC };
+    struct Expectation
+    {
+        SystemCall call {};
+        std::array<uint64_t, 6> arguments {};
+        FilterVerdict compiled;
+        FilterVerdict interpreted;
+        char const* what = nullptr;
+    };
+    auto const expectations = std::array {
+        Expectation {
+            SystemCall::Mprotect, { 0x1000, 4096, Executable }, Allowed, Killed, "code made executable" },
+        Expectation { SystemCall::Mprotect, { 0x1000, 4096, PROT_WRITE | PROT_EXEC }, Killed, Killed, "W+X" },
+        Expectation { SystemCall::Mprotect, { 0x1000, 4096, ReadWrite }, Allowed, Allowed, "memory opened" },
+        Expectation {
+            SystemCall::Mmap, { 0, 4096, Executable, Anonymous }, Killed, Killed, "executable memory" },
+        Expectation { SystemCall::Fcntl, { 12, F_GETFL }, Killed, Allowed, "a descriptor's flags asked" },
+        Expectation {
+            SystemCall::Fcntl, { 12, F_SETFL, O_NONBLOCK }, Killed, Killed, "a descriptor's flags set" },
+        Expectation { SystemCall::Fcntl, { 12, F_DUPFD, 0 }, Killed, Killed, "a descriptor duplicated" },
+        Expectation { SystemCall::Lseek, { 12, 0, SEEK_SET }, Killed, Allowed, "a seek" },
+        Expectation {
+            SystemCall::SchedGetaffinity, { 0, 128 }, Killed, refusedWith(ENOSYS), "a thread's CPUs asked" },
+    };
+    for (auto const arch: Both)
+        for (auto const& expectation: expectations)
+        {
+            INFO((arch == AuditArch::Amd64 ? "x86_64: " : "aarch64: ") << expectation.what);
+            auto const number = numberOf(expectation.call, arch);
+            CHECK(decide(BuildInstrumentation::None,
+                         arch,
+                         number,
+                         expectation.arguments,
+                         arch,
+                         GuestCode::Compiled)
+                  == expectation.compiled);
+            CHECK(decide(BuildInstrumentation::None,
+                         arch,
+                         number,
+                         expectation.arguments,
+                         arch,
+                         GuestCode::Interpreted)
+                  == expectation.interpreted);
+        }
+    // aarch64 flushes instruction caches only for code it wrote.
+    auto const membarrier = numberOf(SystemCall::Membarrier, AuditArch::AArch64);
+    CHECK(decide(BuildInstrumentation::None,
+                 AuditArch::AArch64,
+                 membarrier,
+                 {},
+                 AuditArch::AArch64,
+                 GuestCode::Interpreted)
+          == Killed);
 }

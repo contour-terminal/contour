@@ -120,9 +120,10 @@ struct HostConfinement
     std::function<std::expected<HostEndpoints, HostProcessExit>(
         remote::transport::HelperArguments const& arguments)>
         adoptEndpoints;
-    /// Makes the host's sandbox for the endpoints it adopted, as makeSystemSandbox() does: once its engine is
-    /// made, while its main thread is still its only one. Never returns null.
-    std::function<std::unique_ptr<ISandbox>(SandboxDescriptors descriptors)> sandbox;
+    /// Makes the host's sandbox for the endpoints it adopted and the code its engine runs, as
+    /// makeSystemSandbox() does: once its engine is made, while its main thread is still its only one. Never
+    /// returns null.
+    std::function<std::unique_ptr<ISandbox>(SandboxDescriptors descriptors, GuestCode code)> sandbox;
     /// How the host starts each of its threads, its interrupt listener's and every lane's: the operating
     /// system's threads (ExecutorThread::start), but in a test one that records each start.
     ExecutorStarter startThread;

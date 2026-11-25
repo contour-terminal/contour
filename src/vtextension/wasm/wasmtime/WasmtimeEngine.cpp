@@ -474,6 +474,12 @@ namespace
             return memoryGuardBytesOf(_config);
         }
 
+        /// Cranelift compiles each module to native code, which is made executable once written.
+        [[nodiscard]] host::GuestCode guestCode() const noexcept override
+        {
+            return host::GuestCode::Compiled;
+        }
+
         /// Runs PrimingModule on the calling thread, which installs Wasmtime's signal handlers (once in the
         /// process, under TrapMode::Signals) and the thread's alternate signal stack, both of which Wasmtime
         /// does lazily, the first time a guest runs. Compiled once per engine, on the first thread primed.

@@ -8,7 +8,8 @@
 namespace vtextension::wasm::host
 {
 
-std::unique_ptr<ISandbox> makeSystemSandbox([[maybe_unused]] SandboxDescriptors descriptors)
+std::unique_ptr<ISandbox> makeSystemSandbox([[maybe_unused]] SandboxDescriptors descriptors,
+                                            [[maybe_unused]] GuestCode code)
 {
     return std::make_unique<NullSandbox>();
 }

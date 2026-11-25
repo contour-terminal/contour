@@ -79,6 +79,7 @@ namespace
         SystemCallNumbers { SystemCall::RtSigaction, "rt_sigaction", 13, 134 },
         SystemCallNumbers { SystemCall::RtSigprocmask, "rt_sigprocmask", 14, 135 },
         SystemCallNumbers { SystemCall::RtSigreturn, "rt_sigreturn", 15, 139 },
+        SystemCallNumbers { SystemCall::SchedGetaffinity, "sched_getaffinity", 204, 123 },
         SystemCallNumbers { SystemCall::SchedYield, "sched_yield", 24, 124 },
         SystemCallNumbers { SystemCall::Seccomp, "seccomp", 317, 277 },
         SystemCallNumbers { SystemCall::Sendmmsg, "sendmmsg", 307, 269 },
@@ -171,7 +172,7 @@ namespace
             .index = 3, .test = ArgumentTest::NotEquals, .mask = SharedOrFixed, .value = MAP_SHARED },
     };
     /// Never executable.
-    constexpr auto MappingCoverage = std::array {
+    constexpr auto NeverExecutable = std::array {
         ArgumentCheck { .index = 2, .test = ArgumentTest::AllClear, .mask = PROT_EXEC, .value = 0 },
     };
     /// Never writable and executable at once.
@@ -212,9 +213,6 @@ namespace
             "the allocator, the engine's code and stacks, and guest memory mapped over its reservation"),
         allow(SystemCall::Munmap, "the allocator, and released instances"),
         allow(SystemCall::Madvise, "the allocator and the engine return pages"),
-        allowWhen(SystemCall::Mprotect,
-                  ProtectionRelease,
-                  "compiled code turns executable once written, and guest memory opens as it grows"),
         allow(SystemCall::Mremap, "the allocator grows large blocks"),
         allow(SystemCall::Brk, "the allocator's main arena"),
         allow(SystemCall::Close, "released descriptors: granted objects, and the channels at the end"),
@@ -247,9 +245,37 @@ namespace
                "no file: the C library's probes (overcommit_memory as an arena shrinks) do without"),
         refuse(SystemCall::Open, EACCES, "no file"),
         refuse(SystemCall::Openat2, EACCES, "no file"),
+    };
+
+    constexpr auto CompiledTable = std::array {
+        allowWhen(SystemCall::Mprotect,
+                  ProtectionRelease,
+                  "compiled code turns executable once written, and guest memory opens as it grows"),
         allow(SystemCall::Membarrier,
               "the engine flushes other cores' instruction caches once it wrote code",
               Architectures::AArch64),
+    };
+
+    /// Asks for a descriptor's status flags: F_GETFL, and nothing fcntl() changes.
+    constexpr auto StatusFlagsQuery = std::array {
+        ArgumentCheck { .index = 1, .test = ArgumentTest::Equals, .mask = IntBits, .value = F_GETFL },
+    };
+
+    // As the WAMR helper suite measured them: an interpreter writes no code, so nothing turns executable.
+    constexpr auto InterpretedTable = std::array {
+        allowWhen(
+            SystemCall::Mprotect,
+            NeverExecutable,
+            "guest memory and the interpreter's stacks open as they grow; an interpreter writes no code"),
+        allowWhen(SystemCall::Fcntl,
+                  StatusFlagsQuery,
+                  "WAMR's WASI asks the null device for its flags as it binds a guest's standard streams"),
+        allow(SystemCall::Lseek,
+              "a guest's fd_seek on a standard stream, which WAMR's WASI hands to the null device"),
+        refuse(SystemCall::SchedGetaffinity,
+               ENOSYS,
+               "pthread_getattr_np() asks for a thread's CPUs as WAMR finds the thread's stack; without "
+               "them, the C library answers all the same"),
     };
 
     constexpr auto SanitizerTable = std::array {
@@ -262,7 +288,7 @@ namespace
 
     constexpr auto CoverageTable = std::array {
         allowWhen(SystemCall::Mmap,
-                  MappingCoverage,
+                  NeverExecutable,
                   "counter files are mapped shared to be merged; the release row's other uses still pass"),
         allow(SystemCall::Openat, "counter files; the file system restriction allows the build tree only"),
         allow(SystemCall::Fcntl, "counter files are locked while they are merged"),
@@ -286,6 +312,30 @@ namespace
                                                .reason = spec.reason });
         }
         return rows;
+    }
+
+    /// @return The rows @p code adds, numbered for @p arch.
+    [[nodiscard]] std::vector<SystemCallRow> guestCodeRows(GuestCode code, AuditArch arch)
+    {
+        switch (code)
+        {
+            case GuestCode::Interpreted: return interpretedRows(arch);
+            case GuestCode::Compiled: return compiledRows(arch);
+        }
+        return {};
+    }
+
+    /// Replaces each row of @p rows by the row of @p added of the same call, and appends the others.
+    void overlay(std::vector<SystemCallRow>& rows, std::vector<SystemCallRow> const& added)
+    {
+        for (auto const& row: added)
+        {
+            auto const same = std::ranges::find(rows, row.number, &SystemCallRow::number);
+            if (same != rows.end())
+                *same = row;
+            else
+                rows.push_back(row);
+        }
     }
 
     /// @return The rows @p instrumentation adds, numbered for @p arch.
@@ -321,6 +371,16 @@ std::vector<SystemCallRow> releaseRows(AuditArch arch)
     return numbered(ReleaseTable, arch);
 }
 
+std::vector<SystemCallRow> compiledRows(AuditArch arch)
+{
+    return numbered(CompiledTable, arch);
+}
+
+std::vector<SystemCallRow> interpretedRows(AuditArch arch)
+{
+    return numbered(InterpretedTable, arch);
+}
+
 std::vector<SystemCallRow> sanitizerRows(AuditArch arch)
 {
     return numbered(SanitizerTable, arch);
@@ -331,23 +391,17 @@ std::vector<SystemCallRow> coverageRows(AuditArch arch)
     return numbered(CoverageTable, arch);
 }
 
-std::vector<SystemCallRow> rowsFor(BuildInstrumentation instrumentation, AuditArch arch)
+std::vector<SystemCallRow> rowsFor(GuestCode code, BuildInstrumentation instrumentation, AuditArch arch)
 {
     auto rows = releaseRows(arch);
-    for (auto const& added: instrumentationRows(instrumentation, arch))
-    {
-        auto const same = std::ranges::find(rows, added.number, &SystemCallRow::number);
-        if (same != rows.end())
-            *same = added;
-        else
-            rows.push_back(added);
-    }
+    overlay(rows, guestCodeRows(code, arch));
+    overlay(rows, instrumentationRows(instrumentation, arch));
     return rows;
 }
 
-std::vector<SystemCallRow> buildRows(AuditArch arch)
+std::vector<SystemCallRow> buildRows(GuestCode code, AuditArch arch)
 {
-    return rowsFor(ThisBuildInstrumentation, arch);
+    return rowsFor(code, ThisBuildInstrumentation, arch);
 }
 
 } // namespace vtextension::wasm::host
