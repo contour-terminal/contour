@@ -26,8 +26,14 @@ add_library(vtextension_host STATIC
     InProcessHost.hpp
     InterruptListener.cpp
     InterruptListener.hpp
-    MemoryProvision.cpp
-    MemoryProvision.hpp
     ../remote/HostConnector.hpp
 )
-target_link_libraries(vtextension_host PUBLIC vtextension_remote_wire PRIVATE core::base)
+target_link_libraries(vtextension_host PUBLIC vtextension_remote_wire vtextension_memory_provision PRIVATE core::base)
+
+# The memory a host hands the engine an instance runs on (MemoryProvision.hpp): a target of its own, so that an
+# engine's backend, which Contour also links to run extensions in its own process, needs it and not the host.
+add_library(vtextension_memory_provision STATIC
+    MemoryProvision.cpp
+    MemoryProvision.hpp
+)
+target_link_libraries(vtextension_memory_provision PUBLIC vtextension_remote_wire)

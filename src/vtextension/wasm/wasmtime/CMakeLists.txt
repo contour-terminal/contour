@@ -12,8 +12,8 @@ add_library(vtextension_wasmtime STATIC
     WasmtimeMemoryCreator.hpp
     WasmtimeRuntime.hpp
 )
-# vtextension_host for the memory a host provides an instance with (../host/MemoryProvision.hpp).
-target_link_libraries(vtextension_wasmtime PUBLIC vtextension vtextension_host PRIVATE contour::wasmtime)
+# vtextension_memory_provision for the memory a host provides an instance with (../host/MemoryProvision.hpp).
+target_link_libraries(vtextension_wasmtime PUBLIC vtextension PRIVATE vtextension_memory_provision contour::wasmtime)
 
 # The backstop WasmtimeEngine.cpp includes: it stops the build unless the Wasmtime headers have every
 # feature the backend switches, from the same list the configure-time probe checks an installed Wasmtime
@@ -57,7 +57,8 @@ elseif(VTEXTENSION_TESTING)
         WasmtimeEngine_test.cpp
     )
     target_link_libraries(vtextension_wasmtime_test PRIVATE
-        vtextension vtextension_wasmtime contour::wasmtime core::testing Catch2::Catch2 contour_test_trace)
+        vtextension vtextension_wasmtime vtextension_memory_provision contour::wasmtime core::testing Catch2::Catch2
+        contour_test_trace)
     add_test(NAME vtextension_wasmtime_test COMMAND vtextension_wasmtime_test)
     if(CONTOUR_WASM_GUESTS)
         # The hidden measurement case renders a bundled extension, read from where vtextension_test reads it.
