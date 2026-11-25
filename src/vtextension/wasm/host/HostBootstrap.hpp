@@ -92,7 +92,7 @@ inline constexpr CapPolicy BuildCapPolicy =
 /// RLIMIT_AS): its program text and libraries (16 MiB, measured for the WAMR host on Linux), its threads'
 /// stacks (four executors of ExecutorStackBytes, 10 MiB each, and the interrupt listener's 256 KiB), and what
 /// its heap maps for itself. That is some 57 MiB before the heap; 256 MiB leaves an allocator that keeps
-/// address space it freed several times that.
+/// address space it freed several times that, which HostBootstrap.cpp asserts.
 inline constexpr uint64_t AddressSpaceHeadroomBytes = uint64_t { 256 } * 1024 * 1024;
 
 /// @param dataBytes The data bytes a host's guests may hold; not 0.

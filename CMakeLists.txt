@@ -206,12 +206,18 @@ endif()
 # Contour itself where they run in process. Each value names a backend directory, src/vtextension/wasm/<value>/;
 # adding an engine is adding that directory and a value here. Empty, the default, picks once the third parties
 # are resolved (below): wasmtime, which compiles guests to native code, where a Wasmtime was found and
-# extensions run out of process; wamr, which interprets them, otherwise. Wasmtime runs only in the extension
-# host, whose sandbox lets it make the code it compiled executable; Contour itself never may. Checked only when
-# extensions are built: nothing reads it otherwise.
+# extensions run out of process, on a system whose sandbox can run it; wamr, which interprets them, otherwise.
+# Wasmtime runs only in the extension host, whose sandbox lets it make the code it compiled executable; Contour
+# itself never may. Checked only when extensions are built: nothing reads it otherwise.
 set(CONTOUR_WASM_RUNTIME "" CACHE STRING
     "WebAssembly engine running status-line extensions: wasmtime or wamr [default: wasmtime where one is found and extensions run out of process, else wamr]")
 set(_CONTOUR_WASM_RUNTIMES wamr wasmtime)
+# The systems whose extension-host sandbox cannot run wasmtime, a CMAKE_SYSTEM_NAME each: the default picks wamr
+# there, and wasmtime chosen explicitly is refused. FreeBSD's caps the host's whole address space (RLIMIT_AS) at
+# twice the memory its guests may hold and some headroom (src/vtextension/wasm/host/HostBootstrap.hpp,
+# addressSpaceCap()), which fits WAMR; Wasmtime reserves gigabytes of address space for each guest memory and its
+# guard, which no such cap leaves it.
+set(_CONTOUR_SANDBOXES_WITHOUT_WASMTIME FreeBSD)
 set_property(CACHE CONTOUR_WASM_RUNTIME PROPERTY STRINGS ${_CONTOUR_WASM_RUNTIMES})
 if(CONTOUR_EXTENSIONS AND CONTOUR_WASM_RUNTIME)
     if(NOT CONTOUR_WASM_RUNTIME IN_LIST _CONTOUR_WASM_RUNTIMES)
@@ -222,6 +228,11 @@ if(CONTOUR_EXTENSIONS AND CONTOUR_WASM_RUNTIME)
         message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is wasmtime, which runs extensions only in the extension host, "
                             "but CONTOUR_EXTENSION_HOST is in-process. Choose CONTOUR_EXTENSION_HOST=out-of-process, "
                             "or CONTOUR_WASM_RUNTIME=wamr.")
+    endif()
+    if(CONTOUR_WASM_RUNTIME STREQUAL "wasmtime" AND CMAKE_SYSTEM_NAME IN_LIST _CONTOUR_SANDBOXES_WITHOUT_WASMTIME)
+        message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is wasmtime, which the extension host's ${CMAKE_SYSTEM_NAME} "
+                            "sandbox cannot run: it caps the host's address space below what Wasmtime reserves "
+                            "for guest memory. Configure with CONTOUR_WASM_RUNTIME=wamr.")
     endif()
 endif()
 # Whether the extension host can run Wasmtime: set ON by cmake/ContourThirdParties.cmake once a Wasmtime
@@ -471,7 +482,8 @@ if(CONTOUR_EXTENSIONS)
     include(ContourCargo)
     # The engine, now that it is known whether a Wasmtime was found (CONTOUR_WASM_RUNTIME, above).
     if(NOT CONTOUR_WASM_RUNTIME)
-        if(CONTOUR_HAVE_WASMTIME AND CONTOUR_EXTENSION_HOST STREQUAL "out-of-process")
+        if(CONTOUR_HAVE_WASMTIME AND CONTOUR_EXTENSION_HOST STREQUAL "out-of-process"
+           AND NOT CMAKE_SYSTEM_NAME IN_LIST _CONTOUR_SANDBOXES_WITHOUT_WASMTIME)
             set(CONTOUR_WASM_RUNTIME wasmtime)
         else()
             set(CONTOUR_WASM_RUNTIME wamr)

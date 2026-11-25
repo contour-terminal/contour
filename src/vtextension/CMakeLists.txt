@@ -216,14 +216,7 @@ endif()
 set(VTEXTENSION_FREEBSD_SANDBOX OFF)
 if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     set(VTEXTENSION_FREEBSD_SANDBOX ON)
-    # That sandbox caps the host's whole address space (RLIMIT_AS) at twice the memory its guests may hold and
-    # some headroom (wasm/host/HostBootstrap.hpp, addressSpaceCap()), which fits WAMR. Wasmtime reserves
-    # gigabytes of address space for each guest memory and its guard, which no such cap leaves it.
-    if(CONTOUR_EXTENSIONS AND CONTOUR_WASM_RUNTIME STREQUAL "wasmtime")
-        message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is wasmtime, which the extension host's FreeBSD sandbox cannot "
-                            "run: it caps the host's address space below what Wasmtime reserves for guest memory. "
-                            "Configure with CONTOUR_WASM_RUNTIME=wamr.")
-    endif()
+    # That sandbox runs no Wasmtime: a row of _CONTOUR_SANDBOXES_WITHOUT_WASMTIME (../../CMakeLists.txt).
 endif()
 
 # The protocol and channels between Contour and its extension host process, and the host's server; no engine,
