@@ -573,19 +573,9 @@ void checkRefusedPromptly(std::span<InstantiationHookCase const> cases)
 
 TEST_CASE("CompiledExtension.instantiationHooks", "[vtextension]")
 {
-    // What the runtime would run by itself while instantiating -- where no deadline stops it and host
-    // functions fail -- refuses the module before it can run, and promptly: none of these is instantiated.
-    checkRefusedPromptly(std::vector<InstantiationHookCase> {
-        { .description = "two export sections",
-          .module = toModule(vtextension::testing::TwoExportSectionsModule) },
-    });
-}
-
-// In-process only: the hooks the in-process engine runs by itself while instantiating, and the export names
-// it would take for one. An engine that runs none, as an extension host's does, has nothing to refuse, and
-// instantiates these modules.
-TEST_CASE("CompiledExtension.instantiationHooks.engineRun", "[vtextension][in-process]")
-{
+    // What an engine would run by itself while instantiating -- where no deadline stops it and host
+    // functions fail -- or would read otherwise than the host, refuses the module before any engine can run
+    // it, on every engine alike, and promptly: none of these is instantiated.
     checkRefusedPromptly(std::vector<InstantiationHookCase> {
         { .description = "__post_instantiate",
           .module = toModule(vtextension::testing::PostInstantiateSpinningModule) },
@@ -593,6 +583,8 @@ TEST_CASE("CompiledExtension.instantiationHooks.engineRun", "[vtextension][in-pr
           .module = toModule(vtextension::testing::CallCtorsSpinningModule) },
         { .description = "_initialize followed by a NUL",
           .module = toModule(vtextension::testing::NulInitializerModule) },
+        { .description = "two export sections",
+          .module = toModule(vtextension::testing::TwoExportSectionsModule) },
         { .description = "the backend's alias of _initialize",
           .module = toModule(vtextension::testing::AliasExportingModule) },
     });

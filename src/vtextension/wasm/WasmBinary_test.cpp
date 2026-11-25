@@ -9,10 +9,12 @@
 #include <expected>
 #include <initializer_list>
 #include <ranges>
+#include <string>
 #include <string_view>
 #include <vector>
 
 #include <vtextension/testing/TestModules.hpp>
+#include <vtextension/wasm/InstantiationHooks.hpp>
 #include <vtextension/wasm/WasmBinary.hpp>
 #include <vtextension/wasm/testing/BackendContract.hpp>
 
@@ -274,4 +276,52 @@ TEST_CASE("WasmBinary.declaredCounts", "[vtextension]")
         module.insert(module.end(), body.begin(), body.end());
         CHECK(declaredCounts(module) == counts);
     }
+}
+
+TEST_CASE("WasmBinary.exportNames", "[vtextension]")
+{
+    using vtextension::wasm::binary::exportNames;
+    using Names = std::vector<std::string>;
+    CHECK(exportNames(raw({ 0x00 })) == std::unexpected(BinaryError::NotAModule));
+
+    struct Case
+    {
+        std::string_view description;
+        std::vector<std::byte> sections;
+        std::expected<Names, BinaryError> names;
+    };
+    auto const cases = std::vector<Case> {
+        { .description = "no export section", .sections = {}, .names = Names {} },
+        { .description = "two exports, a NUL kept as a byte of its name",
+          .sections = raw({ 0x07, 0x0a, 0x02, 0x01, 'a', 0x00, 0x00, 0x02, 'b', 0x00, 0x02, 0x00 }),
+          .names = Names { "a", std::string { "b\0", 2 } } },
+        { .description = "an entry running past its section",
+          .sections = raw({ 0x07, 0x03, 0x01, 0x05, 'a' }),
+          .names = std::unexpected(BinaryError::Truncated) },
+        { .description = "a second export section",
+          .sections = raw({ 0x07, 0x01, 0x00, 0x07, 0x01, 0x00 }),
+          .names = std::unexpected(BinaryError::Malformed) },
+        { .description = "a byte after the last entry",
+          .sections = raw({ 0x07, 0x06, 0x01, 0x01, 'a', 0x00, 0x00, 0xFF }),
+          .names = std::unexpected(BinaryError::Malformed) },
+    };
+    auto const header = raw({ 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 });
+    for (auto const& [description, body, names]: cases)
+    {
+        INFO(description);
+        auto module = header;
+        module.insert(module.end(), body.begin(), body.end());
+        CHECK(exportNames(module) == names);
+    }
+}
+
+TEST_CASE("InstantiationHooks.isRefusedExportName", "[vtextension]")
+{
+    using vtextension::wasm::isRefusedExportName;
+    CHECK(isRefusedExportName("__post_instantiate"));
+    CHECK(isRefusedExportName("__wasm_call_ctors"));
+    CHECK(isRefusedExportName("~initialize"));
+    CHECK(isRefusedExportName(std::string_view { "_initialize\0", 12 }));
+    CHECK_FALSE(isRefusedExportName("_initialize"));
+    CHECK_FALSE(isRefusedExportName("render"));
 }

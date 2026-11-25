@@ -80,8 +80,7 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
     #
     # Beside them, the suites vtextension_test runs on the default backend, here composed by
     # testing/RemoteDefaultBackend.cpp as the remote backend over hosts in this process: their real guests
-    # run through the protocol. A case that depends on an in-process engine is tagged [in-process] and
-    # excluded from this binary's run.
+    # run through the protocol.
     add_executable(vtextension_remote_test
         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
         ../host/ExecutorThread_test.cpp
@@ -107,7 +106,7 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
         target_compile_definitions(vtextension_remote_test PRIVATE
             VTEXTENSION_TEST_MODULE_DIR="${VTEXTENSION_TEST_MODULE_DIR}")
     endif()
-    add_test(NAME vtextension_remote_test COMMAND vtextension_remote_test "~[in-process]")
+    add_test(NAME vtextension_remote_test COMMAND vtextension_remote_test)
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
         target_compile_options(vtextension_remote_test PRIVATE -Wno-c2y-extensions)

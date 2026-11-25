@@ -11,7 +11,9 @@
 
 #include <vtextension/ControlImports.hpp>
 #include <vtextension/HostBindings.hpp>
+#include <vtextension/wasm/InstantiationHooks.hpp>
 #include <vtextension/wasm/WasiAllowList.hpp>
+#include <vtextension/wasm/WasmBinary.hpp>
 
 namespace vtextension
 {
@@ -125,6 +127,13 @@ std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> CompiledExtens
     // The manifest is read before the runtime sees the bytes, which its loader may rewrite in place.
     auto manifest = parseManifest(bytes);
     auto const startsItself = hasStartFunction(bytes);
+
+    // Exports an engine would run while instantiating, or read otherwise than the host does, are refused
+    // here, before any engine sees them: every engine refuses the same modules, and at once. Bytes whose
+    // exports cannot be read are no module any engine would load.
+    auto const exportNames = wasm::binary::exportNames(bytes);
+    if (!exportNames || std::ranges::any_of(*exportNames, wasm::isRefusedExportName))
+        return std::unexpected(ExtensionError::InvalidComponent);
 
     auto module = engine.runtime().load(std::move(identity), std::move(bytes));
     // A host that cannot be reached says nothing about the module; any other refusal is the module's.

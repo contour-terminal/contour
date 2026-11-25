@@ -64,6 +64,7 @@ set(vtextension_HEADERS
     wasm/BackendConfig.hpp
     wasm/DefaultBackend.hpp
     wasm/EngineFeatures.hpp
+    wasm/InstantiationHooks.hpp
     wasm/WasiAllowList.hpp
     wasm/WasmBinary.hpp
     wasm/WasmRuntime.hpp

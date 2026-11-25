@@ -14,6 +14,7 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace vtextension::wasm::binary
@@ -336,6 +337,47 @@ struct DeclaredCounts
             });
         });
     });
+}
+
+/// The names a module exports, in the order its export section lists them.
+/// @param module A WebAssembly core module's bytes.
+/// @return The names; none for a module without an export section. `Malformed` for a second export section,
+///         or one with bytes after its last entry; `Truncated` for one that ends inside an entry.
+[[nodiscard]] inline std::expected<std::vector<std::string>, BinaryError> exportNames(
+    std::span<std::byte const> module)
+{
+    return sections(module).and_then(
+        [](std::vector<Section> const& all) -> std::expected<std::vector<std::string>, BinaryError> {
+            auto names = std::vector<std::string> {};
+            auto matching =
+                all | std::views::filter([](Section const& entry) { return entry.id == ExportSectionId; });
+            auto const first = matching.begin();
+            if (first == matching.end())
+                return names;
+            if (std::ranges::next(first) != matching.end())
+                return std::unexpected(BinaryError::Malformed);
+            auto reader = Reader { first->content, first->offset };
+            auto const count = reader.u32();
+            if (!count)
+                return std::unexpected(count.error());
+            for ([[maybe_unused]] auto const index: std::views::iota(uint32_t { 0 }, *count))
+            {
+                // A name, the kind of what is exported, and its index.
+                auto const name = reader.name();
+                if (!name)
+                    return std::unexpected(name.error());
+                if (auto const kind = reader.byte(); !kind)
+                    return std::unexpected(kind.error());
+                if (auto const exported = reader.u32(); !exported)
+                    return std::unexpected(exported.error());
+                auto& added = names.emplace_back(name->size(), '\0');
+                std::ranges::transform(
+                    *name, added.begin(), [](std::byte value) { return static_cast<char>(value); });
+            }
+            if (!reader.atEnd())
+                return std::unexpected(BinaryError::Malformed);
+            return names;
+        });
 }
 
 } // namespace vtextension::wasm::binary
