@@ -293,6 +293,24 @@ namespace
         "git no longer lists the worktree, but its directory is still there; check it "
         "and delete it by hand: {}"sv;
 
+    /// The command that removes the run's worktree: from the repository when it may. Run inside the worktree,
+    /// git on Windows cannot delete the directory it has as its working directory, and leaves it; a
+    /// repository no longer configured leaves only that.
+    /// @return Its name.
+    [[nodiscard]] std::string_view removalCommand(StepContext const& context) noexcept
+    {
+        switch (context.repoCommands)
+        {
+            case RepoCommands::Available: return "git-worktree-remove"sv;
+            case RepoCommands::Unavailable: break;
+        }
+        return "git-worktree-remove-inside"sv;
+    }
+
+    /// What keeps a run whose removal found its repository's directory missing.
+    constexpr auto RepositoryMissing =
+        "the repository's directory is missing, so the worktree could not be removed from it"sv;
+
     /// The one untracked file the extension itself writes, as `git status --porcelain` lists it.
     constexpr auto StatusBoardEntry = "?? STATUS.md"sv;
 
@@ -681,7 +699,7 @@ namespace
             return enterCommand(run,
                                 context,
                                 nextStep(std::move(ending), EndStep::Remove),
-                                "git-worktree-remove",
+                                removalCommand(context),
                                 { { .name = "path", .value = run.worktree } });
         if (lines.size() == 1 && lines.front() == StatusBoardEntry)
             return enterCommand(
@@ -736,7 +754,7 @@ namespace
                 return enterCommand(run,
                                     context,
                                     nextStep(std::move(ending), EndStep::Remove),
-                                    "git-worktree-remove",
+                                    removalCommand(context),
                                     { { .name = "path", .value = run.worktree } });
             case EndStep::Remove:
                 return finish(run, context, ending.cause, Fate::Removed, {}, ending.resumedFrom);
@@ -903,6 +921,10 @@ std::vector<RunEffect> advance(Run& run, RunInput const& input, StepContext cons
         [&](Ending const& ending, CwdMissing const&) -> Effects {
             if (!awaitsCommand(ending))
                 return {};
+            // Every other ending command runs inside the worktree, so its missing directory is the worktree
+            // gone; the removal runs in the repository, whose missing directory says nothing of the worktree.
+            if (ending.step == EndStep::Remove && context.repoCommands == RepoCommands::Available)
+                return keep(run, context, ending, RepositoryMissing);
             return finish(run, context, goneEnded(run, ending), Fate::Removed, {}, ending.resumedFrom);
         },
         [&](Ending& ending, MarkSeen const&) -> Effects {

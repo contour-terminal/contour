@@ -81,7 +81,17 @@ git-clean (short, in worktrees): git clean -f -- STATUS.md
   GIT_CONFIG_VALUE_2=/dev/null
   GIT_ATTR_SOURCE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
   GIT_OPTIONAL_LOCKS=0
-git-worktree-remove (long, in worktrees): git worktree remove {path}
+git-worktree-remove (long, in repos): git worktree remove {path}
+  GIT_CONFIG_COUNT=3
+  GIT_CONFIG_KEY_0=core.fsmonitor
+  GIT_CONFIG_VALUE_0=false
+  GIT_CONFIG_KEY_1=core.hooksPath
+  GIT_CONFIG_VALUE_1=/dev/null
+  GIT_CONFIG_KEY_2=core.attributesFile
+  GIT_CONFIG_VALUE_2=/dev/null
+  GIT_ATTR_SOURCE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
+  GIT_OPTIONAL_LOCKS=0
+git-worktree-remove-inside (long, in worktrees): git worktree remove {path}
   GIT_CONFIG_COUNT=3
   GIT_CONFIG_KEY_0=core.fsmonitor
   GIT_CONFIG_VALUE_0=false

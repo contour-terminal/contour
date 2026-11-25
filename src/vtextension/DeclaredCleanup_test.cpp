@@ -64,7 +64,7 @@ constexpr auto EmptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"sv;
 /// The commands run in a worktree an agent controlled, before anything of it is removed.
 constexpr auto CleanupCommands = std::array {
     "git-common-dir"sv,      "git-index-flags"sv, "git-status"sv,          "git-head-reachable"sv,
-    "git-operation-state"sv, "git-clean"sv,       "git-worktree-remove"sv,
+    "git-operation-state"sv, "git-clean"sv,       "git-worktree-remove"sv, "git-worktree-remove-inside"sv,
 };
 
 /// Commands that run in a repository or a worktree the orchestrator is setting up, not tearing down.
@@ -461,12 +461,14 @@ void requireNoFilterRuns(GitSandbox const& sandbox, std::function<void(GitIn con
     GitSandbox::makeStatDirty(sandbox.worktree() / "f");
 
     auto cleanup = DeclaredCleanup(sandbox);
-    for (auto const command: CleanupCommands)
+    // The removal runs once, from the repository: its variant run inside the worktree would find it gone.
+    for (auto const command:
+         CleanupCommands | std::views::filter([](auto name) { return name != "git-worktree-remove-inside"; }))
     {
-        auto const arguments = command == "git-worktree-remove"
-                                   ? ConfigMap { { "path", sandbox.worktree().string() } }
-                                   : ConfigMap {};
-        auto const result = cleanup.run(command, sandbox.worktree(), arguments);
+        auto const removes = command == "git-worktree-remove";
+        auto const arguments = removes ? ConfigMap { { "path", sandbox.worktree().string() } } : ConfigMap {};
+        auto const result =
+            cleanup.run(command, removes ? sandbox.repository() : sandbox.worktree(), arguments);
         INFO(command << ": " << result.standardError);
         CHECK(result.exitCode == 0);
         CHECK_FALSE(std::filesystem::exists(sandbox.sentinel()));
@@ -899,8 +901,8 @@ TEST_CASE("worktree remove without --force refuses a dirty tree", "[vtextension]
     GitIn(*sandbox, sandbox->worktree()).write("f", "changed\n");
 
     auto cleanup = DeclaredCleanup(*sandbox);
-    auto const removed =
-        cleanup.run("git-worktree-remove", sandbox->worktree(), { { "path", sandbox->worktree().string() } });
+    auto const removed = cleanup.run(
+        "git-worktree-remove", sandbox->repository(), { { "path", sandbox->worktree().string() } });
     REQUIRE(removed.exitCode.has_value());
     CHECK(removed.exitCode != 0);
     CHECK(std::filesystem::is_directory(sandbox->worktree()));

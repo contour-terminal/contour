@@ -432,6 +432,13 @@ enum class WorktreeListing : uint8_t
     Unlisted,        ///< git no longer lists it: a directory without a `.git` file is what its removal left.
 };
 
+/// Whether a command may run in the run's repository: the host runs one only in a configured repository.
+enum class RepoCommands : uint8_t
+{
+    Unavailable = 0, ///< The repository is not configured, or not at the path the run stored.
+    Available,       ///< It is configured at the path the run stored.
+};
+
 /// What a step may know about the world beyond the run.
 struct StepContext
 {
@@ -442,6 +449,8 @@ struct StepContext
     /// Whether git still lists the run's worktree; read only once its directory was found without a `.git`
     /// file.
     WorktreeListing worktreeListing = WorktreeListing::Unavailable;
+    /// Whether the removal may run in the repository, where it can delete the worktree's directory too.
+    RepoCommands repoCommands = RepoCommands::Unavailable;
     uint64_t wallMs = 0; ///< Now, in wall-clock milliseconds.
     uint64_t monoMs = 0; ///< Now, in monotonic milliseconds: what a change is stamped with.
     /// The provider rows the configuration was read with; a step never runs an Unmeasured row's command.

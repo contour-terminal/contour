@@ -112,7 +112,8 @@ namespace
     constexpr auto RunKeyPrefix = "run/"sv;
 
     /// The commands that delete from a worktree: never run while a tab of its run is listed.
-    constexpr auto DeletingCommands = std::array { "git-clean"sv, "git-worktree-remove"sv };
+    constexpr auto DeletingCommands =
+        std::array { "git-clean"sv, "git-worktree-remove"sv, "git-worktree-remove-inside"sv };
 
     /// Why a deleting command was held back: a tab of the run is listed.
     constexpr auto TabStillListed = "a tab of the run is still open"sv;
@@ -410,12 +411,14 @@ StepContext Engine::contextFor(Run const& run) const noexcept
         main = mainCheckout(state->worktrees);
     else if (repo == nullptr)
         main = std::string_view { run.repoPath };
-    auto const listed = state != nullptr && repo != nullptr && repo->path == run.repoPath;
+    auto const configured = repo != nullptr && repo->path == run.repoPath;
+    auto const listed = state != nullptr && configured;
     auto const unknown = listed ? state->unknownCheckout : CheckoutUnknown::Unavailable;
     return StepContext {
         .mainCheckout = main,
         .unknownCheckout = unknown,
         .worktreeListing = listed ? worktreeListingOf(*state, run) : WorktreeListing::Unavailable,
+        .repoCommands = configured ? RepoCommands::Available : RepoCommands::Unavailable,
         .wallMs = _wallMs,
         .monoMs = _monoMs,
         .providers = _config ? _config->sources().providers : providers(),

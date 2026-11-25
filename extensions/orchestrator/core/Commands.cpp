@@ -384,9 +384,18 @@ namespace
                       .root = Root::Worktrees,
                       .argv = GitCleanArgv,
                       .environment = CleanupEnvironment },
-        // Run from inside the worktree being removed, not from its repository: git then checks that the
-        // worktree's link points back to it, and refuses a worktree whose link was redirected elsewhere.
+        // Run from the repository, not from inside the worktree being removed: on Windows no process can
+        // delete a directory some process -- git itself, run there -- has as its working directory, so git
+        // would delete every file and forget the worktree, then fail on the directory and leave it. From the
+        // repository git still checks that the worktree's link points back to it, and refuses one redirected.
         CommandDecl { .name = "git-worktree-remove",
+                      .timeout = Timeout::Long,
+                      .root = Root::Repos,
+                      .argv = GitWorktreeRemoveArgv,
+                      .environment = CleanupEnvironment },
+        // The same from inside the worktree, for a run whose repository is no longer configured: the host
+        // runs a repository command only in a configured one. On Windows it leaves the directory behind.
+        CommandDecl { .name = "git-worktree-remove-inside",
                       .timeout = Timeout::Long,
                       .root = Root::Worktrees,
                       .argv = GitWorktreeRemoveArgv,

@@ -44,7 +44,7 @@ constexpr auto ForceExempt = std::pair { "git-clean"sv, "-f"sv };
 /// and take no optional lock.
 constexpr auto CleanupCommands = std::array {
     "git-common-dir"sv,  "git-status"sv, "git-head-reachable"sv,  "git-operation-state"sv,
-    "git-index-flags"sv, "git-clean"sv,  "git-worktree-remove"sv,
+    "git-index-flags"sv, "git-clean"sv,  "git-worktree-remove"sv, "git-worktree-remove-inside"sv,
 };
 
 /// The environment every cleanup command, and only a cleanup command, carries.
@@ -1110,7 +1110,8 @@ TEST_CASE("manifestLines spells the declared tables", "[orchestrator][commands][
         "command-env-for git-worktree-remove GIT_CONFIG_VALUE_1 = /dev/null"sv,
         "command-env GIT_CONFIG_COUNT = 2"sv,
         "command-env-for git-operation-state LC_ALL = C"sv,
-        "command git-worktree-remove long @worktrees = git worktree remove {path}"sv,
+        "command git-worktree-remove long @repos = git worktree remove {path}"sv,
+        "command git-worktree-remove-inside long @worktrees = git worktree remove {path}"sv,
         "arg path = path:worktrees"sv,
         "root worktrees create = config:worktree_root"sv,
         "root repos = config:repos/*/path"sv,

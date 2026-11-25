@@ -471,7 +471,10 @@ class Harness
     }
 
     /// The pane is gone; the run goes through the removal checks and is removed.
-    void endCleanly(std::string_view id, std::string_view main = ContourPath)
+    /// @param removal The removal it expects: from inside the worktree for a repository no longer configured.
+    void endCleanly(std::string_view id,
+                    std::string_view main = ContourPath,
+                    std::string_view removal = "git-worktree-remove")
     {
         list({});
         read("/.git", intactGitFile(main, id));
@@ -480,7 +483,7 @@ class Harness
         finish("git-head-reachable", ok("refs/heads/agent/x\n"));
         finish("git-operation-state", ok(CleanLongStatus));
         finish("git-status", ok());
-        finish("git-worktree-remove", ok());
+        finish(removal, ok());
     }
 
     [[nodiscard]] Run const* run(std::string_view id) const
@@ -1197,6 +1200,13 @@ TEST_CASE("a clean ending removes the worktree and frees the slot", "[orchestrat
     harness.finish("git-head-reachable", ok("refs/heads/agent/x\n"));
     harness.finish("git-operation-state", ok(CleanLongStatus));
     harness.finish("git-status", ok());
+    // From the repository, never from inside the worktree: on Windows git, run there, could not delete
+    // the directory it has as its working directory.
+    auto const removal = harness.pending("git-worktree-remove");
+    REQUIRE(removal);
+    CHECK(removal->cwd == ContourPath);
+    REQUIRE(removal->arguments.size() == 1);
+    CHECK(removal->arguments.front().value == worktreeOf("contour", PrId));
     auto const removed = harness.finish("git-worktree-remove", ok());
     auto const finished = finishedOf(harness.run(PrId));
     REQUIRE(finished);
@@ -3565,7 +3575,10 @@ TEST_CASE("a run of a repository no longer configured can still be ended", "[orc
     auto const closes = all<ClosePane>(harness.feed(EndRun { .run = std::string(PrId) }));
     REQUIRE(closes.size() == 1);
     CHECK(closes.front().pane == "p1");
-    harness.endCleanly(PrId);
+    // The host runs nothing in a repository no longer configured: git removes it from inside the worktree.
+    harness.endCleanly(PrId, ContourPath, "git-worktree-remove-inside");
+    CHECK(harness.commandsIssued("git-worktree-remove-inside") == 1);
+    CHECK(harness.commandsIssued("git-worktree-remove") == 0);
     auto const finished = finishedOf(harness.run(PrId));
     REQUIRE(finished);
     CHECK(finished->ended == Ended::EndedByYou);
@@ -3688,7 +3701,8 @@ TEST_CASE("a run ended outside the configuration completes after a restart", "[o
         second.finish("git-head-reachable", ok("refs/heads/agent/x\n"));
         second.finish("git-operation-state", ok(CleanLongStatus));
         second.finish("git-status", ok());
-        second.finish("git-worktree-remove", ok());
+        // Its repository is no longer configured: the host runs nothing there, so git runs in the worktree.
+        second.finish("git-worktree-remove-inside", ok());
         auto const finished = finishedOf(second.run(PrId));
         REQUIRE(finished);
         CHECK(finished->ended == Ended::EndedByYou);
@@ -3696,7 +3710,7 @@ TEST_CASE("a run ended outside the configuration completes after a restart", "[o
     }
     SECTION("restarted once finished")
     {
-        first.endCleanly(PrId);
+        first.endCleanly(PrId, ContourPath, "git-worktree-remove-inside");
         REQUIRE(finishedOf(first.run(PrId)));
         auto restart = contextFor(settings);
         restart.stored = first.stored();

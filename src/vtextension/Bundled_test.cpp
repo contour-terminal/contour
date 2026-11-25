@@ -87,6 +87,7 @@ struct BundledExtension
                         "git-index-flags",
                         "git-clean",
                         "git-worktree-remove",
+                        "git-worktree-remove-inside",
                         "agent-setup-check",
                         "claude-plugins",
                         "claude-marketplace-add",

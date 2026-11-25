@@ -67,6 +67,7 @@ using orchestrator::PrepareStep;
 using orchestrator::Preparing;
 using orchestrator::ReadGitFile;
 using orchestrator::Removal;
+using orchestrator::RepoCommands;
 using orchestrator::RetryRemoval;
 using orchestrator::Run;
 using orchestrator::RunDeclared;
@@ -158,7 +159,9 @@ enum class Item : uint8_t
 
 [[nodiscard]] StepContext knownContext()
 {
-    return StepContext { .mainCheckout = MainCheckout, .wallMs = NowMs };
+    return StepContext { .mainCheckout = MainCheckout,
+                         .repoCommands = RepoCommands::Available,
+                         .wallMs = NowMs };
 }
 
 /// The effects beginRun() returns; none when it refuses.
@@ -331,6 +334,7 @@ struct TransitionRow
     std::string_view failureAfter = {};
     Checkout checkout = Checkout::Known;
     WorktreeListing listing = WorktreeListing::Unavailable; ///< What git's listing says of the worktree.
+    RepoCommands repoCommands = RepoCommands::Available;    ///< Whether its repository is configured.
 };
 
 [[nodiscard]] Ending endingAt(EndStep step, Ended cause = Ended::Completed)
@@ -735,7 +739,8 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
         { .from = "verify after a failed worktree add, no .git, git does not list it",
           .state = endingAt(EndStep::Verify, Ended::PreparationFailed),
           .input = gitFileError(FileReadError::NotRegular),
-          .to = "Finished(preparation-failed, kept, new: the .git entry is not a readable file: it is not a "
+          .to = "Finished(preparation-failed, kept, new: the .git entry is not a readable file: it is "
+                "not a "
                 "regular file)",
           .effects = "persist",
           .carried = Carried::Failure,
@@ -777,7 +782,8 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
         { .from = "verify, escapes",
           .state = endingAt(EndStep::Verify),
           .input = gitFileError(FileReadError::Escapes),
-          .to = "Finished(completed, kept, new: the .git entry is not a readable file: it leads outside the "
+          .to = "Finished(completed, kept, new: the .git entry is not a readable file: it leads outside "
+                "the "
                 "worktree)",
           .effects = "persist" },
         { .from = "verify, lost",
@@ -955,6 +961,14 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
           .input = CommandOk { "" },
           .to = "Ending(remove, completed, removal issued)",
           .effects = "persist, run git-worktree-remove path" },
+        // The host runs nothing in a repository no longer configured: git removes the worktree from
+        // inside.
+        { .from = "status, clean, repository no longer configured",
+          .state = endingAt(EndStep::Status),
+          .input = CommandOk { "" },
+          .to = "Ending(remove, completed, removal issued)",
+          .effects = "persist, run git-worktree-remove-inside path",
+          .repoCommands = RepoCommands::Unavailable },
         { .from = "status, only the status board",
           .state = endingAt(EndStep::Status),
           .input = CommandOk { "?? STATUS.md\n" },
@@ -981,6 +995,27 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
           .input = CommandOk { "Removing STATUS.md\n" },
           .to = "Ending(remove, completed, removal issued)",
           .effects = "persist, run git-worktree-remove path" },
+        { .from = "clean-status-board ok, repository no longer configured",
+          .state = endingAt(EndStep::CleanStatusBoard),
+          .input = CommandOk { "Removing STATUS.md\n" },
+          .to = "Ending(remove, completed, removal issued)",
+          .effects = "persist, run git-worktree-remove-inside path",
+          .repoCommands = RepoCommands::Unavailable },
+        // The removal runs in the repository: its directory missing says nothing of the worktree.
+        { .from = "remove in a missing repository directory",
+          .state = endingAt(EndStep::Remove),
+          .input = CwdMissing {},
+          .to = "Finished(completed, kept, new: the repository's directory is missing, so the "
+                "worktree could "
+                "not be removed from it)",
+          .effects = "persist" },
+        // Run inside the worktree, the removal's missing directory is the worktree gone.
+        { .from = "remove inside a missing worktree",
+          .state = endingAt(EndStep::Remove),
+          .input = CwdMissing {},
+          .to = "Finished(completed, removed, new)",
+          .effects = "persist",
+          .repoCommands = RepoCommands::Unavailable },
         { .from = "remove ok",
           .state = endingAt(EndStep::Remove),
           .input = CommandOk {},
@@ -1152,7 +1187,8 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
                              .effects = step == PrepareStep::OpenPane ? "persist, close-pane" : VerifyEffects,
                              .failureAfter = failure });
 
-    // The command steps of the removal checks: a failure keeps the worktree, a missing directory forgets it.
+    // The command steps of the removal checks: a failure keeps the worktree, a missing directory forgets
+    // it.
     struct CommandStep
     {
         EndStep step;
@@ -1185,14 +1221,16 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
                          .input = CommandFailed { "timed out" },
                          .to = command.kept,
                          .effects = "persist" });
-        // Once the removal was asked for, a worktree found gone may be its doing: the run ended as it did.
+        // Once the removal was asked for, a worktree found gone may be its doing: the run ended as it
+        // did. The removal runs in the repository, unless that is no longer configured (the rows above).
         auto const removing = command.step == EndStep::Remove;
         rows.push_back(
             { .from = "missing directory",
               .state = endingAt(command.step),
               .input = CwdMissing {},
               .to = removing ? "Finished(completed, removed, new)" : "Finished(worktree-gone, removed, new)",
-              .effects = "persist" });
+              .effects = "persist",
+              .repoCommands = RepoCommands::Unavailable });
         rows.push_back({ .from = "lost",
                          .state = endingAt(command.step, Ended::NeverReported),
                          .input = Lost {},
@@ -1238,6 +1276,7 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
     context.unknownCheckout =
         row.checkout == Checkout::Pending ? CheckoutUnknown::Pending : CheckoutUnknown::Unavailable;
     context.worktreeListing = row.listing;
+    context.repoCommands = row.repoCommands;
     return context;
 }
 
@@ -1722,7 +1761,8 @@ TEST_CASE("every declared command passes its declaration", "[orchestrator][run]"
                                              "git-status",
                                              "git-worktree-add",
                                              "git-worktree-add-branch",
-                                             "git-worktree-remove" });
+                                             "git-worktree-remove",
+                                             "git-worktree-remove-inside" });
 }
 
 TEST_CASE("the values each command is passed", "[orchestrator][run]")
@@ -2121,7 +2161,9 @@ TEST_CASE("a Windows run's checks read git's spelling of its paths", "[orchestra
     run.repoPath = R"(C:\Users\u\src\contour)";
     run.worktree = R"(C:\Users\u\wt\contour\pr-2334-20261113-150847)";
     run.pane = "pane-7";
-    auto const context = StepContext { .mainCheckout = "C:/Users/u/src/contour"sv, .wallMs = NowMs };
+    auto const context = StepContext { .mainCheckout = "C:/Users/u/src/contour"sv,
+                                       .repoCommands = RepoCommands::Available,
+                                       .wallMs = NowMs };
     CHECK(describe(orchestrator::advance(run, PaneGone {}, context)) == "persist, read-git-file");
     CHECK(describe(orchestrator::advance(
               run,
