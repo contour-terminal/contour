@@ -10,6 +10,8 @@
 #include <vector>
 
 #include <vtextension/wasm/remote/proto/Codec.hpp>
+#include <vtextension/wasm/remote/proto/PduTable.hpp>
+#include <vtextension/wasm/remote/proto/Wire.hpp>
 
 namespace vtextension::wasm::remote::transport
 {
@@ -31,6 +33,14 @@ namespace
         return StreamError::Io;
     }
 
+    /// @return How many bytes of @p frame, one encodeFrame() made, its body spans: its length less the kind's
+    ///         one byte.
+    [[nodiscard]] uint64_t bodySizeOf(std::span<uint8_t const> frame) noexcept
+    {
+        auto header = proto::Reader { frame };
+        return header.varint64().value_or(1) - 1;
+    }
+
     /// @return The stream's reason for a frame the codec refused; never called with NeedMoreData.
     [[nodiscard]] StreamError streamErrorOf(proto::DecodeError error) noexcept
     {
@@ -48,9 +58,12 @@ PduStream::PduStream(Channel channel,
 
 std::expected<void, StreamError> PduStream::send(proto::Pdu const& pdu)
 {
-    // A PDU the peer would refuse is not sent: the stream stays usable, and the caller learns why.
+    // A PDU the peer would refuse is not sent: the stream stays usable, and the caller learns why. The
+    // encoder checks every list against its cap; the body's bytes are checked here, against the cap the
+    // peer's reader applies under the same limits.
     auto const frame = proto::encodeFrame(pdu);
-    if (!frame)
+    if (!frame
+        || bodySizeOf(*frame) > proto::PduTable[std::to_underlying(proto::kindOf(pdu)) - 1].sizeCap(_limits))
         return std::unexpected(StreamError::OverCap);
     return _channel.send(*frame).transform_error([](ChannelError error) { return streamErrorOf(error); });
 }

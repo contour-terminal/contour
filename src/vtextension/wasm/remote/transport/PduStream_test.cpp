@@ -110,6 +110,29 @@ TEST_CASE("PduStream.overCapIsNotSent", "[vtextension]")
     CHECK(pair.helper.receive() == release);
 }
 
+TEST_CASE("PduStream.overByteCapIsNotSent", "[vtextension]")
+{
+    // A module larger than the stream's limits let a Load carry: its lists are within their caps, its bytes
+    // are not. Refused here, as the helper's reader would refuse it, and the stream carries on.
+    auto const limits = proto::PduLimits { .maxModuleBytes = 64, .maxMemoryBytes = 64 };
+    auto channels = makeChannelPair();
+    REQUIRE(channels.has_value());
+    auto parent = PduStream {
+        std::move(channels->parent), proto::ChannelKind::Control, proto::Direction::ToParent, limits
+    };
+    auto helper = PduStream {
+        std::move(channels->helper), proto::ChannelKind::Control, proto::Direction::ToHelper, limits
+    };
+
+    auto const tooLarge =
+        proto::Pdu { proto::Load { .runtimeId = 1, .moduleId = 2, .bytes = std::vector<std::byte>(256) } };
+    CHECK(parent.send(tooLarge) == std::unexpected(StreamError::OverCap));
+
+    auto const release = proto::Pdu { proto::Release { .target = proto::ReleaseTarget::Module, .id = 2 } };
+    REQUIRE(parent.send(release).has_value());
+    CHECK(helper.receive() == release);
+}
+
 TEST_CASE("PduStream.peerCloseIsClosed", "[vtextension]")
 {
     auto pair = makeControlPair();

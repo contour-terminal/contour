@@ -176,7 +176,9 @@ struct Channel::Native
 {
     HANDLE pipe;
     std::atomic<EndState> state { EndState::Open };
-    std::atomic<uint32_t> inFlight { 0 }; ///< Transfers that may touch the handle.
+    /// Who may touch the handle: every transfer in flight, and every shutdown() from before its state change
+    /// until after its cancel, so that no close slips in ahead of that cancel.
+    std::atomic<uint32_t> inFlight { 0 };
 
     explicit Native(HANDLE pipe) noexcept: pipe { pipe } {}
     ~Native()

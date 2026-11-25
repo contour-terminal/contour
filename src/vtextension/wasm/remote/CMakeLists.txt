@@ -9,12 +9,18 @@ if(WIN32)
     set(_channel_source transport/Channel_win32.cpp)
 endif()
 
-add_library(vtextension_remote_wire STATIC
+# The codec's sources, compiled into the library and, with the fuzzer's flags, into the fuzz target below: one
+# list, so that the fuzzer never decodes with a codec the library does not ship.
+set(_codec_sources
     proto/Codec.cpp
     proto/Codec.hpp
     proto/Pdu.hpp
     proto/PduTable.hpp
     proto/Wire.hpp
+)
+
+add_library(vtextension_remote_wire STATIC
+    ${_codec_sources}
     transport/Channel.hpp
     ${_channel_source}
     transport/PduStream.cpp
@@ -45,9 +51,8 @@ if(VTEXTENSION_FUZZING)
     # coverage runtime in each of them).
     #
     # Not an OBJECT library both share: the fuzzer's copy needs the fuzzer's compile flags, which the
-    # library's must not have. The list below is therefore the codec's sources by hand: proto/Codec.cpp is
-    # the only one (Wire.hpp, Pdu.hpp and PduTable.hpp are header-only); a new codec source joins both lists.
-    add_executable(vtextension_remote_fuzz proto/Codec_fuzz.cpp proto/Codec.cpp)
+    # library's must not have. Both compile _codec_sources, so a new codec source reaches both.
+    add_executable(vtextension_remote_fuzz proto/Codec_fuzz.cpp ${_codec_sources})
     target_include_directories(vtextension_remote_fuzz PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_compile_options(vtextension_remote_fuzz PRIVATE -fsanitize=fuzzer)
     target_link_options(vtextension_remote_fuzz PRIVATE -fsanitize=fuzzer)
