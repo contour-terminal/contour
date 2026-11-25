@@ -37,7 +37,7 @@ std::shared_ptr<Image> makeCoordinateImage(ImageSize size)
             data[base + 3] = 0xFF;
         }
     return std::make_shared<Image>(
-        ImageId(1), ImageFormat::RGBA, std::move(data), size, [](auto) {}, ImagePoolId(0));
+        ImageId(1), ImagePoolId(0), ImageFormat::RGBA, std::move(data), size, [](auto) {});
 }
 
 /// Counts the cells of a full-page sixel's span that the image fails to cover -- i.e. the gap.
@@ -214,7 +214,7 @@ TEST_CASE("RasterizedImage.fragment", "[RasterizedImage]")
     auto const imageSize = ImageSize { Width(100), Height(100) };
     auto imageData = std::vector<uint8_t>(static_cast<std::size_t>(100 * 100 * 4), 0xFF); // White opaque
     auto image = std::make_shared<Image>(
-        ImageId(1), ImageFormat::RGBA, std::move(imageData), imageSize, [](auto) {}, ImagePoolId(0));
+        ImageId(1), ImagePoolId(0), ImageFormat::RGBA, std::move(imageData), imageSize, [](auto) {});
 
     auto rasterizedImage = rasterize(image,
                                      ImageAlignment::MiddleCenter,

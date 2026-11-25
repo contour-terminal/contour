@@ -425,8 +425,9 @@ using ImageRehome = std::function<std::shared_ptr<Image const>(Image const& imag
 void rehomeImageFragments(Line& line, ImageRehome const& rehome);
 
 /// @param image An image.
-/// @return An image with @p image's id, format, size and data, whose remover reaches nothing: one that
-///         may outlive every terminal.
+/// @return An image with @p image's id, pool, format, size and data, whose remover reaches nothing: one
+///         that may outlive every terminal. Keeping the pool keeps its ImageKey, so the renderer may
+///         draw the copy with the texture of the image it was taken from.
 [[nodiscard]] std::shared_ptr<Image const> detachedImage(Image const& image);
 
 /// Clears every hyperlink of @p line: its ids name entries of another terminal's hyperlink store.

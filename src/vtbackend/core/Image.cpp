@@ -440,28 +440,28 @@ shared_ptr<Image const> ImagePool::adopt(ImageId id, ImageFormat format, ImageSi
     // The remover prunes the id index before the user's callback runs. It captures the
     // index by shared_ptr, never the pool: an image's last reference may outlive the
     // pool member order-wise, and it may drop on any thread.
-    auto image = make_shared<Image>(
-        id,
-        format,
-        std::move(data),
-        size,
-        [index = _idIndex, remover = _onImageRemove](Image const* image) {
-            {
-                auto const _ = std::lock_guard { index->mutex };
-                // Prune only if this dying image still owns its slot. After the uint32
-                // id counter wraps, a live image may have re-taken this id via
-                // insert_or_assign (see create() below); its weak_ptr is unexpired, so
-                // erasing by id unconditionally would drop the LIVE entry. Our own slot's
-                // weak_ptr is already expired once the destructor's remover runs, so
-                // expired() precisely selects the entry to remove.
-                if (auto const it = index->images.find(image->id().value);
-                    it != index->images.end() && it->second.expired())
-                    index->images.erase(it);
-            }
-            if (remover)
-                remover(image);
-        },
-        _poolId);
+    auto image = make_shared<Image>(id,
+                                    _poolId,
+                                    format,
+                                    std::move(data),
+                                    size,
+                                    [index = _idIndex, remover = _onImageRemove](Image const* image) {
+                                        {
+                                            auto const _ = std::lock_guard { index->mutex };
+                                            // Prune only if this dying image still owns its slot. After the
+                                            // uint32 id counter wraps, a live image may have re-taken this id
+                                            // via insert_or_assign (see create() below); its weak_ptr is
+                                            // unexpired, so erasing by id unconditionally would drop the LIVE
+                                            // entry. Our own slot's weak_ptr is already expired once the
+                                            // destructor's remover runs, so expired() precisely selects the
+                                            // entry to remove.
+                                            if (auto const it = index->images.find(image->id().value);
+                                                it != index->images.end() && it->second.expired())
+                                                index->images.erase(it);
+                                        }
+                                        if (remover)
+                                            remover(image);
+                                    });
     {
         auto const _ = std::lock_guard { _idIndex->mutex };
         // insert_or_assign, not emplace: after the uint32 id counter wraps, the

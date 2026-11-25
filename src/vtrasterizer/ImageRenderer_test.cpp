@@ -24,6 +24,23 @@ auto const testGridMetrics = GridMetrics { .pageSize = PageSize { LineCount(24),
                                            .baseline = 15,
                                            .underline = { .position = 17, .thickness = 1 } };
 
+/// Places @p image across @p cellSpan cells, pinned to the top-left and never resized.
+/// @param image the image to place.
+/// @param cellSpan how many cells it covers.
+/// @param layer which side of the text it composites on.
+std::shared_ptr<RasterizedImage> rasterizeImage(std::shared_ptr<Image const> image,
+                                                GridSize cellSpan,
+                                                ImageLayer layer = ImageLayer::Replace)
+{
+    return std::make_shared<RasterizedImage>(std::move(image),
+                                             ImageAlignment::TopStart,
+                                             ImageResize::NoResize,
+                                             RGBAColor { 0, 0, 0, 0xFF },
+                                             cellSpan,
+                                             CellSize,
+                                             layer);
+}
+
 /// A rasterized image spanning @p cellSpan cells at exactly one image pixel per target pixel.
 /// @param cellSpan how many cells the image covers.
 /// @param layer which side of the text it composites on.
@@ -35,16 +52,21 @@ std::shared_ptr<RasterizedImage> makeImage(GridSize cellSpan,
     auto const imageSize = ImageSize { Width::cast_from(unbox(cellSpan.columns) * unbox(CellSize.width)),
                                        Height::cast_from(unbox(cellSpan.lines) * unbox(CellSize.height)) };
     auto data = Image::Data(imageSize.area() * 4, 0x7F);
-    auto image = std::make_shared<Image>(
-        imageId, ImageFormat::RGBA, std::move(data), imageSize, [](auto) {}, ImagePoolId(0));
+    return rasterizeImage(
+        std::make_shared<Image>(
+            imageId, ImagePoolId(0), ImageFormat::RGBA, std::move(data), imageSize, [](auto) {}),
+        cellSpan,
+        layer);
+}
 
-    return std::make_shared<RasterizedImage>(std::move(image),
-                                             ImageAlignment::TopStart,
-                                             ImageResize::NoResize,
-                                             RGBAColor { 0, 0, 0, 0xFF },
-                                             cellSpan,
-                                             CellSize,
-                                             layer);
+/// Lets go of the image every recorded upload holds, as a real backend does once it has executed the
+/// command (RhiRenderer drops its queued creates with the frame). The mock keeps the commands for
+/// inspection, so without this they would keep every uploaded image alive.
+/// @param backend the mock whose recorded uploads to release.
+void releaseUploadOwners(MockImageTextureBackend& backend)
+{
+    for (auto& create: backend.createCommands)
+        create.owner.reset();
 }
 
 /// A rasterized image that does NOT fill the cells it spans, leaving an alignment gap.
@@ -63,7 +85,7 @@ std::shared_ptr<RasterizedImage> makeLetterboxedImage(ImageSize imageSize,
 {
     auto data = Image::Data(imageSize.area() * 4, 0x7F);
     auto image = std::make_shared<Image>(
-        ImageId(1), ImageFormat::RGBA, std::move(data), imageSize, [](auto) {}, ImagePoolId(0));
+        ImageId(1), ImagePoolId(0), ImageFormat::RGBA, std::move(data), imageSize, [](auto) {});
 
     return std::make_shared<RasterizedImage>(std::move(image),
                                              ImageAlignment::TopStart,
@@ -189,13 +211,8 @@ TEST_CASE("ImageRenderer.widens a 24-bit RGB image for upload", "[image][rendere
         rgb[(pixel * 3) + 2] = 0x33;
     }
     auto image = std::make_shared<Image>(
-        ImageId(2), ImageFormat::RGB, std::move(rgb), imageSize, [](auto) {}, ImagePoolId(0));
-    auto const rasterized = std::make_shared<RasterizedImage>(std::move(image),
-                                                              ImageAlignment::TopStart,
-                                                              ImageResize::NoResize,
-                                                              RGBAColor { 0, 0, 0, 0xFF },
-                                                              Span,
-                                                              CellSize);
+        ImageId(2), ImagePoolId(0), ImageFormat::RGB, std::move(rgb), imageSize, [](auto) {});
+    auto const rasterized = rasterizeImage(std::move(image), Span);
 
     auto renderTarget = MockRenderTarget {};
     auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
@@ -223,18 +240,9 @@ TEST_CASE("ImageRenderer.refuses an image that is still an encoded file", "[imag
     auto const imageSize = ImageSize { Width::cast_from(unbox(Span.columns) * unbox(CellSize.width)),
                                        Height::cast_from(unbox(Span.lines) * unbox(CellSize.height)) };
     auto image = std::make_shared<Image>(
-        ImageId(3),
-        ImageFormat::PNG,
-        Image::Data(8, uint8_t { 0x89 }),
-        imageSize,
-        [](auto) {},
-        ImagePoolId(0));
-    auto const rasterized = std::make_shared<RasterizedImage>(std::move(image),
-                                                              ImageAlignment::TopStart,
-                                                              ImageResize::NoResize,
-                                                              RGBAColor { 0, 0, 0, 0xFF },
-                                                              Span,
-                                                              CellSize);
+        ImageId(3), ImagePoolId(0), ImageFormat::PNG, Image::Data(8, uint8_t { 0x89 }), imageSize, [](auto) {
+        });
+    auto const rasterized = rasterizeImage(std::move(image), Span);
 
     auto renderTarget = MockRenderTarget {};
     auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
@@ -448,13 +456,12 @@ TEST_CASE("ImageRenderer.leaves a kitty placeholder's gap to the cell background
 
         // A 10x10 image across two 10x20 cells: the first cell is half gap, the second all gap.
         auto data = Image::Data(std::size_t { 100 } * 4, 0x7F);
-        auto image = std::make_shared<Image>(
-            ImageId(1),
-            ImageFormat::RGBA,
-            std::move(data),
-            ImageSize { Width(10), Height(10) },
-            [](auto) {},
-            ImagePoolId(0));
+        auto image = std::make_shared<Image>(ImageId(1),
+                                             ImagePoolId(0),
+                                             ImageFormat::RGBA,
+                                             std::move(data),
+                                             ImageSize { Width(10), Height(10) },
+                                             [](auto) {});
         auto const raster = std::make_shared<RasterizedImage>(std::move(image),
                                                               ImageAlignment::TopStart,
                                                               ImageResize::NoResize,
@@ -508,14 +515,8 @@ TEST_CASE("ImageRenderer.refuses an image whose pixmap is shorter than its geome
     auto const declaredSize = ImageSize { Width(10), Height(20) };
     auto shortData = Image::Data(16, 0x7F); // 16 bytes claiming to be 10*20*4 = 800
     auto image = std::make_shared<Image>(
-        ImageId(1), ImageFormat::RGBA, std::move(shortData), declaredSize, [](auto) {}, ImagePoolId(0));
-    auto const rasterized = std::make_shared<RasterizedImage>(std::move(image),
-                                                              ImageAlignment::TopStart,
-                                                              ImageResize::NoResize,
-                                                              RGBAColor { 0, 0, 0, 0xFF },
-                                                              Span,
-                                                              CellSize,
-                                                              ImageLayer::Replace);
+        ImageId(1), ImagePoolId(0), ImageFormat::RGBA, std::move(shortData), declaredSize, [](auto) {});
+    auto const rasterized = rasterizeImage(std::move(image), Span);
 
     renderRow(imageRenderer, rasterized, 1);
 
@@ -696,19 +697,10 @@ TEST_CASE("ImageRenderer.keeps images of different pools apart under a shared id
     REQUIRE(firstPool.poolId() != secondPool.poolId());
 
     auto const cellSpan = GridSize { .lines = LineCount(1), .columns = ColumnCount(1) };
-    auto const rasterize = [&](std::shared_ptr<Image const> image) {
-        return std::make_shared<RasterizedImage>(std::move(image),
-                                                 ImageAlignment::TopStart,
-                                                 ImageResize::NoResize,
-                                                 RGBAColor { 0, 0, 0, 0xFF },
-                                                 cellSpan,
-                                                 CellSize,
-                                                 ImageLayer::Replace);
-    };
-    auto const first =
-        rasterize(firstPool.create(ImageFormat::RGBA, CellSize, Image::Data(CellSize.area() * 4, 0x11)));
-    auto const second =
-        rasterize(secondPool.create(ImageFormat::RGBA, CellSize, Image::Data(CellSize.area() * 4, 0x22)));
+    auto const first = rasterizeImage(
+        firstPool.create(ImageFormat::RGBA, CellSize, Image::Data(CellSize.area() * 4, 0x11)), cellSpan);
+    auto const second = rasterizeImage(
+        secondPool.create(ImageFormat::RGBA, CellSize, Image::Data(CellSize.area() * 4, 0x22)), cellSpan);
     REQUIRE(first->image().id() == second->image().id());
 
     renderRow(imageRenderer, first, 1);
@@ -754,12 +746,7 @@ TEST_CASE("ImageRenderer.releases the texture of an image that died without a di
         renderRow(imageRenderer, doomed, 1);
         renderRow(imageRenderer, survivor, 1);
         REQUIRE(backend.createCommands.size() == 2);
-
-        // A real backend lets go of each upload's owner once it has executed the command (RhiRenderer
-        // drops its queued creates with the frame); the mock keeps the commands for inspection, so drop
-        // the owners here or they would keep the image alive.
-        for (auto& create: backend.createCommands)
-            create.owner.reset();
+        releaseUploadOwners(backend);
     }
     auto const doomedTexture = backend.createCommands[0].id;
 

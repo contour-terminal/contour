@@ -31,13 +31,12 @@ namespace
     auto animation = KittyAnimation {};
     auto id = uint32_t { 1 };
     for (auto const gap: gaps)
-        animation.frames.push_back({ .image = std::make_shared<Image const>(
-                                         ImageId(id++),
-                                         ImageFormat::RGB,
-                                         Image::Data { 0, 0, 0 },
-                                         ImageSize { Width(1), Height(1) },
-                                         [](Image const*) {},
-                                         ImagePoolId(0)),
+        animation.frames.push_back({ .image = std::make_shared<Image const>(ImageId(id++),
+                                                                            ImagePoolId(0),
+                                                                            ImageFormat::RGB,
+                                                                            Image::Data { 0, 0, 0 },
+                                                                            ImageSize { Width(1), Height(1) },
+                                                                            [](Image const*) {}),
                                      .gapMilliseconds = gap });
     animation.state = state;
     animation.loopCount = loopCount;

@@ -88,7 +88,7 @@ enum class ImageFormat : uint8_t
 
 // clang-format off
 namespace detail { struct ImageId {}; }
-using ImageId = boxed::boxed<uint32_t, detail::ImageId>; // unique numerical image identifier
+using ImageId = boxed::boxed<uint32_t, detail::ImageId>; // unique within its ImagePool only; see ImageKey
 
 namespace detail { struct ImagePoolIdTag {}; }
 /// Identifies the ImagePool an image was created in. An ImageId is unique only within its pool: every
@@ -133,16 +133,17 @@ class Image: public std::enable_shared_from_this<Image>
     /// Constructs an RGBA image.
     ///
     /// @param id        the image's id within its pool
-    /// @param data      RGBA buffer data
-    /// @param pixelSize image dimensionss in pixels
+    /// @param pool      the pool the image belongs to; with @p id, its ImageKey. See ImagePoolId.
+    /// @param format    the pixel format of @p data
+    /// @param data      the pixels
+    /// @param pixelSize image dimensions in pixels
     /// @param remover   invoked when the image is destroyed
-    /// @param pool      the pool the image belongs to; see ImagePoolId
     Image(ImageId id,
+          ImagePoolId pool,
           ImageFormat format,
           Data data,
           ImageSize pixelSize,
-          OnImageRemove remover,
-          ImagePoolId pool) noexcept:
+          OnImageRemove remover) noexcept:
         _id { id },
         _pool { pool },
         _format { format },

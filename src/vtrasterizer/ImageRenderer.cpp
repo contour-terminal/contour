@@ -170,20 +170,25 @@ void ImageRenderer::evictToBudget()
 
     // Only what this frame did not draw may go; see the declaration. Carrying the LRU key alongside the
     // id keeps the sort from hashing its way back into the map on every comparison.
-    auto candidates = std::vector<std::pair<uint64_t, vtbackend::ImageKey>> {};
+    struct EvictionCandidate
+    {
+        uint64_t lastUsedFrame = 0;
+        vtbackend::ImageKey key {};
+    };
+    auto candidates = std::vector<EvictionCandidate> {};
     for (auto const& [imageKey, entry]: _imageTextures)
         if (entry.lastUsedFrame != _frameCounter)
-            candidates.emplace_back(entry.lastUsedFrame, imageKey);
+            candidates.push_back({ .lastUsedFrame = entry.lastUsedFrame, .key = imageKey });
 
-    std::ranges::sort(candidates, {}, &std::pair<uint64_t, vtbackend::ImageKey>::first);
+    std::ranges::sort(candidates, {}, &EvictionCandidate::lastUsedFrame);
 
-    for (auto const& [lastUsedFrame, imageKey]: candidates)
+    for (auto const& candidate: candidates)
     {
         if (_residentBytes <= _textureBudgetBytes)
             break;
         // Exactly what a pool removal does: release the texture and forget the mapping, so the next
         // sight of this image uploads it again.
-        discardImage(imageKey);
+        discardImage(candidate.key);
     }
 }
 

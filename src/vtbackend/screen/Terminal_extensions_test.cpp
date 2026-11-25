@@ -1015,3 +1015,18 @@ TEST_CASE("Terminal.extensions.destroyedWhilePublishing", "[extensions][threadin
     publisher.join();
     CHECK(deliveries.load() > 0);
 }
+
+TEST_CASE("detachedImage keeps the image's key", "[statusline][extensions][image]")
+{
+    // A status-line copy holds the same pixels as its source, so it may share the source's texture --
+    // which it can only do under the same key. Dropping the pool would also put the copy in pool zero's id
+    // space, where it would collide with every other image built outside a pool.
+    auto pool = ImagePool {};
+    auto const source =
+        pool.create(ImageFormat::RGBA, ImageSize { Width(1), Height(1) }, Image::Data { 1, 2, 3, 0xFF });
+    auto const copy = detachedImage(*source);
+
+    CHECK(copy->key() == source->key());
+    CHECK(copy->pool() == pool.poolId());
+    CHECK(copy->data() == source->data());
+}
