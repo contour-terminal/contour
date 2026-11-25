@@ -5,7 +5,7 @@
 
 **Goal:** Agents start in Claude Code's `auto` permission mode through a new built-in `auto` profile that is the
 default. `j k h l gg G Ctrl+D Ctrl+U q i` work in every list, dialog and menu whenever nothing is being typed; the
-palette, which is always typing its query, chooses with `↑ ↓` and `Ctrl+J`/`Ctrl+K`. The dialog's and the `n` box's
+palette, which is always typing its query, chooses with `↑ ↓` and `Ctrl+N`/`Ctrl+P`. The dialog's and the `n` box's
 text fields switch between typing and navigating. A `keys` map rebinds the navigation keys, and `work.folded` /
 `work.fold_empty` set the Work view's folds.
 
@@ -53,7 +53,9 @@ This plan implements its **Goals 1–3**. **Goal 4 (large repositories) is alrea
   not change. `ctest --test-dir out/build/clangcl-release -R orchestrator` → all pass after every task.
 - **AGENT.md:**
   - C++23, range-for only, `[[nodiscard]]`, and Doxygen on new public API.
-  - `enum class : uint8_t` over `bool`, with the zero enumerator the negative or default case. `vim` and
+  - `enum class : uint8_t` over `bool`; the zero enumerator is the negative case, so that a zero-initialised value
+    means what `false` meant (AGENT.md's wording). `VimKeys { Off = 0, On }` and `EmptyGroups { Shown = 0, Hidden }`
+    therefore default their members to the non-zero value on purpose. `vim` and
     `fold_empty` are `bool` only in `ConfigJson.hpp` (the wire boundary) and become `VimKeys` / `EmptyGroups`
     inside.
   - Data-driven tables: one row per navigation action, command key, group spelling and problem text.
@@ -70,6 +72,9 @@ This plan implements its **Goals 1–3**. **Goal 4 (large repositories) is alrea
   - Arrows, `Tab`/`Shift+Tab`, `Home`/`End`, `PgUp`/`PgDn` and the mouse keep working as today.
   - The `n` box opens with the keys in its text, so typing and then `⏎` starts at once.
   - No letter types into a field that is not being typed, and no letter acts while one is.
+  - **One deliberate change (Decision 16):** `→`/`←` (and `l`/`h`) on the focused sort chip toggle the sort; today
+    they always step the repository chip. Everywhere else the arrows act as today.
+  - The mouse acts on intent, never through the key table (Decision 17).
 - **No real data** in committed files. Use `example.atlassian.net`, `group/project`, `PRJ-<n>`, `user`, and the
   repositories `contour`/`other`.
 - Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
@@ -115,7 +120,7 @@ This plan implements its **Goals 1–3**. **Goal 4 (large repositories) is alrea
    - two printable characters not starting with `^`;
    - one of `up down left right home end pgup pgdn enter esc tab del`.
 
-   An integer `0`–`9` in YAML is read as that digit, as a task `key` is.
+   An integer `0`–`9` in YAML is read as that digit, as a quick reply's `key` is (`JsonKey`, `keyText()`).
 8. **Clashes are checked against `commandKeys()`, not `dashboardKeys()`.** `dashboardKeys()` reserves task keys
    and includes `j`, `k` and the arrows, which are navigation. It omits `w`, `s`, `o`, `r` and the digits, which
    the views bind to commands (work-board Decision 6). `commandKeys()` lists every key a view binds to a command,
@@ -123,7 +128,10 @@ This plan implements its **Goals 1–3**. **Goal 4 (large repositories) is alrea
    `enter_field` keeps `enter` and `close` keeps `esc`. A view test keeps `keyRows()`/`workKeyRows()` and
    `commandKeys()` in step. A refused binding is a `ConfigError` at the configured entry (`keys.close[0]`). Its
    subject names the other holder, as in `keys.close[0]: is already bound: j, also keys.move_down`. When both
-   holders are configured, the error is reported at the later one in `navActionRows()` order. `close: []` and
+   holders are configured, the error is reported at the later one in `navActionRows()` order. Per entry the checks
+   run in this order: the spelling (`NotAKey`), text in Typing (`TypesText`), a command holder, then an action
+   holder, then a sequence prefix; the first that fails is reported. The view test that keeps the tables in step
+   exempts `enter` and `esc`, the two keys a command shares with an action's own defaults. `close: []` and
    `leave_field: []` are refused as `Empty`, since a dialog would then have no key that closes it.
 9. **What each action does where.** Lists consult only the movement actions:
 
@@ -141,8 +149,11 @@ This plan implements its **Goals 1–3**. **Goal 4 (large repositories) is alrea
     lists' existing `Back`) clears it. `/` enters the filter again with its text kept. `i` is not bound in lists,
     because a list's `⏎` is its row's action and a list has no selected text field. The spec's "`i` or `Enter`
     enters it again" applies to the boxes.
-11. **Alt.** A key with Alt is how `Esc` reads when the next key follows it in one read. While a field is typed,
-    it is `leave_field` and the key itself is dropped. While navigating, it closes the box as today.
+11. **Alt.** A key with Alt is how `Esc` reads when the next key follows it in one read. Alt+key therefore acts as
+    whatever the key name `esc` resolves to in the surface's context: `leave_field` while typing and `close` while
+    navigating with the defaults; with `esc` bound to nothing in that context (say `leave_field: ["^c"]`), nothing.
+    The key itself is dropped either way. Alt+Enter in the message box still adds a line. The palette is not
+    resolved: Alt+key closes it, as `Esc` does (Decision 15).
 12. **Folds are explicit choices.** Today a group's fold key held in the store means "toggled from the group's
     fixed default". With a configurable default, a toggle would silently flip when `work.folded` changes. A new
     engine input `SetFold { group, FoldChoice }` stores `<foldKey>#open` or `<foldKey>#folded` in the same
@@ -160,12 +171,25 @@ This plan implements its **Goals 1–3**. **Goal 4 (large repositories) is alrea
     include `WorkItems.hpp`. The group enum, `FoldDefault`, `WorkGroupRow` (which gains `configName`),
     `WorkGroupRows`, `SortByUpdateKey` and the new `EmptyGroups`/`WorkSettings` move to a header both include.
 15. **The palette has no navigating mode (controller's ruling).** It opens typing its query and stays so: every
-    printable key, `j` and `k` included, types into the query. `↑`/`↓` and `Ctrl+J`/`Ctrl+K` move the highlight
+    printable key, `j` and `k` included, types into the query. `↑`/`↓` and `Ctrl+N`/`Ctrl+P` move the highlight
     (wrapping, as `↑`/`↓` do today), `⏎` runs, and `Esc` (or a key with Alt) closes it at once, keeping the query as
-    today. The nav table is not consulted in the palette; `Ctrl+J`/`Ctrl+K` are fixed palette keys (`^k` is already
-    in `commandKeys()` in context Typing; Ctrl+J is no valid binding spelling, Decision 7). Ctrl+J is LF: check how
-    `core::tui` decodes 0x0A, and if it arrives as `KeyCode::Enter`, tell it from CR by its codepoint, so that it
-    moves the highlight instead of running the command.
+    today. The nav table is not consulted in the palette. Ctrl+J is not used: core-cpp's `VtParser` decodes LF and
+    CR alike as `KeyCode::Enter`, so it cannot be told from `Enter`. Ctrl+N (0x0E) and Ctrl+P (0x10) decode as Ctrl
+    letters. Ctrl+P still toggles the start dialog's preview there; the palette is a different surface.
+    `commandKeys()` lists `^n` and `^p` in context Typing, so no `leave_field` binding may take them.
+16. **Spec deviations, ratified by the controller.**
+    - The existing top-level `permissions` key names the default profile; there is no `default_permissions`
+      (Decision 1).
+    - `/` re-enters a list's filter with its text kept; `i`/`⏎` do not (Decision 10).
+    - `→`/`←` and `l`/`h` on the focused sort chip toggle the sort; today `→`/`←` always stepped the repository chip
+      (Decision 9).
+17. **The mouse acts on intent.** A click beside an open popup and the popup's wheel used to press `Esc`, `↑` and
+    `↓` (`Dashboard::State::press(KeyCode)`). Once keys resolve through the nav table, that would only leave a
+    typed field, or do nothing after a rebinding. `Dashboard::State` gains `press(NavAction, actions)`, which
+    routes the action to the surface with the keys as its resolved `nav`, bypassing `navActionOf` and the context:
+    `Close` closes every popup (the palette, the row menu, the timeline, the start dialog, the `n` box), whether or
+    not a field is typed, and `MoveUp`/`MoveDown` move a highlight or setting. A paste drops `pendingKey`, as a
+    mouse event does.
 
 ## Review Focus
 
@@ -241,8 +265,16 @@ CHECK(permissionsText("auto", settingsJsonOf(autoProfile))
 // A configured `standard` (mode plan) is what `auto` extends: auto keeps mode Auto and gains its rules.
 ```
 
-  Update the existing case "the settings Claude Code takes" so that it looks up `standard` by
-  `StandardProfileName`; its `acceptEdits` prefix stays. `Config_test.cpp`: `defaulted->profiles().size() == 4`, and
+  Edit three existing cases in `Permissions_test.cpp`:
+  - "Permissions: the built-in profiles resolve": `auto const& standard = named(*profiles, DefaultProfileName);`
+    becomes `named(*profiles, StandardProfileName)`. Add `CHECK(named(*profiles, "auto").mode ==
+    PermissionMode::Auto);` after the `ask` checks.
+  - "Permissions: a configured profile replaces a built-in one, and others build on it":
+    `REQUIRE(profiles->size() == 5);` becomes `== 6`.
+  - "Permissions: the settings Claude Code takes": `named(*profiles, DefaultProfileName)` becomes
+    `named(*profiles, StandardProfileName)`; its `acceptEdits` prefix stays.
+
+  Then the other files: `Config_test.cpp`: `defaulted->profiles().size() == 4`, and
   `defaulted->defaultProfile().name == "auto"`. `"permissions": "standard"` still parses, and `profileFor(...)` is
   `standard`. `permission_profiles: [{ "name": "careful", "mode": "auto" }]` parses with mode `Auto`, and
   `"mode": "bypassPermissions"` is still `BypassRefused`. The `NotPermissionMode` message lists `default,
@@ -272,11 +304,12 @@ CHECK(permissionsText("auto", settingsJsonOf(autoProfile))
 **Files:**
 - Create: `extensions/orchestrator/core/NavKeys.hpp`, `extensions/orchestrator/core/NavKeys.cpp`,
   `extensions/orchestrator/core/NavKeys_test.cpp`
-- Modify: `extensions/orchestrator/core/DashboardKeys.hpp/.cpp` (`CommandKey`, `commandKeys()`)
+- Modify: `extensions/orchestrator/core/DashboardKeys.hpp/.cpp` (`CommandKey`, `commandKeys()`,
+  `MessagePassKey`, `messagePassKeys()`)
 - Modify: `extensions/orchestrator/core/ConfigJson.hpp` (`JsonKeys`), `extensions/orchestrator/core/Config.hpp/.cpp`
   (`JsonType::Bool`, `JsonType::Object`, `JsonType::KeyList`, `ObjectKind::Keys`, `KeysFields`, problems,
   `Listing::KeyNames`, `Config::keys()`)
-- Modify: `extensions/orchestrator/CMakeLists.txt`, `extensions/orchestrator/README.md` ("Configuration")
+- Modify: `extensions/orchestrator/CMakeLists.txt` (the README's `keys` text lands in Task 5, where keys act)
 - Append: `extensions-text.md` (`## Task 2`)
 - Test: `extensions/orchestrator/core/Config_test.cpp`
 
@@ -339,12 +372,17 @@ struct KeyBindingProblem
 /// @return The keys in force, or the first entry refused (actions in row order, entries in list order).
 [[nodiscard]] std::expected<NavKeys, KeyBindingProblem> navKeysOf(
     VimKeys vim, std::span<std::optional<std::vector<std::string>> const, NavActionCount> configured);
+// The constructor stays public only for navKeysOf()/defaults(); nothing else builds a NavKeys from raw lists.
 
 // DashboardKeys.hpp
 /// One key a view binds to a command: no navigation binding may take it in its context.
 struct CommandKey { std::string_view name; std::string_view does; NavContext context; };
 /// @return Every key the views bind to a command, per context, in the order a problem line would name them.
 [[nodiscard]] std::span<CommandKey const> commandKeys() noexcept;
+/// One key the message box passes on to the Focus while it is typed, and what it does there.
+struct MessagePassKey { std::string_view name; std::string_view does; };
+/// @return pgup, pgdn, end, left, right (tab is a command key of its own); commandKeys()' Typing rows include them.
+[[nodiscard]] std::span<MessagePassKey const> messagePassKeys() noexcept;
 
 // Config.hpp
 // ConfigProblem gains, after UnknownRole:
@@ -376,8 +414,15 @@ TypesText,   ///< A `leave_field` key that would type.
       `o` "open the link", `r` "reveal the agent", `x` "check the worktree again", `z` "fold a group",
       `n` "start a new task", `w` "switch the view", `s` "sort", `m` "open the row menu"
     - `1`–`9` "answer with quick reply <d>"
-  - T: `enter` "send or start", `tab` "move to the next field", `^k` "open the palette" (in the palette: choose the entry above), `^u` "clear the text",
-    `^w` "drop a word".
+  - T:
+    - `enter` "send or start", `tab` "move to the next field", `^k` "open the palette", `^u` "clear the text",
+      `^w` "drop a word"
+    - `^p` "show the prompt" (the start dialog's preview, in both modes), `^n` "choose the next palette entry"
+    - the keys the message box passes on while typed: `pgup` "scroll a page up", `pgdn` "scroll a page down",
+      `end` "follow the transcript again", `left` "turn to the previous transcript page", `right` "turn to the
+      next transcript page". This task defines them as `messagePassKeys()` in `core/DashboardKeys.cpp`, and
+      `commandKeys()` builds its five Typing rows from that table. Task 5 makes `typeIntoMessage` read the same
+      table, so the two cannot drift.
 
   Subjects for `Taken`:
   - another action holds the key: `"<key>, also keys.<other>"`
@@ -394,11 +439,13 @@ TypesText,   ///< A `leave_field` key that would type.
   - `KeyTaken`: "is already bound".
   - `TypesText`: "would type into a text field instead of leaving it; use esc, ^ and a letter, or another special
     key".
-  `JsonKeys` holds `std::optional<bool> vim` and, per action in row order, `std::optional<std::vector<std::string>>`,
-  with `glz::meta` snake_case names. `KeysFields` mirrors it (`vim` Bool, the rest KeyList), with its
+  `JsonKeys` holds `std::optional<bool> vim` and, per action in row order, `std::optional<std::vector<JsonKey>>`
+  (`JsonKey = std::variant<uint64_t, std::string>`, already in `ConfigJson.hpp` for quick replies), with
+  `glz::meta` snake_case names. Each element is converted with the existing `keyText()`. `KeysFields` mirrors it (`vim` Bool, the rest KeyList), with its
   `matchesMirror` static_assert. A `Config_test` case checks that its names after `vim` equal `navActionRows()`'
   `configName`s: for each row, `"keys": { "<configName>": ["F"] }` (`["^c"]` for `leave_field`) parses, and `keysOf(row.action)` is that list. `JsonType::Object` is one object of `Field::object`'s kind. `KeyList` is an array whose
-  elements are strings or integers 0–9, read as `JsonType::Key` reads a task key. `Bool` is `true`/`false`.
+  elements are strings or integers 0–9, each checked as `JsonType::Key` checks a quick reply's `key`. `Bool` is
+  `true`/`false`.
 
 - [ ] **Step 1: Write the failing tests.** `NavKeys_test.cpp`, tag `[orchestrator][navkeys]`:
 
@@ -449,6 +496,10 @@ TEST_CASE("navKeysOf: what is refused, and the subject that names the other hold
     // {Last, {"g"}}           → { Last, 0, Taken, "g, which starts keys.first's gg" }
     // {MoveDown, {"ee"}}      → Taken, "ee, which starts with the dashboard's key to end the run"
     // {MoveDown, {"J"}}, {Last, {"J"}} → reported at Last (later row): "J, also keys.move_down"
+    // {LeaveField, {"^p"}}    → Taken, "^p, the dashboard's key to show the prompt"
+    // {LeaveField, {"^n"}}    → Taken, "^n, the dashboard's key to choose the next palette entry"
+    // {LeaveField, {"left"}}  → Taken, "left, the dashboard's key to turn to the previous transcript page"
+    // {MoveDown, {"e"}} reports the command before any action holder (Decision 8 order)
 }
 ```
 
@@ -470,28 +521,20 @@ TEST_CASE("navKeysOf: what is refused, and the subject that names the other hold
   to `CMakeLists.txt`.
 - [ ] **Step 4:** Rebuild. Run `orchestrator_test.exe` (all), then
   `ctest --test-dir out/build/clangcl-release -R orchestrator`. Run the portability scripts and `clang-format -i`.
-- [ ] **Step 5: Docs.**
-  - README "Configuration" gains a `keys` subsection with this YAML. Give each action and its defaults in a table
-    (from `navActionRows()`), then the clash rule and its example line, and say to quote a key YAML reads otherwise.
-
-```yaml
-keys:
-    vim: false              # arrows, Home/End, Esc and Enter only
-    move_down: [down, "^n"] # a list replaces the action's defaults
-```
-
-  - `## Task 2` in `extensions-text.md` adds a `keys` row after `quick_replies`.
+- [ ] **Step 5: Docs.** `## Task 2` in `extensions-text.md` adds a `keys` row after `quick_replies`: `vim`
+  (default `true`), the eleven actions with their defaults, a list replacing an action's defaults, and the clash
+  rule. The README's `keys` subsection is written in Task 5.
 - [ ] **Step 6: Commit:** message `feat(orchestrator): a keys map for the navigation keys`.
 
 ### Task 3: The `work` configuration — folded groups and empty groups — Haiku
 
 **Files:**
-- Create: `extensions/orchestrator/core/WorkGroups.hpp` (moved from `WorkItems.hpp`, plus the new types)
+- Create: `extensions/orchestrator/core/WorkGroups.hpp` (header-only: moved from `WorkItems.hpp`, plus the new
+  types; `defaultWorkSettings()` is `inline` there)
 - Modify: `extensions/orchestrator/core/WorkItems.hpp` (include `WorkGroups.hpp`; the moved definitions leave)
 - Modify: `extensions/orchestrator/core/ConfigJson.hpp` (`JsonWork`), `extensions/orchestrator/core/Config.hpp/.cpp`
   (`ObjectKind::Work`, `WorkFields`, `UnknownGroup`, `Listing::Groups`, `Config::work()`)
-- Modify: `extensions/orchestrator/CMakeLists.txt`, `extensions/orchestrator/README.md` ("Configuration", the
-  Work view's group table: "folded until you open it" becomes "folded by default (`work.folded`)")
+- Modify: `extensions/orchestrator/CMakeLists.txt` (`WorkGroups.hpp` in `orchestrator_core`'s sources)
 - Append: `extensions-text.md` (`## Task 3`)
 - Test: `extensions/orchestrator/core/Config_test.cpp`
 
@@ -513,8 +556,8 @@ struct WorkSettings
     EmptyGroups empty = EmptyGroups::Hidden; ///< `fold_empty`.
     [[nodiscard]] bool operator==(WorkSettings const&) const = default;
 };
-/// @return The groups whose row is FoldDefault::Folded, and Hidden.
-[[nodiscard]] WorkSettings defaultWorkSettings();
+/// @return The groups whose row is FoldDefault::Folded, and Hidden. Defined inline here: it filters WorkGroupRows.
+[[nodiscard]] inline WorkSettings defaultWorkSettings();
 
 // Config.hpp
 // ConfigProblem gains, last: UnknownGroup ///< A `work.folded` entry no WorkGroupRows row spells.
@@ -540,11 +583,9 @@ struct WorkSettings
 - [ ] **Step 3: Implement.** Move the definitions without changing them, apart from the new `configName` column.
 - [ ] **Step 4:** Rebuild and run `orchestrator_test.exe` (all), which must pass with the move alone. Then run
   `ctest … -R orchestrator`, the portability scripts and `clang-format -i`.
-- [ ] **Step 5: Docs.**
-  - README "Configuration" gains a `work` subsection: `folded` (default `[everything_else]`) and `fold_empty`
-    (default `true`, which hides a group with nothing in it). A fold you make with `z`, `⏎` or a click wins and is
-    kept across restarts (Task 4 makes that true).
-  - `## Task 3` in `extensions-text.md` adds a `work` row after `keys`.
+- [ ] **Step 5: Docs.** `## Task 3` in `extensions-text.md` adds a `work` row after `keys`: `folded` (default
+  `[everything_else]`, the five names) and `fold_empty` (default `true`). The README's `work` subsection is written
+  in Task 4, where the settings act.
 - [ ] **Step 6: Commit:** message `feat(orchestrator): work.folded and work.fold_empty`.
 
 ### Task 4: Folds as the user's choice; configured defaults; empty groups — Opus
@@ -556,7 +597,8 @@ struct WorkSettings
 - Modify: `extensions/orchestrator/view/Keys.hpp` (`SetFoldAction`, `UiAction`),
   `extensions/orchestrator/view/WorkBoard.hpp/.cpp` (`isGroupFolded`, `foldWorkGroup`, `workLines`),
   `extensions/orchestrator/view/ViewFixtures.cpp`, `extensions/orchestrator/guest/Driver.cpp` (`inputOf`)
-- Modify: `extensions/orchestrator/README.md` (the Work view's paragraph on folds)
+- Modify: `extensions/orchestrator/README.md` (the Work view's paragraph on folds and its group table;
+  "Configuration" gains a `work` subsection)
 - Create: `extensions/orchestrator/view/testdata/work-empty-groups-80x24.screen`
 - Test: `extensions/orchestrator/core/Engine_test.cpp`, `extensions/orchestrator/view/WorkBoard_test.cpp`,
   `extensions/orchestrator/view/Dashboard_test.cpp` (scene), `extensions/orchestrator/guest/Driver_test.cpp`
@@ -627,8 +669,13 @@ struct SetFoldAction { std::string group = {}; FoldChoice choice = FoldChoice::O
   has none. Regenerate the goldens. Only the new screen may appear; every existing screen must stay unchanged.
 - [ ] **Step 5:** Rebuild and run `orchestrator_test.exe` (all), `ctest … -R orchestrator`, the portability
   scripts and `clang-format -i`.
-- [ ] **Step 6: Docs.** In README "The Work view", the sentence on folds says that a fold you make wins over
-  `work.folded` and is kept across restarts. With `fold_empty: false` every group shows its heading.
+- [ ] **Step 6: Docs.**
+  - README "The Work view": the sentence on folds says that a fold you make wins over `work.folded` and is kept
+    across restarts, and with `fold_empty: false` every group shows its heading. In the group table, "folded until
+    you open it" becomes "folded by default (`work.folded`)".
+  - README "Configuration" gains a `work` subsection: `folded` (default `[everything_else]`; the names
+    `needs_you`, `ready_to_merge`, `in_review`, `no_mr_yet`, `everything_else`) and `fold_empty` (default `true`,
+    which hides a group with nothing in it).
 - [ ] **Step 7: Commit:** message `feat(orchestrator): Work folds are the user's choice over work.folded`.
 
 ### Task 5: The key resolver; the Fleet, the Focus and the Work list on it — Opus
@@ -644,15 +691,17 @@ struct SetFoldAction { std::string group = {}; FoldChoice choice = FoldChoice::O
   - `applyKey` and `keyNameOf`/`workKeyNameOf` get new signatures.
 - Modify: `extensions/orchestrator/view/WorkBoard.hpp/.cpp` (`applyWorkKey`'s signature, half-page handlers,
   `RepoPrevious`/`RepoNext` on the sort chip), `extensions/orchestrator/view/Dashboard.cpp` (routing, `fleetRows`,
-  dropping `pendingKey` on a mouse event), `extensions/orchestrator/view/Actions.cpp` and `view/Palette.cpp`
-  (`keyNameOf` callers)
+  dropping `pendingKey` on a mouse event or a paste, `press(NavAction)` and the three mouse sites that press keys),
+  `extensions/orchestrator/view/Actions.cpp` and `view/Palette.cpp` (`keyNameOf` callers)
+- Modify: `extensions/orchestrator/view/ViewFixtures.hpp/.cpp` (the `navFor` test helper)
 - Modify: `extensions/orchestrator/CMakeLists.txt`, `extensions/orchestrator/README.md` (the Fleet's and the Work
-  view's key tables)
+  view's key tables; "Configuration" gains a `keys` subsection)
 - Test: `extensions/orchestrator/view/Keys_test.cpp`, `extensions/orchestrator/view/WorkBoard_test.cpp`,
   `extensions/orchestrator/view/Dashboard_test.cpp`
 
 **Interfaces:**
-- Consumes: `NavAction`, `NavContext`, `NavKeys`, `NavKeys::defaults`, `commandKeys()`, `Config::keys()` (Task 2).
+- Consumes: `NavAction`, `NavContext`, `NavKeys`, `NavKeys::defaults`, `commandKeys()`, `messagePassKeys()`,
+  `Config::keys()` (Task 2).
 - Produces (namespace `orchestrator::view`):
 
 ```cpp
@@ -672,8 +721,8 @@ enum class NavMiss : uint8_t { NotBound = 0, Pending };
 /// @param pending Interaction::pendingKey; set or cleared.
 [[nodiscard]] std::expected<NavAction, NavMiss> navActionOf(core::tui::KeyEvent const& key, NavContext context,
                                                             NavKeys const& keys, std::string& pending);
-/// @return The context of the surface that has the keys: Typing while the start dialog's or the `n` box's or the
-///         palette is open (always typing), a filter is typed, or the message box has the keys; else Navigating.
+/// @return The context of a list surface: Typing while a filter is typed or the message box has the keys; else
+///         Navigating. (Task 6 adds the start dialog's and the `n` box's FieldMode; the palette is never resolved.)
 [[nodiscard]] NavContext navContextOf(Interaction const& interaction, KeyContext const& context) noexcept;
 /// @return The command @p action is in @p view's list (Decision 9's first and third columns); std::nullopt for
 ///         LeaveField, EnterField and Close, which no list command stands for.
@@ -689,6 +738,8 @@ enum class NavMiss : uint8_t { NotBound = 0, Pending };
                                                Interaction& interaction, KeyContext const& context);
 [[nodiscard]] std::string keyNameOf(KeyCommand command, NavKeys const& keys);     // nav-mapped: navKeyLabel()
 [[nodiscard]] std::string workKeyNameOf(KeyCommand command, NavKeys const& keys); // likewise
+// Dashboard.cpp, Dashboard::State gains
+void press(NavAction action, std::vector<UiAction>& actions); ///< Decision 17: routes @p action as resolved.
 // WorkBoard.hpp
 [[nodiscard]] std::vector<UiAction> applyWorkKey(core::tui::KeyEvent const& key, std::optional<NavAction> nav,
                                                  Interaction&, std::span<WorkLine const>, std::span<WorkItem const>,
@@ -700,6 +751,12 @@ enum class NavMiss : uint8_t { NotBound = 0, Pending };
   Otherwise they use the command table as today. While the timeline is shown, `nav == Close` closes it.
   `Dashboard::State::applyKeys` resolves once per key for a list surface (no dialog, box, palette or menu open).
   On `Pending` it continues to the next key. Tasks 6 and 7 extend the same routing to the boxes.
+  - **The message box's pass-through keys** (`messagePassKeys()` and `tab`): `typeIntoMessage` declines exactly
+    these (read from `messagePassKeys()`), and `applyKey` then resolves the key again in `Navigating` and acts on
+    that, so `←`/`→` still turn pages and `End` still follows the transcript while the box has the keys.
+  - **The mouse** (Decision 17): the click beside a popup calls `press(NavAction::Close)`, and the popup's wheel
+    `press(NavAction::MoveUp/MoveDown)`. In this task the boxes still take keys; `press(NavAction)` passes them the
+    equivalent plain key (`Escape`, `Up`, `Down`) until Tasks 6 and 7 give them a `nav` parameter.
 
 - [ ] **Step 1: Write the failing tests.**
   - `NavInput_test.cpp` (`[orchestrator][view][navinput]`):
@@ -716,7 +773,8 @@ enum class NavMiss : uint8_t { NotBound = 0, Pending };
     - `navKeyLabel(defaults(On), MoveDown) == "↓"`, `navKeyLabel(defaults(On), EnterField) == "i"`,
       `navKeyLabel(defaults(Off), EnterField)` is empty.
     - Every key in `keyRows()` and `workKeyRows()` is a `commandKeys()` name in context Navigating. No row of
-      either table holds a key any `navActionRows()` default holds in Navigating.
+      either table holds a key any `navActionRows()` default holds in Navigating, except `enter` and `esc`
+      (Decision 8), which the test names.
   - `Keys_test.cpp`:
     - In the Fleet, `G` selects the last row, then `gg` the first.
     - Ctrl+D with `fleetRows = 10` moves the selection by 5, and Ctrl+U moves it back.
@@ -724,12 +782,18 @@ enum class NavMiss : uint8_t { NotBound = 0, Pending };
     - `h`/`l` turn the transcript's pages, as `←`/`→` do.
     - `q` closes the timeline; `q` in the Fleet with nothing open does nothing.
     - With `keys: { vim: false }`, `j` does nothing in the Fleet.
+    - The existing case "left and right step through the Focus's tabs, the message box's too" passes unchanged.
   - `WorkBoard_test.cpp`:
     - `l`/`h` step the repository chip.
-    - With the sort chip focused, `l` toggles the sort (one `ToggleFoldAction { SortByUpdateKey }`).
+    - With the sort chip focused, `l` and `→` each toggle the sort (one `ToggleFoldAction { SortByUpdateKey }`),
+      and `h` and `←` too (Decision 16).
     - Ctrl+D moves the selection by `pageRows / 2`. `G` goes to the last line, then `gg` to the first.
     - The bar still names `→ repository` with the defaults.
-- [ ] **Step 2:** Build, then run `"[navinput]"`, `"[keys]"` and `"[workboard]"`. Expected: fail.
+  - `Dashboard_test.cpp`:
+    - With the message box open (the `message-box` world, `\r` typed), `→` through `applyKeys` turns the
+      transcript's page, and `End` follows it again, as before.
+    - `g` then a paste: `pendingKey` is empty afterwards, and a following `g` alone does not jump.
+- [ ] **Step 2:** Build, then run `"[navinput]"`, `"[keys]"`, `"[workboard]"` and `"[view]"`. Expected: fail.
 - [ ] **Step 3: Implement.** Set `fleetRows` where the Dashboard records the Fleet's drawn height. Update every
   caller of the changed signatures, tests included. Tests that call `applyKey`/`applyWorkKey` resolve `nav` with a
   shared helper in `ViewFixtures` (`navFor(key, context)`, defaults).
@@ -738,8 +802,18 @@ enum class NavMiss : uint8_t { NotBound = 0, Pending };
   the portability scripts and `clang-format -i`.
 - [ ] **Step 5: Docs.**
   - The README key tables gain `j` `k` `gg` `G` `Ctrl+D` `Ctrl+U` beside the arrows. The Work view's `←` `→` row
-    becomes `←` `→` `h` `l`, stepping the chip with the keys. The timeline closes with `q` too.
-  - Add one line: "Every navigation key is configurable (`keys`, see Configuration)."
+    becomes `←` `→` `h` `l`, stepping the chip with the keys (the sort chip toggles the sort). The timeline closes
+    with `q` too.
+  - README "Configuration" gains a `keys` subsection with this YAML. Give each action and its defaults in a table
+    (from `navActionRows()`), then the clash rule and its example line
+    (`keys.close[0]: is already bound: j, also keys.move_down`), and say to quote a key YAML reads otherwise.
+
+```yaml
+keys:
+    vim: false              # arrows, Home/End, Esc and Enter only
+    move_down: [down, "^n"] # a list replaces the action's defaults
+```
+
 - [ ] **Step 6: Commit:** message `feat(orchestrator): vim keys in the lists, from one key table`.
 
 ### Task 6: Typing and navigating in the start dialog and the `n` box — Opus
@@ -747,12 +821,15 @@ enum class NavMiss : uint8_t { NotBound = 0, Pending };
 **Files:**
 - Modify: `extensions/orchestrator/view/StartDialog.hpp/.cpp` (`StartDialogState::mode`, `applyStartDialogKey`,
   the hint line, a click on the note), `extensions/orchestrator/view/TaskBox.hpp/.cpp` (`TaskBoxState::mode`,
-  `applyTaskBoxKey`, the hint line, clicks), `extensions/orchestrator/view/Dashboard.cpp` (routing to both)
+  `applyTaskBoxKey`, the hint line, clicks), `extensions/orchestrator/view/Dashboard.cpp` (routing to both;
+  `press(NavAction)` hands them `nav`), `extensions/orchestrator/view/NavInput.hpp/.cpp` (`navContextOf` reads
+  both modes)
 - Modify: `extensions/orchestrator/README.md` ("Starting an agent": the dialog's and the `n` box's keys)
 - Create: `view/testdata/start-dialog-keys-{80x24,120x40}.screen` and `view/testdata/task-box-settings-{50x20,80x24}.screen`
 - Modify: `view/testdata/start-dialog-*.screen` and `view/testdata/task-box-*.screen` (the hint line)
 - Test: `extensions/orchestrator/view/StartDialog_test.cpp`, `extensions/orchestrator/view/TaskBox_test.cpp`,
-  `extensions/orchestrator/view/Dashboard_test.cpp` (scenes)
+  `extensions/orchestrator/view/NavInput_test.cpp`, `extensions/orchestrator/view/DispatchForm_test.cpp` (its
+  "a paste is text, never keys" and Tab cases), `extensions/orchestrator/view/Dashboard_test.cpp` (scenes, mouse)
 
 **Interfaces:**
 - Consumes: `FieldMode`, `navActionOf`, `navContextOf`, `keysInForce`, `navKeyLabel` (Task 5); `NavAction` (Task 2).
@@ -767,9 +844,13 @@ enum class NavMiss : uint8_t { NotBound = 0, Pending };
 [[nodiscard]] std::optional<DispatchAction> applyTaskBoxKey(core::tui::KeyEvent const& key,
     std::optional<NavAction> nav, std::optional<TaskBoxState>& box, Engine const& engine,
     HooksWarning hooksAtInput, std::string_view nearTab);
+// NavInput.hpp: navContextOf() also returns Typing while the start dialog's or the `n` box's mode is Typing.
 ```
 
-  The rules come from Decision 9's "Start dialog / `n` box" column, Decisions 6 and 11, and the following:
+  The rules come from Decision 9's "Start dialog / `n` box" column, Decisions 6, 11 and 17, and the following:
+  - **A paste** goes into the note / the text whatever the mode: it is text, never keys (`pasteIntoStartDialog`,
+    `pasteIntoTaskBox` unchanged).
+  - **`nav == Close`** (Decision 17, from `press(NavAction::Close)`) closes the box in either mode.
   - **Typing.**
     - Only the line-editing keys and printable keys edit the field.
     - `⏎` confirms, as today.
@@ -779,12 +860,14 @@ enum class NavMiss : uint8_t { NotBound = 0, Pending };
       Repo.
   - **Navigating.** No printable key types. `Ctrl+P` toggles the dialog's preview in both modes.
   - **Hints.**
-    - Dialog, navigating: `⏎ start · ↑↓ settings · ←→ change · i note · esc close`.
-    - Dialog, typing: `⏎ start · esc settings`.
-    - `n` box, navigating: `⏎ start · ↑↓ move · ←→ change · i text · esc close`.
+    - Dialog, navigating: `⏎ start · ↑↓ settings · ←→ change · i note · ctrl+p more · esc close`; while Note is
+      selected the first hint reads `⏎ note` instead of `enterHint()`.
+    - Dialog, typing: `⏎ start · esc settings · ctrl+p more`.
+    - `ctrl+p more` reads `ctrl+p less` with the Full preview, as today.
+    - `n` box, navigating: `⏎ start · ↑↓ move · ←→ change · i text · esc close`; with Text selected, `⏎ text`.
     - `n` box, typing: `⏎ start · esc settings`.
     - Each key is `navKeyLabel()` of its action (`↑`+`↓`, `←`+`→`, EnterField, Close, LeaveField). A hint whose
-      key is empty is left out. The `⏎` hint keeps today's `enterHint()`.
+      key is empty is left out. Otherwise the `⏎` hint keeps today's `enterHint()`.
 
 - [ ] **Step 1: Write the failing tests.**
   - `StartDialog_test.cpp`, `"start dialog: jk move between the settings, hl change one, letters type nothing"`:
@@ -799,7 +882,8 @@ enum class NavMiss : uint8_t { NotBound = 0, Pending };
     - `esc` goes to Navigating with the dialog open; a second `esc` closes it.
     - Reopened: `G` then `⏎` goes to Typing on Note, and a second `⏎` returns the dispatch, as today's `⏎`.
     - Alt+`j` while typing goes to Navigating with the note unchanged and the dialog open.
-    - `Tab` from Model reaches Note, Typing.
+    - `Tab` from Perms reaches Note, Typing (`SettingOrder`: Task, Worker, Model, Perms, Note).
+    - A paste right after opening (Navigating, on Task) lands in the note.
   - `TaskBox_test.cpp`, `"n box: opens typing; esc goes to the settings; a second esc closes"`:
     - The box opens on Text, Typing. Typing `fix jkhlqgGi` gives exactly that text.
     - `esc` goes to Repo, Navigating. `j` goes to Worker, and `l` steps the worker as `→` does.
@@ -807,7 +891,15 @@ enum class NavMiss : uint8_t { NotBound = 0, Pending };
     - `⏎` on Text goes to Typing, and `esc` goes back to Repo.
     - `i` goes to Text, Typing. `esc` then `q` closes the box.
     - Typing then `⏎` at once still dispatches (the one-step flow).
-- [ ] **Step 2:** Build, then run `"[startdialog]"` and `"[taskbox]"`. Expected: fail.
+    - A paste while Navigating lands in the text.
+  - `NavInput_test.cpp`: `navContextOf` is Typing for the `n` box just opened, Navigating after its `esc`; for the
+    start dialog just opened, Navigating, and Typing after `i`.
+  - `Dashboard_test.cpp`: a left click beside the `n` box while its text is typed closes the box; the same beside
+    the dialog while its note is typed closes the dialog.
+  - `DispatchForm_test.cpp`: "a paste is text, never keys" still passes (the paste reaches the note while the
+    dialog navigates). Its Tab ×4 path reaches Note typing, as before.
+- [ ] **Step 2:** Build, then run `"[startdialog]"`, `"[taskbox]"`, `"[navinput]"`, `"[form]"` and `"[view]"`.
+  Expected: fail.
 - [ ] **Step 3: Implement**, with `Dashboard::State::applyKeys` resolving `nav` for both boxes from
   `navContextOf`.
 - [ ] **Step 4: Scenes.**
@@ -818,7 +910,7 @@ enum class NavMiss : uint8_t { NotBound = 0, Pending };
 
   If the scene harness does not resolve a trailing lone `Esc` before `.then` (`Dashboard`'s `EscapeTimeout`),
   advance its clock past the timeout there, as the Dashboard's own Esc tests do. Regenerate the goldens. The
-  existing start-dialog and task-box screens may change only on their hint line.
+  existing start-dialog and task-box screens may change only on their hint line, which keeps `ctrl+p more`.
 - [ ] **Step 5:** Rebuild and run `orchestrator_test.exe` (all), `ctest … -R orchestrator`, the portability
   scripts and `clang-format -i`.
 - [ ] **Step 6: Docs.**
@@ -832,10 +924,11 @@ enum class NavMiss : uint8_t { NotBound = 0, Pending };
 ### Task 7: The palette, the row menu, the filters and the message box — Opus
 
 **Files:**
-- Modify: `extensions/orchestrator/view/Palette.hpp/.cpp` (`applyPaletteKey`: `Ctrl+J`/`Ctrl+K`),
+- Modify: `extensions/orchestrator/view/Palette.hpp/.cpp` (`applyPaletteKey`: `Ctrl+N`/`Ctrl+P`),
   `extensions/orchestrator/view/RowMenu.hpp/.cpp` (`applyRowMenuKey`), `extensions/orchestrator/view/Keys.hpp/.cpp`
   (`typeIntoFilter`, the message box's leave key, Alt), `extensions/orchestrator/view/WorkBoard.cpp`
-  (the filter), `extensions/orchestrator/view/Dashboard.cpp` (routing)
+  (the filter), `extensions/orchestrator/view/Dashboard.cpp` (routing; `press(NavAction)` hands the menu `nav` and
+  closes or moves the palette directly)
 - Modify: `extensions/orchestrator/README.md` (the palette, the row menu sentence, the filters, the message box)
 - Test: `extensions/orchestrator/view/Palette_test.cpp`, `extensions/orchestrator/view/RowMenu_test.cpp`,
   `extensions/orchestrator/view/Keys_test.cpp`, `extensions/orchestrator/view/WorkBoard_test.cpp`,
@@ -856,22 +949,25 @@ enum class NavMiss : uint8_t { NotBound = 0, Pending };
 ```
 
   The rules come from Decisions 9, 10, 11 and 15:
-  - **Palette** (Decision 15). Its hint stays today's: `⏎ run · ↑↓ choose · esc close`.
+  - **Palette** (Decision 15). Ctrl+N moves the highlight down and Ctrl+P up, both wrapping like `↓`/`↑`. Its hint
+    stays today's: `⏎ run · ↑↓ choose · esc close`.
   - **Row menu.** It is always Navigating. Movement wraps nowhere: the highlight stops at the ends, as `↑`/`↓` do
     today. Its hint, if any, reads as today.
   - **Filter.** `leave_field` keeps the filter (Decision 10).
   - **Message box.** `leave_field`, not `KeyCode::Escape`, returns to the Fleet with the draft kept. Alt+Enter
-    still adds a line, and any other key with Alt is `leave_field` (Decision 11).
+    still adds a line, and any other key with Alt acts as `esc` resolves in Typing (Decision 11).
 
 - [ ] **Step 1: Write the failing tests.**
   - `Palette_test.cpp`:
     - `jkhlqgGi` types the query `"jkhlqgGi"` (Review Focus 3).
     - `j` typed into the query filters: on a query `re`, typing `j` leaves `paletteMatches` the entries matching
       `rej`, and the highlight is reset to 0.
-    - With an empty query, `↓` highlights 1, Ctrl+J 2, Ctrl+K 1, `↑` 0, and `↑` again the last entry (wrap); the
-      query stays `""` throughout.
+    - With an empty query, `↓` highlights 1, Ctrl+N 2, Ctrl+P 1, `↑` 0, and `↑` again the last entry (wrap); the
+      query stays `""` throughout. Feed Ctrl+N and Ctrl+P as the bytes `"\x0e"` and `"\x10"` through the
+      dashboard's input (as the scenes feed `"\x0b"`), not as synthesized events.
+    - `j` typed after Ctrl+N types `j` into the query and resets the highlight to 0.
     - Type `re`, then one `esc`: the palette is closed, and `paletteQuery == "re"`.
-    - Ctrl+J does not run the highlighted command; `⏎` does.
+    - The wheel over the palette moves its highlight, and a click beside it closes it (Decision 17).
   - `RowMenu_test.cpp`: `j` moves the highlight to 1, `G` to the last entry and `gg` to 0. `q` closes the menu.
     `↓` still moves the highlight.
   - `Keys_test.cpp`:
@@ -879,7 +975,9 @@ enum class NavMiss : uint8_t { NotBound = 0, Pending };
       `"jkq"` kept; a second `esc` clears it; `/` again types with the text kept.
     - The message box: typing `jkhlq` gives the draft `"jkhlq"`, and `esc` returns to the Fleet with the draft
       kept.
-    - With `keys: { leave_field: ["^c"] }`, Ctrl+C leaves the message box and `esc` does not.
+    - With `keys: { leave_field: ["^c"] }`, Ctrl+C leaves the message box and `esc` does not; Alt+`j` (Esc then
+      `j` in one read) does not leave it either, and types nothing (Decision 11).
+    - With the defaults, Alt+`j` while the box has the keys returns to the Fleet with the draft kept.
   - `WorkBoard_test.cpp`: the Work filter's `esc` keeps the filter, and the second `esc` clears it.
 - [ ] **Step 2:** Build, then run `"[palette]"`, `"[rowmenu]"`, `"[keys]"` and `"[workboard]"`. Expected: fail.
 - [ ] **Step 3: Implement**, with `Dashboard::State::applyKeys` resolving `nav` for the menu and a typed filter,
@@ -888,9 +986,9 @@ enum class NavMiss : uint8_t { NotBound = 0, Pending };
 - [ ] **Step 5:** Rebuild and run `orchestrator_test.exe` (all), `ctest … -R orchestrator`, the portability
   scripts and `clang-format -i`.
 - [ ] **Step 6: Docs.**
-  - README: in the palette every letter types into the query; `↑` `↓` or `Ctrl+J` `Ctrl+K` choose, `⏎` runs, and
+  - README: in the palette every letter types into the query; `↑` `↓` or `Ctrl+N` `Ctrl+P` choose, `⏎` runs, and
     `Esc` closes it at once, keeping the query.
   - The row menu: `j`/`k`/`gg`/`G` choose and `q` closes.
   - The Work view's `/` row: `Esc` keeps the filter and a second `Esc` clears it (it cleared at once before).
   - The message box: `Esc` returns to the Fleet with the draft kept.
-- [ ] **Step 7: Commit:** message `feat(orchestrator): vim keys in the row menu and the filters, Ctrl+J/K in the palette`.
+- [ ] **Step 7: Commit:** message `feat(orchestrator): vim keys in the row menu and the filters, Ctrl+N/P in the palette`.
