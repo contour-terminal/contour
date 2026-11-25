@@ -29,6 +29,7 @@
 #include <orchestrator/core/Jira.hpp>
 #include <orchestrator/core/Json.hpp>
 #include <orchestrator/core/Model.hpp>
+#include <orchestrator/core/NavKeys.hpp>
 #include <orchestrator/core/Overloaded.hpp>
 #include <orchestrator/core/Prompt.hpp>
 #include <orchestrator/core/Provider.hpp>
@@ -74,7 +75,42 @@ struct glz::meta<orchestrator::config::detail::JsonConfig>
                                               "permission_profiles",
                                               &T::permissionProfiles,
                                               "quick_replies",
-                                              &T::quickReplies);
+                                              &T::quickReplies,
+                                              "keys",
+                                              &T::keys);
+};
+
+/// The `keys` map's snake_case names.
+template <>
+struct glz::meta<orchestrator::config::detail::JsonKeys>
+{
+    using T = orchestrator::config::detail::JsonKeys;
+    // Glaze finds the table by this spelling, as the standard library finds `value_type`.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr auto value = glz::object("vim",
+                                              &T::vim,
+                                              "move_up",
+                                              &T::moveUp,
+                                              "move_down",
+                                              &T::moveDown,
+                                              "first",
+                                              &T::first,
+                                              "last",
+                                              &T::last,
+                                              "half_page_up",
+                                              &T::halfPageUp,
+                                              "half_page_down",
+                                              &T::halfPageDown,
+                                              "previous_value",
+                                              &T::previousValue,
+                                              "next_value",
+                                              &T::nextValue,
+                                              "leave_field",
+                                              &T::leaveField,
+                                              "enter_field",
+                                              &T::enterField,
+                                              "close",
+                                              &T::close);
 };
 
 /// A task's keys: `applies_to` is no member name.
@@ -144,6 +180,7 @@ namespace
     using config::detail::JsonDuration;
     using config::detail::JsonIssueSource;
     using config::detail::JsonKey;
+    using config::detail::JsonKeys;
     using config::detail::JsonPermissionProfile;
     using config::detail::JsonPluginRequirement;
     using config::detail::JsonQuickReply;
@@ -201,6 +238,7 @@ namespace
         PaneKeys,        ///< paneKeyNames().
         AfterReplies,    ///< afterReplyNames().
         TaskRoles,       ///< TaskRoleRows.
+        KeyNames,        ///< SpecialKeyNames.
     };
 
     /// What each problem means; one row per ConfigProblem, in its order.
@@ -306,6 +344,15 @@ namespace
                       .text = "is a permission profile, which a Copilot worker does not take" },
         ProblemText {
             .problem = ConfigProblem::UnknownRole, .text = "must be one of", .listing = Listing::TaskRoles },
+        ProblemText { .problem = ConfigProblem::NotAKeyName,
+                      .text = "is not a key: one printable character, ^ and a letter (not h, i, j or m), two "
+                              "characters such as gg, or one of",
+                      .listing = Listing::KeyNames },
+        ProblemText { .problem = ConfigProblem::KeyTaken, .text = "is already bound" },
+        ProblemText { .problem = ConfigProblem::TypesText,
+                      .text =
+                          "would type into a text field instead of leaving it; use esc, ^ and a letter, or "
+                          "another special key" },
     };
 
     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ProblemTexts.size()),
@@ -313,7 +360,7 @@ namespace
                                           return static_cast<std::size_t>(ProblemTexts[i].problem) == i;
                                       }),
                   "ProblemTexts has one row per ConfigProblem, in its order");
-    static_assert(ProblemTexts.size() == static_cast<std::size_t>(ConfigProblem::UnknownRole) + 1,
+    static_assert(ProblemTexts.size() == static_cast<std::size_t>(ConfigProblem::TypesText) + 1,
                   "ProblemTexts covers every ConfigProblem");
 
     /// @return The values @p listing names, as the user writes them, of the rows @p sources holds.
@@ -359,6 +406,7 @@ namespace
                 for (auto const& row: TaskRoleRows)
                     values.push_back(row.spelling);
                 break;
+            case Listing::KeyNames: std::ranges::copy(SpecialKeyNames, std::back_inserter(values)); break;
         }
         return values;
     }
@@ -399,6 +447,9 @@ namespace
         Key,      ///< A string, or a non-negative integer: a digit.
         Strings,  ///< An array of strings.
         Objects,  ///< An array of objects of Field::object's kind.
+        Bool,     ///< `true` or `false`.
+        Object,   ///< One object of Field::object's kind.
+        KeyList,  ///< An array of keys: strings, or integers 0 to 9.
     };
 
     /// The objects the configuration nests.
@@ -412,6 +463,7 @@ namespace
         PermissionProfile,
         QuickReply,
         Worker,
+        Keys,
     };
 
     /// One key an object may have, and the type of its value.
@@ -419,7 +471,8 @@ namespace
     {
         std::string_view key;
         JsonType type;
-        ObjectKind object = ObjectKind::Config; ///< For Objects: the kind of its elements.
+        ObjectKind object =
+            ObjectKind::Config; ///< For Objects: the kind of its elements; for Object, its own.
     };
 
     constexpr auto ConfigFields = std::array {
@@ -441,6 +494,7 @@ namespace
                 .type = JsonType::Objects,
                 .object = ObjectKind::PermissionProfile },
         Field { .key = "quick_replies", .type = JsonType::Objects, .object = ObjectKind::QuickReply },
+        Field { .key = "keys", .type = JsonType::Object, .object = ObjectKind::Keys },
     };
 
     constexpr auto RepoFields = std::array {
@@ -499,6 +553,31 @@ namespace
         Field { .key = "then", .type = JsonType::String },
     };
 
+    /// `vim`, then one KeyList per navigation action, named as navActionRows() names them.
+    constexpr auto KeysFields = std::array {
+        Field { .key = "vim", .type = JsonType::Bool },
+        Field { .key = "move_up", .type = JsonType::KeyList },
+        Field { .key = "move_down", .type = JsonType::KeyList },
+        Field { .key = "first", .type = JsonType::KeyList },
+        Field { .key = "last", .type = JsonType::KeyList },
+        Field { .key = "half_page_up", .type = JsonType::KeyList },
+        Field { .key = "half_page_down", .type = JsonType::KeyList },
+        Field { .key = "previous_value", .type = JsonType::KeyList },
+        Field { .key = "next_value", .type = JsonType::KeyList },
+        Field { .key = "leave_field", .type = JsonType::KeyList },
+        Field { .key = "enter_field", .type = JsonType::KeyList },
+        Field { .key = "close", .type = JsonType::KeyList },
+    };
+
+    /// Each action's list in JsonKeys, in navActionRows() order.
+    constexpr auto KeyListMembers = std::array {
+        &JsonKeys::moveUp,     &JsonKeys::moveDown,     &JsonKeys::first,         &JsonKeys::last,
+        &JsonKeys::halfPageUp, &JsonKeys::halfPageDown, &JsonKeys::previousValue, &JsonKeys::nextValue,
+        &JsonKeys::leaveField, &JsonKeys::enterField,   &JsonKeys::close,
+    };
+    static_assert(KeyListMembers.size() == NavActionCount, "KeyListMembers has one member per NavAction");
+    static_assert(KeysFields.size() == NavActionCount + 1, "KeysFields is vim and one list per NavAction");
+
     [[nodiscard]] constexpr std::span<Field const> fieldsOf(ObjectKind kind) noexcept
     {
         switch (kind)
@@ -511,6 +590,7 @@ namespace
             case ObjectKind::PermissionProfile: return PermissionProfileFields;
             case ObjectKind::QuickReply: return QuickReplyFields;
             case ObjectKind::Worker: return WorkerFields;
+            case ObjectKind::Keys: return KeysFields;
         }
         return {};
     }
@@ -538,6 +618,7 @@ namespace
     static_assert(matchesMirror<JsonQuickReply>(QuickReplyFields),
                   "QuickReplyFields and JsonQuickReply name the same keys");
     static_assert(matchesMirror<JsonWorker>(WorkerFields), "WorkerFields and JsonWorker name the same keys");
+    static_assert(matchesMirror<JsonKeys>(KeysFields), "KeysFields and JsonKeys name the same keys");
 
     /// Integers are read exactly, so that a count is never a rounded double.
     using Generic = glz::generic_u64;
@@ -550,6 +631,17 @@ namespace
     [[nodiscard]] std::optional<ConfigError> checkObject(Generic const& value,
                                                          ObjectKind kind,
                                                          std::string const& key);
+
+    /// The largest integer a `keys` list reads as a key: a digit.
+    constexpr uint64_t MaxKeyDigit = 9;
+
+    /// @return Whether @p element may be an entry of a `keys` list: a string, or an integer 0 to 9 (YAML's
+    ///         `- 0`), as a quick reply's `key` may be a bare digit.
+    [[nodiscard]] bool isKeyElement(Generic const& element) noexcept
+    {
+        auto const* const number = std::get_if<uint64_t>(&element.data);
+        return element.is_string() || (number != nullptr && *number <= MaxKeyDigit);
+    }
 
     /// @return The first wrong type in @p value, or unknown key beneath it, for a value of @p field at @p
     /// key.
@@ -570,8 +662,11 @@ namespace
                                                                                             : wrongType;
             case JsonType::Duration:
             case JsonType::Key: return value.is_string() || number != nullptr ? std::nullopt : wrongType;
+            case JsonType::Bool: return std::holds_alternative<bool>(value.data) ? std::nullopt : wrongType;
+            case JsonType::Object: return checkObject(value, field.object, key);
             case JsonType::Strings:
             case JsonType::Objects:
+            case JsonType::KeyList:
                 if (array == nullptr)
                     return wrongType;
                 for (auto const index: std::views::iota(std::size_t { 0 }, array->size()))
@@ -579,6 +674,8 @@ namespace
                     auto const& element = (*array)[index];
                     auto const elementKey = std::format("{}[{}]", key, index);
                     if (field.type == JsonType::Strings && !element.is_string())
+                        return problemAt(elementKey, ConfigProblem::WrongType);
+                    if (field.type == JsonType::KeyList && !isKeyElement(element))
                         return problemAt(elementKey, ConfigProblem::WrongType);
                     if (field.type == JsonType::Objects)
                         if (auto problem = checkObject(element, field.object, elementKey))
@@ -1203,6 +1300,52 @@ namespace
         return replies;
     }
 
+    /// The problem a refused `keys` entry is reported as.
+    struct KeyRefusalProblem
+    {
+        KeyRefusal refusal;
+        ConfigProblem problem;
+    };
+
+    constexpr auto KeyRefusalProblems = std::array {
+        KeyRefusalProblem { .refusal = KeyRefusal::NotAKey, .problem = ConfigProblem::NotAKeyName },
+        KeyRefusalProblem { .refusal = KeyRefusal::TypesText, .problem = ConfigProblem::TypesText },
+        KeyRefusalProblem { .refusal = KeyRefusal::Taken, .problem = ConfigProblem::KeyTaken },
+        KeyRefusalProblem { .refusal = KeyRefusal::Unbound, .problem = ConfigProblem::Empty },
+    };
+    static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, KeyRefusalProblems.size()),
+                                      [](std::size_t i) {
+                                          return static_cast<std::size_t>(KeyRefusalProblems[i].refusal) == i;
+                                      }),
+                  "KeyRefusalProblems has one row per KeyRefusal, in its order");
+
+    /// @return @p problem as the configuration reports it: at `keys.<action>[<i>]`, or at `keys.<action>` for
+    ///         an action left without keys.
+    [[nodiscard]] ConfigError keyErrorOf(KeyBindingProblem problem)
+    {
+        auto const name = navActionRows()[static_cast<std::size_t>(problem.action)].configName;
+        return ConfigError {
+            .key = problem.index ? std::format("keys.{}[{}]", name, *problem.index)
+                                 : std::format("keys.{}", name),
+            .problem = KeyRefusalProblems[static_cast<std::size_t>(problem.refusal)].problem,
+            .subject = std::move(problem.subject),
+        };
+    }
+
+    /// @return The navigation keys `keys` asks for; without it, the defaults with the vim keys.
+    [[nodiscard]] Checked<NavKeys> keysOf(std::optional<JsonKeys> const& value)
+    {
+        if (!value)
+            return NavKeys::defaults(VimKeys::On);
+        auto const vim = value->vim.value_or(true) ? VimKeys::On : VimKeys::Off;
+        auto configured = std::array<std::optional<std::vector<std::string>>, NavActionCount> {};
+        for (auto const [index, member]: std::views::enumerate(KeyListMembers))
+            if (auto const& list = (*value).*member)
+                configured[static_cast<std::size_t>(index)] =
+                    *list | std::views::transform(keyText) | std::ranges::to<std::vector>();
+        return navKeysOf(vim, configured).transform_error(keyErrorOf);
+    }
+
     /// @return The rules of a profile's @p list, each checked, reported at `<key>[i]`.
     [[nodiscard]] Checked<std::vector<std::string>> checkedRules(
         std::optional<std::vector<std::string>> const& list, std::string const& key)
@@ -1450,6 +1593,8 @@ std::expected<Config, ConfigError> Config::parse(std::string_view json,
             return e;
         if (auto e = assign(values.quickReplies, quickRepliesOf(document.quickReplies)))
             return e;
+        if (auto e = assign(values.keys, keysOf(document.keys)))
+            return e;
         auto permissions = permissionsOf(document.permissions, document.permissionProfiles, values.tasks);
         if (!permissions)
             return std::move(permissions.error());
@@ -1488,6 +1633,7 @@ Config::Config(Values values) noexcept:
     _quickReplies { std::move(values.quickReplies) },
     _profiles { std::move(values.profiles) },
     _defaultProfile { std::move(values.defaultProfile) },
+    _keys { std::move(values.keys) },
     _sources { values.sources }
 {
     // Every configuration can start an agent on a topic: without a task of its own, the topic's text is the

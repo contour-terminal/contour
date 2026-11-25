@@ -19,6 +19,7 @@
 #include <orchestrator/core/HostPaths.hpp>
 #include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Model.hpp>
+#include <orchestrator/core/NavKeys.hpp>
 #include <orchestrator/core/UnmeasuredSources.hpp>
 
 using namespace std::string_view_literals;
@@ -481,6 +482,9 @@ constexpr auto RejectRows = std::array {
     RejectRow { "an unknown agent", { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "workers": [ { "id": "a", "agent": "codex" } ],)" }, "workers[0].agent", ConfigProblem::UnknownAgent },
     RejectRow { "an env_set that is no Name", { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "workers": [ { "id": "a", "agent": "claude", "env_set": "a b" } ],)" }, "workers[0].env_set", ConfigProblem::NotAName },
     RejectRow { "a task worker that is no Name", { .find = R"("applies_to": "issue")", .replace = R"("applies_to": "issue", "worker": "a b")" }, "tasks[2].worker", ConfigProblem::NotAName },
+    RejectRow { "a keys entry that is no key", { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "keys": { "move_up": ["^h"] },)" }, "keys.move_up[0]", ConfigProblem::NotAKeyName },
+    RejectRow { "a keys entry already bound", { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "keys": { "close": ["e"] },)" }, "keys.close[0]", ConfigProblem::KeyTaken },
+    RejectRow { "a leave_field key that types", { .find = R"("max_agents": 4,)", .replace = R"("max_agents": 4, "keys": { "leave_field": ["x"] },)" }, "keys.leave_field[0]", ConfigProblem::TypesText },
 };
 // clang-format on
 
@@ -1176,4 +1180,129 @@ TEST_CASE("takesNoProfileFor: a task's own profile on a worker whose agent takes
     CHECK_FALSE(
         takesNoProfileFor(TaskDef { .permissions = "read_only" }, WorkerDef { .agent = AgentKind::Claude }));
     CHECK_FALSE(takesNoProfileFor(TaskDef { .permissions = "" }, WorkerDef { .agent = AgentKind::Copilot }));
+}
+
+namespace
+{
+
+/// @return The example with @p keys as its `keys` value.
+[[nodiscard]] std::expected<Config, ConfigError> parseKeys(std::string_view keys)
+{
+    auto const replaced = std::format(R"("max_agents": 4, "keys": {},)", keys);
+    return parse(Input { .find = R"("max_agents": 4,)", .replace = replaced });
+}
+
+} // namespace
+
+TEST_CASE("keys: the defaults, vim off, and lists of one's own", "[config]")
+{
+    auto const defaulted = parse(Input {});
+    REQUIRE(defaulted.has_value());
+    CHECK(defaulted->keys() == NavKeys::defaults(VimKeys::On));
+
+    auto const plain = parseKeys(R"({ "vim": false })");
+    REQUIRE(plain.has_value());
+    CHECK(plain->keys() == NavKeys::defaults(VimKeys::Off));
+
+    auto const vimOn = parseKeys(R"({ "vim": true })");
+    REQUIRE(vimOn.has_value());
+    CHECK(vimOn->keys() == NavKeys::defaults(VimKeys::On));
+
+    // A bare digit, as YAML writes `- 0`, is its digit.
+    auto const own = parseKeys(R"({ "vim": false, "move_down": ["j"], "first": [0] })");
+    REQUIRE(own.has_value());
+    CHECK(std::ranges::equal(own->keys().keysOf(NavAction::MoveDown), std::array { "j"sv }));
+    CHECK(std::ranges::equal(own->keys().keysOf(NavAction::First), std::array { "0"sv }));
+}
+
+TEST_CASE("keys: its names after vim are navActionRows()' config names", "[config]")
+{
+    for (auto const& row: navActionRows())
+    {
+        CAPTURE(row.configName);
+        auto const key = row.action == NavAction::LeaveField ? "^c"sv : "F"sv;
+        auto const config = parseKeys(std::format(R"({{ "{}": ["{}"] }})", row.configName, key));
+        REQUIRE(config.has_value());
+        CHECK(std::ranges::equal(config->keys().keysOf(row.action), std::array { key }));
+    }
+}
+
+TEST_CASE("keys: what is refused, and where", "[config]")
+{
+    auto const taken = parseKeys(R"({ "close": ["j"] })");
+    REQUIRE_FALSE(taken.has_value());
+    CHECK(taken.error().key == "keys.close[0]");
+    CHECK(taken.error().problem == ConfigProblem::KeyTaken);
+    CHECK(message(taken.error(), sourceTables())
+          == "keys.close[0]: is already bound: j, also keys.move_down");
+
+    auto const notAKey = parseKeys(R"({ "move_up": ["up", "PgUp"] })");
+    REQUIRE_FALSE(notAKey.has_value());
+    CHECK(notAKey.error().key == "keys.move_up[1]");
+    CHECK(notAKey.error().problem == ConfigProblem::NotAKeyName);
+    CHECK(
+        message(notAKey.error(), sourceTables())
+        == "keys.move_up[1]: is not a key: one printable character, ^ and a letter (not h, i, j or m), two "
+           "characters such as gg, or one of: up, down, left, right, home, end, pgup, pgdn, enter, esc, tab, "
+           "del");
+
+    auto const types = parseKeys(R"({ "leave_field": ["x"] })");
+    REQUIRE_FALSE(types.has_value());
+    CHECK(types.error().key == "keys.leave_field[0]");
+    CHECK(types.error().problem == ConfigProblem::TypesText);
+
+    struct Row
+    {
+        std::string_view keys;
+        std::string_view key;
+        ConfigProblem problem;
+    };
+    for (auto const& row: std::array {
+             Row { .keys = R"({ "close": [] })", .key = "keys.close", .problem = ConfigProblem::Empty },
+             Row { .keys = R"({ "leave_field": [] })",
+                   .key = "keys.leave_field",
+                   .problem = ConfigProblem::Empty },
+             Row { .keys = R"({ "jump": ["x"] })", .key = "keys.jump", .problem = ConfigProblem::UnknownKey },
+             Row { .keys = R"({ "vim": "no" })", .key = "keys.vim", .problem = ConfigProblem::WrongType },
+             Row { .keys = R"({ "move_up": "k" })",
+                   .key = "keys.move_up",
+                   .problem = ConfigProblem::WrongType },
+             Row { .keys = R"(["j"])", .key = "keys", .problem = ConfigProblem::WrongType },
+             Row { .keys = R"({ "move_up": [true] })",
+                   .key = "keys.move_up[0]",
+                   .problem = ConfigProblem::WrongType },
+             Row { .keys = R"({ "move_up": [10] })",
+                   .key = "keys.move_up[0]",
+                   .problem = ConfigProblem::WrongType },
+             Row { .keys = R"({ "move_up": ["e"] })",
+                   .key = "keys.move_up[0]",
+                   .problem = ConfigProblem::KeyTaken },
+         })
+    {
+        CAPTURE(row.keys);
+        auto const config = parseKeys(row.keys);
+        REQUIRE_FALSE(config.has_value());
+        CHECK(config.error().key == row.key);
+        CHECK(config.error().problem == row.problem);
+    }
+}
+
+TEST_CASE("keys: task keys the vim defaults use still load", "[config]")
+{
+    // dashboardKeys() is unchanged: navigation keys are not task keys' business.
+    auto const config = parse(Input { .json = R"({
+  "worktree_root": "~/worktrees",
+  "repos": [ { "path": "~/repo/contour", "forge": "github" } ],
+  "tasks": [
+    { "id": "a", "key": "q", "label": "a", "applies_to": "pr", "model": "opus", "prompt": "{url}" },
+    { "id": "b", "key": "g", "label": "b", "applies_to": "pr", "model": "opus", "prompt": "{url}" },
+    { "id": "c", "key": "G", "label": "c", "applies_to": "pr", "model": "opus", "prompt": "{url}" },
+    { "id": "d", "key": "h", "label": "d", "applies_to": "pr", "model": "opus", "prompt": "{url}" },
+    { "id": "e", "key": "l", "label": "e", "applies_to": "pr", "model": "opus", "prompt": "{url}" },
+    { "id": "f", "key": "i", "label": "f", "applies_to": "pr", "model": "opus", "prompt": "{url}" }
+  ]
+})" });
+    REQUIRE(config.has_value());
+    CHECK(std::ranges::equal(config->tasks() | std::views::take(6) | std::views::transform(&TaskDef::key),
+                             std::array { 'q', 'g', 'G', 'h', 'l', 'i' }));
 }

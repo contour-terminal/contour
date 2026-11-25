@@ -16,6 +16,7 @@
 #include <orchestrator/core/HostPaths.hpp>
 #include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Model.hpp>
+#include <orchestrator/core/NavKeys.hpp>
 #include <orchestrator/core/Permissions.hpp>
 #include <orchestrator/core/Plugins.hpp>
 #include <orchestrator/core/Provider.hpp>
@@ -171,6 +172,9 @@ enum class ConfigProblem : uint8_t
     ProfileOnCopilot, ///< A task with its own `permissions` on a worker that takes no profile: a notice;
                       ///< the task is unavailable.
     UnknownRole,      ///< A task's `role` no TaskRoleRows row spells.
+    NotAKeyName,      ///< A `keys` entry that is no key spelling.
+    KeyTaken,         ///< A `keys` entry another binding, or a command, already holds.
+    TypesText,        ///< A `leave_field` key that would type.
 };
 
 /// Why a configuration was refused.
@@ -291,6 +295,8 @@ class Config
     /// @return The profile the task's runs start with: its own, else the default; the default for a task no
     ///         longer configured.
     [[nodiscard]] PermissionProfile const& profileFor(std::string_view taskId) const noexcept;
+    /// @return The navigation keys in force (`keys`): the defaults with the vim keys, as `keys` changed them.
+    [[nodiscard]] NavKeys const& keys() const noexcept { return _keys; }
     /// @return How long an agent stays done before its run is ended; 0: never.
     [[nodiscard]] std::chrono::milliseconds endDoneAfter() const noexcept { return _endDoneAfter; }
 
@@ -345,6 +351,7 @@ class Config
         std::vector<QuickReply> quickReplies = defaultQuickReplies();
         std::vector<PermissionProfile> profiles = {};
         std::string defaultProfile = std::string { DefaultProfileName };
+        NavKeys keys = NavKeys::defaults(VimKeys::On);
         std::chrono::milliseconds endDoneAfter = DefaultEndDoneAfter;
         std::chrono::milliseconds finishedRetention = DefaultFinishedRetention;
         std::vector<Repo> repos = {};
@@ -374,6 +381,7 @@ class Config
     std::vector<QuickReply> _quickReplies;
     std::vector<PermissionProfile> _profiles;
     std::string _defaultProfile;
+    NavKeys _keys;
     SourceTables _sources;
 };
 

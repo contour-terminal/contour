@@ -66,6 +66,24 @@ struct JsonQuickReply
     std::optional<std::string> then;
 };
 
+/// The `keys` map: whether the vim keys are among the defaults, and each navigation action's own keys, in
+/// navActionRows() order; Config.cpp maps the snake_case names.
+struct JsonKeys
+{
+    std::optional<bool> vim;
+    std::optional<std::vector<JsonKey>> moveUp;
+    std::optional<std::vector<JsonKey>> moveDown;
+    std::optional<std::vector<JsonKey>> first;
+    std::optional<std::vector<JsonKey>> last;
+    std::optional<std::vector<JsonKey>> halfPageUp;
+    std::optional<std::vector<JsonKey>> halfPageDown;
+    std::optional<std::vector<JsonKey>> previousValue;
+    std::optional<std::vector<JsonKey>> nextValue;
+    std::optional<std::vector<JsonKey>> leaveField;
+    std::optional<std::vector<JsonKey>> enterField;
+    std::optional<std::vector<JsonKey>> close;
+};
+
 /// One `workers` entry.
 struct JsonWorker
 {
@@ -108,6 +126,7 @@ struct JsonConfig
     std::optional<std::string> permissions;
     std::optional<std::vector<JsonPermissionProfile>> permissionProfiles;
     std::optional<std::vector<JsonQuickReply>> quickReplies;
+    std::optional<JsonKeys> keys;
 };
 
 } // namespace orchestrator::config::detail

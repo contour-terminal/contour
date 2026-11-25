@@ -79,6 +79,8 @@ add_library(orchestrator_core STATIC
     core/Model.hpp
     core/Naming.cpp
     core/Naming.hpp
+    core/NavKeys.cpp
+    core/NavKeys.hpp
     core/OperationState.cpp
     core/OperationState.hpp
     core/Overloaded.hpp
@@ -209,6 +211,7 @@ if(ORCHESTRATOR_TESTING)
         core/Jira_test.cpp
         core/JsonPrefix_test.cpp
         core/Naming_test.cpp
+        core/NavKeys_test.cpp
         core/OperationState_test.cpp
         core/Permissions_test.cpp
         core/Plugins_test.cpp
