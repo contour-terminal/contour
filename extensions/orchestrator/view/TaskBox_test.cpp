@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <catch2/catch_test_macros.hpp>
 
+#include <format>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -263,4 +264,29 @@ TEST_CASE("the n box does not open unconfigured", "[orchestrator][view][taskbox]
     CHECK_FALSE(fixture.dashboard.interaction().taskBox.has_value());
     CHECK(fixture.screen().contains("not configured"));
     CHECK(openTaskBox(fixture.engine, {}, {}, {}, {}).error() == StartRefusal::NotConfigured);
+}
+
+TEST_CASE("the n box: a busy worker gives way only to one the topic task's profile can go to",
+          "[orchestrator][view][taskbox]")
+{
+    auto world = World {
+        .configJson = std::format(R"({{ "worktree_root": "~/worktrees", "models": ["opus"],
+  "workers": [ {{ "id": "claude", "agent": "claude" }}, {{ "id": "copilot", "agent": "copilot" }} ],
+  "repos": {},
+  "tasks": [
+    {{ "id": "plan", "key": "p", "label": "plan", "applies_to": "topic", "model": "opus", "worker": "claude",
+       "permissions": "trusted", "prompt": "/plan {{topic}}" }} ] }})",
+                                  OneRepository),
+    };
+    // A run with no worker of its own counts for `claude`, which is then busy.
+    world.stored = { storedRun(
+        Running {}, "topic-busy-20261113-150847", TopicRef { .slug = "busy" }, "plan") };
+    auto fixture = DashboardFixture { world };
+    REQUIRE(fixture.engine.config() != nullptr);
+    CHECK(fixture.dashboard.input("n").empty());
+    CHECK(fixture.dashboard.input("plan the release").empty());
+    auto const dispatched = dispatchesIn(fixture.dashboard.input("\r"));
+    REQUIRE(dispatched.size() == 1);
+    // Copilot is idle but takes no profile: the busy task's own worker stays, and ⏎ started it.
+    CHECK(dispatched.front().worker == "claude");
 }

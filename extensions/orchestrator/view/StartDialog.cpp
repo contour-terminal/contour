@@ -58,8 +58,7 @@ namespace
     }
 
     /// @return The setting after (or before, by @p step) @p from in SettingOrder, wrapping around, passing
-    /// over
-    ///         the ones not offered.
+    ///         over the ones not offered.
     [[nodiscard]] FormField nextSetting(FormField from,
                                         int step,
                                         DispatchFormState const& form,

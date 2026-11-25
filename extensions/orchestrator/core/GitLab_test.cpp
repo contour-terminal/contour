@@ -337,10 +337,11 @@ TEST_CASE("GitLab: an MR's newest pipeline of its sha decides, and its failed jo
     CHECK(mrs[1].ci == CiState::Passing);
     CHECK(mrs[2].ci == CiState::Pending);
     CHECK(mrs[0].review == listed->items[0].review); // reviewStateOf(), unchanged by the join
-    CHECK(mrs[0].source == StateSource::Complete);
-    CHECK(mrs[3].source == StateSource::Inferred); // no pipeline of its sha
+    CHECK(mrs[0].ciSource == StateSource::Complete);
+    CHECK(mrs[0].reviewSource == StateSource::Inferred); // a pipeline says nothing about review
+    CHECK(mrs[3].ciSource == StateSource::Inferred);     // no pipeline of its sha
     CHECK(mrs[3] == listed->items[3]);
-    CHECK(gitlab::enriched(listed->items, std::nullopt, std::nullopt)[0].source == StateSource::Inferred);
+    CHECK(gitlab::enriched(listed->items, std::nullopt, std::nullopt)[0].ciSource == StateSource::Inferred);
     CHECK(gitlab::enriched(listed->items, std::nullopt, std::nullopt) == listed->items);
     CHECK(gitlab::enriched(listed->items, std::span { *pipes }, std::nullopt)[0].failingChecks.empty());
 }
@@ -357,7 +358,8 @@ TEST_CASE("GitLab: the REST list carries conflicts, update time and the head com
     CHECK(byIid(5729).conflicts == Conflicts::Conflicting); // `draft_status`, has_conflicts true
     CHECK(byIid(5752).conflicts == Conflicts::None);
     CHECK(byIid(5696).updatedWallMs == unixMsOf("2026-11-20T10:24:50.48+01:00"));
-    CHECK(byIid(5752).source == StateSource::Inferred);
+    CHECK(byIid(5752).ciSource == StateSource::Inferred);
+    CHECK(byIid(5752).reviewSource == StateSource::Inferred);
     CHECK(std::ranges::all_of(
         listed->items, [](ChangeRequest const& mr) { return mr.updatedWallMs != 0 && !mr.headSha.empty(); }));
 }
@@ -375,7 +377,8 @@ TEST_CASE("GitLab: a merge request's pipelines are found by its head commit or i
                                .failingChecks = {},
                                .review = ReviewState::Required,
                                .closesIssues = {},
-                               .source = StateSource::Inferred,
+                               .ciSource = StateSource::Inferred,
+                               .reviewSource = StateSource::Inferred,
                                .headSha = std::string(sha) };
     };
     auto const listed = std::vector {
@@ -408,11 +411,11 @@ TEST_CASE("GitLab: a merge request's pipelines are found by its head commit or i
     REQUIRE(mrs.size() == listed.size());
 
     CHECK(mrs[0].ci == CiState::Failing);
-    CHECK(mrs[0].source == StateSource::Complete);
+    CHECK(mrs[0].ciSource == StateSource::Complete);
     CHECK(mrs[0].failingChecks == std::vector<std::string> { "merged-build" });
 
     CHECK(mrs[1].ci == CiState::Passing);
-    CHECK(mrs[1].source == StateSource::Complete);
+    CHECK(mrs[1].ciSource == StateSource::Complete);
 
     CHECK(mrs[2].ci == CiState::Failing);
     CHECK(mrs[2].failingChecks == std::vector<std::string> { "e2e" });
@@ -421,7 +424,7 @@ TEST_CASE("GitLab: a merge request's pipelines are found by its head commit or i
     CHECK(mrs[3].failingChecks.empty());
 
     CHECK(mrs[4] == listed[4]);
-    CHECK(mrs[4].source == StateSource::Inferred);
+    CHECK(mrs[4].ciSource == StateSource::Inferred);
 }
 
 TEST_CASE("GitLab: the recorded merged-results pipelines keep their merge request refs", "[gitlab]")

@@ -32,8 +32,8 @@ namespace orchestrator::gitlab
 
 /// Maps the output of the declared `glab-mrs` command. GitLab's list carries no pipeline object and no
 /// closing issues: a change request's CI state is only what its `detailed_merge_status` says (ciStateOf), it
-/// names no failing check, and it claims no issue. Each is Inferred until enriched() matches a pipeline to
-/// its `sha`.
+/// names no failing check, and it claims no issue. Each one's CI is Inferred until enriched() matches a
+/// pipeline to it; its review always is.
 /// @param stdoutText What it printed.
 /// @param extent Whether the host kept all of it; a cut output is read up to its last whole entry.
 /// @return Its merge requests, leaving out (and counting) each without an `iid` or whose target branch is not
@@ -55,8 +55,7 @@ namespace orchestrator::gitlab
 
 /// @param status A REST pipeline `status`.
 /// @return success, skipped: Passing; failed, canceled: Failing; every other value (running, pending,
-/// created,
-///         waiting_for_resource, preparing, manual, scheduled, canceling, unknown): Pending.
+///         created, waiting_for_resource, preparing, manual, scheduled, canceling, unknown): Pending.
 [[nodiscard]] CiState pipelineStateOf(std::string_view status) noexcept;
 
 /// Maps the output of the declared `glab-pipelines` command: a JSON array of `{id, sha, status, …}`.
@@ -78,8 +77,9 @@ namespace orchestrator::gitlab
 /// Joins pipelines and failed jobs into the REST list. A pipeline belongs to a merge request when it ran on
 /// its `headSha`, or for its `refs/merge-requests/<iid>/head` or `refs/merge-requests/<iid>/merge` (a
 /// merged-results pipeline, whose commit is not the head). A merge request with such pipelines takes the
-/// highest-id one's ci and that pipeline's failed jobs (list order, each name once), keeps the review
-/// reviewStateOf() gave it, and is Complete; without one it stays as changeRequests() mapped it, Inferred.
+/// highest-id one's ci and that pipeline's failed jobs (list order, each name once), and its ciSource
+/// becomes Complete; its review stays as reviewStateOf() gave it, and Inferred. Without one it stays as
+/// changeRequests() mapped it.
 /// @param listed The REST list's merge requests.
 /// @param pipelines What pipelines() read; std::nullopt: the call failed.
 /// @param jobs What failedJobs() read; std::nullopt: the call failed (failingChecks stay empty).

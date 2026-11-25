@@ -74,11 +74,11 @@ enum class Conflicts : uint8_t
     Conflicting, ///< It conflicts with its base.
 };
 
-/// Where a change request's CI and review state come from.
+/// Where a change request's CI state, or its review state, comes from.
 enum class StateSource : uint8_t
 {
-    Complete = 0, ///< The forge reported them directly.
-    Inferred,     ///< Inferred from GitLab's single `detailed_merge_status` (no matched pipeline).
+    Complete = 0, ///< The forge reported it directly.
+    Inferred,     ///< Inferred from GitLab's single `detailed_merge_status`.
 };
 
 /// Whether a change request is open for review.
@@ -147,10 +147,11 @@ struct ChangeRequest
     ReviewState review = ReviewState::None;         ///< Where it stands with its reviewers.
     std::vector<uint64_t>
         closesIssues; ///< The issues of its own repository it closes when merged, by number.
-    Conflicts conflicts = Conflicts::None;      ///< Whether it conflicts with its base.
-    uint64_t updatedWallMs = 0;                 ///< When it was last updated, Unix ms; 0: unknown.
-    StateSource source = StateSource::Complete; ///< Where @ref ci and @ref review come from.
-    std::string headSha = {};                   ///< Its head commit as the forge reported it; empty: unknown.
+    Conflicts conflicts = Conflicts::None;            ///< Whether it conflicts with its base.
+    uint64_t updatedWallMs = 0;                       ///< When it was last updated, Unix ms; 0: unknown.
+    StateSource ciSource = StateSource::Complete;     ///< Where @ref ci comes from.
+    StateSource reviewSource = StateSource::Complete; ///< Where @ref review comes from.
+    std::string headSha = {}; ///< Its head commit as the forge reported it; empty: unknown.
     [[nodiscard]] bool operator==(ChangeRequest const&) const = default;
 };
 

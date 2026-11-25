@@ -60,8 +60,7 @@ enum class StartRefusal : uint8_t
 ///        empty: the one suggestTask() suggests.
 /// @param session The agent's session UUID; empty for the caller to mint.
 /// @return The dialog on @p item: the suggested task (or @p task while it applies), its model,
-/// defaultWorker(),
-///         and the reason; or why it cannot open.
+///         defaultWorker(), and the reason; or why it cannot open.
 [[nodiscard]] std::expected<StartDialogState, StartRefusal> openStartDialog(Engine const& engine,
                                                                             WorkItem const& item,
                                                                             std::string_view task,

@@ -89,7 +89,7 @@ namespace
     }
 
     /// @return Whether a word may start at @p at: it is the first byte, or follows a byte that is no word
-    /// byte.
+    ///         byte.
     [[nodiscard]] bool atWordStart(std::string_view text, std::size_t at) noexcept
     {
         return at == 0 || !isWordByte(text[at - 1]);
@@ -114,7 +114,7 @@ namespace
     }
 
     /// @return Whether @p text starts with the word @p word, case-insensitively, at a word boundary on both
-    /// sides.
+    ///         sides.
     [[nodiscard]] bool startsWithWord(std::string_view text, std::size_t at, std::string_view word) noexcept
     {
         if (!atWordStart(text, at) || text.size() - at < word.size())
@@ -149,7 +149,7 @@ namespace
     }
 
     /// @return The Jira key whose token starts at @p at in @p text, upper-cased; std::nullopt: no key starts
-    /// there.
+    ///         there.
     [[nodiscard]] std::optional<std::string> keyAt(std::string_view text, std::size_t at, KeyCase keyCase)
     {
         auto const startsProject = keyCase == KeyCase::Exact ? isUpper : isLetter;
@@ -518,12 +518,15 @@ WorkGroup groupOf(ChangeRequest const& mr) noexcept
     if (mr.ci == CiState::Failing || mr.review == ReviewState::ChangesRequested
         || mr.conflicts == Conflicts::Conflicting)
         return WorkGroup::NeedsYou;
-    // An inferred MR's ci None and review None say nothing: only GitLab's `mergeable` (Approved) means ready.
-    auto const ready = mr.source == StateSource::Inferred
-                           ? mr.review == ReviewState::Approved
-                           : (mr.ci == CiState::Passing || mr.ci == CiState::None)
-                                 && (mr.review == ReviewState::Approved || mr.review == ReviewState::None);
-    return ready ? WorkGroup::ReadyToMerge : WorkGroup::InReview;
+    // An inferred None says nothing: GitLab's merge status names a review only while it blocks the merge
+    // (or `mergeable`, an inferred Approved), so an inferred review is ready only once Approved.
+    auto const reviewReady = mr.review == ReviewState::Approved
+                             || (mr.review == ReviewState::None && mr.reviewSource == StateSource::Complete);
+    // `mergeable` vouches for the pipeline too, while no matched pipeline says otherwise.
+    auto const ciReady = mr.ciSource == StateSource::Inferred
+                             ? mr.review == ReviewState::Approved && mr.reviewSource == StateSource::Inferred
+                             : mr.ci == CiState::Passing || mr.ci == CiState::None;
+    return reviewReady && ciReady ? WorkGroup::ReadyToMerge : WorkGroup::InReview;
 }
 
 WorkGroup groupOf(Progress progress) noexcept
@@ -668,11 +671,16 @@ std::size_t activeRunsOn(Config const& /*config*/,
 WorkerDef const& defaultWorker(Config const& config, std::span<Run const> runs, std::string_view taskId)
 {
     auto const& own = config.workerFor(taskId);
-    if (activeRunsOn(config, runs, own.id) == 0)
+    auto const* const task = config.findTask(taskId);
+    if (task == nullptr || activeRunsOn(config, runs, own.id) == 0)
         return own;
-    auto const workers = config.workers();
-    return *std::ranges::min_element(
-        workers, {}, [&](WorkerDef const& worker) { return activeRunsOn(config, runs, worker.id); });
+    // Only a worker the engine would take for this task (Engine::preview refuses WorkerTakesNoProfile).
+    auto takers = config.workers() | std::views::filter([&](WorkerDef const& worker) {
+                      return !takesNoProfileFor(*task, worker);
+                  });
+    auto const least = std::ranges::min_element(
+        takers, {}, [&](WorkerDef const& worker) { return activeRunsOn(config, runs, worker.id); });
+    return least != takers.end() ? *least : own;
 }
 
 } // namespace orchestrator

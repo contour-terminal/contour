@@ -219,7 +219,7 @@ five groups shown in this order:
 | Group | Holds |
 | --- | --- |
 | Needs you | a merge request whose pipeline failed, whose reviewer asked for changes, or that conflicts with its base |
-| Ready to merge | a merge request whose pipeline passed (or that has none), without conflicts, and approved or needing no review |
+| Ready to merge | a merge request whose pipeline passed (or that has none), without conflicts, and approved or needing no review (on GitLab: `mergeable`) |
 | In review | every other open merge request: its pipeline running, its review pending |
 | No MR yet | a ticket in progress that no merge request names |
 | Everything else | a draft merge request, whatever its pipeline or conflicts, and a ticket not in progress; folded until you open it |
@@ -243,7 +243,7 @@ Each row has these columns:
 | Title | its title, cut with `…` | its summary |
 | Pipeline | `✗ pipeline`, `◌ running`, `✓ pipeline` or `·` | `·` |
 | Review | `⚠ conflicts` (which wins), `⟲ changes`, `✓ approved`, `… review` or `· no review` | `·` |
-| Jira | `◆ <status>` of its ticket, or `·` | `◆ <status>`, or `● open` for a forge issue |
+| Jira | `◆ <status>` of its ticket, `◆ ?` while its status is unknown, or `·` | `◆ <status>`, or `● open` for a forge issue |
 | Agent | `⬢ <worker>` while a run works on it, else how long ago it was updated | the same, but a ticket has no age |
 
 As the tab narrows, a row drops the age first, then shows the review and then the pipeline by their glyph alone;
@@ -290,7 +290,7 @@ offers no "copy branch name": a served tab drops OSC 52, so no copy would reach 
 | a row | select it | open the start dialog | the row menu | scroll the list three lines; the selection stays until it leaves the view |
 | a merge request's number or a ticket's key | select the row | open it on your machine | as on the row | as on the row |
 | a group's heading | fold or unfold it | nothing more: the first click did it | fold every other group | scroll |
-| the scrollbar | jump there | — | — | drag the thumb |
+| the scrollbar | jump there; hold the button on the thumb to drag it | — | — | scroll the list |
 | the filter, the repository chip, the sort chip | type into the filter; step the chip | — | step the chip back | step the chip |
 | a key in the action bar | run it | — | — | — |
 | the start dialog or the `n` box | pick a setting; on its value or its `‹ ›`, step it; pick a worker's chip | start (on a label, the note or a worker; a double click on `‹ ›` steps twice) | step it back | step the setting under the pointer |
@@ -405,9 +405,11 @@ A pipeline belongs to a merge request when it ran on the merge request's head co
 `refs/merge-requests/<iid>/head` or `refs/merge-requests/<iid>/merge` (a merged-results pipeline, whose commit is
 not the head); of a merge request's pipelines the newest wins, and its failed jobs are the failing checks the
 details line and the start dialog name. Approval still comes from `detailed_merge_status`, which says
-`not_approved`, `requested_changes` or `mergeable`. A merge request none of the listed pipelines matches keeps
-what `detailed_merge_status` alone says, is Ready to merge only while that is `mergeable`, and its details line
-says `pipeline and review inferred from the merge status`. A pipeline call that fails leaves every merge request
+`not_approved`, `requested_changes` or `mergeable`, so a merge request is Ready to merge only while it says
+`mergeable`, however its pipeline did: any other status (`discussions_not_resolved`, `need_rebase`,
+`blocked_status`, `checking`, …) names no review, so the row stays In review and shows `… review`, not
+`· no review`. A merge request none of the listed pipelines matches keeps what `detailed_merge_status` alone
+says, and its details line says `pipeline and review inferred from the merge status`. A pipeline call that fails leaves every merge request
 so, with a problem line (`contour: the pipeline list could not be read; CI and review are inferred from GitLab's
 merge status`); a failed job list leaves the failing checks unnamed, also with a line. It is never one call per
 merge request.

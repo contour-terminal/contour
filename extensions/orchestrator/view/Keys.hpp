@@ -347,6 +347,12 @@ struct WorkState
     [[nodiscard]] bool operator==(WorkState const&) const = default;
 };
 
+/// @param state The Work view's interaction: its repository chip.
+/// @param repos The configured repositories, in configuration order (Engine::repositories()).
+/// @return The repository the chip names; empty while it names every one, or one no longer configured.
+[[nodiscard]] std::string_view chipRepository(WorkState const& state,
+                                              std::span<std::string const> repos) noexcept;
+
 /// How long an answered agent may still ask before the action bar says so.
 inline constexpr uint64_t StillAsksAfterMs = 10'000;
 

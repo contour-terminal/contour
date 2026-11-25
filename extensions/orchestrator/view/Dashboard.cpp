@@ -1380,7 +1380,12 @@ namespace
             .layer = Layer::Popup,
             .click =
                 [](State& state, std::size_t value, Clicks, Pointer const&, std::vector<UiAction>& actions) {
-                    state.interaction.palette->highlighted = value;
+                    // A hit the last frame recorded may outlive the palette: a second press, or a poll,
+                    // closed it.
+                    auto& palette = state.interaction.palette;
+                    if (!palette)
+                        return;
+                    palette->highlighted = value;
                     state.press(core::tui::KeyCode::Enter, actions);
                 },
             .wheel = nullptr },
@@ -1571,8 +1576,8 @@ namespace
             .layer = Layer::Popup,
             .click =
                 [](State& state, std::size_t value, Clicks, Pointer const&, std::vector<UiAction>& actions) {
-                    // A hit the last frame recorded may outlive the menu: a second press, or a poll, closed
-                    // it.
+                    // A hit the last frame recorded may outlive the menu: a second press, or a poll,
+                    // closed it.
                     auto& menu = state.interaction.work.menu;
                     if (!menu)
                         return;

@@ -405,9 +405,7 @@ namespace
         if (interaction.view == View::Work)
         {
             auto const& work = interaction.work;
-            auto const repos = engine.repositories();
-            if (work.repoChip > 0 && work.repoChip <= repos.size())
-                chipRepo = repos[work.repoChip - 1];
+            chipRepo = chipRepository(work, engine.repositories());
             auto const items = engine.workItems();
             auto const selected = std::ranges::find_if(
                 items, [&](WorkItem const& item) { return workItemKey(item) == work.selectedKey; });
@@ -1033,6 +1031,13 @@ std::optional<UiAction> applyKey(core::tui::KeyEvent const& key,
         return std::nullopt;
     }
     return command ? dispatch(*command, interaction, context) : std::nullopt;
+}
+
+std::string_view chipRepository(WorkState const& state, std::span<std::string const> repos) noexcept
+{
+    return state.repoChip > 0 && state.repoChip <= repos.size()
+               ? std::string_view { repos[state.repoChip - 1] }
+               : std::string_view {};
 }
 
 } // namespace orchestrator::view

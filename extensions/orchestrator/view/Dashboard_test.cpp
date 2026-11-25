@@ -950,6 +950,31 @@ TEST_CASE("a click on a palette entry runs it; one beside the palette closes it"
     CHECK_FALSE(fixture.dashboard.interaction().palette.has_value());
 }
 
+TEST_CASE("a double click on a palette entry runs it once", "[orchestrator][view][mouse]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    auto const entryClicked = [&](int presses) {
+        CHECK(fixture.dashboard.input("").empty());
+        static_cast<void>(fixture.dashboard.frame());
+        REQUIRE(fixture.dashboard.interaction().palette.has_value());
+        auto const regions = fixture.dashboard.hits().regions();
+        auto const entry = std::ranges::find_if(
+            regions, [](HitRegion const& region) { return region.hit.kind == HitKind::PaletteEntry; });
+        REQUIRE(entry != regions.end());
+        auto clicks = std::string {};
+        for ([[maybe_unused]] auto const press: std::views::iota(0, presses))
+            clicks += clickAt(entry->area.x + 2, entry->area.y);
+        // One input, no frame between: the first press runs the entry and closes the palette; the second
+        // lands on the cell the last frame still maps to it.
+        auto actions = fixture.dashboard.input(clicks);
+        CHECK_FALSE(fixture.dashboard.interaction().palette.has_value());
+        return actions;
+    };
+    auto const once = entryClicked(1);
+    CHECK(entryClicked(2) == once);
+}
+
 // }}}
 
 // {{{ the Work view's mouse

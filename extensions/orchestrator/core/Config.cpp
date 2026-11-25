@@ -530,8 +530,6 @@ namespace
     static_assert(matchesMirror<JsonRepo>(RepoFields), "RepoFields and JsonRepo name the same keys");
     static_assert(matchesMirror<JsonIssueSource>(IssueSourceFields),
                   "IssueSourceFields and JsonIssueSource name the same keys");
-    static_assert(matchesMirror<JsonIssueSource>(IssueSourceFields),
-                  "IssueSourceFields and JsonIssueSource name the same keys");
     static_assert(matchesMirror<JsonTask>(TaskFields), "TaskFields and JsonTask name the same keys");
     static_assert(matchesMirror<JsonPluginRequirement>(PluginFields),
                   "PluginFields and JsonPluginRequirement name the same keys");

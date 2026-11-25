@@ -20,8 +20,7 @@ namespace
     constexpr auto BaseLength = std::size_t { 19 };
 
     /// @return The value of the @p count decimal digits at @p at in @p text; std::nullopt if the text is too
-    /// short
-    ///         or one of them is not a digit.
+    ///         short or one of them is not a digit.
     std::optional<unsigned> digitsAt(std::string_view text, std::size_t at, std::size_t count) noexcept
     {
         if (at + count > text.size())
@@ -35,9 +34,8 @@ namespace
         return value;
     }
 
-    /// @return The offset of the zone @p zone (`Z`, `+HH:MM` or `+HHMM`) from UTC, in minutes; std::nullopt
-    /// for
-    ///         any other spelling or an hour or minute out of range.
+    /// @return The offset of the zone @p zone (`Z`, `+HH:MM`, `+HHMM`, `-HH:MM` or `-HHMM`) from UTC, in
+    ///         minutes; std::nullopt for any other spelling or an hour or minute out of range.
     std::optional<int> offsetMinutesOf(std::string_view zone) noexcept
     {
         if (zone == "Z"sv)

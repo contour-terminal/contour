@@ -56,8 +56,8 @@ namespace
     };
     static_assert(PipelineLooks.size() == std::to_underlying(CiState::Failing) + 1U);
 
-    /// A merge request's review, indexed by ReviewState: `· no review`, `… review`, `✓ approved`, `⟲
-    /// changes`.
+    /// A merge request's review, indexed by ReviewState: `· no review`, `… review`, `✓ approved`,
+    /// `⟲ changes`. An inferred None is drawn as Required (reviewLook()).
     constexpr auto ReviewCellLooks = std::array {
         Look { .mark = "·"sv, .role = Role::Dim, .word = "no review"sv },
         Look { .mark = "…"sv, .role = Role::Dim, .word = "review"sv },
@@ -121,11 +121,9 @@ namespace
     class ItemFilter
     {
       public:
-        ItemFilter(Engine const& engine, WorkState const& state): _filter { state.filter }
+        ItemFilter(Engine const& engine, WorkState const& state):
+            _filter { state.filter }, _repo { chipRepository(state, engine.repositories()) }
         {
-            auto const repos = engine.repositories();
-            if (state.repoChip > 0 && state.repoChip <= repos.size())
-                _repo = repos[state.repoChip - 1];
         }
 
         [[nodiscard]] bool shows(WorkItem const& item) const
@@ -164,7 +162,11 @@ namespace
             return NothingLook;
         if (item.changeRequest->conflicts == Conflicts::Conflicting)
             return ConflictLook;
-        return entryOf(ReviewCellLooks, item.changeRequest->review);
+        auto const& mr = *item.changeRequest;
+        // An inferred None is GitLab's merge status naming no review, not a repository that asks for none.
+        if (mr.review == ReviewState::None && mr.reviewSource == StateSource::Inferred)
+            return entryOf(ReviewCellLooks, ReviewState::Required);
+        return entryOf(ReviewCellLooks, mr.review);
     }
 
     /// A cell's text and how it is drawn.
@@ -792,7 +794,7 @@ namespace
             if (mr->review == ReviewState::ChangesRequested)
                 parts.emplace_back("changes requested");
             // GitLab's single merge status stood in for a pipeline the board could not match.
-            if (mr->source == StateSource::Inferred)
+            if (mr->ciSource == StateSource::Inferred)
                 parts.emplace_back("pipeline and review inferred from the merge status");
             if (!item.ticketKey.empty())
                 parts.push_back(item.ticket && !item.ticket->status.empty()
@@ -845,10 +847,8 @@ namespace
             frame.hits.add(Rect { .x = x, .y = 0, .width = columnsOf(text), .height = 1 },
                            Hit { .kind = HitKind::WorkChip, .value = std::to_underlying(focus) });
         };
-        auto const repos = frame.engine.repositories();
-        auto const repo = work.repoChip > 0 && work.repoChip <= repos.size()
-                              ? std::string_view { repos[work.repoChip - 1] }
-                              : "all repositories"sv;
+        auto const chipRepo = chipRepository(work, frame.engine.repositories());
+        auto const repo = chipRepo.empty() ? "all repositories"sv : chipRepo;
         auto const repoText = std::format("‹ {} ›", repo);
         auto const sortText = std::format(
             "sort: {}", sortOf(frame.engine) == WorkSort::LastUpdate ? "last update"sv : "importance"sv);

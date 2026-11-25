@@ -49,8 +49,7 @@ struct TaskBoxState
 /// @param text The text it opens with: a finished topic run's, or empty.
 /// @param session The agent's session UUID; empty for the caller to mint.
 /// @return The box: repository = @p chipRepo while configured, else @p selectedRepo while configured, else
-/// the
-///         first; worker = defaultWorker() of the topic task; model = the topic task's; @p text typed.
+///         the first; worker = defaultWorker() of the topic task; model = the topic task's; @p text typed.
 ///         StartRefusal::NotConfigured when the engine has no configuration or no repository.
 [[nodiscard]] std::expected<TaskBoxState, StartRefusal> openTaskBox(Engine const& engine,
                                                                     std::string_view chipRepo,

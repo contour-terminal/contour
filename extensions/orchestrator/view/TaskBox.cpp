@@ -227,7 +227,7 @@ namespace
     }
 
     /// @return What a setting shows: the configured value the form holds, for the worker with its active
-    /// runs.
+    ///         runs.
     [[nodiscard]] std::string settingText(FormField setting, TaskBoxState const& box, Engine const& engine)
     {
         auto const* const config = engine.config();

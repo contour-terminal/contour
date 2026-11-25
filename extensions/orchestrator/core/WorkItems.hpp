@@ -121,13 +121,12 @@ struct WorkInput
 
 /// @param run A run.
 /// @return The worker @p run runs on: Run::worker, or ImplicitWorkerId (`claude`) when it is empty (Decision
-/// 15).
+///         15).
 [[nodiscard]] std::string_view workerIdOf(Run const& run) noexcept;
 
 /// @param item A Work board row.
 /// @return The item's identity across rebuilds: `<repo>/!<n>` for an MR row, `<repo>/<JIRA-KEY>` or
-/// `<repo>/#<n>`
-///         for a ticket row; what the view keeps a selection and an open menu on.
+///         `<repo>/#<n>` for a ticket row; what the view keeps a selection and an open menu on.
 [[nodiscard]] std::string workItemKey(WorkItem const& item);
 
 /// A key links only into a covered project: one whose key a source listed, or that a Jira source's JQL names.
@@ -151,8 +150,7 @@ struct WorkInput
 
 /// @param mr A merge request.
 /// @return The forge issues of its own repository @p mr names: closesIssues, then each `#<digits>` in its
-/// title
-///         (at a word boundary), each once, in that order.
+///         title (at a word boundary), each once, in that order.
 [[nodiscard]] std::vector<uint64_t> namedForgeIssues(ChangeRequest const& mr);
 
 /// @param issue A listed issue.
@@ -165,8 +163,10 @@ struct WorkInput
 
 /// @param mr A merge request.
 /// @return The group of an MR row: the first of Draft → EverythingElse; failing, changes requested or
-///         conflicting → NeedsYou; ready → ReadyToMerge; else InReview. An Inferred MR is ready only when its
-///         review is Approved (GitLab's `mergeable`).
+///         conflicting → NeedsYou; ready → ReadyToMerge; else InReview. Ready takes a passing pipeline (or
+///         none reported) and an approval (or, reported by the forge, no review required). A review inferred
+///         from GitLab's merge status is ready only when Approved (`mergeable`): its None names no review;
+///         and while the CI is inferred too, `mergeable` stands for the pipeline as well.
 [[nodiscard]] WorkGroup groupOf(ChangeRequest const& mr) noexcept;
 
 /// @param progress A ticket's progress.
@@ -175,8 +175,7 @@ struct WorkInput
 
 /// @param input The repositories' lists, the looked-up tickets, the covered projects and the runs.
 /// @return Every MR, and every ticket or issue no MR names, de-duplicated by key, in groups; MR rows first,
-/// in
-///         repository then list order, then ticket rows likewise.
+///         in repository then list order, then ticket rows likewise.
 [[nodiscard]] std::vector<WorkItem> workItems(WorkInput const& input);
 
 /// How the board orders its items.
@@ -221,7 +220,7 @@ struct TaskSuggestion
 [[nodiscard]] TaskSuggestion suggestTask(Config const& config, WorkItem const& item);
 
 /// @param config The configuration; unused, since each run carries its worker's id (kept for the callers'
-/// signature).
+///               signature).
 /// @param runs Every run; only active ones (countsAsActive) count.
 /// @param workerId A worker's id.
 /// @return How many active runs run on @p workerId, each counted by workerIdOf() (Decision 15).
@@ -232,9 +231,9 @@ struct TaskSuggestion
 /// @param config The configuration: its tasks and workers.
 /// @param runs Every run; only active ones (countsAsActive) count.
 /// @param taskId A task id.
-/// @return The task's own worker; when it runs at least one agent, the worker with the fewest active runs,
-/// ties
-///         in configuration order.
+/// @return The task's own worker; when it runs at least one agent, the worker with the fewest active runs
+///         (ties in configuration order) among those the engine takes for the task, so never one for which
+///         takesNoProfileFor() holds.
 [[nodiscard]] WorkerDef const& defaultWorker(Config const& config,
                                              std::span<Run const> runs,
                                              std::string_view taskId);

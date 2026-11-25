@@ -5205,6 +5205,36 @@ TEST_CASE("a GitLab poll lists pipelines and failed jobs once per repository",
     CHECK(mrs[0].failingChecks == std::vector<std::string> { "test-windows", "lint" });
 }
 
+TEST_CASE("a GitLab MR whose pipeline passed is not ready to merge while its merge status names a blocker",
+          "[orchestrator][engine][gitlab][work]")
+{
+    auto harness = Harness { gitlabContext() };
+    harness.boot();
+    REQUIRE(harness.engine().problems().empty());
+    auto const items = harness.engine().workItems();
+    auto const passing =
+        std::ranges::to<std::vector>(items | std::views::filter([](WorkItem const& item) {
+                                         return item.changeRequest
+                                                && item.changeRequest->ci == CiState::Passing
+                                                && item.changeRequest->readiness == Readiness::Ready;
+                                     }));
+    REQUIRE_FALSE(passing.empty());
+    for (auto const& item: passing)
+    {
+        CAPTURE(item.changeRequest->number);
+        CHECK(item.changeRequest->ciSource == StateSource::Complete);
+        CHECK(item.changeRequest->reviewSource == StateSource::Inferred);
+        CHECK(item.group
+              == (item.changeRequest->review == ReviewState::Approved ? WorkGroup::ReadyToMerge
+                                                                      : WorkGroup::InReview));
+    }
+    // 5746's merge status is ci_still_running, its newest pipeline passed: still nothing approved it.
+    auto const running = std::ranges::find_if(
+        passing, [](WorkItem const& item) { return item.changeRequest->number == 5746; });
+    REQUIRE(running != passing.end());
+    CHECK(running->group == WorkGroup::InReview);
+}
+
 TEST_CASE("a failed pipeline list leaves inferred rows and a problem line",
           "[orchestrator][engine][gitlab][work]")
 {
@@ -5220,7 +5250,7 @@ TEST_CASE("a failed pipeline list leaves inferred rows and a problem line",
         auto const mrs = harness.engine().changeRequests("contour");
         REQUIRE_FALSE(mrs.empty());
         CHECK(std::ranges::all_of(
-            mrs, [](ChangeRequest const& mr) { return mr.source == StateSource::Inferred; }));
+            mrs, [](ChangeRequest const& mr) { return mr.ciSource == StateSource::Inferred; }));
         CHECK(
             mentions(harness.engine().problems(),
                      "contour: the pipeline list could not be read; CI and review are inferred from GitLab's "

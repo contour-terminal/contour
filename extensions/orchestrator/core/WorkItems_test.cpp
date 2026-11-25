@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include <orchestrator/core/GitLab.hpp>
 #include <orchestrator/core/WorkItems.hpp>
 
 using namespace std::string_view_literals;
@@ -146,7 +147,7 @@ TEST_CASE("WorkItems: an MR's group is the first row of the spec's table that ma
         CiState ci = CiState::Passing;
         ReviewState review = ReviewState::Approved;
         Conflicts conflicts = Conflicts::None;
-        StateSource source = StateSource::Complete;
+        StateSource source = StateSource::Complete; // the CI's and the review's alike
         WorkGroup expected = WorkGroup::ReadyToMerge;
     };
     auto const rows = std::array {
@@ -192,11 +193,47 @@ TEST_CASE("WorkItems: an MR's group is the first row of the spec's table that ma
         auto mr = mrOf(1, "t", row.ci, row.review);
         mr.readiness = row.readiness;
         mr.conflicts = row.conflicts;
-        mr.source = row.source;
+        mr.ciSource = row.source;
+        mr.reviewSource = row.source;
         CHECK(groupOf(mr) == row.expected);
     }
     CHECK(groupOf(Progress::InProgress) == WorkGroup::NoMrYet);
     CHECK(groupOf(Progress::NotStarted) == WorkGroup::EverythingElse);
+}
+
+TEST_CASE("groupOf: a GitLab MR whose pipeline matched is ready only once its merge status approves it",
+          "[orchestrator][work][gitlab]")
+{
+    struct Row
+    {
+        std::string_view status; ///< Its `detailed_merge_status`.
+        WorkGroup expected = WorkGroup::InReview;
+    };
+    // The pipeline passed in every row; the merge status alone stands for the review.
+    auto const rows = std::array {
+        Row { .status = "discussions_not_resolved" },
+        Row { .status = "need_rebase" },
+        Row { .status = "blocked_status" },
+        Row { .status = "jira_association_missing" },
+        Row { .status = "checking" },
+        Row { .status = "unchecked" },
+        Row { .status = "ci_still_running" },
+        Row { .status = "not_approved" },
+        Row { .status = "a_status_a_newer_gitlab_adds" },
+        Row { .status = "mergeable", .expected = WorkGroup::ReadyToMerge },
+    };
+    for (auto const& row: rows)
+    {
+        INFO(row.status);
+        auto mr = mrOf(1, "t", CiState::Passing, gitlab::reviewStateOf(row.status));
+        mr.ciSource = StateSource::Complete;
+        mr.reviewSource = StateSource::Inferred;
+        CHECK(groupOf(mr) == row.expected);
+    }
+    // `mergeable` with a matched pipeline that has not finished waits for it.
+    auto running = mrOf(1, "t", CiState::Pending, ReviewState::Approved);
+    running.reviewSource = StateSource::Inferred;
+    CHECK(groupOf(running) == WorkGroup::InReview);
 }
 
 TEST_CASE("WorkItems: progress by category, by query, and forge issues always", "[orchestrator][work]")
@@ -701,4 +738,28 @@ TEST_CASE("WorkItems: the worker defaults to the task's, else the least busy",
     CHECK(activeRunsOn(withClaude, emptyWorkerRuns, "x") == 0);
     CHECK(activeRunsOn(withClaude, emptyWorkerRuns, ImplicitWorkerId) == 1);
     CHECK(defaultWorker(withClaude, emptyWorkerRuns, "issue").id == "x");
+}
+
+TEST_CASE("WorkItems: a busy worker gives way only to a worker that takes the task's profile",
+          "[orchestrator][work][suggest]")
+{
+    auto const workers = std::string { R"( "workers": [ { "id": "claude", "agent": "claude" },
+  { "id": "copilot", "agent": "copilot" }, { "id": "spare", "agent": "claude" } ],)" };
+    auto const issue = IssueRef { 5 };
+    auto const runOn = [&](std::string id, std::string worker) {
+        return runOf(std::move(id), "contour", issue, std::move(worker), Running {});
+    };
+    auto const busy = std::vector<Run> { runOn("1", "claude") };
+
+    // The task's own profile goes to no Copilot worker: the idle Claude worker takes it.
+    auto const profiled = configOf(
+        workers, taskJson("issue", 'w', "issue", R"(, "worker": "claude", "permissions": "trusted")"));
+    CHECK(defaultWorker(profiled, busy, "issue").id == "spare");
+    // Every other worker that takes it is busier: the task's own worker stays.
+    auto const busier = std::vector<Run> { runOn("1", "claude"), runOn("2", "spare"), runOn("3", "spare") };
+    CHECK(defaultWorker(profiled, busier, "issue").id == "claude");
+
+    // Without a profile of its own the task goes to Copilot as to any other worker.
+    auto const plain = configOf(workers, taskJson("issue", 'w', "issue", R"(, "worker": "claude")"));
+    CHECK(defaultWorker(plain, busy, "issue").id == "copilot");
 }

@@ -366,7 +366,8 @@ TEST_CASE("GitHub: mergeable CONFLICTING is a conflict, and updatedAt the update
     REQUIRE(listed->items.size() == 1);
     CHECK(listed->items[0].conflicts == Conflicts::Conflicting);
     CHECK(listed->items[0].updatedWallMs == 1'794'571'200'000); // "2026-11-13T12:00:00Z"
-    CHECK(listed->items[0].source == StateSource::Complete);
+    CHECK(listed->items[0].ciSource == StateSource::Complete);
+    CHECK(listed->items[0].reviewSource == StateSource::Complete);
     // prs-open: every row MERGEABLE, so none conflicts.
     auto const open = github::changeRequests(readFixture(FixtureRoot::Testdata, "github/prs-open.json"),
                                              OutputExtent::Whole);

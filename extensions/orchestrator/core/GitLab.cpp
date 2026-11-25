@@ -151,7 +151,8 @@ namespace
             .closesIssues = {},
             .conflicts = json.hasConflicts ? Conflicts::Conflicting : Conflicts::None,
             .updatedWallMs = unixMsOf(json.updatedAt).value_or(0),
-            .source = StateSource::Inferred,
+            .ciSource = StateSource::Inferred,
+            .reviewSource = StateSource::Inferred, // a matched pipeline later completes only the CI
             .headSha = json.sha,
         };
     }
@@ -261,7 +262,7 @@ std::vector<ChangeRequest> enriched(std::vector<ChangeRequest> listed,
         if (newest == ofMr.end())
             continue;
         mr.ci = newest->ci;
-        mr.source = StateSource::Complete;
+        mr.ciSource = StateSource::Complete; // the review stays inferred: REST says no more about it
         mr.failingChecks.clear();
         for (auto const& job: failed)
             if (job.pipelineId == newest->id && !std::ranges::contains(mr.failingChecks, job.name))

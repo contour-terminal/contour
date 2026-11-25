@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -417,4 +418,17 @@ TEST_CASE("o asks to open the run's link", "[orchestrator][view][keys]")
     CHECK(applyKey(character(U'o'), interaction, live.context())
           == UiAction {
               OpenUrlAction { .url = "https://github.com/contour-terminal/contour/pull/1", .label = "#1" } });
+}
+
+TEST_CASE("chipRepository: the chip's repository, empty for every one or one gone",
+          "[orchestrator][view][work]")
+{
+    auto const repos = std::array { std::string { "contour" }, std::string { "other" } };
+    auto const chipOn = [&](std::size_t chip) {
+        return chipRepository(WorkState { .repoChip = chip }, repos);
+    };
+    CHECK(chipOn(0).empty());
+    CHECK(chipOn(1) == "contour");
+    CHECK(chipOn(2) == "other");
+    CHECK(chipOn(3).empty());
 }

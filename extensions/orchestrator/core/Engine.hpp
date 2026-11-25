@@ -150,9 +150,12 @@ struct FileRead
 {
     std::string tag;                                   ///< The tag it was asked for with.
     std::expected<std::string, FileReadError> content; ///< Its bytes, or why they could not be read.
-    uint64_t modifiedWallMs = 0; ///< The file's modification time, in wall-clock milliseconds; 0: unknown.
-    uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
-    uint64_t wallMs = 0; ///< When it arrived, in wall-clock milliseconds, read by the driver; 0: unknown.
+    /// The file's modification time, in wall-clock milliseconds; 0: unknown.
+    uint64_t modifiedWallMs = 0;
+    /// When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
+    uint64_t monoMs = 0;
+    /// When it arrived, in wall-clock milliseconds, read by the driver; 0: unknown.
+    uint64_t wallMs = 0;
 };
 
 /// The panes were listed.

@@ -135,9 +135,9 @@ struct BarHint
 /// @param selected What the Work view's selected line is; std::nullopt: none is.
 /// @param columns The cells the line may take.
 /// @return The Work view's action bar hints, as many whole ones as fit in order: what `⏎` does on the
-/// selected
-///         line (`⏎ start` on an item, `⏎ fold` on a heading), `n new task`, then the Work view's other keys
-///         (workKeyRows()), then `^k all actions`, which always shows (cut when nothing else fits).
+///         selected line (`⏎ start` on an item, `⏎ fold` on a heading), `n new task`, then the Work view's
+///         other keys (workKeyRows()), then `^k all actions`, which always shows (cut when nothing else
+///         fits).
 [[nodiscard]] std::vector<BarHint> workBarHints(std::optional<WorkLineKind> selected, int columns);
 
 /// @param selected What the Work view's selected line is; std::nullopt: none is.
