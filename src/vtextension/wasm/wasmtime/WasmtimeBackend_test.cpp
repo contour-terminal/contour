@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -33,6 +34,7 @@
 #include <vtextension/wasm/testing/FeatureModules.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeBackend.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
+#include <vtextension/wasm/wasmtime/WasmtimeRuntime.hpp>
 
 using vtextension::ExtensionError;
 using vtextension::wasm::FeatureState;
@@ -133,6 +135,41 @@ class ReenteringHostContext final: public vtextension::wasm::IHostContext
         reentered = instance->call(*add, argv).transform([&] { return argv[0]; });
         return std::unexpected(ExtensionError::PermissionDenied);
     }
+};
+
+/// `count` counts to a million and returns the count; `ping-then-count` calls `ping(0)` first.
+constexpr auto CountingModule = std::string_view { R"((module
+  (import "contract:test/host@0" "ping" (func $ping (param i32)))
+  (func $count (export "count") (result i32) (local $n i32)
+    (loop $again
+      (local.set $n (i32.add (local.get $n) (i32.const 1)))
+      (br_if $again (i32.lt_u (local.get $n) (i32.const 1000000))))
+    (local.get $n))
+  (func (export "ping-then-count") (result i32) (call $ping (i32.const 0)) (call $count)))
+)" };
+
+/// What `count` of CountingModule returns.
+constexpr auto CountedTo = uint32_t { 1'000'000 };
+
+/// A host context whose every host function call interrupts another instance: from inside a running
+/// call, at a known point of it.
+class InterruptingHostContext final: public vtextension::wasm::IHostContext
+{
+  public:
+    /// @param target The instance every host function call interrupts; outlives the context's use.
+    explicit InterruptingHostContext(vtextension::wasm::IWasmInstance& target) noexcept: _target { &target }
+    {
+    }
+
+    [[nodiscard]] std::expected<void, ExtensionError> callHost(
+        std::size_t /*functionIndex*/, std::span<uint32_t const> /*arguments*/) noexcept override
+    {
+        _target->interrupt();
+        return {};
+    }
+
+  private:
+    vtextension::wasm::IWasmInstance* _target;
 };
 
 } // namespace
@@ -311,4 +348,95 @@ TEST_CASE("WasmtimeBackend.wasiReadsTheConfiguredEnvironment", "[wasmtime]")
     auto const random = instance->memory(64, 16);
     REQUIRE(random.has_value());
     CHECK(std::ranges::all_of(*random, [](std::byte byte) { return byte == std::byte { 0x5A }; }));
+}
+
+TEST_CASE("Wasmtime.idleInstanceNeverWakes", "[wasmtime]")
+{
+    // Nothing but an interrupt moves the epoch: a guest running a million loop iterations never reaches
+    // its deadline, and nothing wakes to poll it.
+    namespace contract = vtextension::wasm::testing::contract;
+    auto const& kind = *WasmtimeTraits::kind();
+    auto const backend = WasmtimeTraits::make();
+    auto const runtime = contract::createRuntime(*backend);
+    auto const guard = contract::enterThread(*backend);
+    auto const module = runtime->load(assemble(CountingModule));
+    REQUIRE(module.has_value());
+    auto context = contract::RecordingHostContext {};
+    auto const instance = contract::instantiate(**module, context);
+
+    auto const before = kind.epochCallbacks();
+    auto result = std::array<uint32_t, 1> {};
+    REQUIRE(instance->call(contract::functionOf(*instance, "count"), result).has_value());
+    CHECK(result[0] == CountedTo);
+    CHECK(kind.epochCallbacks() == before);
+}
+
+TEST_CASE("Wasmtime.interruptLeavesSiblingsRunning", "[wasmtime]")
+{
+    // An interrupt moves the epoch every instance of the runtime shares. One running when it moves wakes
+    // once, finds its own instance not interrupted, and runs on; the interrupted one stays stopped.
+    namespace contract = vtextension::wasm::testing::contract;
+    using vtextension::wasm::CallFailure;
+    auto const& kind = *WasmtimeTraits::kind();
+    auto const backend = WasmtimeTraits::make();
+    auto const runtime = contract::createRuntime(*backend);
+    auto const guard = contract::enterThread(*backend);
+    auto const module = runtime->load(assemble(CountingModule));
+    REQUIRE(module.has_value());
+    auto targetContext = contract::RecordingHostContext {};
+    auto const target = contract::instantiate(**module, targetContext);
+    auto siblingContext = InterruptingHostContext { *target };
+    auto const sibling = contract::instantiate(**module, siblingContext);
+
+    auto const before = kind.epochCallbacks();
+    auto result = std::array<uint32_t, 1> {};
+    REQUIRE(sibling->call(contract::functionOf(*sibling, "ping-then-count"), result).has_value());
+    CHECK(result[0] == CountedTo);
+    CHECK(kind.epochCallbacks() - before == 1);
+
+    auto const stopped = target->call(contract::functionOf(*target, "count"), result);
+    REQUIRE_FALSE(stopped.has_value());
+    CHECK(stopped.error() == CallFailure::Interrupted);
+
+    // The epoch has not moved since: the sibling's next call runs through without waking.
+    REQUIRE(sibling->call(contract::functionOf(*sibling, "count"), result).has_value());
+    CHECK(kind.epochCallbacks() - before == 1);
+}
+
+TEST_CASE("Wasmtime.interruptRacingACallStopsIt", "[wasmtime]")
+{
+    // An interrupt landing at any point of a call's way into the guest stops it: before the call checks
+    // the flag, between that check and the guest's first instruction, or while the guest runs. Each round
+    // releases the interrupt a little later relative to the call than the one before.
+    namespace contract = vtextension::wasm::testing::contract;
+    using vtextension::wasm::CallFailure;
+    auto const backend = WasmtimeTraits::make();
+    auto const runtime = contract::createRuntime(*backend);
+    auto const guard = contract::enterThread(*backend);
+    auto const module = contract::load(*runtime, contract::InstanceModule);
+    auto context = contract::RecordingHostContext {};
+
+    constexpr auto Rounds = 200;
+    auto stopped = 0;
+    for (auto const round: std::views::iota(0, Rounds))
+    {
+        auto const instance = contract::instantiate(*module, context);
+        auto const spin = contract::functionOf(*instance, "spin");
+        auto go = std::atomic<bool> { false };
+        auto interrupter = std::jthread([&] {
+            while (!go.load(std::memory_order_acquire))
+                std::this_thread::yield();
+            // A delay the optimizer cannot drop: an atomic counted up `round * 4` times.
+            auto delay = std::atomic<int> { 0 };
+            std::ranges::for_each(std::views::iota(0, round * 4),
+                                  [&](int) { delay.fetch_add(1, std::memory_order_relaxed); });
+            instance->interrupt();
+        });
+        go.store(true, std::memory_order_release);
+        auto const called = instance->call(spin, {});
+        interrupter.join();
+        if (!called.has_value() && called.error() == CallFailure::Interrupted)
+            ++stopped;
+    }
+    CHECK(stopped == Rounds);
 }

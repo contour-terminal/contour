@@ -45,23 +45,46 @@ class KindState
     /// @return The current bring-up generation; 0 before the first.
     [[nodiscard]] uint64_t generation() const noexcept { return _generation.load(); }
 
+    /// Counts one more call of an epoch deadline callback, of any instance of the kind.
+    void countEpochCallback() noexcept { _epochCallbacks.fetch_add(1, std::memory_order_relaxed); }
+
+    /// Test-only: how often a running guest woke at its epoch deadline, which only an interrupt moves.
+    /// @return The count of epoch deadline callbacks of every instance of the kind so far.
+    [[nodiscard]] uint64_t epochCallbacks() const noexcept
+    {
+        return _epochCallbacks.load(std::memory_order_relaxed);
+    }
+
     /// Test-only: what the calling thread was prepared for, of whichever kind.
     /// @return The generation the calling thread's guard was entered for; 0 if none is held.
     [[nodiscard]] static uint64_t preparedGeneration() noexcept;
 
   private:
-    std::mutex _mutex;                    ///< Guards _liveRuntimes and each bring-up.
-    std::size_t _liveRuntimes = 0;        ///< How many runtimes are alive.
-    std::atomic<uint64_t> _generation {}; ///< The current bring-up generation.
+    std::mutex _mutex;                        ///< Guards _liveRuntimes and each bring-up.
+    std::size_t _liveRuntimes = 0;            ///< How many runtimes are alive.
+    std::atomic<uint64_t> _generation {};     ///< The current bring-up generation.
+    std::atomic<uint64_t> _epochCallbacks {}; ///< How often a running guest woke at its epoch deadline.
 };
 
-/// The data of an instance's store: what a host function the guest calls reaches, and how it failed.
+/// Whether an instance was interrupted (IWasmInstance::interrupt()).
+enum class InterruptState : uint8_t
+{
+    Running,     ///< Not interrupted: its calls run.
+    Interrupted, ///< Interrupted, for good: no call of it runs again, and a running one stops.
+};
+
+/// The data of an instance's store: what a host function the guest calls reaches, how it failed, and
+/// whether the instance was interrupted.
 ///
-/// Lives at a stable address for as long as the store, which hands it to every host function call.
+/// Lives at a stable address for as long as the store, which hands it to every host function call and
+/// to the epoch deadline callback.
 struct StoreData
 {
     IHostContext& context;                        ///< What the instance's host function calls reach.
     wasi::ShimEnvironment const& wasiEnvironment; ///< What the instance's WASI function calls read.
+    KindState& kind; ///< Where the epoch deadline callback is counted, for the tests to see.
+    /// Written from any thread by interrupt(); read by call() and by the epoch deadline callback.
+    std::atomic<InterruptState> interrupt {};
     /// The error the latest host function call failed with, if it failed; it is what tells a call stopped
     /// by a failing host function apart from one the guest trapped in.
     std::optional<ExtensionError> hostFailure;
@@ -123,6 +146,9 @@ class WasmtimeRuntime final: public IWasmRuntime, public std::enable_shared_from
 
     /// @return The host functions the runtime provides.
     [[nodiscard]] std::span<HostBinding const> hostBindings() const noexcept { return _hostBindings; }
+
+    /// @return The state of the backends of the kind, kept alive by the runtime.
+    [[nodiscard]] KindState& kind() const noexcept { return *_kind; }
 
     /// @return The limits every instance is held to.
     [[nodiscard]] RuntimeLimits limits() const noexcept { return _limits; }

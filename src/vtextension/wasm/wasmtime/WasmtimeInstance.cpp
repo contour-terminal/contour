@@ -59,27 +59,45 @@ namespace
         uint32_t resultCount = 0;    ///< How many i32 results it returns.
     };
 
-    /// Whether IWasmInstance::interrupt() was called.
-    enum class Interruption : uint8_t
-    {
-        None,
-        Requested,
-    };
-
     /// @return Whether every type of @p types is an i32: the cells IWasmInstance::call() passes.
     [[nodiscard]] bool allI32(std::span<ValueType const> types) noexcept
     {
         return std::ranges::all_of(types, [](ValueType type) { return type == ValueType::I32; });
     }
 
-    /// Lets the guest of @p context run, before every entry into guest code.
-    ///
-    /// A store's epoch deadline starts at 0 ticks, so with epoch interruption on, a guest would trap at its
-    /// first epoch check. Until a deadline is what interrupt() stops a running call with, the deadline is
-    /// set as far out as it goes: an interrupt then stops only calls not yet entered.
+    /// How far beyond the current epoch a guest's deadline lies: one tick. Only an interrupt moves the
+    /// epoch, so a guest that is never interrupted never reaches it and nothing ever wakes to poll it;
+    /// one that is reaches it at its next epoch check.
+    constexpr auto DeadlineTicks = uint64_t { 1 };
+
+    /// Sets the deadline of the guest of @p context, before every entry into guest code. A store's
+    /// deadline starts at epoch 0, which the engine's epoch has always reached.
     void armEpochDeadline(wasmtime_context_t* context) noexcept
     {
-        wasmtime_context_set_epoch_deadline(context, std::numeric_limits<uint64_t>::max());
+        wasmtime_context_set_epoch_deadline(context, DeadlineTicks);
+    }
+
+    /// Wasmtime's epoch deadline callback: called on the thread of a running guest whose deadline the
+    /// epoch reached. The epoch is the engine's, shared by every instance of the runtime, so reaching
+    /// the deadline says only that some instance was interrupted: this one's own flag decides.
+    /// Called from Wasmtime's Rust code, which an exception must not unwind through: noexcept.
+    /// @param env The instance's StoreData.
+    /// @return An error ending the call if the instance was interrupted; otherwise null, with the deadline
+    ///         moved one tick past the current epoch.
+    wasmtime_error_t* onEpochDeadline(wasmtime_context_t* /*context*/,
+                                      void* env,
+                                      uint64_t* deadlineTicks,
+                                      wasmtime_update_deadline_kind_t* updateKind) noexcept
+    {
+        auto& data = *static_cast<StoreData*>(env);
+        data.kind.countEpochCallback();
+        // Pairs with the fence in interrupt(): the epoch this guest saw moved after the flag was stored.
+        std::atomic_thread_fence(std::memory_order_acquire);
+        if (data.interrupt.load(std::memory_order_relaxed) == InterruptState::Interrupted)
+            return wasmtime_error_new("interrupted");
+        *deadlineTicks = DeadlineTicks;
+        *updateKind = WASMTIME_UPDATE_DEADLINE_CONTINUE;
+        return nullptr;
     }
 
     /// One module instance in its own store.
@@ -108,12 +126,14 @@ namespace
                          std::unique_ptr<StoreData> data,
                          detail::StoreHandle store,
                          std::vector<FunctionEntry> functions,
-                         std::optional<wasmtime_memory_t> memory) noexcept:
+                         std::optional<wasmtime_memory_t> memory,
+                         wasm_engine_t const* engine) noexcept:
             _owner { std::move(owner) },
             _data { std::move(data) },
             _store { std::move(store) },
             _functions { std::move(functions) },
-            _memory { memory }
+            _memory { memory },
+            _engine { engine }
         {
         }
 
@@ -140,8 +160,15 @@ namespace
             auto const& entry = _functions[function.index];
             Require(argv.size() >= std::max(entry.parameterCount, entry.resultCount));
 
+            // The deadline goes first, the interrupt check after it: an interrupt landing between the two is
+            // seen by the check, and one landing after the check moves the epoch past the deadline, which
+            // stops the guest at its first epoch check. The fence pairs with interrupt()'s: if setting the
+            // deadline read an epoch an interrupt moved, the check sees that interrupt's flag.
+            auto* const context = storeContext();
+            armEpochDeadline(context);
+            std::atomic_thread_fence(std::memory_order_acquire);
             // The interrupt is sticky: once requested, no call enters the guest again.
-            if (_interruption.load(std::memory_order_acquire) == Interruption::Requested)
+            if (_data->interrupt.load(std::memory_order_relaxed) == InterruptState::Interrupted)
                 return std::unexpected(CallFailure::Interrupted);
 
             // A host function may call back into the instance (to allocate in guest memory): what the
@@ -161,8 +188,6 @@ namespace
             auto wideResults = std::vector<wasmtime_val_t> {};
             auto const results = valuesFor(entry.resultCount, inlineResults, wideResults);
 
-            auto* const context = storeContext();
-            armEpochDeadline(context);
             auto* rawTrap = static_cast<wasm_trap_t*>(nullptr);
             ++_callDepth;
             auto const error = detail::ErrorHandle { wasmtime_func_call(context,
@@ -174,7 +199,7 @@ namespace
                                                                         &rawTrap) };
             --_callDepth;
             auto const trap = detail::TrapHandle { rawTrap };
-            auto const failed = error || trap ? std::optional { failure(trap.get()) } : std::nullopt;
+            auto const failed = error || trap ? std::optional { failure() } : std::nullopt;
             // A nested call reports its host failure through its own result: the host function that made
             // it decides what becomes of it, and the call it is nested in must not report it again.
             if (_callDepth > 0)
@@ -204,11 +229,15 @@ namespace
             return whole.subspan(address, size);
         }
 
+        /// Wait-free, from any thread, before, during or after a call: stores the flag, then moves the
+        /// engine's epoch past the deadline of every guest of the runtime running now. Each of them wakes
+        /// once (onEpochDeadline); only this instance's stops.
         void interrupt() noexcept override
         {
-            // Final for every call not yet entered. Stopping one already running takes an epoch deadline
-            // near enough to be reached (armEpochDeadline).
-            _interruption.store(Interruption::Requested, std::memory_order_release);
+            _data->interrupt.store(InterruptState::Interrupted, std::memory_order_relaxed);
+            // Orders the flag before the epoch increment, for whoever reads the moved epoch.
+            std::atomic_thread_fence(std::memory_order_release);
+            wasmtime_engine_increment_epoch(_engine);
         }
 
       private:
@@ -221,18 +250,15 @@ namespace
             return wasmtime_store_context(_store.get());
         }
 
-        /// @param trap The trap the call failed with; null if Wasmtime refused the call itself.
-        /// @return Why the call that just failed did. Decided by what the instance recorded and by the
-        ///         trap's code, never by its message.
-        [[nodiscard]] CallFailure failure(wasm_trap_t const* trap) const noexcept
+        /// @return Why the call that just failed did. Decided by what the instance recorded, never by a
+        ///         trap's message: an interrupt ends a call only through onEpochDeadline, which reads the
+        ///         flag this reads.
+        [[nodiscard]] CallFailure failure() const noexcept
         {
-            if (_interruption.load(std::memory_order_acquire) == Interruption::Requested)
+            if (_data->interrupt.load(std::memory_order_acquire) == InterruptState::Interrupted)
                 return CallFailure::Interrupted;
             if (_data->hostFailure)
                 return CallFailure::HostFailure;
-            auto code = wasmtime_trap_code_t {};
-            if (trap && wasmtime_trap_code(trap, &code) && code == WASMTIME_TRAP_CODE_INTERRUPT)
-                return CallFailure::Interrupted;
             return CallFailure::Trap;
         }
 
@@ -241,8 +267,8 @@ namespace
         detail::StoreHandle _store;
         std::vector<FunctionEntry> _functions;
         std::optional<wasmtime_memory_t> _memory; ///< The first memory the instance exports, if any.
-        std::atomic<Interruption> _interruption = Interruption::None; ///< Written from any thread.
-        uint32_t _callDepth = 0; ///< Calls running, nested ones included.
+        wasm_engine_t const* _engine;             ///< The runtime's engine, whose epoch interrupt() moves.
+        uint32_t _callDepth = 0;                  ///< Calls running, nested ones included.
     };
 
     std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> WasmtimeInstance::create(
@@ -259,11 +285,13 @@ namespace
         if (largestInitialPages * PageBytes > capBytes)
             return std::unexpected(ExtensionError::OutOfMemory);
 
-        auto data = std::make_unique<StoreData>(StoreData {
-            .context = context, .wasiEnvironment = runtime.wasiEnvironment(), .hostFailure = std::nullopt });
+        auto data = std::make_unique<StoreData>(context, runtime.wasiEnvironment(), runtime.kind());
         auto store = detail::StoreHandle { wasmtime_store_new(runtime.engine(), data.get(), nullptr) };
         if (!store)
             return std::unexpected(ExtensionError::RuntimeUnavailable);
+        // Before anything runs in the store, a start function included: every deadline is one an interrupt
+        // of any instance of the runtime moves the epoch past.
+        wasmtime_store_epoch_deadline_callback(store.get(), &onEpochDeadline, data.get(), nullptr);
         // Memory grows up to the cap and no further (memory.grow returns -1); one instance and one memory
         // per store.
         auto const memoryCap = static_cast<int64_t>(
@@ -309,8 +337,13 @@ namespace
                 wasmtime_extern_delete(&item);
         }
 
-        return std::make_unique<WasmtimeInstance>(
-            PrivateTag {}, std::move(owner), std::move(data), std::move(store), std::move(functions), memory);
+        return std::make_unique<WasmtimeInstance>(PrivateTag {},
+                                                  std::move(owner),
+                                                  std::move(data),
+                                                  std::move(store),
+                                                  std::move(functions),
+                                                  memory,
+                                                  runtime.engine());
     }
 } // namespace
 

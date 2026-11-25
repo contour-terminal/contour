@@ -148,9 +148,10 @@ namespace
         for (auto const& [feature, setter]: FeatureSetters)
             setter(engineConfig, featureRow(feature).state == FeatureState::On);
         wasmtime_config_max_wasm_stack_set(engineConfig, limits.stackBytes);
-        // Epoch interruption is how a call is stopped from another thread. A store's epoch deadline
-        // starts at 0 ticks, so a guest would trap at its first epoch check: WasmtimeInstance.cpp sets the
-        // store's deadline (wasmtime_context_set_epoch_deadline) before every entry into guest code.
+        // Epoch interruption is how a call is stopped from another thread: interrupt() moves the engine's
+        // epoch, and nothing else does, so no thread ticks it. WasmtimeInstance.cpp sets every store's
+        // deadline one tick ahead before each entry into guest code, and decides in the store's deadline
+        // callback whether the guest that reached it stops.
         wasmtime_config_epoch_interruption_set(engineConfig, true);
         wasmtime_config_signals_based_traps_set(engineConfig, config.trapMode == TrapMode::Signals);
         wasmtime_config_cranelift_opt_level_set(engineConfig, WASMTIME_OPT_LEVEL_SPEED);
