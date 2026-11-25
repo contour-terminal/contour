@@ -166,17 +166,18 @@ namespace
             return {};
         }
 
-        [[nodiscard]] std::optional<std::span<std::byte>> memory(uint32_t address, uint32_t size) override
+        [[nodiscard]] std::expected<std::span<std::byte>, MemoryFailure> memory(uint32_t address,
+                                                                                uint32_t size) override
         {
             if (size == 0)
                 return std::span<std::byte> {};
             auto* const memory = wasm_runtime_get_default_memory(_instance.get());
             if (!memory)
-                return std::nullopt;
+                return std::unexpected(MemoryFailure::OutOfBounds);
             auto const bytes =
                 wasm_memory_get_cur_page_count(memory) * wasm_memory_get_bytes_per_page(memory);
             if (uint64_t { address } + size > bytes)
-                return std::nullopt;
+                return std::unexpected(MemoryFailure::OutOfBounds);
             auto const whole =
                 std::span<std::byte> { static_cast<std::byte*>(wasm_memory_get_base_address(memory)),
                                        static_cast<std::size_t>(bytes) };

@@ -94,14 +94,15 @@ class FakeWasmInstance final: public wasm::IWasmInstance
         return hook->second(argv);
     }
 
-    [[nodiscard]] std::optional<std::span<std::byte>> memory(uint32_t address, uint32_t size) override
+    [[nodiscard]] std::expected<std::span<std::byte>, wasm::MemoryFailure> memory(uint32_t address,
+                                                                                  uint32_t size) override
     {
         if (_guest.onMemoryAccess)
             _guest.onMemoryAccess();
         if (size == 0)
             return std::span<std::byte> {};
         if (uint64_t { address } + size > linearMemory.size())
-            return std::nullopt;
+            return std::unexpected(wasm::MemoryFailure::OutOfBounds);
         return std::span { linearMemory }.subspan(address, size);
     }
 

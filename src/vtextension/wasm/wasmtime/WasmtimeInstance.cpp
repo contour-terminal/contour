@@ -221,16 +221,17 @@ namespace
             return {};
         }
 
-        [[nodiscard]] std::optional<std::span<std::byte>> memory(uint32_t address, uint32_t size) override
+        [[nodiscard]] std::expected<std::span<std::byte>, MemoryFailure> memory(uint32_t address,
+                                                                                uint32_t size) override
         {
             if (size == 0)
                 return std::span<std::byte> {};
             if (!_memory)
-                return std::nullopt;
+                return std::unexpected(MemoryFailure::OutOfBounds);
             auto* const context = storeContext();
             auto const bytes = wasmtime_memory_data_size(context, &*_memory);
             if (uint64_t { address } + size > bytes)
-                return std::nullopt;
+                return std::unexpected(MemoryFailure::OutOfBounds);
             auto const whole =
                 std::span<std::byte> { reinterpret_cast<std::byte*>(wasmtime_memory_data(context, &*_memory)),
                                        bytes };

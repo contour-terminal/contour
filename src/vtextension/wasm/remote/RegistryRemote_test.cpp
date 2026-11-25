@@ -6,11 +6,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -30,6 +33,7 @@
 #include <vtextension/wasm/WasmRuntime.hpp>
 #include <vtextension/wasm/host/HostServer.hpp>
 #include <vtextension/wasm/host/InProcessHost.hpp>
+#include <vtextension/wasm/testing/DecoratedEngine.hpp>
 #include <vtextension/wasm/testing/HostedEngine.hpp>
 
 using namespace vtextension;
@@ -101,6 +105,72 @@ struct RemoteRig
     }
 };
 
+/// Whether the next memory read a host serves kills it.
+enum class ReadFate : uint8_t
+{
+    Served, ///< The read is served.
+    Fatal,  ///< The host dies serving it: it answers nothing more.
+};
+
+/// Kills every host a connector started once armed, from inside the next memory read one of them serves:
+/// after the host answered the call that the read follows, and before it answers the read.
+class DeathOnRead
+{
+  public:
+    /// @param connector The connector whose hosts die; must outlive every read.
+    void arm(InProcessHostConnector& connector) noexcept
+    {
+        _connector = &connector;
+        _fate.store(ReadFate::Fatal, std::memory_order_release);
+    }
+
+    /// Called by a host serving a read: kills it if armed, once.
+    void onRead() noexcept
+    {
+        if (_fate.exchange(ReadFate::Served, std::memory_order_acq_rel) == ReadFate::Fatal)
+            _connector->terminateAll();
+    }
+
+  private:
+    InProcessHostConnector* _connector = nullptr;
+    std::atomic<ReadFate> _fate { ReadFate::Served };
+};
+
+/// An instance in a host that consults a DeathOnRead before each memory read it serves.
+class DyingOnRead final: public wasm::testing::ForwardingInstance
+{
+  public:
+    DyingOnRead(std::unique_ptr<wasm::IWasmInstance> inner, std::shared_ptr<DeathOnRead> death) noexcept:
+        ForwardingInstance { std::move(inner) }, _death { std::move(death) }
+    {
+    }
+
+    [[nodiscard]] std::expected<std::span<std::byte>, wasm::MemoryFailure> memory(uint32_t address,
+                                                                                  uint32_t size) override
+    {
+        _death->onRead();
+        return ForwardingInstance::memory(address, size);
+    }
+
+  private:
+    std::shared_ptr<DeathOnRead> _death;
+};
+
+/// @return A connector whose hosts' instances die on the read @p death arms.
+[[nodiscard]] std::shared_ptr<InProcessHostConnector> makeDyingConnector(
+    std::shared_ptr<DeathOnRead> const& death)
+{
+    return std::make_shared<InProcessHostConnector>(
+        [death] {
+            return std::make_unique<wasm::testing::DecoratedEngine>(
+                wasm::testing::makeHostedEngine(), [death](std::unique_ptr<wasm::IWasmInstance> instance) {
+                    return std::unique_ptr<wasm::IWasmInstance> { std::make_unique<DyingOnRead>(
+                        std::move(instance), death) };
+                });
+        },
+        HostServerConfig {});
+}
+
 } // namespace
 
 TEST_CASE("one death counts once across panes", "[vtextension][remote][registry]")
@@ -169,4 +239,20 @@ TEST_CASE("registry drop races instantiate (remote)", "[vtextension][remote][reg
         }
     }
     CHECK(connector->liveHosts() == 0);
+}
+
+TEST_CASE("host death during a memory read counts as the host's", "[vtextension][remote][registry]")
+{
+    // The host answers the render honestly, then dies before it answers the read of the string it returned:
+    // the pane sees the host gone, not a guest trap, and the death counts once against the extension.
+    auto const death = std::make_shared<DeathOnRead>();
+    auto rig = RemoteRig { makeDyingConnector(death) };
+    auto const compiled = rig.acquire();
+    auto const instance = rig.instantiate(*compiled);
+    REQUIRE(instance.has_value());
+
+    death->arm(*rig.connector);
+    CHECK((*instance)->render(surface(10, 1)).error() == ExtensionError::HostUnavailable);
+    CHECK(compiled->breaker()->faultCount() == 1);
+    CHECK(rig.connector->liveHosts() == 0);
 }

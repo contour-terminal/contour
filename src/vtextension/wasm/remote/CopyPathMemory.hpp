@@ -15,15 +15,17 @@
 #include <span>
 #include <vector>
 
+#include <vtextension/wasm/WasmRuntime.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 
 namespace vtextension::wasm::remote
 {
 
 /// Reads a range of an instance's memory from its host.
-/// @return The range's bytes, exactly as many as asked for; nothing if the range lies outside the memory or
-///         the host could not be reached.
-using MemoryFetch = std::function<std::optional<std::vector<std::byte>>(uint32_t address, uint32_t size)>;
+/// @return The range's bytes, exactly as many as asked for; `OutOfBounds` if the range lies outside the
+///         memory, `HostCrashed` if the host could not be reached.
+using MemoryFetch =
+    std::function<std::expected<std::vector<std::byte>, MemoryFailure>(uint32_t address, uint32_t size)>;
 
 /// The parts of one instance's memory the parent read since the instance last ran, in a shadow of the whole
 /// memory, at the same offsets. A page is fetched the first time a view reaches it, and every view of the
@@ -54,8 +56,9 @@ class CopyPathMemory
     /// instance's only until clear().
     /// @param address The guest address the view starts at.
     /// @param size The view's size in bytes; 0 yields an empty span, fetching nothing.
-    /// @return The view; nothing if the range reaches past the memory's limit or could not be fetched.
-    [[nodiscard]] std::optional<std::span<std::byte>> view(uint32_t address, uint32_t size);
+    /// @return The view; `OutOfBounds` if the range reaches past the memory's limit or the host refused it,
+    ///         `HostCrashed` if the host could not be reached.
+    [[nodiscard]] std::expected<std::span<std::byte>, MemoryFailure> view(uint32_t address, uint32_t size);
 
     /// @return One write per maximal run of bytes changed since they were fetched or last flushed, in address
     ///         order. What they return counts as unchanged from then on.
@@ -73,14 +76,8 @@ class CopyPathMemory
     /// The slot of a page that has none: it was not fetched since the instance last ran.
     static constexpr auto NoSlot = std::numeric_limits<uint32_t>::max();
 
-    /// Why pages could not be fetched.
-    enum class FetchError : uint8_t
-    {
-        Unreachable, ///< The host refused the range, or could not be reached.
-    };
-
     /// Fetches pages [@p first, @p end) into the shadow, all of them absent, and snapshots each.
-    [[nodiscard]] std::expected<void, FetchError> fetchPages(std::size_t first, std::size_t end);
+    [[nodiscard]] std::expected<void, MemoryFailure> fetchPages(std::size_t first, std::size_t end);
 
     /// @return The snapshot of page @p page, which must have been fetched: its bytes as fetched or last
     /// flushed.

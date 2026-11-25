@@ -90,10 +90,16 @@ class Instance::GuestMemory final: public abi::IGuestMemory
 
     [[nodiscard]] abi::Result<std::span<std::byte>> view(abi::Address address, uint32_t size) override
     {
-        auto const bytes = _instance._instance->memory(address, size);
-        if (!bytes)
-            return std::unexpected(ExtensionError::Trapped);
-        return *bytes;
+        // A guest that names memory it does not have traps; a host that died meanwhile is the host's fault,
+        // and counts as such.
+        return _instance._instance->memory(address, size).transform_error([](wasm::MemoryFailure failure) {
+            switch (failure)
+            {
+                case wasm::MemoryFailure::OutOfBounds: return ExtensionError::Trapped;
+                case wasm::MemoryFailure::HostCrashed: return ExtensionError::HostUnavailable;
+            }
+            return ExtensionError::Trapped;
+        });
     }
 
     [[nodiscard]] abi::Result<abi::Address> allocate(uint32_t size, uint32_t alignment) override

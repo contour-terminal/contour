@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -13,6 +14,7 @@
 #include <vtextension/wasm/remote/CopyPathMemory.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 
+using vtextension::wasm::MemoryFailure;
 using vtextension::wasm::remote::CopyPathMemory;
 
 namespace proto = vtextension::wasm::remote::proto;
@@ -37,17 +39,18 @@ class FakeMemory
     /// @return A CopyPathMemory over this memory, as large as it may grow.
     [[nodiscard]] CopyPathMemory copies()
     {
-        return CopyPathMemory { InstanceId,
-                                _bytes.size(),
-                                [this](uint32_t address,
-                                       uint32_t size) -> std::optional<std::vector<std::byte>> {
-                                    ++fetches;
-                                    reads.push_back(Read { .address = address, .size = size });
-                                    if (std::size_t { address } + size > _bytes.size())
-                                        return std::nullopt;
-                                    auto const range = std::span { _bytes }.subspan(address, size);
-                                    return std::vector<std::byte> { range.begin(), range.end() };
-                                } };
+        return CopyPathMemory {
+            InstanceId,
+            _bytes.size(),
+            [this](uint32_t address, uint32_t size) -> std::expected<std::vector<std::byte>, MemoryFailure> {
+                ++fetches;
+                reads.push_back(Read { .address = address, .size = size });
+                if (std::size_t { address } + size > _bytes.size())
+                    return std::unexpected(MemoryFailure::OutOfBounds);
+                auto const range = std::span { _bytes }.subspan(address, size);
+                return std::vector<std::byte> { range.begin(), range.end() };
+            }
+        };
     }
 
     /// Applies @p writes in order.
@@ -253,17 +256,31 @@ TEST_CASE("CopyPathMemory.refusesWhatLiesPastTheMemory", "[vtextension][remote]"
     auto memory = FakeMemory {};
     auto copies = memory.copies();
 
-    CHECK_FALSE(copies.view((3 * Page) - 8, 16).has_value()); // past the memory's limit
-    CHECK_FALSE(copies.view(0xFFFF'FFF0, 32).has_value());    // past the address space
+    CHECK(copies.view((3 * Page) - 8, 16).error() == MemoryFailure::OutOfBounds); // past the memory's limit
+    CHECK_FALSE(copies.view(0xFFFF'FFF0, 32).has_value());                        // past the address space
     CHECK_FALSE(copies.view(0xFFFF'FFFF, 0xFFFF'FFFF).has_value());
     CHECK(memory.fetches == 0);
     CHECK(copies.view((3 * Page) - 8, 8).has_value());
 
     // A memory smaller than its limit refuses what it does not hold: its host cannot read it.
     auto copiesOfSmall = CopyPathMemory { InstanceId, 2 * std::size_t { Page }, [](uint32_t, uint32_t) {
-                                             return std::optional<std::vector<std::byte>> {};
+                                             return std::expected<std::vector<std::byte>, MemoryFailure> {
+                                                 std::unexpect, MemoryFailure::OutOfBounds
+                                             };
                                          } };
-    CHECK_FALSE(copiesOfSmall.view(Page, 4).has_value());
+    CHECK(copiesOfSmall.view(Page, 4).error() == MemoryFailure::OutOfBounds);
+}
+
+TEST_CASE("CopyPathMemory.reportsAHostGoneAsSuch", "[vtextension][remote]")
+{
+    // A host that cannot be reached is not a range out of bounds: the caller blames the host, not the guest.
+    auto copies = CopyPathMemory { InstanceId, 2 * std::size_t { Page }, [](uint32_t, uint32_t) {
+                                      return std::expected<std::vector<std::byte>, MemoryFailure> {
+                                          std::unexpect, MemoryFailure::HostCrashed
+                                      };
+                                  } };
+    CHECK(copies.view(0, 4).error() == MemoryFailure::HostCrashed);
+    CHECK(copies.view(Page - 2, 4).error() == MemoryFailure::HostCrashed);
 }
 
 TEST_CASE("CopyPathMemory.snapshotsOnlyTheFetchedPages", "[vtextension][remote]")

@@ -1005,8 +1005,8 @@ void memoryViewIsBoundsChecked()
     CHECK(std::ranges::equal(*hello, std::string_view { "hello" }, [](std::byte byte, char c) {
         return std::to_integer<char>(byte) == c;
     }));
-    CHECK_FALSE(instance->memory(PageBytes - 1, 2).has_value());
-    CHECK_FALSE(instance->memory(0xFFFFFFF0, 32).has_value());
+    CHECK(instance->memory(PageBytes - 1, 2).error() == MemoryFailure::OutOfBounds);
+    CHECK(instance->memory(0xFFFFFFF0, 32).error() == MemoryFailure::OutOfBounds);
     auto const empty = instance->memory(70000, 0);
     REQUIRE(empty.has_value());
     CHECK(empty->empty());
@@ -1191,7 +1191,7 @@ void memoryCapRefusesGrowth()
                               ? CallFailure::MemoryGrowthRefused
                               : CallFailure::Trap;
     CHECK(called.error() == expected);
-    CHECK_FALSE(instance->memory(0, 2 * PageBytes).has_value());
+    CHECK(instance->memory(0, 2 * PageBytes).error() == MemoryFailure::OutOfBounds);
 }
 
 /// A call that trapped leaves its instance callable: the next call runs as if none had failed.

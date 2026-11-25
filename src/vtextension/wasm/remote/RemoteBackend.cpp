@@ -313,12 +313,13 @@ namespace
         [[nodiscard]] std::expected<void, CallFailure> call(ExportFunction function,
                                                             std::span<uint32_t> argv) override;
 
-        [[nodiscard]] std::optional<std::span<std::byte>> memory(uint32_t address, uint32_t size) override
+        [[nodiscard]] std::expected<std::span<std::byte>, MemoryFailure> memory(uint32_t address,
+                                                                                uint32_t size) override
         {
             if (size == 0)
                 return std::span<std::byte> {};
             if (!_incarnation->isAlive())
-                return std::nullopt;
+                return std::unexpected(MemoryFailure::HostCrashed);
             return _memory.view(address, size);
         }
 
@@ -345,7 +346,10 @@ namespace
         }
 
         /// Reads a range of the instance's memory on the calling thread's lane.
-        [[nodiscard]] std::optional<std::vector<std::byte>> fetch(uint32_t address, uint32_t size);
+        /// @return The range's bytes; `OutOfBounds` if the host refused the range or the thread has no lane,
+        ///         `HostCrashed` if the host died or broke the protocol, which kills it.
+        [[nodiscard]] std::expected<std::vector<std::byte>, MemoryFailure> fetch(uint32_t address,
+                                                                                 uint32_t size);
 
         /// Sends what was written to the instance's memory on @p lane, then drops every copy: the instance
         /// is about to run.
@@ -521,25 +525,27 @@ namespace
         return {};
     }
 
-    std::optional<std::vector<std::byte>> RemoteInstance::fetch(uint32_t address, uint32_t size)
+    std::expected<std::vector<std::byte>, MemoryFailure> RemoteInstance::fetch(uint32_t address,
+                                                                               uint32_t size)
     {
+        // A thread that cannot call cannot read either: as a call from it traps, its read is refused.
         auto* const lane = laneOfCurrentThread();
         if (!lane)
-            return std::nullopt;
+            return std::unexpected(MemoryFailure::OutOfBounds);
         if (!lane->send(proto::MemoryRead { .instanceId = _instanceId, .address = address, .size = size }))
         {
             _incarnation->markDead();
-            return std::nullopt;
+            return std::unexpected(MemoryFailure::HostCrashed);
         }
         auto reply = lane->receive();
         auto* const data = reply ? std::get_if<proto::MemoryData>(&*reply) : nullptr;
         if (!data || (data->status == proto::MemoryStatus::Ok && data->bytes.size() != size))
         {
             _incarnation->markDead();
-            return std::nullopt;
+            return std::unexpected(MemoryFailure::HostCrashed);
         }
         if (data->status != proto::MemoryStatus::Ok)
-            return std::nullopt;
+            return std::unexpected(MemoryFailure::OutOfBounds);
         return std::move(data->bytes);
     }
 

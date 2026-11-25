@@ -31,14 +31,14 @@ CopyPathMemory::CopyPathMemory(uint32_t instanceId, std::size_t memoryBytes, Mem
 {
 }
 
-std::optional<std::span<std::byte>> CopyPathMemory::view(uint32_t address, uint32_t size)
+std::expected<std::span<std::byte>, MemoryFailure> CopyPathMemory::view(uint32_t address, uint32_t size)
 {
     if (size == 0)
         return std::span<std::byte> {};
     auto const begin = std::size_t { address };
     auto const end = begin + size; // cannot overflow: both are 32-bit
     if (end > _memoryBytes)
-        return std::nullopt;
+        return std::unexpected(MemoryFailure::OutOfBounds);
 
     // One fetch per run of adjacent absent pages.
     auto const firstPage = begin / PageBytes;
@@ -49,21 +49,30 @@ std::optional<std::span<std::byte>> CopyPathMemory::view(uint32_t address, uint3
         auto const absent = _slots[page] == NoSlot;
         if (absent && !runBegin)
             runBegin = page;
-        else if (!absent && runBegin && !fetchPages(*std::exchange(runBegin, std::nullopt), page))
-            return std::nullopt;
+        else if (!absent && runBegin)
+        {
+            if (auto fetched = fetchPages(*std::exchange(runBegin, std::nullopt), page); !fetched)
+                return std::unexpected(fetched.error());
+        }
     }
-    if (runBegin && !fetchPages(*runBegin, endPage))
-        return std::nullopt;
+    if (runBegin)
+    {
+        if (auto fetched = fetchPages(*runBegin, endPage); !fetched)
+            return std::unexpected(fetched.error());
+    }
     return std::span { _shadow.get(), _memoryBytes }.subspan(begin, size);
 }
 
-std::expected<void, CopyPathMemory::FetchError> CopyPathMemory::fetchPages(std::size_t first, std::size_t end)
+std::expected<void, MemoryFailure> CopyPathMemory::fetchPages(std::size_t first, std::size_t end)
 {
     auto const address = first * PageBytes;
     auto const size = pageEnd(end - 1) - address;
     auto fetched = _fetch(static_cast<uint32_t>(address), static_cast<uint32_t>(size));
-    if (!fetched || fetched->size() != size)
-        return std::unexpected(FetchError::Unreachable);
+    if (!fetched)
+        return std::unexpected(fetched.error());
+    // A fetch answering other than the range asked for is refused as that range.
+    if (fetched->size() != size)
+        return std::unexpected(MemoryFailure::OutOfBounds);
     std::ranges::copy(*fetched, _shadow.get() + address);
     // Each page's snapshot takes the next slot of the arena, which keeps its capacity across clear().
     for (auto const page: std::views::iota(first, end))

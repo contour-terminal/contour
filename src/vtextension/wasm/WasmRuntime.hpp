@@ -79,6 +79,13 @@ enum class CallFailure : uint8_t
     HostCrashed,         ///< The host running the instance died; every later call fails so.
 };
 
+/// Why a view of an instance's memory could not be had.
+enum class MemoryFailure : uint8_t
+{
+    OutOfBounds, ///< A byte of the range lies outside the memory, or the instance has none.
+    HostCrashed, ///< The host running the instance died before it could serve the range.
+};
+
 /// Which host a module runs in. Modules with equal keys share one; an empty key gets a host of its own.
 /// In-process backends ignore it.
 struct ModuleIdentity
@@ -246,8 +253,10 @@ class IWasmInstance
     /// instance, which may grow (and so move) the memory.
     /// @param address The guest address the view starts at.
     /// @param size The view's size in bytes; 0 yields an empty span.
-    /// @return The view; nothing if any byte of it lies outside the memory.
-    [[nodiscard]] virtual std::optional<std::span<std::byte>> memory(uint32_t address, uint32_t size) = 0;
+    /// @return The view; `OutOfBounds` if any byte of it lies outside the memory, `HostCrashed` if the host
+    ///         running the instance died (only from a backend whose instances run in another process).
+    [[nodiscard]] virtual std::expected<std::span<std::byte>, MemoryFailure> memory(uint32_t address,
+                                                                                    uint32_t size) = 0;
 
     /// Stops the call running in the instance, if any, for good: callable from any thread, and final.
     /// Every later call() fails as CallFailure::Interrupted without entering the guest, including when

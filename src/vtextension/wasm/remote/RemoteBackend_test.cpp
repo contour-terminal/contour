@@ -56,6 +56,7 @@ using vtextension::wasm::IWasmInstance;
 using vtextension::wasm::IWasmModule;
 using vtextension::wasm::IWasmRuntime;
 using vtextension::wasm::Linkage;
+using vtextension::wasm::MemoryFailure;
 using vtextension::wasm::ModuleIdentity;
 using vtextension::wasm::ValueType;
 using vtextension::wasm::host::HostServerConfig;
@@ -526,7 +527,7 @@ void checkLaneBytesKillTheHelper(std::span<uint8_t const> bytes)
     CHECK(loadFailure(instance) == CallFailure::HostCrashed);
     CHECK(scripted.rig.connector->terminations() == 1);
     CHECK(loadFailure(instance) == CallFailure::HostCrashed);
-    CHECK_FALSE(instance.memory(0, 4).has_value());
+    CHECK(instance.memory(0, 4).error() == MemoryFailure::HostCrashed);
     CHECK(scripted.rig.connector->terminations() == 1);
 }
 
@@ -565,7 +566,7 @@ TEST_CASE("RemoteBackend.helperDeathFailsCallsHostCrashed", "[vtextension][remot
     CHECK(connector->terminateAll() == 1);
 
     CHECK(addFailure(*instance) == CallFailure::HostCrashed);
-    CHECK_FALSE(instance->memory(0, 4).has_value());
+    CHECK(instance->memory(0, 4).error() == MemoryFailure::HostCrashed);
     CHECK(addFailure(*instance) == CallFailure::HostCrashed);
     CHECK(connector->connects() == 1);
 }
@@ -756,7 +757,7 @@ TEST_CASE("RemoteBackend.memoryDataOfTheWrongSizeKillsTheHelper", "[vtextension]
         .laneBytes =
             frameOf(proto::MemoryData { .status = proto::MemoryStatus::Ok,
                                         .bytes = { std::byte { 1 }, std::byte { 2 }, std::byte { 3 } } }) } };
-    CHECK_FALSE(scripted.instance->memory(0, 4).has_value());
+    CHECK(scripted.instance->memory(0, 4).error() == MemoryFailure::HostCrashed);
     // Checked before calling: had the host survived, the call would wait for an answer it never sends.
     REQUIRE(scripted.rig.connector->terminations() == 1);
     CHECK(loadFailure(*scripted.instance) == CallFailure::HostCrashed);

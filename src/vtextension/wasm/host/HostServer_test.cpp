@@ -36,6 +36,7 @@
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 #include <vtextension/wasm/remote/transport/PduStream.hpp>
 #include <vtextension/wasm/testing/BackendContract.hpp>
+#include <vtextension/wasm/testing/DecoratedEngine.hpp>
 #include <vtextension/wasm/testing/HostedEngine.hpp>
 
 #if defined(_MSC_VER) && !defined(__clang__)
@@ -268,19 +269,13 @@ class StackProbe
 };
 
 /// An instance of a probed engine: records where each call begins, and forwards everything.
-class ProbedInstance final: public vtextension::wasm::IWasmInstance
+class ProbedInstance final: public vtextension::wasm::testing::ForwardingInstance
 {
   public:
     ProbedInstance(std::unique_ptr<vtextension::wasm::IWasmInstance> inner,
                    std::shared_ptr<StackProbe> probe):
-        _inner { std::move(inner) }, _probe { std::move(probe) }
+        ForwardingInstance { std::move(inner) }, _probe { std::move(probe) }
     {
-    }
-
-    [[nodiscard]] std::optional<vtextension::wasm::ExportFunction> function(
-        std::string_view name) const override
-    {
-        return _inner->function(name);
     }
 
     [[nodiscard]] std::expected<void, CallFailure> call(vtextension::wasm::ExportFunction function,
@@ -293,121 +288,24 @@ class ProbedInstance final: public vtextension::wasm::IWasmInstance
 #else
         _probe->record(reinterpret_cast<std::uintptr_t>(__builtin_frame_address(0)));
 #endif
-        return _inner->call(function, argv);
+        return ForwardingInstance::call(function, argv);
     }
-
-    [[nodiscard]] std::optional<std::span<std::byte>> memory(uint32_t address, uint32_t size) override
-    {
-        return _inner->memory(address, size);
-    }
-
-    void interrupt() noexcept override { _inner->interrupt(); }
 
   private:
-    std::unique_ptr<vtextension::wasm::IWasmInstance> _inner;
     std::shared_ptr<StackProbe> _probe;
 };
 
-/// A module of a probed engine, whose instances are probed.
-class ProbedModule final: public vtextension::wasm::IWasmModule
+/// @return A hosted engine whose instances record where each of their calls begins on its thread's stack.
+[[nodiscard]] std::unique_ptr<vtextension::wasm::host::IHostedEngine> makeProbedEngine(
+    std::shared_ptr<StackProbe> probe)
 {
-  public:
-    ProbedModule(std::shared_ptr<vtextension::wasm::IWasmModule> inner, std::shared_ptr<StackProbe> probe):
-        _inner { std::move(inner) }, _probe { std::move(probe) }
-    {
-    }
-
-    [[nodiscard]] std::span<vtextension::wasm::ImportDescription const> imports() const noexcept override
-    {
-        return _inner->imports();
-    }
-
-    [[nodiscard]] std::span<vtextension::wasm::ExportDescription const> exports() const noexcept override
-    {
-        return _inner->exports();
-    }
-
-    [[nodiscard]] std::expected<std::unique_ptr<vtextension::wasm::IWasmInstance>, ExtensionError>
-    instantiate(vtextension::wasm::IHostContext& context) override
-    {
-        return _inner->instantiate(context).transform(
-            [this](std::unique_ptr<vtextension::wasm::IWasmInstance> instance)
-                -> std::unique_ptr<vtextension::wasm::IWasmInstance> {
-                return std::make_unique<ProbedInstance>(std::move(instance), _probe);
-            });
-    }
-
-  private:
-    std::shared_ptr<vtextension::wasm::IWasmModule> _inner;
-    std::shared_ptr<StackProbe> _probe;
-};
-
-/// A runtime of a probed engine, whose modules are probed.
-class ProbedRuntime final: public vtextension::wasm::IWasmRuntime
-{
-  public:
-    ProbedRuntime(std::shared_ptr<vtextension::wasm::IWasmRuntime> inner, std::shared_ptr<StackProbe> probe):
-        _inner { std::move(inner) }, _probe { std::move(probe) }
-    {
-    }
-
-    [[nodiscard]] std::expected<std::shared_ptr<vtextension::wasm::IWasmModule>, ExtensionError> load(
-        ModuleIdentity identity, std::vector<std::byte> bytes) override
-    {
-        return _inner->load(std::move(identity), std::move(bytes))
-            .transform([this](std::shared_ptr<vtextension::wasm::IWasmModule> module)
-                           -> std::shared_ptr<vtextension::wasm::IWasmModule> {
-                return std::make_shared<ProbedModule>(std::move(module), _probe);
-            });
-    }
-
-  private:
-    std::shared_ptr<vtextension::wasm::IWasmRuntime> _inner;
-    std::shared_ptr<StackProbe> _probe;
-};
-
-/// A hosted engine whose instances record where each of their calls begins on its thread's stack.
-class ProbedEngine final: public vtextension::wasm::host::IHostedEngine
-{
-  public:
-    ProbedEngine(std::unique_ptr<vtextension::wasm::host::IHostedEngine> inner,
-                 std::shared_ptr<StackProbe> probe):
-        _inner { std::move(inner) }, _probe { std::move(probe) }
-    {
-    }
-
-    [[nodiscard]] std::expected<std::shared_ptr<vtextension::wasm::IWasmRuntime>, ExtensionError>
-    createRuntime(vtextension::wasm::RuntimeLimits limits,
-                  std::span<vtextension::wasm::HostFunction const> hostFunctions) override
-    {
-        return _inner->createRuntime(limits, hostFunctions)
-            .transform([this](std::shared_ptr<vtextension::wasm::IWasmRuntime> runtime)
-                           -> std::shared_ptr<vtextension::wasm::IWasmRuntime> {
-                return std::make_shared<ProbedRuntime>(std::move(runtime), _probe);
-            });
-    }
-
-    [[nodiscard]] std::expected<std::unique_ptr<vtextension::wasm::IThreadGuard>, ExtensionError>
-    enterThread() override
-    {
-        return _inner->enterThread();
-    }
-
-    [[nodiscard]] bool isCurrentThreadPrepared() const override { return _inner->isCurrentThreadPrepared(); }
-
-    [[nodiscard]] uint64_t runtimeGeneration() const noexcept override { return _inner->runtimeGeneration(); }
-
-    [[nodiscard]] vtextension::wasm::BackendCapabilities capabilities() const noexcept override
-    {
-        return _inner->capabilities();
-    }
-
-    [[nodiscard]] proto::MemoryMode memoryMode() const noexcept override { return _inner->memoryMode(); }
-
-  private:
-    std::unique_ptr<vtextension::wasm::host::IHostedEngine> _inner;
-    std::shared_ptr<StackProbe> _probe;
-};
+    return std::make_unique<vtextension::wasm::testing::DecoratedEngine>(
+        makeHostedEngine(),
+        [probe = std::move(probe)](std::unique_ptr<vtextension::wasm::IWasmInstance> instance)
+            -> std::unique_ptr<vtextension::wasm::IWasmInstance> {
+            return std::make_unique<ProbedInstance>(std::move(instance), probe);
+        });
+}
 
 /// @return The ordinal of the export named @p name, which @p loaded must describe.
 [[nodiscard]] uint32_t ordinalOf(proto::Loaded const& loaded, std::string_view name)
@@ -764,8 +662,7 @@ TEST_CASE("HostServer.nestedCallsFitTheExecutorStack", "[vtextension][host]")
     // they begin: MaxCallDepth calls into as many instances, each nearly filling the largest stack a runtime
     // may give, must fit one executor's stack.
     auto const probe = std::make_shared<StackProbe>();
-    auto parent =
-        ScriptedParent { std::make_unique<ProbedEngine>(makeHostedEngine(), probe), HostServerConfig {} };
+    auto parent = ScriptedParent { makeProbedEngine(probe), HostServerConfig {} };
     parent.skipHello();
     auto functions = std::vector<proto::WireHostFunction> {};
     for (auto const& function: contract::HostFunctions)
