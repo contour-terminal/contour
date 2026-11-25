@@ -14,6 +14,11 @@ TEST_CASE("unixMsOf reads the three forges' spellings", "[orchestrator][timestam
     CHECK(unixMsOf("2026-11-13T16:08:47.250+01:00") == 1'794'582'527'250);
     CHECK(unixMsOf("2026-11-13T16:08:47.000+0100") == 1'794'582'527'000);
     CHECK(unixMsOf("2026-11-13T12:00:00.123456Z") == 1'794'571'200'123);
+    // Past 2038-01-19, where a 32-bit second count overflows; the last representable date in the four-digit
+    // years.
+    CHECK(unixMsOf("2038-01-19T03:14:08Z") == 2'147'483'648'000);
+    CHECK(unixMsOf("2038-01-20T00:00:00Z") == 2'147'558'400'000);
+    CHECK(unixMsOf("9999-12-31T23:59:59Z") == 253'402'300'799'000);
     for (auto const bad: { ""sv,
                            "2026-11-13T15:08:47"sv,
                            "2026-11-13 15:08:47Z"sv,

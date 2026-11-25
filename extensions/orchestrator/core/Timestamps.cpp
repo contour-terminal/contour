@@ -116,7 +116,8 @@ std::optional<uint64_t> unixMsOf(std::string_view text) noexcept
     if (!offset)
         return std::nullopt;
 
-    auto const days = std::chrono::sys_days { date }.time_since_epoch().count();
+    // The day count is a 32-bit int in some standard libraries: widen it before any multiplication.
+    auto const days = static_cast<int64_t>(std::chrono::sys_days { date }.time_since_epoch().count());
     auto const localSeconds = static_cast<int64_t>(*hourValue) * 3600
                               + static_cast<int64_t>(*minuteValue) * 60 + static_cast<int64_t>(*secondValue);
     auto const unixSeconds = days * 86400 + localSeconds - static_cast<int64_t>(*offset) * 60;
