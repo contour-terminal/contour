@@ -23,10 +23,11 @@
 // control channel to end.
 //
 // With --mutate, it is a hostile extension host's memory: it takes the grant of one Instantiate as
-// --receive-grant does, and flips bytes of the whole object at random (a Mersenne twister seeded with
-// `--seed`, so that a run is repeated by its seed) on a thread of its own while Contour reads it. It reports
-// `mutating` and `end` on its first lane once the thread runs, or `granted=refused` and `end`; then, once its
-// control channel ended, `mutations=N` (how many bytes it flipped) and `end`, and exits.
+// --receive-grant does, and flips bytes of the whole object at random on a thread of its own while Contour
+// reads it. A Mersenne twister seeded with `--seed` picks each flip from its raw output, so a seed names the
+// same flips on every standard library; how they interleave with Contour's reads is the scheduler's. It
+// reports `mutating` and `end` on its first lane once the thread runs, or `granted=refused` and `end`; then,
+// once its control channel ended, `mutations=N` (how many bytes it flipped) and `end`, and exits.
 //
 // The report is one `key=value` line each: `cwd=` its working directory, `env=NAME` per environment variable,
 // `stdin=`, `stdout=` and `stderr=` each `null` if it is the null device, `terminal` if a terminal, else
@@ -453,12 +454,14 @@ constexpr auto Seed = std::string_view { "--seed=" };
     {
         auto const bytes = mapping->bytes();
         auto mutator = std::jthread { [bytes, seed = *seed, &mutations](std::stop_token const& stop) {
+            // The engine's raw output, which the standard fixes, rather than a distribution, which each
+            // standard library implements its own way: a seed names one sequence of flips everywhere.
             auto random = std::mt19937 { seed };
-            auto offsets = std::uniform_int_distribution<std::size_t> { 0, bytes.size() - 1 };
-            auto masks = std::uniform_int_distribution<unsigned> { 1, 0xFF };
             while (!stop.stop_requested())
             {
-                bytes[offsets(random)] ^= std::byte { static_cast<uint8_t>(masks(random)) };
+                auto const offset = random() % bytes.size();
+                auto const mask = static_cast<uint8_t>((random() % 0xFF) + 1);
+                bytes[offset] ^= std::byte { mask };
                 ++mutations;
             }
         } };
