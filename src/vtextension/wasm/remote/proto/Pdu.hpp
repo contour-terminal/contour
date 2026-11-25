@@ -29,13 +29,18 @@ inline constexpr uint32_t ProtocolVersion = 3;
 /// The size of a guest's memory page: what guest memory grows by, and what its object is rounded up to.
 inline constexpr uint64_t WasmPageBytes = uint64_t { 64 } * 1024;
 
+/// The largest object memoryObjectBytes() sizes: the most whole guest pages a 64-bit size holds.
+inline constexpr uint64_t MaxMemoryObjectBytes = (UINT64_MAX / WasmPageBytes) * WasmPageBytes;
+
 /// The size of the shared object that holds an instance's memory under a cap of @p capBytes: the cap rounded
 /// up to a whole guest page, and at least one page, so that an instance without memory still has an object.
-/// @param capBytes The most bytes the instance's memory may grow to; below 2^64 - WasmPageBytes.
-/// @return The object's size in bytes.
+/// A cap past MaxMemoryObjectBytes sizes it at that, rather than wrap to 0, which names no object.
+/// @param capBytes The most bytes the instance's memory may grow to.
+/// @return The object's size in bytes: a whole number of guest pages, never 0.
 [[nodiscard]] constexpr uint64_t memoryObjectBytes(uint64_t capBytes) noexcept
 {
-    auto const pages = (capBytes / WasmPageBytes) + (capBytes % WasmPageBytes != 0 ? 1 : 0);
+    auto const cap = capBytes < MaxMemoryObjectBytes ? capBytes : MaxMemoryObjectBytes;
+    auto const pages = (cap / WasmPageBytes) + (cap % WasmPageBytes != 0 ? 1 : 0);
     return (pages == 0 ? 1 : pages) * WasmPageBytes;
 }
 

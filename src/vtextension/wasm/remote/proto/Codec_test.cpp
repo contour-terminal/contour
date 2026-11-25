@@ -555,6 +555,12 @@ TEST_CASE("PduCodec.memoryObjectBytes", "[vtextension]")
     STATIC_CHECK(memoryObjectBytes((64 * KiB) + 1) == 128 * KiB);
     STATIC_CHECK(memoryObjectBytes(32 * MiB) == 32 * MiB);
     STATIC_CHECK(memoryObjectBytes((32 * MiB) + 1) == (32 * MiB) + (64 * KiB));
+    // No cap wraps around to 0, which names a copy-mode host.
+    STATIC_CHECK(memoryObjectBytes(UINT64_MAX) == MaxMemoryObjectBytes);
+    STATIC_CHECK(memoryObjectBytes(MaxMemoryObjectBytes + 1) == MaxMemoryObjectBytes);
+    STATIC_CHECK(memoryObjectBytes(MaxMemoryObjectBytes) == MaxMemoryObjectBytes);
+    STATIC_CHECK(MaxMemoryObjectBytes % WasmPageBytes == 0);
+    STATIC_CHECK(MaxMemoryObjectBytes > UINT64_MAX - WasmPageBytes);
 }
 
 TEST_CASE("PduCodec.mutatedFramesNeverCrash", "[vtextension]")
