@@ -1208,7 +1208,8 @@ TEST_CASE("the index check decides on what the host keeps of a listing of any si
         auto const input = kept.extent == OutputExtent::Whole
                                ? RunInput { CommandOk { kept.text } }
                                : RunInput { CommandFailed { "its output was cut at the host's limit" } };
-        orchestrator::advance(run, input, knownContext());
+        auto const effects = orchestrator::advance(run, input, knownContext());
+        CHECK_FALSE(effects.empty());
         CHECK(describe(run.state) == row.to);
     }
 }
