@@ -17,7 +17,6 @@
 #include <mutex>
 #include <optional>
 #include <print>
-#include <random>
 #include <span>
 #include <string>
 #include <string_view>
@@ -45,6 +44,7 @@
 namespace proto = vtextension::wasm::remote::proto;
 namespace transport = vtextension::wasm::remote::transport;
 using contour::extension_host::testing::AfterContourEnds;
+using contour::extension_host::testing::GarbageAnswer;
 using contour::extension_host::testing::HostileAction;
 using contour::extension_host::testing::HostileIncident;
 using contour::extension_host::testing::hostileModeNamed;
@@ -60,10 +60,6 @@ constexpr auto HostileSetupFailed = 76;
 
 /// The exit code of a host that ends in the middle of serving (HostileAction::ForwardThenExit).
 constexpr auto AbruptExitCode = 3;
-
-/// How many bytes HostileAction::AnswerGarbage answers, and what they come from.
-constexpr auto GarbageBytes = 64;
-constexpr auto GarbageSeed = std::mt19937::result_type { 0x5eed };
 
 /// The limits both ends apply.
 constexpr auto Limits = proto::PduLimits {};
@@ -128,16 +124,6 @@ constexpr auto Limits = proto::PduLimits {};
     return proto::encodeFrame(
                proto::MemoryData { .status = proto::MemoryStatus::Ok, .bytes = std::vector<std::byte>(size) })
         .value_or(std::vector<uint8_t> {});
-}
-
-/// @param seed What the bytes are generated from: the same garbage every run, so that a failure repeats.
-/// @return GarbageBytes pseudo-random bytes.
-[[nodiscard]] std::array<uint8_t, GarbageBytes> garbageOf(std::mt19937::result_type seed)
-{
-    auto engine = std::mt19937 { seed };
-    auto garbage = std::array<uint8_t, GarbageBytes> {};
-    std::ranges::generate(garbage, [&engine] { return static_cast<uint8_t>(engine()); });
-    return garbage;
 }
 
 /// One channel Contour handed over, and the one the real host serves in its place.
@@ -282,11 +268,23 @@ class Relay
                 if (complete(way, pending, size))
                     std::ignore = way.sendTo(way.target(), std::span { pending }.first(size));
                 std::_Exit(AbruptExitCode);
+            case HostileAction::Exit: std::_Exit(AbruptExitCode);
+            case HostileAction::ForwardWrongVersion: {
+                if (!complete(way, pending, size))
+                    return Verdict::Stop;
+                auto decoded = proto::decodeFrame(pending, way.direction, way.channel.kind, Limits);
+                auto* const hello = decoded ? std::get_if<proto::Hello>(&decoded->pdu) : nullptr;
+                if (hello == nullptr)
+                    return Verdict::Stop;
+                ++hello->version;
+                auto const frame = proto::encodeFrame(*hello);
+                return frame && way.sendTo(way.target(), *frame) ? Verdict::Discard : Verdict::Stop;
+            }
             case HostileAction::StopReadingChannel: return Verdict::Stop;
             case HostileAction::StopReadingEveryChannel:
                 _contourReads.store(ContourReads::Stopped);
                 return Verdict::Stop;
-            case HostileAction::AnswerGarbage: return answer(garbageOf(GarbageSeed));
+            case HostileAction::AnswerGarbage: return answer(GarbageAnswer);
             case HostileAction::AnswerOverCapMemory: {
                 auto header = proto::Writer {};
                 header.varint(1 + Limits.maxMemoryBytes + 17); // The kind, and 17 bytes past the body's cap.

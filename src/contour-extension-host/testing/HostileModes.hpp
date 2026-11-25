@@ -44,14 +44,26 @@ enum class HostileAction : uint8_t
     Abort,                   ///< std::abort(): the host crashes.
     Segfault,                ///< Dies as a segmentation fault does, whatever handler a sanitizer installed.
     ForwardThenExit,         ///< Forwards the frame, then exits at once with code 3.
+    Exit,                    ///< Exits at once with code 3, the frame not forwarded.
+    ForwardWrongVersion,     ///< Forwards a Hello that names a protocol version Contour does not speak.
     StopReadingChannel,      ///< Reads nothing more of that channel, the frame included; stays alive.
     StopReadingEveryChannel, ///< Reads nothing more of any of Contour's channels; stays alive.
-    AnswerGarbage,           ///< Swallows the frame and answers 64 pseudo-random bytes on its channel.
+    AnswerGarbage,           ///< Swallows the frame and answers GarbageAnswer on its channel.
     AnswerOverCapMemory,     ///< Swallows a MemoryRead and answers a MemoryData header past the size cap.
     AnswerShortMemory,       ///< Swallows a MemoryRead and answers a well-formed MemoryData one byte short.
     AnswerHalfMemory,        ///< Swallows a MemoryRead and answers a MemoryData header and half its body.
     HoldBack,                ///< Holds the frame, and every one after it that way, back forever.
 };
+
+/// What HostileAction::AnswerGarbage answers: 64 bytes, produced once from `std::mt19937 { 0x5eed }` (the
+/// low byte of each of its first 64 outputs) and fixed here, so that every run answers the same garbage.
+/// They read as a frame whose kind is no PduKind: a violation at once, not a frame still arriving.
+inline constexpr auto GarbageAnswer = std::to_array<uint8_t>({
+    0xf7, 0x4a, 0xff, 0xd8, 0x1e, 0xe5, 0xd6, 0x65, 0x8a, 0x76, 0x53, 0xef, 0xd4, 0xd2, 0x1a, 0x8b,
+    0xe8, 0x7a, 0xdb, 0xb4, 0x87, 0xd0, 0xf5, 0x51, 0xf4, 0xe0, 0xac, 0x8f, 0xba, 0x5c, 0x8c, 0xbb,
+    0x84, 0xc8, 0xb0, 0xab, 0xaa, 0x52, 0x1d, 0x60, 0xbf, 0x83, 0x6c, 0xec, 0xc9, 0x18, 0xf1, 0x89,
+    0x06, 0x50, 0x79, 0x8b, 0x70, 0xae, 0xeb, 0x47, 0x27, 0xd1, 0x48, 0x7b, 0x73, 0xf9, 0xcb, 0xe5,
+});
 
 /// The frame an incident happens at: the first one of `kind` travelling `direction` on a channel of kind
 /// `channel`, once a frame of kind `after` passed on any channel either way.
@@ -140,6 +152,23 @@ inline constexpr auto HostileModes = std::array {
                      .incident =
                          HostileIncident { .trigger = detail::contourOnLane(proto::PduKind::MemoryRead),
                                            .action = HostileAction::AnswerHalfMemory } },
+    HostileModeRow { .name = "exit-before-hello",
+                     .incident = HostileIncident { .trigger = detail::hostOnControl(proto::PduKind::Hello),
+                                                   .action = HostileAction::Exit } },
+    HostileModeRow { .name = "wrong-version",
+                     .incident = HostileIncident { .trigger = detail::hostOnControl(proto::PduKind::Hello),
+                                                   .action = HostileAction::ForwardWrongVersion } },
+    HostileModeRow { .name = "hang-at-create-runtime",
+                     .incident =
+                         HostileIncident { .trigger = detail::hostOnControl(proto::PduKind::RuntimeCreated),
+                                           .action = HostileAction::HoldBack } },
+    HostileModeRow {
+        .name = "stop-reading-at-release",
+        .incident = HostileIncident { .trigger = HostileTrigger { .direction = proto::Direction::ToHelper,
+                                                                  .channel = proto::ChannelKind::Control,
+                                                                  .kind = proto::PduKind::Release,
+                                                                  .after = proto::PduKind::Instantiated },
+                                      .action = HostileAction::StopReadingChannel } },
     HostileModeRow { .name = "hang-at-handshake",
                      .incident = HostileIncident { .trigger = detail::hostOnControl(proto::PduKind::Hello),
                                                    .action = HostileAction::HoldBack } },

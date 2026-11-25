@@ -23,6 +23,7 @@
 #include <mutex>
 #include <optional>
 #include <print>
+#include <ranges>
 #include <span>
 #include <stop_token>
 #include <string>
@@ -45,14 +46,19 @@
 #include <vtextension/testing/TestModules.hpp>
 #include <vtextension/wasm/BackendConfig.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
+#include <vtextension/wasm/remote/HostConnector.hpp>
 #include <vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp>
 #include <vtextension/wasm/remote/process/testing/HelperComposition.hpp>
+#include <vtextension/wasm/remote/proto/Codec.hpp>
+#include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/testing/BackendContract.hpp>
 
 namespace process = vtextension::wasm::remote::process;
 namespace contract = vtextension::wasm::testing::contract;
+using contour::extension_host::testing::GarbageAnswer;
 using contour::extension_host::testing::hostileModeNamed;
 using contour::extension_host::testing::HostileOption;
+using process::KillReason;
 using process::testing::HelperBackendConfig;
 using process::testing::HelperComposition;
 using process::testing::HelperTeardownGrace;
@@ -66,14 +72,33 @@ using vtextension::wasm::IWasmRuntime;
 using vtextension::wasm::LockdownRequirement;
 using vtextension::wasm::MemoryFailure;
 using vtextension::wasm::ModuleIdentity;
+using vtextension::wasm::remote::HostStep;
+namespace proto = vtextension::wasm::remote::proto;
 using namespace std::chrono_literals;
 
 namespace
 {
 
-/// The budgets the hostile hosts are held to: short, so that a hang costs little.
+/// The budgets the hostile hosts are held to: short, so that a hang costs little, and far enough apart that
+/// the time a hang took names the budget that ended it.
 constexpr auto Timeouts =
-    HostTimeouts { .load = 200ms, .instantiate = 200ms, .handshake = 200ms, .interruptGrace = 50ms };
+    HostTimeouts { .load = 700ms, .instantiate = 1100ms, .handshake = 300ms, .interruptGrace = 50ms };
+
+/// How long past its budget a step that overran may take to fail: the kill, its reaping, and the start of
+/// the helper before its first step.
+constexpr auto BudgetSlack = 300ms;
+
+/// @return The budget of @p step in Timeouts.
+[[nodiscard]] constexpr std::chrono::milliseconds budgetOf(HostStep step) noexcept
+{
+    switch (step)
+    {
+        case HostStep::Handshake: return Timeouts.handshake;
+        case HostStep::Load: return Timeouts.load;
+        case HostStep::Instantiate: return Timeouts.instantiate;
+    }
+    return {};
+}
 
 /// How long after a call or a read began the watchdog interrupts it, as the pool's would at its deadline.
 constexpr auto WatchdogDelay = 50ms;
@@ -166,12 +191,19 @@ class Watchdog
 /// What an operation on a hostile host is.
 enum class Operation : uint8_t
 {
-    Add,         ///< `call("add", {2, 3})`, under the watchdog.
-    PingThenAdd, ///< `call("ping-then-add", {2, 3})`, a host call first, under the watchdog.
-    Read,        ///< `memory(16, 5)`, under the watchdog.
-    Load,        ///< `runtime->load(...)`.
-    Instantiate, ///< `module->instantiate(...)`.
+    Add,          ///< `call("add", {2, 3})`, under the watchdog.
+    PingThenAdd,  ///< `call("ping-then-add", {2, 3})`, a host call first, under the watchdog.
+    Read,         ///< `memory(16, 5)`, under the watchdog.
+    Load,         ///< `runtime->load(...)`.
+    Instantiate,  ///< `module->instantiate(...)`.
+    ReleaseFlood, ///< FloodInstances instances dropped at once, then `module->instantiate(...)`.
 };
+
+/// How many instances Operation::ReleaseFlood drops.
+constexpr auto FloodInstances = 1000;
+
+/// How long dropping one instance may take: it never waits for the host.
+constexpr auto DropBound = 100ms;
 
 /// How an operation failed, of the ways that matter here.
 enum class Failure : uint8_t
@@ -183,11 +215,19 @@ enum class Failure : uint8_t
     Other,           ///< Any other way.
 };
 
-/// How the hostile helper ended.
+/// How the hostile helper ended, and so which kill the supervisor counted for it.
 enum class HelperEnd : uint8_t
 {
-    Killed,   ///< By the supervisor, as Contour stopped it: no unclean exit.
-    OnItsOwn, ///< It crashed or exited: one unclean exit (D57).
+    /// Contour found it broke the protocol and stopped it: one kill Requested, no unclean exit.
+    Refused,
+    /// An interrupted call of its did not end within the grace: one Grace kill, no unclean exit.
+    GraceExpired,
+    /// It overstayed a step's budget: one StepTimeout kill, no unclean exit.
+    StepOverran,
+    /// It crashed or exited by itself: no kill for a timeout or a violation, and one unclean exit -- a
+    /// non-zero exit or a signal the supervisor did not send. Contour, seeing the channels end, may still
+    /// ask for a kill before the end was reaped: at most one kill Requested, which does nothing.
+    OnItsOwn,
 };
 
 /// One hostile mode, what Contour asks of it, and what that must come to.
@@ -197,20 +237,61 @@ struct HostileRow
     Operation operation;
     Failure failure;
     HelperEnd end;
+    std::optional<HostStep> step {}; ///< The step whose budget ended it; nothing unless StepOverran.
 };
 
 constexpr auto HostileRows = std::array {
     HostileRow { "abort", Operation::Add, Failure::CallCrashed, HelperEnd::OnItsOwn },
     HostileRow { "segfault", Operation::Add, Failure::CallCrashed, HelperEnd::OnItsOwn },
-    HostileRow { "garbage", Operation::Add, Failure::CallCrashed, HelperEnd::Killed },
-    HostileRow { "stop-reading", Operation::Add, Failure::CallCrashed, HelperEnd::Killed },
+    HostileRow { "garbage", Operation::Add, Failure::CallCrashed, HelperEnd::Refused },
+    HostileRow { "stop-reading", Operation::Add, Failure::CallCrashed, HelperEnd::GraceExpired },
     HostileRow { "exit-in-callhost", Operation::PingThenAdd, Failure::CallCrashed, HelperEnd::OnItsOwn },
-    HostileRow { "over-cap", Operation::Read, Failure::ReadCrashed, HelperEnd::Killed },
-    HostileRow { "bogus-size", Operation::Read, Failure::ReadCrashed, HelperEnd::Killed },
-    HostileRow { "stall-after-header", Operation::Read, Failure::ReadCrashed, HelperEnd::Killed },
-    HostileRow { "hang-at-handshake", Operation::Load, Failure::HostUnavailable, HelperEnd::Killed },
-    HostileRow { "hang-at-load", Operation::Load, Failure::HostUnavailable, HelperEnd::Killed },
-    HostileRow { "hang-at-instantiate", Operation::Instantiate, Failure::HostUnavailable, HelperEnd::Killed },
+    HostileRow { "over-cap", Operation::Read, Failure::ReadCrashed, HelperEnd::Refused },
+    HostileRow { "bogus-size", Operation::Read, Failure::ReadCrashed, HelperEnd::Refused },
+    HostileRow { "stall-after-header", Operation::Read, Failure::ReadCrashed, HelperEnd::GraceExpired },
+    HostileRow { "exit-before-hello", Operation::Load, Failure::HostUnavailable, HelperEnd::OnItsOwn },
+    HostileRow { "wrong-version", Operation::Load, Failure::HostUnavailable, HelperEnd::Refused },
+    HostileRow { "hang-at-handshake",
+                 Operation::Load,
+                 Failure::HostUnavailable,
+                 HelperEnd::StepOverran,
+                 HostStep::Handshake },
+    HostileRow { "hang-at-create-runtime",
+                 Operation::Load,
+                 Failure::HostUnavailable,
+                 HelperEnd::StepOverran,
+                 HostStep::Handshake },
+    HostileRow {
+        "hang-at-load", Operation::Load, Failure::HostUnavailable, HelperEnd::StepOverran, HostStep::Load },
+    HostileRow { "hang-at-instantiate",
+                 Operation::Instantiate,
+                 Failure::HostUnavailable,
+                 HelperEnd::StepOverran,
+                 HostStep::Instantiate },
+    HostileRow { "stop-reading-at-release",
+                 Operation::ReleaseFlood,
+                 Failure::HostUnavailable,
+                 HelperEnd::StepOverran,
+                 HostStep::Instantiate },
+};
+
+/// @return The kill @p end is counted as; nothing for a helper that ended by itself.
+[[nodiscard]] constexpr std::optional<KillReason> killOf(HelperEnd end) noexcept
+{
+    switch (end)
+    {
+        case HelperEnd::Refused: return KillReason::Requested;
+        case HelperEnd::GraceExpired: return KillReason::Grace;
+        case HelperEnd::StepOverran: return KillReason::StepTimeout;
+        case HelperEnd::OnItsOwn: return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+/// Every reason the supervisor kills for.
+constexpr auto KillReasons = std::array {
+    KillReason::Requested, KillReason::StepTimeout, KillReason::Grace,
+    KillReason::Dropped,   KillReason::Shutdown,
 };
 
 [[nodiscard]] Failure failureOf(CallFailure failure) noexcept
@@ -233,6 +314,23 @@ template <typename T, typename E>
 [[nodiscard]] Failure failureOf(std::expected<T, E> const& result) noexcept
 {
     return result ? Failure::None : failureOf(result.error());
+}
+
+/// What an operation came to.
+struct Outcome
+{
+    Failure failure = Failure::Other;              ///< How its failing step failed.
+    std::chrono::nanoseconds elapsed {};           ///< How long that step took.
+    std::shared_ptr<IWasmModule> module = nullptr; ///< What it leaves to recover with; none after a load.
+};
+
+/// @return How @p step failed, and how long it took.
+template <typename Step>
+[[nodiscard]] std::pair<Failure, std::chrono::nanoseconds> timed(Step const& step)
+{
+    auto const began = std::chrono::steady_clock::now();
+    auto const failure = step();
+    return { failure, std::chrono::steady_clock::now() - began };
 }
 
 /// @return The instance module's bytes, loaded on @p runtime.
@@ -273,40 +371,99 @@ template <typename T, typename E>
     return sum && *sum == std::optional<uint32_t> { 5 };
 }
 
+/// Drops FloodInstances instances of @p module, each within DropBound, with a host that reads none of the
+/// releases: none may wait for it.
+void flood(IWasmModule& module, contract::RecordingHostContext& context)
+{
+    auto instances = std::vector<std::unique_ptr<IWasmInstance>> {};
+    for ([[maybe_unused]] auto const index: std::views::iota(0, FloodInstances))
+        instances.push_back(contract::instantiate(module, context));
+    auto slowest = std::chrono::nanoseconds {};
+    for (auto& instance: instances)
+    {
+        auto const began = std::chrono::steady_clock::now();
+        instance.reset();
+        slowest = std::max(slowest, std::chrono::nanoseconds { std::chrono::steady_clock::now() - began });
+    }
+    CHECK(slowest < DropBound);
+}
+
 /// Runs @p row's operation on @p runtime, whose backend is @p backend.
-/// @return How it failed, and the module it leaves to recover with: the one it ran on, or for a load, none.
-[[nodiscard]] std::pair<Failure, std::shared_ptr<IWasmModule>> operate(HostileRow const& row,
-                                                                       IWasmBackend& backend,
-                                                                       IWasmRuntime& runtime)
+/// @return What it came to.
+[[nodiscard]] Outcome operate(HostileRow const& row, IWasmBackend& backend, IWasmRuntime& runtime)
 {
     if (row.operation == Operation::Load)
-        return { failureOf(loadInstanceModule(runtime)), nullptr };
-    auto module = loadInstanceModule(runtime);
-    REQUIRE(module.has_value());
-    auto context = contract::RecordingHostContext {};
-    if (row.operation == Operation::Instantiate)
-        return { failureOf((*module)->instantiate(context)), *module };
-    auto const instance = contract::instantiate(**module, context);
-    switch (row.operation)
     {
-        case Operation::Add: return { callUnderWatchdog(backend, *instance, "add"), *module };
-        case Operation::PingThenAdd:
-            return { callUnderWatchdog(backend, *instance, "ping-then-add"), *module };
-        case Operation::Read:
-            return { contract::onPreparedThread(backend,
-                                                [&] {
-                                                    auto const watchdog = Watchdog { *instance };
-                                                    return failureOf(instance->memory(16, 5));
-                                                })
-                         .value_or(Failure::Other),
-                     *module };
-        case Operation::Load:
-        case Operation::Instantiate: break;
+        auto const [failure, elapsed] = timed([&] { return failureOf(loadInstanceModule(runtime)); });
+        return Outcome { .failure = failure, .elapsed = elapsed, .module = nullptr };
     }
-    return { Failure::Other, *module };
+    auto loaded = loadInstanceModule(runtime);
+    REQUIRE(loaded.has_value());
+    auto const module = *std::move(loaded);
+    auto context = contract::RecordingHostContext {};
+    auto const instantiating = [&] {
+        return failureOf(module->instantiate(context));
+    };
+    if (row.operation == Operation::Instantiate)
+    {
+        auto const [failure, elapsed] = timed(instantiating);
+        return Outcome { .failure = failure, .elapsed = elapsed, .module = module };
+    }
+    if (row.operation == Operation::ReleaseFlood)
+    {
+        flood(*module, context);
+        auto const [failure, elapsed] = timed(instantiating);
+        return Outcome { .failure = failure, .elapsed = elapsed, .module = module };
+    }
+    auto const instance = contract::instantiate(*module, context);
+    auto const [failure, elapsed] = timed([&] {
+        switch (row.operation)
+        {
+            case Operation::Add: return callUnderWatchdog(backend, *instance, "add");
+            case Operation::PingThenAdd: return callUnderWatchdog(backend, *instance, "ping-then-add");
+            case Operation::Read:
+                return contract::onPreparedThread(backend,
+                                                  [&] {
+                                                      auto const watchdog = Watchdog { *instance };
+                                                      return failureOf(instance->memory(16, 5));
+                                                  })
+                    .value_or(Failure::Other);
+            case Operation::Load:
+            case Operation::Instantiate:
+            case Operation::ReleaseFlood: break;
+        }
+        return Failure::Other;
+    });
+    return Outcome { .failure = failure, .elapsed = elapsed, .module = module };
+}
+
+/// Checks the kills @p composition's supervisor counted for a helper that ended as @p end.
+void checkKills(HelperComposition const& composition, HelperEnd end)
+{
+    auto const expected = killOf(end);
+    for (auto const reason: KillReasons)
+    {
+        auto const kills = composition.killsFor(reason);
+        CAPTURE(std::to_underlying(reason));
+        if (expected)
+            CHECK(kills == (reason == *expected ? 1U : 0U));
+        else if (reason == KillReason::Requested)
+            CHECK(kills <= 1U);
+        else
+            CHECK(kills == 0U);
+    }
 }
 
 } // namespace
+
+TEST_CASE("Hostility.garbageIsAViolationAtOnce", "[vtextension][hostility]")
+{
+    // The garbage a hostile host answers is refused by its header, not awaited as a frame still arriving.
+    auto const size = proto::frameSizeOf(
+        GarbageAnswer, proto::Direction::ToParent, proto::ChannelKind::Lane, proto::PduLimits {});
+    REQUIRE_FALSE(size.has_value());
+    CHECK(size.error() != proto::DecodeError::NeedMoreData);
+}
 
 TEST_CASE("Hostility.modes", "[vtextension][process][hostility]")
 {
@@ -322,28 +479,33 @@ TEST_CASE("Hostility.modes", "[vtextension][process][hostility]")
                 auto const backend = composition.backend(hostileHelper(row.mode));
                 auto const runtime = contract::createRuntime(*backend);
 
-                auto const began = std::chrono::steady_clock::now();
-                auto [failure, module] = operate(row, *backend, *runtime);
-                auto const elapsed = std::chrono::steady_clock::now() - began;
-                CHECK(failure == row.failure);
-                CHECK(elapsed < FailureBound);
+                auto outcome = operate(row, *backend, *runtime);
+                CHECK(outcome.failure == row.failure);
+                CHECK(outcome.elapsed < FailureBound);
+                if (row.step)
+                {
+                    // The budget of the step that overran, and no other, ended it.
+                    CHECK(outcome.elapsed >= budgetOf(*row.step));
+                    CHECK(outcome.elapsed < budgetOf(*row.step) + BudgetSlack);
+                }
 
                 // One death, whether the helper died on its own or was killed: a kill is reaped and observed
-                // like any end.
+                // like any end. The kill names how it ended.
                 CHECK(awaitDeaths(composition, 1));
                 composition.supervisor().sync();
                 CHECK(composition.supervisor().counters().deathsObserved == 1);
                 CHECK(composition.recording().launches() == 1);
                 CHECK(composition.supervisor().counters().uncleanExits == expectedUnclean);
+                checkKills(composition, row.end);
 
                 // The next operation runs in a host started anew, which plays by the rules.
-                if (!module)
+                if (!outcome.module)
                 {
                     auto loaded = loadInstanceModule(*runtime);
                     REQUIRE(loaded.has_value());
-                    module = *std::move(loaded);
+                    outcome.module = *std::move(loaded);
                 }
-                CHECK(addsOnAFreshInstance(*backend, *module));
+                CHECK(addsOnAFreshInstance(*backend, *outcome.module));
                 CHECK(composition.recording().launches() == 2);
             }
             CHECK(composition.awaitEveryHelperReaped());
@@ -361,11 +523,10 @@ namespace
 class HostileExtension
 {
   public:
+    /// @param composition What starts the helpers; must outlive the extension.
     /// @param mode The hostile mode of every helper started.
-    /// @param laterArguments Applied to the command line of every helper after the first.
-    HostileExtension(std::string_view mode, process::testing::ArgumentRewrite laterArguments):
-        _composition { HelperTeardownGrace, std::move(laterArguments) },
-        _backend { _composition.backend(hostileHelper(mode)) },
+    HostileExtension(HelperComposition const& composition, std::string_view mode):
+        _backend { composition.backend(hostileHelper(mode)) },
         _engine { [this] {
             auto created = vtextension::Engine::create(*_backend, Limits);
             REQUIRE(created.has_value());
@@ -390,13 +551,9 @@ class HostileExtension
         return vtextension::Instance::create(*_engine, compiled, _services, _clock, Limits);
     }
 
-    /// @return What started the helpers.
-    [[nodiscard]] HelperComposition const& composition() const noexcept { return _composition; }
-
   private:
     static constexpr auto Limits = vtextension::ExtensionLimits {};
 
-    HelperComposition _composition;
     std::unique_ptr<IWasmBackend> _backend;
     std::shared_ptr<vtextension::Engine> _engine;
     std::unique_ptr<vtextension::wasm::IThreadGuard> _threadGuard;
@@ -431,42 +588,62 @@ class HostileExtension
     return rendered ? std::nullopt : std::optional { rendered.error() };
 }
 
+/// Checks that every helper of @p composition ended once the case let go of it, @p unclean of them
+/// uncleanly: those that crashed, and no other.
+void checkEveryHelperEnded(HelperComposition const& composition, std::size_t unclean)
+{
+    CHECK(composition.awaitEveryHelperReaped());
+    CHECK(composition.supervisor().counters().uncleanExits == unclean);
+}
+
 } // namespace
 
 TEST_CASE("Hostility.oneCrashIsOneFault", "[vtextension][process][hostility]")
 {
     auto const deadline = CaseDeadline { "Hostility.oneCrashIsOneFault" };
-    auto extension = HostileExtension { "abort", &withoutHostileMode };
-    auto const compiled = extension.acquire();
-    REQUIRE(compiled.has_value());
-    CHECK(renderFailure(extension, **compiled) == ExtensionError::HostUnavailable);
-    CHECK((*compiled)->breaker()->faultCount() == 1);
-    CHECK(rendersAfresh(extension, **compiled));
-    CHECK(extension.composition().recording().launches() == 2);
+    auto const composition = HelperComposition { HelperTeardownGrace, &withoutHostileMode };
+    {
+        auto extension = HostileExtension { composition, "abort" };
+        auto const compiled = extension.acquire();
+        REQUIRE(compiled.has_value());
+        CHECK(renderFailure(extension, **compiled) == ExtensionError::HostUnavailable);
+        CHECK((*compiled)->breaker()->faultCount() == 1);
+        CHECK(rendersAfresh(extension, **compiled));
+        CHECK(composition.recording().launches() == 2);
+    }
+    checkEveryHelperEnded(composition, 1);
 }
 
 TEST_CASE("Hostility.oneHangIsOneFault", "[vtextension][process][hostility]")
 {
     auto const deadline = CaseDeadline { "Hostility.oneHangIsOneFault" };
-    auto extension = HostileExtension { "hang-at-instantiate", &withoutHostileMode };
-    auto const compiled = extension.acquire();
-    REQUIRE(compiled.has_value());
-    auto const instance = extension.create(**compiled);
-    REQUIRE_FALSE(instance.has_value());
-    CHECK(instance.error() == ExtensionError::HostUnavailable);
-    CHECK((*compiled)->breaker()->faultCount() == 1);
-    CHECK(rendersAfresh(extension, **compiled));
+    auto const composition = HelperComposition { HelperTeardownGrace, &withoutHostileMode };
+    {
+        auto extension = HostileExtension { composition, "hang-at-instantiate" };
+        auto const compiled = extension.acquire();
+        REQUIRE(compiled.has_value());
+        auto const instance = extension.create(**compiled);
+        REQUIRE_FALSE(instance.has_value());
+        CHECK(instance.error() == ExtensionError::HostUnavailable);
+        CHECK((*compiled)->breaker()->faultCount() == 1);
+        CHECK(rendersAfresh(extension, **compiled));
+    }
+    checkEveryHelperEnded(composition, 0);
 }
 
 TEST_CASE("Hostility.oneViolationIsOneFault", "[vtextension][process][hostility]")
 {
     auto const deadline = CaseDeadline { "Hostility.oneViolationIsOneFault" };
-    auto extension = HostileExtension { "garbage", &withoutHostileMode };
-    auto const compiled = extension.acquire();
-    REQUIRE(compiled.has_value());
-    CHECK(renderFailure(extension, **compiled) == ExtensionError::HostUnavailable);
-    CHECK((*compiled)->breaker()->faultCount() == 1);
-    CHECK(rendersAfresh(extension, **compiled));
+    auto const composition = HelperComposition { HelperTeardownGrace, &withoutHostileMode };
+    {
+        auto extension = HostileExtension { composition, "garbage" };
+        auto const compiled = extension.acquire();
+        REQUIRE(compiled.has_value());
+        CHECK(renderFailure(extension, **compiled) == ExtensionError::HostUnavailable);
+        CHECK((*compiled)->breaker()->faultCount() == 1);
+        CHECK(rendersAfresh(extension, **compiled));
+    }
+    checkEveryHelperEnded(composition, 0);
 }
 
 TEST_CASE("Hostility.repeatedCrashesOpenTheBreaker", "[vtextension][process][hostility]")
@@ -474,36 +651,45 @@ TEST_CASE("Hostility.repeatedCrashesOpenTheBreaker", "[vtextension][process][hos
     // Every helper crashes at its first call: each round is one fault, and the third opens the breaker,
     // which then starts no helper more.
     auto const deadline = CaseDeadline { "Hostility.repeatedCrashesOpenTheBreaker" };
-    auto extension = HostileExtension { "abort", {} };
-    auto const compiled = extension.acquire();
-    REQUIRE(compiled.has_value());
-    auto const& breaker = *(*compiled)->breaker();
-    for (auto const round: { 1, 2, 3 })
+    auto const composition = HelperComposition {};
     {
-        CHECK(renderFailure(extension, **compiled) == ExtensionError::HostUnavailable);
-        CHECK(breaker.faultCount() == static_cast<std::size_t>(round));
+        auto extension = HostileExtension { composition, "abort" };
+        auto const compiled = extension.acquire();
+        REQUIRE(compiled.has_value());
+        auto const& breaker = *(*compiled)->breaker();
+        for (auto const round: { 1, 2, 3 })
+        {
+            CHECK(renderFailure(extension, **compiled) == ExtensionError::HostUnavailable);
+            CHECK(breaker.faultCount() == static_cast<std::size_t>(round));
+        }
+        CHECK(breaker.state() == vtextension::BreakerState::Open);
+        auto const fourth = extension.create(**compiled);
+        REQUIRE_FALSE(fourth.has_value());
+        CHECK(fourth.error() == ExtensionError::HostUnavailable);
+        CHECK(composition.recording().launches() == 3);
     }
-    CHECK(breaker.state() == vtextension::BreakerState::Open);
-    auto const fourth = extension.create(**compiled);
-    REQUIRE_FALSE(fourth.has_value());
-    CHECK(fourth.error() == ExtensionError::HostUnavailable);
-    CHECK(extension.composition().recording().launches() == 3);
+    checkEveryHelperEnded(composition, 3);
 }
 
 TEST_CASE("Hostility.hangingLoadOpensTheBreaker", "[vtextension][process][hostility]")
 {
-    // Every helper holds its Loaded back: each acquire times out, and counts as a fault of the extension's
-    // breaker (D53); once it opened, nothing is loaded, nor a helper started.
+    // Every helper holds its Loaded back: each acquire times out, and a load that fails for its host counts
+    // as a fault of the extension's breaker like a host that dies under an instance; once it opened, nothing
+    // is loaded, nor a helper started.
     auto const deadline = CaseDeadline { "Hostility.hangingLoadOpensTheBreaker" };
-    auto extension = HostileExtension { "hang-at-load", {} };
-    for ([[maybe_unused]] auto const round: { 1, 2, 3 })
+    auto const composition = HelperComposition {};
     {
-        auto const acquired = extension.acquire();
-        REQUIRE_FALSE(acquired.has_value());
-        CHECK(acquired.error() == ExtensionError::HostUnavailable);
+        auto extension = HostileExtension { composition, "hang-at-load" };
+        for ([[maybe_unused]] auto const round: { 1, 2, 3 })
+        {
+            auto const acquired = extension.acquire();
+            REQUIRE_FALSE(acquired.has_value());
+            CHECK(acquired.error() == ExtensionError::HostUnavailable);
+        }
+        auto const fourth = extension.acquire();
+        REQUIRE_FALSE(fourth.has_value());
+        CHECK(fourth.error() == ExtensionError::HostUnavailable);
+        CHECK(composition.recording().launches() == 3);
     }
-    auto const fourth = extension.acquire();
-    REQUIRE_FALSE(fourth.has_value());
-    CHECK(fourth.error() == ExtensionError::HostUnavailable);
-    CHECK(extension.composition().recording().launches() == 3);
+    checkEveryHelperEnded(composition, 0);
 }
