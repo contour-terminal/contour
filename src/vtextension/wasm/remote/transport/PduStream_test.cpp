@@ -369,6 +369,36 @@ TEST_CASE("PduStream.instantiateCarriesItsDescriptor", "[vtextension]")
     CHECK(transport::claimGrantedHandle(pair.helper, 0) == std::unexpected(StreamError::Malformed));
 }
 
+TEST_CASE("PduStream.descriptorGoesWithItsFrame", "[vtextension]")
+{
+    // Frames sent before and after the one a descriptor travels with may arrive in the same receive -- Linux
+    // reads the bytes queued before a message that carries descriptors together with it. The descriptor is
+    // the frame's it came with, and no other's.
+    auto pair = makeControlPair();
+    auto const object = makeObject();
+    auto const grant = grantOf(object);
+    auto const release = proto::Pdu { proto::Release { .target = proto::ReleaseTarget::Instance, .id = 9 } };
+    REQUIRE(pair.parent.send(release).has_value());
+    REQUIRE(pair.parent.send(release).has_value());
+    REQUIRE(pair.parent.send(instantiateWith(grant), grant).has_value());
+    REQUIRE(pair.parent.send(release).has_value());
+
+    for ([[maybe_unused]] auto const before: { 1, 2 })
+    {
+        CHECK(pair.helper.receive() == release);
+        CHECK_FALSE(pair.helper.takeAttachedHandle());
+    }
+    auto const received = pair.helper.receive();
+    REQUIRE(received.has_value());
+    REQUIRE(std::holds_alternative<proto::Instantiate>(*received));
+    auto const claimed =
+        transport::claimGrantedHandle(pair.helper, std::get<proto::Instantiate>(*received).memory.handle);
+    REQUIRE(claimed.has_value());
+    CHECK(inodeOf(claimed->get()) == inodeOf(object.get()));
+    CHECK(pair.helper.receive() == release);
+    CHECK_FALSE(pair.helper.takeAttachedHandle());
+}
+
 TEST_CASE("PduStream.secondUnclaimedDescriptorIsMalformed", "[vtextension]")
 {
     auto pair = makeControlPair();

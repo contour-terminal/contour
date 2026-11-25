@@ -134,6 +134,10 @@ std::expected<void, StreamError> PduStream::sendAttaching(
 
 OwnedHandle PduStream::takeAttachedHandle() noexcept
 {
+    // One that came with a frame not received yet is that frame's.
+    if (_attachedTo != AttachedTo::Received)
+        return OwnedHandle {};
+    _attachedTo = AttachedTo::Nothing;
     return std::move(_attached);
 }
 
@@ -169,6 +173,15 @@ std::expected<proto::Pdu, StreamError> PduStream::receive()
         auto decoded = proto::decodeFrame(buffered, _arriving, _kind, _limits);
         if (decoded)
         {
+            // A handle held for a frame further on is that much nearer the front; one held for this frame is
+            // this PDU's.
+            if (_attachedTo == AttachedTo::Buffered)
+            {
+                if (_attachedAt == 0)
+                    _attachedTo = AttachedTo::Received;
+                else
+                    _attachedAt -= decoded->consumed;
+            }
             // Moves what follows the frame to the front, and lets a buffer a large frame grew go.
             std::ranges::copy(buffered.subspan(decoded->consumed), _buffer.get());
             _buffered -= decoded->consumed;
@@ -210,9 +223,36 @@ std::expected<std::size_t, StreamError> PduStream::receiveMore()
     if (arrived.size() > 1 || (!arrived.empty() && _attached))
         return std::unexpected(StreamError::Malformed);
     if (!arrived.empty())
+    {
         _attached = std::move(arrived.front());
+        _attachedTo = AttachedTo::Buffered;
+        _attachedAt = attachedFrameStart(_buffered, _buffered + *received);
+    }
     return *received;
 #endif
+}
+
+std::size_t PduStream::attachedFrameStart([[maybe_unused]] std::size_t chunkStart,
+                                          std::size_t chunkEnd) const noexcept
+{
+    // The frames the buffer holds, walked from its front: a frame's header tells where the next one starts.
+    // Linux ends a receive with the message that carried descriptors, but may begin it with bytes sent before
+    // that message: the handle came with the last frame that starts in the buffer. The BSDs end a receive
+    // before a message that carries descriptors once bytes were read: there it came with the first frame that
+    // starts in what arrived.
+    auto const bytes = std::span<uint8_t const> { _buffer.get(), chunkEnd };
+    auto start = std::size_t { 0 };
+    while (true)
+    {
+#ifndef __linux__
+        if (start >= chunkStart)
+            return start;
+#endif
+        auto const size = proto::frameSizeOf(bytes.subspan(start), _arriving, _kind, _limits);
+        if (!size || start + *size >= chunkEnd)
+            return start;
+        start += *size;
+    }
 }
 
 void PduStream::reallocate(std::size_t capacity)

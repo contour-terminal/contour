@@ -99,8 +99,10 @@ class PduStream
     [[nodiscard]] std::expected<proto::Pdu, StreamError> receive();
 
     /// Takes the handle that arrived with a PDU received, which the stream held until now; see
-    /// claimGrantedHandle(), which is how a reader claims it.
-    /// @return The handle; none if none arrived since the last one was taken.
+    /// claimGrantedHandle(), which is how a reader claims it. A handle belongs to the frame whose first bytes
+    /// it travelled with (send(pdu, grant)), however the system grouped the bytes a receive returned: it is
+    /// handed out once that frame's PDU was received, and not with any PDU before it.
+    /// @return The handle; none if none arrived with the PDUs received since the last one was taken.
     [[nodiscard]] OwnedHandle takeAttachedHandle() noexcept;
 
     /// Shuts the channel down: a receive blocked on it, from any thread, fails `Closed`.
@@ -130,6 +132,18 @@ class PduStream
     /// Sends the tail of a frame trySend() began, if any.
     [[nodiscard]] std::expected<void, StreamError> flushUnsentTail();
 
+    /// Which frame the handle held came with.
+    enum class AttachedTo : uint8_t
+    {
+        Nothing,  ///< No handle is held.
+        Buffered, ///< A frame not received yet, starting _attachedAt bytes into the buffer.
+        Received, ///< A PDU receive() returned.
+    };
+
+    /// @return Where the frame a handle that came with the bytes [@p chunkStart, @p chunkEnd) of the buffer
+    ///         travelled with starts, as this system groups what a receive returns.
+    [[nodiscard]] std::size_t attachedFrameStart(std::size_t chunkStart, std::size_t chunkEnd) const noexcept;
+
     /// Receives more bytes into the buffer's free space, and takes in a handle that came with them where this
     /// stream takes handles.
     /// @return How many bytes arrived; `Malformed` for a handle while one is unclaimed, or more than one at
@@ -147,6 +161,8 @@ class PduStream
     std::vector<uint8_t> _unsentTail; ///< What trySend() did not get sent of the frame it began.
     Attachments _attachments;         ///< Whether it takes handles in: fixed by its channel and direction.
     OwnedHandle _attached;            ///< A handle taken in, until it is claimed.
+    AttachedTo _attachedTo = AttachedTo::Nothing; ///< Which frame _attached came with.
+    std::size_t _attachedAt = 0; ///< Where that frame starts in the buffer, while it is AttachedTo::Buffered.
 };
 
 } // namespace vtextension::wasm::remote::transport
