@@ -37,16 +37,17 @@ struct ProcessHostConfig
     std::optional<transport::NativeHandle> standardError = defaultHelperStandardError();
 };
 
-/// Whether a host this connector started ever failed to confine itself.
-enum class LockdownHistory : uint8_t
+/// Whether a host this connector started was ever refused for a lasting reason (refusalPersistence()).
+enum class RefusalHistory : uint8_t
 {
-    NeverFailed, ///< None did, or none was started.
-    Failed,      ///< One did: a property of the system and the build, which every later host would share.
+    NoneLasting, ///< None was, or none was started.
+    Lasting,     ///< One was: every later host would be refused alike, on this system and build.
 };
 
 /// Starts each host as a process the supervisor launches and owns, connected over inherited channels, an
-/// interrupt page and a wake signal. Once a host it started was refused for failing to confine itself, it
-/// starts none again: a host would fail the same way, on this system and build, for every extension.
+/// interrupt page and a wake signal. Once a host it started was refused for a lasting reason -- it failed to
+/// confine itself, runs without the sandbox required, or speaks another protocol version -- it starts none
+/// again: a host would be refused the same way, on this system and build, for every extension.
 class ProcessHostConnector final: public remote::IHostConnector
 {
   public:
@@ -62,11 +63,11 @@ class ProcessHostConnector final: public remote::IHostConnector
     /// helper ends, which close here once it started.
     /// @return The connection; `HostUnavailable` if any of it could not be created, or the host not started
     ///         -- logged the first time for each reason the system gave -- and, without starting one, once a
-    ///         host it started failed to confine itself (refused()).
+    ///         host it started was refused for a lasting reason (refused()).
     [[nodiscard]] std::expected<remote::HostConnection, ExtensionError> connect() override;
 
-    /// Keeps a `LockdownFailed` refusal for good: every later connect() fails without starting a host,
-    /// until the connector is made again. Thread-safe.
+    /// Keeps a refusal whose refusalPersistence() is `Lasting` for good: every later connect() fails without
+    /// starting a host, until the connector is made again. Thread-safe.
     /// @param refusal Why the host was refused.
     void refused(remote::HostRefusal refusal) override;
 
@@ -74,7 +75,7 @@ class ProcessHostConnector final: public remote::IHostConnector
     std::shared_ptr<SupervisorMailbox> _supervisor;
     ProcessHostConfig _config;
     remote::HostRefusalLog _refusals;
-    std::atomic<LockdownHistory> _lockdown { LockdownHistory::NeverFailed };
+    std::atomic<RefusalHistory> _refusalHistory { RefusalHistory::NoneLasting };
 };
 
 } // namespace vtextension::wasm::remote::process

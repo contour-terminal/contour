@@ -342,6 +342,13 @@ enum class HelperEnd : uint8_t
     OnItsOwn,
 };
 
+/// Whether the connector starts another host after a hostile one.
+enum class NextHost : uint8_t
+{
+    NoneStarted, ///< None: the hostile one was refused for a reason every host would share.
+    StartedAnew, ///< One that plays by the rules.
+};
+
 /// One hostile mode, what Contour asks of it, and what that must come to.
 struct HostileRow
 {
@@ -350,6 +357,7 @@ struct HostileRow
     Failure failure;
     HelperEnd end;
     std::optional<HostStep> step {}; ///< The step whose budget ended it; nothing unless StepOverran.
+    NextHost next = NextHost::StartedAnew;
 };
 
 constexpr auto HostileRows = std::array {
@@ -362,7 +370,13 @@ constexpr auto HostileRows = std::array {
     HostileRow { "bogus-size", Operation::Read, Failure::ReadCrashed, HelperEnd::Refused },
     HostileRow { "stall-after-header", Operation::Read, Failure::ReadCrashed, HelperEnd::GraceExpired },
     HostileRow { "exit-before-hello", Operation::Load, Failure::HostUnavailable, HelperEnd::OnItsOwn },
-    HostileRow { "wrong-version", Operation::Load, Failure::HostUnavailable, HelperEnd::Refused },
+    // Another protocol version stays installed: no host is started again.
+    HostileRow { "wrong-version",
+                 Operation::Load,
+                 Failure::HostUnavailable,
+                 HelperEnd::Refused,
+                 std::nullopt,
+                 NextHost::NoneStarted },
     HostileRow { "hang-at-handshake",
                  Operation::Load,
                  Failure::HostUnavailable,
@@ -633,15 +647,26 @@ TEST_CASE("Hostility.modes", "[vtextension][process][hostility]")
                 CHECK(composition.supervisor().counters().uncleanExits == expectedUnclean);
                 checkKills(composition, row.end);
 
-                // The next operation runs in a host started anew, which plays by the rules.
-                if (!outcome.module)
+                if (row.next == NextHost::NoneStarted)
                 {
-                    auto loaded = loadInstanceModule(*runtime);
-                    REQUIRE(loaded.has_value());
-                    outcome.module = *std::move(loaded);
+                    // Refused for good: the next operation starts no host.
+                    auto const loaded = loadInstanceModule(*runtime);
+                    REQUIRE_FALSE(loaded.has_value());
+                    CHECK(loaded.error() == ExtensionError::HostUnavailable);
+                    CHECK(composition.recording().launches() == 1);
                 }
-                CHECK(addsOnAFreshInstance(*backend, *outcome.module));
-                CHECK(composition.recording().launches() == 2);
+                else
+                {
+                    // The next operation runs in a host started anew, which plays by the rules.
+                    if (!outcome.module)
+                    {
+                        auto loaded = loadInstanceModule(*runtime);
+                        REQUIRE(loaded.has_value());
+                        outcome.module = *std::move(loaded);
+                    }
+                    CHECK(addsOnAFreshInstance(*backend, *outcome.module));
+                    CHECK(composition.recording().launches() == 2);
+                }
             }
             CHECK(composition.awaitEveryHelperReaped());
             // The one that misbehaved, if it died on its own; the one started anew exits cleanly.

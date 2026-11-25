@@ -6,9 +6,12 @@
 /// handshake. Each reason is logged the first time it comes up, never again for that backend -- a reason
 /// stays as long as the installation does, and every later attempt would only repeat it.
 
+#include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -63,6 +66,59 @@ static_assert(refusalSource(LastHostRefusal) != RefusalSource::None);
 static_assert(refusalSource(static_cast<HostRefusal>(std::to_underlying(LastHostRefusal) + 1))
                   == RefusalSource::None,
               "LastHostRefusal must name the last reason");
+
+/// Whether a reason a host was refused for would hold for the next host a connector started.
+enum class RefusalPersistence : uint8_t
+{
+    Transient, ///< It may not: the next host is started.
+    Lasting,   ///< It would: a property of the system or the build, which every later host shares.
+};
+
+/// A reason, and whether it lasts.
+struct RefusalPersistenceRow
+{
+    HostRefusal refusal;            ///< The reason.
+    RefusalPersistence persistence; ///< Whether a host started again would be refused for it as well.
+};
+
+/// Every reason, one row each, at its enumerator's index. A host refused at the handshake for a lasting
+/// reason is the last its connector starts (IHostConnector::refused()).
+inline constexpr auto RefusalPersistenceRows = std::array {
+    RefusalPersistenceRow { .refusal = HostRefusal::HelperNotFound,
+                            .persistence = RefusalPersistence::Transient },
+    RefusalPersistenceRow { .refusal = HostRefusal::OutOfResources,
+                            .persistence = RefusalPersistence::Transient },
+    RefusalPersistenceRow { .refusal = HostRefusal::Unsupported,
+                            .persistence = RefusalPersistence::Transient },
+    RefusalPersistenceRow { .refusal = HostRefusal::LaunchRefused,
+                            .persistence = RefusalPersistence::Transient },
+    // The host installed with Contour speaks Contour's version; another one stays installed.
+    RefusalPersistenceRow { .refusal = HostRefusal::ProtocolVersion,
+                            .persistence = RefusalPersistence::Lasting },
+    RefusalPersistenceRow { .refusal = HostRefusal::LockdownFailed,
+                            .persistence = RefusalPersistence::Lasting },
+    // Refused only where a sandbox is required, and a system without one does not grow one.
+    RefusalPersistenceRow { .refusal = HostRefusal::Unsandboxed, .persistence = RefusalPersistence::Lasting },
+};
+
+/// @return Whether every reason has its row, at its enumerator's index.
+[[nodiscard]] consteval bool everyRefusalHasAPersistenceRow() noexcept
+{
+    if (RefusalPersistenceRows.size() != std::size_t { std::to_underlying(LastHostRefusal) } + 1)
+        return false;
+    for (auto const index: std::views::iota(std::size_t { 0 }, RefusalPersistenceRows.size()))
+        if (std::to_underlying(RefusalPersistenceRows.at(index).refusal) != index)
+            return false;
+    return true;
+}
+static_assert(everyRefusalHasAPersistenceRow());
+
+/// @param refusal A reason.
+/// @return Whether it would hold for a host started again.
+[[nodiscard]] constexpr RefusalPersistence refusalPersistence(HostRefusal refusal) noexcept
+{
+    return RefusalPersistenceRows.at(std::to_underlying(refusal)).persistence;
+}
 
 /// @param refusal Why no extension host serves.
 /// @return The line logged for it, user-readable, naming no engine, never empty. A host that could not be

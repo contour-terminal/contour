@@ -168,7 +168,8 @@ class IHostConnector
     [[nodiscard]] virtual std::expected<HostConnection, ExtensionError> connect() = 0;
 
     /// Told that the host of a connection it made was refused at the handshake (HelperIncarnation): a
-    /// connector may keep a reason that every host it would start again shares, and start none.
+    /// connector that starts processes keeps a reason whose refusalPersistence() is `Lasting`, which every
+    /// host it would start again shares, and starts none.
     /// @param refusal Why the host was refused.
     virtual void refused(HostRefusal refusal) = 0;
 };
