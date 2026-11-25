@@ -799,45 +799,95 @@ TEST_CASE("WasmtimeEngine.provisionMismatchFails", "[wasmtime]")
 
 TEST_CASE("WasmtimeEngine.reservationAndGuardAreExplicit", "[wasmtime]")
 {
+    // Under software traps; signalTrapsOnProvidedMemory checks what signal traps ask for.
     namespace contract = vtextension::wasm::testing::contract;
     using vtextension::wasm::wasmtime::testing::lastMemoryRequest;
     using vtextension::wasm::wasmtime::testing::MemoryRequest;
+    auto const engine = makeProvidedEngine();
+    CHECK(engine->memoryGuardBytes() == 0);
+    auto const runtime = contract::createRuntime(*engine);
+    auto const guard = contract::enterThread(*engine);
+    auto const module = contract::load(*runtime, vtextension::wasm::testing::GrowModule);
+    auto const object = GrantedObject { ContractObjectBytes };
+    auto context = contract::RecordingHostContext {};
+    auto asked = std::vector<uint64_t> {};
+    auto const instance = instantiateWith(
+        *module,
+        context,
+        object.provision(ContractObjectBytes, GuestPage, 0, answering(proto::GrowStatus::Granted, asked)));
+    CHECK(instance.has_value());
+    CHECK(lastMemoryRequest()
+          == MemoryRequest { .minimum = GuestPage, .reserved = ContractObjectBytes, .guard = 0 });
+}
 
-    auto const instantiated = [](TrapMode trapMode) {
-        auto const engine = makeProvidedEngine(trapMode);
-        auto const runtime = contract::createRuntime(*engine);
-        auto const guard = contract::enterThread(*engine);
-        auto const module = contract::load(*runtime, vtextension::wasm::testing::GrowModule);
+TEST_CASE("WasmtimeEngine.signalTrapsOnProvidedMemory", "[wasmtime]")
+{
+    // The only case that brings up an engine trapping through signals: Catch2 puts its own handlers back
+    // after every case, over the ones Wasmtime installs once per process, so a second such case would see
+    // its faults end the test binary. Every check of signal traps belongs here.
+    //
+    // Under signal traps Wasmtime checks an access against the reservation (the object), not the memory's
+    // current size: a store past the open bytes faults in the object's closed pages, which is all that stops
+    // it. A store past the object fails the check and is sent to address 0 (Spectre hardening), which faults
+    // too. Both must be traps the instance survives, not faults that end the process.
+    if constexpr (vtextension::wasm::ThisBuildInstrumentation
+                  != vtextension::wasm::BuildInstrumentation::None)
+        SKIP("an instrumented build traps in software only");
+    namespace contract = vtextension::wasm::testing::contract;
+    auto const engine = makeProvidedEngine(TrapMode::Signals);
+    REQUIRE(engine->memoryGuardBytes() == SignalsGuardBytes);
+    auto const runtime = contract::createRuntime(*engine);
+    auto const guard = contract::enterThread(*engine);
+    constexpr auto ObjectPages = ContractObjectBytes / GuestPage;
+
+    struct Fault
+    {
+        std::string_view what;
+        uint64_t initialPages; ///< The memory's initial size, all of it open.
+        uint32_t index;        ///< The store's dynamic address; its static offset is 8.
+    };
+    for (auto const& [what, initialPages, index]: {
+             Fault { .what = "past the open bytes",
+                     .initialPages = 1,
+                     .index = static_cast<uint32_t>(GuestPage) },
+             Fault { .what = "past the object",
+                     .initialPages = ObjectPages,
+                     .index = static_cast<uint32_t>(ContractObjectBytes - 4) },
+         })
+    {
+        INFO(what);
+        auto const module = runtime->load(ModuleIdentity {},
+                                          assemble(std::format(R"((module
+  (memory (export "memory") {} {})
+  (func (export "store") (param i32 i32) (i32.store (local.get 0) (local.get 1)))
+  (func (export "store-at") (param i32) (i32.store offset=8 (local.get 0) (i32.const 7))))
+)",
+                                                               initialPages,
+                                                               ObjectPages)));
+        REQUIRE(module.has_value());
         auto const object = GrantedObject { ContractObjectBytes };
         auto context = contract::RecordingHostContext {};
         auto asked = std::vector<uint64_t> {};
-        auto const instance = instantiateWith(*module,
-                                              context,
-                                              object.provision(ContractObjectBytes,
-                                                               GuestPage,
-                                                               engine->memoryGuardBytes(),
-                                                               answering(proto::GrowStatus::Granted, asked)));
-        CHECK(instance.has_value());
-        return engine->memoryGuardBytes();
-    };
+        auto instance = instantiateWith(**module,
+                                        context,
+                                        object.provision(ContractObjectBytes,
+                                                         initialPages * GuestPage,
+                                                         SignalsGuardBytes,
+                                                         answering(proto::GrowStatus::Refused, asked)));
+        REQUIRE(instance.has_value());
+        CHECK(vtextension::wasm::wasmtime::testing::lastMemoryRequest()
+              == vtextension::wasm::wasmtime::testing::MemoryRequest { .minimum = initialPages * GuestPage,
+                                                                       .reserved = ContractObjectBytes,
+                                                                       .guard = SignalsGuardBytes });
 
-    SECTION("software traps")
-    {
-        CHECK(instantiated(TrapMode::Software) == 0);
-        CHECK(lastMemoryRequest()
-              == MemoryRequest { .minimum = GuestPage, .reserved = ContractObjectBytes, .guard = 0 });
-    }
+        auto argv = std::array<uint32_t, 1> { index };
+        auto const called = (*instance)->call(contract::functionOf(**instance, "store-at"), argv);
+        REQUIRE_FALSE(called.has_value());
+        CHECK(called.error() == vtextension::wasm::CallFailure::Trap);
 
-    SECTION("signals")
-    {
-        // A sanitizer or coverage owns the signal handlers: Wasmtime's must not replace them.
-        if constexpr (vtextension::wasm::ThisBuildInstrumentation
-                      != vtextension::wasm::BuildInstrumentation::None)
-            SKIP("an instrumented build traps in software only");
-        CHECK(instantiated(TrapMode::Signals) == SignalsGuardBytes);
-        CHECK(lastMemoryRequest()
-              == MemoryRequest {
-                  .minimum = GuestPage, .reserved = ContractObjectBytes, .guard = SignalsGuardBytes });
+        auto stored = std::array<uint32_t, 2> { 16, 42 };
+        REQUIRE((*instance)->call(contract::functionOf(**instance, "store"), stored).has_value());
+        CHECK(object.wordAt(16) == 42);
     }
 }
 
