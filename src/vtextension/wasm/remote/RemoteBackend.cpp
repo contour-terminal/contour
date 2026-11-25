@@ -586,8 +586,12 @@ namespace
             auto* const result = std::get_if<proto::CallResult>(&*reply);
             if (!result)
                 return crashed();
+            // A call that failed once its instance was interrupted failed for the interrupt, whatever the
+            // host makes of a host call refused for it.
             if (result->failure)
-                return std::unexpected(reportedFailure(*result->failure));
+                return std::unexpected(_interrupt.load() == InterruptState::Interrupted
+                                           ? CallFailure::Interrupted
+                                           : reportedFailure(*result->failure));
             if (result->argv.size() != signature.results.size())
                 return crashed();
             std::ranges::copy(result->argv, argv.begin());
@@ -603,6 +607,14 @@ namespace
         if (request.functionIndex >= functions.size()
             || request.arguments.size() != functions[request.functionIndex].parameterCount)
             return crashed();
+        // An interrupted instance's host calls are refused, not served: a host that runs on past an interrupt
+        // cannot keep its grace paused on the parent's time.
+        if (_interrupt.load() == InterruptState::Interrupted)
+        {
+            if (!lane.send(proto::HostResult { .error = ExtensionError::DeadlineExceeded }))
+                return crashed();
+            return {};
+        }
         // The parent's own time: only the host function. Answering it is the host's again, as a host that
         // stops reading must not hold the lane past the grace.
         auto const result = [&] {
@@ -637,7 +649,11 @@ namespace
             return std::unexpected(MemoryFailure::OutOfBounds);
         auto* const lane = &_incarnation->lane(*laneIndex);
         // A read is a frame of its own: a host that stalls in its answer is the backstop's, once interrupted.
+        // An instance interrupted before the read began -- a deadline that ran out while a call's results
+        // were lifted -- has its read armed here, as interrupt() found no frame of it then.
         auto const frame = LaneFrame { _incarnation->laneWatch(*laneIndex), _instanceId };
+        if (_interrupt.load() == InterruptState::Interrupted)
+            _incarnation->interrupt(_instanceId, _interruptSlot);
         if (!lane->send(proto::MemoryRead { .instanceId = _instanceId, .address = address, .size = size }))
         {
             _incarnation->markDead();

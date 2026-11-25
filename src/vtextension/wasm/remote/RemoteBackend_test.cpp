@@ -42,6 +42,7 @@
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 #include <vtextension/wasm/remote/transport/ControlPage.hpp>
+#include <vtextension/wasm/remote/transport/PduStream.hpp>
 #include <vtextension/wasm/testing/BackendContract.hpp>
 #include <vtextension/wasm/testing/HostedEngine.hpp>
 #include <vtextension/wasm/testing/RenderMeasurement.hpp>
@@ -71,6 +72,8 @@ using vtextension::wasm::remote::HostConnection;
 using vtextension::wasm::remote::HostStep;
 using vtextension::wasm::remote::IHostConnector;
 using vtextension::wasm::remote::IHostHandle;
+using vtextension::wasm::remote::LaneArming;
+using vtextension::wasm::remote::LaneWatch;
 using vtextension::wasm::remote::makeRemoteBackend;
 using vtextension::wasm::remote::makeRemoteKindState;
 using vtextension::wasm::remote::MaxLaneChannels;
@@ -78,6 +81,7 @@ using vtextension::wasm::remote::RemoteKindState;
 using vtextension::wasm::remote::StepWatch;
 using vtextension::wasm::remote::transport::Channel;
 using vtextension::wasm::remote::transport::makeChannelPair;
+using vtextension::wasm::remote::transport::PduStream;
 using vtextension::wasm::testing::makeHostedEngine;
 
 namespace proto = vtextension::wasm::remote::proto;
@@ -1196,6 +1200,120 @@ TEST_CASE("RemoteBackend.releasedSlotIsLowered", "[vtextension][remote][threadin
     auto argv = std::array<uint32_t, 2> { 2, 3 };
     CHECK(heir.call(contract::functionOf(heir, "add"), argv).has_value());
     CHECK(argv[0] == 5);
+}
+
+namespace
+{
+/// @return @p future's value, once ready within five seconds; else the run ends, rather than wait forever on
+///         a thread a regression keeps from returning.
+template <typename T>
+[[nodiscard]] T within(std::future<T>& future, char const* what)
+{
+    if (future.wait_for(std::chrono::seconds { 5 }) != std::future_status::ready)
+    {
+        FAIL_CHECK(what);
+        std::fputs(what, stderr);
+        std::fputs("\n", stderr);
+        std::abort();
+    }
+    return future.get();
+}
+} // namespace
+
+TEST_CASE("RemoteBackend.readAfterAnInterruptIsArmed", "[vtextension][remote][threading]")
+{
+    // A deadline ran out between a call and the reads of its results: the read that follows waits on a host
+    // that never answers it, and must be the backstop's to end.
+    using namespace std::chrono_literals;
+    auto scripted = ScriptedInstance { HelperScript {} }; // reads none of its lanes
+    scripted.instance->interrupt();
+    auto read = std::async(std::launch::async, [&]() -> std::optional<MemoryFailure> {
+        auto const guard = scripted.rig.backend->enterThread();
+        if (!guard)
+            return MemoryFailure::OutOfBounds;
+        auto const viewed = scripted.instance->memory(0, 4);
+        return viewed ? std::nullopt : std::optional { viewed.error() };
+    });
+
+    auto const attachment = scripted.rig.connector->attachment();
+    REQUIRE(attachment.lanes != nullptr);
+    auto const isArmed = [&] {
+        return std::ranges::any_of(attachment.lanes->lanes(), [](LaneWatch const& lane) {
+            return lane.observe().arming == LaneArming::Armed;
+        });
+    };
+    auto const deadline = std::chrono::steady_clock::now() + 5s;
+    while (!isArmed() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(1ms);
+    auto const wasArmed = isArmed();
+    // What the backstop's kill does to the parent once the grace ran out.
+    attachment.onDeath();
+    CHECK(wasArmed);
+    CHECK(within(read, "the stalled read did not end with its host") == MemoryFailure::HostCrashed);
+}
+
+TEST_CASE("RemoteBackend.interruptedInstancesHostCallIsRefused", "[vtextension][remote][threading]")
+{
+    // A host that runs on past an interrupt and calls the parent gets a refusal, not a served host call whose
+    // time would pause its grace.
+    using namespace std::chrono_literals;
+    auto arrived = std::make_shared<std::promise<void>>();
+    auto go = std::make_shared<std::promise<void>>();
+    auto answered = std::make_shared<std::promise<std::optional<ExtensionError>>>();
+    auto const connector = std::make_shared<ScriptedConnector>([arrived,
+                                                                proceed = go->get_future().share(),
+                                                                answered](HelperEnds& ends,
+                                                                          std::size_t /*connection*/) {
+        auto const script = HelperScript {};
+        auto const create = ends.send(HonestHello) ? ends.receive<proto::CreateRuntime>() : std::nullopt;
+        if (!create
+            || !ends.send(proto::RuntimeCreated { .runtimeId = create->runtimeId, .error = std::nullopt }))
+            return;
+        auto const load = ends.receive<proto::Load>();
+        if (!load || !ends.sendFrame(script.loaded(load->moduleId)))
+            return;
+        auto const instantiate = ends.receive<proto::Instantiate>();
+        if (!instantiate || !ends.sendFrame(script.instantiated(instantiate->instanceId)))
+            return;
+        auto lane = PduStream { std::move(ends.lanes.front()),
+                                proto::ChannelKind::Lane,
+                                proto::Direction::ToHelper,
+                                proto::PduLimits {} };
+        if (!lane.receive())
+            return;
+        arrived->set_value();
+        // The guest runs on, interrupted, and calls `ping(7)`.
+        if (proceed.wait_for(5s) != std::future_status::ready
+            || !lane.send(proto::CallHost { .functionIndex = 0, .arguments = { 7 } }))
+            return;
+        auto const answer = lane.receive();
+        auto const* const result = answer ? std::get_if<proto::HostResult>(&*answer) : nullptr;
+        answered->set_value(result ? result->error : std::nullopt);
+        std::ignore = lane.send(proto::CallResult { .failure = CallFailure::HostFailure, .argv = {} });
+        ends.drain();
+    });
+    auto rig = ScriptedRig { .connector = connector };
+    auto const guard = contract::enterThread(*rig.backend);
+    auto const module = contract::load(*rig.runtime, PeekModule);
+    auto context = contract::RecordingHostContext {};
+    auto const instance = contract::instantiate(*module, context);
+
+    auto called = std::async(std::launch::async, [&] {
+        auto const callGuard = rig.backend->enterThread();
+        auto argv = std::array<uint32_t, 1> { 0 };
+        return callGuard ? instance->call(contract::functionOf(*instance, "ping-then-load"), argv)
+                         : std::expected<void, CallFailure> { std::unexpected(CallFailure::Trap) };
+    });
+    auto arrival = arrived->get_future();
+    within(arrival, "the call never reached the host");
+    instance->interrupt();
+    go->set_value();
+    auto answer = answered->get_future();
+    CHECK(within(answer, "the host call was not answered")
+          == std::optional { ExtensionError::DeadlineExceeded });
+    CHECK(within(called, "the call did not return")
+          == std::expected<void, CallFailure> { std::unexpected(CallFailure::Interrupted) });
+    CHECK(context.calls().empty());
 }
 
 TEST_CASE("RemoteBackend.preparedGenerationFollowsTheOutermostGuard", "[vtextension][remote]")
