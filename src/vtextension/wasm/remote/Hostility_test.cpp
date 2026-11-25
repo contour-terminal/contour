@@ -47,6 +47,7 @@
 #include <vtextension/wasm/BackendConfig.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 #include <vtextension/wasm/remote/HostConnector.hpp>
+#include <vtextension/wasm/remote/RemoteBackend.hpp>
 #include <vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp>
 #include <vtextension/wasm/remote/process/testing/HelperComposition.hpp>
 #include <vtextension/wasm/remote/proto/Codec.hpp>
@@ -72,7 +73,12 @@ using vtextension::wasm::IWasmRuntime;
 using vtextension::wasm::LockdownRequirement;
 using vtextension::wasm::MemoryFailure;
 using vtextension::wasm::ModuleIdentity;
+using vtextension::wasm::remote::HostAttachment;
+using vtextension::wasm::remote::HostConnection;
 using vtextension::wasm::remote::HostStep;
+using vtextension::wasm::remote::IHostConnector;
+using vtextension::wasm::remote::IHostHandle;
+using vtextension::wasm::remote::StepWatch;
 namespace proto = vtextension::wasm::remote::proto;
 using namespace std::chrono_literals;
 
@@ -84,8 +90,8 @@ namespace
 constexpr auto Timeouts =
     HostTimeouts { .load = 700ms, .instantiate = 1100ms, .handshake = 300ms, .interruptGrace = 50ms };
 
-/// How long past its budget a step that overran may take to fail: the kill, its reaping, and the start of
-/// the helper before its first step.
+/// How long past its budget a step that overran may take to fail, timed from when its watch was armed: the
+/// kill and its observation. The helper's start, and every step before the one that overran, are not timed.
 constexpr auto BudgetSlack = 300ms;
 
 /// @return The budget of @p step in Timeouts.
@@ -156,6 +162,82 @@ class Watchdog
     std::jthread _thread;
 };
 
+/// When each step's watch was last armed, of every host a StampingConnector started.
+class StepStamps
+{
+  public:
+    /// Records that @p step's watch is being armed now.
+    void stamp(HostStep step)
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        _armedAt.at(std::to_underlying(step)) = std::chrono::steady_clock::now();
+    }
+
+    /// @return When @p step's watch was last armed; nothing if it never was.
+    [[nodiscard]] std::optional<std::chrono::steady_clock::time_point> armedAt(HostStep step) const
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        return _armedAt.at(std::to_underlying(step));
+    }
+
+  private:
+    mutable std::mutex _mutex;
+    std::array<std::optional<std::chrono::steady_clock::time_point>, 3> _armedAt {};
+};
+
+/// A host handle that stamps each step's watch as it is armed, and otherwise is the handle it wraps.
+class StampingHandle final: public IHostHandle
+{
+  public:
+    StampingHandle(std::unique_ptr<IHostHandle> inner, std::shared_ptr<StepStamps> stamps) noexcept:
+        _inner { std::move(inner) }, _stamps { std::move(stamps) }
+    {
+    }
+
+    void interrupt(uint32_t instanceId, uint32_t interruptSlot) noexcept override
+    {
+        _inner->interrupt(instanceId, interruptSlot);
+    }
+    void clearInterrupt(uint32_t interruptSlot) noexcept override { _inner->clearInterrupt(interruptSlot); }
+    void terminate() noexcept override { _inner->terminate(); }
+    void letGo() noexcept override { _inner->letGo(); }
+    void attach(HostAttachment attachment) override { _inner->attach(std::move(attachment)); }
+
+    [[nodiscard]] StepWatch watch(HostStep step, std::chrono::milliseconds budget) override
+    {
+        // Stamped before it is armed: the time measured from the stamp is never shorter than the budget ran.
+        _stamps->stamp(step);
+        return _inner->watch(step, budget);
+    }
+
+  private:
+    std::unique_ptr<IHostHandle> _inner;
+    std::shared_ptr<StepStamps> _stamps;
+};
+
+/// A connector whose hosts' handles stamp each step's watch as it is armed (StampingHandle): so that how long
+/// a step that overran took is timed from its own start, not from the helper's.
+class StampingConnector final: public IHostConnector
+{
+  public:
+    StampingConnector(std::shared_ptr<IHostConnector> inner, std::shared_ptr<StepStamps> stamps) noexcept:
+        _inner { std::move(inner) }, _stamps { std::move(stamps) }
+    {
+    }
+
+    [[nodiscard]] std::expected<HostConnection, ExtensionError> connect() override
+    {
+        return _inner->connect().transform([this](HostConnection connection) {
+            connection.handle = std::make_unique<StampingHandle>(std::move(connection.handle), _stamps);
+            return connection;
+        });
+    }
+
+  private:
+    std::shared_ptr<IHostConnector> _inner;
+    std::shared_ptr<StepStamps> _stamps;
+};
+
 /// @return @p arguments without the hostile mode: the helper started after a hostile one is benign.
 [[nodiscard]] std::vector<std::string> withoutHostileMode(std::vector<std::string> arguments)
 {
@@ -171,6 +253,21 @@ class Watchdog
                                  .extraArguments = { std::string { HostileOption } + std::string { mode } },
                                  .lockdown = LockdownRequirement::AcceptUnsandboxed,
                                  .timeouts = Timeouts };
+}
+
+/// @return A remote backend over @p composition whose hosts are the helper @p config names, each step's watch
+///         stamped into @p stamps as it is armed.
+[[nodiscard]] std::unique_ptr<IWasmBackend> stampedBackend(HelperComposition const& composition,
+                                                           HelperBackendConfig const& config,
+                                                           std::shared_ptr<StepStamps> stamps)
+{
+    return vtextension::wasm::remote::makeRemoteBackend(
+        composition.kind(),
+        vtextension::wasm::BackendConfig { .helper = config.helper,
+                                           .timeouts = config.timeouts,
+                                           .connector = std::make_shared<StampingConnector>(
+                                               composition.connector(config), std::move(stamps)),
+                                           .lockdown = config.lockdown });
 }
 
 /// Waits until @p composition's supervisor observed @p deaths helper ends, within Patience.
@@ -319,18 +416,28 @@ template <typename T, typename E>
 /// What an operation came to.
 struct Outcome
 {
-    Failure failure = Failure::Other;              ///< How its failing step failed.
-    std::chrono::nanoseconds elapsed {};           ///< How long that step took.
-    std::shared_ptr<IWasmModule> module = nullptr; ///< What it leaves to recover with; none after a load.
+    Failure failure = Failure::Other;               ///< How its failing step failed.
+    std::chrono::nanoseconds elapsed {};            ///< How long that step took.
+    std::chrono::steady_clock::time_point ended {}; ///< When it ended.
+    std::shared_ptr<IWasmModule> module = nullptr;  ///< What it leaves to recover with; none after a load.
 };
 
-/// @return How @p step failed, and how long it took.
+/// How an operation's step failed, and when.
+struct Timed
+{
+    Failure failure = Failure::Other;               ///< How it failed.
+    std::chrono::nanoseconds elapsed {};            ///< How long it took.
+    std::chrono::steady_clock::time_point ended {}; ///< When it ended.
+};
+
+/// @return How @p step failed, how long it took, and when it ended.
 template <typename Step>
-[[nodiscard]] std::pair<Failure, std::chrono::nanoseconds> timed(Step const& step)
+[[nodiscard]] Timed timed(Step const& step)
 {
     auto const began = std::chrono::steady_clock::now();
     auto const failure = step();
-    return { failure, std::chrono::steady_clock::now() - began };
+    auto const ended = std::chrono::steady_clock::now();
+    return { .failure = failure, .elapsed = ended - began, .ended = ended };
 }
 
 /// @return The instance module's bytes, loaded on @p runtime.
@@ -394,8 +501,8 @@ void flood(IWasmModule& module, contract::RecordingHostContext& context)
 {
     if (row.operation == Operation::Load)
     {
-        auto const [failure, elapsed] = timed([&] { return failureOf(loadInstanceModule(runtime)); });
-        return Outcome { .failure = failure, .elapsed = elapsed, .module = nullptr };
+        auto const [failure, elapsed, ended] = timed([&] { return failureOf(loadInstanceModule(runtime)); });
+        return Outcome { .failure = failure, .elapsed = elapsed, .ended = ended, .module = nullptr };
     }
     auto loaded = loadInstanceModule(runtime);
     REQUIRE(loaded.has_value());
@@ -406,17 +513,17 @@ void flood(IWasmModule& module, contract::RecordingHostContext& context)
     };
     if (row.operation == Operation::Instantiate)
     {
-        auto const [failure, elapsed] = timed(instantiating);
-        return Outcome { .failure = failure, .elapsed = elapsed, .module = module };
+        auto const [failure, elapsed, ended] = timed(instantiating);
+        return Outcome { .failure = failure, .elapsed = elapsed, .ended = ended, .module = module };
     }
     if (row.operation == Operation::ReleaseFlood)
     {
         flood(*module, context);
-        auto const [failure, elapsed] = timed(instantiating);
-        return Outcome { .failure = failure, .elapsed = elapsed, .module = module };
+        auto const [failure, elapsed, ended] = timed(instantiating);
+        return Outcome { .failure = failure, .elapsed = elapsed, .ended = ended, .module = module };
     }
     auto const instance = contract::instantiate(*module, context);
-    auto const [failure, elapsed] = timed([&] {
+    auto const [failure, elapsed, ended] = timed([&] {
         switch (row.operation)
         {
             case Operation::Add: return callUnderWatchdog(backend, *instance, "add");
@@ -434,7 +541,7 @@ void flood(IWasmModule& module, contract::RecordingHostContext& context)
         }
         return Failure::Other;
     });
-    return Outcome { .failure = failure, .elapsed = elapsed, .module = module };
+    return Outcome { .failure = failure, .elapsed = elapsed, .ended = ended, .module = module };
 }
 
 /// Checks the kills @p composition's supervisor counted for a helper that ended as @p end.
@@ -476,7 +583,8 @@ TEST_CASE("Hostility.modes", "[vtextension][process][hostility]")
             auto const expectedUnclean =
                 row.end == HelperEnd::OnItsOwn ? std::size_t { 1 } : std::size_t { 0 };
             {
-                auto const backend = composition.backend(hostileHelper(row.mode));
+                auto const stamps = std::make_shared<StepStamps>();
+                auto const backend = stampedBackend(composition, hostileHelper(row.mode), stamps);
                 auto const runtime = contract::createRuntime(*backend);
 
                 auto outcome = operate(row, *backend, *runtime);
@@ -484,9 +592,13 @@ TEST_CASE("Hostility.modes", "[vtextension][process][hostility]")
                 CHECK(outcome.elapsed < FailureBound);
                 if (row.step)
                 {
-                    // The budget of the step that overran, and no other, ended it.
-                    CHECK(outcome.elapsed >= budgetOf(*row.step));
-                    CHECK(outcome.elapsed < budgetOf(*row.step) + BudgetSlack);
+                    // The budget of the step that overran, and no other, ended it: timed from when its watch
+                    // was armed, so that neither the helper's start nor the steps before count.
+                    auto const armedAt = stamps->armedAt(*row.step);
+                    REQUIRE(armedAt.has_value());
+                    auto const stepTook = outcome.ended - *armedAt;
+                    CHECK(stepTook >= budgetOf(*row.step));
+                    CHECK(stepTook < budgetOf(*row.step) + BudgetSlack);
                 }
 
                 // One death, whether the helper died on its own or was killed: a kill is reaped and observed
