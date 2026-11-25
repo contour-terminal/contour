@@ -7,8 +7,11 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <ranges>
 #include <thread>
+#include <tuple>
+#include <utility>
 
 #include <vtextension/wasm/remote/LaneWatch.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
@@ -17,6 +20,7 @@ using vtextension::wasm::remote::LaneArming;
 using vtextension::wasm::remote::LaneObservation;
 using vtextension::wasm::remote::LanePlace;
 using vtextension::wasm::remote::LaneWatch;
+using vtextension::wasm::remote::LaneWatchProbe;
 using vtextension::wasm::remote::LaneWatchSet;
 using vtextension::wasm::remote::MaxLaneChannels;
 
@@ -78,6 +82,70 @@ TEST_CASE("LaneWatch.frameEnteredAfterItsInstanceLeftIsNotArmed", "[vtextension]
     watch.leave();
     watch.enter(7);
     CHECK(watch.observe().arming == LaneArming::Disarmed);
+}
+
+namespace
+{
+/// A lane thread racing an interrupt: what it does to the lane between the interrupt's two reads of a frame,
+/// once.
+struct Race
+{
+    std::function<void(LaneWatch&)> change;
+    LaneWatch* watch = nullptr;
+    bool isRun = false;
+
+    /// @return The probe that runs the change.
+    [[nodiscard]] LaneWatchProbe probe() noexcept
+    {
+        return LaneWatchProbe { .betweenReads =
+                                    [](void* context) noexcept {
+                                        auto& race = *static_cast<Race*>(context);
+                                        if (std::exchange(race.isRun, true))
+                                            return;
+                                        race.change(*race.watch);
+                                    },
+                                .context = this };
+    }
+};
+} // namespace
+
+TEST_CASE("LaneWatch.interruptNeverArmsAnotherInstancesFrame", "[vtextension]")
+{
+    // Instance 7's frame is left, and 9's entered in its place, while the watchdog reads the frame: the
+    // healthy call of 9 is not armed, whatever the watchdog read of 7.
+    auto race = Race { .change =
+                           [](LaneWatch& lane) {
+                               lane.leave();
+                               lane.enter(9);
+                           },
+                       .watch = nullptr,
+                       .isRun = false };
+    auto watch = LaneWatch { race.probe() };
+    race.watch = &watch;
+    watch.enter(7);
+    std::ignore = watch.interrupt(7);
+    CHECK(race.isRun);
+    CHECK(watch.observe().arming == LaneArming::Disarmed);
+}
+
+TEST_CASE("LaneWatch.staleInterruptKeepsANewerArming", "[vtextension]")
+{
+    // One watchdog reads 7's frame; meanwhile 7 calls again in its place, and another interrupt arms that
+    // call. The first, done reading, must not put the arming back to the frame that is gone.
+    auto race = Race { .change =
+                           [](LaneWatch& lane) {
+                               lane.leave();
+                               lane.enter(7);
+                               CHECK(lane.interrupt(7));
+                           },
+                       .watch = nullptr,
+                       .isRun = false };
+    auto watch = LaneWatch { race.probe() };
+    race.watch = &watch;
+    watch.enter(7);
+    CHECK(watch.interrupt(7));
+    CHECK(race.isRun);
+    CHECK(watch.observe().arming == LaneArming::Armed);
 }
 
 TEST_CASE("LaneWatch.hostCallParksTheInnermostFrame", "[vtextension]")

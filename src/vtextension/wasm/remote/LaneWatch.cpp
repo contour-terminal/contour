@@ -57,11 +57,19 @@ bool LaneWatch::interrupt(uint32_t instanceId) noexcept
     auto const depth = std::min(_depth.load(), LaneFrameCapacity);
     for (auto& frame: std::span { _frames }.first(depth))
     {
+        // The serial first: enter() stores it last, so the instance read after it is that frame's, or a later
+        // one's. Should the frame have been replaced in between, this arms a serial no frame has any more --
+        // an arming the supervisor never sees -- and never the frame of another instance.
+        auto const serial = frame.serial.load();
+        if (_probe.betweenReads)
+            _probe.betweenReads(_probe.context);
         if (frame.instanceId.load() != instanceId)
             continue;
-        // Should the frame have been left and another entered in its place meanwhile, this arms a serial no
-        // frame has any more: an arming that the supervisor never sees.
-        frame.armedSerial.store(frame.serial.load());
+        // Raised, never lowered: an interrupter that read an older frame leaves a later frame's arming be.
+        auto armed = frame.armedSerial.load();
+        while (armed < serial && !frame.armedSerial.compare_exchange_weak(armed, serial))
+        {
+        }
         return true;
     }
     return false;

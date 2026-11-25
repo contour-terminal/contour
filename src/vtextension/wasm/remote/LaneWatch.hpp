@@ -50,15 +50,27 @@ struct LaneObservation
     LanePlace place = LanePlace::Idle;        ///< Who it waits on.
 };
 
+/// Test hook: what interrupt() calls between its two reads of a frame -- its serial, then its instance --
+/// so that a test can replace the frame in between, as a lane thread racing it may.
+struct LaneWatchProbe
+{
+    void (*betweenReads)(void* context) noexcept = nullptr; ///< Called, if set, with `context`.
+    void* context = nullptr;                                ///< What it is called with.
+};
+
 /// One lane's frames as its thread runs them, for the backstop. Atomics only: the lane's thread records,
 /// any thread interrupts, the supervisor observes, and none of them waits on another.
 ///
-/// Every frame is given a serial unique on the lane; an interrupt arms a frame by storing its serial beside
-/// it, so that an arming outlives neither the frame nor a frame entered later in its place.
+/// Every frame is given a serial unique on the lane, increasing as frames enter; an interrupt arms a frame by
+/// raising the serial stored beside it to the frame's own, so that an arming outlives neither the frame nor a
+/// frame entered later in its place, and an interrupter that read an older frame never lowers it.
 class LaneWatch
 {
   public:
     LaneWatch() noexcept = default;
+
+    /// @param probe The test hook interrupt() calls between its reads.
+    explicit LaneWatch(LaneWatchProbe probe) noexcept: _probe { probe } {}
     LaneWatch(LaneWatch const&) = delete;
     LaneWatch(LaneWatch&&) = delete;
     LaneWatch& operator=(LaneWatch const&) = delete;
@@ -108,6 +120,7 @@ class LaneWatch
     std::array<Frame, LaneFrameCapacity> _frames {};
     std::atomic<std::size_t> _depth { 0 };   ///< How many frames run, recorded or not.
     std::atomic<uint64_t> _nextSerial { 1 }; ///< The next frame's serial; the lane's thread's.
+    LaneWatchProbe _probe {};                ///< Test hook; inert by default.
 };
 
 /// The lanes of one host, MaxLaneChannels of them.
