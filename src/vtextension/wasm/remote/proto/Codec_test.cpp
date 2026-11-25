@@ -5,6 +5,7 @@
 #include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -82,7 +83,13 @@ namespace
                                              .signature = {},
                                              .initialPages = 17 } },
         },
-        Instantiate { .moduleId = 9, .instanceId = 11, .interruptSlot = 1023 },
+        Instantiate { .moduleId = 9, .instanceId = 11, .interruptSlot = 1023, .memory = {} },
+        Instantiate { .moduleId = 9,
+                      .instanceId = 12,
+                      .interruptSlot = 0,
+                      .memory = MemoryGrant { .handle = 0x1F4,
+                                              .objectBytes = memoryObjectBytes(uint64_t { 32 } * 1024 * 1024),
+                                              .initialBytes = uint64_t { 17 } * WasmPageBytes } },
         Instantiated { .instanceId = 11, .error = std::nullopt, .callableExports = { 0, 3, 70000 } },
         Release { .target = ReleaseTarget::Runtime, .id = 7 },
         Call { .instanceId = 11, .exportOrdinal = 2, .argv = { 1, 0xFFFFFFFF, 300 } },
@@ -94,6 +101,9 @@ namespace
         MemoryRead { .instanceId = 11, .address = 0x10000, .size = 256 },
         MemoryData { .status = MemoryStatus::Ok, .bytes = raw({ 1, 2, 3 }) },
         MemoryWrite { .instanceId = 11, .address = 0xFFFFFFF0, .bytes = raw({ 9, 8 }) },
+        Grow { .instanceId = 11, .bytes = uint64_t { 18 } * WasmPageBytes },
+        Grown { .status = GrowStatus::Granted },
+        Grown { .status = GrowStatus::Refused },
     };
 }
 
@@ -109,6 +119,33 @@ namespace
 [[nodiscard]] PduRow const& rowOf(Pdu const& pdu)
 {
     return PduTable.at(std::to_underlying(kindOf(pdu)) - 1);
+}
+
+/// @return How many bytes the body of @p frame spans: its length less its kind's one byte.
+[[nodiscard]] uint64_t bodyBytesOf(std::span<uint8_t const> frame)
+{
+    auto header = Reader { frame };
+    auto const length = header.varint64();
+    REQUIRE(length.has_value());
+    return *length - 1;
+}
+
+/// @return The channels a PDU of @p row's kind travels on.
+[[nodiscard]] std::vector<ChannelKind> channelsOf(PduRow const& row)
+{
+    auto channels = std::vector<ChannelKind> {};
+    for (auto const channel: { ChannelKind::Control, ChannelKind::Lane })
+        if (travelsOn(row, channel))
+            channels.push_back(channel);
+    return channels;
+}
+
+/// @return The first channel a PDU of @p row's kind travels on.
+[[nodiscard]] ChannelKind homeChannelOf(PduRow const& row)
+{
+    auto const channels = channelsOf(row);
+    REQUIRE_FALSE(channels.empty());
+    return channels.front();
 }
 
 /// @return @p value as a varint.
@@ -132,7 +169,7 @@ namespace
 /// @return Why @p frame decodes to nothing as a @p row PDU; nothing if it decodes.
 [[nodiscard]] std::optional<DecodeError> errorOf(std::span<uint8_t const> frame, PduRow const& row)
 {
-    auto const decoded = decodeFrame(frame, row.direction, row.channel, PduLimits {});
+    auto const decoded = decodeFrame(frame, row.direction, homeChannelOf(row), PduLimits {});
     if (decoded)
         return std::nullopt;
     return decoded.error();
@@ -142,7 +179,7 @@ namespace
 
 TEST_CASE("PduCodec.tableHasOneRowPerKind", "[vtextension]")
 {
-    CHECK(PduTable.size() == 15);
+    CHECK(PduTable.size() == 17);
     for (auto const index: std::views::iota(std::size_t { 0 }, PduTable.size()))
     {
         INFO("row " << index);
@@ -161,10 +198,14 @@ TEST_CASE("PduCodec.roundTrip", "[vtextension]")
         {
             auto const& row = rowOf(sample);
             auto const frame = encoded(sample);
-            auto const decoded = decodeFrame(frame, row.direction, row.channel, PduLimits {});
-            REQUIRE(decoded.has_value());
-            CHECK(decoded->pdu == sample);
-            CHECK(decoded->consumed == frame.size());
+            for (auto const channel: channelsOf(row))
+            {
+                INFO("channel " << static_cast<int>(channel));
+                auto const decoded = decodeFrame(frame, row.direction, channel, PduLimits {});
+                REQUIRE(decoded.has_value());
+                CHECK(decoded->pdu == sample);
+                CHECK(decoded->consumed == frame.size());
+            }
         }
     }
 }
@@ -226,10 +267,11 @@ TEST_CASE("PduCodec.overCapIsRejectedFromTheHeader", "[vtextension]")
     auto const small = PduLimits { .maxModuleBytes = 100, .maxMemoryBytes = 200 };
     auto const load = encoded(Load { .runtimeId = 1, .moduleId = 2, .bytes = std::vector<std::byte>(101) });
     auto const& loadRow = PduTable.at(std::to_underlying(PduKind::Load) - 1);
-    CHECK(decodeFrame(load, loadRow.direction, loadRow.channel, small).has_value());
+    CHECK(decodeFrame(load, loadRow.direction, homeChannelOf(loadRow), small).has_value());
     auto const tooLarge =
         encoded(Load { .runtimeId = 1, .moduleId = 2, .bytes = std::vector<std::byte>(200) });
-    CHECK(decodeFrame(tooLarge, loadRow.direction, loadRow.channel, small).error() == DecodeError::OverCap);
+    CHECK(decodeFrame(tooLarge, loadRow.direction, homeChannelOf(loadRow), small).error()
+          == DecodeError::OverCap);
 }
 
 TEST_CASE("PduCodec.lyingBodyIsMalformed", "[vtextension]")
@@ -263,6 +305,11 @@ TEST_CASE("PduCodec.lyingBodyIsMalformed", "[vtextension]")
               == DecodeError::BadEnum);
         CHECK(errorOf(frameOf(std::to_underlying(PduKind::Hello), std::vector<uint8_t> { 1, 0, 3 }), helloRow)
               == DecodeError::BadEnum);
+        auto const& grownRow = PduTable.at(std::to_underlying(PduKind::Grown) - 1);
+        CHECK(errorOf(frameOf(std::to_underlying(PduKind::Grown), std::vector<uint8_t> { 1 }), grownRow)
+              == std::nullopt);
+        CHECK(errorOf(frameOf(std::to_underlying(PduKind::Grown), std::vector<uint8_t> { 2 }), grownRow)
+              == DecodeError::BadEnum);
         // A status names the error + 1; one past the last error is out of range.
         auto const lastError = std::to_underlying(ExtensionError::HostUnavailable);
         auto const& createdRow = PduTable.at(std::to_underlying(PduKind::RuntimeCreated) - 1);
@@ -279,7 +326,7 @@ TEST_CASE("PduCodec.lyingBodyIsMalformed", "[vtextension]")
     SECTION("a kind naming no PDU is UnknownKind")
     {
         CHECK(errorOf(frameOf(0, {}), helloRow) == DecodeError::UnknownKind);
-        CHECK(errorOf(frameOf(16, {}), helloRow) == DecodeError::UnknownKind);
+        CHECK(errorOf(frameOf(PduTable.size() + 1, {}), helloRow) == DecodeError::UnknownKind);
     }
 
     SECTION("an over-long varint is MalformedVarint")
@@ -379,7 +426,7 @@ TEST_CASE("PduCodec.encoderRefusesWhatAReaderWould", "[vtextension]")
         auto const frame = encodeFrame(atCap);
         REQUIRE(frame.has_value());
         auto const& row = rowOf(atCap);
-        auto const decoded = decodeFrame(*frame, row.direction, row.channel, PduLimits {});
+        auto const decoded = decodeFrame(*frame, row.direction, homeChannelOf(row), PduLimits {});
         REQUIRE(decoded.has_value());
         CHECK(decoded->pdu == atCap);
     }
@@ -441,12 +488,73 @@ TEST_CASE("PduCodec.lyingCountsAreRefusedBeforeReading", "[vtextension]")
 
 TEST_CASE("PduCodec.directionAndChannelAreChecked", "[vtextension]")
 {
-    auto const call = encoded(Call { .instanceId = 1, .exportOrdinal = 2, .argv = {} });
-    CHECK(decodeFrame(call, Direction::ToParent, ChannelKind::Lane, PduLimits {}).error()
-          == DecodeError::WrongDirection);
-    auto const load = encoded(Load { .runtimeId = 1, .moduleId = 2, .bytes = {} });
-    CHECK(decodeFrame(load, Direction::ToHelper, ChannelKind::Lane, PduLimits {}).error()
-          == DecodeError::WrongChannel);
+    // Every kind decodes on each channel its row names, travelling its way, and on no other.
+    for (auto const& sample: samples())
+    {
+        auto const& row = rowOf(sample);
+        INFO("kind " << static_cast<int>(row.kind));
+        auto const frame = encoded(sample);
+        auto const otherWay =
+            row.direction == Direction::ToHelper ? Direction::ToParent : Direction::ToHelper;
+        for (auto const channel: { ChannelKind::Control, ChannelKind::Lane })
+        {
+            INFO("channel " << static_cast<int>(channel));
+            auto const decoded = decodeFrame(frame, row.direction, channel, PduLimits {});
+            if (travelsOn(row, channel))
+                CHECK(decoded.has_value());
+            else
+                CHECK(decoded == std::unexpected(DecodeError::WrongChannel));
+            CHECK(decodeFrame(frame, otherWay, channel, PduLimits {})
+                  == std::unexpected(DecodeError::WrongDirection));
+        }
+    }
+
+    // Memory grows during a lane's call and during instantiation, on the control channel: both ways, Grow up
+    // and Grown down, travel either channel. Nothing else travels both.
+    for (auto const kind: { PduKind::Grow, PduKind::Grown })
+        CHECK(PduTable.at(std::to_underlying(kind) - 1).channels == ChannelSet::Either);
+    CHECK(std::ranges::count(PduTable, ChannelSet::Either, &PduRow::channels) == 2);
+    CHECK(PduTable.at(std::to_underlying(PduKind::Grow) - 1).direction == Direction::ToParent);
+    CHECK(PduTable.at(std::to_underlying(PduKind::Grown) - 1).direction == Direction::ToHelper);
+}
+
+TEST_CASE("PduCodec.protocolVersionIsThree", "[vtextension]")
+{
+    STATIC_CHECK(ProtocolVersion == 3);
+}
+
+TEST_CASE("PduCodec.grantAtItsLargestFitsItsCap", "[vtextension]")
+{
+    // Every field at its largest: still under the Instantiate row's cap, and round-tripped.
+    auto const largest = Pdu { Instantiate {
+        .moduleId = UINT32_MAX,
+        .instanceId = UINT32_MAX,
+        .interruptSlot = UINT32_MAX,
+        .memory =
+            MemoryGrant { .handle = UINT64_MAX, .objectBytes = UINT64_MAX, .initialBytes = UINT64_MAX } } };
+    auto const frame = encoded(largest);
+    auto const& row = rowOf(largest);
+    CHECK(bodyBytesOf(frame) <= row.sizeCap(PduLimits {}));
+    auto const decoded = decodeFrame(frame, row.direction, ChannelKind::Control, PduLimits {});
+    REQUIRE(decoded.has_value());
+    CHECK(decoded->pdu == largest);
+
+    // And so is a Grow.
+    auto const grow = Pdu { Grow { .instanceId = UINT32_MAX, .bytes = UINT64_MAX } };
+    CHECK(bodyBytesOf(encoded(grow)) <= rowOf(grow).sizeCap(PduLimits {}));
+}
+
+TEST_CASE("PduCodec.memoryObjectBytes", "[vtextension]")
+{
+    constexpr auto KiB = uint64_t { 1024 };
+    constexpr auto MiB = 1024 * KiB;
+    STATIC_CHECK(WasmPageBytes == 64 * KiB);
+    STATIC_CHECK(memoryObjectBytes(0) == 64 * KiB);
+    STATIC_CHECK(memoryObjectBytes(1) == 64 * KiB);
+    STATIC_CHECK(memoryObjectBytes(64 * KiB) == 64 * KiB);
+    STATIC_CHECK(memoryObjectBytes((64 * KiB) + 1) == 128 * KiB);
+    STATIC_CHECK(memoryObjectBytes(32 * MiB) == 32 * MiB);
+    STATIC_CHECK(memoryObjectBytes((32 * MiB) + 1) == (32 * MiB) + (64 * KiB));
 }
 
 TEST_CASE("PduCodec.mutatedFramesNeverCrash", "[vtextension]")
@@ -489,7 +597,7 @@ TEST_CASE("PduCodec.mutatedFramesNeverCrash", "[vtextension]")
                 }
             }
             auto const& row = rowOf(all[index]);
-            auto const decoded = decodeFrame(frame, row.direction, row.channel, PduLimits {});
+            auto const decoded = decodeFrame(frame, row.direction, homeChannelOf(row), PduLimits {});
             if (!decoded)
                 continue;
             // What decodes is a frame of its own: it encodes again to what decodes alike.
@@ -497,7 +605,7 @@ TEST_CASE("PduCodec.mutatedFramesNeverCrash", "[vtextension]")
             INFO("iteration " << iteration);
             CHECK(decoded->consumed <= frame.size());
             auto const redecoded =
-                decodeFrame(encoded(decoded->pdu), row.direction, row.channel, PduLimits {});
+                decodeFrame(encoded(decoded->pdu), row.direction, homeChannelOf(row), PduLimits {});
             REQUIRE(redecoded.has_value());
             CHECK(redecoded->pdu == decoded->pdu);
         }

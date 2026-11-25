@@ -592,9 +592,11 @@ namespace
         };
 
         auto const instanceId = host.nextInstanceId();
+        // No object yet: every host copies memory.
         auto reply = host.request(proto::Instantiate { .moduleId = _moduleId,
                                                        .instanceId = instanceId,
-                                                       .interruptSlot = *interruptSlot },
+                                                       .interruptSlot = *interruptSlot,
+                                                       .memory = {} },
                                   HostStep::Instantiate);
         if (!reply)
             return refused(ExtensionError::HostUnavailable);

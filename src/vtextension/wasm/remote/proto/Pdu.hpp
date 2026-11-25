@@ -24,7 +24,20 @@ namespace vtextension::wasm::remote::proto
 {
 
 /// The protocol version both ends must speak; the helper states it in its Hello.
-inline constexpr uint32_t ProtocolVersion = 2;
+inline constexpr uint32_t ProtocolVersion = 3;
+
+/// The size of a guest's memory page: what guest memory grows by, and what its object is rounded up to.
+inline constexpr uint64_t WasmPageBytes = uint64_t { 64 } * 1024;
+
+/// The size of the shared object that holds an instance's memory under a cap of @p capBytes: the cap rounded
+/// up to a whole guest page, and at least one page, so that an instance without memory still has an object.
+/// @param capBytes The most bytes the instance's memory may grow to; below 2^64 - WasmPageBytes.
+/// @return The object's size in bytes.
+[[nodiscard]] constexpr uint64_t memoryObjectBytes(uint64_t capBytes) noexcept
+{
+    auto const pages = (capBytes / WasmPageBytes) + (capBytes % WasmPageBytes != 0 ? 1 : 0);
+    return (pages == 0 ? 1 : pages) * WasmPageBytes;
+}
 
 /// The most values a Call carries as arguments, or a CallResult as results.
 inline constexpr std::size_t MaxCallValues = 64;
@@ -116,6 +129,8 @@ enum class PduKind : uint8_t
     MemoryRead,
     MemoryData,
     MemoryWrite,
+    Grow,
+    Grown,
 };
 
 /// Whether a MemoryRead found its range inside the instance's memory.
@@ -123,6 +138,13 @@ enum class MemoryStatus : uint8_t
 {
     OutOfBounds, ///< The range runs past the memory's end; nothing was read.
     Ok,          ///< The bytes follow.
+};
+
+/// Whether the parent let an instance's memory grow.
+enum class GrowStatus : uint8_t
+{
+    Refused, ///< It did not: the guest's growth fails.
+    Granted, ///< It did: the memory spans the new size.
 };
 
 /// The size limits a stream applies to the PDUs it receives, beside the fixed ones in the PduTable.
@@ -201,6 +223,21 @@ struct Loaded
     bool operator==(Loaded const&) const = default;
 };
 
+/// The shared object an instance's memory lives in, handed to the helper with the Instantiate that needs it.
+struct MemoryGrant
+{
+    /// Where the object reaches the helper. On Windows the value of the section handle the parent duplicated
+    /// into the helper; on POSIX 0, the descriptor travelling with the frame itself.
+    uint64_t handle = 0;
+    /// The object's size: memoryObjectBytes() of the runtime's memory cap. 0 for a helper that copies memory,
+    /// to which no object is handed.
+    uint64_t objectBytes = 0;
+    /// How many of its bytes the memory spans at first: its initial pages.
+    uint64_t initialBytes = 0;
+
+    bool operator==(MemoryGrant const&) const = default;
+};
+
 /// Instantiates a module.
 struct Instantiate
 {
@@ -209,6 +246,7 @@ struct Instantiate
     /// The interrupt page's slot the parent raises to interrupt the instance: below InterruptSlotCount, and
     /// held by no other live instance.
     uint32_t interruptSlot = 0;
+    MemoryGrant memory {}; ///< The object its memory lives in; none (objectBytes 0) for a helper that copies.
 
     bool operator==(Instantiate const&) const = default;
 };
@@ -297,6 +335,24 @@ struct MemoryWrite
     bool operator==(MemoryWrite const&) const = default;
 };
 
+/// The guest grew an instance's memory; the parent checks the new size and answers Grown. Sent on the lane of
+/// the call that grew it, or on the control channel while the instance is being instantiated.
+struct Grow
+{
+    uint32_t instanceId = 0; ///< Whose memory.
+    uint64_t bytes = 0;      ///< The size it grows to: a whole number of guest pages.
+
+    bool operator==(Grow const&) const = default;
+};
+
+/// Answers Grow, on the channel the Grow arrived on.
+struct Grown
+{
+    GrowStatus status = GrowStatus::Refused; ///< Whether the memory may span the new size.
+
+    bool operator==(Grown const&) const = default;
+};
+
 /// Any PDU. Its alternatives are in PduKind order: alternative `i` is the PDU of kind `i + 1`.
 using Pdu = std::variant<Hello,
                          CreateRuntime,
@@ -312,9 +368,11 @@ using Pdu = std::variant<Hello,
                          CallResult,
                          MemoryRead,
                          MemoryData,
-                         MemoryWrite>;
+                         MemoryWrite,
+                         Grow,
+                         Grown>;
 
-static_assert(std::variant_size_v<Pdu> == static_cast<std::size_t>(PduKind::MemoryWrite),
+static_assert(std::variant_size_v<Pdu> == static_cast<std::size_t>(PduKind::Grown),
               "one Pdu alternative per PduKind");
 
 } // namespace vtextension::wasm::remote::proto

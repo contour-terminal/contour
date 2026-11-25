@@ -128,6 +128,15 @@ namespace
         }
         return false;
     }
+    constexpr bool isEnumerator(GrowStatus value) noexcept
+    {
+        switch (value)
+        {
+            case GrowStatus::Refused:
+            case GrowStatus::Granted: return true;
+        }
+        return false;
+    }
 
     /// A vector field, with the most elements the wire lets it hold. Its count is checked before a single
     /// element is read: the byte caps bound the body, not what its elements cost once decoded, and a
@@ -203,7 +212,11 @@ namespace
     }
     constexpr auto members(Of<Instantiate> auto& value) noexcept
     {
-        return fields(value.moduleId, value.instanceId, value.interruptSlot);
+        return fields(value.moduleId, value.instanceId, value.interruptSlot, value.memory);
+    }
+    constexpr auto members(Of<MemoryGrant> auto& value) noexcept
+    {
+        return fields(value.handle, value.objectBytes, value.initialBytes);
     }
     constexpr auto members(Of<Instantiated> auto& value) noexcept
     {
@@ -240,6 +253,14 @@ namespace
     constexpr auto members(Of<MemoryWrite> auto& value) noexcept
     {
         return fields(value.instanceId, value.address, value.bytes);
+    }
+    constexpr auto members(Of<Grow> auto& value) noexcept
+    {
+        return fields(value.instanceId, value.bytes);
+    }
+    constexpr auto members(Of<Grown> auto& value) noexcept
+    {
+        return fields(value.status);
     }
 
     /// A struct whose fields members() lists.
@@ -472,7 +493,7 @@ std::expected<std::vector<uint8_t>, EncodeError> encodeFrame(Pdu const& pdu)
         return std::unexpected(EncodeError::OverCap);
 
     // Every kind fits a one-byte varint, so the kind is its value's byte.
-    static_assert(std::to_underlying(PduKind::MemoryWrite) < 0x80);
+    static_assert(std::to_underlying(PduKind::Grown) < 0x80);
     auto body = Writer {};
     std::visit([&body](auto const& value) { write(body, value); }, pdu);
     auto const bodyBytes = body.take();
@@ -527,7 +548,7 @@ namespace
         auto const& row = PduTable[*kind - 1];
         if (row.direction != arriving)
             return std::unexpected(DecodeError::WrongDirection);
-        if (row.channel != channel)
+        if (!travelsOn(row, channel))
             return std::unexpected(DecodeError::WrongChannel);
         if (*length - frame.consumed() > row.sizeCap(limits))
             return std::unexpected(DecodeError::OverCap);
@@ -581,5 +602,7 @@ template std::expected<Pdu, DecodeError> decodeBody<CallResult>(std::span<uint8_
 template std::expected<Pdu, DecodeError> decodeBody<MemoryRead>(std::span<uint8_t const>);
 template std::expected<Pdu, DecodeError> decodeBody<MemoryData>(std::span<uint8_t const>);
 template std::expected<Pdu, DecodeError> decodeBody<MemoryWrite>(std::span<uint8_t const>);
+template std::expected<Pdu, DecodeError> decodeBody<Grow>(std::span<uint8_t const>);
+template std::expected<Pdu, DecodeError> decodeBody<Grown>(std::span<uint8_t const>);
 
 } // namespace vtextension::wasm::remote::proto
