@@ -166,6 +166,7 @@ HostConfinement systemConfinement()
 {
     return HostConfinement {
         .bindToParent = &bindToParent,
+        .beforeThreads = &hardenProcess,
         .confine =
             [](uint64_t dataBytes) {
                 if constexpr (BuildCapPolicy == CapPolicy::Skip)
@@ -185,6 +186,8 @@ int runExtensionHost(std::span<std::string_view const> arguments,
     // First, so that the host never outlives Contour, whatever happens next.
     if (!confinement.bindToParent(parsed->parentProcessId))
         return endWith(HostProcessExit::ParentGone);
+    // While the main thread is the only one: what is set per thread then reaches every thread started later.
+    auto const hardened = confinement.beforeThreads();
     auto endpoints = adoptEndpoints(*parsed);
     if (!endpoints)
         return endWith(endpoints.error());
@@ -193,8 +196,9 @@ int runExtensionHost(std::span<std::string_view const> arguments,
     if (!engine)
         return endWith(HostProcessExit::EngineUnavailable);
     auto config = HostServerConfig {};
-    config.confine = [&confinement, dataBytes = parsed->dataBytes] {
-        return confinement.confine(dataBytes);
+    config.confine = [&confinement, hardened, dataBytes = parsed->dataBytes] {
+        auto const confined = confinement.confine(dataBytes);
+        return hardened == remote::proto::LockdownState::Failed ? hardened : confined;
     };
     auto host = HostProcess { *engine, *std::move(endpoints), std::move(config) };
     return endWith(hostProcessExitOf(host.run()));

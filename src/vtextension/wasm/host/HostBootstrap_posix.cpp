@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// What the extension host does to itself on Linux, FreeBSD and macOS. macOS has no parent-death binding and
-// no cap that bounds mmap (RLIMIT_AS and RLIMIT_DATA do not), so there it only checks its parent.
+// What the extension host does to itself on Linux, FreeBSD and macOS. macOS has no parent-death binding, no
+// cap that bounds mmap (RLIMIT_AS and RLIMIT_DATA do not) and no way to deny its own user's debugger short of
+// ptrace(PT_DENY_ATTACH), so there it only checks its parent and refuses core dumps.
 #include <sys/resource.h>
 
 #include <algorithm>
@@ -81,6 +82,19 @@ std::expected<void, BootstrapError> bindToParent(int64_t parentProcessId) noexce
             return std::unexpected(BootstrapError::ParentGone);
         return {};
     });
+}
+
+remote::proto::LockdownState hardenProcess() noexcept
+{
+    auto const noCore = rlimit { .rlim_cur = 0, .rlim_max = 0 };
+    auto hardened = ::setrlimit(RLIMIT_CORE, &noCore) == 0;
+#ifdef __linux__
+    hardened = ::prctl(PR_SET_DUMPABLE, 0) == 0 && hardened;
+#elifdef __FreeBSD__
+    auto traceControl = PROC_TRACE_CTL_DISABLE;
+    hardened = ::procctl(P_PID, 0, PROC_TRACE_CTL, &traceControl) == 0 && hardened;
+#endif
+    return hardened ? remote::proto::LockdownState::Unsandboxed : remote::proto::LockdownState::Failed;
 }
 
 remote::proto::LockdownState capResources(uint64_t dataBytes, CapPolicy policy) noexcept

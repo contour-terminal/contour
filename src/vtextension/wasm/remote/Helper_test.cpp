@@ -37,6 +37,12 @@
 #include <vtextension/wasm/testing/BackendContract.hpp>
 #include <vtextension/wasm/testing/ProcessModules.hpp>
 
+#ifdef __linux__
+    #include <sys/stat.h>
+
+    #include <unistd.h>
+#endif
+
 namespace proto = vtextension::wasm::remote::proto;
 namespace process = vtextension::wasm::remote::process;
 using process::ExitKind;
@@ -198,6 +204,31 @@ TEST_CASE("Helper.capsItselfBeforeHello", "[vtextension]")
     CHECK(limitOf(processId, "Max processes") == LimitValues { .soft = "0", .hard = "0" });
     CHECK(limitOf(processId, "Max data size")
           == LimitValues { .soft = std::to_string(DataBytes), .hard = std::to_string(DataBytes) });
+
+    {
+        auto const closed = std::move(control);
+    }
+    CHECK(awaitReap(*helper->launcher, *helper->process)
+          == ExitStatus { .kind = ExitKind::Exited, .value = 0 });
+}
+#endif
+
+#ifdef __linux__
+TEST_CASE("Helper.hardensItselfBeforeHello", "[vtextension]")
+{
+    auto helper = launchHelper(process::makeSystemProcessLauncher(), helperLaunch());
+    REQUIRE(helper.has_value());
+    auto control = receiveHello(*helper);
+
+    // No core dump, soft and hard alike.
+    auto const processId = helper->process->id();
+    CHECK(limitOf(processId, "Max core file size") == LimitValues { .soft = "0", .hard = "0" });
+    // Not dumpable: the kernel hands the files under its /proc directory (not the directory itself) to root,
+    // out of reach of its own user's processes. Its limits and status stay readable to all.
+    struct stat entry {};
+    REQUIRE(::stat(std::format("/proc/{}/status", processId).c_str(), &entry) == 0);
+    if (::getuid() != 0)
+        CHECK(entry.st_uid != ::getuid());
 
     {
         auto const closed = std::move(control);

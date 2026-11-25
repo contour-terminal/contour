@@ -103,19 +103,25 @@ struct HostConfinement
 {
     /// Binds the process to the parent it is given, as bindToParent() does.
     std::function<std::expected<void, BootstrapError>(int64_t parentProcessId)> bindToParent;
+    /// Hardens the process while its main thread is its only one, as hardenProcess() does: right after it
+    /// bound itself to its parent, before it adopts its endpoints, makes its engine or starts any thread.
+    /// What is set per thread and must reach every thread is set here.
+    /// @return How far it confined itself; `Failed` makes Hello state `Failed` whatever confine returns.
+    std::function<remote::proto::LockdownState()> beforeThreads;
     /// Caps its resources once its threads run, to the data bytes it is given, as capResources() does.
-    /// @return What Hello states.
+    /// @return What Hello states, unless beforeThreads failed.
     std::function<remote::proto::LockdownState(uint64_t dataBytes)> confine;
 };
 
-/// @return bindToParent() and capResources() under BuildCapPolicy, which under `Skip` says so once on stderr.
+/// @return bindToParent(), hardenProcess(), and capResources() under BuildCapPolicy, which under `Skip` says
+///         so once on stderr.
 [[nodiscard]] HostConfinement systemConfinement();
 
-/// The executable's body: parse, bind to the parent, adopt, make the engine, serve. Every exit but `Served`
-/// writes one line, `contour-extension-host: <text>`, to stderr.
+/// The executable's body: parse, bind to the parent, harden, adopt, make the engine, serve. Every exit but
+/// `Served` writes one line, `contour-extension-host: <text>`, to stderr.
 /// @param arguments The command line after the program's name.
 /// @param engines Makes the engine; called only once everything before it succeeded.
-/// @param confinement How it binds to its parent and caps itself.
+/// @param confinement How it binds to its parent, hardens and caps itself.
 /// @return The exit code.
 [[nodiscard]] int runExtensionHost(std::span<std::string_view const> arguments,
                                    EngineFactory const& engines,

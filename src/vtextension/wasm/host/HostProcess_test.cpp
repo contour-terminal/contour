@@ -9,8 +9,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <expected>
+#include <filesystem>
 #include <future>
+#include <iterator>
 #include <memory>
+#include <ranges>
 #include <set>
 #include <span>
 #include <string>
@@ -60,6 +63,7 @@ using vtextension::wasm::host::hostProcessExits;
 using vtextension::wasm::host::IHostedEngine;
 using vtextension::wasm::host::runExtensionHost;
 using vtextension::wasm::host::ServerExit;
+using vtextension::wasm::remote::MaxLaneChannels;
 using vtextension::wasm::remote::transport::Channel;
 using vtextension::wasm::remote::transport::ControlPage;
 using vtextension::wasm::remote::transport::formatHelperArguments;
@@ -99,16 +103,36 @@ constexpr auto TheDataBytes = uint64_t { 64 } * 1024 * 1024;
 #endif
 }
 
-/// What the tests' confinement saw.
+/// @return How many threads this process runs; 0 where that is not known (not Linux).
+[[nodiscard]] std::size_t threadCount()
+{
+#ifdef __linux__
+    auto const tasks = std::filesystem::directory_iterator { "/proc/self/task" };
+    return static_cast<std::size_t>(std::ranges::distance(tasks, std::filesystem::directory_iterator {}));
+#else
+    return 0;
+#endif
+}
+
+/// What the tests' confinement saw. Each step records when it ran, as the count of steps before it.
 struct Confined
 {
     std::atomic<int64_t> boundTo { 0 };
     std::atomic<uint64_t> cappedTo { 0 };
     std::atomic<int> confines { 0 };
+    std::atomic<int> hardenings { 0 };
+    std::atomic<int> steps { 0 };
+    std::atomic<int> hardenedAt { -1 };
+    std::atomic<int> engineMadeAt { -1 };
+    std::atomic<int> confinedAt { -1 };
+    std::atomic<std::size_t> threadsWhenHardened { 0 };
+    std::atomic<std::size_t> threadsWhenConfined { 0 };
+    /// What beforeThreads returns.
+    proto::LockdownState hardening = proto::LockdownState::Unsandboxed;
 };
 
-/// @return A confinement that touches nothing of this process: it binds to TheParent alone, and caps by
-///         recording the cap.
+/// @return A confinement that touches nothing of this process: it binds to TheParent alone, and hardens and
+///         caps by recording that, and when, it did.
 [[nodiscard]] HostConfinement testConfinement(std::shared_ptr<Confined> const& confined)
 {
     return HostConfinement {
@@ -118,12 +142,30 @@ struct Confined
                 return std::unexpected(BootstrapError::ParentGone);
             return {};
         },
+        .beforeThreads =
+            [confined] {
+                confined->threadsWhenHardened.store(threadCount());
+                confined->hardenedAt.store(confined->steps.fetch_add(1));
+                confined->hardenings.fetch_add(1);
+                return confined->hardening;
+            },
         .confine =
             [confined](uint64_t dataBytes) {
+                confined->threadsWhenConfined.store(threadCount());
+                confined->confinedAt.store(confined->steps.fetch_add(1));
                 confined->cappedTo.store(dataBytes);
                 confined->confines.fetch_add(1);
                 return capResources(dataBytes, CapPolicy::Skip);
             },
+    };
+}
+
+/// @return An engine factory that records when it made the engine, among @p confined's steps.
+[[nodiscard]] EngineFactory recordingEngines(std::shared_ptr<Confined> confined)
+{
+    return [confined = std::move(confined)]() -> std::unique_ptr<IHostedEngine> {
+        confined->engineMadeAt.store(confined->steps.fetch_add(1));
+        return makeHostedEngine();
     };
 }
 
@@ -379,6 +421,47 @@ TEST_CASE("HostProcess.servesOverAdoptedEndpoints", "[vtextension][host]")
     CHECK(exitCodeOf(HostProcessExit::Served) == 0);
 }
 
+TEST_CASE("HostProcess.hardensBeforeAnyThreadStarts", "[vtextension][host]")
+{
+    for (auto const hardening: { proto::LockdownState::Unsandboxed, proto::LockdownState::Failed })
+    {
+        auto parent = makeParentEnds();
+        auto confined = std::make_shared<Confined>();
+        confined->hardening = hardening;
+        auto const arguments = formatHelperArguments(parent.arguments);
+        auto task = std::packaged_task<int()> { [&] {
+            return runHost(arguments, recordingEngines(confined), testConfinement(confined));
+        } };
+        auto exitCode = task.get_future();
+        auto host = std::jthread { std::move(task) };
+
+        auto const hello = parent.control.receive();
+        REQUIRE(hello.has_value());
+        // A hardening that failed is what Hello states, whatever the caps did.
+        CHECK(*hello
+              == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
+                                             .memoryMode = proto::MemoryMode::Copy,
+                                             .lockdown = hardening } });
+        // Hardened once, before the engine was made, and so before any thread of the host started; capped
+        // once they all ran.
+        CHECK(confined->hardenings.load() == 1);
+        CHECK(confined->hardenedAt.load() == 0);
+        CHECK(confined->engineMadeAt.load() == 1);
+        CHECK(confined->confinedAt.load() == 2);
+#ifdef __linux__
+        // Between the two, the host started a thread per lane and its interrupt listener.
+        auto const started = confined->threadsWhenConfined.load() - confined->threadsWhenHardened.load();
+        CHECK(started >= MaxLaneChannels + 1);
+#endif
+
+        {
+            auto const closed = std::move(parent.control);
+        }
+        REQUIRE(exitCode.wait_for(HostPatience) == std::future_status::ready);
+        CHECK(exitCode.get() == exitCodeOf(HostProcessExit::Served));
+    }
+}
+
 TEST_CASE("HostProcess.badArgumentsExit", "[vtextension][host]")
 {
     auto engines = std::make_shared<std::atomic<int>>(0);
@@ -418,6 +501,7 @@ TEST_CASE("HostProcess.wrongParentExits", "[vtextension][host]")
     CHECK(runHost(formatHelperArguments(arguments), countingEngines(engines), testConfinement(confined))
           == 72);
     CHECK(engines->load() == 0);
+    CHECK(confined->hardenings.load() == 0);
     CHECK(confined->confines.load() == 0);
     closeAll(arguments);
 }
@@ -431,6 +515,7 @@ TEST_CASE("HostProcess.noEngineExits", "[vtextension][host]")
               [] { return std::unique_ptr<IHostedEngine> {}; },
               testConfinement(confined))
           == 73);
+    CHECK(confined->hardenings.load() == 1);
     CHECK(confined->confines.load() == 0);
     // The adopted ends closed with the host.
     CHECK(parent.control.receive() == std::unexpected(StreamError::Closed));

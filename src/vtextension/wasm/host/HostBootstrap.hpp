@@ -3,11 +3,14 @@
 
 /// @file
 /// What the extension host process does to itself before it serves: it binds its life to its parent's, first
-/// thing, and caps its own resources once its threads run.
+/// thing; hardens itself while its main thread is its only one; and caps its own resources once its threads
+/// run.
 ///
-/// Both are the helper's own doing rather than the launcher's: on Linux the parent-death signal is bound to
-/// the thread that started the process, which only the child can name after the fact, and RLIMIT_NPROC
-/// counts threads, so a cap applied before exec would keep the helper from starting its own.
+/// Each is the helper's own doing rather than the launcher's: on Linux the parent-death signal is bound to
+/// the thread that started the process, which only the child can name after the fact; what is set per thread
+/// (no_new_privs, Landlock) reaches every thread only when set before the first is created, which the
+/// hardening step is the place for; and RLIMIT_NPROC counts threads, so a cap applied before exec would keep
+/// the helper from starting its own.
 
 #include <cstdint>
 #include <expected>
@@ -31,6 +34,14 @@ enum class BootstrapError : uint8_t
 /// @param parentProcessId The process that started this one.
 /// @return Nothing once bound; why not otherwise.
 [[nodiscard]] std::expected<void, BootstrapError> bindToParent(int64_t parentProcessId) noexcept;
+
+/// Hardens this process, before it starts any thread of its own: no core dump, which would stall a crash
+/// while it is written and put an extension's memory on disk (RLIMIT_CORE 0, soft and hard, on POSIX); on
+/// Linux not dumpable (PR_SET_DUMPABLE 0), on FreeBSD not traceable (PROC_TRACE_CTL_DISABLE), so that
+/// another process of the same user can neither attach to it nor read its memory; on Windows no fault report
+/// with its dialog (WerSetFlags), where the job Contour started it in ends it on an unhandled exception.
+/// @return `Unsandboxed`; `Failed` if the system refused any of it.
+[[nodiscard]] remote::proto::LockdownState hardenProcess() noexcept;
 
 /// Whether the host caps its own resources.
 enum class CapPolicy : uint8_t
