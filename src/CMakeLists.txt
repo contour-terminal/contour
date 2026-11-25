@@ -12,6 +12,19 @@ if(CONTOUR_CODE_COVERAGE_ENABLED)
     add_compile_options(-g --coverage)
 endif()
 
+# Whether this build produces a macOS application bundle, as opposed to a plain executable.
+#
+# A .app exists to be double-clicked, and everything that assembles one -- the
+# @executable_path/../Frameworks rpath, macdeployqt, the Info.plist keys, the icon, code signing,
+# notarization and the DragNDrop disk image -- serves that window. A GUI-less build produces a
+# command-line binary instead: none of that applies to it, and all of it needs a Qt that renders,
+# which is the whole point of not building the frontend. So it installs like any other Unix CLI
+# tool. Every bundle-only block (contour/, contour-extension-host/) is gated on this rather than on APPLE.
+set(CONTOUR_MACOS_APP_BUNDLE OFF)
+if(APPLE AND CONTOUR_FRONTEND_GUI)
+    set(CONTOUR_MACOS_APP_BUNDLE ON)
+endif()
+
 # Before every module: their suites link its test support.
 add_subdirectory(testing)
 add_subdirectory(crispy)

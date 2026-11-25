@@ -11,18 +11,8 @@ endif()
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 option(CONTOUR_WAYLAND "Enables Wayland specific code paths." ON)
 
-# Whether this build produces a macOS application bundle, as opposed to a plain executable.
-#
-# A .app exists to be double-clicked, and everything that assembles one -- the
-# @executable_path/../Frameworks rpath, macdeployqt, the Info.plist keys, the icon, code signing,
-# notarization and the DragNDrop disk image -- serves that window. A GUI-less build produces a
-# command-line binary instead: none of that applies to it, and all of it needs a Qt that renders,
-# which is the whole point of not building the frontend. So it installs like any other Unix CLI
-# tool. Every bundle-only block below is gated on this rather than on APPLE.
-set(CONTOUR_MACOS_APP_BUNDLE OFF)
-if(APPLE AND CONTOUR_FRONTEND_GUI)
-    set(CONTOUR_MACOS_APP_BUNDLE ON)
-endif()
+# CONTOUR_MACOS_APP_BUNDLE, whether this build produces a macOS application bundle, is decided in
+# ../CMakeLists.txt: contour-extension-host is placed into the bundle too.
 
 option(CONTOUR_MACOS_DEPLOY "Run macdeployqt + prune/verify/sign on the macOS app bundle" ON)
 
