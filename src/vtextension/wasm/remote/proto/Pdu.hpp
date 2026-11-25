@@ -94,6 +94,27 @@ enum class LockdownState : uint8_t
     LockedDown,  ///< It runs inside its sandbox.
 };
 
+/// A step of the helper's confinement: its hardening, its sandbox and its resource caps, on every system.
+/// Each system takes some of them. Phrased for users by lockdownSteps() (LockdownSteps.hpp).
+enum class LockdownStep : uint8_t
+{
+    None,             ///< No step: what a Hello names when nothing failed.
+    CoreDumps,        ///< No core dump (POSIX: RLIMIT_CORE 0, soft and hard).
+    Dumpable,         ///< Not dumpable (Linux: PR_SET_DUMPABLE 0).
+    Tracing,          ///< Not traceable (FreeBSD: PROC_TRACE_CTL_DISABLE).
+    FaultReports,     ///< No fault report with its dialog (Windows: WerSetFlags).
+    NoNewPrivileges,  ///< No privilege gained through exec (Linux: no_new_privs; FreeBSD: PROC_NO_NEW_PRIVS).
+    FileSystem,       ///< No file system access (Linux: Landlock).
+    SystemCalls,      ///< Only the system calls it needs (Linux: seccomp).
+    ThreadSync,       ///< The system call filter on every thread (Linux: seccomp TSYNC).
+    ResourceCaps,     ///< Its resources capped (POSIX: setrlimit).
+    Capabilities,     ///< Capability mode (FreeBSD: cap_enter).
+    DescriptorRights, ///< Each descriptor limited to what it is used for (FreeBSD: cap_rights_limit).
+    Profile,          ///< A sandbox profile (macOS: Seatbelt).
+    Container,        ///< A container of its own (Windows: AppContainer).
+    Mitigations,      ///< The process mitigations it runs under (Windows).
+};
+
 /// Which way a PDU travels.
 enum class Direction : uint8_t
 {

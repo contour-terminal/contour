@@ -32,9 +32,8 @@ namespace
     }
 
     /// The steps this system's hardening takes.
-    constexpr auto HardeningSteps = std::array { HardeningRow { .step = HardeningStep::FaultReports,
-                                                                .text = "fault reports cannot be turned off",
-                                                                .apply = &refuseFaultReports } };
+    constexpr auto HardeningSteps = std::array { HardeningRow {
+        .step = remote::proto::LockdownStep::FaultReports, .apply = &refuseFaultReports } };
 } // namespace
 
 std::expected<void, BootstrapError> bindToParent([[maybe_unused]] int64_t parentProcessId) noexcept
@@ -54,10 +53,10 @@ std::string systemErrorText(int code)
         "{}, HRESULT 0x{:08X}", std::system_category().message(code), static_cast<uint32_t>(code));
 }
 
-remote::proto::LockdownState capResources([[maybe_unused]] uint64_t dataBytes,
-                                          [[maybe_unused]] CapPolicy policy) noexcept
+std::expected<void, ConfinementFailure> capResources([[maybe_unused]] uint64_t dataBytes,
+                                                     [[maybe_unused]] CapPolicy policy) noexcept
 {
-    return remote::proto::LockdownState::Unsandboxed;
+    return {};
 }
 
 } // namespace vtextension::wasm::host

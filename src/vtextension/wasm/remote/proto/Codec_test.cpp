@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -15,11 +16,13 @@
 #include <random>
 #include <ranges>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include <vtextension/wasm/remote/proto/Codec.hpp>
+#include <vtextension/wasm/remote/proto/LockdownSteps.hpp>
 #include <vtextension/wasm/remote/proto/PduTable.hpp>
 
 using namespace vtextension::wasm::remote::proto;
@@ -521,6 +524,29 @@ TEST_CASE("PduCodec.directionAndChannelAreChecked", "[vtextension]")
 TEST_CASE("PduCodec.protocolVersionIsThree", "[vtextension]")
 {
     STATIC_CHECK(ProtocolVersion == 3);
+}
+
+TEST_CASE("LockdownSteps.oneRowPerStep", "[vtextension]")
+{
+    auto const steps = lockdownSteps();
+    for (auto const index: std::views::iota(std::size_t { 0 }, steps.size()))
+    {
+        auto const& row = steps[index];
+        INFO("step " << index << ": " << row.text);
+        CHECK(std::to_underlying(row.step) == index);
+        CHECK(lockdownStepText(row.step) == row.text);
+        CHECK_FALSE(row.text.empty());
+        // Users read these: they name the role, never the engine.
+        auto lowered = std::string { row.text };
+        std::ranges::transform(lowered, lowered.begin(), [](char character) {
+            return static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+        });
+        for (auto const engine: { "wasm", "wamr", "wasmtime", "webassembly" })
+            CHECK_FALSE(lowered.contains(engine));
+    }
+    // A value naming no step reads as no step at all.
+    auto const pastTheLast = static_cast<uint8_t>(lockdownSteps().size());
+    CHECK(lockdownStepText(static_cast<LockdownStep>(pastTheLast)) == lockdownStepText(LockdownStep::None));
 }
 
 TEST_CASE("PduCodec.grantAtItsLargestFitsItsCap", "[vtextension]")

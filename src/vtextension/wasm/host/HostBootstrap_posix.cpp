@@ -11,6 +11,7 @@
 #include <csignal>
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <span>
 #include <string>
 #include <system_error>
@@ -27,6 +28,8 @@
 
 namespace vtextension::wasm::host
 {
+
+using remote::proto::LockdownStep;
 
 namespace
 {
@@ -89,17 +92,11 @@ namespace
 
     /// The steps this system's hardening takes.
     constexpr auto HardeningSteps = std::array {
-        HardeningRow { .step = HardeningStep::CoreDumps,
-                       .text = "core dumps cannot be turned off",
-                       .apply = &refuseCoreDumps },
+        HardeningRow { .step = LockdownStep::CoreDumps, .apply = &refuseCoreDumps },
 #ifdef __linux__
-        HardeningRow { .step = HardeningStep::Dumpable,
-                       .text = "the process cannot be kept from being dumped or attached to",
-                       .apply = &refuseDumping },
+        HardeningRow { .step = LockdownStep::Dumpable, .apply = &refuseDumping },
 #elifdef __FreeBSD__
-        HardeningRow { .step = HardeningStep::Tracing,
-                       .text = "the process cannot be kept from being traced",
-                       .apply = &refuseTracing },
+        HardeningRow { .step = LockdownStep::Tracing, .apply = &refuseTracing },
 #endif
     };
 
@@ -143,23 +140,30 @@ std::string systemErrorText(int code)
     return std::system_category().message(code);
 }
 
-remote::proto::LockdownState capResources(uint64_t dataBytes, CapPolicy policy) noexcept
+std::expected<void, ConfinementFailure> capResources(uint64_t dataBytes, CapPolicy policy) noexcept
 {
     if (policy == CapPolicy::Skip)
-        return remote::proto::LockdownState::Unsandboxed;
-    auto const applied = std::ranges::all_of(Caps, [dataBytes](ResourceCap const& cap) {
+        return {};
+    auto failed = std::optional<int> {};
+    for (auto const& cap: Caps)
+    {
         if (cap.value == CappedValue::DataBytes && dataBytes == 0)
-            return true;
+            continue;
         auto inherited = rlimit {};
-        if (::getrlimit(cap.resource, &inherited) != 0)
-            return false;
-        // A hard limit cannot be raised: one stricter than the cap, inherited from Contour, caps already.
-        auto const wanted = cap.value == CappedValue::Zero ? rlim_t { 0 } : static_cast<rlim_t>(dataBytes);
-        auto const value = std::min(wanted, inherited.rlim_max);
-        auto const limit = rlimit { .rlim_cur = value, .rlim_max = value };
-        return ::setrlimit(cap.resource, &limit) == 0;
-    });
-    return applied ? remote::proto::LockdownState::Unsandboxed : remote::proto::LockdownState::Failed;
+        auto const capped = errnoOf(::getrlimit(cap.resource, &inherited)).and_then([&] {
+            // A hard limit cannot be raised: one stricter than the cap, inherited from Contour, caps already.
+            auto const wanted =
+                cap.value == CappedValue::Zero ? rlim_t { 0 } : static_cast<rlim_t>(dataBytes);
+            auto const value = std::min(wanted, inherited.rlim_max);
+            auto const limit = rlimit { .rlim_cur = value, .rlim_max = value };
+            return errnoOf(::setrlimit(cap.resource, &limit));
+        });
+        if (!capped && !failed)
+            failed = capped.error();
+    }
+    if (failed)
+        return std::unexpected(ConfinementFailure { .step = LockdownStep::ResourceCaps, .code = *failed });
+    return {};
 }
 
 } // namespace vtextension::wasm::host

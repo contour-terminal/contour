@@ -193,7 +193,7 @@ int runExtensionHost(std::span<std::string_view const> arguments,
     // While the main thread is the only one: what is set per thread then reaches every thread started later.
     auto const hardened = confinement.beforeThreads();
     if (!hardened)
-        confinement.tell(std::format("hardening failed: {}", hardeningFailureText(hardened.error())));
+        confinement.tell(std::format("hardening failed: {}", confinementFailureText(hardened.error())));
     auto endpoints = adoptEndpoints(*parsed);
     if (!endpoints)
         return endWith(endpoints.error());
@@ -203,8 +203,11 @@ int runExtensionHost(std::span<std::string_view const> arguments,
         return endWith(HostProcessExit::EngineUnavailable);
     auto config = HostServerConfig {};
     config.confine = [&confinement, hardened, dataBytes = parsed->dataBytes] {
-        auto const confined = confinement.confine(dataBytes);
-        return hardened ? confined : remote::proto::LockdownState::Failed;
+        auto const capped = confinement.confine(dataBytes);
+        if (!capped)
+            confinement.tell(std::format("resource caps failed: {}", confinementFailureText(capped.error())));
+        return hardened && capped ? remote::proto::LockdownState::Unsandboxed
+                                  : remote::proto::LockdownState::Failed;
     };
     auto host = HostProcess { *engine, *std::move(endpoints), std::move(config) };
     return endWith(hostProcessExitOf(host.run()));

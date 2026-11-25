@@ -30,6 +30,8 @@ endif()
 set(_codec_sources
     proto/Codec.cpp
     proto/Codec.hpp
+    proto/LockdownSteps.cpp
+    proto/LockdownSteps.hpp
     proto/Pdu.hpp
     proto/PduTable.hpp
     proto/Wire.hpp

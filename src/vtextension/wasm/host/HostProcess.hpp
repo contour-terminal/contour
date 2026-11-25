@@ -109,10 +109,11 @@ struct HostConfinement
     /// What is set per thread and must reach every thread is set here.
     /// @return Nothing if it hardened itself wholly; the first step that failed otherwise, which the host
     ///         tells of through tell and which makes Hello state `Failed` whatever confine returns.
-    std::function<std::expected<void, HardeningFailure>()> beforeThreads;
+    std::function<std::expected<void, ConfinementFailure>()> beforeThreads;
     /// Caps its resources once its threads run, to the data bytes it is given, as capResources() does.
-    /// @return What Hello states, unless beforeThreads failed.
-    std::function<remote::proto::LockdownState(uint64_t dataBytes)> confine;
+    /// @return Nothing once capped; the step that failed otherwise, which the host tells of through tell and
+    ///         which makes Hello state `Failed`.
+    std::function<std::expected<void, ConfinementFailure>(uint64_t dataBytes)> confine;
     /// Tells of a confinement the host could not complete, one line without its end: on stderr, after
     /// `contour-extension-host: `, as tellOnStandardError() does.
     std::function<void(std::string_view line)> tell;

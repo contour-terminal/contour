@@ -4,7 +4,7 @@
 /// @file
 /// What the extension host process does to itself before it serves: it binds its life to its parent's, first
 /// thing; hardens itself while its main thread is its only one; and caps its own resources once its threads
-/// run.
+/// run. Its sandbox is Sandbox.hpp's.
 ///
 /// Each is the helper's own doing rather than the launcher's: on Linux the parent-death signal is bound to
 /// the thread that started the process, which only the child can name after the fact; what is set per thread
@@ -16,9 +16,9 @@
 #include <expected>
 #include <span>
 #include <string>
-#include <string_view>
 
 #include <vtextension/wasm/BuildInstrumentation.hpp>
+#include <vtextension/wasm/host/Sandbox.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 
 namespace vtextension::wasm::host
@@ -39,59 +39,37 @@ enum class BootstrapError : uint8_t
 /// @return Nothing once bound; why not otherwise.
 [[nodiscard]] std::expected<void, BootstrapError> bindToParent(int64_t parentProcessId) noexcept;
 
-/// A step of the host's hardening.
-enum class HardeningStep : uint8_t
-{
-    CoreDumps,    ///< No core dump (POSIX: RLIMIT_CORE 0, soft and hard).
-    Dumpable,     ///< Not dumpable (Linux: PR_SET_DUMPABLE 0).
-    Tracing,      ///< Not traceable (FreeBSD: PROC_TRACE_CTL_DISABLE).
-    FaultReports, ///< No fault report with its dialog (Windows: WerSetFlags).
-};
-
-/// One step of the hardening, as this system takes it.
+/// One step of the hardening, as this system takes it. What it says when it fails is its step's row in
+/// lockdownSteps().
 struct HardeningRow
 {
-    HardeningStep step;    ///< The step.
-    std::string_view text; ///< What failed if it fails, user-readable: a sentence's end.
+    remote::proto::LockdownStep step; ///< The step.
     /// Takes the step.
     /// @return Nothing once taken; the system's error code otherwise (errno on POSIX, an HRESULT on Windows).
     std::expected<void, int> (*apply)() noexcept;
 };
 
 /// @return The steps this system's hardening takes, in order: no core dump, which would stall a crash while
-/// it
-///         is written and put an extension's memory on disk; on Linux not dumpable, on FreeBSD not traceable,
-///         so that another process of the same user can neither attach to it nor read its memory; on Windows
-///         no fault report with its dialog, where the job Contour started it in ends it on an unhandled
-///         exception.
+///         it is written and put an extension's memory on disk; on Linux not dumpable, on FreeBSD not
+///         traceable, so that another process of the same user can neither attach to it nor read its memory;
+///         on Windows no fault report with its dialog, where the job Contour started it in ends it on an
+///         unhandled exception.
 [[nodiscard]] std::span<HardeningRow const> hardeningSteps() noexcept;
-
-/// A step of the hardening that failed, and how.
-struct HardeningFailure
-{
-    HardeningStep step;    ///< The step.
-    std::string_view text; ///< What failed, as the step's row says.
-    int code;              ///< The system's error code (errno on POSIX, an HRESULT on Windows).
-};
 
 /// Takes every step of @p steps, even past one that failed, so that a host is as hard as the system lets it
 /// be.
 /// @param steps The steps, in order.
-/// @return Nothing if every step was taken; the first that failed otherwise, as its row says.
-[[nodiscard]] std::expected<void, HardeningFailure> hardenProcess(
+/// @return Nothing if every step was taken; the first that failed otherwise.
+[[nodiscard]] std::expected<void, ConfinementFailure> hardenProcess(
     std::span<HardeningRow const> steps) noexcept;
 
 /// Hardens this process by this system's steps (hardeningSteps()), before it starts any thread of its own.
 /// @return Nothing if every step was taken; the first that failed otherwise.
-[[nodiscard]] std::expected<void, HardeningFailure> hardenProcess() noexcept;
+[[nodiscard]] std::expected<void, ConfinementFailure> hardenProcess() noexcept;
 
-/// @param code An error code a hardening step returned: errno on POSIX, an HRESULT on Windows.
+/// @param code An error code a confinement step returned: errno on POSIX, an HRESULT on Windows.
 /// @return What the system says of it, user-readable.
 [[nodiscard]] std::string systemErrorText(int code);
-
-/// @param failure A step that failed.
-/// @return What failed and why, user-readable: its row's text, then the system's word on the error.
-[[nodiscard]] std::string hardeningFailureText(HardeningFailure const& failure);
 
 /// Whether the host caps its own resources.
 enum class CapPolicy : uint8_t
@@ -111,7 +89,9 @@ inline constexpr CapPolicy BuildCapPolicy =
 /// it caps already.
 /// @param dataBytes The cap on its data memory; 0 for none.
 /// @param policy Whether to cap at all.
-/// @return `Unsandboxed`; `Failed` if the system refused a cap.
-[[nodiscard]] remote::proto::LockdownState capResources(uint64_t dataBytes, CapPolicy policy) noexcept;
+/// @return Nothing once capped, or when @p policy is `Skip`; `ResourceCaps` with the system's error if it
+///         refused a cap. Every cap is applied, even past one that was refused.
+[[nodiscard]] std::expected<void, ConfinementFailure> capResources(uint64_t dataBytes,
+                                                                   CapPolicy policy) noexcept;
 
 } // namespace vtextension::wasm::host

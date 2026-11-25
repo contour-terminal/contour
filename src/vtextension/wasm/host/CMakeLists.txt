@@ -26,6 +26,8 @@ add_library(vtextension_host STATIC
     InProcessHost.hpp
     InterruptListener.cpp
     InterruptListener.hpp
+    Sandbox.cpp
+    Sandbox.hpp
     ../remote/HostConnector.hpp
 )
 target_link_libraries(vtextension_host PUBLIC vtextension_remote_wire vtextension_memory_provision PRIVATE core::base)

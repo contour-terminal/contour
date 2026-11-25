@@ -5,33 +5,26 @@
 #include <vtextension/wasm/host/HostBootstrap.hpp>
 
 #include <expected>
-#include <format>
 #include <optional>
 #include <span>
-#include <string>
 
 namespace vtextension::wasm::host
 {
 
-std::expected<void, HardeningFailure> hardenProcess(std::span<HardeningRow const> steps) noexcept
+std::expected<void, ConfinementFailure> hardenProcess(std::span<HardeningRow const> steps) noexcept
 {
-    auto failed = std::optional<HardeningFailure> {};
+    auto failed = std::optional<ConfinementFailure> {};
     for (auto const& row: steps)
         if (auto const applied = row.apply(); !applied && !failed)
-            failed = HardeningFailure { .step = row.step, .text = row.text, .code = applied.error() };
+            failed = ConfinementFailure { .step = row.step, .code = applied.error() };
     if (failed)
         return std::unexpected(*failed);
     return {};
 }
 
-std::expected<void, HardeningFailure> hardenProcess() noexcept
+std::expected<void, ConfinementFailure> hardenProcess() noexcept
 {
     return hardenProcess(hardeningSteps());
-}
-
-std::string hardeningFailureText(HardeningFailure const& failure)
-{
-    return std::format("{} ({})", failure.text, systemErrorText(failure.code));
 }
 
 } // namespace vtextension::wasm::host

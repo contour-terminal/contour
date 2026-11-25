@@ -31,6 +31,7 @@
 #include <vtextension/wasm/host/HostProcess.hpp>
 #include <vtextension/wasm/host/HostServer.hpp>
 #include <vtextension/wasm/host/IHostedEngine.hpp>
+#include <vtextension/wasm/remote/proto/LockdownSteps.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 #include <vtextension/wasm/remote/transport/ControlPage.hpp>
@@ -56,12 +57,11 @@ using vtextension::wasm::CallFailure;
 using vtextension::wasm::host::BootstrapError;
 using vtextension::wasm::host::CapPolicy;
 using vtextension::wasm::host::capResources;
+using vtextension::wasm::host::ConfinementFailure;
+using vtextension::wasm::host::confinementFailureText;
 using vtextension::wasm::host::EngineFactory;
 using vtextension::wasm::host::exitCodeOf;
-using vtextension::wasm::host::HardeningFailure;
-using vtextension::wasm::host::hardeningFailureText;
 using vtextension::wasm::host::HardeningRow;
-using vtextension::wasm::host::HardeningStep;
 using vtextension::wasm::host::hardeningSteps;
 using vtextension::wasm::host::hardenProcess;
 using vtextension::wasm::host::HostConfinement;
@@ -137,7 +137,7 @@ struct Confined
     std::atomic<std::size_t> threadsWhenHardened { 0 };
     std::atomic<std::size_t> threadsWhenConfined { 0 };
     /// What beforeThreads returns.
-    std::expected<void, HardeningFailure> hardening {};
+    std::expected<void, ConfinementFailure> hardening {};
     /// What the host told, line by line.
     std::mutex toldLock;
     std::vector<std::string> told;
@@ -444,7 +444,7 @@ namespace
 {
 
 /// Runs a host whose hardening ends as @p hardening, and checks what Hello states and when it hardened.
-void checkHardening(std::expected<void, HardeningFailure> hardening,
+void checkHardening(std::expected<void, ConfinementFailure> hardening,
                     proto::LockdownState expected,
                     std::vector<std::string> const& expectedTold)
 {
@@ -501,11 +501,10 @@ TEST_CASE("HostProcess.failedHardeningSaysWhichStep", "[vtextension][host]")
 {
     // A hardening that failed is what Hello states, whatever the caps did; the host tells which step failed,
     // in the failing row's own words.
-    auto const failure =
-        HardeningFailure { .step = HardeningStep::Tracing, .text = "the third row", .code = 1 };
+    auto const failure = ConfinementFailure { .step = proto::LockdownStep::Tracing, .code = 1 };
     checkHardening(std::unexpected(failure),
                    proto::LockdownState::Failed,
-                   { "hardening failed: the third row (" + systemErrorText(1) + ")" });
+                   { "hardening failed: " + confinementFailureText(failure) });
 }
 
 TEST_CASE("HostBootstrap.hardeningNamesTheFirstFailedStep", "[vtextension][host]")
@@ -514,20 +513,17 @@ TEST_CASE("HostBootstrap.hardeningNamesTheFirstFailedStep", "[vtextension][host]
     secondStepRuns.store(0);
     thirdStepRuns.store(0);
     auto const rows = std::array {
-        HardeningRow { .step = HardeningStep::CoreDumps,
-                       .text = "first",
+        HardeningRow { .step = proto::LockdownStep::CoreDumps,
                        .apply = []() noexcept -> std::expected<void, int> {
                            firstStepRuns.fetch_add(1);
                            return {};
                        } },
-        HardeningRow { .step = HardeningStep::Dumpable,
-                       .text = "second",
+        HardeningRow { .step = proto::LockdownStep::Dumpable,
                        .apply = []() noexcept -> std::expected<void, int> {
                            secondStepRuns.fetch_add(1);
                            return std::unexpected(1);
                        } },
-        HardeningRow { .step = HardeningStep::Tracing,
-                       .text = "third",
+        HardeningRow { .step = proto::LockdownStep::Tracing,
                        .apply = []() noexcept -> std::expected<void, int> {
                            thirdStepRuns.fetch_add(1);
                            return std::unexpected(2);
@@ -536,9 +532,7 @@ TEST_CASE("HostBootstrap.hardeningNamesTheFirstFailedStep", "[vtextension][host]
     auto const hardened = hardenProcess(rows);
     REQUIRE_FALSE(hardened.has_value());
     // Named by the row that ran, whether or not this system takes such a step, with the error it returned.
-    CHECK(hardened.error().step == rows[1].step);
-    CHECK(hardened.error().text == rows[1].text);
-    CHECK(hardened.error().code == 1);
+    CHECK(hardened.error() == ConfinementFailure { .step = rows[1].step, .code = 1 });
     // Every step ran, past the one that failed.
     CHECK(firstStepRuns.load() == 1);
     CHECK(secondStepRuns.load() == 1);
@@ -549,18 +543,21 @@ TEST_CASE("HostBootstrap.everyStepSaysWhatFailed", "[vtextension][host]")
 {
     CHECK_FALSE(hardeningSteps().empty());
     for (auto const& row: hardeningSteps())
-        CHECK_FALSE(row.text.empty());
+    {
+        CHECK(row.step != proto::LockdownStep::None);
+        CHECK(proto::lockdownStepText(row.step) != proto::lockdownStepText(proto::LockdownStep::None));
+    }
 }
 
 TEST_CASE("HostBootstrap.failureSaysWhatTheSystemSaid", "[vtextension][host]")
 {
     // The error code is read, not printed as a bare number: the line carries the system's word on it.
-    auto const failure = HardeningFailure { .step = HardeningStep::CoreDumps, .text = "first", .code = 1 };
-    auto const text = hardeningFailureText(failure);
+    auto const failure = ConfinementFailure { .step = proto::LockdownStep::CoreDumps, .code = 1 };
+    auto const text = confinementFailureText(failure);
     INFO(text);
-    CHECK(text.starts_with("first ("));
-    CHECK(text.ends_with(")"));
-    CHECK(text.contains(systemErrorText(1)));
+    CHECK(text
+          == std::string { proto::lockdownStepText(proto::LockdownStep::CoreDumps) } + ": "
+                 + systemErrorText(1));
     CHECK_FALSE(systemErrorText(1).empty());
 }
 
@@ -670,7 +667,7 @@ TEST_CASE("HostBootstrap.capResourcesApplies", "[vtextension][host]")
     #else
         auto const dataHolds = true;
     #endif
-        ::_exit(lockdown == proto::LockdownState::Unsandboxed && nprocHolds && dataHolds ? 0 : 1);
+        ::_exit(lockdown.has_value() && nprocHolds && dataHolds ? 0 : 1);
     }
     auto status = 0;
     REQUIRE(::waitpid(child, &status, 0) == child);
@@ -697,7 +694,7 @@ TEST_CASE("HostBootstrap.stricterInheritedLimitCountsAsCapped", "[vtextension][h
         auto data = rlimit {};
         auto const dataHolds =
             ::getrlimit(RLIMIT_DATA, &data) == 0 && data.rlim_cur == Inherited && data.rlim_max == Inherited;
-        ::_exit(lockdown == proto::LockdownState::Unsandboxed && dataHolds ? 0 : 1);
+        ::_exit(lockdown.has_value() && dataHolds ? 0 : 1);
     }
     auto status = 0;
     REQUIRE(::waitpid(child, &status, 0) == child);
@@ -708,5 +705,6 @@ TEST_CASE("HostBootstrap.stricterInheritedLimitCountsAsCapped", "[vtextension][h
 
 TEST_CASE("HostBootstrap.skipCapsNothing", "[vtextension][host]")
 {
-    CHECK(capResources(TheDataBytes, CapPolicy::Skip) == proto::LockdownState::Unsandboxed);
+    // A sanitizer build caps nothing, and says nothing failed.
+    CHECK(capResources(TheDataBytes, CapPolicy::Skip).has_value());
 }
