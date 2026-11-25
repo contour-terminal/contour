@@ -129,6 +129,7 @@ if(_process_source)
         # host does, and process_test proves the sandbox with it and tests its pieces.
         if(VTEXTENSION_LINUX_SANDBOX)
             target_sources(extension_host_probe PRIVATE process/testing/SandboxProbe.cpp)
+            target_link_libraries(extension_host_probe PRIVATE vtextension_host_sanitizer_options)
         endif()
 
         # The launcher against the probe, the transport's pieces the helper inherits, and the test launchers;

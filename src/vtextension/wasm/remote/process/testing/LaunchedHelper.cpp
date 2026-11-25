@@ -9,7 +9,6 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
-#include <format>
 #include <iterator>
 #include <optional>
 #include <ranges>
@@ -18,7 +17,6 @@
 #include <tuple>
 #include <vector>
 
-#include <vtextension/wasm/BuildInstrumentation.hpp>
 #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
 
 #ifdef _WIN32
@@ -36,37 +34,19 @@ using transport::NativeHandle;
 
 namespace
 {
-    /// A sanitizer variable a helper is handed, and what is appended to it in a sanitizer build.
-    struct SanitizerVariable
-    {
-        std::string_view name;
-        std::string_view appended; ///< Empty: nothing.
-    };
-
-    constexpr auto NoLeakDetection = std::string_view { "detect_leaks=0" };
-
-    constexpr auto SanitizerVariables = std::array {
-        SanitizerVariable { .name = "ASAN_OPTIONS", .appended = NoLeakDetection },
-        SanitizerVariable { .name = "LSAN_OPTIONS", .appended = NoLeakDetection },
-        SanitizerVariable { .name = "UBSAN_OPTIONS", .appended = {} },
-        SanitizerVariable { .name = "TSAN_OPTIONS", .appended = {} },
-    };
+    /// The sanitizer variables a helper is handed when this process has them. Leak detection is off in a
+    /// sandboxed helper by its own defaults (host/SanitizerOptions.cpp) unless they turn it back on.
+    constexpr auto SanitizerVariables =
+        std::array<std::string_view, 4> { "ASAN_OPTIONS", "LSAN_OPTIONS", "UBSAN_OPTIONS", "TSAN_OPTIONS" };
 } // namespace
 
 std::vector<std::pair<std::string, std::string>> sanitizerEnvironment()
 {
     auto environment = std::vector<std::pair<std::string, std::string>> {};
     auto const live = core::LiveEnvironment {};
-    for (auto const& variable: SanitizerVariables)
-    {
-        auto value = live.get(variable.name);
-        if constexpr (ThisBuildInstrumentation == BuildInstrumentation::Sanitizers)
-            if (!variable.appended.empty())
-                value = value && !value->empty() ? std::format("{}:{}", *value, variable.appended)
-                                                 : std::string { variable.appended };
-        if (value)
-            environment.emplace_back(std::string { variable.name }, *std::move(value));
-    }
+    for (auto const name: SanitizerVariables)
+        if (auto value = live.get(name))
+            environment.emplace_back(std::string { name }, *std::move(value));
     return environment;
 }
 

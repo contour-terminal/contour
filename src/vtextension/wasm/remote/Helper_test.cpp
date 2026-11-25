@@ -281,6 +281,23 @@ TEST_CASE("Helper.locksDown", "[vtextension]")
 }
 #endif
 
+TEST_CASE("Helper.exitsCleanlyWithAnEmptyEnvironment", "[vtextension]")
+{
+    // As Contour starts it: the launcher's default environment, without the tests' sanitizer variables. A
+    // sanitizer build's helper still leaves its leak check out at exit, which its filter would answer with
+    // SIGSYS.
+    auto launch = helperLaunch();
+    launch.environment = process::defaultHelperEnvironment();
+    auto helper = launchHelper(process::makeSystemProcessLauncher(), std::move(launch));
+    REQUIRE(helper.has_value());
+    auto control = receiveHello(*helper);
+    {
+        auto const closed = std::move(control);
+    }
+    CHECK(awaitReap(*helper->launcher, *helper->process)
+          == ExitStatus { .kind = ExitKind::Exited, .value = 0 });
+}
+
 TEST_CASE("Process.unsandboxedIsRefusedUnlessAccepted", "[vtextension]")
 {
     auto const requested = killsFor(process::KillReason::Requested);

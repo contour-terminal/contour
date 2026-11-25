@@ -37,8 +37,7 @@ inline constexpr auto ChildPatience = std::chrono::seconds { 5 };
 [[nodiscard]] std::optional<transport::NativeHandle> ownStandardError() noexcept;
 
 /// @return The sanitizer variables a helper is handed: this process's, so that its sanitizer runtime is
-///         configured as the tests' is; and in a sanitizer build, with leak detection off -- it stops the
-///         world through ptrace, which the sandboxed helper may not -- whether this process has them or not.
+///         configured as the tests' is.
 [[nodiscard]] std::vector<std::pair<std::string, std::string>> sanitizerEnvironment();
 
 /// Reaps @p process, waiting up to ChildPatience for it to exit.
