@@ -1172,11 +1172,11 @@ TEST_CASE("every shipped command is in the manifest", "[orchestrator][commands][
         if (decl.verification == Verification::Unmeasured)
             ++unmeasured;
     }
-    // Every shipped command is recorded: GitLab's five and Jira's two are declared, and so is the argument
+    // Every shipped command is recorded: GitLab's seven and Jira's two are declared, and so is the argument
     // only Jira's search names.
     CHECK(unmeasured == 0);
     CHECK(std::ranges::count_if(lines, [](std::string const& line) { return line.contains(" = glab "); })
-          == 5);
+          == 7);
     CHECK(std::ranges::count_if(lines, [](std::string const& line) { return line.contains(" = acli "); })
           == 2);
     CHECK(std::ranges::count_if(lines, [](std::string const& line) { return line.starts_with("arg jql "); })
@@ -1200,6 +1200,38 @@ TEST_CASE("glab is asked for JSON with --output, never -F", "[orchestrator][comm
         CHECK(*std::next(output) == "json");
         CHECK(!std::ranges::contains(command->argv, "-F"sv));
         CHECK(command->verification == Verification::Recorded);
+    }
+}
+
+TEST_CASE("GitLab's pipelines and failed jobs are read through glab api", "[orchestrator][commands][gitlab]")
+{
+    struct Row
+    {
+        std::string_view name;
+        std::string_view endpoint;
+        std::string_view manifestLine;
+    };
+    constexpr auto Rows = std::array {
+        Row { .name = "glab-pipelines",
+              .endpoint = "projects/:id/pipelines?per_page=100&order_by=id&sort=desc",
+              .manifestLine = "command glab-pipelines long @repos = glab api "
+                              "projects/:id/pipelines?per_page=100&order_by=id&sort=desc" },
+        Row { .name = "glab-failed-jobs",
+              .endpoint = "projects/:id/jobs?scope[]=failed&per_page=100",
+              .manifestLine = "command glab-failed-jobs long @repos = glab api "
+                              "projects/:id/jobs?scope[]=failed&per_page=100" },
+    };
+    auto const lines = manifestLines();
+    for (auto const& row: Rows)
+    {
+        CAPTURE(row.name);
+        auto const* const command = findCommand(row.name);
+        REQUIRE(command != nullptr);
+        CHECK(std::ranges::equal(command->argv, std::array { "glab"sv, "api"sv, row.endpoint }));
+        CHECK(command->timeout == Timeout::Long);
+        CHECK(command->root == Root::Repos);
+        CHECK(command->verification == Verification::Recorded);
+        CHECK(std::ranges::contains(lines, std::string(row.manifestLine)));
     }
 }
 

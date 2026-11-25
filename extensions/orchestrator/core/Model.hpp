@@ -150,7 +150,25 @@ struct ChangeRequest
     Conflicts conflicts = Conflicts::None;      ///< Whether it conflicts with its base.
     uint64_t updatedWallMs = 0;                 ///< When it was last updated, Unix ms; 0: unknown.
     StateSource source = StateSource::Complete; ///< Where @ref ci and @ref review come from.
+    std::string headSha = {};                   ///< Its head commit as the forge reported it; empty: unknown.
     [[nodiscard]] bool operator==(ChangeRequest const&) const = default;
+};
+
+/// One pipeline of a project, as its pipeline list reports it.
+struct PipelineInfo
+{
+    uint64_t id = 0;            ///< Its project-wide id; a later pipeline has a higher one.
+    std::string sha;            ///< The commit it ran on.
+    CiState ci = CiState::None; ///< Its status, in the model.
+    [[nodiscard]] bool operator==(PipelineInfo const&) const = default;
+};
+
+/// One failed job, by the pipeline it ran in.
+struct FailedJob
+{
+    uint64_t pipelineId = 0; ///< The pipeline it ran in.
+    std::string name;        ///< Its name, sanitised, at most MaxTitleChars.
+    [[nodiscard]] bool operator==(FailedJob const&) const = default;
 };
 
 /// One open issue, as a provider's mapping returns it.

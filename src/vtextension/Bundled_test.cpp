@@ -97,6 +97,8 @@ struct BundledExtension
                         "glab-auth",
                         "glab-default-branch",
                         "glab-mrs",
+                        "glab-pipelines",
+                        "glab-failed-jobs",
                         "glab-issues",
                         "glab-mr-checkout",
                         "acli-auth",

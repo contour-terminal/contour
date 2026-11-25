@@ -56,6 +56,8 @@ command agent-stats short @worktrees = contour agent stats --session {session} -
 command glab-auth short @repos = glab auth status
 command glab-default-branch short @repos = glab repo view --output json
 command glab-mrs long @repos = glab mr list --author=@me --per-page 100 --output json
+command glab-pipelines long @repos = glab api projects/:id/pipelines?per_page=100&order_by=id&sort=desc
+command glab-failed-jobs long @repos = glab api projects/:id/jobs?scope[]=failed&per_page=100
 command glab-issues long @repos = glab issue list --assignee=@me --per-page 100 --search {query} --output json
 command glab-mr-checkout long @worktrees = glab mr checkout {number} --branch {branch}
 command acli-auth short @repos = acli jira auth status

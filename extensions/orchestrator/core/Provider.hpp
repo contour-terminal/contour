@@ -2,9 +2,11 @@
 #pragma once
 
 #include <expected>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Model.hpp>
@@ -19,6 +21,15 @@ using MapChangeRequests = std::expected<Listed<ChangeRequest>, ParseError> (*)(s
 using MapIssues = std::expected<Listed<Issue>, ParseError> (*)(std::string_view, OutputExtent);
 /// Maps a default-branch command's output.
 using MapDefaultBranch = std::expected<std::string, ParseError> (*)(std::string_view);
+/// Maps a pipeline list command's output, whole or cut at the host's limit.
+using MapPipelines = std::expected<std::vector<PipelineInfo>, ParseError> (*)(std::string_view, OutputExtent);
+/// Maps a failed-job list command's output, whole or cut at the host's limit.
+using MapFailedJobs = std::expected<std::vector<FailedJob>, ParseError> (*)(std::string_view, OutputExtent);
+/// Joins pipelines and failed jobs into the change requests a list mapped; a std::nullopt is a call that
+/// failed.
+using EnrichChangeRequests = std::vector<ChangeRequest> (*)(std::vector<ChangeRequest>,
+                                                            std::optional<std::span<PipelineInfo const>>,
+                                                            std::optional<std::span<FailedJob const>>);
 
 /// One forge: the declared commands that talk to it, and the mappings that read what they print. Adding a
 /// forge is adding a row.
@@ -42,6 +53,14 @@ struct Provider
     /// Whether its mappings were tested against recorded output: the configuration accepts only a Recorded
     /// forge, and each command the row names carries the same verification.
     Verification verification = Verification::Unmeasured;
+    // A forge whose change-request list carries no CI detail reads it with two more calls per repository.
+    std::string_view listPipelines = {};   ///< Lists the project's newest pipelines; empty: none.
+    std::string_view listFailedJobs = {};  ///< Lists the project's failed jobs; empty: none.
+    MapPipelines mapPipelines = nullptr;   ///< Reads listPipelines' output; nullptr: none.
+    MapFailedJobs mapFailedJobs = nullptr; ///< Reads listFailedJobs' output; nullptr: none.
+    /// Joins what the two read into listChangeRequests' mapping; nullptr: none (the engine calls it through
+    /// the row).
+    EnrichChangeRequests enrich = nullptr;
 };
 
 /// Every provider, one row per forge.

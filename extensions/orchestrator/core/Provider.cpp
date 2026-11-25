@@ -31,8 +31,8 @@ namespace
                    .defaultBranchOf = &github::defaultBranch,
                    .verification = Verification::Recorded },
         // Recorded from glab 1.119.0 (core/testdata/gitlab/). Its list carries no pipeline object and no
-        // closing issues: the CI state is what `detailed_merge_status` says, and no merge request claims an
-        // issue.
+        // closing issues: the CI state is what `detailed_merge_status` says until the project's pipelines and
+        // failed jobs are joined in by the head commit, and no merge request claims an issue.
         Provider { .forge = Forge::GitLab,
                    .name = "GitLab",
                    .authCheck = "glab-auth",
@@ -46,7 +46,12 @@ namespace
                    .changeRequests = &gitlab::changeRequests,
                    .issues = &gitlab::issues,
                    .defaultBranchOf = &gitlab::defaultBranch,
-                   .verification = Verification::Recorded },
+                   .verification = Verification::Recorded,
+                   .listPipelines = "glab-pipelines",
+                   .listFailedJobs = "glab-failed-jobs",
+                   .mapPipelines = &gitlab::pipelines,
+                   .mapFailedJobs = &gitlab::failedJobs,
+                   .enrich = &gitlab::enriched },
     };
 } // namespace
 

@@ -107,6 +107,8 @@ agent-stats (short, in worktrees): contour agent stats --session {session} --cwd
 glab-auth (short, in repos): glab auth status
 glab-default-branch (short, in repos): glab repo view --output json
 glab-mrs (long, in repos): glab mr list --author=@me --per-page 100 --output json
+glab-pipelines (long, in repos): glab api projects/:id/pipelines?per_page=100&order_by=id&sort=desc
+glab-failed-jobs (long, in repos): glab api projects/:id/jobs?scope[]=failed&per_page=100
 glab-issues (long, in repos): glab issue list --assignee=@me --per-page 100 --search {query} --output json
 glab-mr-checkout (long, in worktrees): glab mr checkout {number} --branch {branch}
 acli-auth (short, in repos): acli jira auth status

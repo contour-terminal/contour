@@ -2,20 +2,27 @@
 //
 // The merge request list and the project in testdata/gitlab/ were printed by glab 1.119.0
 // (`glab mr list --output json`, `glab repo view --output json`) and scrubbed by harness/scrub-fixture.py;
-// the non-empty issue list is still the REST API's documented shape (testdata/gitlab/README.md).
+// the non-empty issue list is still the REST API's documented shape (testdata/gitlab/README.md). The
+// pipelines and failed jobs were printed by `glab api` and scrubbed the same way; their `-hand` files are
+// hand-made.
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <format>
+#include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include <orchestrator/core/Fixtures.hpp>
 #include <orchestrator/core/GitLab.hpp>
 #include <orchestrator/core/Model.hpp>
+#include <orchestrator/core/Timestamps.hpp>
 
 using namespace std::string_view_literals;
 
@@ -253,4 +260,101 @@ TEST_CASE("GitLab: an empty issue list", "[gitlab]")
     CHECK(listed->items.empty());
     CHECK(listed->skipped == 0);
     CHECK(listed->completeness == ListCompleteness::Complete);
+}
+
+TEST_CASE("GitLab: pipeline statuses by table", "[gitlab]")
+{
+    using Row = std::pair<std::string_view, CiState>;
+    for (auto const [text, state]: std::array { Row { "success"sv, CiState::Passing },
+                                                Row { "skipped"sv, CiState::Passing },
+                                                Row { "failed"sv, CiState::Failing },
+                                                Row { "canceled"sv, CiState::Failing },
+                                                Row { "running"sv, CiState::Pending },
+                                                Row { "manual"sv, CiState::Pending },
+                                                Row { "new_value"sv, CiState::Pending } })
+    {
+        CAPTURE(text);
+        CHECK(gitlab::pipelineStateOf(text) == state);
+    }
+}
+
+TEST_CASE("GitLab: the recorded pipelines and failed jobs map", "[gitlab]")
+{
+    auto const pipes =
+        gitlab::pipelines(readFixture(FixtureRoot::Testdata, "gitlab/pipelines.json"), OutputExtent::Whole);
+    auto const jobs = gitlab::failedJobs(readFixture(FixtureRoot::Testdata, "gitlab/jobs-failed.json"),
+                                         OutputExtent::Whole);
+    REQUIRE(pipes.has_value());
+    REQUIRE(jobs.has_value());
+    CHECK_FALSE(pipes->empty());
+    CHECK_FALSE(jobs->empty());
+    CHECK(std::ranges::all_of(*pipes, [](PipelineInfo const& p) { return p.id != 0 && !p.sha.empty(); }));
+    CHECK(std::ranges::all_of(
+        *jobs, [](FailedJob const& j) { return j.pipelineId != 0 && j.name.starts_with("job-"); }));
+}
+
+TEST_CASE("GitLab: pipelines and failed jobs leave out what they cannot place", "[gitlab]")
+{
+    auto const pipes = gitlab::pipelines(
+        R"([{"id":3,"sha":"abc","status":"failed"},{"sha":"abc","status":"success"},{"id":4,"status":"success"}])",
+        OutputExtent::Whole);
+    REQUIRE(pipes.has_value());
+    CHECK(*pipes == std::vector { PipelineInfo { .id = 3, .sha = "abc", .ci = CiState::Failing } });
+    CHECK(gitlab::pipelines(R"({"id":3})", OutputExtent::Whole).error() == ParseError::WrongShape);
+    CHECK(
+        gitlab::pipelines(R"([{"id":3,"sha":"abc","status":"failed"},{"id")", OutputExtent::Truncated)->size()
+        == 1);
+
+    auto const jobs = gitlab::failedJobs(
+        R"([{"name":"a\u001b[31m","pipeline":{"id":3}},{"name":"b"},{"name":"c","pipeline":null},)"
+        R"({"name":"","pipeline":{"id":3}}])",
+        OutputExtent::Whole);
+    REQUIRE(jobs.has_value());
+    REQUIRE(jobs->size() == 1);
+    CHECK(jobs->front().pipelineId == 3);
+    CHECK_FALSE(jobs->front().name.contains('\x1b'));
+    CHECK(gitlab::failedJobs("not json", OutputExtent::Whole).error() == ParseError::NotJson);
+}
+
+TEST_CASE("GitLab: an MR's newest pipeline of its sha decides, and its failed jobs are named", "[gitlab]")
+{
+    auto listed = gitlab::changeRequests(readFixture(FixtureRoot::Testdata, "gitlab/mrs-open.json"),
+                                         OutputExtent::Whole);
+    auto const pipes = gitlab::pipelines(readFixture(FixtureRoot::Testdata, "gitlab/pipelines-hand.json"),
+                                         OutputExtent::Whole);
+    auto const jobs = gitlab::failedJobs(readFixture(FixtureRoot::Testdata, "gitlab/jobs-failed-hand.json"),
+                                         OutputExtent::Whole);
+    REQUIRE(listed.has_value());
+    REQUIRE(pipes.has_value());
+    REQUIRE(jobs.has_value());
+    auto const mrs = gitlab::enriched(listed->items, std::span { *pipes }, std::span { *jobs });
+    REQUIRE(mrs.size() == listed->items.size());
+    CHECK(mrs[0].ci == CiState::Failing);
+    CHECK(mrs[0].failingChecks == std::vector<std::string> { "test-windows", "lint" }); // `lint` ran twice
+    CHECK(mrs[1].ci == CiState::Passing);
+    CHECK(mrs[2].ci == CiState::Pending);
+    CHECK(mrs[0].review == listed->items[0].review); // reviewStateOf(), unchanged by the join
+    CHECK(mrs[0].source == StateSource::Complete);
+    CHECK(mrs[3].source == StateSource::Inferred); // no pipeline of its sha
+    CHECK(mrs[3] == listed->items[3]);
+    CHECK(gitlab::enriched(listed->items, std::nullopt, std::nullopt)[0].source == StateSource::Inferred);
+    CHECK(gitlab::enriched(listed->items, std::nullopt, std::nullopt) == listed->items);
+    CHECK(gitlab::enriched(listed->items, std::span { *pipes }, std::nullopt)[0].failingChecks.empty());
+}
+
+TEST_CASE("GitLab: the REST list carries conflicts, update time and the head commit", "[gitlab]")
+{
+    auto const listed = gitlab::changeRequests(readFixture(FixtureRoot::Testdata, "gitlab/mrs-open.json"),
+                                               OutputExtent::Whole);
+    REQUIRE(listed.has_value());
+    auto const byIid = [&](uint64_t iid) {
+        return *std::ranges::find(listed->items, iid, &ChangeRequest::number);
+    };
+    CHECK(byIid(5696).conflicts == Conflicts::Conflicting); // detailed_merge_status `conflict`
+    CHECK(byIid(5729).conflicts == Conflicts::Conflicting); // `draft_status`, has_conflicts true
+    CHECK(byIid(5752).conflicts == Conflicts::None);
+    CHECK(byIid(5696).updatedWallMs == unixMsOf("2026-11-20T10:24:50.48+01:00"));
+    CHECK(byIid(5752).source == StateSource::Inferred);
+    CHECK(std::ranges::all_of(
+        listed->items, [](ChangeRequest const& mr) { return mr.updatedWallMs != 0 && !mr.headSha.empty(); }));
 }

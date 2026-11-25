@@ -278,6 +278,12 @@ namespace
     constexpr auto GlabMrsArgv = std::array {
         "glab"sv, "mr"sv, "list"sv, "--author=@me"sv, "--per-page"sv, "100"sv, "--output"sv, "json"sv,
     };
+    /// `glab api` fills `:id` from the repository it runs in. The newest pipelines first, so that a merge
+    /// request's newest pipeline is among them.
+    constexpr auto GlabPipelinesArgv =
+        std::array { "glab"sv, "api"sv, "projects/:id/pipelines?per_page=100&order_by=id&sort=desc"sv };
+    constexpr auto GlabFailedJobsArgv =
+        std::array { "glab"sv, "api"sv, "projects/:id/jobs?scope[]=failed&per_page=100"sv };
     constexpr auto GlabIssuesArgv = std::array {
         "glab"sv, "issue"sv,    "list"sv,    "--assignee=@me"sv, "--per-page"sv,
         "100"sv,  "--search"sv, "{query}"sv, "--output"sv,       "json"sv,
@@ -443,6 +449,18 @@ namespace
                       .timeout = Timeout::Long,
                       .root = Root::Repos,
                       .argv = GlabMrsArgv,
+                      .environment = {},
+                      .verification = Verification::Recorded },
+        CommandDecl { .name = "glab-pipelines",
+                      .timeout = Timeout::Long,
+                      .root = Root::Repos,
+                      .argv = GlabPipelinesArgv,
+                      .environment = {},
+                      .verification = Verification::Recorded },
+        CommandDecl { .name = "glab-failed-jobs",
+                      .timeout = Timeout::Long,
+                      .root = Root::Repos,
+                      .argv = GlabFailedJobsArgv,
                       .environment = {},
                       .verification = Verification::Recorded },
         CommandDecl { .name = "glab-issues",

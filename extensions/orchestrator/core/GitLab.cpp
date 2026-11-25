@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <orchestrator/core/GitLab.hpp>
 
+#include <algorithm>
 #include <array>
 #include <expected>
+#include <optional>
+#include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <glaze/glaze.hpp>
 #include <orchestrator/core/ArgumentKinds.hpp>
@@ -14,6 +19,7 @@
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Sanitize.hpp>
 #include <orchestrator/core/Spelling.hpp>
+#include <orchestrator/core/Timestamps.hpp>
 
 using namespace std::string_view_literals;
 
@@ -43,7 +49,13 @@ struct glz::meta<orchestrator::gitlab::detail::JsonMergeRequest>
                                               "target_project_id",
                                               &T::targetProjectId,
                                               "detailed_merge_status",
-                                              &T::detailedMergeStatus);
+                                              &T::detailedMergeStatus,
+                                              "has_conflicts",
+                                              &T::hasConflicts,
+                                              "updated_at",
+                                              &T::updatedAt,
+                                              "sha",
+                                              &T::sha);
 };
 
 /// An issue.
@@ -70,7 +82,9 @@ namespace orchestrator::gitlab
 namespace
 {
     using detail::JsonIssue;
+    using detail::JsonJob;
     using detail::JsonMergeRequest;
+    using detail::JsonPipeline;
     using detail::JsonProject;
 
     /// The input is a string_view: nothing terminates it, and GitLab's objects hold many keys this mapping
@@ -93,6 +107,15 @@ namespace
         Spelling { .text = "ci_must_pass"sv, .meaning = CiState::Failing },
     };
 
+    /// The pipeline `status` values that are settled; every other one, a value a newer GitLab adds among
+    /// them, is a pipeline that has not finished.
+    constexpr auto PipelineStatuses = std::array {
+        Spelling { .text = "success"sv, .meaning = CiState::Passing },
+        Spelling { .text = "skipped"sv, .meaning = CiState::Passing },
+        Spelling { .text = "failed"sv, .meaning = CiState::Failing },
+        Spelling { .text = "canceled"sv, .meaning = CiState::Failing },
+    };
+
     /// @return @p json in the model.
     ChangeRequest changeRequestOf(JsonMergeRequest const& json)
     {
@@ -110,6 +133,10 @@ namespace
             .failingChecks = {},
             .review = reviewStateOf(status),
             .closesIssues = {},
+            .conflicts = json.hasConflicts ? Conflicts::Conflicting : Conflicts::None,
+            .updatedWallMs = unixMsOf(json.updatedAt).value_or(0),
+            .source = StateSource::Inferred,
+            .headSha = json.sha,
         };
     }
 } // namespace
@@ -122,6 +149,11 @@ ReviewState reviewStateOf(std::string_view detailedMergeStatus) noexcept
 CiState ciStateOf(std::string_view detailedMergeStatus) noexcept
 {
     return meaningOf(CiStatuses, detailedMergeStatus, CiState::None);
+}
+
+CiState pipelineStateOf(std::string_view status) noexcept
+{
+    return meaningOf(PipelineStatuses, status, CiState::Pending);
 }
 
 std::expected<Listed<ChangeRequest>, ParseError> changeRequests(std::string_view stdoutText,
@@ -166,6 +198,61 @@ std::expected<std::string, ParseError> defaultBranch(std::string_view stdoutText
                 return std::unexpected(ParseError::WrongShape);
             return std::move(project.defaultBranch);
         });
+}
+
+std::expected<std::vector<PipelineInfo>, ParseError> pipelines(std::string_view stdoutText,
+                                                               OutputExtent extent)
+{
+    return json::readList<ReadOptions, JsonPipeline>(stdoutText, extent).transform([](auto const& read) {
+        auto mapped = std::vector<PipelineInfo> {};
+        for (auto const& entry: read.entries)
+            if (entry.id != 0 && !entry.sha.empty())
+                mapped.push_back(
+                    PipelineInfo { .id = entry.id, .sha = entry.sha, .ci = pipelineStateOf(entry.status) });
+        return mapped;
+    });
+}
+
+std::expected<std::vector<FailedJob>, ParseError> failedJobs(std::string_view stdoutText, OutputExtent extent)
+{
+    return json::readList<ReadOptions, JsonJob>(stdoutText, extent).transform([](auto const& read) {
+        auto mapped = std::vector<FailedJob> {};
+        for (auto const& entry: read.entries)
+        {
+            auto const pipelineId = entry.pipeline ? entry.pipeline->id : 0;
+            auto name = displayText(entry.name, MaxTitleChars);
+            if (pipelineId != 0 && !name.empty())
+                mapped.push_back(FailedJob { .pipelineId = pipelineId, .name = std::move(name) });
+        }
+        return mapped;
+    });
+}
+
+std::vector<ChangeRequest> enriched(std::vector<ChangeRequest> listed,
+                                    std::optional<std::span<PipelineInfo const>> pipelines,
+                                    std::optional<std::span<FailedJob const>> jobs)
+{
+    if (!pipelines)
+        return listed;
+    auto const failed = jobs.value_or(std::span<FailedJob const> {});
+    for (auto& mr: listed)
+    {
+        if (mr.headSha.empty())
+            continue;
+        auto ofHead = *pipelines | std::views::filter([&](PipelineInfo const& pipeline) {
+            return pipeline.sha == mr.headSha;
+        });
+        auto const newest = std::ranges::max_element(ofHead, {}, &PipelineInfo::id);
+        if (newest == ofHead.end())
+            continue;
+        mr.ci = newest->ci;
+        mr.source = StateSource::Complete;
+        mr.failingChecks.clear();
+        for (auto const& job: failed)
+            if (job.pipelineId == newest->id && !std::ranges::contains(mr.failingChecks, job.name))
+                mr.failingChecks.push_back(job.name);
+    }
+    return listed;
 }
 
 } // namespace orchestrator::gitlab

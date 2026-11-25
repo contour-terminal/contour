@@ -17,7 +17,8 @@ joined by `.`, an array's element written `[]` (`[].author.web_url`), `*` matchi
                     innermost array), `{host}` (the shape's placeholder host) and any key of an enclosing
                     object, innermost first (`{iid}`);
 - `url:<template>`  the same, for a URL: the template names `{host}`;
-- `sha`             forty times one hexadecimal digit, chosen by the entry's index;
+- `sha`             forty times one hexadecimal digit, chosen by the entry's index (`sha:<length>` for a
+                    shortened one, such as a commit's `short_id`);
 - `key`             a Jira key, as `ABC-<n>`: the same recorded key always becomes the same placeholder, and
                     a recorded key left anywhere in a kept string is replaced by its placeholder too;
 - `redact`          `x` (free text no mapping reads);
@@ -30,7 +31,8 @@ empty string stays empty. The output is laid out as the tool lays it out (compac
 indented by two for `acli-*`, `<`, `>` and `&` escaped as Go escapes them, one trailing newline) and is
 deterministic: the same input always yields the same bytes.
 
-Usage: scrub-fixture.py --shape glab-mrs|glab-issues|glab-repo|acli-issues <recorded.json> <fixture.json>
+Usage: scrub-fixture.py --shape glab-mrs|glab-issues|glab-repo|glab-pipelines|glab-jobs|acli-issues
+                         <recorded.json> <fixture.json>
     e.g. scrub-fixture.py --shape glab-mrs mrs-recorded.json core/testdata/gitlab/mrs-open.json
 """
 
@@ -62,6 +64,17 @@ USER = {
     "state": "keep",
     "accountType": "keep",
     "created_at": "keep",
+    "bio": "redact",
+    "location": "redact",
+    "local_time": "redact",
+    "organization": "redact",
+    "job_title": "redact",
+    "pronouns": "redact",
+    "website_url": "redact",
+    "discord": "redact",
+    "github": "redact",
+    "linkedin": "redact",
+    "twitter": "redact",
 }
 
 # GitLab's milestone object, as merge requests and issues carry it.
@@ -216,6 +229,76 @@ SHAPES = {
         "merge_request_title_regex_description": "redact",
         "external_authorization_classification_label": "redact",
     },
+    "glab-pipelines": {
+        "[].sha": "sha",
+        "[].ref": "fmt:feature/branch-{n}",
+        "[].name": "text:Pipeline",
+        "[].web_url": "url:https://{host}/group/project/-/pipelines/{id}",
+        "[].status": "keep",
+        "[].source": "keep",
+        "[].created_at": "keep",
+        "[].updated_at": "keep",
+        "[].user": "user",
+    },
+    "glab-jobs": {
+        "[].name": "fmt:job-{n}",
+        "[].stage": "keep",
+        "[].ref": "fmt:feature/branch-{n}",
+        "[].status": "keep",
+        "[].failure_reason": "keep",
+        "[].created_at": "keep",
+        "[].started_at": "keep",
+        "[].finished_at": "keep",
+        "[].erased_at": "keep",
+        "[].artifacts_expire_at": "keep",
+        "[].web_url": "url:https://{host}/group/project/-/jobs/{id}",
+        "[].user": "user",
+        "[].tag_list[]": "fmt:tag-{i}",
+        "[].artifacts[].file_type": "keep",
+        "[].artifacts[].file_format": "keep",
+        "[].artifacts[].filename": "keep",
+        "[].artifacts_file.filename": "keep",
+        "[].pipeline.sha": "sha",
+        "[].pipeline.ref": "fmt:feature/branch-{n}",
+        "[].pipeline.status": "keep",
+        "[].pipeline.source": "keep",
+        "[].pipeline.created_at": "keep",
+        "[].pipeline.updated_at": "keep",
+        "[].pipeline.web_url": "url:https://{host}/group/project/-/pipelines/{id}",
+        "[].commit.id": "sha",
+        "[].commit.short_id": "sha:8",
+        "[].commit.parent_ids[]": "sha",
+        "[].commit.title": "text:Commit",
+        "[].commit.message": "text:Commit",
+        "[].commit.author_name": "fmt:user",
+        "[].commit.committer_name": "fmt:user",
+        "[].commit.author_email": "fmt:",
+        "[].commit.committer_email": "fmt:",
+        "[].commit.authored_date": "keep",
+        "[].commit.committed_date": "keep",
+        "[].commit.created_at": "keep",
+        "[].commit.trailers.*": "redact",
+        "[].commit.extended_trailers.*[]": "redact",
+        "[].commit.web_url": "url:https://{host}/group/project/-/commit/{n}",
+        "[].runner.description": "fmt:runner",
+        "[].runner.name": "fmt:runner",
+        "[].runner.ip_address": "redact",
+        "[].runner.runner_type": "keep",
+        "[].runner.status": "keep",
+        "[].runner.job_execution_status": "keep",
+        "[].runner.created_at": "keep",
+        "[].runner.created_by": "user",
+        "[].runner_manager.system_id": "fmt:runner",
+        "[].runner_manager.ip_address": "redact",
+        "[].runner_manager.architecture": "keep",
+        "[].runner_manager.platform": "keep",
+        "[].runner_manager.version": "keep",
+        "[].runner_manager.revision": "keep",
+        "[].runner_manager.status": "keep",
+        "[].runner_manager.job_execution_status": "keep",
+        "[].runner_manager.created_at": "keep",
+        "[].runner_manager.contacted_at": "keep",
+    },
     "acli-issues": {
         "[].expand": "keep",
         "[].id": "keep",
@@ -251,7 +334,14 @@ SHAPES = {
     },
 }
 
-HOSTS = {"glab-mrs": GITLAB_HOST, "glab-issues": GITLAB_HOST, "glab-repo": GITLAB_HOST, "acli-issues": JIRA_HOST}
+HOSTS = {
+    "glab-mrs": GITLAB_HOST,
+    "glab-issues": GITLAB_HOST,
+    "glab-repo": GITLAB_HOST,
+    "glab-pipelines": GITLAB_HOST,
+    "glab-jobs": GITLAB_HOST,
+    "acli-issues": JIRA_HOST,
+}
 
 # A Jira key as the recording may spell it: an upper-case project key, a dash, a number.
 JIRA_KEY = re.compile(r"[A-Z][A-Z0-9_]*-[0-9]+")
@@ -331,7 +421,7 @@ class Scrubber:
         if kind in ("fmt", "url"):
             return argument.format_map(context)
         if kind == "sha":
-            return "0123456789abcdef"[n % 16] * 40
+            return "0123456789abcdef"[n % 16] * int(argument or 40)
         if kind == "key":
             return self.keys.setdefault(value, f"ABC-{len(self.keys) + 1}")
         if kind == "redact":

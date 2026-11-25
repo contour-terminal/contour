@@ -168,6 +168,27 @@ TEST_CASE("Provider.github_command_names", "[provider]")
     }
 }
 
+TEST_CASE("GitLab's row reads pipelines and failed jobs; GitHub's reads none", "[provider]")
+{
+    auto const* const gitlab = findProvider(Forge::GitLab);
+    REQUIRE(gitlab != nullptr);
+    CHECK(gitlab->listPipelines == "glab-pipelines");
+    CHECK(gitlab->listFailedJobs == "glab-failed-jobs");
+    CHECK(findCommand(gitlab->listPipelines) != nullptr);
+    CHECK(findCommand(gitlab->listFailedJobs) != nullptr);
+    CHECK(gitlab->mapPipelines != nullptr);
+    CHECK(gitlab->mapFailedJobs != nullptr);
+    CHECK(gitlab->enrich != nullptr);
+
+    auto const* const github = findProvider(Forge::GitHub);
+    REQUIRE(github != nullptr);
+    CHECK(github->listPipelines.empty());
+    CHECK(github->listFailedJobs.empty());
+    CHECK(github->mapPipelines == nullptr);
+    CHECK(github->mapFailedJobs == nullptr);
+    CHECK(github->enrich == nullptr);
+}
+
 TEST_CASE("Provider.list_commands_ask_for_ListLimit", "[provider]")
 {
     auto const limit = std::format("{}", ListLimit);
