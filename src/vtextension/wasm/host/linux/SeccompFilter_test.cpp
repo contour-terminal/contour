@@ -126,7 +126,8 @@ TEST_CASE("SeccompFilter.decidesEachRowAsItsTableSays", "[vtextension][sandbox]"
         Decision { SystemCall::Tgkill, { OwnProcess, 1, 6 }, Allowed, "abort()" },
         Decision { SystemCall::Tgkill, { OtherProcess, 1, 6 }, Killed, "another process's thread" },
         Decision { SystemCall::Kill, { OtherProcess, 0 }, Killed, "another process" },
-        Decision { SystemCall::RtSigaction, {}, Killed, "a handler: priming installed them all" },
+        Decision { SystemCall::RtSigaction, {}, Allowed, "a fault handed on to the default action" },
+        Decision { SystemCall::Writev, { 2 }, Allowed, "the C library's report of heap corruption" },
     };
     for (auto const arch: Both)
     {

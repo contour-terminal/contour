@@ -116,6 +116,7 @@ enum class SystemCall : uint8_t
     Unshare,
     Vfork,
     Write,
+    Writev,
 };
 
 /// What an architecture numbers a call it does not have.

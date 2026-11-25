@@ -95,13 +95,14 @@ namespace
         SystemCallNumbers { SystemCall::Unshare, "unshare", 272, 97 },
         SystemCallNumbers { SystemCall::Vfork, "vfork", 58, NoSystemCall },
         SystemCallNumbers { SystemCall::Write, "write", 1, 64 },
+        SystemCallNumbers { SystemCall::Writev, "writev", 20, 66 },
     };
     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, NumberTable.size()),
                                       [](std::size_t index) {
                                           return std::to_underlying(NumberTable.at(index).call) == index;
                                       }),
                   "NumberTable holds one row per SystemCall, at its index.");
-    static_assert(NumberTable.back().call == SystemCall::Write, "NumberTable names every SystemCall.");
+    static_assert(NumberTable.back().call == SystemCall::Writev, "NumberTable names every SystemCall.");
 
     /// Where a row applies.
     enum class Architectures : uint8_t
@@ -180,7 +181,9 @@ namespace
                         .mask = WritableOrExecutable,
                         .value = WritableOrExecutable },
     };
-    /// The descriptor's own metadata: the path argument is empty.
+    /// The descriptor's own metadata, as AT_EMPTY_PATH asks for it. Seccomp cannot read the path argument,
+    /// so a caller passing a path with the flag set still stats that path. That is accepted residual risk: a
+    /// file's metadata stays observable (Landlock does not govern a stat), never its contents.
     constexpr auto StatOfDescriptorAt3 = std::array {
         ArgumentCheck { .index = 3, .test = ArgumentTest::AllSet, .mask = AT_EMPTY_PATH, .value = 0 },
     };
@@ -200,6 +203,9 @@ namespace
         allow(SystemCall::Ppoll, "poll() where the architecture has only ppoll"),
         allow(SystemCall::Read, "reads of descriptors the host holds already"),
         allow(SystemCall::Write, "the wake signal, and lines on stderr"),
+        allow(SystemCall::Writev,
+              "the C library's report of heap corruption before it aborts, so a crash is not taken for a "
+              "sandbox kill; it writes no more than write() does"),
         allowWhen(
             SystemCall::Mmap,
             MappingRelease,
@@ -216,6 +222,9 @@ namespace
         allow(SystemCall::RtSigreturn, "a guest trap returns from the engine's signal handler"),
         allow(SystemCall::Sigaltstack, "a thread's alternate signal stack is queried and removed as it ends"),
         allow(SystemCall::RtSigprocmask, "a thread blocks signals as it ends"),
+        allow(SystemCall::RtSigaction,
+              "a fault that is no guest's is handed on by restoring the default action, so the host dies "
+              "of the fault itself; a handler changes only what the process does with its own signals"),
         allow(SystemCall::SchedYield, "spin locks back off"),
         allow(SystemCall::ClockGettime, "the clock, where the vDSO cannot read it"),
         allow(SystemCall::Getrandom, "hash seeds of tables made after lockdown"),
