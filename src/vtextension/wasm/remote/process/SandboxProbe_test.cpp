@@ -148,6 +148,11 @@ TEST_CASE("Sandbox.forbiddenOperationsFailFromAnExecutor", "[vtextension][sandbo
     constexpr auto Expectations = std::array {
         Expectation { .op = "open-file", .refusedWith = EACCES },
         Expectation { .op = "open-directory", .refusedWith = EACCES },
+        // A sanitizer build reads its own maps for a report, and no other process's.
+        Expectation { .op = "open-own-process",
+                      .refusedWith = EACCES,
+                      .allowedIn = vtextension::wasm::BuildInstrumentation::Sanitizers },
+        Expectation { .op = "open-other-process", .refusedWith = EACCES },
         Expectation { .op = "socket-inet", .refusedWith = EPERM },
         Expectation { .op = "socket-unix", .refusedWith = EPERM },
         Expectation { .op = "send-descriptor", .refusedWith = std::nullopt },

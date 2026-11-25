@@ -7,7 +7,8 @@
 // ASAN_OPTIONS/LSAN_OPTIONS still override them.
 //
 // Linked as objects into each executable that locks itself down, as a static library member defining them
-// would never be pulled in over the runtime's own weak defaults.
+// would never be pulled in over the runtime's own weak defaults. Compiled into Linux builds only: it serves
+// the Linux filter, and its assembler labels are ELF names (Mach-O's would carry a leading underscore).
 #include <vtextension/wasm/BuildInstrumentation.hpp>
 
 #if CONTOUR_BUILD_INSTRUMENTATION == 2

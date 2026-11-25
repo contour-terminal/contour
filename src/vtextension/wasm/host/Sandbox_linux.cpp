@@ -40,10 +40,11 @@ namespace
 
     /// Every directory an instrumented build keeps: a sanitizer reads its process's maps for a report (it
     /// names modules and offsets, unsymbolized), and a coverage build writes its counters into the build
-    /// tree.
+    /// tree. `/proc/self` resolves to `/proc/<pid>` as it is opened, so the rule covers the host's own
+    /// entries and no other process's.
     constexpr auto InstrumentationDirectories = std::array {
         InstrumentationDirectory { .build = BuildInstrumentation::Sanitizers,
-                                   .path = "/proc",
+                                   .path = "/proc/self",
                                    .rights = LandlockReadFile | LandlockReadDirectory },
 #ifdef CONTOUR_COVERAGE_OBJECT_ROOT
         InstrumentationDirectory { .build = BuildInstrumentation::Coverage,

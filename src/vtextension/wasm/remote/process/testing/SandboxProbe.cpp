@@ -115,6 +115,18 @@ namespace
         return openPath("/", O_RDONLY | O_DIRECTORY);
     }
 
+    /// What a sanitizer's report reads: its own process's maps.
+    [[nodiscard]] std::string openOwnProcess(OperationContext&)
+    {
+        return openPath("/proc/self/maps", O_RDONLY);
+    }
+
+    /// Another process's entry, which no build's host may read.
+    [[nodiscard]] std::string openOtherProcess(OperationContext& context)
+    {
+        return openPath(std::format("/proc/{}/maps", context.parentProcess).c_str(), O_RDONLY);
+    }
+
     [[nodiscard]] std::string socketOf(int family)
     {
         auto const descriptor = ::socket(family, SOCK_STREAM | SOCK_CLOEXEC, 0);
@@ -289,6 +301,8 @@ namespace
         Operation { .name = "none", .run = &nothing },
         Operation { .name = "open-file", .run = &openFile },
         Operation { .name = "open-directory", .run = &openDirectory },
+        Operation { .name = "open-own-process", .run = &openOwnProcess },
+        Operation { .name = "open-other-process", .run = &openOtherProcess },
         Operation { .name = "socket-inet", .run = &socketInet },
         Operation { .name = "socket-unix", .run = &socketUnix },
         Operation { .name = "send-descriptor", .run = &sendDescriptor },

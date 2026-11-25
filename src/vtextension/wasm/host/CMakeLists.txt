@@ -65,5 +65,10 @@ target_link_libraries(vtextension_memory_provision PUBLIC vtextension_remote_wir
 
 # What a sanitizer build's sandboxed process defaults its sanitizer to (SanitizerOptions.cpp): objects, linked
 # into each executable that locks itself down -- the extension host and the probe that locks down as it does.
-add_library(vtextension_host_sanitizer_options OBJECT SanitizerOptions.cpp)
-target_link_libraries(vtextension_host_sanitizer_options PRIVATE vtextension_remote_wire)
+# Only the Linux filter needs them, and only ELF names them so; elsewhere the target is empty.
+if(VTEXTENSION_LINUX_SANDBOX)
+    add_library(vtextension_host_sanitizer_options OBJECT SanitizerOptions.cpp)
+    target_link_libraries(vtextension_host_sanitizer_options PRIVATE vtextension_remote_wire)
+else()
+    add_library(vtextension_host_sanitizer_options INTERFACE)
+endif()

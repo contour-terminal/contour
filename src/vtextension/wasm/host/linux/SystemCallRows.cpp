@@ -254,7 +254,8 @@ namespace
 
     constexpr auto SanitizerTable = std::array {
         allow(SystemCall::Openat,
-              "a report reads /proc/self/maps; the file system restriction allows /proc only"),
+              "a report reads /proc/self/maps; the file system restriction allows the host's own /proc "
+              "entries only"),
         allow(SystemCall::Gettimeofday, "the thread sanitizer's clock"),
         allow(SystemCall::Nanosleep, "the thread sanitizer's background thread sleeps"),
     };
