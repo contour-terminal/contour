@@ -2,7 +2,7 @@
 //
 // The `n` box: a custom task. The user types what the agent should do, and ⏎ starts it at once as a topic, on
 // the defaults: the repository chip's repository (else the selected row's, else the first), the topic task's
-// worker by the busy rule, and its model. Tab reaches those three settings.
+// worker by the busy rule, and its model. Esc (or Tab) reaches those three settings.
 #pragma once
 
 #include <core/tui/Canvas.hpp>
@@ -40,6 +40,7 @@ struct TaskBoxState
     TaskBoxField focus = TaskBoxField::Text; ///< What ←/→ change.
     DispatchFormState form; ///< A topic form: repository, worker, model; its topic is @ref text.
     HooksWarning hooks = HooksWarning::None; ///< As the dialog has it: a second ⏎ past an incomplete setup.
+    FieldMode mode = FieldMode::Typing;      ///< Typing: the text has the keys.
     [[nodiscard]] bool operator==(TaskBoxState const&) const = default;
 };
 
@@ -65,22 +66,41 @@ struct TaskBoxState
 /// @return What it dispatches: its form, its topic the text typed.
 [[nodiscard]] DispatchFormState formOf(TaskBoxState const& box);
 
-/// Applies one key: typing and the line-editing keys edit the text wherever the keys are; Tab moves Text →
-/// Repo → Worker → Model → Text (Shift+Tab back); ←/→ step the setting; Esc, or a key with Alt, closes; ⏎
-/// dispatches the text as a topic at once (nothing to choose), not while the text is blank or canConfirm() is
-/// false, and past an incomplete setup only with an Enter of a later input than the one that confirmed the
+/// Applies one key (Decision 9's "Start dialog / `n` box" column). @p nav is what the key resolved to in the
+/// box's context (navContextOf()), or what the mouse asked (Dashboard::State::press(NavAction)).
+/// - `nav == Close` closes it, whatever the mode.
+/// - Typing (on Text, as it opens): the line-editing and printable keys edit the text, `⏎` confirms,
+///   leave_field (or a key with Alt, as `esc`) turns to Navigating on Repo; a plain special key acts as it
+///   would navigating (passedKeyAction()), and no chord acts.
+/// - Navigating: move_up/move_down step between Text, Repo, Worker and Model, stopping at the ends;
+///   first/last go to Text/Model; previous_value/next_value step the setting; enter_field types the text, but
+///   `⏎` off the Text line confirms; no printable key types; a key with Alt does what `esc` does there
+///   (close, with the defaults).
+/// - Tab/Shift+Tab, in either mode, move to the next/previous place, wrapping: arriving on Text types,
+/// arriving
+///   elsewhere navigates.
+/// A move by a navigation key that leaves Text stops typing; one that arrives on Text only selects it.
+/// ⏎ dispatches the text as a topic at once (nothing to choose), not while the text is blank or canConfirm()
+/// is false, and past an incomplete setup only with an Enter of a later input than the one that confirmed the
 /// warning.
 /// @param key A key the terminal sent.
+/// @param nav What @p key resolved to; std::nullopt: nothing.
 /// @param box The open box; closed (reset) when the key cancels or confirms it.
 /// @param engine The engine it was opened with.
 /// @param hooksAtInput The box's HooksWarning as the input that holds @p key began.
 /// @param nearTab The dashboard tab it is shown in.
 /// @return The dispatch, when the key confirmed it.
 [[nodiscard]] std::optional<DispatchAction> applyTaskBoxKey(core::tui::KeyEvent const& key,
+                                                            std::optional<NavAction> nav,
                                                             std::optional<TaskBoxState>& box,
                                                             Engine const& engine,
                                                             HooksWarning hooksAtInput,
                                                             std::string_view nearTab);
+
+/// Picks a place as a click on it does: on Text the text is typed, elsewhere the box navigates.
+/// @param box The open box.
+/// @param field The place picked.
+void pickTaskBoxField(TaskBoxState& box, TaskBoxField field) noexcept;
 
 /// Types a paste into the box's text, as one line: a paste is text, never keys.
 /// @param box The open box; nothing happens when none is.

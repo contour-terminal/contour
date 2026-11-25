@@ -16,12 +16,20 @@
 #include <string_view>
 
 #include <orchestrator/core/Engine.hpp>
+#include <orchestrator/core/NavKeys.hpp>
 #include <orchestrator/core/WorkItems.hpp>
 #include <orchestrator/view/DispatchForm.hpp>
 #include <orchestrator/view/HitMap.hpp>
 
 namespace orchestrator::view
 {
+
+/// Whether a box's text field has the keys.
+enum class FieldMode : uint8_t
+{
+    Navigating = 0, ///< The keys move between the box's settings: letters may act.
+    Typing,         ///< The text field has the keys: letters type.
+};
 
 /// How much of what a dispatch runs the dialog shows.
 enum class DialogPreview : uint8_t
@@ -38,6 +46,7 @@ struct StartDialogState
     FormField setting = FormField::Task;          ///< What ←/→ change.
     HooksWarning hooks = HooksWarning::None;      ///< How far the user got past the incomplete-setup warning.
     DialogPreview preview = DialogPreview::Short; ///< How much it shows.
+    FieldMode mode = FieldMode::Navigating;       ///< Typing: the note has the keys.
     [[nodiscard]] bool operator==(StartDialogState const&) const = default;
 };
 
@@ -66,22 +75,40 @@ enum class StartRefusal : uint8_t
                                                                             std::string_view task,
                                                                             std::string session);
 
-/// Applies one key: Tab moves Task → Worker → Model → Perms → Note → Task (Shift+Tab back; Perms is passed
-/// over for a worker that takes no profile); ←/→ step the setting; typing edits the note; Ctrl+P toggles the
-/// preview; Esc, or a key with Alt, closes; ⏎ dispatches unless canConfirm() is false (the engine's refusal
-/// is shown) or the worker's setup is incomplete and the warning was not confirmed by an earlier input (the
-/// first ⏎ only confirms).
+/// Applies one key (Decision 9's "Start dialog / `n` box" column). @p nav is what the key resolved to in the
+/// dialog's context (navContextOf()), or what the mouse asked (Dashboard::State::press(NavAction)).
+/// - `nav == Close` closes it, whatever the mode.
+/// - Navigating: move_up/move_down step between Task, Worker, Model, Perms and Note, stopping at the ends;
+///   first/last go to Task/Note; previous_value/next_value step the setting; enter_field types the note, but
+///   `⏎` off the Note line confirms; Ctrl+P toggles the preview; no printable key types; a key with Alt does
+///   what `esc` does there (close, with the defaults).
+/// - Typing (on Note): the line-editing and printable keys edit the note, `⏎` confirms, leave_field (or a key
+///   with Alt, as `esc`) turns to Navigating on Note, Ctrl+P toggles the preview; a plain special key acts as
+///   it would navigating (passedKeyAction()), and no chord acts.
+/// - Tab/Shift+Tab, in either mode, move to the next/previous setting, wrapping (Perms is passed over for a
+///   worker that takes no profile): arriving on Note types, arriving elsewhere navigates.
+/// A move by a navigation key that leaves Note stops typing; one that arrives on Note only selects it.
+/// ⏎ dispatches unless canConfirm() is false (the engine's refusal is shown) or the worker's setup is
+/// incomplete and the warning was not confirmed by an earlier input (the first ⏎ only confirms).
+/// A task's configured key selects no task here: a navigation key always acts as navigation.
 /// @param key A key the terminal sent.
+/// @param nav What @p key resolved to; std::nullopt: nothing.
 /// @param dialog The open dialog; closed (reset) when the key cancels or confirms it.
 /// @param engine The engine it was opened with.
 /// @param hooksAtInput The dialog's HooksWarning as the input that holds @p key began.
 /// @param nearTab The dashboard tab it is shown in.
 /// @return The dispatch, when the key confirmed it.
 [[nodiscard]] std::optional<DispatchAction> applyStartDialogKey(core::tui::KeyEvent const& key,
+                                                                std::optional<NavAction> nav,
                                                                 std::optional<StartDialogState>& dialog,
                                                                 Engine const& engine,
                                                                 HooksWarning hooksAtInput,
                                                                 std::string_view nearTab);
+
+/// Picks a setting as a click on it does: on Note the note is typed, elsewhere the dialog navigates.
+/// @param dialog The open dialog.
+/// @param setting The setting picked.
+void pickStartDialogSetting(StartDialogState& dialog, FormField setting) noexcept;
 
 /// Types a paste into the dialog's note, as one line: a paste is text, never keys.
 /// @param dialog The open dialog; nothing happens when none is.

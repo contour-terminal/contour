@@ -168,6 +168,13 @@ std::optional<NavAction> passedKeyAction(core::tui::KeyEvent const& key, NavKeys
 
 NavContext navContextOf(Interaction const& interaction, KeyContext const& context) noexcept
 {
+    auto const contextOf = [](FieldMode mode) {
+        return mode == FieldMode::Typing ? NavContext::Typing : NavContext::Navigating;
+    };
+    if (interaction.startDialog)
+        return contextOf(interaction.startDialog->mode);
+    if (interaction.taskBox)
+        return contextOf(interaction.taskBox->mode);
     if (interaction.view == View::Work)
         return interaction.work.filtering == Filtering::Typing ? NavContext::Typing : NavContext::Navigating;
     auto const inMessageBox =

@@ -46,9 +46,12 @@ namespace
     constexpr auto MessagePassKeys = std::array {
         MessagePassKey { .name = "pgup"sv, .does = "scroll a page up"sv },
         MessagePassKey { .name = "pgdn"sv, .does = "scroll a page down"sv },
-        MessagePassKey { .name = "end"sv, .does = "follow the transcript again"sv },
-        MessagePassKey { .name = "left"sv, .does = "turn to the previous transcript page"sv },
-        MessagePassKey { .name = "right"sv, .does = "turn to the next transcript page"sv },
+        MessagePassKey { .name = "end"sv,
+                         .does = "follow the transcript again, or go to a dialog's last setting"sv },
+        MessagePassKey { .name = "left"sv,
+                         .does = "turn to the previous transcript page from the message box"sv },
+        MessagePassKey { .name = "right"sv,
+                         .does = "turn to the next transcript page from the message box"sv },
     };
 
     constexpr auto Navigating = NavContext::Navigating;
@@ -96,8 +99,12 @@ namespace
                      .does = "show the prompt or choose the previous palette entry"sv,
                      .context = Typing },
         CommandKey { .name = "^n"sv, .does = "choose the next palette entry"sv, .context = Typing },
-        CommandKey { .name = "up"sv, .does = "choose the previous palette entry"sv, .context = Typing },
-        CommandKey { .name = "down"sv, .does = "choose the next palette entry"sv, .context = Typing },
+        CommandKey { .name = "up"sv,
+                     .does = "choose the previous palette entry or dialog setting"sv,
+                     .context = Typing },
+        CommandKey { .name = "down"sv,
+                     .does = "choose the next palette entry or dialog setting"sv,
+                     .context = Typing },
     };
 
     /// OwnCommandKeys, then the message box's pass-through keys as Typing rows: one table each, no drift.

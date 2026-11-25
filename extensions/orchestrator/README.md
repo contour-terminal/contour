@@ -300,7 +300,7 @@ offers no "copy branch name": a served tab drops OSC 52, so no copy would reach 
 | the scrollbar | jump there; hold the button on the thumb to drag it | — | — | scroll the list |
 | the filter, the repository chip, the sort chip | type into the filter; step the chip | — | step the chip back | step the chip |
 | a key in the action bar | run it | — | — | — |
-| the start dialog or the `n` box | pick a setting; on its value or its `‹ ›`, step it; pick a worker's chip | start (on a label, the note or a worker; a double click on `‹ ›` steps twice) | step it back | step the setting under the pointer |
+| the start dialog or the `n` box | pick a setting (the note or the text: type it); on its value or its `‹ ›`, step it; pick a worker's chip | start (on a label, the note or a worker; a double click on `‹ ›` steps twice) | step it back | step the setting under the pointer |
 | beside a dialog or the menu | close it | — | — | — |
 
 While the Work view is shown the dashboard also asks for every move of the pointer (DECSET 1003): the row under
@@ -332,8 +332,11 @@ the board, with the item, then its settings:
 - **Note**: optional text added to the prompt; it may not start with `-`.
 
 Below them are the checkout and the worktree; `Ctrl+P` also shows the prompt and the agent's exact command line.
-`Tab` and `Shift+Tab` move through the settings, `←` `→` change one, typing fills the note, `Enter` starts the
-agent and `Esc` closes the dialog. While an agent already works on the item the dialog says so (`⬢ claude-work
+The dialog opens on its settings, Task selected. `j` `k` (or `↑` `↓`, `Tab` `Shift+Tab`) move between them, and
+`gg` `G` (or `Home` `End`) go to the first and the last; `h` `l` (or `←` `→`) change the one selected. No letter
+types there. `i` types the note, as `Tab` onto it or a click on it does; while it is typed every letter is text,
+`j`, `k` and `q` included, and `Esc` leaves the note for the settings. `Enter` on the Note line types the note;
+anywhere else, and while the note is typed, it starts the agent. A second `Esc`, or `q`, closes the dialog. While an agent already works on the item the dialog says so (`⬢ claude-work
 already works on this`) with the engine's refusal, and `Enter` starts nothing; so does any other dispatch the
 engine would refuse. `⏎ run again` on a finished run opens the dialog on the same item and task, while the Work
 view still lists the item.
@@ -348,10 +351,12 @@ with a line that names them), but it starts nothing: an item's agent starts from
 **`n`: a custom task.** `n`, in either view, or `+ new task`, opens a box that asks "What should the agent do?",
 with the keys in its text. `Enter` starts the agent at once, on these defaults: the **repository** the Work view's
 chip names, else the selected row's, else the first configured; the **worker** of the topic task, by the same
-busy rule as the dialog's; and the topic task's **model**. `Tab` (or a click) reaches those three settings, and
-`←` `→` change one. An empty text starts nothing, and a worker whose setup is incomplete asks for a second
-`Enter`, as in the dialog. `Esc` closes the box. `⏎ run again` on a finished topic run opens the box again on its
-text.
+busy rule as the dialog's; and the topic task's **model**. The box opens typing its text, so typing and then
+`Enter` still starts at once. `Esc` goes to its settings, Repo selected, where `j` `k` (or `↑` `↓`) move and `h`
+`l` (or `←` `→`) change one; `Tab` and a click reach them too. `i`, or `Enter` on the text, types the text again;
+`Enter` elsewhere starts. A second `Esc`, or `q`, closes the box. An empty text starts nothing, and a worker whose
+setup is incomplete asks for a second `Enter`, as in the dialog. `⏎ run again` on a finished topic run opens the
+box again on its text.
 
 The search launcher that `n` opened before is gone. Its jobs moved: browsing the pull requests and issues to the
 Work view; a query naming one item (`#2375`, its URL, `PRJ-1234`) to the Work view's filter; typing a topic to
@@ -429,16 +434,16 @@ defaults, plain then vim (the action bar names an action by its first key):
 
 | Action | Defaults | What it does |
 | --- | --- | --- |
-| `move_up` | `up` `k` | the row or line above; in the Focus, scroll up a line |
-| `move_down` | `down` `j` | the row or line below; in the Focus, scroll down a line |
-| `first` | `home` `gg` | the first row or line; the Focus's top |
-| `last` | `end` `G` | the last row or line; the Focus's end, live |
+| `move_up` | `up` `k` | the row or line above; in the Focus, scroll up a line; a dialog's setting above |
+| `move_down` | `down` `j` | the row or line below; in the Focus, scroll down a line; a dialog's setting below |
+| `first` | `home` `gg` | the first row or line; the Focus's top; a dialog's first setting |
+| `last` | `end` `G` | the last row or line; the Focus's end, live; a dialog's last setting |
 | `half_page_up` | `^u` | half the rows shown up; in the Focus, scroll half the tab |
 | `half_page_down` | `^d` | half the rows shown down; in the Focus, scroll half the tab |
-| `previous_value` | `left` `h` | the transcript's previous page; the Work view's chip back |
-| `next_value` | `right` `l` | the transcript's next page; the Work view's chip on |
-| `leave_field` | `esc` | stop typing a text field (acts only while one is typed) |
-| `enter_field` | `enter` `i` | start typing a dialog's text field (`⏎` stays a list row's own key) |
+| `previous_value` | `left` `h` | the transcript's previous page; the Work view's chip back; a dialog's setting back |
+| `next_value` | `right` `l` | the transcript's next page; the Work view's chip on; a dialog's setting on |
+| `leave_field` | `esc` | stop typing a text field (acts only while one is typed); the `n` box goes to Repo |
+| `enter_field` | `enter` `i` | type a dialog's text field (`⏎` types only on the field's line, and stays a list row's own key) |
 | `close` | `esc` `q` | close what is open, such as the last 24 hours; `Esc` still closes that popup when `close` is rebound |
 
 A key is a printable character, `^` and a letter for Ctrl (not `^h`, `^i`, `^j` or `^m`, which terminals send as
@@ -451,9 +456,11 @@ problem line names the other holder:
     keys.close[0]: is already bound: j, also keys.move_down
 
 A task's `key` is not a navigation key's concern: it starts nothing from a list, so a task keyed `G`, `q` or `l`
-still loads, and the navigation key wins in the lists. For now the keys take effect in the Fleet, the Focus, the
-Work list and the last 24 hours; the start dialog, the `n` box, the row menu, the palette, the filters and the
-message box still take their own keys, so `leave_field` and `enter_field` do not act yet.
+still loads, and the navigation key wins in the lists and in the start dialog, where a task's key picks no task.
+For now the keys take effect in the Fleet, the Focus, the Work list, the last 24 hours, the start dialog and the
+`n` box; the row menu, the palette, the filters and the message box still take their own keys. While the dialog's
+note or the box's text is typed, a letter or a chord never acts as navigation; the plain special keys (`↑` `↓`
+`Home` `End`) still move between the settings.
 
 **GitLab.** `glab mr list` carries no pipeline and no approvals, so per GitLab repository and poll the orchestrator
 also asks for the project's newest pipelines and its failed jobs, two REST calls through `glab api`:

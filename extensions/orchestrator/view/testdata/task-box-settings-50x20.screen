@@ -1,0 +1,20 @@
+ ✦ Agents  Work                        ⬢ 0/4 ▱▱▱▱ 
+╭─ Agents 0 ─────────────────────────────────────╮
+╭─ + New task ───────────────────────────────────╮
+│ What should the agent do?                      │
+│ investigate the flaky test                     │
+│                                                │
+│ repo      ‹ contour ›                          │
+│ worker    ‹ claude 0 ›                         │
+│ model     ‹ opus ›                             │
+│ ────────────────────────────────────────────── │
+│ branch    agent/topic-investigate-the-flaky-te │
+│           st-…                                 │
+│ worktree  /home/u/worktrees/contour/topic-inve │
+│           stigate-the-flaky-test-…             │
+│                                                │
+│ enter start · ↑↓ move · ←→ change · i text     │
+╰────────────────────────────────────────────────╯
+│                                                │
+╰────────────────────────────────────────────────╯
+ ⏎ new task · ^k all actions                      

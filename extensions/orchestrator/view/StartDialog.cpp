@@ -23,6 +23,7 @@
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Utf8.hpp>
 #include <orchestrator/view/Keys.hpp>
+#include <orchestrator/view/NavInput.hpp>
 #include <orchestrator/view/Sections.hpp>
 #include <orchestrator/view/TextEdit.hpp>
 #include <orchestrator/view/Theme.hpp>
@@ -57,10 +58,18 @@ namespace
         return field != FormField::Permissions || takesProfile(form, engine);
     }
 
-    /// @return The setting after (or before, by @p step) @p from in SettingOrder, wrapping around, passing
-    ///         over the ones not offered.
+    /// What a step past the first or the last setting does.
+    enum class AtTheEnds : uint8_t
+    {
+        Stop = 0, ///< It stays there, as the navigation keys do.
+        Wrap,     ///< It goes round to the other end, as Tab does.
+    };
+
+    /// @return The setting after (or before, by @p step) @p from in SettingOrder, passing over the ones not
+    ///         offered; past an end as @p ends says.
     [[nodiscard]] FormField nextSetting(FormField from,
                                         int step,
+                                        AtTheEnds ends,
                                         DispatchFormState const& form,
                                         Engine const& engine) noexcept
     {
@@ -69,11 +78,23 @@ namespace
         auto index = static_cast<std::size_t>(std::ranges::distance(SettingOrder.begin(), found)) % count;
         for ([[maybe_unused]] auto const attempt: std::views::iota(std::size_t { 0 }, count))
         {
+            auto const atEnd = step > 0 ? index + 1 == count : index == 0;
+            if (atEnd && ends == AtTheEnds::Stop)
+                return from;
             index = step > 0 ? (index + 1) % count : (index + count - 1) % count;
             if (isOffered(SettingOrder[index], form, engine))
                 return SettingOrder[index];
         }
         return from;
+    }
+
+    /// Moves to @p setting by a navigation key: a move off the note stops typing it; one onto it only
+    /// selects it.
+    void moveTo(StartDialogState& dialog, FormField setting) noexcept
+    {
+        if (setting != dialog.setting)
+            dialog.mode = FieldMode::Navigating;
+        dialog.setting = setting;
     }
 
     /// Confirms the dialog: the dispatch of its choices, unless they cannot be confirmed, or the setup is
@@ -162,7 +183,63 @@ void pasteIntoStartDialog(std::optional<StartDialogState>& dialog, std::string_v
         dialog->form.note += text;
 }
 
+void pickStartDialogSetting(StartDialogState& dialog, FormField setting) noexcept
+{
+    dialog.setting = setting;
+    dialog.mode = setting == FormField::Note ? FieldMode::Typing : FieldMode::Navigating;
+}
+
+namespace
+{
+    /// Applies a navigation action to the open dialog.
+    /// @return The dispatch, when the action confirmed it.
+    [[nodiscard]] std::optional<DispatchAction> applyNavAction(NavAction action,
+                                                               core::tui::KeyEvent const& key,
+                                                               std::optional<StartDialogState>& dialog,
+                                                               Engine const& engine,
+                                                               HooksWarning hooksAtInput,
+                                                               std::string_view nearTab)
+    {
+        auto& state = *dialog;
+        switch (action)
+        {
+            case NavAction::MoveUp:
+            case NavAction::MoveDown:
+                moveTo(state,
+                       nextSetting(state.setting,
+                                   action == NavAction::MoveDown ? 1 : -1,
+                                   AtTheEnds::Stop,
+                                   state.form,
+                                   engine));
+                break;
+            case NavAction::First: moveTo(state, SettingOrder.front()); break;
+            case NavAction::Last: moveTo(state, SettingOrder.back()); break;
+            case NavAction::PreviousValue:
+            case NavAction::NextValue:
+                changeSetting(state.form, state.setting, action == NavAction::NextValue ? 1 : -1, engine);
+                break;
+            case NavAction::EnterField:
+                // `⏎` types the note only on its line; elsewhere it confirms, as it always has.
+                if (key.key == core::tui::KeyCode::Enter && state.setting != FormField::Note)
+                {
+                    auto dispatch = confirm(state, engine, hooksAtInput, nearTab);
+                    if (dispatch)
+                        dialog.reset();
+                    return dispatch;
+                }
+                pickStartDialogSetting(state, FormField::Note);
+                break;
+            case NavAction::LeaveField: state.mode = FieldMode::Navigating; break;
+            case NavAction::Close: dialog.reset(); break;
+            case NavAction::HalfPageUp:
+            case NavAction::HalfPageDown: break;
+        }
+        return std::nullopt;
+    }
+} // namespace
+
 std::optional<DispatchAction> applyStartDialogKey(core::tui::KeyEvent const& key,
+                                                  std::optional<NavAction> nav,
                                                   std::optional<StartDialogState>& dialog,
                                                   Engine const& engine,
                                                   HooksWarning hooksAtInput,
@@ -173,39 +250,47 @@ std::optional<DispatchAction> applyStartDialogKey(core::tui::KeyEvent const& key
     auto& state = *dialog;
     using core::tui::KeyCode;
     using core::tui::Modifier;
+    auto const typing = state.mode == FieldMode::Typing;
+    auto const& keys = keysInForce(engine);
 
-    // The line-editing keys come first: Alt+Backspace drops a word rather than reading as Esc.
-    if (auto const edit = textEditOf(key))
+    if (nav == NavAction::Close)
+    {
+        dialog.reset();
+        return std::nullopt;
+    }
+    // The line-editing keys come first while typing: Alt+Backspace drops a word rather than reading as Esc.
+    if (auto const edit = textEditOf(key); edit && typing)
     {
         applyTextEdit(state.form.note, *edit);
         return std::nullopt;
     }
-    // A key with Alt is how an Esc reads when the next key follows it in the same read: the user pressed Esc.
+    // A key with Alt is how an Esc reads when the next key follows it in the same read: it does what Esc
+    // does there (Decision 11).
     if (core::tui::hasModifier(key.modifiers, Modifier::Alt))
     {
-        dialog.reset();
-        return std::nullopt;
+        auto const asEsc = keys.actionFor("esc", typing ? NavContext::Typing : NavContext::Navigating);
+        return asEsc ? applyNavAction(*asEsc, key, dialog, engine, hooksAtInput, nearTab) : std::nullopt;
     }
     if (isCtrl(key, U'p'))
     {
         state.preview = state.preview == DialogPreview::Short ? DialogPreview::Full : DialogPreview::Short;
         return std::nullopt;
     }
+    if (nav)
+        return applyNavAction(*nav, key, dialog, engine, hooksAtInput, nearTab);
     if (core::tui::hasModifier(key.modifiers, Modifier::Ctrl))
         return std::nullopt;
 
     switch (key.key)
     {
-        case KeyCode::Escape: dialog.reset(); return std::nullopt;
         case KeyCode::Tab:
-            state.setting = nextSetting(state.setting,
-                                        core::tui::hasModifier(key.modifiers, Modifier::Shift) ? -1 : 1,
-                                        state.form,
-                                        engine);
-            return std::nullopt;
-        case KeyCode::Left:
-        case KeyCode::Right:
-            changeSetting(state.form, state.setting, key.key == KeyCode::Right ? 1 : -1, engine);
+            pickStartDialogSetting(
+                state,
+                nextSetting(state.setting,
+                            core::tui::hasModifier(key.modifiers, Modifier::Shift) ? -1 : 1,
+                            AtTheEnds::Wrap,
+                            state.form,
+                            engine));
             return std::nullopt;
         case KeyCode::Enter: {
             auto action = confirm(state, engine, hooksAtInput, nearTab);
@@ -215,8 +300,16 @@ std::optional<DispatchAction> applyStartDialogKey(core::tui::KeyEvent const& key
         }
         default: break;
     }
+    if (!typing)
+        return std::nullopt;
     if (auto const printable = printableOf(key))
+    {
         appendUtf8(state.form.note, *printable);
+        return std::nullopt;
+    }
+    // A plain special key the note does not take acts as it would with nothing typed.
+    if (auto const passed = passedKeyAction(key, keys))
+        return applyNavAction(*passed, key, dialog, engine, hooksAtInput, nearTab);
     return std::nullopt;
 }
 
@@ -354,21 +447,42 @@ namespace
         lines.push_back(std::move(line));
     }
 
-    /// @return The hint line: what Enter does now, then the other keys, cut between hints.
+    /// @return The hint line: what Enter does now, then the other keys, each named by its first key in force
+    ///         (a hint whose key is unbound is left out), cut between hints.
     [[nodiscard]] Line hintLine(StartDialogState const& dialog,
                                 Engine const& engine,
                                 bool confirmable,
                                 int width)
     {
-        auto hints = std::vector<std::string_view> {};
-        if (confirmable)
-            hints.push_back(enterHint(dialog.form, engine, dialog.hooks));
-        hints.insert(hints.end(),
-                     { "tab next"sv,
-                       "←→ change"sv,
-                       dialog.preview == DialogPreview::Short ? "ctrl+p more"sv : "ctrl+p less"sv,
-                       "esc close"sv });
-        return Line { Segment { .text = joinHints(hints, width), .role = Role::Dim } };
+        auto const& keys = keysInForce(engine);
+        auto const label = [&](NavAction action) {
+            return navKeyLabel(keys, action);
+        };
+        auto hints = std::vector<std::string> {};
+        auto const add = [&](std::string const& key, std::string_view does) {
+            if (!key.empty())
+                hints.push_back(std::format("{} {}", key, does));
+        };
+        auto const typing = dialog.mode == FieldMode::Typing;
+        // `⏎` on the Note line types it, when it is an enter_field key there.
+        if (!typing && dialog.setting == FormField::Note
+            && std::ranges::contains(keys.keysOf(NavAction::EnterField), "enter"sv))
+            add(std::string { shownKeyName("enter") }, "note"sv);
+        else if (confirmable)
+            hints.emplace_back(enterHint(dialog.form, engine, dialog.hooks));
+        if (typing)
+            add(label(NavAction::LeaveField), "settings"sv);
+        else
+        {
+            add(label(NavAction::MoveUp) + label(NavAction::MoveDown), "settings"sv);
+            add(label(NavAction::PreviousValue) + label(NavAction::NextValue), "change"sv);
+            add(label(NavAction::EnterField), "note"sv);
+        }
+        hints.emplace_back(dialog.preview == DialogPreview::Short ? "ctrl+p more"sv : "ctrl+p less"sv);
+        if (!typing)
+            add(label(NavAction::Close), "close"sv);
+        auto const views = std::vector<std::string_view> { hints.begin(), hints.end() };
+        return Line { Segment { .text = joinHints(views, width), .role = Role::Dim } };
     }
 
 } // namespace
@@ -441,7 +555,7 @@ namespace
             else
                 lines.push_back(Line { labelOf("perms"), Segment { .text = "none", .role = Role::Dim } });
             auto note = Line { settingLabel("note", FormField::Note),
-                               Segment { .text = cut(noteText(form.note, isFocused(FormField::Note)),
+                               Segment { .text = cut(noteText(form.note, dialog.mode == FieldMode::Typing),
                                                      std::max(width - LabelColumns, 4)),
                                          .role = isFocused(FormField::Note) ? Role::Selection : Role::Text,
                                          .hit = Hit { .kind = HitKind::DialogSetting,

@@ -55,12 +55,33 @@ namespace
     return *fixture.dashboard.interaction().taskBox;
 }
 
-/// Closes the open box with Esc.
-void closeBox(DashboardFixture& fixture)
+/// Presses Esc on its own: the key the terminal's Escape stands for, once its wait is over.
+void pressEsc(DashboardFixture& fixture)
 {
     CHECK(fixture.dashboard.input("\x1b").empty());
     CHECK(fixture.escapeTimesOut().empty());
+}
+
+/// Closes the open box, its text typed: Esc leaves the text, a second Esc closes.
+void closeBox(DashboardFixture& fixture)
+{
+    REQUIRE(boxOf(fixture).mode == FieldMode::Typing);
+    pressEsc(fixture);
+    pressEsc(fixture);
     REQUIRE_FALSE(fixture.dashboard.interaction().taskBox.has_value());
+}
+
+/// @return A world of two workers, for the busy rule's topic task.
+[[nodiscard]] World twoWorkers()
+{
+    auto world = World {};
+    world.configJson = R"({ "worktree_root": "~/worktrees", "models": ["opus", "sonnet"],
+  "workers": [ { "id": "a", "agent": "claude" }, { "id": "b", "agent": "claude" } ],
+  "repos": [ { "name": "contour", "path": "~/projects/contour", "forge": "github",
+               "issues": [ { "source": "forge", "query": "assignee:@me" } ] } ],
+  "tasks": [ { "id": "fix_ci", "key": "f", "label": "fix CI", "applies_to": "pr", "model": "sonnet",
+               "prompt": "/contour-workflows:fix-ci {url}" } ] })";
+    return world;
 }
 
 } // namespace
@@ -213,11 +234,12 @@ TEST_CASE("the n box: Tab reaches the repository, the worker and the model", "[o
     CHECK(fixture.dashboard.input("\x1b[C").empty());
     auto const stepped = boxOf(fixture).form.model;
     CHECK(stepped != model);
-    // Typing still edits the text wherever the keys are; Tab returns to it, Shift+Tab goes back.
+    // A letter types nothing off the text; Tab returns to it, typing, Shift+Tab goes back.
     CHECK(fixture.dashboard.input("!").empty());
-    CHECK(boxOf(fixture).text == "tidy the docs!");
+    CHECK(boxOf(fixture).text == "tidy the docs");
     CHECK(fixture.dashboard.input("\t").empty());
     CHECK(boxOf(fixture).focus == TaskBoxField::Text);
+    CHECK(boxOf(fixture).mode == FieldMode::Typing);
     CHECK(fixture.dashboard.input("\x1b[9;2u").empty()); // Shift+Tab
     CHECK(boxOf(fixture).focus == TaskBoxField::Model);
 
@@ -235,8 +257,10 @@ TEST_CASE("the n box: esc closes it; a paste is text", "[orchestrator][view][tas
     CHECK(boxOf(fixture).text == "fix it");
     closeBox(fixture);
     CHECK_FALSE(fixture.screen().contains("What should the agent do?"));
-    // Esc and a key read together close it too.
+    // Esc and a key read together leave the text, as Esc does; read so again, they close it.
     CHECK(fixture.dashboard.input("n").empty());
+    CHECK(fixture.dashboard.input("\x1b\r").empty());
+    CHECK(boxOf(fixture).mode == FieldMode::Navigating);
     CHECK(fixture.dashboard.input("\x1b\r").empty());
     CHECK_FALSE(fixture.dashboard.interaction().taskBox.has_value());
 }
@@ -289,4 +313,70 @@ TEST_CASE("the n box: a busy worker gives way only to one the topic task's profi
     REQUIRE(dispatched.size() == 1);
     // Copilot is idle but takes no profile: the busy task's own worker stays, and ⏎ started it.
     CHECK(dispatched.front().worker == "claude");
+}
+
+TEST_CASE("n box: opens typing; esc goes to the settings; a second esc closes",
+          "[orchestrator][view][taskbox]")
+{
+    auto fixture = DashboardFixture { twoWorkers() };
+    REQUIRE(fixture.engine.config() != nullptr);
+    CHECK(fixture.dashboard.input("n").empty());
+    CHECK(boxOf(fixture).focus == TaskBoxField::Text);
+    CHECK(boxOf(fixture).mode == FieldMode::Typing);
+    CHECK(fixture.screen().contains("esc settings"));
+
+    // The vim letters type.
+    CHECK(fixture.dashboard.input("fix jkhlqgGi").empty());
+    CHECK(boxOf(fixture).text == "fix jkhlqgGi");
+    CHECK(fixture.screen().contains("enter start · esc settings"));
+
+    // Esc goes to Repo, navigating; j goes to Worker, and l steps the worker as → does.
+    pressEsc(fixture);
+    CHECK(boxOf(fixture).focus == TaskBoxField::Repo);
+    CHECK(boxOf(fixture).mode == FieldMode::Navigating);
+    CHECK(fixture.screen().contains("enter start · ↑↓ move · ←→ change · i text · esc close"));
+    CHECK(fixture.dashboard.input("j").empty());
+    CHECK(boxOf(fixture).focus == TaskBoxField::Worker);
+    auto const first = boxOf(fixture).form.worker;
+    CHECK(fixture.dashboard.input("l").empty());
+    auto const next = boxOf(fixture).form.worker;
+    CHECK(next != first);
+    CHECK(fixture.dashboard.input("\x1b[D").empty());
+    CHECK(boxOf(fixture).form.worker == first);
+    CHECK(fixture.dashboard.input("\x1b[C").empty());
+    CHECK(boxOf(fixture).form.worker == next);
+
+    // k k reaches the text, which it only selects: x types nothing there.
+    CHECK(fixture.dashboard.input("kk").empty());
+    CHECK(boxOf(fixture).focus == TaskBoxField::Text);
+    CHECK(boxOf(fixture).mode == FieldMode::Navigating);
+    CHECK(fixture.screen().contains("⏎ text · ↑↓ move · ←→ change · i text · esc close"));
+    CHECK(fixture.dashboard.input("x").empty());
+    CHECK(boxOf(fixture).text == "fix jkhlqgGi");
+
+    // ⏎ on the text types it; Esc goes back to Repo.
+    CHECK(fixture.dashboard.input("\r").empty());
+    CHECK(boxOf(fixture).mode == FieldMode::Typing);
+    CHECK(boxOf(fixture).focus == TaskBoxField::Text);
+    pressEsc(fixture);
+    CHECK(boxOf(fixture).focus == TaskBoxField::Repo);
+
+    // A paste while navigating lands in the text.
+    CHECK(fixture.dashboard.input("\x1b[200~!\x1b[201~").empty());
+    CHECK(boxOf(fixture).text == "fix jkhlqgGi!");
+    CHECK(boxOf(fixture).mode == FieldMode::Navigating);
+
+    // i goes to the text, typing; Esc then q closes.
+    CHECK(fixture.dashboard.input("i").empty());
+    CHECK(boxOf(fixture).focus == TaskBoxField::Text);
+    CHECK(boxOf(fixture).mode == FieldMode::Typing);
+    pressEsc(fixture);
+    CHECK(fixture.dashboard.input("q").empty());
+    CHECK_FALSE(fixture.dashboard.interaction().taskBox.has_value());
+
+    // Typing and ⏎ at once still start: the one-step flow.
+    CHECK(fixture.dashboard.input("n").empty());
+    auto const dispatched = dispatchesIn(fixture.dashboard.input("tidy the docs\r"));
+    REQUIRE(dispatched.size() == 1);
+    CHECK(dispatched.front().topic == "tidy the docs");
 }

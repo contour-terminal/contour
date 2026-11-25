@@ -260,8 +260,8 @@ TEST_CASE("Start dialog: typing edits the note, Ctrl+P shows the prompt and the 
 {
     auto fixture = DashboardFixture { workWorld(), Wide };
     static_cast<void>(openOnFirst(fixture));
-    // Typed text goes to the note wherever the keys are; a paste too, as text.
-    CHECK(fixture.dashboard.input("keep it small").empty());
+    // i types the note; a paste goes to it too, as text.
+    CHECK(fixture.dashboard.input("ikeep it small").empty());
     CHECK(fixture.dashboard.input("\x1b[200~ please\r\x1b[201~").empty());
     CHECK(fixture.dashboard.interaction().startDialog->form.note == "keep it small please ");
     CHECK_FALSE(fixture.screen().contains("prompt    "));
@@ -290,4 +290,173 @@ TEST_CASE("Start dialog: it does not open on an item the engine no longer lists"
     auto const asked = openStartDialog(engine, items.front(), "fix_ci", {});
     REQUIRE(asked.has_value());
     CHECK(engine.config()->tasks()[asked->form.task].id == "fix_ci");
+}
+
+namespace
+{
+
+/// Two workers, the second one taking no profile, and two tasks for a pull request, the second keyed `l`.
+[[nodiscard]] World navigationWorld()
+{
+    constexpr auto Workers =
+        R"([ { "id": "claude", "agent": "claude" }, { "id": "copilot", "agent": "copilot" } ])"sv;
+    constexpr auto Tasks = R"([
+    { "id": "fix_ci", "key": "f", "label": "fix CI", "applies_to": "pr", "model": "sonnet", "worker": "claude",
+      "prompt": "/contour-workflows:fix-ci {url}" },
+    { "id": "review", "key": "l", "label": "address review", "applies_to": "pr", "model": "sonnet",
+      "worker": "claude", "prompt": "/contour-workflows:address-review {url}" } ])"sv;
+    return workWorldWith(workConfig(Workers, Tasks), {});
+}
+
+/// @return The open dialog; it must be open.
+[[nodiscard]] StartDialogState const& dialogOf(DashboardFixture const& fixture)
+{
+    REQUIRE(fixture.dashboard.interaction().startDialog.has_value());
+    return *fixture.dashboard.interaction().startDialog;
+}
+
+/// Presses ⏎ again on the Work view's selected row, the dialog closed.
+void reopen(DashboardFixture& fixture)
+{
+    REQUIRE_FALSE(fixture.dashboard.interaction().startDialog.has_value());
+    CHECK(fixture.dashboard.input("\r").empty());
+    REQUIRE(fixture.dashboard.interaction().startDialog.has_value());
+}
+
+/// Presses Esc on its own: the key the terminal's Escape stands for, once its wait is over.
+void pressEsc(DashboardFixture& fixture)
+{
+    CHECK(fixture.dashboard.input("\x1b").empty());
+    CHECK(fixture.escapeTimesOut().empty());
+}
+
+} // namespace
+
+TEST_CASE("start dialog: jk move between the settings, hl change one, letters type nothing",
+          "[orchestrator][view][start][startdialog]")
+{
+    auto fixture = DashboardFixture { navigationWorld(), Wide };
+    REQUIRE(fixture.engine.config() != nullptr);
+    static_cast<void>(openOnFirst(fixture));
+    CHECK(dialogOf(fixture).setting == FormField::Task);
+    CHECK(dialogOf(fixture).mode == FieldMode::Navigating);
+
+    // j walks down the settings and stops at the last; k, gg and G go back up, to the first and the last.
+    for (auto const setting: { FormField::Worker, FormField::Model, FormField::Permissions, FormField::Note })
+    {
+        CHECK(fixture.dashboard.input("j").empty());
+        CHECK(dialogOf(fixture).setting == setting);
+    }
+    CHECK(fixture.dashboard.input("j").empty());
+    CHECK(dialogOf(fixture).setting == FormField::Note);
+    CHECK(dialogOf(fixture).mode == FieldMode::Navigating);
+    CHECK(fixture.dashboard.input("k").empty());
+    CHECK(dialogOf(fixture).setting == FormField::Permissions);
+    CHECK(fixture.dashboard.input("gg").empty());
+    CHECK(dialogOf(fixture).setting == FormField::Task);
+    CHECK(fixture.dashboard.input("G").empty());
+    CHECK(dialogOf(fixture).setting == FormField::Note);
+    CHECK(dialogOf(fixture).mode == FieldMode::Navigating);
+
+    // On Task, l changes the task as → does, h changes it back.
+    CHECK(fixture.dashboard.input("gg").empty());
+    auto const first = dialogOf(fixture).form.task;
+    CHECK(fixture.dashboard.input("l").empty());
+    auto const next = dialogOf(fixture).form.task;
+    CHECK(next != first);
+    CHECK(fixture.dashboard.input("h").empty());
+    CHECK(dialogOf(fixture).form.task == first);
+    CHECK(fixture.dashboard.input("\x1b[C").empty());
+    CHECK(dialogOf(fixture).form.task == next);
+    CHECK(fixture.dashboard.input("\x1b[D").empty());
+    CHECK(dialogOf(fixture).form.task == first);
+
+    // A letter types nothing while the settings have the keys, and q closes.
+    CHECK(fixture.dashboard.input("x").empty());
+    CHECK(dialogOf(fixture).form.note.empty());
+    CHECK(dialogOf(fixture).setting == FormField::Task);
+    CHECK(fixture.dashboard.input("q").empty());
+    CHECK_FALSE(fixture.dashboard.interaction().startDialog.has_value());
+
+    // l on Worker steps the worker, though a task is keyed l: a task's key selects no task here. A worker
+    // that takes no profile offers none: j from Model goes to Note.
+    reopen(fixture);
+    CHECK(fixture.dashboard.input("jl").empty());
+    CHECK(dialogOf(fixture).setting == FormField::Worker);
+    CHECK(fixture.engine.config()->workers()[dialogOf(fixture).form.worker].id == "copilot");
+    CHECK(taskOf(fixture.engine, dialogOf(fixture)) == "fix_ci");
+    CHECK(fixture.dashboard.input("j").empty());
+    CHECK(dialogOf(fixture).setting == FormField::Model);
+    CHECK(fixture.dashboard.input("j").empty());
+    CHECK(dialogOf(fixture).setting == FormField::Note);
+}
+
+TEST_CASE("start dialog: i types into the note; esc leaves it, a second esc closes",
+          "[orchestrator][view][start][startdialog]")
+{
+    auto fixture = DashboardFixture { workWorld(), Wide };
+    static_cast<void>(openOnFirst(fixture));
+
+    // i goes to the note, typing; there the vim letters type.
+    CHECK(fixture.dashboard.input("i").empty());
+    CHECK(dialogOf(fixture).setting == FormField::Note);
+    CHECK(dialogOf(fixture).mode == FieldMode::Typing);
+    CHECK(fixture.screen().contains("enter start · esc settings · ctrl+p more"));
+    CHECK(fixture.dashboard.input("jkhlqgGi").empty());
+    CHECK(dialogOf(fixture).form.note == "jkhlqgGi");
+    CHECK(dialogOf(fixture).mode == FieldMode::Typing);
+
+    // Esc leaves the note, the dialog open on it; a second Esc closes it.
+    pressEsc(fixture);
+    CHECK(dialogOf(fixture).mode == FieldMode::Navigating);
+    CHECK(dialogOf(fixture).setting == FormField::Note);
+    CHECK(fixture.screen().contains("⏎ note · ↑↓ settings · ←→ change · i note · ctrl+p more · esc close"));
+    pressEsc(fixture);
+    CHECK_FALSE(fixture.dashboard.interaction().startDialog.has_value());
+
+    // ⏎ on the Note line types it; a second ⏎ starts, as ⏎ always has.
+    reopen(fixture);
+    CHECK(fixture.screen().contains(
+        "enter start · ↑↓ settings · ←→ change · i note · ctrl+p more · esc close"));
+    CHECK(fixture.dashboard.input("G").empty());
+    CHECK(fixture.dashboard.input("\r").empty());
+    CHECK(dialogOf(fixture).setting == FormField::Note);
+    CHECK(dialogOf(fixture).mode == FieldMode::Typing);
+    CHECK(dispatchesIn(fixture.dashboard.input("\r")).size() == 1);
+    CHECK_FALSE(fixture.dashboard.interaction().startDialog.has_value());
+
+    // Alt+j while typing (Esc and j in one read) leaves the note: j is dropped, the dialog stays open.
+    reopen(fixture);
+    CHECK(fixture.dashboard.input("i").empty());
+    CHECK(fixture.dashboard.input("\x1bj").empty());
+    CHECK(dialogOf(fixture).mode == FieldMode::Navigating);
+    CHECK(dialogOf(fixture).setting == FormField::Note);
+    CHECK(dialogOf(fixture).form.note.empty());
+
+    // Tab from Perms reaches the note, typing; Tab on leaves it.
+    CHECK(fixture.dashboard.input("k").empty());
+    REQUIRE(dialogOf(fixture).setting == FormField::Permissions);
+    CHECK(fixture.dashboard.input("\t").empty());
+    CHECK(dialogOf(fixture).setting == FormField::Note);
+    CHECK(dialogOf(fixture).mode == FieldMode::Typing);
+    CHECK(fixture.dashboard.input("\t").empty());
+    CHECK(dialogOf(fixture).setting == FormField::Task);
+    CHECK(dialogOf(fixture).mode == FieldMode::Navigating);
+    CHECK(fixture.dashboard.input("q").empty());
+
+    // A paste right after opening lands in the note: a paste is text, never keys.
+    reopen(fixture);
+    CHECK(fixture.dashboard.input("\x1b[200~jk\x1b[201~").empty());
+    CHECK(dialogOf(fixture).form.note == "jk");
+    CHECK(dialogOf(fixture).setting == FormField::Task);
+    CHECK(dialogOf(fixture).mode == FieldMode::Navigating);
+
+    // While the note is typed a chord moves nothing (Ctrl+D), and a plain special key still moves (↑).
+    CHECK(fixture.dashboard.input("G\r\x04").empty());
+    CHECK(dialogOf(fixture).setting == FormField::Note);
+    CHECK(dialogOf(fixture).mode == FieldMode::Typing);
+    CHECK(fixture.dashboard.input("\x1b[A").empty());
+    CHECK(dialogOf(fixture).setting == FormField::Permissions);
+    CHECK(dialogOf(fixture).mode == FieldMode::Navigating);
+    CHECK(dialogOf(fixture).form.note == "jk");
 }

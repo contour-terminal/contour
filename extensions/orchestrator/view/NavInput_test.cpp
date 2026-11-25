@@ -14,10 +14,12 @@
 #include <orchestrator/core/NavKeys.hpp>
 #include <orchestrator/view/Keys.hpp>
 #include <orchestrator/view/NavInput.hpp>
+#include <orchestrator/view/ViewFixtures.hpp>
 
 using namespace std::string_view_literals;
 using namespace orchestrator;
 using namespace orchestrator::view;
+using namespace orchestrator::view::test;
 using core::tui::KeyCode;
 using core::tui::KeyEvent;
 using core::tui::Modifier;
@@ -120,4 +122,23 @@ TEST_CASE("the key tables bind command keys only, as commandKeys() lists them",
             if (!std::ranges::contains(SharedWithActions, row.key))
                 CHECK(defaults.actionFor(row.key, NavContext::Navigating) == std::nullopt);
         }
+}
+
+TEST_CASE("navContextOf follows the start dialog's and the n box's mode", "[orchestrator][view][navinput]")
+{
+    auto box = DashboardFixture { World {} };
+    CHECK(box.dashboard.input("n").empty());
+    REQUIRE(box.dashboard.interaction().taskBox.has_value());
+    CHECK(navContextOf(box.dashboard.interaction(), KeyContext {}) == NavContext::Typing);
+    CHECK(box.dashboard.input("\x1b").empty());
+    static_cast<void>(box.escapeTimesOut());
+    REQUIRE(box.dashboard.interaction().taskBox.has_value());
+    CHECK(navContextOf(box.dashboard.interaction(), KeyContext {}) == NavContext::Navigating);
+
+    auto dialog = DashboardFixture { World {} };
+    dialog.dashboard.openStartDialogOn("contour", ChangeRequestRef { 2375 }, "fix_ci");
+    REQUIRE(dialog.dashboard.interaction().startDialog.has_value());
+    CHECK(navContextOf(dialog.dashboard.interaction(), KeyContext {}) == NavContext::Navigating);
+    CHECK(dialog.dashboard.input("i").empty());
+    CHECK(navContextOf(dialog.dashboard.interaction(), KeyContext {}) == NavContext::Typing);
 }

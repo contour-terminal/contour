@@ -16,13 +16,6 @@
 namespace orchestrator::view
 {
 
-/// Whether a box's text field has the keys.
-enum class FieldMode : uint8_t
-{
-    Navigating = 0, ///< The keys move between the box's settings: letters may act.
-    Typing,         ///< The text field has the keys: letters type.
-};
-
 /// Why a key resolved to no action.
 enum class NavMiss : uint8_t
 {
@@ -71,8 +64,9 @@ enum class NavMiss : uint8_t
 /// @return The action it does with nothing typed; std::nullopt: none, or it is no plain special key.
 [[nodiscard]] std::optional<NavAction> passedKeyAction(core::tui::KeyEvent const& key, NavKeys const& keys);
 
-/// @return The context of a list surface: Typing while a filter is typed or the message box has the
-///         keys; else Navigating. The palette is never resolved.
+/// @return The context of the surface with the keys: the start dialog's or the `n` box's mode while one is
+///         open; else Typing while a filter is typed or the message box has the keys, else Navigating. The
+///         palette is never resolved.
 /// @param interaction Where the user is.
 /// @param context The selected row and the engine: whether the message box has the keys.
 [[nodiscard]] NavContext navContextOf(Interaction const& interaction, KeyContext const& context) noexcept;

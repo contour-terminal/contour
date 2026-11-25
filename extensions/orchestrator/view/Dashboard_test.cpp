@@ -298,8 +298,16 @@ struct Scene
         Scene { .name = "work-empty-groups", .world = workEmptyGroups, .keys = "w/2375", .sizes = { Medium } },
         // The start dialog on Needs you's first item: its suggested task with the reason, the worker chips.
         Scene { .name = "start-dialog", .world = workWorld(), .keys = "w\r", .sizes = { Narrow, Medium, Wide } },
+        // The dialog's settings navigated: Model stepped with l.
+        Scene { .name = "start-dialog-keys", .world = workWorld(), .keys = "w\rjjl", .sizes = { Medium, Wide } },
         // The `n` box, a task typed: the defaults it starts on, the branch and worktree it makes.
         Scene { .name = "task-box", .world = World {}, .keys = "ninvestigate the flaky test", .sizes = { Narrow, Medium, Wide } },
+        // Esc leaves the text for the settings, where j selects the worker.
+        Scene { .name = "task-box-settings",
+                .world = World {},
+                .keys = "ninvestigate the flaky test\x1b",
+                .sizes = { Narrow, Medium },
+                .then = "j" },
         // The row menu, opened with the right button on Needs you's first item: #2375's.
         Scene { .name = "row-menu",
                 .world = workWorld(),
@@ -364,6 +372,9 @@ TEST_CASE("golden screens", "[orchestrator][view]")
                 static_cast<void>(fixture.dashboard.frame());
                 // What the keys ask, such as a fold, is carried out as the guest does.
                 static_cast<void>(fixture.carryOut(fixture.dashboard.input(scene.keys), sceneAnswers()));
+                // An Esc the keys end with is a key of its own once its wait is over.
+                if (scene.keys.ends_with('\x1b'))
+                    static_cast<void>(fixture.carryOut(fixture.escapeTimesOut(), sceneAnswers()));
                 fixture.settle(sceneAnswers());
                 // A click lands on what the last frame drew.
                 if (!scene.then.empty())
@@ -1414,13 +1425,15 @@ TEST_CASE("Work mouse: the dialog's settings step under the pointer", "[orchestr
     CHECK(dialog->form.model == (modelAt + 2) % 3);
     static_cast<void>(dashboard.frame());
 
-    // A click on a label picks the setting.
+    // A click on a label picks the setting; on the note's, it types the note.
+    CHECK(dialog->mode == FieldMode::Navigating);
     auto const note = regionOf(
         dashboard, Hit { .kind = HitKind::DialogSetting, .value = std::to_underlying(FormField::Note) });
     CHECK(dashboard.input(clickAt(note.x, note.y)).empty());
     CHECK(dialog->setting == FormField::Note);
+    CHECK(dialog->mode == FieldMode::Typing);
 
-    // A click outside closes it.
+    // A click outside closes it, though its note is typed.
     CHECK(dashboard.input(clickAt(0, 0)).empty());
     CHECK_FALSE(dialog.has_value());
 }
@@ -1439,12 +1452,18 @@ TEST_CASE("Work mouse: the n box's settings step under the pointer", "[orchestra
     auto const before = box->form.worker;
     CHECK(dashboard.input(clickAt(worker.x + 1, worker.y)).empty());
     CHECK(box->focus == TaskBoxField::Worker);
+    CHECK(box->mode == FieldMode::Navigating);
     CHECK(box->form.worker != before);
     static_cast<void>(dashboard.frame());
     auto const text = regionOf(
         dashboard, Hit { .kind = HitKind::DialogSetting, .value = std::to_underlying(TaskBoxField::Text) });
     CHECK(dashboard.input(clickAt(text.x, text.y)).empty());
     CHECK(box->focus == TaskBoxField::Text);
+    CHECK(box->mode == FieldMode::Typing);
+
+    // A click beside it closes it, though its text is typed.
+    CHECK(dashboard.input(clickAt(0, 0)).empty());
+    CHECK_FALSE(box.has_value());
 }
 
 TEST_CASE("Work mouse: a click on Agents/Work in the top bar switches views",
@@ -1485,8 +1504,13 @@ TEST_CASE("Work mouse: every hint in the bar runs its action", "[orchestrator][v
     auto const task = hint(KeyCommand::NewTask);
     CHECK(dashboard.input(clickAt(task.x + 1, task.y)).empty());
     CHECK(dashboard.interaction().taskBox.has_value());
-    CHECK(dashboard.input("\x1b").empty());
-    static_cast<void>(fixture->escapeTimesOut());
+    // Esc leaves its text, a second closes it.
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 2))
+    {
+        CHECK(dashboard.input("\x1b").empty());
+        static_cast<void>(fixture->escapeTimesOut());
+    }
+    CHECK_FALSE(dashboard.interaction().taskBox.has_value());
     static_cast<void>(dashboard.frame());
     // Every Work view hint the bar draws stands for its key.
     for (auto const& region: regionsOf(dashboard, HitKind::Command))
@@ -1701,8 +1725,12 @@ TEST_CASE("n opens the box; enter on + new task too", "[orchestrator][view]")
     auto fixture = Fixture { World {} };
     CHECK(fixture.dashboard.input("n").empty());
     CHECK(fixture.dashboard.interaction().taskBox.has_value());
-    CHECK(fixture.dashboard.input("\x1b").empty());
-    fixture.escapeTimesOut();
+    // Esc leaves its text, a second closes it.
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 2))
+    {
+        CHECK(fixture.dashboard.input("\x1b").empty());
+        fixture.escapeTimesOut();
+    }
     REQUIRE_FALSE(fixture.dashboard.interaction().taskBox.has_value());
     // `+ new task` is the only row, selected.
     CHECK(fixture.dashboard.input("\r").empty());

@@ -20,6 +20,7 @@
 #include <orchestrator/core/Utf8.hpp>
 #include <orchestrator/core/WorkItems.hpp>
 #include <orchestrator/view/Keys.hpp>
+#include <orchestrator/view/NavInput.hpp>
 #include <orchestrator/view/Sections.hpp>
 #include <orchestrator/view/TextEdit.hpp>
 #include <orchestrator/view/Theme.hpp>
@@ -59,6 +60,24 @@ namespace
         auto const count = FieldRows.size();
         auto const index = std::to_underlying(from);
         return FieldRows[step > 0 ? (index + 1) % count : (index + count - 1) % count].field;
+    }
+
+    /// @return The place after (or before, by @p step) @p from, staying at either end.
+    [[nodiscard]] TaskBoxField steppedField(TaskBoxField from, int step) noexcept
+    {
+        auto const index = std::to_underlying(from);
+        if (step > 0)
+            return index + 1 < FieldRows.size() ? FieldRows[index + 1].field : from;
+        return index > 0 ? FieldRows[index - 1].field : from;
+    }
+
+    /// Moves to @p field by a navigation key: a move off the text stops typing it; one onto it only selects
+    /// it.
+    void moveTo(TaskBoxState& box, TaskBoxField field) noexcept
+    {
+        if (field != box.focus)
+            box.mode = FieldMode::Navigating;
+        box.focus = field;
     }
 
     /// @return Whether @p text says nothing: empty, or blanks only.
@@ -125,7 +144,60 @@ void pasteIntoTaskBox(std::optional<TaskBoxState>& box, std::string_view text)
         box->text += text;
 }
 
+void pickTaskBoxField(TaskBoxState& box, TaskBoxField field) noexcept
+{
+    box.focus = field;
+    box.mode = field == TaskBoxField::Text ? FieldMode::Typing : FieldMode::Navigating;
+}
+
+namespace
+{
+    /// Applies a navigation action to the open box.
+    /// @return The dispatch, when the action confirmed it.
+    [[nodiscard]] std::optional<DispatchAction> applyNavAction(NavAction action,
+                                                               core::tui::KeyEvent const& key,
+                                                               std::optional<TaskBoxState>& box,
+                                                               Engine const& engine,
+                                                               HooksWarning hooksAtInput,
+                                                               std::string_view nearTab)
+    {
+        auto& state = *box;
+        switch (action)
+        {
+            case NavAction::MoveUp:
+            case NavAction::MoveDown:
+                moveTo(state, steppedField(state.focus, action == NavAction::MoveDown ? 1 : -1));
+                break;
+            case NavAction::First: moveTo(state, FieldRows.front().field); break;
+            case NavAction::Last: moveTo(state, FieldRows.back().field); break;
+            case NavAction::PreviousValue:
+            case NavAction::NextValue:
+                if (auto const setting = FieldRows[std::to_underlying(state.focus)].setting)
+                    changeSetting(state.form, *setting, action == NavAction::NextValue ? 1 : -1, engine);
+                break;
+            case NavAction::EnterField:
+                // `⏎` types the text only on its line; elsewhere it starts, as it always has.
+                if (key.key == core::tui::KeyCode::Enter && state.focus != TaskBoxField::Text)
+                {
+                    auto dispatch = confirm(state, engine, hooksAtInput, nearTab);
+                    if (dispatch)
+                        box.reset();
+                    return dispatch;
+                }
+                pickTaskBoxField(state, TaskBoxField::Text);
+                break;
+            // The settings are what the keys go to once the text is left.
+            case NavAction::LeaveField: pickTaskBoxField(state, TaskBoxField::Repo); break;
+            case NavAction::Close: box.reset(); break;
+            case NavAction::HalfPageUp:
+            case NavAction::HalfPageDown: break;
+        }
+        return std::nullopt;
+    }
+} // namespace
+
 std::optional<DispatchAction> applyTaskBoxKey(core::tui::KeyEvent const& key,
+                                              std::optional<NavAction> nav,
                                               std::optional<TaskBoxState>& box,
                                               Engine const& engine,
                                               HooksWarning hooksAtInput,
@@ -136,33 +208,38 @@ std::optional<DispatchAction> applyTaskBoxKey(core::tui::KeyEvent const& key,
     auto& state = *box;
     using core::tui::KeyCode;
     using core::tui::Modifier;
+    auto const typing = state.mode == FieldMode::Typing;
+    auto const& keys = keysInForce(engine);
 
-    // The line-editing keys come first: Alt+Backspace drops a word rather than reading as Esc.
-    if (auto const edit = textEditOf(key))
-    {
-        applyTextEdit(state.text, *edit);
-        return std::nullopt;
-    }
-    // A key with Alt is how an Esc reads when the next key follows it in the same read: the user pressed Esc.
-    if (core::tui::hasModifier(key.modifiers, Modifier::Alt))
+    if (nav == NavAction::Close)
     {
         box.reset();
         return std::nullopt;
     }
+    // The line-editing keys come first while typing: Alt+Backspace drops a word rather than reading as Esc.
+    if (auto const edit = textEditOf(key); edit && typing)
+    {
+        applyTextEdit(state.text, *edit);
+        return std::nullopt;
+    }
+    // A key with Alt is how an Esc reads when the next key follows it in the same read: it does what Esc
+    // does there (Decision 11).
+    if (core::tui::hasModifier(key.modifiers, Modifier::Alt))
+    {
+        auto const asEsc = keys.actionFor("esc", typing ? NavContext::Typing : NavContext::Navigating);
+        return asEsc ? applyNavAction(*asEsc, key, box, engine, hooksAtInput, nearTab) : std::nullopt;
+    }
+    if (nav)
+        return applyNavAction(*nav, key, box, engine, hooksAtInput, nearTab);
     if (core::tui::hasModifier(key.modifiers, Modifier::Ctrl))
         return std::nullopt;
 
     switch (key.key)
     {
-        case KeyCode::Escape: box.reset(); return std::nullopt;
         case KeyCode::Tab:
-            state.focus =
-                nextField(state.focus, core::tui::hasModifier(key.modifiers, Modifier::Shift) ? -1 : 1);
-            return std::nullopt;
-        case KeyCode::Left:
-        case KeyCode::Right:
-            if (auto const setting = FieldRows[std::to_underlying(state.focus)].setting)
-                changeSetting(state.form, *setting, key.key == KeyCode::Right ? 1 : -1, engine);
+            pickTaskBoxField(
+                state,
+                nextField(state.focus, core::tui::hasModifier(key.modifiers, Modifier::Shift) ? -1 : 1));
             return std::nullopt;
         case KeyCode::Enter: {
             auto action = confirm(state, engine, hooksAtInput, nearTab);
@@ -172,8 +249,16 @@ std::optional<DispatchAction> applyTaskBoxKey(core::tui::KeyEvent const& key,
         }
         default: break;
     }
+    if (!typing)
+        return std::nullopt;
     if (auto const printable = printableOf(key))
+    {
         appendUtf8(state.text, *printable);
+        return std::nullopt;
+    }
+    // A plain special key the text does not take acts as it would with nothing typed.
+    if (auto const passed = passedKeyAction(key, keys))
+        return applyNavAction(*passed, key, box, engine, hooksAtInput, nearTab);
     return std::nullopt;
 }
 
@@ -274,10 +359,10 @@ namespace
         // The text, with a cursor while it has the keys.
         lines.push_back(Line { Segment {
             .text = "What should the agent do?", .role = Role::Dim, .hit = placeHit(TaskBoxField::Text) } });
-        auto const typing = box.focus == TaskBoxField::Text;
-        auto const textRole = box.text.starts_with('-') ? Role::Failing
-                              : typing                  ? Role::Selection
-                                                        : Role::Text;
+        auto const typing = box.mode == FieldMode::Typing;
+        auto const textRole = box.text.starts_with('-')         ? Role::Failing
+                              : box.focus == TaskBoxField::Text ? Role::Selection
+                                                                : Role::Text;
         auto const textLine = lines.size();
         appendText(lines,
                    typing ? std::format("{}▏", box.text) : box.text,
@@ -344,12 +429,34 @@ namespace
             appendText(lines, warning, Role::Warning, width);
         lines.emplace_back();
 
-        // What Enter does now, then the other keys.
-        auto hints = std::vector<std::string_view> {};
-        if (!blank && canConfirm(form, engine))
-            hints.push_back(enterHint(form, engine, box.hooks));
-        hints.insert(hints.end(), { "tab settings"sv, "←→ change"sv, "esc close"sv });
-        lines.push_back(Line { Segment { .text = joinHints(hints, width), .role = Role::Dim } });
+        // What Enter does now, then the other keys, each named by its first key in force (a hint whose key is
+        // unbound is left out).
+        auto const& keys = keysInForce(engine);
+        auto const label = [&](NavAction action) {
+            return navKeyLabel(keys, action);
+        };
+        auto hints = std::vector<std::string> {};
+        auto const add = [&](std::string const& key, std::string_view does) {
+            if (!key.empty())
+                hints.push_back(std::format("{} {}", key, does));
+        };
+        // `⏎` on the Text line types it, when it is an enter_field key there.
+        if (!typing && box.focus == TaskBoxField::Text
+            && std::ranges::contains(keys.keysOf(NavAction::EnterField), "enter"sv))
+            add(std::string { shownKeyName("enter") }, "text"sv);
+        else if (!blank && canConfirm(form, engine))
+            hints.emplace_back(enterHint(form, engine, box.hooks));
+        if (typing)
+            add(label(NavAction::LeaveField), "settings"sv);
+        else
+        {
+            add(label(NavAction::MoveUp) + label(NavAction::MoveDown), "move"sv);
+            add(label(NavAction::PreviousValue) + label(NavAction::NextValue), "change"sv);
+            add(label(NavAction::EnterField), "text"sv);
+            add(label(NavAction::Close), "close"sv);
+        }
+        auto const views = std::vector<std::string_view> { hints.begin(), hints.end() };
+        lines.push_back(Line { Segment { .text = joinHints(views, width), .role = Role::Dim } });
         return layout;
     }
 

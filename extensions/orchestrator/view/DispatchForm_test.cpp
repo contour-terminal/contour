@@ -100,8 +100,10 @@ TEST_CASE("a note starting with - is refused in the form", "[orchestrator][view]
 {
     auto fixture = DashboardFixture { World {} };
     openOn2375(fixture);
+    // Tab four times reaches the note, typing.
     CHECK(fixture.dashboard.input("\t\t\t\t-rf").empty());
     REQUIRE(dialogOf(fixture).setting == FormField::Note);
+    CHECK(dialogOf(fixture).mode == FieldMode::Typing);
     CHECK(dialogOf(fixture).form.note == "-rf");
     CHECK(fixture.screen().contains("a note may not start with -"));
 
@@ -250,9 +252,12 @@ TEST_CASE("a paste is text, never keys", "[orchestrator][view][form]")
     // Every frame asks for bracketed paste.
     CHECK(fixture.dashboard.frame().contains(BracketedPasteOn));
 
+    // The dialog opens navigating its settings; a paste still goes to the note.
     openOn2375(fixture);
+    REQUIRE(dialogOf(fixture).mode == FieldMode::Navigating);
     CHECK(fixture.dashboard.input("\x1b[200~a\nb\r\n\x1b[201~").empty());
     CHECK(dialogOf(fixture).form.note == "a b ");
+    CHECK(dialogOf(fixture).mode == FieldMode::Navigating);
 
     // On the list a paste is dropped: its Enter opens nothing; typing a filter, it extends the filter.
     auto list = DashboardFixture { World {} };
@@ -267,11 +272,11 @@ TEST_CASE("the form offers Enter only while Enter dispatches", "[orchestrator][v
 {
     auto fixture = DashboardFixture { World {} };
     openOn2375(fixture);
-    CHECK(fixture.screen().contains("enter start · tab next · ←→ change"));
+    CHECK(fixture.screen().contains("enter start · ↑↓ settings · ←→ change"));
     CHECK(fixture.screen().contains("task      ‹ fix CI ›"));
-    CHECK(fixture.dashboard.input("-").empty());
+    CHECK(fixture.dashboard.input("i-").empty());
     CHECK_FALSE(fixture.screen().contains("enter start"));
-    CHECK(fixture.screen().contains("tab next · ←→ change"));
+    CHECK(fixture.screen().contains("esc settings · ctrl+p more"));
 
     auto refused = DashboardFixture { limitReached() };
     openOn2375(refused);

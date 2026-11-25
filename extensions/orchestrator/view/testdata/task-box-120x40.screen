@@ -22,7 +22,7 @@
 │                   │ branch    agent/topic-investigate-the-flaky-test-…                           │                   │
 │                   │ worktree  /home/u/worktrees/contour/topic-investigate-the-flaky-test-…       │                   │
 │                   │                                                                              │                   │
-│                   │ enter start · tab settings · ←→ change · esc close                           │                   │
+│                   │ enter start · esc settings                                                   │                   │
 │                   ╰──────────────────────────────────────────────────────────────────────────────╯                   │
 │                                              │ │                                                                     │
 │                                              │ │                                                                     │

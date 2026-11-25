@@ -270,12 +270,22 @@ struct Dashboard::State
     /// @param actions What the engine is asked, appended to.
     void press(core::tui::KeyCode key, std::vector<UiAction>& actions);
     /// Routes @p action as resolved to the surface with the keys, whatever key the configuration binds it to
-    /// and whether a field is typed (Decision 17): the mouse acts on intent, never through the key table. A
-    /// dialog, the `n` box, the palette and the row menu still take keys: they are given the plain key that
-    /// does @p action there (`esc`, `up`, `down`).
+    /// and whether a field is typed (Decision 17): the mouse acts on intent, never through the key table. The
+    /// palette and the row menu still take keys: they are given the plain key that does @p action there
+    /// (`esc`, `up`, `down`).
     /// @param action What the mouse asks.
     /// @param actions What the engine is asked, appended to.
     void press(NavAction action, std::vector<UiAction>& actions);
+    /// Applies one key to the open start dialog, else the open `n` box.
+    /// @param key The key.
+    /// @param nav What it resolved to in the dialog's or the box's mode, or what the mouse asked;
+    ///        std::nullopt: nothing.
+    /// @param hooksAtInput The HooksWarning as the input that holds @p key began.
+    /// @param actions What the engine is asked, appended to.
+    void applyBoxKey(core::tui::KeyEvent const& key,
+                     std::optional<NavAction> nav,
+                     HooksWarning hooksAtInput,
+                     std::vector<UiAction>& actions);
     /// Applies one key to a list surface: the Work view's list while nothing is over it, the palette's entry
     /// the Work view has a command for, else applyKey().
     /// @param key The key.
@@ -1132,25 +1142,15 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
         if (key == nullptr)
             continue;
         interaction.notice.clear();
-        if (interaction.startDialog)
+        // The start dialog and the `n` box resolve the key in their mode; a key that starts a sequence waits
+        // for the next one.
+        if (interaction.startDialog || interaction.taskBox)
         {
-            if (auto dispatched =
-                    applyStartDialogKey(*key, interaction.startDialog, engine, hooksAtInput, tab))
-            {
-                // The run it starts is selected once it is listed: its session is the one the dialog minted.
-                startedSession = dispatched->session;
-                actions.emplace_back(std::move(*dispatched));
-            }
-            continue;
-        }
-        if (interaction.taskBox)
-        {
-            if (auto dispatched = applyTaskBoxKey(*key, interaction.taskBox, engine, hooksAtInput, tab))
-            {
-                // The run it starts is selected once it is listed: its session is the one the box minted.
-                startedSession = dispatched->session;
-                actions.emplace_back(std::move(*dispatched));
-            }
+            auto const resolved = navActionOf(
+                *key, navContextOf(interaction, keyContext()), keysInForce(engine), interaction.pendingKey);
+            if (!resolved && resolved.error() == NavMiss::Pending)
+                continue;
+            applyBoxKey(*key, resolved ? std::optional { *resolved } : std::nullopt, hooksAtInput, actions);
             continue;
         }
         auto const view = interaction.view;
@@ -1179,6 +1179,21 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
     if (interaction != before)
         repaint = Repaint::Needed;
     return actions;
+}
+
+void Dashboard::State::applyBoxKey(core::tui::KeyEvent const& key,
+                                   std::optional<NavAction> nav,
+                                   HooksWarning hooksAtInput,
+                                   std::vector<UiAction>& actions)
+{
+    auto dispatched = interaction.startDialog
+                          ? applyStartDialogKey(key, nav, interaction.startDialog, engine, hooksAtInput, tab)
+                          : applyTaskBoxKey(key, nav, interaction.taskBox, engine, hooksAtInput, tab);
+    if (!dispatched)
+        return;
+    // The run it starts is selected once it is listed: its session is the one the dialog or the box minted.
+    startedSession = dispatched->session;
+    actions.emplace_back(std::move(*dispatched));
 }
 
 void Dashboard::State::applyListKey(core::tui::KeyEvent const& key,
@@ -1295,14 +1310,14 @@ namespace
             RowMenuState { .itemKey = workItemKey(*item), .highlighted = 0, .at = pointer.at };
     }
 
-    /// Picks a setting of the open start dialog or `n` box.
+    /// Picks a setting of the open start dialog or `n` box, as a click does: its text line types.
     /// @param field A FormField of the dialog, or a TaskBoxField of the box.
     void pickDialogSetting(State& state, std::size_t field)
     {
         if (auto& dialog = state.interaction.startDialog)
-            dialog->setting = static_cast<FormField>(field);
+            pickStartDialogSetting(*dialog, static_cast<FormField>(field));
         else if (auto& box = state.interaction.taskBox)
-            box->focus = static_cast<TaskBoxField>(field);
+            pickTaskBoxField(*box, static_cast<TaskBoxField>(field));
     }
 
     /// Picks a setting of the open start dialog or `n` box and steps it, as ←/→ do.
@@ -1597,7 +1612,7 @@ namespace
                           std::vector<UiAction>& actions) {
                            if (auto& dialog = state.interaction.startDialog)
                            {
-                               dialog->setting = FormField::Worker;
+                               pickStartDialogSetting(*dialog, FormField::Worker);
                                dialog->form.worker = value;
                            }
                            if (clicks == Clicks::Double)
@@ -1721,15 +1736,18 @@ void Dashboard::State::press(NavAction action, std::vector<UiAction>& actions)
     interaction.pendingKey.clear();
     auto const plain = std::ranges::find(PlainKeys, action, &PlainKey::action);
     auto const key = plain != PlainKeys.end() ? plain->key : core::tui::KeyCode::None;
-    // The boxes, the palette and the row menu take keys until they take a resolved action of their own.
-    if (interaction.startDialog || interaction.taskBox || interaction.palette || interaction.work.menu)
+    // The palette and the row menu take keys until they take a resolved action of their own.
+    if (interaction.palette || interaction.work.menu)
     {
         press(key, actions);
         return;
     }
     auto const before = interaction;
     interaction.notice.clear();
-    applyListKey(core::tui::KeyEvent { .key = key }, action, actions);
+    if (interaction.startDialog || interaction.taskBox)
+        applyBoxKey(core::tui::KeyEvent { .key = key }, action, dialogHooks(), actions);
+    else
+        applyListKey(core::tui::KeyEvent { .key = key }, action, actions);
     if (interaction != before)
         repaint = Repaint::Needed;
 }
