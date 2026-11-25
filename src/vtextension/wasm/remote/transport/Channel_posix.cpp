@@ -237,6 +237,7 @@ std::expected<std::size_t, ChannelError> Channel::receiveSomeWithHandles(std::sp
     // Owned at once, so that every one is closed should any part of the message be refused.
     auto arrived = std::vector<OwnedHandle> {};
     auto foreign = false;
+    auto unconfigured = false;
     for (auto* header = CMSG_FIRSTHDR(&message); header != nullptr; header = CMSG_NXTHDR(&message, header))
     {
         if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_RIGHTS
@@ -253,13 +254,15 @@ std::expected<std::size_t, ChannelError> Channel::receiveSomeWithHandles(std::sp
             arrived.emplace_back(descriptor);
 #ifndef MSG_CMSG_CLOEXEC
             if (::fcntl(descriptor, F_SETFD, FD_CLOEXEC) == -1)
-                foreign = true;
+                unconfigured = true;
 #endif
         }
     }
     // Something other than descriptors, or descriptors the buffer had no room for: nothing of the message
     // can be trusted to carry what its sender meant.
     if (foreign || (message.msg_flags & MSG_CTRUNC) != 0)
+        return std::unexpected(ChannelError::Refused);
+    if (unconfigured)
         return std::unexpected(ChannelError::Io);
     if (received == 0)
         return std::unexpected(ChannelError::Closed);

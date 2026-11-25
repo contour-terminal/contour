@@ -30,6 +30,9 @@
 
 #ifdef _WIN32
     #include <bit>
+
+    #define WIN32_LEAN_AND_MEAN
+    #include <Windows.h>
 #endif
 
 using namespace vtextension::wasm::remote;
@@ -122,12 +125,13 @@ TEST_CASE("HandleGrant.forgedValueIsRefused", "[vtextension]")
         std::move(probe.control), proto::ChannelKind::Control, proto::Direction::ToParent, proto::PduLimits {}
     };
 #ifdef _WIN32
-    // A value the probe holds a handle under, of no section: its own control pipe. Released, not closed: the
-    // probe still hears its control channel end below.
+    // A value the probe holds a handle under, of no section: its own control pipe. Let go, never closed: the
+    // probe still hears the next PDU on that pipe.
     REQUIRE_FALSE(probe.childHandles->empty());
     auto const forged = static_cast<uint64_t>(std::bit_cast<uintptr_t>(probe.childHandles->front()));
 #else
-    // The descriptor the request names never came.
+    // The descriptor the request names never came. This pins only the end-to-end outcome: no value a POSIX
+    // helper is sent can name a descriptor of its own, so there is nothing it could close by mistake.
     auto const forged = uint64_t { 0 };
 #endif
     REQUIRE(control.send(instantiateNaming(forged)).has_value());
@@ -135,5 +139,96 @@ TEST_CASE("HandleGrant.forgedValueIsRefused", "[vtextension]")
     auto const report = readReport(probe.lanes.front());
     REQUIRE(report.has_value());
     CHECK(*report == std::vector<std::string> { "granted=refused", "end" });
+
+    // Its control channel survived the refusal: had the forged value been closed, the probe would hear
+    // nothing.
+    REQUIRE(control.send(proto::Release { .target = proto::ReleaseTarget::Instance, .id = 1 }).has_value());
+    auto const heard = readReport(probe.lanes.front());
+    REQUIRE(heard.has_value());
+    CHECK(*heard == std::vector<std::string> { "heard", "end" });
     endProbe(probe, control);
 }
+
+TEST_CASE("HandleGrant.noTargetGrantsNothing", "[vtextension]")
+{
+    auto const object = transport::createSharedObject(ObjectBytes, transport::SharedObjectUse::GuestMemory);
+    REQUIRE(object.has_value());
+    CHECK(transport::HandleTarget::none().isNone());
+    CHECK(transport::grantHandle(transport::HandleTarget::none(), object->get())
+          == std::unexpected(transport::GrantError::Io));
+
+    // A target moved on grants as it did; the one it was moved from is none().
+    auto source = transport::HandleTarget::currentProcess();
+    auto const moved = std::move(source);
+    CHECK_FALSE(moved.isNone());
+    auto const grant = transport::grantHandle(moved, object->get());
+    REQUIRE(grant.has_value());
+#ifdef _WIN32
+    // Granted to this process: the duplicate is the test's to close.
+    ::CloseHandle(std::bit_cast<HANDLE>(static_cast<uintptr_t>(grant->wireValue)));
+#endif
+}
+
+#ifdef _WIN32
+namespace
+{
+
+/// @return The helper's end of a fresh control channel, as the helper reads it.
+[[nodiscard]] transport::PduStream helperControl(transport::ChannelPair& pair)
+{
+    return transport::PduStream {
+        std::move(pair.helper), proto::ChannelKind::Control, proto::Direction::ToHelper, proto::PduLimits {}
+    };
+}
+
+/// @return Whether @p handle names a handle of this process.
+[[nodiscard]] bool isOpen(HANDLE handle)
+{
+    auto flags = DWORD { 0 };
+    return ::GetHandleInformation(handle, &flags) != FALSE;
+}
+
+} // namespace
+
+TEST_CASE("HandleGrant.claimRefusesWhatNamesNoHandle", "[vtextension]")
+{
+    auto pair = transport::makeChannelPair();
+    REQUIRE(pair.has_value());
+    auto stream = helperControl(*pair);
+    // Not a multiple of 4; this process's and this thread's pseudo-handles; the process token's, a multiple
+    // of 4.
+    for (auto const value: { uint64_t { 0 }, uint64_t { 0x1F5 }, UINT64_MAX, UINT64_MAX - 1, UINT64_MAX - 3 })
+    {
+        INFO(value);
+        CHECK(transport::claimGrantedHandle(stream, value)
+              == std::unexpected(transport::StreamError::Malformed));
+    }
+}
+
+TEST_CASE("HandleGrant.unprovedClaimIsNeverClosed", "[vtextension]")
+{
+    auto pair = transport::makeChannelPair();
+    REQUIRE(pair.has_value());
+    auto stream = helperControl(*pair);
+    auto* const own = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    REQUIRE(own != nullptr);
+    auto const value = static_cast<uint64_t>(std::bit_cast<uintptr_t>(own));
+
+    // A claim let go unproved forgets the value: it may name a handle of this process's own.
+    {
+        auto claim = transport::claimGrantedHandle(stream, value);
+        REQUIRE(claim.has_value());
+        CHECK(claim->get() == own);
+    }
+    CHECK(isOpen(own));
+
+    // Adopted, once proved, it is this process's to close.
+    {
+        auto claim = transport::claimGrantedHandle(stream, value);
+        REQUIRE(claim.has_value());
+        auto const adopted = std::move(*claim).adopt();
+        CHECK(adopted.get() == own);
+    }
+    CHECK_FALSE(isOpen(own));
+}
+#endif

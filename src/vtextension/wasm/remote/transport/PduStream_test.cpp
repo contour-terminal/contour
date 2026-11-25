@@ -13,6 +13,7 @@
 #include <expected>
 #include <future>
 #include <ranges>
+#include <span>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -23,6 +24,11 @@
 #include <vtextension/wasm/remote/transport/PduStream.hpp>
 
 #ifndef _WIN32
+    #include <sys/socket.h>
+    #include <sys/uio.h>
+
+    #include <cstring>
+
     #include <unistd.h>
 
     #include <vtextension/wasm/remote/transport/HandleGrant.hpp>
@@ -312,6 +318,36 @@ namespace
     return *grant;
 }
 
+/// Sends a Release frame on @p socket with every one of @p objects in one SCM_RIGHTS message, as no honest
+/// parent does; none of them with no objects.
+/// @return Whether all of the frame was sent.
+[[nodiscard]] bool sendWithDescriptors(int socket, std::span<transport::OwnedHandle const> objects)
+{
+    auto frame = proto::encodeFrame(proto::Release { .target = proto::ReleaseTarget::Instance, .id = 1 });
+    REQUIRE(frame.has_value());
+    auto iov = ::iovec { .iov_base = frame->data(), .iov_len = frame->size() };
+    alignas(::cmsghdr) auto control = std::array<std::byte, CMSG_SPACE(sizeof(int) * 3)> {};
+    auto message = ::msghdr {};
+    message.msg_iov = &iov;
+    message.msg_iovlen = 1;
+    if (!objects.empty())
+    {
+        auto const bytes = sizeof(int) * objects.size();
+        message.msg_control = control.data();
+        message.msg_controllen = static_cast<decltype(message.msg_controllen)>(CMSG_SPACE(bytes));
+        auto* const header = CMSG_FIRSTHDR(&message);
+        header->cmsg_level = SOL_SOCKET;
+        header->cmsg_type = SCM_RIGHTS;
+        header->cmsg_len = static_cast<decltype(header->cmsg_len)>(CMSG_LEN(bytes));
+        for (auto const index: std::views::iota(std::size_t { 0 }, objects.size()))
+        {
+            auto const descriptor = objects[index].get();
+            std::memcpy(CMSG_DATA(header) + (index * sizeof(int)), &descriptor, sizeof(int));
+        }
+    }
+    return ::sendmsg(socket, &message, 0) == static_cast<ssize_t>(frame->size());
+}
+
 } // namespace
 
 TEST_CASE("PduStream.instantiateCarriesItsDescriptor", "[vtextension]")
@@ -351,6 +387,53 @@ TEST_CASE("PduStream.secondUnclaimedDescriptorIsMalformed", "[vtextension]")
     CHECK(transport::testing::openDescriptorCount() == before);
     CHECK(pair.helper.takeAttachedHandle());
 }
+
+TEST_CASE("PduStream.tooManyDescriptorsAreMalformed", "[vtextension]")
+{
+    // One SCM_RIGHTS message with two descriptors: both taken in, then refused and closed by the stream. With
+    // three: more than a receive takes in, truncated by the system, refused and closed by the channel.
+    for (auto const count: { std::size_t { 2 }, std::size_t { 3 } })
+    {
+        INFO(count << " descriptors");
+        auto channels = makeChannelPair();
+        REQUIRE(channels.has_value());
+        auto helper = PduStream { std::move(channels->helper),
+                                  proto::ChannelKind::Control,
+                                  proto::Direction::ToHelper,
+                                  proto::PduLimits {} };
+        auto const before = transport::testing::openDescriptorCount();
+        {
+            auto objects = std::vector<transport::OwnedHandle> {};
+            for ([[maybe_unused]] auto const index: std::views::iota(std::size_t { 0 }, count))
+                objects.push_back(makeObject());
+            REQUIRE(sendWithDescriptors(channels->parent.nativeHandle(), objects));
+        }
+        CHECK(helper.receive() == std::unexpected(StreamError::Malformed));
+        CHECK_FALSE(helper.takeAttachedHandle());
+        CHECK(transport::testing::openDescriptorCount() == before);
+    }
+}
+
+    #ifdef SO_PASSCRED
+TEST_CASE("PduStream.foreignAncillaryDataIsMalformed", "[vtextension]")
+{
+    // Credentials, which the kernel attaches to every message once the reader asks for them: ancillary data
+    // that is no descriptor.
+    auto channels = makeChannelPair();
+    REQUIRE(channels.has_value());
+    auto const enable = 1;
+    REQUIRE(::setsockopt(channels->helper.nativeHandle(), SOL_SOCKET, SO_PASSCRED, &enable, sizeof(enable))
+            == 0);
+    auto helper = PduStream { std::move(channels->helper),
+                              proto::ChannelKind::Control,
+                              proto::Direction::ToHelper,
+                              proto::PduLimits {} };
+    auto const before = transport::testing::openDescriptorCount();
+    REQUIRE(sendWithDescriptors(channels->parent.nativeHandle(), {}));
+    CHECK(helper.receive() == std::unexpected(StreamError::Malformed));
+    CHECK(transport::testing::openDescriptorCount() == before);
+}
+    #endif
 
 TEST_CASE("PduStream.lanesNeverInstallADescriptor", "[vtextension]")
 {

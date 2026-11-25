@@ -18,7 +18,8 @@
 // With --receive-grant, it is the helper side of a handle grant: bound to its parent likewise, it reads one
 // Instantiate off its control channel, claims the handle it names, maps it as the object it promises, and
 // writes `probe` at its start. It reports `granted=ok`, or `granted=refused` if any of that failed, and `end`
-// on its first lane, then waits for its control channel to end.
+// on its first lane; then `heard` and `end` there once another PDU arrives on control, and waits for its
+// control channel to end.
 //
 // The report is one `key=value` line each: `cwd=` its working directory, `env=NAME` per environment variable,
 // `stdin=`, `stdout=` and `stderr=` each `null` if it is the null device, `terminal` if a terminal, else
@@ -320,14 +321,12 @@ constexpr auto GrantMark = std::string_view { "probe" };
         return std::nullopt;
     auto mapping = transport::SharedMapping::map(
         handle->get(), request.memory.objectBytes, transport::MapAccess::ReadWrite);
+    // A claim that is not the object is let go as the claim lets go: on Windows never closed, as it may name
+    // a handle of this process's own.
     if (!mapping)
-    {
-#ifdef _WIN32
-        // A value that names no such object may name a handle of this process's own: let go, never closed.
-        std::ignore = handle->release();
-#endif
         return std::nullopt;
-    }
+    // The object, proved: the mapping keeps it, and the handle is closed.
+    std::ignore = std::move(*handle).adopt();
     auto const first =
         std::min<uint64_t>(request.memory.objectBytes, vtextension::wasm::remote::proto::WasmPageBytes);
     if (GrantMark.size() > first || !mapping->commit(0, first))
@@ -363,9 +362,16 @@ constexpr auto GrantMark = std::string_view { "probe" };
     auto const text = std::format("granted={}\nend\n", mapping ? "ok" : "refused");
     if (!lane->send(std::span { reinterpret_cast<uint8_t const*>(text.data()), text.size() }))
         return ProbeExit::ReportFailed;
-    // Mapped until the parent is done with it: whatever arrives is ignored.
-    while (control.receive())
+    // Mapped until the parent is done with it. The first PDU that arrives next is reported as heard: the
+    // control channel survived the grant, whatever it named.
+    if (control.receive())
     {
+        constexpr auto Heard = std::string_view { "heard\nend\n" };
+        if (!lane->send(std::span { reinterpret_cast<uint8_t const*>(Heard.data()), Heard.size() }))
+            return ProbeExit::ReportFailed;
+        while (control.receive())
+        {
+        }
     }
     return ProbeExit::Reported;
 }

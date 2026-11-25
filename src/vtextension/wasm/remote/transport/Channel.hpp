@@ -23,6 +23,9 @@ enum class ChannelError : uint8_t
 {
     Closed, ///< The peer closed its end, or this end was shut down.
     Io,     ///< The operating system reported any other failure.
+    /// The peer attached what no message carries: more descriptors than a receive takes in, or ancillary
+    /// data other than descriptors (receiveSomeWithHandles()).
+    Refused,
 };
 
 #ifdef _WIN32
@@ -98,9 +101,9 @@ class Channel
     /// receive fails.
     /// @param buffer Where the bytes go. Not empty.
     /// @param handles Where the descriptors that arrived are appended, now the caller's.
-    /// @return How many bytes arrived, at least one; `Closed` as receiveSome(); `Io` if the system truncated
-    ///         what was attached, or something other than descriptors was, every descriptor received then
-    ///         closed.
+    /// @return How many bytes arrived, at least one; `Closed` as receiveSome(); `Refused` if the system
+    ///         truncated what was attached, or something other than descriptors was, every descriptor
+    ///         received then closed; `Io` if a received descriptor could not be made close-on-exec.
     [[nodiscard]] std::expected<std::size_t, ChannelError> receiveSomeWithHandles(
         std::span<uint8_t> buffer, std::vector<OwnedHandle>& handles);
 #endif

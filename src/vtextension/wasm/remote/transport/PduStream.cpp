@@ -36,6 +36,7 @@ namespace
         {
             case ChannelError::Closed: return StreamError::Closed;
             case ChannelError::Io: return StreamError::Io;
+            case ChannelError::Refused: return StreamError::Malformed;
         }
         return StreamError::Io;
     }

@@ -30,7 +30,7 @@ enum class StreamError : uint8_t
     Closed,    ///< The channel closed, or was shut down.
     Io,        ///< The channel failed.
     Malformed, ///< The peer sent a frame the codec refuses: a malformed one, or one of the wrong kind,
-               ///< direction or channel.
+               ///< direction or channel; or attached to its frames what none carries.
     OverCap,   ///< The peer sent a frame larger than its kind may be; or, from send(), the PDU holds a
                ///< list over its cap or is larger than its kind may be, and was not sent.
 };
