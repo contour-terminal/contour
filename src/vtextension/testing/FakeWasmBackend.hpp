@@ -274,8 +274,12 @@ class FakeWasmBackend final: public wasm::IWasmBackend
     /// How every instance created from now on behaves.
     FakeGuest guest;
 
-    /// What every load from now on fails with; nothing for loads that succeed.
+    /// What every load from now on fails with; nothing for loads that succeed. Read after loadGate returns.
     std::optional<ExtensionError> loadFailure;
+
+    /// Run by every load once it is counted, before it answers, on the loading thread: a test holds a load in
+    /// flight with it. None for loads that answer at once.
+    std::function<void()> loadGate;
 
     /// The instance created last; null before the first. Valid only while that instance lives.
     FakeWasmInstance* lastInstance = nullptr;
@@ -342,6 +346,8 @@ inline std::expected<std::shared_ptr<wasm::IWasmModule>, ExtensionError> FakeWas
     wasm::ModuleIdentity identity, std::vector<std::byte> /*bytes*/)
 {
     _backend.moduleLoaded(std::move(identity));
+    if (_backend.loadGate)
+        _backend.loadGate();
     if (_backend.loadFailure)
         return std::unexpected(*_backend.loadFailure);
     return std::make_shared<FakeWasmModule>(shared_from_this(), _backend, _hostFunctions);

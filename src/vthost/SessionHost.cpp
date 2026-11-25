@@ -2038,7 +2038,8 @@ void SessionHost::replaceProfiles(std::shared_ptr<ProfileCatalog const> profiles
     if (!profiles)
         return;
     _profiles = std::move(profiles);
-    // A reload is what starts an extension whose host process kept dying again.
+    // Every extension's breaker closes, so that a session built from here on may start an extension whose
+    // host process kept dying again; a reload rebuilds no running session's extensions.
     if (_extensions)
         _extensions->configurationReloaded();
     auto relimited = std::vector<SessionId> {};

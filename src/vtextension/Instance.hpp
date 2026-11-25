@@ -81,12 +81,10 @@ class Instance final: private wasm::IHostContext
     ///        instance. The watchdog itself enforces deadlines in real time.
     /// @param limits The limits this instance is held to. Its `memoryBytes` and `stackBytes` must be the
     ///        engine's (@p engine's limits()), whose runtime enforces them; the rest are the instance's.
-    /// @return The instance; `HostUnavailable` if the module's host keeps dying (its breaker is open: nothing
-    /// is
-    ///         instantiated) or cannot be reached, `OutOfMemory` if the module needs more memory than @p
-    ///         limits allow, `InvalidComponent` if the runtime cannot instantiate it, or the error a WASI
-    ///         reactor's
-    ///         `_initialize` failed with.
+    /// @return The instance; `HostUnavailable` if the module's host cannot be reached, or keeps dying (its
+    ///         breaker is open, and nothing is instantiated); `OutOfMemory` if the module needs more memory
+    ///         than @p limits allow; `InvalidComponent` if the runtime cannot instantiate it; or the error a
+    ///         WASI reactor's `_initialize` failed with.
     [[nodiscard]] static std::expected<std::unique_ptr<Instance>, ExtensionError> create(
         Engine& engine,
         CompiledExtension const& compiled,

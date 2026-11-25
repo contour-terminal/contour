@@ -10,11 +10,14 @@
 
 #include <array>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <thread>
@@ -186,9 +189,9 @@ TEST_CASE("reload resets breaker", "[vtextension][registry]")
 TEST_CASE("ExtensionRegistry.differentConfigGetsItsOwnEntry", "[vtextension][registry]")
 {
     auto fixture = RegistryFixture {};
-    auto const plain = fixture.acquire({ { "format", "%H:%M" } });
+    auto const plain = fixture.acquire({ { "format", "%H:%M" }, { "zone", "UTC" } });
     auto const plainIdentity = fixture.fake.lastIdentity();
-    auto const other = fixture.acquire({ { "format", "%H:%M:%S" } });
+    auto const other = fixture.acquire({ { "format", "%H:%M:%S" }, { "zone", "UTC" } });
     auto const otherIdentity = fixture.fake.lastIdentity();
 
     CHECK(plain != other);
@@ -198,7 +201,7 @@ TEST_CASE("ExtensionRegistry.differentConfigGetsItsOwnEntry", "[vtextension][reg
     CHECK_FALSE(plainIdentity.key.empty());
 
     // The same configuration again, in another order, is the same entry.
-    auto const again = fixture.acquire({ { "format", "%H:%M" } });
+    auto const again = fixture.acquire({ { "zone", "UTC" }, { "format", "%H:%M" } });
     CHECK(again == plain);
     CHECK(fixture.fake.loads() == 2);
 }
@@ -505,4 +508,135 @@ TEST_CASE("ExtensionRegistry.concurrentAcquiresLoadOnce", "[vtextension][registr
     CHECK(fixture.fake.loads() == 1);
     CHECK(std::ranges::all_of(results,
                               [&](auto const& result) { return result && result == results.front(); }));
+}
+
+namespace
+{
+
+/// Holds every load that passes it until the test opens it.
+class LoadGate
+{
+  public:
+    /// Waits until the gate is open. On the loading thread.
+    void pass()
+    {
+        auto lock = std::unique_lock { _mutex };
+        _opened.wait(lock, [this] { return _isOpen; });
+    }
+
+    /// Lets every load held, and every later one, through.
+    void open()
+    {
+        {
+            auto const lock = std::scoped_lock { _mutex };
+            _isOpen = true;
+        }
+        _opened.notify_all();
+    }
+
+  private:
+    std::mutex _mutex;
+    std::condition_variable _opened;
+    bool _isOpen = false;
+};
+
+/// Spins until @p condition holds. The bound only keeps a broken registry from hanging the suite: a case that
+/// passes never reaches it.
+/// @return Whether @p condition came to hold.
+template <typename Condition>
+[[nodiscard]] bool eventually(Condition const& condition)
+{
+    auto const giveUp = std::chrono::steady_clock::now() + 10s;
+    while (!condition())
+    {
+        if (std::chrono::steady_clock::now() > giveUp)
+            return false;
+        std::this_thread::yield();
+    }
+    return true;
+}
+
+using AcquireResult = std::expected<std::shared_ptr<CompiledExtension>, ExtensionError>;
+
+/// What one load in flight handed the call that ran it, and the calls that waited for it.
+struct SharedLoad
+{
+    AcquireResult loader;
+    std::vector<AcquireResult> waiters;
+};
+
+/// Holds the first acquire of the minimal module in its load, has @p waiterCount more acquire it meanwhile,
+/// checks that each waits for that load rather than running its own, then lets the load end with @p failure.
+[[nodiscard]] SharedLoad shareOneLoad(RegistryFixture& fixture,
+                                      std::size_t waiterCount,
+                                      std::optional<ExtensionError> failure)
+{
+    auto gate = LoadGate {};
+    fixture.fake.loadGate = [&gate] {
+        gate.pass();
+    };
+    auto const acquire = [&fixture] {
+        auto const spec = minimalSpec({});
+        return fixture.registry.acquire(*fixture.engine,
+                                        registryKeyOf(spec, ExtensionWorld::StatusLine),
+                                        toModule(vtextension::testing::MinimalModule));
+    };
+
+    auto loader = std::optional<AcquireResult> {};
+    auto waiters = std::vector<std::optional<AcquireResult>>(waiterCount);
+    {
+        auto threads = std::vector<std::jthread> {};
+        threads.emplace_back([&] { loader = acquire(); });
+        CHECK(eventually([&] { return fixture.fake.loads() == 1; }));
+        for (auto& waiter: waiters)
+            threads.emplace_back([&acquire, &waiter] { waiter = acquire(); });
+
+        // Every later call waits for the load in flight; one that took it for a miss would load again.
+        CHECK(eventually(
+            [&] { return fixture.registry.waitingAcquires() == waiterCount || fixture.fake.loads() > 1; }));
+        CHECK(fixture.fake.loads() == 1);
+        CHECK(fixture.registry.waitingAcquires() == waiterCount);
+
+        // Ordered before the load reads it by the gate's lock.
+        fixture.fake.loadFailure = failure;
+        gate.open();
+    }
+    fixture.fake.loadGate = nullptr;
+    CHECK(fixture.registry.waitingAcquires() == 0);
+
+    auto shared = SharedLoad { .loader = *loader, .waiters = {} };
+    for (auto& waiter: waiters)
+        shared.waiters.push_back(*waiter);
+    return shared;
+}
+
+} // namespace
+
+TEST_CASE("ExtensionRegistry.waitersShareALoadInFlight", "[vtextension][registry][threading]")
+{
+    auto fixture = RegistryFixture {};
+    auto const shared = shareOneLoad(fixture, 4, std::nullopt);
+    REQUIRE(shared.loader.has_value());
+    for (auto const& waiter: shared.waiters)
+    {
+        REQUIRE(waiter.has_value());
+        CHECK(*waiter == *shared.loader);
+    }
+    CHECK(fixture.fake.loads() == 1);
+    CHECK(fixture.registry.liveEntries() == 1);
+}
+
+TEST_CASE("ExtensionRegistry.aFailedLoadInFlightFailsEveryWaiter", "[vtextension][registry][threading]")
+{
+    auto fixture = RegistryFixture {};
+    auto const shared = shareOneLoad(fixture, 4, ExtensionError::InvalidComponent);
+    CHECK(shared.loader.error() == ExtensionError::InvalidComponent);
+    for (auto const& waiter: shared.waiters)
+        CHECK(waiter.error() == ExtensionError::InvalidComponent);
+    CHECK(fixture.registry.liveEntries() == 0);
+
+    // Nothing of the failed load is kept: the next acquire loads again.
+    fixture.fake.loadFailure.reset();
+    CHECK(fixture.acquire() != nullptr);
+    CHECK(fixture.fake.loads() == 2);
 }

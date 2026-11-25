@@ -19,6 +19,12 @@ namespace vtextension
 
 namespace
 {
+    /// Counts a waiter out however its wait ends, a load's exception included.
+    struct DecrementOnExit
+    {
+        void operator()(std::atomic<std::size_t>* counter) const noexcept { --*counter; }
+    };
+
     /// One world, and the name a module identity spells it with.
     struct WorldName
     {
@@ -117,6 +123,8 @@ std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> ExtensionRegis
                 // Waited for outside the lock, which the load takes to publish its outcome.
                 auto const pending = *loading;
                 lock.unlock();
+                ++_waiting;
+                auto const waited = std::unique_ptr<std::atomic<std::size_t>, DecrementOnExit> { &_waiting };
                 return pending.get();
             }
             // Lost its last pane since the sweep above, on another thread: a new entry takes its place.

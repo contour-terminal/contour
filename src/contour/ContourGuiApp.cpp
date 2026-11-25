@@ -2858,8 +2858,9 @@ void ContourGuiApp::runWithoutWindow(actions::Action const& action, QScreen* anc
 void ContourGuiApp::onConfigurationReloaded()
 {
 #ifdef CONTOUR_EXTENSIONS
-    // A reload is what starts an extension whose host kept dying again, whether its sessions rebuild it or
-    // keep it as it was.
+    // Every extension's breaker closes: a pane built or reconfigured from here on may start an extension
+    // whose host kept dying again. A pane whose runner disabled that extension already stays disabled, as a
+    // reload that leaves its declared extensions unchanged does not rebuild it.
     if (auto* const runtime = startedExtensionRuntime())
         runtime->configurationReloaded();
 #endif

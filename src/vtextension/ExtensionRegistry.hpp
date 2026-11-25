@@ -3,6 +3,7 @@
 
 #include <core/platform/Clock.hpp>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -89,6 +90,10 @@ class ExtensionRegistry
     /// @return How many entries are loading or alive.
     [[nodiscard]] std::size_t liveEntries() const;
 
+    /// Test hook.
+    /// @return How many acquire() calls are waiting for a load another call runs.
+    [[nodiscard]] std::size_t waitingAcquires() const noexcept { return _waiting.load(); }
+
   private:
     using LoadResult = std::expected<std::shared_ptr<CompiledExtension>, ExtensionError>;
 
@@ -112,8 +117,9 @@ class ExtensionRegistry
     core::platform::IClock& _clock;
     ExtensionLimits _limits;
     mutable std::mutex _mutex;
-    std::vector<Entry> _entries; ///< Guarded by _mutex.
-    uint64_t _nextSerial = 0;    ///< Guarded by _mutex.
+    std::vector<Entry> _entries;           ///< Guarded by _mutex.
+    uint64_t _nextSerial = 0;              ///< Guarded by _mutex.
+    std::atomic<std::size_t> _waiting = 0; ///< How many acquire() calls wait for another's load.
 };
 
 } // namespace vtextension
