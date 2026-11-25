@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtextension/wasm/wasmtime/WasmtimeBackend.hpp>
 
+#include <core/Assert.hpp>
 #include <core/Utils.hpp>
 
 #include <algorithm>
@@ -94,7 +95,11 @@ namespace
 
     /// Wasmtime's switch for every feature of EngineFeatures that has one (FeatureSwitch::Configurable),
     /// in the table's order. Every engine is configured by setting each from its row's state.
-    constexpr auto FeatureSetters = std::to_array<FeatureSetterRow>({
+    ///
+    /// Not constexpr: where Wasmtime is a DLL (a system Wasmtime on Windows), its functions are
+    /// `__declspec(dllimport)`, and the address of one is not a constant expression. The table is
+    /// initialized before main() all the same, and featureSettersMatchTheTable() checks it at run time.
+    auto const featureSetters = std::to_array<FeatureSetterRow>({
         { .feature = EngineFeature::BulkMemory, .setter = &wasmtime_config_wasm_bulk_memory_set },
         { .feature = EngineFeature::MultiValue, .setter = &wasmtime_config_wasm_multi_value_set },
         { .feature = EngineFeature::ReferenceTypes, .setter = &wasmtime_config_wasm_reference_types_set },
@@ -125,27 +130,27 @@ namespace
           .setter = &wasmtime_config_wasm_component_model_map_set },
     });
 
-    /// @return Whether FeatureSetters holds exactly the configurable features of EngineFeatures, each
+    /// @return Whether featureSetters holds exactly the configurable features of EngineFeatures, each
     ///         once, in the table's order, each with a switch.
-    [[nodiscard]] consteval bool featureSettersMatchTheTable() noexcept
+    [[nodiscard]] bool featureSettersMatchTheTable() noexcept
     {
         auto configurable = EngineFeatures | std::views::filter([](FeatureRow const& row) {
                                 return row.featureSwitch == FeatureSwitch::Configurable;
                             })
                             | std::views::transform(&FeatureRow::feature);
         return std::ranges::equal(configurable,
-                                  FeatureSetters | std::views::transform(&FeatureSetterRow::feature))
-               && std::ranges::none_of(FeatureSetters,
+                                  featureSetters | std::views::transform(&FeatureSetterRow::feature))
+               && std::ranges::none_of(featureSetters,
                                        [](FeatureSetterRow const& row) { return row.setter == nullptr; });
     }
-    static_assert(featureSettersMatchTheTable(),
-                  "FeatureSetters drives every switchable row of EngineFeatures");
-
     /// @return A configuration for one runtime's engine, from EngineFeatures, @p config and @p limits.
     [[nodiscard]] wasm_config_t* engineConfig(WasmtimeConfig const& config, RuntimeLimits limits)
     {
+        // featureSetters drives every switchable row of EngineFeatures: checked here, as the table cannot
+        // be checked at compile time, and every engine is configured through here.
+        Require(featureSettersMatchTheTable());
         auto* const engineConfig = wasm_config_new();
-        for (auto const& [feature, setter]: FeatureSetters)
+        for (auto const& [feature, setter]: featureSetters)
             setter(engineConfig, featureRow(feature).state == FeatureState::On);
         wasmtime_config_max_wasm_stack_set(engineConfig, limits.stackBytes);
         // Epoch interruption is how a call is stopped from another thread: interrupt() moves the engine's
