@@ -6,9 +6,9 @@
 /// classic BPF program seccomp runs, and installed on every thread at once.
 ///
 /// The program checks the architecture first (another one, or an x32 call on x86_64, kills the process),
-/// then tests each row's number in the rows' order; a row whose number matches decides, its argument checks
-/// passing or the process being killed. A call no row names takes the unlisted action: for the host's own
-/// filter, killing the process.
+/// then tests each row's number in the rows' order; a row whose number matches decides when its argument
+/// checks pass. A call no row names, or one whose row's checks fail, takes the unlisted action: for the
+/// host's own filter, killing the process.
 
 #include <cstdint>
 #include <expected>
@@ -39,7 +39,9 @@ namespace vtextension::wasm::host
     std::span<SystemCallRow const> rows, SandboxDescriptors descriptors, int ownProcess, AuditArch arch);
 
 /// assembleFilter(), with the action of a call @p rows do not name given: what an outer sandbox's filter,
-/// which lets through all it does not refuse, is made of.
+/// which lets through all it does not refuse, is made of. A call whose row's argument checks fail takes
+/// @p unlisted as well, as the row does not apply to it: a row refusing one value of an argument lets every
+/// other value through an allow-by-default filter, rather than killing it.
 /// @param rows What becomes of each call named, each number at most once.
 /// @param descriptors The descriptors `EqualsControl` compares with.
 /// @param ownProcess The process id `EqualsOwnProcess` compares with.

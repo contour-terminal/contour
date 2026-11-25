@@ -128,7 +128,7 @@ namespace
     class RowBody
     {
       public:
-        /// Appends the test of @p comparison; failing it jumps to the row's kill.
+        /// Appends the test of @p comparison; failing it jumps to the row's failure return.
         void compare(Comparison const& comparison)
         {
             auto halves = std::vector<Half> {};
@@ -156,18 +156,20 @@ namespace
                 _program.at(at).jf = static_cast<uint8_t>(_program.size() - (at + 1));
         }
 
-        /// Ends the body with @p decision, and the kill its failed checks jump to.
+        /// Ends the body with @p decision, and the return its failed checks jump to.
+        /// @param decision What the row decides when its checks pass.
+        /// @param failed What it decides when one fails: the filter's unlisted action.
         /// @return The body; nothing if a jump would exceed what an instruction reaches.
-        [[nodiscard]] std::optional<std::vector<sock_filter>> finish(uint32_t decision) &&
+        [[nodiscard]] std::optional<std::vector<sock_filter>> finish(uint32_t decision, uint32_t failed) &&
         {
             _program.push_back(statement(Return, decision));
             if (_fails.empty())
                 return std::move(_program);
-            _program.push_back(statement(Return, SECCOMP_RET_KILL_PROCESS));
-            auto const kill = _program.size() - 1;
+            _program.push_back(statement(Return, failed));
+            auto const fail = _program.size() - 1;
             for (auto const& patch: _fails)
             {
-                auto const distance = kill - (patch.at + 1);
+                auto const distance = fail - (patch.at + 1);
                 if (distance > MaxJump)
                     return std::nullopt;
                 (patch.branch == Branch::WhenTrue ? _program.at(patch.at).jt : _program.at(patch.at).jf) =
@@ -180,7 +182,7 @@ namespace
         struct Patch
         {
             std::size_t at;
-            Branch branch; ///< Which branch of the jump at `at` goes to the kill.
+            Branch branch; ///< Which branch of the jump at `at` goes to the failure return.
         };
         std::vector<sock_filter> _program;
         std::vector<Patch> _fails;
@@ -240,7 +242,8 @@ std::expected<std::vector<sock_filter>, ConfinementFailure> assembleFilter(
                 return std::unexpected(assemblyFailure(EINVAL));
             body.compare(comparisonOf(check, descriptors, ownProcess));
         }
-        auto const assembled = std::move(body).finish(seccompReturnOf(row.action, row.error));
+        auto const assembled =
+            std::move(body).finish(seccompReturnOf(row.action, row.error), seccompReturnOf(unlisted, 0));
         if (!assembled || assembled->size() > MaxJump)
             return std::unexpected(assemblyFailure(E2BIG));
         // A row whose number differs is skipped whole; the accumulator still holds the number then, as only a

@@ -319,3 +319,35 @@ TEST_CASE("SeccompFilter.checksBothHalvesOfAWideArgument", "[vtextension][sandbo
         }
     }
 }
+
+TEST_CASE("SeccompFilter.failedChecksTakeTheUnlistedAction", "[vtextension][sandbox]")
+{
+    // An outer sandbox refusing one value of an argument lets every other value through, as a call no row
+    // names; the host's own filter, which kills what it does not name, kills a failed check as well.
+    constexpr auto Refused = uint64_t { 83 };
+    constexpr auto OneValue = std::array {
+        ArgumentCheck { .index = 2, .test = ArgumentTest::Equals, .mask = 0xFFFF'FFFF, .value = Refused },
+    };
+    auto const rows = std::array { SystemCallRow { .number = 54,
+                                                   .checks = OneValue,
+                                                   .action = SystemCallAction::Refuse,
+                                                   .error = EPERM,
+                                                   .reason = "one option" } };
+    for (auto const unlisted: { SystemCallAction::Allow, SystemCallAction::Kill })
+    {
+        auto const program = assembleFilter(
+            rows, SandboxDescriptors { .control = Control }, OwnProcess, AuditArch::Amd64, unlisted);
+        REQUIRE(program.has_value());
+        auto const verdictFor = [&](long number, uint64_t option) {
+            auto const returned = evaluateFilter(
+                *program,
+                SystemCallUse { .arch = AuditArch::Amd64, .number = number, .arguments = { 0, 0, option } });
+            REQUIRE(returned.has_value());
+            return verdictOf(*returned);
+        };
+        auto const otherwise = FilterVerdict { .action = unlisted };
+        CHECK(verdictFor(54, Refused) == refusedWith(EPERM));
+        CHECK(verdictFor(54, Refused + 1) == otherwise);
+        CHECK(verdictFor(55, Refused) == otherwise);
+    }
+}
