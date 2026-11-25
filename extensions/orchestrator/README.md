@@ -43,14 +43,19 @@ nothing to stderr.
 
 ## The dashboard
 
-The orchestrator draws its own tab (`view/`, drawn with core-cpp's headless terminal UI). It is one screen to
-see, read and talk to agents: the **Fleet** on the left lists your runs, and the **Focus** on the right shows
-the one selected. Pull requests and issues are not listed here: you browse and start them from the launcher
-(`n`, below).
+The orchestrator draws its own tab (`view/`, drawn with core-cpp's headless terminal UI). It has two views, which
+`w` switches between, or a click on a view's name in the top bar:
 
-A top bar names the dashboard and carries the fleet gauge (`⬢ 3/4 ▰▰▰▱`, active runs of `max_agents`), a
-`● 2 need you` pill while a run waits for you, and `plugins missing · ^K install` while a plugin the tasks
-need is missing. Problems — a failing `gh`, a list cut at its limit, a configuration that does not parse — sit
+- **Agents**, where you see, read and talk to agents: the **Fleet** on the left lists your runs, and the
+  **Focus** on the right shows the one selected. The dashboard opens on it.
+- **Work**, where you see what needs doing: your open merge requests and the tickets you work on, grouped by
+  what they need from you, and where you start an agent on one (see "The Work view" below).
+
+`n` starts a custom task in either view (see "`n`: a custom task" below).
+
+A top bar names the two views (`✦ Agents  Work`, the one shown lit) and carries the fleet gauge (`⬢ 3/4 ▰▰▰▱`,
+active runs of `max_agents`), a `● 2 need you` pill while a run waits for you, and `plugins missing · ^K install`
+while a plugin the tasks need is missing. Problems — a failing `gh`, a list cut at its limit, a configuration that does not parse — sit
 below it, one line each. The bottom line is the action bar: what you can do with the selected row, or the
 result of the last action until the next key (see "Actions and the palette" below).
 
@@ -70,7 +75,7 @@ age, and below them, dimmed, what it is on — the reason its agent reported, it
 it needs from you, or how it ended — with a `▰▱` meter of its board's task boxes once its board was read. In a
 narrower tab a row is one line, but a Needs you row keeps its second line, so that its question shows without
 opening anything. While a worktree is left that no run accounts for, a LEFTOVER WORKTREES group lists it (see
-below). `+ new agent` is the last row; with no run it is the only one, and the Focus shows a primer. Every
+below). `+ new task` is the last row; with no run it is the only one, and the Focus shows a primer. Every
 title is sanitised before it is drawn, so an escape sequence in a title is shown as text and does nothing.
 
 **The Focus** shows the selected run in a box whose border names it (`pr-2375 · fix CI · sonnet`) and its
@@ -97,13 +102,13 @@ that window opens it with its own launcher, as a hyperlink you follow there woul
 dashboard draws is also recorded as an OSC 8 hyperlink, and a click on one opens it the same way. (A served
 tab does not pass OSC 8 or OSC 52 on to the terminal, so ctrl+click and copying do not apply there.)
 
-**The mouse.** The dashboard asks for the mouse (SGR reporting, DECSET 1000 and 1006). A click selects a row of
-the Fleet, and a double click runs its primary action; one click on `+ new agent` opens the launcher. A click
-switches the Focus's tab, answers with a quick-reply chip, gives the message box the keys, opens a link, runs a
-palette entry, or highlights a launcher candidate (a double click starts it). A click beside an open popup
-closes it. The wheel moves the Fleet's selection, scrolls the Focus's tab, or moves a popup's highlight,
+**The mouse.** The dashboard asks for the mouse (SGR reporting, DECSET 1000 and 1006). In the Agents view a
+click selects a row of the Fleet, and a double click runs its primary action; one click on `+ new task` opens the
+`n` box. A click switches the Focus's tab, answers with a quick-reply chip, gives the message box the keys, opens
+a link, or runs a palette entry. A click on a view's name in the top bar shows that view. A click beside an open
+popup closes it. The wheel moves the Fleet's selection, scrolls the Focus's tab, or moves a popup's highlight,
 whichever is under the pointer. Each frame records what it drew where, so a click lands on what you see.
-Shift+drag still selects text in Contour.
+Shift+drag still selects text in Contour. The Work view's mouse is described with it, below.
 
 **Places and keys.** The Fleet has the keys by default, and its letters are commands; the Focus gets them with
 `Enter` on a live run or `Tab` on any, and its border lights up. In the Focus of a live run the message box
@@ -117,12 +122,13 @@ has the keys: every printable key types, digits too, so no letter is ever both a
 | `b` `t` `d` | show the Focus's Board, Transcript or Details tab |
 | `PgUp` `PgDn` | scroll the Focus's tab |
 | `←` `→` | turn the transcript's pages; on the Board or Details, or past the transcript's first or last page, show the tab beside |
-| `n` | open the launcher: browse the pull requests and issues, or type a topic |
+| `n` | start a custom task: the `n` box (below) |
+| `w` | show the Work view |
 | `/` | filter the runs by text, Finished's folded ones too; Enter keeps the filter, Esc drops it |
 | `Ctrl+K` `?` | open the command palette: every action, and the commands that have no key |
 | `e` | end the selected run; asks once (`e again to end · esc keeps it`) |
 | `r` | show the selected agent's tab |
-| `o` | copy the run's pull request or issue link |
+| `o` | open the run's pull request or issue on your machine (see "Links" above) |
 | `x` | check a kept worktree again |
 | `Del` | drop a finished run from the list |
 | `z` | fold the selected run's group, or unfold a folded one |
@@ -148,7 +154,7 @@ Fleet's letters act, and `↑` `↓` scroll instead of moving. `Esc` or `Tab` go
 
 **Actions and the palette.** What the dashboard offers follows the selected row. Each row's state has its
 actions in rank order; the first is what `Enter` does, and the action bar lists them while they fit, then
-`n new agent` and `^k all actions`:
+`n new task` and `^k all actions`:
 
 | Selected | Action bar |
 | --- | --- |
@@ -156,10 +162,10 @@ actions in rank order; the first is what `Enter` does, and the action bar lists 
 | a run that waits, or stopped by an error | `⏎ reply` · `t transcript` · `b board` (or `d details`) · `e end` |
 | a run starting or at work | `⏎ message` · `t transcript` · `b board` · `e end` (starting: `r agent tab`) |
 | a run that reported done | `⏎ follow up` · `o open link` · `t transcript` · `e end` |
-| a finished run | `⏎ run again` (the launcher, on its item or topic, task and model) · `t transcript` · `del dismiss` |
+| a finished run | `⏎ run again` (the start dialog on its item and task, or the `n` box on its topic's text) · `t transcript` · `del dismiss` |
 | a kept run | `⏎ retry removal` · `d details` · `del dismiss` |
 | a folded group's heading | `⏎ unfold` |
-| `+ new agent` | `⏎ new agent` |
+| `+ new task` | `⏎ new task` |
 
 `Enter` on a live run always writes to it; only the label changes. An action a row does not offer — `o` on a
 topic, `b` once the worktree is gone — is not listed. A done or finished run's box at the bottom of the Focus
@@ -167,8 +173,8 @@ lists the same actions. In the Focus the bar adds `esc back`; while the message 
 send · alt⏎ line · esc keep draft`.
 
 `Ctrl+K` or `?` opens the command palette over the dashboard. It lists the selected row's actions first, then
-the commands for the whole dashboard — new agent, filter the agents, refresh the lists, install the missing
-plugins, show the last 24 hours — then every other action, dimmed, with the reason it does not apply now
+the commands for the whole dashboard — new task, filter the agents, refresh the lists, install the missing
+plugins, show the last 24 hours, switch view, fold the other groups (the Work view's) — then every other action, dimmed, with the reason it does not apply now
 (`end · no run selected`); an asking run's quick replies are listed by their labels. Each shows its key, or `palette only`. Typing filters it fuzzily (`l24` finds "show
 the last 24 hours"), the matched letters underlined; `↑` `↓` choose; `Enter` runs the command exactly as its
 key would; `Esc` closes it and keeps what you typed for the next time. Refreshing the lists and installing the
@@ -204,51 +210,215 @@ The dashboard is drawn in the design's palette, 256-colour by default: muted and
 the place that has the keys, and a colour per state (asking, error, working, done), each paired with its own
 glyph so that nothing is told apart by hue alone. Ordinary text and the background stay your terminal's own.
 
-**The launcher.** `n` opens one popup to start any agent. With nothing typed it lists your pull requests
-whose checks fail or whose reviewer asked for changes, then your other pull requests, then the issues
-without one, each with its checks, review and whether an agent works on it (`⬢`). Typing filters them by
-number and title, across every repository. While anything is typed, a row starts a **topic** on exactly
-that text; a query that names an item exactly (`2375`, `#2375`, its URL or a Jira key) puts that item
-first. `↑` `↓` choose a row and `Enter` starts the agent.
+## The Work view
 
-Under the query, the scope narrows the list: `repo  all  contour  pace …` and `show  all  needs attention  pull
-requests  issues`. On the list, `←` `→` step the repository and `Ctrl+←` `Ctrl+→` the kind; a click on a chip
-picks it. A topic starts in the repository the list is narrowed to, and the launcher opens again as you left it.
-While every repository is listed, each row names its own. In a wide tab the launcher takes three quarters of the
-width, from 80 to 160 columns.
+`w` shows it: your open merge requests (pull requests, on GitHub) and the tickets you work on — the Jira work
+items and forge issues your repositories' `issues` searches list — one row each, across every repository, in
+five groups shown in this order:
 
-Below the list are the settings for the chosen row: a topic's repository, the task (one that applies to
-the item), the model, the permission profile, and an item's optional note, which is added to the prompt.
-`Tab` moves into them and through them, `←` `→` change one, and typing into the note fills it. The query, the
-note, the message box, the filter and the palette all take `Backspace`, `Alt+Backspace` (a word), `Ctrl+W` (back
-to the last blank) and `Ctrl+U` (everything). Each
-follows the chosen row, so the defaults are the task's own. The checkout and the worktree are shown
-below them; `Ctrl+P` also shows the prompt and the agent's exact command line. `Esc` closes the
-launcher. A dispatch the engine would refuse, an item an agent already works on for instance, says why
-instead of starting. While Claude Code's status hooks or a plugin are missing the launcher says so, and
-asks for a second `Enter`.
+| Group | Holds |
+| --- | --- |
+| Needs you | a merge request whose pipeline failed, whose reviewer asked for changes, or that conflicts with its base |
+| Ready to merge | a merge request whose pipeline passed (or that has none), without conflicts, and approved or needing no review |
+| In review | every other open merge request: its pipeline running, its review pending |
+| No MR yet | a ticket in progress that no merge request names |
+| Everything else | a draft merge request, whatever its pipeline or conflicts, and a ticket not in progress; folded until you open it |
 
-A task's `key` is still read, and may not be one of the dashboard's reserved keys (the configuration is
-refused with a line that names them), but it no longer acts on the dashboard: the items it applied to are
-the launcher's now.
+A draft is checked first; then the first group whose rule matches takes the item. A ticket a merge request names
+is not listed on its own: its status shows on the merge request's row. A merge request names a Jira ticket with
+the first Jira key in its title, else in its source branch, of a project a Jira source covers — a project one of
+its tickets is in, or one its JQL names (`project = PRJ`, `project in (PRJ, ABC)`) — so that a stray `UTF-8`
+names nothing; it names a forge issue with the forge's own closing link or a `#<number>` in its title. A Jira
+ticket is in progress when Jira's status category is *In Progress*, or, with `in_progress_jql`, when that query
+lists it (see "Configuration" below). A forge issue counts as in progress, since its search already selects your
+work, and shows `● open`. A ticket two repositories list belongs to the first in configuration order, which is
+where its run checks it out.
+
+Each row has these columns:
+
+| Column | A merge request's row | A ticket's row |
+| --- | --- | --- |
+| MR | `!812` (GitLab) or `#2375` (GitHub) | — |
+| Ticket | the key of the ticket it names, or `·` | its key |
+| Title | its title, cut with `…` | its summary |
+| Pipeline | `✗ pipeline`, `◌ running`, `✓ pipeline` or `·` | `·` |
+| Review | `⚠ conflicts` (which wins), `⟲ changes`, `✓ approved`, `… review` or `· no review` | `·` |
+| Jira | `◆ <status>` of its ticket, or `·` | `◆ <status>`, or `● open` for a forge issue |
+| Agent | `⬢ <worker>` while a run works on it, else how long ago it was updated | the same, but a ticket has no age |
+
+As the tab narrows, a row drops the age first, then shows the review and then the pipeline by their glyph alone;
+below 60 columns the Ticket column goes too. Within a group the merge request updated last comes first. A
+ticket has no update time — `acli`'s search cannot print a Jira ticket's, and a forge issue's is not read — so
+tickets follow the merge requests in the order their search returned them: end a JQL with `ORDER BY updated
+DESC` to list the newest first.
+
+Above the list is the filter bar: `/ filter`, the repository chip (`‹ all repositories ›`, or one repository) and
+the sort chip (`sort: importance`, or `sort: last update`, one flat list without groups). The list scrolls with
+the selection kept in view, and a scrollbar shows on its right edge while it does not fit. Below it, the details
+line says what the selected row is about: its failing checks (`pipeline fails: test-windows`), the base it
+conflicts with, its ticket and that ticket's status, and the agent on it (`#2375 · contour · pipeline fails:
+test-windows · PRJ-1234 In Progress`). The groups' folds and the sort are kept across restarts, as the Fleet's
+folds are; the filter and the repository chip are not.
+
+| Key | In the Work view |
+| --- | --- |
+| `↑` `↓` `j` `k` `PgUp` `PgDn` `Home` `End` | move the selection |
+| `Enter` | on a row, open the start dialog (below); on a group's heading, fold or unfold it |
+| `z` | fold or unfold the selected line's group |
+| `/` | filter: what you type matches a merge request's number (`!812`, `#2375`, `2375`), a ticket's key, a title, a repository or a URL, case-insensitively; `Enter` keeps the filter, `Esc` clears it |
+| `Esc` | clear the filter |
+| `s` | sort by importance (in groups) or by last update (one flat list) |
+| `←` `→` | step the repository chip |
+| `o` | open the selected merge request, or a ticket row's ticket, on your machine (see "Links" above) |
+| `m` | open the row menu |
+| `n` | start a custom task: the `n` box (below) |
+| `w` | show the Agents view |
+| `Tab` | move the keys along the list, the filter, the repository chip and the sort chip; `Enter` steps a chip that has them |
+| `Ctrl+K` `?` | open the command palette; a command chosen there acts on the Work view, and "fold the other groups" folds every group but the selected line's |
+
+The action bar lists the keys that apply to the selected line (`⏎ start · n new task · o open · m menu · z fold ·
+/ filter · s sort · → repository · w agents · ^k all actions`, as many as fit), and a click on one runs it.
+
+**The row menu** (`m`, or a right-click on a row) offers *Start agent…*, *Open MR*, *Open ticket* and *Fold
+group*; an entry that does not apply to the row is dimmed. `↑` `↓` choose, `Enter` runs one, `Esc` closes it. It
+offers no "copy branch name": a served tab drops OSC 52, so no copy would reach your clipboard.
+
+**The mouse** in the Work view:
+
+| Where | Click | Double click | Right-click | Wheel |
+| --- | --- | --- | --- | --- |
+| a row | select it | open the start dialog | the row menu | scroll the list three lines; the selection stays until it leaves the view |
+| a merge request's number or a ticket's key | select the row | open it on your machine | as on the row | as on the row |
+| a group's heading | fold or unfold it | nothing more: the first click did it | fold every other group | scroll |
+| the scrollbar | jump there | — | — | drag the thumb |
+| the filter, the repository chip, the sort chip | type into the filter; step the chip | — | step the chip back | step the chip |
+| a key in the action bar | run it | — | — | — |
+| the start dialog or the `n` box | pick a setting; on its value or its `‹ ›`, step it; pick a worker's chip | start (on a label, the note or a worker; a double click on `‹ ›` steps twice) | step it back | step the setting under the pointer |
+| beside a dialog or the menu | close it | — | — | — |
+
+While the Work view is shown the dashboard also asks for every move of the pointer (DECSET 1003): the row under
+it is marked with a dim `▏`, redrawn only when the pointer reaches another row, and holding the button on the
+scrollbar drags it. A served tab may set that mode, but whether a terminal passes the moves on has not been
+checked in a live session: without them nothing is marked, the scrollbar takes clicks only, and everything else
+works as described. Every mouse action has a key.
+
+## Starting an agent
+
+**The start dialog.** `Enter` or a double click on a row, or *Start agent…* in its menu, opens the dialog over
+the board, with the item, then its settings:
+
+- **Task**: suggested from the row, the first that matches — a failed pipeline suggests the task for fixing CI,
+  a conflict the one for resolving conflicts, a reviewer's changes the one for addressing the review, a ticket
+  the one for working on an issue; otherwise the first task that applies to the item. The reason is shown
+  beside it (`pipeline fails: test-windows`, `conflicts with main`, `changes requested`, `ticket in progress`).
+  A task's role says which of these it is (`role:`, see "Configuration" below); a rule whose role no task that
+  applies to the item has falls through to the next. Only the tasks that apply to the item are offered,
+  and choosing another brings its own model, permission profile and worker.
+- **Worker**: every configured worker as a chip with the number of runs it has now (`claude-work 1`). It
+  defaults to the task's own worker; while that worker already runs an agent, to the worker with the fewest
+  runs (ties in configuration order). A worker whose setup is incomplete — Claude Code's status hooks or a
+  plugin missing for its set — is marked `(setup)`, the dialog says what is missing, and starting on it asks for
+  a second `Enter`. A worker that takes no permission profile for the task (a Copilot worker) is marked
+  `(no profile)`, and Perms is passed over. The worker chosen holds for this run only.
+- **Model**: the task's model, any of `models`.
+- **Perms**: the permission profile, the task's by default.
+- **Note**: optional text added to the prompt; it may not start with `-`.
+
+Below them are the checkout and the worktree; `Ctrl+P` also shows the prompt and the agent's exact command line.
+`Tab` and `Shift+Tab` move through the settings, `←` `→` change one, typing fills the note, `Enter` starts the
+agent and `Esc` closes the dialog. While an agent already works on the item the dialog says so (`⬢ claude-work
+already works on this`) with the engine's refusal, and `Enter` starts nothing; so does any other dispatch the
+engine would refuse. `⏎ run again` on a finished run opens the dialog on the same item and task, while the Work
+view still lists the item.
+
+The `n` box's text, the dialog's note, the message box, the filters and the palette all take `Backspace`,
+`Alt+Backspace` (a word), `Ctrl+W` (back to the last blank) and `Ctrl+U` (everything). A paste into the box's
+text or the note arrives as one line of text; the message box keeps a paste's line feeds.
+
+A task's `key` is still read, and may not be one of the dashboard's reserved keys (the configuration is refused
+with a line that names them), but it starts nothing: an item's agent starts from the Work view.
+
+**`n`: a custom task.** `n`, in either view, or `+ new task`, opens a box that asks "What should the agent do?",
+with the keys in its text. `Enter` starts the agent at once, on these defaults: the **repository** the Work view's
+chip names, else the selected row's, else the first configured; the **worker** of the topic task, by the same
+busy rule as the dialog's; and the topic task's **model**. `Tab` (or a click) reaches those three settings, and
+`←` `→` change one. An empty text starts nothing, and a worker whose setup is incomplete asks for a second
+`Enter`, as in the dialog. `Esc` closes the box. `⏎ run again` on a finished topic run opens the box again on its
+text.
+
+The search launcher that `n` opened before is gone. Its jobs moved: browsing the pull requests and issues to the
+Work view; a query naming one item (`#2375`, its URL, `PRJ-1234`) to the Work view's filter; typing a topic to
+the `n` box.
 
 **Topics.** Not everything an agent should do has a pull request or an issue. A topic's task is a `tasks`
 entry with `applies_to: topic`, whose prompt takes `{topic}` for the text. Without one, a built-in `topic`
 task makes the text the whole prompt. The run's id, branch and worktree are named from a slug of the text,
 at most 40 characters of `[a-z0-9-]`, such as `agent/topic-investigate-the-flaky-test-…`. The text itself
 reaches only the prompt and the dashboard. It starts on a new branch from the repository's base, as an
-issue's run does. `Enter` on a finished topic run opens the launcher again on its text.
+issue's run does.
 
-**The item's key.** `{key}` in a task's prompt stands for the item's key: a Jira key such as `DEV-1234`, or the number of a forge issue, pull request or merge request. A prompt may use `{url}`, `{key}` or both; a topic task's prompt may not use `{key}`.
+**The item's key.** `{key}` in a task's prompt stands for the item's key: a Jira key such as `PRJ-1234`, or the number of a forge issue, pull request or merge request. A prompt may use `{url}`, `{key}` or both; a topic task's prompt may not use `{key}`.
 
 **The agents' skills.** A task's prompt such as `/contour-workflows:fix-ci {url}` names a skill, and
 the skill comes with a Claude Code plugin. If that plugin is missing, the agent answers "Unknown skill".
 `plugins` lists the plugins the agents need (by default `contour-workflows@contour-terminal`). With the status
 hooks check done, the orchestrator asks the `claude` its panes run (`claude plugin list --json`) which
-plugins are installed and enabled. Each missing one is a problem line, and the launcher warns of it and
-asks for a second `Enter`. The palette's "install the missing plugins" (`Ctrl+K`, then `install`) runs
+plugins are installed and enabled. Each missing one is a problem line, and the start dialog and the `n` box
+warn of it and ask for a second `Enter`. The palette's "install the missing plugins" (`Ctrl+K`, then `install`) runs
 `claude plugin marketplace add` and `claude plugin install` into your own Claude Code and checks again. On a machine you reach only through `contour client`,
 this is how its agents get their skills. The orchestrator never edits Claude Code's settings files.
+
+## Configuration
+
+The whole configuration is in [Configuring the orchestrator](../../docs/extensions.md#configuring-the-orchestrator).
+The Work view adds two optional keys; every configuration that was valid before stays valid.
+
+```yaml
+repos:
+    - path: ~/repo/project
+      forge: gitlab
+      issues:
+          - source: jira
+            site: https://example.atlassian.net
+            jql: 'assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC'
+            in_progress_jql: 'status in ("In Progress", "Selected for Development")'   # optional
+tasks:
+    - { id: fix, key: f, label: fix CI, applies_to: pr, model: sonnet, role: fix_ci,
+        prompt: "/contour-workflows:fix-ci {url}" }
+```
+
+- **`in_progress_jql`** (a Jira source's, optional): a ticket is in progress when it matches
+  `(<jql>) AND (<in_progress_jql>)`, a query `acli` runs once per poll; together the two must fit one argument.
+  Without it a ticket is in progress when Jira's status category is *In Progress*, whatever the project calls the
+  status. A failed query keeps that rule for the poll and shows a problem line.
+- **`role`** (a task's, optional): `fix_ci`, `resolve_conflicts`, `address_review` or `work_on_issue`, the state
+  the start dialog suggests the task for. Without it, a task whose `id` is one of these has that role, so
+  `id: fix_ci` needs none. Any other value is refused, and the line names the four.
+
+**GitLab.** `glab mr list` carries no pipeline and no approvals, so per GitLab repository and poll the orchestrator
+also asks for the project's newest pipelines and its failed jobs, two REST calls through `glab api`:
+
+    glab api projects/:id/pipelines?per_page=100&order_by=id&sort=desc
+    glab api projects/:id/jobs?scope[]=failed&per_page=100
+
+A pipeline belongs to a merge request when it ran on the merge request's head commit, or for its
+`refs/merge-requests/<iid>/head` or `refs/merge-requests/<iid>/merge` (a merged-results pipeline, whose commit is
+not the head); of a merge request's pipelines the newest wins, and its failed jobs are the failing checks the
+details line and the start dialog name. Approval still comes from `detailed_merge_status`, which says
+`not_approved`, `requested_changes` or `mergeable`. A merge request none of the listed pipelines matches keeps
+what `detailed_merge_status` alone says, is Ready to merge only while that is `mergeable`, and its details line
+says `pipeline and review inferred from the merge status`. A pipeline call that fails leaves every merge request
+so, with a problem line (`contour: the pipeline list could not be read; CI and review are inferred from GitLab's
+merge status`); a failed job list leaves the failing checks unnamed, also with a line. It is never one call per
+merge request.
+
+**Jira.** The search asks for `--fields key,summary,status,issuetype`, so each ticket comes with its status and
+status category; `acli` allows no `updated` among them, so a ticket shows no age and keeps the order its JQL
+gives. A merge request may name a ticket no search listed — someone else's, or one outside the JQL: all of
+those are read with one `key in (PRJ-1234, …)` search per poll, so that every merge request shows its ticket's
+status. Keys are checked against the key pattern before they reach the command; when
+that lookup fails, those merge requests show without their ticket, with a problem line. Each Jira source with
+`in_progress_jql` adds its one query per poll.
 
 ## Attention
 
