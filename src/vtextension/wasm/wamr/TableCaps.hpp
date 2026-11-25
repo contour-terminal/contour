@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <span>
 #include <vector>
 
 #include <vtextension/wasm/WasmBinary.hpp>
@@ -27,10 +28,11 @@ namespace vtextension::wasm::wamr
 /// Only the table section is rewritten, and only if a table needs it; every other section is copied as it
 /// was.
 /// @param module A WebAssembly core module's bytes.
+/// @param tables Its tables, as binary::tableDeclarations() read them: the module is not read for them
+///               again.
 /// @param maxElements The cap on each table's elements.
-/// @return The module, rewritten or as it was; why its bytes could not be read (@see
-///         binary::tableDeclarations), `Malformed` also for a second table section.
+/// @return The module, rewritten or as it was; why its sections could not be read.
 [[nodiscard]] std::expected<std::vector<std::byte>, binary::BinaryError> capTableMaxima(
-    std::vector<std::byte> module, uint32_t maxElements);
+    std::vector<std::byte> module, std::span<binary::TableDeclaration const> tables, uint32_t maxElements);
 
 } // namespace vtextension::wasm::wamr

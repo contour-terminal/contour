@@ -92,6 +92,8 @@ inline constexpr auto EngineFeatures = std::to_array<FeatureRow>({
       .name = "mutable-globals",
       .featureSwitch = FeatureSwitch::AlwaysOn },
     { .feature = EngineFeature::MultiValue, .state = FeatureState::On, .name = "multi-value" },
+    // On, but a module may still define only one table: MaxTables (WasmRuntime.hpp) narrows the
+    // proposal's multiple tables, on every engine alike.
     { .feature = EngineFeature::ReferenceTypes, .state = FeatureState::On, .name = "reference-types" },
     { .feature = EngineFeature::Gc, .state = FeatureState::Off, .name = "gc" },
     { .feature = EngineFeature::Exceptions, .state = FeatureState::Off, .name = "exceptions" },

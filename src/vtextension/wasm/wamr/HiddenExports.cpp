@@ -26,6 +26,8 @@ namespace
             case binary::BinaryError::NotAModule: return ModuleBytesError::NotAModule;
             case binary::BinaryError::Truncated: return ModuleBytesError::Truncated;
             case binary::BinaryError::Malformed: return ModuleBytesError::Malformed;
+            // A limit the export reader sets none of.
+            case binary::BinaryError::TooMany: return ModuleBytesError::Malformed;
         }
         return ModuleBytesError::Malformed;
     }

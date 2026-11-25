@@ -17,6 +17,7 @@
 #include <vtextension/wasm/wamr/TableCaps.hpp>
 
 using vtextension::wasm::binary::BinaryError;
+using vtextension::wasm::binary::tableDeclarations;
 using vtextension::wasm::wamr::capTableMaxima;
 
 namespace
@@ -42,6 +43,9 @@ using Bytes = std::vector<std::byte>;
 
 /// The cap every case is rewritten under: 1024, two bytes as LEB128.
 constexpr auto Cap = uint32_t { 1024 };
+
+/// The most tables a case's module is read with: two, so that the rewrite of each is seen.
+constexpr auto MaxTablesRead = uint32_t { 2 };
 
 } // namespace
 
@@ -109,6 +113,12 @@ TEST_CASE("TableCaps.capTableMaxima", "[vtextension]")
         { .description = "of two tables, only the one that needs it changes",
           .input = module({ 0x04, 0x08, 0x02, 0x70, 0x01, 0x01, 0x02, 0x70, 0x00, 0x03 }),
           .output = module({ 0x04, 0x0a, 0x02, 0x70, 0x01, 0x01, 0x02, 0x70, 0x01, 0x03, 0x80, 0x08 }) },
+        { .description = "bytes after the last table",
+          .input = module({ 0x04, 0x05, 0x01, 0x70, 0x00, 0x02, 0xff }),
+          .output = std::unexpected(BinaryError::Malformed) },
+        { .description = "more tables than are read",
+          .input = module({ 0x04, 0x0a, 0x03, 0x70, 0x00, 0x01, 0x70, 0x00, 0x01, 0x70, 0x00, 0x01 }),
+          .output = std::unexpected(BinaryError::TooMany) },
         { .description = "a second table section",
           .input = module({ 0x04, 0x04, 0x01, 0x70, 0x00, 0x01, 0x04, 0x04, 0x01, 0x70, 0x00, 0x01 }),
           .output = std::unexpected(BinaryError::Malformed) },
@@ -128,6 +138,10 @@ TEST_CASE("TableCaps.capTableMaxima", "[vtextension]")
     for (auto const& [description, input, output]: cases)
     {
         INFO(description);
-        CHECK(capTableMaxima(input, Cap) == output);
+        // As the backend does: the tables are read once, and the rewrite is handed what was read.
+        auto const rewritten = tableDeclarations(input, MaxTablesRead).and_then([&](auto const& tables) {
+            return capTableMaxima(input, tables, Cap);
+        });
+        CHECK(rewritten == output);
     }
 }

@@ -123,7 +123,7 @@ namespace
             wasmtime_module_t const* module,
             std::span<ExportDescription const> exports,
             uint32_t largestInitialPages,
-            binary::TableShape tables,
+            uint32_t largestInitialTableElements,
             IHostContext& context);
 
         /// Use create(); public only so that std::make_unique can reach it.
@@ -300,14 +300,14 @@ namespace
         wasmtime_module_t const* module,
         std::span<ExportDescription const> exports,
         uint32_t largestInitialPages,
-        binary::TableShape tables,
+        uint32_t largestInitialTableElements,
         IHostContext& context)
     {
         // Checked before instantiating, exported memories and tables and others alike: the limiter's
         // refusal would fail the instantiation as an error indistinguishable from any other.
         auto const limits = runtime.limits();
         auto const capBytes = limits.memoryBytes;
-        if (largestInitialPages * PageBytes > capBytes || !tables.fitsWithin(MaxTables, limits.tableElements))
+        if (largestInitialPages * PageBytes > capBytes || largestInitialTableElements > limits.tableElements)
             return std::unexpected(ExtensionError::OutOfMemory);
 
         auto data = std::make_unique<StoreData>(context, runtime.wasiEnvironment(), runtime.kind());
@@ -381,8 +381,13 @@ std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> WasmtimeModule::in
     IHostContext& context)
 {
     // The guest's `_initialize` is never run here: it stays an ordinary export, the caller's to call.
-    return WasmtimeInstance::create(
-        shared_from_this(), *_runtime, _module.get(), _exports, _largestInitialPages, _tables, context);
+    return WasmtimeInstance::create(shared_from_this(),
+                                    *_runtime,
+                                    _module.get(),
+                                    _exports,
+                                    _largestInitialPages,
+                                    _largestInitialTableElements,
+                                    context);
 }
 
 } // namespace vtextension::wasm::wasmtime

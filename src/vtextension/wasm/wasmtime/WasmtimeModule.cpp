@@ -251,6 +251,10 @@ detail::FuncTypeHandle functionType(FunctionSignature const& signature)
 std::expected<std::shared_ptr<IWasmModule>, ExtensionError> loadModule(
     std::shared_ptr<WasmtimeRuntime> runtime, wasm_engine_t* engine, std::span<std::byte const> bytes)
 {
+    // More than MaxTables is refused before anything is compiled; Wasmtime would compile it.
+    auto const tables = binary::tableDeclarations(bytes, MaxTables);
+    if (!tables)
+        return std::unexpected(ExtensionError::InvalidComponent);
     auto* compiled = static_cast<wasmtime_module_t*>(nullptr);
     auto const error = detail::ErrorHandle { wasmtime_module_new(
         engine, reinterpret_cast<uint8_t const*>(bytes.data()), bytes.size(), &compiled) };
@@ -261,15 +265,14 @@ std::expected<std::shared_ptr<IWasmModule>, ExtensionError> loadModule(
     auto exports = describeExports(module.get());
     // Wasmtime's C API describes no memory a module does not export; its bytes do.
     auto const largestInitialPages = binary::largestInitialMemoryPages(bytes);
-    auto const tables = binary::tableShape(bytes);
-    if (!imports || !exports || !largestInitialPages || !tables)
+    if (!imports || !exports || !largestInitialPages)
         return std::unexpected(ExtensionError::InvalidComponent);
     return std::make_shared<WasmtimeModule>(std::move(runtime),
                                             std::move(module),
                                             std::move(*imports),
                                             std::move(*exports),
                                             *largestInitialPages,
-                                            *tables);
+                                            binary::largestInitialElements(*tables));
 }
 
 WasmtimeModule::WasmtimeModule(std::shared_ptr<WasmtimeRuntime> runtime,
@@ -277,13 +280,13 @@ WasmtimeModule::WasmtimeModule(std::shared_ptr<WasmtimeRuntime> runtime,
                                std::vector<ImportDescription> imports,
                                std::vector<ExportDescription> exports,
                                uint32_t largestInitialPages,
-                               binary::TableShape tables) noexcept:
+                               uint32_t largestInitialTableElements) noexcept:
     _runtime { std::move(runtime) },
     _module { std::move(module) },
     _imports { std::move(imports) },
     _exports { std::move(exports) },
     _largestInitialPages { largestInitialPages },
-    _tables { tables }
+    _largestInitialTableElements { largestInitialTableElements }
 {
 }
 

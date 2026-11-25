@@ -56,19 +56,14 @@ namespace
     }
 } // namespace
 
-std::expected<std::vector<std::byte>, binary::BinaryError> capTableMaxima(std::vector<std::byte> module,
-                                                                          uint32_t maxElements)
+std::expected<std::vector<std::byte>, binary::BinaryError> capTableMaxima(
+    std::vector<std::byte> module, std::span<binary::TableDeclaration const> tables, uint32_t maxElements)
 {
+    if (std::ranges::none_of(tables, [&](auto const& table) { return needsCap(table, maxElements); }))
+        return module;
     auto const all = binary::sections(module);
     if (!all)
         return std::unexpected(all.error());
-    if (std::ranges::count(*all, binary::TableSectionId, &binary::Section::id) > 1)
-        return std::unexpected(binary::BinaryError::Malformed);
-    auto const tables = binary::tableDeclarations(module);
-    if (!tables)
-        return std::unexpected(tables.error());
-    if (std::ranges::none_of(*tables, [&](auto const& table) { return needsCap(table, maxElements); }))
-        return module;
 
     auto result = std::vector<std::byte>(module.begin(), module.begin() + binary::ModuleHeader.size());
     auto previousEnd = binary::ModuleHeader.size();
@@ -77,7 +72,7 @@ std::expected<std::vector<std::byte>, binary::BinaryError> capTableMaxima(std::v
         auto const end = section.offset + section.content.size();
         if (section.id == binary::TableSectionId)
         {
-            auto const content = cappedTableSection(*tables, maxElements);
+            auto const content = cappedTableSection(tables, maxElements);
             result.push_back(std::byte { binary::TableSectionId });
             appendU32(result, static_cast<uint32_t>(content.size()));
             result.insert(result.end(), content.begin(), content.end());

@@ -15,13 +15,12 @@
 #include <vtextension/wasm/WasmBinary.hpp>
 
 using vtextension::wasm::binary::BinaryError;
+using vtextension::wasm::binary::largestInitialElements;
 using vtextension::wasm::binary::largestInitialMemoryPages;
 using vtextension::wasm::binary::Reader;
 using vtextension::wasm::binary::sections;
 using vtextension::wasm::binary::TableDeclaration;
 using vtextension::wasm::binary::tableDeclarations;
-using vtextension::wasm::binary::TableShape;
-using vtextension::wasm::binary::tableShape;
 
 namespace
 {
@@ -206,6 +205,15 @@ TEST_CASE("WasmBinary.tableDeclarations", "[vtextension]")
         { .description = "a maximum cut short",
           .sections = raw({ 0x04, 0x04, 0x01, 0x70, 0x01, 0x01 }),
           .tables = std::unexpected(BinaryError::Truncated) },
+        { .description = "bytes after the last table",
+          .sections = raw({ 0x04, 0x05, 0x01, 0x70, 0x00, 0x02, 0xff }),
+          .tables = std::unexpected(BinaryError::Malformed) },
+        { .description = "more tables than are read, refused by the count alone",
+          .sections = raw({ 0x04, 0x05, 0x03, 0xff, 0xff, 0xff, 0xff }),
+          .tables = std::unexpected(BinaryError::TooMany) },
+        { .description = "a second table section",
+          .sections = raw({ 0x04, 0x04, 0x01, 0x70, 0x00, 0x01, 0x04, 0x04, 0x01, 0x70, 0x00, 0x01 }),
+          .tables = std::unexpected(BinaryError::Malformed) },
     };
     auto const header = raw({ 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 });
     for (auto const& [description, body, tables]: cases)
@@ -213,35 +221,16 @@ TEST_CASE("WasmBinary.tableDeclarations", "[vtextension]")
         INFO(description);
         auto module = header;
         module.insert(module.end(), body.begin(), body.end());
-        CHECK(tableDeclarations(module) == tables);
+        CHECK(tableDeclarations(module, 2) == tables);
     }
 }
 
-TEST_CASE("WasmBinary.tableShape", "[vtextension]")
+TEST_CASE("WasmBinary.largestInitialElements", "[vtextension]")
 {
-    auto module = raw({ 0x00,
-                        0x61,
-                        0x73,
-                        0x6d,
-                        0x01,
-                        0x00,
-                        0x00,
-                        0x00,
-                        0x04,
-                        0x08,
-                        0x02,
-                        0x70,
-                        0x00,
-                        0x03,
-                        0x70,
-                        0x01,
-                        0x07,
-                        0x09 });
-    auto const shape = tableShape(module);
-    REQUIRE(shape.has_value());
-    CHECK(*shape == TableShape { .count = 2, .largestInitialElements = 7 });
-    CHECK(shape->fitsWithin(2, 7));
-    CHECK_FALSE(shape->fitsWithin(1, 7));
-    CHECK_FALSE(shape->fitsWithin(2, 6));
-    CHECK(tableShape({}) == std::unexpected(BinaryError::NotAModule));
+    auto const tables = std::vector {
+        TableDeclaration { .elementType = 0x70, .initialElements = 3, .maximum = {} },
+        TableDeclaration { .elementType = 0x70, .initialElements = 7, .maximum = 9 },
+    };
+    CHECK(largestInitialElements(tables) == 7);
+    CHECK(largestInitialElements({}) == 0);
 }

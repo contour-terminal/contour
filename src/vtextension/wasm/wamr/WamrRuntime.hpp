@@ -81,17 +81,18 @@ class WamrRuntime final: public IWasmRuntime, public std::enable_shared_from_thi
 /// @param module WAMR's handle on @p owner's module.
 /// @param limits The limits of the runtime @p owner was loaded on.
 /// @param exports @p owner's exports.
-/// @param tables The tables @p owner defines, exported or not.
+/// @param largestInitialTableElements The largest initial size of the tables @p owner defines, exported or
+///                                    not.
 /// @param context What the instance's host function calls reach.
-/// @return The instance; `OutOfMemory` if a memory's initial size exceeds the cap, or the tables exceed
-///         theirs (RuntimeLimits::tableElements, MaxTables), `InvalidComponent`
+/// @return The instance; `OutOfMemory` if a memory's or a table's initial size exceeds its cap
+///         (RuntimeLimits::memoryBytes, RuntimeLimits::tableElements), `InvalidComponent`
 ///         if WAMR cannot instantiate the module, `RuntimeUnavailable` on a resource failure.
 [[nodiscard]] std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> instantiateModule(
     std::shared_ptr<IWasmModule const> owner,
     WASMModuleCommon* module,
     RuntimeLimits const& limits,
     std::span<ExportDescription const> exports,
-    binary::TableShape tables,
+    uint32_t largestInitialTableElements,
     IHostContext& context);
 
 /// The most host functions one runtime can be created with.

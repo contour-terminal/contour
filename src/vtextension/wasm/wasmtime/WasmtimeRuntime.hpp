@@ -176,13 +176,13 @@ class WasmtimeModule final: public IWasmModule, public std::enable_shared_from_t
     /// @param imports Its imports, with what the runtime provides.
     /// @param exports Its exports.
     /// @param largestInitialPages The largest initial size of the memories it defines, exported or not.
-    /// @param tables The tables it defines, exported or not.
+    /// @param largestInitialTableElements The largest initial size of the tables it defines, exported or not.
     WasmtimeModule(std::shared_ptr<WasmtimeRuntime> runtime,
                    detail::ModuleHandle module,
                    std::vector<ImportDescription> imports,
                    std::vector<ExportDescription> exports,
                    uint32_t largestInitialPages,
-                   binary::TableShape tables) noexcept;
+                   uint32_t largestInitialTableElements) noexcept;
 
     [[nodiscard]] std::span<ImportDescription const> imports() const noexcept override { return _imports; }
     [[nodiscard]] std::span<ExportDescription const> exports() const noexcept override { return _exports; }
@@ -195,8 +195,8 @@ class WasmtimeModule final: public IWasmModule, public std::enable_shared_from_t
     detail::ModuleHandle _module;
     std::vector<ImportDescription> _imports;
     std::vector<ExportDescription> _exports;
-    uint32_t _largestInitialPages; ///< In pages; what instantiate() checks against the memory cap.
-    binary::TableShape _tables;    ///< What instantiate() checks against the table caps.
+    uint32_t _largestInitialPages;         ///< In pages; what instantiate() checks against the memory cap.
+    uint32_t _largestInitialTableElements; ///< What instantiate() checks against the table cap.
 };
 
 /// Decides whether a runtime provides an import, by module, name and signature: one of its host

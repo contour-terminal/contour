@@ -123,8 +123,10 @@ struct ExportDescription
 /// higher cap with `RuntimeUnavailable` on every backend, so that all of them accept the same limits.
 inline constexpr auto MaxTableElements = uint32_t { 1024 };
 
-/// The most tables one instance may define. Every toolchain the host targets emits one, the indirect
-/// function table; a module defining more is not instantiated (`OutOfMemory`). Without this cap the
+/// The most tables one module may define. Every toolchain the host targets emits one, the indirect
+/// function table; a module defining more is not loaded (`InvalidComponent`), by every backend before its
+/// engine reads the module, so that all refuse it at the same step. Narrower than reference-types allows
+/// (EngineFeatures.hpp), deliberately. Without this cap the
 /// per-table one would bound nothing: each further table costs a guest three bytes of module.
 inline constexpr auto MaxTables = uint32_t { 1 };
 

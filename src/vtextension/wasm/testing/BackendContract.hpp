@@ -448,6 +448,13 @@ inline constexpr auto OversizedTableModule = std::to_array<uint8_t>({
     0x41,
 });
 
+/// Defines one table, of two elements and without a maximum, and then a byte the table section's size
+/// covers but no table does.
+///
+///     table section: 04 05 | 01 (one table) | 70 00 02 (funcref, no maximum, 2) | ff
+inline constexpr auto TrailingBytesTableModule = std::to_array<uint8_t>(
+    { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x04, 0x05, 0x01, 0x70, 0x00, 0x02, 0xff });
+
 /// Defines one table more than MaxTables.
 ///
 ///     (module (table 1 funcref) (table 1 funcref))
@@ -1282,18 +1289,27 @@ void tableInitialSizeIsCapped()
     CHECK(instance.error() == ExtensionError::OutOfMemory);
 }
 
-/// A module defining more tables than MaxTables is not instantiated.
+/// A module defining more tables than MaxTables is not loaded.
 template <typename T>
 void tableCountIsCapped()
 {
     auto const backend = T::make();
     auto const runtime = createRuntime(*backend);
-    auto const guard = enterThread(*backend);
-    auto const module = load(*runtime, TwoTablesModule);
-    auto context = RecordingHostContext {};
-    auto const instance = module->instantiate(context);
-    REQUIRE_FALSE(instance.has_value());
-    CHECK(instance.error() == ExtensionError::OutOfMemory);
+    auto const module = runtime->load(vtextension::testing::toModule(TwoTablesModule));
+    REQUIRE_FALSE(module.has_value());
+    CHECK(module.error() == ExtensionError::InvalidComponent);
+}
+
+/// A table section with bytes after its last table is not loaded, though the tables before them are
+/// well-formed.
+template <typename T>
+void tableSectionWithTrailingBytesIsRefused()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const module = runtime->load(vtextension::testing::toModule(TrailingBytesTableModule));
+    REQUIRE_FALSE(module.has_value());
+    CHECK(module.error() == ExtensionError::InvalidComponent);
 }
 
 /// A table cap above MaxTableElements creates no runtime.
@@ -1559,42 +1575,43 @@ void wasiStdioGoesNowhere()
     }
 
 /// Instantiates the whole contract suite against the backend @p Traits::make() creates.
-#define CONTOUR_WASM_BACKEND_CONTRACT(Traits)                                         \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, loadRejectsNonModule)                  \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, refusesDisabledFeatures)               \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, acceptsEnabledFeatures)                \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, describesImportsAndExports)            \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unknownImportIsUnsatisfied)            \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureImportIsUnsatisfied)     \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureWasiIsUnsatisfied)       \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, allowListedWasiIsSatisfied)            \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, everyAllowedWasiFunctionWorks)         \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNeedsARuntime)              \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNests)                      \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, generationFollowsBringUp)              \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoBackendsAgree)                      \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, moduleCrossesThreads)                  \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callsExport)                           \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instantiateLeavesReactorToCaller)      \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryViewIsBoundsChecked)             \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArguments)         \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArgumentsInOrder)  \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackErrorFails)                \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, nestedHostFailureStaysNested)          \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, nestedCallKeepsTheOuterRecord)         \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoRuntimesShareHostImports)           \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, olderRuntimeOutlivesNewer)             \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesGrowth)                \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callAfterTrapRuns)                     \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesInitialSize)           \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesUnexportedInitialSize) \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableGrowthIsCapped)                   \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableInitialSizeIsCapped)              \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableCountIsCapped)                    \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableCapAboveMaximumIsRefused)         \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, onlyI32ExportsAreOffered)              \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unboundedRecursionTraps)               \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptStopsLoop)                    \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptIsFinal)                      \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instanceCrossesThreads)                \
+#define CONTOUR_WASM_BACKEND_CONTRACT(Traits)                                          \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, loadRejectsNonModule)                   \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, refusesDisabledFeatures)                \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, acceptsEnabledFeatures)                 \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, describesImportsAndExports)             \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unknownImportIsUnsatisfied)             \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureImportIsUnsatisfied)      \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureWasiIsUnsatisfied)        \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, allowListedWasiIsSatisfied)             \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, everyAllowedWasiFunctionWorks)          \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNeedsARuntime)               \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNests)                       \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, generationFollowsBringUp)               \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoBackendsAgree)                       \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, moduleCrossesThreads)                   \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callsExport)                            \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instantiateLeavesReactorToCaller)       \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryViewIsBoundsChecked)              \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArguments)          \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArgumentsInOrder)   \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackErrorFails)                 \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, nestedHostFailureStaysNested)           \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, nestedCallKeepsTheOuterRecord)          \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoRuntimesShareHostImports)            \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, olderRuntimeOutlivesNewer)              \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesGrowth)                 \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callAfterTrapRuns)                      \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesInitialSize)            \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesUnexportedInitialSize)  \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableGrowthIsCapped)                    \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableInitialSizeIsCapped)               \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableCountIsCapped)                     \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableSectionWithTrailingBytesIsRefused) \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableCapAboveMaximumIsRefused)          \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, onlyI32ExportsAreOffered)               \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unboundedRecursionTraps)                \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptStopsLoop)                     \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptIsFinal)                       \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instanceCrossesThreads)                 \
     CONTOUR_WASM_BACKEND_CONTRACT_POSIX(Traits)

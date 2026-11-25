@@ -95,7 +95,7 @@ namespace
             WASMModuleCommon* module,
             RuntimeLimits const& limits,
             std::span<ExportDescription const> exports,
-            binary::TableShape tables,
+            uint32_t largestInitialTableElements,
             IHostContext& context);
 
         /// Use create(); public only so that std::make_unique can reach it.
@@ -252,7 +252,7 @@ namespace
         WASMModuleCommon* module,
         RuntimeLimits const& limits,
         std::span<ExportDescription const> exports,
-        binary::TableShape tables,
+        uint32_t largestInitialTableElements,
         IHostContext& context)
     {
         auto const capPages = capPagesOf(limits);
@@ -260,7 +260,7 @@ namespace
             return entry.kind == ExternKind::Memory && entry.initialPages > capPages;
         };
         // A table is checked before WAMR allocates it, exported or not.
-        if (std::ranges::any_of(exports, exceedsCap) || !tables.fitsWithin(MaxTables, limits.tableElements))
+        if (std::ranges::any_of(exports, exceedsCap) || largestInitialTableElements > limits.tableElements)
             return std::unexpected(ExtensionError::OutOfMemory);
 
         auto* rawArgs = static_cast<InstantiationArgs2*>(nullptr);
@@ -324,10 +324,11 @@ std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> instantiateModule(
     WASMModuleCommon* module,
     RuntimeLimits const& limits,
     std::span<ExportDescription const> exports,
-    binary::TableShape tables,
+    uint32_t largestInitialTableElements,
     IHostContext& context)
 {
-    return WamrInstance::create(std::move(owner), module, limits, exports, tables, context);
+    return WamrInstance::create(
+        std::move(owner), module, limits, exports, largestInitialTableElements, context);
 }
 
 namespace

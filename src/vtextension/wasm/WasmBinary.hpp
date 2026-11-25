@@ -25,6 +25,7 @@ enum class BinaryError : uint8_t
     NotAModule, ///< No WebAssembly core module header.
     Truncated,  ///< Something runs past the end of the bytes.
     Malformed,  ///< An over-long LEB128 number, or a form no engine of the host accepts.
+    TooMany,    ///< More entries than the caller takes; none of them was read.
 };
 
 /// The first eight bytes of every core module: `\0asm`, then version 1 as a little-endian u32.
@@ -220,13 +221,17 @@ struct TableDeclaration
     bool operator==(TableDeclaration const&) const = default;
 };
 
-/// The tables a module defines, in the order it defines them. Imported tables are not among them.
+/// The tables a module defines, in the order it defines them, read once. Imported tables are not among
+/// them.
 /// @param module A WebAssembly core module's bytes.
-/// @return The tables; `Malformed` for a table whose type or limits are of a form only a feature that is
-///         Off in EngineFeatures allows (typed references, 64-bit or shared tables, an initializer
-///         expression): no engine of the host accepts one, so the host need not read one.
+/// @param maxTables The most tables the caller takes. The count is checked before any table is read, so
+///                  that a section declaring millions costs nothing.
+/// @return The tables. `TooMany` for more than @p maxTables. `Malformed` for a second table section, a
+///         table section with bytes after its last table, or a table whose type or limits are of a form
+///         only a feature that is Off in EngineFeatures allows (typed references, 64-bit or shared tables,
+///         an initializer expression): no engine of the host accepts one, so the host need not read one.
 [[nodiscard]] inline std::expected<std::vector<TableDeclaration>, BinaryError> tableDeclarations(
-    std::span<std::byte const> module)
+    std::span<std::byte const> module, uint32_t maxTables)
 {
     // The reference types a table may hold without the function-references proposal.
     constexpr auto FuncRef = uint8_t { 0x70 };
@@ -235,75 +240,63 @@ struct TableDeclaration
     constexpr auto HasMaximum = uint8_t { 0b0000'0001 };
     return sections(module).and_then(
         [&](std::vector<Section> const& all) -> std::expected<std::vector<TableDeclaration>, BinaryError> {
+            auto tableSections =
+                all | std::views::filter([](Section const& entry) { return entry.id == TableSectionId; });
+            auto const first = tableSections.begin();
+            if (first == tableSections.end())
+                return std::vector<TableDeclaration> {};
+            if (std::ranges::next(first) != tableSections.end())
+                return std::unexpected(BinaryError::Malformed);
+
+            auto reader = Reader { first->content, first->offset };
+            auto const count = reader.u32();
+            if (!count)
+                return std::unexpected(count.error());
+            if (*count > maxTables)
+                return std::unexpected(BinaryError::TooMany);
             auto result = std::vector<TableDeclaration> {};
-            for (auto const& section:
-                 all | std::views::filter([](Section const& entry) { return entry.id == TableSectionId; }))
+            result.reserve(*count);
+            for ([[maybe_unused]] auto const index: std::views::iota(uint32_t { 0 }, *count))
             {
-                auto reader = Reader { section.content, section.offset };
-                auto const count = reader.u32();
-                if (!count)
-                    return std::unexpected(count.error());
-                for ([[maybe_unused]] auto const index: std::views::iota(uint32_t { 0 }, *count))
+                auto const elementType = reader.byte();
+                if (!elementType)
+                    return std::unexpected(elementType.error());
+                if (*elementType != FuncRef && *elementType != ExternRef)
+                    return std::unexpected(BinaryError::Malformed);
+                auto const flags = reader.byte();
+                if (!flags)
+                    return std::unexpected(flags.error());
+                if ((*flags & static_cast<uint8_t>(~HasMaximum)) != 0)
+                    return std::unexpected(BinaryError::Malformed);
+                auto const initial = reader.u32();
+                if (!initial)
+                    return std::unexpected(initial.error());
+                auto declaration = TableDeclaration { .elementType = *elementType,
+                                                      .initialElements = *initial,
+                                                      .maximum = std::nullopt };
+                if ((*flags & HasMaximum) != 0)
                 {
-                    auto const elementType = reader.byte();
-                    if (!elementType)
-                        return std::unexpected(elementType.error());
-                    if (*elementType != FuncRef && *elementType != ExternRef)
-                        return std::unexpected(BinaryError::Malformed);
-                    auto const flags = reader.byte();
-                    if (!flags)
-                        return std::unexpected(flags.error());
-                    if ((*flags & static_cast<uint8_t>(~HasMaximum)) != 0)
-                        return std::unexpected(BinaryError::Malformed);
-                    auto const initial = reader.u32();
-                    if (!initial)
-                        return std::unexpected(initial.error());
-                    auto declaration = TableDeclaration { .elementType = *elementType,
-                                                          .initialElements = *initial,
-                                                          .maximum = std::nullopt };
-                    if ((*flags & HasMaximum) != 0)
-                    {
-                        auto const maximum = reader.u32();
-                        if (!maximum)
-                            return std::unexpected(maximum.error());
-                        declaration.maximum = *maximum;
-                    }
-                    result.push_back(declaration);
+                    auto const maximum = reader.u32();
+                    if (!maximum)
+                        return std::unexpected(maximum.error());
+                    declaration.maximum = *maximum;
                 }
+                result.push_back(declaration);
             }
+            // What the section's size covers beyond its last table, an engine refuses.
+            if (!reader.atEnd())
+                return std::unexpected(BinaryError::Malformed);
             return result;
         });
 }
 
-/// How many tables a module defines, and how large the largest is to begin with: what an engine must
-/// check against its limits before instantiating it.
-struct TableShape
+/// @return The largest initial size among @p tables, in elements; 0 if there is none.
+[[nodiscard]] inline uint32_t largestInitialElements(std::span<TableDeclaration const> tables) noexcept
 {
-    uint32_t count = 0;                  ///< How many tables the module defines.
-    uint32_t largestInitialElements = 0; ///< The largest initial size among them; 0 if there is none.
-
-    /// @param maxTables The most tables allowed.
-    /// @param maxElements The most elements each table may begin with.
-    /// @return Whether the tables stay within both.
-    [[nodiscard]] constexpr bool fitsWithin(uint32_t maxTables, uint32_t maxElements) const noexcept
-    {
-        return count <= maxTables && largestInitialElements <= maxElements;
-    }
-
-    /// @return Whether both describe the same tables.
-    bool operator==(TableShape const&) const = default;
-};
-
-/// @return The shape of @p module's tables; why its bytes could not be read (@see tableDeclarations).
-[[nodiscard]] inline std::expected<TableShape, BinaryError> tableShape(std::span<std::byte const> module)
-{
-    return tableDeclarations(module).transform([](std::vector<TableDeclaration> const& tables) {
-        auto shape =
-            TableShape { .count = static_cast<uint32_t>(tables.size()), .largestInitialElements = 0 };
-        for (auto const& table: tables)
-            shape.largestInitialElements = std::max(shape.largestInitialElements, table.initialElements);
-        return shape;
-    });
+    auto largest = uint32_t { 0 };
+    for (auto const& table: tables)
+        largest = std::max(largest, table.initialElements);
+    return largest;
 }
 
 } // namespace vtextension::wasm::binary
