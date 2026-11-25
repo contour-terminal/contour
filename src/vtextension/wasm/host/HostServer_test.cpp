@@ -897,10 +897,13 @@ TEST_CASE("HostServer.confineRunsAfterTheLanesStartAndBeforeHello", "[vtextensio
         return std::unexpected(ConfinementFailure { .step = proto::LockdownStep::SystemCalls, .code = -1 });
     };
     auto parent = ScriptedParent { std::move(config) };
+    // The step that failed, and what the system said of it as its bit pattern: an HRESULT is negative.
     CHECK(parent.receiveControl()
           == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
                                          .memoryMode = proto::MemoryMode::Copy,
-                                         .lockdown = proto::LockdownState::Failed } });
+                                         .lockdown = proto::LockdownState::Failed,
+                                         .failedStep = proto::LockdownStep::SystemCalls,
+                                         .failureCode = UINT32_MAX } });
     CHECK(startsAtConfine->load() == MaxLaneChannels);
 }
 

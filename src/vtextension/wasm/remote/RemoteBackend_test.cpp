@@ -418,10 +418,11 @@ struct HandleRecords
     std::atomic<int> terminations = 0;
     std::atomic<int> lettings = 0; ///< How often a handle was let go.
     std::atomic<std::size_t> connections = 0;
-    std::mutex mutex;                 ///< Guards what follows.
-    std::vector<WatchRecord> watches; ///< Every watch armed, in order.
-    std::size_t disarmed = 0;         ///< How many watches were disarmed.
-    HostAttachment attachment;        ///< The latest connection's.
+    std::mutex mutex;                  ///< Guards what follows.
+    std::vector<WatchRecord> watches;  ///< Every watch armed, in order.
+    std::size_t disarmed = 0;          ///< How many watches were disarmed.
+    std::vector<HostRefusal> refusals; ///< Every refusal the connector was told of, in order.
+    HostAttachment attachment;         ///< The latest connection's.
     /// Run once, by the next watch disarmed, outside the mutex: where a request still holds the control
     /// channel after its last send.
     std::function<void()> onNextDisarm;
@@ -512,6 +513,19 @@ class ScriptedConnector final: public IHostConnector
                                ends = std::move(ends),
                                connection = _threads.size()]() mutable { script(ends, connection); });
         return connection;
+    }
+
+    void refused(HostRefusal refusal) override
+    {
+        auto const lock = std::scoped_lock { _records->mutex };
+        _records->refusals.push_back(refusal);
+    }
+
+    /// @return Every refusal it was told of, in order.
+    [[nodiscard]] std::vector<HostRefusal> refusals() const
+    {
+        auto const lock = std::scoped_lock { _records->mutex };
+        return _records->refusals;
     }
 
     /// @return How often a host of this connector was told to terminate.
@@ -895,6 +909,8 @@ TEST_CASE("RemoteBackend.refusedHelloIsLoggedOncePerReason", "[vtextension][remo
     versioned.version = proto::ProtocolVersion + 1;
     auto failed = HonestHello;
     failed.lockdown = proto::LockdownState::Failed;
+    failed.failedStep = proto::LockdownStep::FileSystem;
+    failed.failureCode = 13;
     auto const rows = std::array {
         RefusalRow { versioned, LockdownRequirement::AcceptUnsandboxed, HostRefusal::ProtocolVersion },
         RefusalRow { failed, LockdownRequirement::AcceptUnsandboxed, HostRefusal::LockdownFailed },
@@ -921,7 +937,10 @@ TEST_CASE("RemoteBackend.refusedHelloIsLoggedOncePerReason", "[vtextension][remo
             REQUIRE_FALSE(connected.has_value());
             CHECK(connected.error() == ExtensionError::HostUnavailable);
         }
-        CHECK(lines == std::vector<std::string> { refusalLine(row.refusal) });
+        // A host that failed to confine itself is refused naming the step it failed at.
+        CHECK(lines == std::vector<std::string> { refusalLine(row.refusal, row.hello.failedStep) });
+        // The connector hears of every refusal, and may keep one that every host it starts would share.
+        CHECK(connector->refusals() == std::vector<HostRefusal> { row.refusal, row.refusal });
     }
 }
 

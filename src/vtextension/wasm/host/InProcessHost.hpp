@@ -134,6 +134,9 @@ class InProcessHostConnector final: public remote::IHostConnector
     /// @return The connection; `HostUnavailable` if no engine or no channel could be created.
     [[nodiscard]] std::expected<remote::HostConnection, ExtensionError> connect() override;
 
+    /// Keeps nothing: a host in this process is refused for its configuration, which a test chose.
+    void refused([[maybe_unused]] remote::HostRefusal refusal) override {}
+
     /// Test hook.
     /// @return How many hosts connect() started.
     [[nodiscard]] std::size_t connects() const noexcept;

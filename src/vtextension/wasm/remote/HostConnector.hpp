@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <vtextension/ExtensionError.hpp>
+#include <vtextension/wasm/remote/HostRefusals.hpp>
 #include <vtextension/wasm/remote/LaneWatch.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 #include <vtextension/wasm/remote/transport/HandleGrant.hpp>
@@ -165,6 +166,11 @@ class IHostConnector
     /// Starts a host and connects to it. The host's first control PDU is its Hello.
     /// @return The connection; `HostUnavailable` if no host could be started or connected to.
     [[nodiscard]] virtual std::expected<HostConnection, ExtensionError> connect() = 0;
+
+    /// Told that the host of a connection it made was refused at the handshake (HelperIncarnation): a
+    /// connector may keep a reason that every host it would start again shares, and start none.
+    /// @param refusal Why the host was refused.
+    virtual void refused(HostRefusal refusal) = 0;
 };
 
 } // namespace vtextension::wasm::remote

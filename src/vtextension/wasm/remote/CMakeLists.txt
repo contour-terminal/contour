@@ -236,6 +236,14 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
         target_compile_definitions(vtextension_remote_test PRIVATE
             VTEXTENSION_TEST_MODULE_DIR="${VTEXTENSION_TEST_MODULE_DIR}")
     endif()
+    if(_process_source)
+        # The process connector, driven through the handshake by a host a fake launcher plays.
+        target_sources(vtextension_remote_test PRIVATE
+            process/LockdownRefusal_test.cpp
+            process/testing/FakeProcessLauncher.cpp
+            process/testing/FakeProcessLauncher.hpp
+        )
+    endif()
     add_test(NAME vtextension_remote_test COMMAND vtextension_remote_test)
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.

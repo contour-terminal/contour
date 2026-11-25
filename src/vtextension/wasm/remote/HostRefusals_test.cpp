@@ -18,6 +18,8 @@
 
 #include <vtextension/wasm/remote/HostRefusals.hpp>
 #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+#include <vtextension/wasm/remote/proto/LockdownSteps.hpp>
+#include <vtextension/wasm/remote/proto/Pdu.hpp>
 
 using vtextension::wasm::remote::HostRefusal;
 using vtextension::wasm::remote::HostRefusalLog;
@@ -28,6 +30,8 @@ using vtextension::wasm::remote::refusalSource;
 using vtextension::wasm::remote::process::LaunchError;
 using vtextension::wasm::remote::process::launchErrors;
 using vtextension::wasm::remote::process::launchErrorText;
+
+namespace proto = vtextension::wasm::remote::proto;
 
 namespace
 {
@@ -90,6 +94,35 @@ TEST_CASE("HostRefusals.launchLinesSayWhatTheLauncherSays", "[vtextension]")
     }
     // Contour shutting down is no reason to tell of.
     CHECK_FALSE(launchErrors()[std::to_underlying(LaunchError::Stopped)].refusal.has_value());
+}
+
+TEST_CASE("HostRefusals.lockdownLineNamesTheStep", "[vtextension]")
+{
+    for (auto const& row: proto::lockdownSteps())
+    {
+        auto const line = refusalLine(HostRefusal::LockdownFailed, row.step);
+        INFO(line);
+        if (row.step == proto::LockdownStep::None)
+        {
+            // A host that names no step is refused in the general words.
+            CHECK(line == refusalLine(HostRefusal::LockdownFailed));
+            continue;
+        }
+        CHECK(line.contains(row.text));
+        for (auto const engine: { "wasm", "wamr", "wasmtime", "webassembly" })
+            CHECK_FALSE(lowered(line).contains(engine));
+    }
+    // Any other reason has no step to name.
+    CHECK(refusalLine(HostRefusal::Unsandboxed, proto::LockdownStep::SystemCalls)
+          == refusalLine(HostRefusal::Unsandboxed));
+
+    // The log names the step the first refusal for the reason named.
+    auto lines = Lines {};
+    auto log = HostRefusalLog { lines.writer() };
+    log.refused(HostRefusal::LockdownFailed, proto::LockdownStep::FileSystem);
+    log.refused(HostRefusal::LockdownFailed, proto::LockdownStep::SystemCalls);
+    CHECK(lines.written
+          == std::vector { refusalLine(HostRefusal::LockdownFailed, proto::LockdownStep::FileSystem) });
 }
 
 TEST_CASE("HostRefusals.eachReasonIsLoggedOnce", "[vtextension]")

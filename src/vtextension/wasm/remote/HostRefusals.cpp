@@ -13,6 +13,7 @@
 #include <utility>
 
 #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+#include <vtextension/wasm/remote/proto/LockdownSteps.hpp>
 
 namespace vtextension::wasm::remote
 {
@@ -47,6 +48,11 @@ namespace
                                   "requires, and was refused. Extensions do not run." },
     };
     static_assert(std::to_underlying(LastHostRefusal) < 32, "a bit per reason in HostRefusalLog's word");
+
+    /// The line for a host that could not confine itself, around the step it named.
+    constexpr auto LockdownStepLine = std::string_view {
+        "The extension host could not confine itself, and was refused: {}. Extensions do not run."
+    };
 
     /// The line for a host that could not be started for a reason the launcher's table does not name.
     constexpr auto UnnamedLaunchLine =
@@ -87,16 +93,28 @@ std::string refusalLine(HostRefusal refusal)
     return std::string { UnnamedLaunchLine };
 }
 
+std::string refusalLine(HostRefusal refusal, proto::LockdownStep failedStep)
+{
+    if (refusal == HostRefusal::LockdownFailed && failedStep != proto::LockdownStep::None)
+        return std::format(LockdownStepLine, proto::lockdownStepText(failedStep));
+    return refusalLine(refusal);
+}
+
 HostRefusalLog::HostRefusalLog(Writer writer): _writer { std::move(writer) }
 {
 }
 
 void HostRefusalLog::refused(HostRefusal refusal)
 {
+    refused(refusal, proto::LockdownStep::None);
+}
+
+void HostRefusalLog::refused(HostRefusal refusal, proto::LockdownStep failedStep)
+{
     auto const bit = uint32_t { 1 } << std::to_underlying(refusal);
     if ((_logged.fetch_or(bit) & bit) != 0)
         return;
-    _writer(refusalLine(refusal));
+    _writer(refusalLine(refusal, failedStep));
 }
 
 HostRefusalLog::Writer errorLogWriter()

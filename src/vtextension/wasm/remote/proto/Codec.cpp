@@ -109,6 +109,28 @@ namespace
         }
         return false;
     }
+    constexpr bool isEnumerator(LockdownStep value) noexcept
+    {
+        switch (value)
+        {
+            case LockdownStep::None:
+            case LockdownStep::CoreDumps:
+            case LockdownStep::Dumpable:
+            case LockdownStep::Tracing:
+            case LockdownStep::FaultReports:
+            case LockdownStep::NoNewPrivileges:
+            case LockdownStep::FileSystem:
+            case LockdownStep::SystemCalls:
+            case LockdownStep::ThreadSync:
+            case LockdownStep::ResourceCaps:
+            case LockdownStep::Capabilities:
+            case LockdownStep::DescriptorRights:
+            case LockdownStep::Profile:
+            case LockdownStep::Container:
+            case LockdownStep::Mitigations: return true;
+        }
+        return false;
+    }
     constexpr bool isEnumerator(ReleaseTarget value) noexcept
     {
         switch (value)
@@ -185,7 +207,7 @@ namespace
     }
     constexpr auto members(Of<Hello> auto& value) noexcept
     {
-        return fields(value.version, value.memoryMode, value.lockdown);
+        return fields(value.version, value.memoryMode, value.lockdown, value.failedStep, value.failureCode);
     }
     constexpr auto members(Of<CreateRuntime> auto& value) noexcept
     {

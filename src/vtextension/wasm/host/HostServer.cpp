@@ -400,9 +400,17 @@ void HostServer::Impl::sendHello()
     auto const confined = _config.confine
                               ? _config.confine()
                               : std::expected<proto::LockdownState, ConfinementFailure> { _config.lockdown };
-    auto const hello = proto::Hello { .version = proto::ProtocolVersion,
-                                      .memoryMode = _engine.memoryMode(),
-                                      .lockdown = confined.value_or(proto::LockdownState::Failed) };
+    auto hello = proto::Hello { .version = proto::ProtocolVersion,
+                                .memoryMode = _engine.memoryMode(),
+                                .lockdown = confined.value_or(proto::LockdownState::Failed),
+                                .failedStep = proto::LockdownStep::None,
+                                .failureCode = 0 };
+    if (!confined)
+    {
+        hello.failedStep = confined.error().step;
+        // An HRESULT is negative as an int: its bit pattern is what travels.
+        hello.failureCode = static_cast<uint32_t>(confined.error().code);
+    }
     if (auto const sent = send(_control, hello); !sent)
     {
         finish(sent.error());

@@ -119,7 +119,8 @@ std::expected<std::shared_ptr<HelperIncarnation>, ExtensionError> HelperIncarnat
         auto const& said = std::get<proto::Hello>(*hello);
         if (auto const refusal = refusalOf(said, policy.lockdown))
         {
-            refusals.refused(*refusal);
+            refusals.refused(*refusal, said.failedStep);
+            connector.refused(*refusal);
             return false;
         }
         incarnation->_memoryMode = said.memoryMode;

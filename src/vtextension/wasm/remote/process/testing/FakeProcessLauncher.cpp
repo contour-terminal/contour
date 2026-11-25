@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -165,7 +166,12 @@ namespace
     };
 } // namespace
 
-FakeProcessLauncher::FakeProcessLauncher(): _state { std::make_shared<State>() }
+FakeProcessLauncher::FakeProcessLauncher(): FakeProcessLauncher { LaunchHook {} }
+{
+}
+
+FakeProcessLauncher::FakeProcessLauncher(LaunchHook onLaunch):
+    _state { std::make_shared<State>() }, _onLaunch { std::move(onLaunch) }
 {
 }
 
@@ -174,10 +180,15 @@ FakeProcessLauncher::~FakeProcessLauncher() = default;
 std::expected<std::unique_ptr<IProcessHandle>, LaunchError> FakeProcessLauncher::launch(
     LaunchSpec const& spec)
 {
-    auto const lock = std::scoped_lock { _state->mutex };
-    _state->launches.push_back(
-        LaunchRecord { .spec = spec, .thread = std::this_thread::get_id(), .exit = std::nullopt });
-    return std::make_unique<FakeProcessHandle>(_state, _state->launches.size() - 1);
+    auto const index = [&] {
+        auto const lock = std::scoped_lock { _state->mutex };
+        _state->launches.push_back(
+            LaunchRecord { .spec = spec, .thread = std::this_thread::get_id(), .exit = std::nullopt });
+        return _state->launches.size() - 1;
+    }();
+    if (_onLaunch)
+        _onLaunch(index, spec);
+    return std::make_unique<FakeProcessHandle>(_state, index);
 }
 
 std::expected<std::unique_ptr<IExitWaitSet>, LaunchError> FakeProcessLauncher::makeWaitSet(

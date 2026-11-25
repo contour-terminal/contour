@@ -101,8 +101,17 @@ ProcessHostConnector::ProcessHostConnector(std::shared_ptr<SupervisorMailbox> su
 {
 }
 
+void ProcessHostConnector::refused(remote::HostRefusal refusal)
+{
+    if (refusal == remote::HostRefusal::LockdownFailed)
+        _lockdown.store(LockdownHistory::Failed);
+}
+
 std::expected<remote::HostConnection, ExtensionError> ProcessHostConnector::connect()
 {
+    // Said once already, by whoever was told the host's Hello: no host is started that would fail alike.
+    if (_lockdown.load() == LockdownHistory::Failed)
+        return std::unexpected(ExtensionError::HostUnavailable);
     auto control = transport::makeChannelPair();
     auto page = transport::ControlPage::create();
     auto wake = transport::makeWakePair();

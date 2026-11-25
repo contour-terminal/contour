@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <thread>
@@ -33,7 +34,14 @@ class FakeProcessLauncher final: public IProcessLauncher
     /// What the launcher and every process and set of it share.
     struct State;
 
+    /// Run by each launch, as the process it starts would run: with its index, counted from 0 in launch
+    /// order, and its spec, whose inherited handles are open until the launch returns.
+    using LaunchHook = std::function<void(std::size_t index, LaunchSpec const& spec)>;
+
     FakeProcessLauncher();
+
+    /// @param onLaunch Run by each launch once it is recorded, outside the launcher's mutex.
+    explicit FakeProcessLauncher(LaunchHook onLaunch);
     FakeProcessLauncher(FakeProcessLauncher const&) = delete;
     FakeProcessLauncher(FakeProcessLauncher&&) = delete;
     FakeProcessLauncher& operator=(FakeProcessLauncher const&) = delete;
@@ -93,6 +101,7 @@ class FakeProcessLauncher final: public IProcessLauncher
 
   private:
     std::shared_ptr<State> _state;
+    LaunchHook _onLaunch;
 };
 
 } // namespace vtextension::wasm::remote::process::testing

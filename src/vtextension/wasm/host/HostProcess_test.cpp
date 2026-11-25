@@ -511,7 +511,9 @@ TEST_CASE("HostProcess.servesOverAdoptedEndpoints", "[vtextension][host]")
     CHECK(*hello
           == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
                                          .memoryMode = proto::MemoryMode::Copy,
-                                         .lockdown = proto::LockdownState::Unsandboxed } });
+                                         .lockdown = proto::LockdownState::Unsandboxed,
+                                         .failedStep = proto::LockdownStep::None,
+                                         .failureCode = 0 } });
     CHECK(confined->boundTo.load() == TheParent);
     CHECK(confined->cappedTo.load() == TheDataBytes);
     CHECK(confined->confines.load() == 1);
@@ -563,12 +565,16 @@ namespace
     return helloOf(confined, testConfinement(confined));
 }
 
-/// @return The Hello of a host that confined itself as @p lockdown says.
-[[nodiscard]] proto::Hello helloSaying(proto::LockdownState lockdown)
+/// @return The Hello of a host that confined itself as @p lockdown says, failing at @p step with @p code.
+[[nodiscard]] proto::Hello helloSaying(proto::LockdownState lockdown,
+                                       proto::LockdownStep step = proto::LockdownStep::None,
+                                       uint32_t code = 0)
 {
     return proto::Hello { .version = proto::ProtocolVersion,
                           .memoryMode = proto::MemoryMode::Copy,
-                          .lockdown = lockdown };
+                          .lockdown = lockdown,
+                          .failedStep = step,
+                          .failureCode = code };
 }
 
 /// @return What the host tells of @p failure, after what it was a step of.
@@ -650,7 +656,7 @@ TEST_CASE("HostProcess.everyConfinementStepRunsPastAFailure", "[vtextension][hos
     confined->lockdown =
         std::unexpected(ConfinementFailure { .step = proto::LockdownStep::SystemCalls, .code = 2 });
     // The first step that failed is stated; every later one ran all the same.
-    CHECK(helloOf(confined) == helloSaying(proto::LockdownState::Failed));
+    CHECK(helloOf(confined) == helloSaying(proto::LockdownState::Failed, proto::LockdownStep::FileSystem, 1));
     auto const events = confined->recorded();
     CHECK(std::ranges::count(events, std::string { "restrict" }) == 1);
     CHECK(std::ranges::count(events, std::string { "caps" }) == 1);
@@ -668,7 +674,7 @@ TEST_CASE("HostProcess.hardeningFailureIsStatedAsItsStep", "[vtextension][host]"
     confined->hardening = std::unexpected(failure);
     confined->lockdown =
         std::unexpected(ConfinementFailure { .step = proto::LockdownStep::SystemCalls, .code = 2 });
-    CHECK(helloOf(confined) == helloSaying(proto::LockdownState::Failed));
+    CHECK(helloOf(confined) == helloSaying(proto::LockdownState::Failed, proto::LockdownStep::Dumpable, 1));
     CHECK(
         toldBy(*confined)
         == std::vector {
@@ -702,7 +708,8 @@ TEST_CASE("HostProcess.refusedCapIsStatedAsItsStep", "[vtextension][host]")
     confinement.confine = [refused](uint64_t) -> std::expected<void, ConfinementFailure> {
         return std::unexpected(refused);
     };
-    CHECK(helloOf(confined, confinement) == helloSaying(proto::LockdownState::Failed));
+    CHECK(helloOf(confined, confinement)
+          == helloSaying(proto::LockdownState::Failed, proto::LockdownStep::ResourceCaps, 1));
     // The sandbox locked the host down all the same.
     CHECK(std::ranges::count(confined->recorded(), std::string { "lockDown" }) == 1);
     CHECK(toldBy(*confined) == std::vector { toldOf("resource caps", refused) });

@@ -239,6 +239,8 @@ class StampingConnector final: public IHostConnector
         });
     }
 
+    void refused(vtextension::wasm::remote::HostRefusal refusal) override { _inner->refused(refusal); }
+
   private:
     std::shared_ptr<IHostConnector> _inner;
     std::shared_ptr<StepStamps> _stamps;

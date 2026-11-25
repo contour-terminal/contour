@@ -24,7 +24,7 @@ namespace vtextension::wasm::remote::proto
 {
 
 /// The protocol version both ends must speak; the helper states it in its Hello.
-inline constexpr uint32_t ProtocolVersion = 3;
+inline constexpr uint32_t ProtocolVersion = 4;
 
 /// The size of a guest's memory page: what guest memory grows by, and what its object is rounded up to.
 inline constexpr uint64_t WasmPageBytes = uint64_t { 64 } * 1024;
@@ -95,7 +95,8 @@ enum class LockdownState : uint8_t
 };
 
 /// A step of the helper's confinement: its hardening, its sandbox and its resource caps, on every system.
-/// Each system takes some of them. Phrased for users by lockdownSteps() (LockdownSteps.hpp).
+/// Each system takes some of them; a Hello stating `Failed` names the first that failed. Phrased for users by
+/// lockdownSteps() (LockdownSteps.hpp), on both ends.
 enum class LockdownStep : uint8_t
 {
     None,             ///< No step: what a Hello names when nothing failed.
@@ -201,6 +202,10 @@ struct Hello
     uint32_t version = 0;                           ///< The protocol version it speaks.
     MemoryMode memoryMode = MemoryMode::Copy;       ///< How it shares instance memory.
     LockdownState lockdown = LockdownState::Failed; ///< How far it confined itself.
+    /// The first step of its confinement that failed, when `lockdown` is `Failed`; `None` otherwise.
+    LockdownStep failedStep = LockdownStep::None;
+    /// What the system said of that step: an errno, or an HRESULT's bit pattern; 0 when none failed.
+    uint32_t failureCode = 0;
 
     bool operator==(Hello const&) const = default;
 };
