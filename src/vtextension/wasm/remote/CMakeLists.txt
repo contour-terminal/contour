@@ -212,6 +212,7 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
         ../host/ExecutorThread_test.cpp
         ../host/HostProcess_test.cpp
         ../host/HostServer_test.cpp
+        ../host/Sandbox_test.cpp
         RegistryRemote_test.cpp
         RemoteBackend_test.cpp
         SharedGuestMemory_test.cpp

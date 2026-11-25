@@ -152,6 +152,11 @@ class DecoratedEngine final: public host::IHostedEngine
 
     [[nodiscard]] uint64_t memoryGuardBytes() const noexcept override { return _inner->memoryGuardBytes(); }
 
+    [[nodiscard]] std::expected<void, ExtensionError> prepareThread() override
+    {
+        return _inner->prepareThread();
+    }
+
   private:
     std::unique_ptr<host::IHostedEngine> _inner;
     InstanceDecorator _decorate;

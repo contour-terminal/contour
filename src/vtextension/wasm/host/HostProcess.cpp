@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <expected>
 #include <format>
+#include <memory>
 #include <ranges>
 #include <string_view>
 #include <tuple>
@@ -132,6 +133,7 @@ std::expected<HostEndpoints, HostProcessExit> adoptEndpoints(transport::HelperAr
 HostProcess::HostProcess(IHostedEngine& engine, HostEndpoints endpoints, HostServerConfig config):
     _controlPage { std::move(endpoints.controlPage) },
     _wake { std::move(endpoints.wake) },
+    _startThread { config.startExecutor },
     _server { engine, std::move(endpoints.lanes), std::move(endpoints.control), [&] {
                  config.isInterruptRaised = [page = &_controlPage](uint32_t slot) {
                      return page->isRaised(slot);
@@ -145,8 +147,8 @@ ServerExit HostProcess::run()
 {
     // Listening before the server confines the host, which may forbid new threads from then on; stopped and
     // joined once the server is done.
-    auto const listener =
-        InterruptListener::start(_controlPage, _wake, [this](uint32_t slot) { _server.interruptSlot(slot); });
+    auto const listener = InterruptListener::start(
+        _controlPage, _wake, [this](uint32_t slot) { _server.interruptSlot(slot); }, _startThread);
     if (!listener)
         return ServerExit::ExecutorUnavailable;
     return _server.run();
@@ -170,6 +172,8 @@ HostConfinement systemConfinement()
     return HostConfinement {
         .bindToParent = &bindToParent,
         .beforeThreads = [] { return hardenProcess(); },
+        .sandbox = &makeSystemSandbox,
+        .startThread = &ExecutorThread::start,
         .confine =
             [](uint64_t dataBytes) {
                 if constexpr (BuildCapPolicy == CapPolicy::Skip)
@@ -184,6 +188,13 @@ int runExtensionHost(std::span<std::string_view const> arguments,
                      EngineFactory const& engines,
                      HostConfinement const& confinement)
 {
+    using Confined = std::expected<void, ConfinementFailure>;
+    // Tells of a step that failed, after what it was a step of.
+    auto const tellOf = [&confinement](std::string_view what, Confined const& step) {
+        if (!step)
+            confinement.tell(std::format("{} failed: {}", what, confinementFailureText(step.error())));
+    };
+
     auto const parsed = transport::parseHelperArguments(arguments);
     if (!parsed)
         return endWith(HostProcessExit::BadArguments);
@@ -192,8 +203,7 @@ int runExtensionHost(std::span<std::string_view const> arguments,
         return endWith(HostProcessExit::ParentGone);
     // While the main thread is the only one: what is set per thread then reaches every thread started later.
     auto const hardened = confinement.beforeThreads();
-    if (!hardened)
-        confinement.tell(std::format("hardening failed: {}", confinementFailureText(hardened.error())));
+    tellOf("hardening", hardened);
     auto endpoints = adoptEndpoints(*parsed);
     if (!endpoints)
         return endWith(endpoints.error());
@@ -201,13 +211,27 @@ int runExtensionHost(std::span<std::string_view const> arguments,
     auto const engine = engines();
     if (!engine)
         return endWith(HostProcessExit::EngineUnavailable);
+    // Still before any thread: what the sandbox restricts now, every thread inherits.
+    auto const sandbox =
+        confinement.sandbox(SandboxDescriptors { .control = endpoints->control.nativeHandle() });
+    auto const restricted = sandbox->restrictBeforeThreads();
+    tellOf("sandbox", restricted);
+
     auto config = HostServerConfig {};
-    config.confine = [&confinement, hardened, dataBytes = parsed->dataBytes] {
+    config.startExecutor = confinement.startThread;
+    // Once every thread runs and was prepared: caps first, which the locked-down host could not set.
+    config.confine = [&confinement, &sandbox, &tellOf, hardened, restricted, dataBytes = parsed->dataBytes]()
+        -> std::expected<remote::proto::LockdownState, ConfinementFailure> {
         auto const capped = confinement.confine(dataBytes);
-        if (!capped)
-            confinement.tell(std::format("resource caps failed: {}", confinementFailureText(capped.error())));
-        return hardened && capped ? remote::proto::LockdownState::Unsandboxed
-                                  : remote::proto::LockdownState::Failed;
+        tellOf("resource caps", capped);
+        auto const lockedDown = sandbox->lockDown();
+        // One line for the sandbox: what failed first.
+        if (restricted)
+            tellOf("sandbox", lockedDown);
+        for (auto const& step: std::array { hardened, restricted, capped, lockedDown })
+            if (!step)
+                return std::unexpected(step.error());
+        return sandbox->lockdownState();
     };
     auto host = HostProcess { *engine, *std::move(endpoints), std::move(config) };
     return endWith(hostProcessExitOf(host.run()));

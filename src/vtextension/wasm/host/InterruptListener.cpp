@@ -32,12 +32,13 @@ namespace
 std::expected<InterruptListener, std::error_code> InterruptListener::start(
     transport::ControlPage const& page,
     transport::WakeReceiver& wake,
-    std::function<void(uint32_t slot)> interruptSlot)
+    std::function<void(uint32_t slot)> interruptSlot,
+    ExecutorStarter const& startThread)
 {
-    return ExecutorThread::start(InterruptListenerStackBytes,
-                                 [&page, &wake, interruptSlot = std::move(interruptSlot)] {
-                                     listen(page, wake, interruptSlot);
-                                 })
+    return startThread(InterruptListenerStackBytes,
+                       [&page, &wake, interruptSlot = std::move(interruptSlot)] {
+                           listen(page, wake, interruptSlot);
+                       })
         .transform([&](ExecutorThread thread) { return InterruptListener { wake, std::move(thread) }; });
 }
 

@@ -29,11 +29,13 @@ class InterruptListener
     /// @param page The interrupt page; outlives the listener.
     /// @param wake The wake signal's receiving end; outlives the listener, and is stopped by its destruction.
     /// @param interruptSlot Called with every slot raised, on every wake; on the listener's thread.
+    /// @param startThread How its thread is started, with InterruptListenerStackBytes.
     /// @return The listener; why its thread could not be started.
     [[nodiscard]] static std::expected<InterruptListener, std::error_code> start(
         remote::transport::ControlPage const& page,
         remote::transport::WakeReceiver& wake,
-        std::function<void(uint32_t slot)> interruptSlot);
+        std::function<void(uint32_t slot)> interruptSlot,
+        ExecutorStarter const& startThread);
 
     InterruptListener(InterruptListener&& other) noexcept;
     InterruptListener& operator=(InterruptListener&& other) noexcept;

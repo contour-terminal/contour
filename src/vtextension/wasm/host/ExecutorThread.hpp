@@ -25,7 +25,9 @@ class ExecutorThread
     /// Starts @p body on a new thread.
     /// @param stackBytes The least stack the thread gets; the platform's minimum if that is larger.
     /// @param body What the thread runs. Must not throw.
-    /// @return The running thread; why the platform could not start it, @p body then never running.
+    /// @return The running thread, once it entered @p body: its start-up is behind it, so that a sandbox
+    ///         installed afterwards never meets it; why the platform could not start it, @p body then never
+    ///         running.
     [[nodiscard]] static std::expected<ExecutorThread, std::error_code> start(std::size_t stackBytes,
                                                                               std::function<void()> body);
 
@@ -44,5 +46,10 @@ class ExecutorThread
 
     std::unique_ptr<State> _state;
 };
+
+/// Starts a thread of a chosen stack, as ExecutorThread::start does: the operating system's threads, but in a
+/// test one that records or fails each start.
+using ExecutorStarter =
+    std::function<std::expected<ExecutorThread, std::error_code>(std::size_t, std::function<void()>)>;
 
 } // namespace vtextension::wasm::host

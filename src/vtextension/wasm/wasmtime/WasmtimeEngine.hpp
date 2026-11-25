@@ -63,7 +63,18 @@ class KindState;
 ///         guest's memory.grow returns -1, and whatever the guest does about it fails the call. Its memory is
 ///         copied to the parent (MemoryMode::Copy) under MemorySharing::Private, and shared with it
 ///         (MemoryMode::Shared) under MemorySharing::Provided.
+///         Each thread it runs guests on is primed by prepareThread(), which runs a built-in module of one
+///         empty function there.
 [[nodiscard]] std::unique_ptr<host::IHostedEngine> makeWasmtimeEngine(std::shared_ptr<KindState> kind,
                                                                       WasmtimeConfig config);
 
 } // namespace vtextension::wasm::wasmtime
+
+namespace vtextension::wasm::wasmtime::testing
+{
+
+/// Test-only: how many times any engine of this process compiled its built-in priming module.
+/// @return The count, since the process started.
+[[nodiscard]] uint64_t primingCompilations() noexcept;
+
+} // namespace vtextension::wasm::wasmtime::testing

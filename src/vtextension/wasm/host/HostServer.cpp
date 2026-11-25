@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <latch>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -43,6 +44,13 @@ namespace
 {
     /// What a request was served with: nothing to go on, or the reason the connection ends.
     using Served = std::expected<void, ServerExit>;
+
+    /// Whether every thread that runs guests was prepared to.
+    enum class Preparation : uint8_t
+    {
+        Complete,   ///< Every one was, so far.
+        Incomplete, ///< One was not: the host cannot run guests on it once confined, and ends.
+    };
 
     /// @return The reason a stream's failure ends the connection with.
     [[nodiscard]] ServerExit exitOf(StreamError error) noexcept
@@ -246,6 +254,9 @@ class HostServer::Impl
     /// every channel down, so that every thread blocked on one returns. Repeating it is harmless.
     void finish(ServerExit reason) noexcept;
 
+    /// Confines the host, says Hello, then serves the control channel (serveControl()).
+    void sendHello();
+
     /// Serves the control channel until the connection ends, and ends it for the reason it does.
     void serveControl();
 
@@ -341,28 +352,36 @@ ServerExit HostServer::Impl::run()
     // Destroyed in reverse, on every way out, an exception's included: the connection ends (unblocking every
     // executor), the executors are joined, then every engine object goes, here on the control thread.
     auto releaseAll = core::Finally { [this] { release(); } };
+    // Counted down by each executor once it prepared its thread, or failed to; outlives every executor.
+    auto lanesPrepared = std::latch { static_cast<std::ptrdiff_t>(_lanes.size()) };
+    auto preparation = std::atomic<Preparation> { Preparation::Complete };
     auto executors = std::vector<ExecutorThread> {};
     auto endConnection = core::Finally { [this] { finish(ServerExit::ProtocolViolation); } };
     executors.reserve(_lanes.size());
     for (auto& lane: _lanes)
     {
-        auto started = _config.startExecutor(ExecutorStackBytes, [this, &lane] { runLane(lane); });
+        auto started = _config.startExecutor(ExecutorStackBytes, [this, &lane, &lanesPrepared, &preparation] {
+            auto const prepared = _engine.prepareThread();
+            if (!prepared)
+                preparation.store(Preparation::Incomplete);
+            lanesPrepared.count_down();
+            if (prepared)
+                runLane(lane);
+        });
         if (!started)
             break;
         executors.push_back(std::move(*started));
     }
     if (executors.size() == _lanes.size())
     {
-        // Every thread the host needs runs now: it may cap itself, then say how far it did.
-        auto const lockdown = _config.confine ? _config.confine() : _config.lockdown;
-        auto const hello = send(_control,
-                                proto::Hello { .version = proto::ProtocolVersion,
-                                               .memoryMode = _engine.memoryMode(),
-                                               .lockdown = lockdown });
-        if (hello)
-            serveControl();
+        // The control thread runs start functions: it is prepared too, then waits for every lane's.
+        if (!_engine.prepareThread())
+            preparation.store(Preparation::Incomplete);
+        lanesPrepared.wait();
+        if (preparation.load() == Preparation::Complete)
+            sendHello();
         else
-            finish(hello.error());
+            finish(ServerExit::ExecutorUnavailable);
     }
     else
         finish(ServerExit::ExecutorUnavailable);
@@ -373,6 +392,23 @@ ServerExit HostServer::Impl::run()
     releaseAll.run();
     auto const lock = std::scoped_lock { _mutex };
     return _exit.value_or(ServerExit::Stopped);
+}
+
+void HostServer::Impl::sendHello()
+{
+    // Every thread the host needs runs now, prepared: it may confine itself, then say how far it did.
+    auto const confined = _config.confine
+                              ? _config.confine()
+                              : std::expected<proto::LockdownState, ConfinementFailure> { _config.lockdown };
+    auto const hello = proto::Hello { .version = proto::ProtocolVersion,
+                                      .memoryMode = _engine.memoryMode(),
+                                      .lockdown = confined.value_or(proto::LockdownState::Failed) };
+    if (auto const sent = send(_control, hello); !sent)
+    {
+        finish(sent.error());
+        return;
+    }
+    serveControl();
 }
 
 void HostServer::Impl::serveControl()

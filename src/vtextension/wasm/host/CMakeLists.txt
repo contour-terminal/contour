@@ -1,14 +1,18 @@
 # vtextension_host: the extension host's side of the protocol. HostServer serves one engine's runtimes, modules
 # and instances over a control channel and its lanes; InProcessHostConnector runs one in this process, for the
 # tests and for measuring the protocol without a process boundary; HostProcess is the extension host
-# executable's body, and HostBootstrap what that process does to itself before it serves. It links no engine:
-# whoever composes a host hands it one (IHostedEngine), and its tests live in vtextension_remote_test
+# executable's body, HostBootstrap and Sandbox what that process does to itself before it serves. It links no
+# engine: whoever composes a host hands it one (IHostedEngine), and its tests live in vtextension_remote_test
 # (../remote/CMakeLists.txt), which links Wasmtime's.
 
 set(_bootstrap_source HostBootstrap_posix.cpp)
 if(WIN32)
     set(_bootstrap_source HostBootstrap_win32.cpp)
 endif()
+
+# Each system's sandbox (Sandbox.hpp) is a file of its own; a system that has none yet runs the host
+# unsandboxed, and its Hello says so.
+set(_sandbox_source Sandbox_none.cpp)
 
 add_library(vtextension_host STATIC
     ExecutorThread.cpp
@@ -28,6 +32,7 @@ add_library(vtextension_host STATIC
     InterruptListener.hpp
     Sandbox.cpp
     Sandbox.hpp
+    ${_sandbox_source}
     ../remote/HostConnector.hpp
 )
 target_link_libraries(vtextension_host PUBLIC vtextension_remote_wire vtextension_memory_provision PRIVATE core::base)

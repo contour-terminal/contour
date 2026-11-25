@@ -26,6 +26,7 @@
 
 #include <vtextension/wasm/host/ExecutorThread.hpp>
 #include <vtextension/wasm/host/IHostedEngine.hpp>
+#include <vtextension/wasm/host/Sandbox.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 #include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
@@ -41,10 +42,6 @@ inline constexpr std::size_t HostFrameBytes = std::size_t { 256 } * 1024;
 inline constexpr std::size_t ExecutorStackBytes =
     remote::proto::MaxCallDepth * (remote::proto::MaxRuntimeStackBytes + HostFrameBytes);
 
-/// Starts the thread a lane's executor runs on, with the stack it asks for, as ExecutorThread::start does.
-using ExecutorStarter =
-    std::function<std::expected<ExecutorThread, std::error_code>(std::size_t, std::function<void()>)>;
-
 /// Opens a guest memory mapping's first bytes, as GuestMemoryMapping::open() does.
 using GuestMemoryOpener = std::function<std::expected<void, remote::transport::MappingError>(
     remote::transport::GuestMemoryMapping& memory, uint64_t bytes)>;
@@ -55,11 +52,13 @@ struct HostServerConfig
     remote::proto::PduLimits limits {}; ///< The caps of the PDUs it receives, and sends.
     /// How far the host confined itself, as its Hello states, when there is no confine.
     remote::proto::LockdownState lockdown = remote::proto::LockdownState::Unsandboxed;
-    /// Confines the host: called once every lane's thread started, before Hello, whose lockdown is what it
-    /// returns. Null: nothing is confined, and Hello states `lockdown`.
-    std::function<remote::proto::LockdownState()> confine {};
+    /// Confines the host: called once every lane's thread started and every thread that runs guests was
+    /// prepared (IHostedEngine::prepareThread()), before Hello. What it returns is what Hello states: how far
+    /// the host is confined, or `Failed` with the step that failed. Null: nothing is confined, and Hello
+    /// states `lockdown`.
+    std::function<std::expected<remote::proto::LockdownState, ConfinementFailure>()> confine {};
     /// How each lane's executor thread is started: the operating system's threads, but in a test that
-    /// makes one fail.
+    /// records or fails each start.
     ExecutorStarter startExecutor = &ExecutorThread::start;
     /// Whether an interrupt slot is raised on the interrupt page, as interruptSlot() asks before it
     /// interrupts: what tells the instance a slot was raised for from one that holds the slot since. Null:
@@ -76,7 +75,7 @@ enum class ServerExit : uint8_t
     ProtocolViolation,   ///< The parent sent what the protocol does not allow, on any channel.
     PeerClosed,          ///< The parent closed a channel, or a channel failed.
     Stopped,             ///< stop() was called.
-    ExecutorUnavailable, ///< A lane's executor thread could not be started.
+    ExecutorUnavailable, ///< A lane's executor thread could not be started, or a thread not be prepared.
     MemoryUnusable,      ///< Guest memory the parent granted to grow into could not be opened.
 };
 
@@ -98,12 +97,14 @@ class HostServer
     HostServer& operator=(HostServer const&) = delete;
     HostServer& operator=(HostServer&&) = delete;
 
-    /// Starts one executor thread per lane (of ExecutorStackBytes), confines the host (HostServerConfig::
-    /// confine), sends Hello, serves control on the calling thread until EOF, a violation or stop(); then
-    /// stops, joins the executors, releases every instance, module, runtime. Called once.
+    /// Starts one executor thread per lane (of ExecutorStackBytes), each of which prepares itself
+    /// (IHostedEngine::prepareThread()) before it serves; prepares the calling thread, which runs start
+    /// functions, too; waits until every one is prepared; confines the host (HostServerConfig::confine),
+    /// sends Hello, serves control on the calling thread until EOF, a violation or stop(); then stops, joins
+    /// the executors, releases every instance, module, runtime. Called once.
     /// @return Why it stopped serving: the first of the reasons that came up, on any channel;
-    ///         `ExecutorUnavailable` if a lane's thread could not be started, neither confining nor sending
-    ///         anything then.
+    ///         `ExecutorUnavailable` if a lane's thread could not be started or a thread not prepared,
+    ///         neither confining nor sending anything then.
     [[nodiscard]] ServerExit run();
 
     /// Thread-safe, idempotent: interrupts every live instance, shuts every channel down. Callable before,

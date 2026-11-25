@@ -6,9 +6,11 @@
 /// memory with Contour.
 
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <memory>
 
+#include <vtextension/ExtensionError.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 
@@ -27,6 +29,14 @@ class IHostedEngine: public IWasmBackend
     ///         object where the host maps it: the guard the engine's compiled code relies on
     ///         (MemoryProvision). 0 for an engine that copies memory.
     [[nodiscard]] virtual uint64_t memoryGuardBytes() const noexcept = 0;
+
+    /// Prepares the calling thread to run guests, before the host locks itself down: does once what running
+    /// a guest on it would do the first time -- installing the engine's signal handlers, the thread's
+    /// alternate signal stack, its thread environment -- so that nothing a guest does later needs what the
+    /// locked-down host may no longer do. Called on every thread that runs guests, each once; idempotent per
+    /// thread.
+    /// @return Nothing once the thread is prepared; why not otherwise, which ends the host.
+    [[nodiscard]] virtual std::expected<void, ExtensionError> prepareThread() = 0;
 };
 
 /// Creates the engine one host runs on; null if none can be.

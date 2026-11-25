@@ -337,12 +337,103 @@ namespace
         return linker;
     }
 
+    /// A module of one function that takes and returns nothing, built in: what a thread is primed with.
+    ///
+    ///     (module (func (export "p")))
+    constexpr auto PrimingModule = std::to_array<uint8_t>({
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02,
+        0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 0x70, 0x00, 0x00, 0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b,
+    });
+
+    /// The name PrimingModule exports its function under.
+    constexpr auto PrimingExport = std::string_view { "p" };
+
+    /// The stack the priming engine gives a call: one frame of a function that does nothing.
+    constexpr auto PrimingStackBytes = std::size_t { 64 } * 1024;
+
+    /// How many times PrimingModule was compiled, in this process.
+    auto primingCompilationCount = std::atomic<uint64_t> { 0 };
+
+    /// The serial the next engine facade takes; 0 names none.
+    auto nextEngineSerial = std::atomic<uint64_t> { 1 };
+
+    /// The serial of the engine facade whose prepareThread() primed the calling thread last; 0 for none.
+    thread_local auto threadPrimedFor = uint64_t { 0 };
+
+    /// What a thread is primed with: an engine configured as every runtime's engine of a facade is, as to
+    /// how it traps, and PrimingModule compiled on it.
+    struct Priming
+    {
+        detail::EngineHandle engine;
+        detail::ModuleHandle module;
+    };
+
+    /// Compiles PrimingModule on an engine configured by @p config as to how it traps.
+    /// @return The engine and the module; `RuntimeUnavailable` if either cannot be made.
+    [[nodiscard]] std::expected<Priming, ExtensionError> compilePriming(WasmtimeConfig const& config)
+    {
+        // Its own memory: the module has none, and so needs no provision.
+        auto primingConfig = WasmtimeConfig { .trapMode = config.trapMode,
+                                              .wasiEnvironment = config.wasiEnvironment,
+                                              .memory = MemorySharing::Private };
+        auto engine = detail::EngineHandle { wasm_engine_new_with_config(engineConfig(
+            primingConfig,
+            RuntimeLimits { .memoryBytes = 0, .stackBytes = PrimingStackBytes, .tableElements = 0 })) };
+        if (!engine)
+            return std::unexpected(ExtensionError::RuntimeUnavailable);
+        auto* module = static_cast<wasmtime_module_t*>(nullptr);
+        auto const error = detail::ErrorHandle { wasmtime_module_new(
+            engine.get(), PrimingModule.data(), PrimingModule.size(), &module) };
+        if (error || module == nullptr)
+            return std::unexpected(ExtensionError::RuntimeUnavailable);
+        primingCompilationCount.fetch_add(1);
+        return Priming { .engine = std::move(engine), .module = detail::ModuleHandle { module } };
+    }
+
+    /// Instantiates @p priming's module and calls its function on the calling thread: what the engine does
+    /// the first time a guest runs on a thread, and once in the process.
+    /// @return Nothing once it returned; `RuntimeUnavailable` if anything failed or trapped.
+    [[nodiscard]] std::expected<void, ExtensionError> runPriming(Priming const& priming)
+    {
+        auto const store = detail::StoreHandle { wasmtime_store_new(priming.engine.get(), nullptr, nullptr) };
+        if (!store)
+            return std::unexpected(ExtensionError::RuntimeUnavailable);
+        auto* const context = wasmtime_store_context(store.get());
+        // Epoch interruption is on, as on every engine; nothing moves this engine's epoch past one tick.
+        wasmtime_context_set_epoch_deadline(context, 1);
+        auto instance = wasmtime_instance_t {};
+        auto* rawTrap = static_cast<wasm_trap_t*>(nullptr);
+        auto const error = detail::ErrorHandle { wasmtime_instance_new(
+            context, priming.module.get(), nullptr, 0, &instance, &rawTrap) };
+        auto const trap = detail::TrapHandle { rawTrap };
+        if (error || trap)
+            return std::unexpected(ExtensionError::RuntimeUnavailable);
+        auto item = wasmtime_extern_t {};
+        if (!wasmtime_instance_export_get(
+                context, &instance, PrimingExport.data(), PrimingExport.size(), &item))
+            return std::unexpected(ExtensionError::RuntimeUnavailable);
+        if (item.kind != WASMTIME_EXTERN_FUNC)
+        {
+            wasmtime_extern_delete(&item);
+            return std::unexpected(ExtensionError::RuntimeUnavailable);
+        }
+        auto* rawCallTrap = static_cast<wasm_trap_t*>(nullptr);
+        auto const callError = detail::ErrorHandle { wasmtime_func_call(
+            context, &item.of.func, nullptr, 0, nullptr, 0, &rawCallTrap) };
+        auto const callTrap = detail::TrapHandle { rawCallTrap };
+        if (callError || callTrap)
+            return std::unexpected(ExtensionError::RuntimeUnavailable);
+        return {};
+    }
+
     /// A Wasmtime engine: a facade over the kind's shared state.
     class WasmtimeEngine final: public host::IHostedEngine
     {
       public:
         WasmtimeEngine(std::shared_ptr<KindState> kind, WasmtimeConfig config) noexcept:
-            _kind { std::move(kind) }, _config { std::move(config) }
+            _kind { std::move(kind) },
+            _config { std::move(config) },
+            _serial { nextEngineSerial.fetch_add(1) }
         {
         }
 
@@ -383,9 +474,38 @@ namespace
             return memoryGuardBytesOf(_config);
         }
 
+        /// Runs PrimingModule on the calling thread, which installs Wasmtime's signal handlers (once in the
+        /// process, under TrapMode::Signals) and the thread's alternate signal stack, both of which Wasmtime
+        /// does lazily, the first time a guest runs. Compiled once per engine, on the first thread primed.
+        [[nodiscard]] std::expected<void, ExtensionError> prepareThread() override
+        {
+            if (threadPrimedFor == _serial)
+                return {};
+            return priming()
+                .and_then([](Priming const* priming) { return runPriming(*priming); })
+                .transform([this] { threadPrimedFor = _serial; });
+        }
+
       private:
+        /// @return This engine's priming, compiled by the first call.
+        [[nodiscard]] std::expected<Priming const*, ExtensionError> priming()
+        {
+            auto const lock = std::scoped_lock { _primingMutex };
+            if (!_priming)
+            {
+                auto compiled = compilePriming(_config);
+                if (!compiled)
+                    return std::unexpected(compiled.error());
+                _priming = std::move(*compiled);
+            }
+            return &*_priming;
+        }
+
         std::shared_ptr<KindState> _kind;
         WasmtimeConfig _config;
+        uint64_t _serial;                ///< Which engine primed a thread (threadPrimedFor).
+        std::mutex _primingMutex;        ///< Guards _priming.
+        std::optional<Priming> _priming; ///< What threads are primed with; compiled by the first.
     };
 } // namespace
 
@@ -509,3 +629,13 @@ std::unique_ptr<host::IHostedEngine> makeWasmtimeEngine(std::shared_ptr<KindStat
 }
 
 } // namespace vtextension::wasm::wasmtime
+
+namespace vtextension::wasm::wasmtime::testing
+{
+
+uint64_t primingCompilations() noexcept
+{
+    return primingCompilationCount.load();
+}
+
+} // namespace vtextension::wasm::wasmtime::testing

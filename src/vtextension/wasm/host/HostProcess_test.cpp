@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <expected>
 #include <filesystem>
+#include <functional>
 #include <future>
 #include <iterator>
 #include <memory>
@@ -20,9 +21,11 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <tuple>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <vtextension/testing/TestModules.hpp>
@@ -31,6 +34,7 @@
 #include <vtextension/wasm/host/HostProcess.hpp>
 #include <vtextension/wasm/host/HostServer.hpp>
 #include <vtextension/wasm/host/IHostedEngine.hpp>
+#include <vtextension/wasm/host/Sandbox.hpp>
 #include <vtextension/wasm/remote/proto/LockdownSteps.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
@@ -41,6 +45,7 @@
 #include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
 #include <vtextension/wasm/testing/BackendContract.hpp>
 #include <vtextension/wasm/testing/HostedEngine.hpp>
+#include <vtextension/wasm/testing/PreparationHookEngine.hpp>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -60,6 +65,8 @@ using vtextension::wasm::host::capResources;
 using vtextension::wasm::host::ConfinementFailure;
 using vtextension::wasm::host::confinementFailureText;
 using vtextension::wasm::host::EngineFactory;
+using vtextension::wasm::host::ExecutorStackBytes;
+using vtextension::wasm::host::ExecutorThread;
 using vtextension::wasm::host::exitCodeOf;
 using vtextension::wasm::host::HardeningRow;
 using vtextension::wasm::host::hardeningSteps;
@@ -69,9 +76,11 @@ using vtextension::wasm::host::HostProcessExit;
 using vtextension::wasm::host::hostProcessExitOf;
 using vtextension::wasm::host::hostProcessExits;
 using vtextension::wasm::host::IHostedEngine;
+using vtextension::wasm::host::ISandbox;
+using vtextension::wasm::host::NullSandbox;
 using vtextension::wasm::host::runExtensionHost;
+using vtextension::wasm::host::SandboxDescriptors;
 using vtextension::wasm::host::ServerExit;
-using vtextension::wasm::host::systemErrorText;
 using vtextension::wasm::remote::MaxLaneChannels;
 using vtextension::wasm::remote::transport::Channel;
 using vtextension::wasm::remote::transport::ControlPage;
@@ -86,6 +95,7 @@ using vtextension::wasm::remote::transport::WakeSender;
 using vtextension::wasm::remote::transport::testing::closeHandle;
 using vtextension::wasm::remote::transport::testing::duplicate;
 using vtextension::wasm::testing::makeHostedEngine;
+using vtextension::wasm::testing::PreparationHookEngine;
 
 namespace proto = vtextension::wasm::remote::proto;
 namespace contract = vtextension::wasm::testing::contract;
@@ -138,9 +148,64 @@ struct Confined
     std::atomic<std::size_t> threadsWhenConfined { 0 };
     /// What beforeThreads returns.
     std::expected<void, ConfinementFailure> hardening {};
+    /// What the sandbox's steps return, and what it states once both were taken.
+    std::expected<void, ConfinementFailure> restriction {};
+    std::expected<void, ConfinementFailure> lockdown {};
+    proto::LockdownState sandboxState = proto::LockdownState::Unsandboxed;
+    /// The control handle the sandbox was made for.
+    std::atomic<NativeHandle> sandboxedControl {};
+    /// How many threads the host started, and how many it had when the sandbox restricted it.
+    std::atomic<int> threadsStarted { 0 };
+    std::atomic<int> threadsWhenRestricted { -1 };
     /// What the host told, line by line.
     std::mutex toldLock;
     std::vector<std::string> told;
+    /// What the host did, step by step, in order: bind, harden, engine, restrict, listener, executor,
+    /// prepare, caps, lockDown.
+    std::mutex eventsLock;
+    std::vector<std::string> events;
+
+    void record(std::string event)
+    {
+        auto const lock = std::scoped_lock { eventsLock };
+        events.push_back(std::move(event));
+    }
+
+    [[nodiscard]] std::vector<std::string> recorded()
+    {
+        auto const lock = std::scoped_lock { eventsLock };
+        return events;
+    }
+};
+
+/// A sandbox that records its steps among @p confined's events, and returns what @p confined says.
+class RecordingSandbox final: public ISandbox
+{
+  public:
+    explicit RecordingSandbox(std::shared_ptr<Confined> confined) noexcept: _confined { std::move(confined) }
+    {
+    }
+
+    [[nodiscard]] std::expected<void, ConfinementFailure> restrictBeforeThreads() override
+    {
+        _confined->record("restrict");
+        _confined->threadsWhenRestricted.store(_confined->threadsStarted.load());
+        return _confined->restriction;
+    }
+
+    [[nodiscard]] std::expected<void, ConfinementFailure> lockDown() override
+    {
+        _confined->record("lockDown");
+        return _confined->lockdown;
+    }
+
+    [[nodiscard]] proto::LockdownState lockdownState() const noexcept override
+    {
+        return _confined->sandboxState;
+    }
+
+  private:
+    std::shared_ptr<Confined> _confined;
 };
 
 /// @return A confinement that touches nothing of this process: it binds to TheParent alone, and hardens and
@@ -150,6 +215,7 @@ struct Confined
     return HostConfinement {
         .bindToParent = [confined](int64_t parent) -> std::expected<void, BootstrapError> {
             confined->boundTo.store(parent);
+            confined->record("bind");
             if (parent != TheParent)
                 return std::unexpected(BootstrapError::ParentGone);
             return {};
@@ -159,10 +225,22 @@ struct Confined
                 confined->threadsWhenHardened.store(threadCount());
                 confined->hardenedAt.store(confined->steps.fetch_add(1));
                 confined->hardenings.fetch_add(1);
+                confined->record("harden");
                 return confined->hardening;
             },
+        .sandbox = [confined](SandboxDescriptors descriptors) -> std::unique_ptr<ISandbox> {
+            confined->sandboxedControl.store(descriptors.control);
+            return std::make_unique<RecordingSandbox>(confined);
+        },
+        .startThread = [confined](std::size_t stackBytes, std::function<void()> body)
+            -> std::expected<ExecutorThread, std::error_code> {
+            confined->record(stackBytes == ExecutorStackBytes ? "executor" : "listener");
+            confined->threadsStarted.fetch_add(1);
+            return ExecutorThread::start(stackBytes, std::move(body));
+        },
         .confine =
             [confined](uint64_t dataBytes) {
+                confined->record("caps");
                 confined->threadsWhenConfined.store(threadCount());
                 confined->confinedAt.store(confined->steps.fetch_add(1));
                 confined->cappedTo.store(dataBytes);
@@ -177,12 +255,19 @@ struct Confined
     };
 }
 
-/// @return An engine factory that records when it made the engine, among @p confined's steps.
+/// @return An engine factory that records when it made the engine, among @p confined's steps, and each
+///         thread it prepared, among its events.
 [[nodiscard]] EngineFactory recordingEngines(std::shared_ptr<Confined> confined)
 {
     return [confined = std::move(confined)]() -> std::unique_ptr<IHostedEngine> {
         confined->engineMadeAt.store(confined->steps.fetch_add(1));
-        return makeHostedEngine(proto::MemoryMode::Copy);
+        confined->record("engine");
+        return std::make_unique<PreparationHookEngine>(
+            makeHostedEngine(proto::MemoryMode::Copy),
+            [confined]() -> std::expected<void, vtextension::ExtensionError> {
+                confined->record("prepare");
+                return {};
+            });
     };
 }
 
@@ -443,46 +528,60 @@ TEST_CASE("HostProcess.servesOverAdoptedEndpoints", "[vtextension][host]")
 namespace
 {
 
-/// Runs a host whose hardening ends as @p hardening, and checks what Hello states and when it hardened.
-void checkHardening(std::expected<void, ConfinementFailure> hardening,
-                    proto::LockdownState expected,
-                    std::vector<std::string> const& expectedTold)
+/// Runs a host confined by @p confinement, its engine and steps recorded in @p confined, until it said Hello
+/// and served its connection.
+/// @return Its Hello.
+[[nodiscard]] proto::Hello helloOf(std::shared_ptr<Confined> const& confined,
+                                   HostConfinement const& confinement)
 {
     auto parent = makeParentEnds();
-    auto confined = std::make_shared<Confined>();
-    confined->hardening = hardening;
     auto const arguments = formatHelperArguments(parent.arguments);
     auto task = std::packaged_task<int()> { [&] {
-        return runHost(arguments, recordingEngines(confined), testConfinement(confined));
+        return runHost(arguments, recordingEngines(confined), confinement);
     } };
     auto exitCode = task.get_future();
     auto host = std::jthread { std::move(task) };
 
     auto const hello = parent.control.receive();
-    REQUIRE(hello.has_value());
-    CHECK(*hello
-          == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
-                                         .memoryMode = proto::MemoryMode::Copy,
-                                         .lockdown = expected } });
-    // Hardened once, before the engine was made, and so before any thread of the host started; capped once
-    // they all ran.
-    CHECK(confined->hardenings.load() == 1);
-    CHECK(confined->hardenedAt.load() == 0);
-    CHECK(confined->engineMadeAt.load() == 1);
-    CHECK(confined->confinedAt.load() == 2);
-#ifdef __linux__
-    // Between the two, the host started a thread per lane and its interrupt listener.
-    auto const started = confined->threadsWhenConfined.load() - confined->threadsWhenHardened.load();
-    CHECK(started >= MaxLaneChannels + 1);
-#endif
-
+    confined->record("hello");
+    // The sandbox, if the test's, was made for the control end the host adopted: the one it was handed.
+    if (auto const sandboxed = confined->sandboxedControl.load(); sandboxed != NativeHandle {})
+        CHECK(sandboxed == parent.arguments.control);
     {
         auto const closed = std::move(parent.control);
     }
     REQUIRE(exitCode.wait_for(HostPatience) == std::future_status::ready);
     CHECK(exitCode.get() == exitCodeOf(HostProcessExit::Served));
-    auto const lock = std::scoped_lock { confined->toldLock };
-    CHECK(confined->told == expectedTold);
+    REQUIRE(hello.has_value());
+    REQUIRE(std::holds_alternative<proto::Hello>(*hello));
+    return std::get<proto::Hello>(*hello);
+}
+
+/// @return helloOf() under testConfinement(): steps that do as @p confined says.
+[[nodiscard]] proto::Hello helloOf(std::shared_ptr<Confined> const& confined)
+{
+    return helloOf(confined, testConfinement(confined));
+}
+
+/// @return The Hello of a host that confined itself as @p lockdown says.
+[[nodiscard]] proto::Hello helloSaying(proto::LockdownState lockdown)
+{
+    return proto::Hello { .version = proto::ProtocolVersion,
+                          .memoryMode = proto::MemoryMode::Copy,
+                          .lockdown = lockdown };
+}
+
+/// @return What the host tells of @p failure, after what it was a step of.
+[[nodiscard]] std::string toldOf(std::string_view what, ConfinementFailure failure)
+{
+    return std::string { what } + " failed: " + confinementFailureText(failure);
+}
+
+/// @return What @p confined's host told.
+[[nodiscard]] std::vector<std::string> toldBy(Confined& confined)
+{
+    auto const lock = std::scoped_lock { confined.toldLock };
+    return confined.told;
 }
 
 /// How many times each fake hardening step ran.
@@ -494,17 +593,119 @@ std::atomic<int> thirdStepRuns { 0 };
 
 TEST_CASE("HostProcess.hardensBeforeAnyThreadStarts", "[vtextension][host]")
 {
-    checkHardening({}, proto::LockdownState::Unsandboxed, {});
+    auto confined = std::make_shared<Confined>();
+    CHECK(helloOf(confined) == helloSaying(proto::LockdownState::Unsandboxed));
+    // Hardened once, before the engine was made, and so before any thread of the host started; capped once
+    // they all ran.
+    CHECK(confined->hardenings.load() == 1);
+    CHECK(confined->hardenedAt.load() == 0);
+    CHECK(confined->engineMadeAt.load() == 1);
+    CHECK(confined->confinedAt.load() == 2);
+#ifdef __linux__
+    // Between the two, the host started a thread per lane and its interrupt listener.
+    auto const started = confined->threadsWhenConfined.load() - confined->threadsWhenHardened.load();
+    CHECK(started >= MaxLaneChannels + 1);
+#endif
+    CHECK(toldBy(*confined).empty());
 }
 
-TEST_CASE("HostProcess.failedHardeningSaysWhichStep", "[vtextension][host]")
+TEST_CASE("HostProcess.locksDownInTheSandboxOrder", "[vtextension][host]")
 {
-    // A hardening that failed is what Hello states, whatever the caps did; the host tells which step failed,
-    // in the failing row's own words.
-    auto const failure = ConfinementFailure { .step = proto::LockdownStep::Tracing, .code = 1 };
-    checkHardening(std::unexpected(failure),
-                   proto::LockdownState::Failed,
-                   { "hardening failed: " + confinementFailureText(failure) });
+    auto confined = std::make_shared<Confined>();
+    CHECK(helloOf(confined) == helloSaying(proto::LockdownState::Unsandboxed));
+    auto const events = confined->recorded();
+    auto listed = std::string {};
+    for (auto const& event: events)
+        listed += event + ' ';
+    INFO(listed);
+    // Endpoints are adopted between hardening and the engine (the sandbox was made for the adopted control
+    // end, helloOf() checks); the rest is recorded as it happens.
+    constexpr auto Lanes = static_cast<std::ptrdiff_t>(MaxLaneChannels);
+    REQUIRE(events.size() == 5 + MaxLaneChannels + (MaxLaneChannels + 1) + 3);
+    auto const head = std::vector<std::string> { "bind", "harden", "engine", "restrict", "listener" };
+    CHECK(std::vector(events.begin(), events.begin() + 5) == head);
+    // Each lane's executor prepares its thread as it starts; the control thread prepares its own once every
+    // lane's started. Their interleaving is the scheduler's.
+    auto const threads = std::span { events }.subspan(5, (2 * MaxLaneChannels) + 1);
+    CHECK(std::ranges::count(threads, std::string { "executor" }) == Lanes);
+    CHECK(std::ranges::count(threads, std::string { "prepare" }) == Lanes + 1);
+    auto executors = std::ptrdiff_t { 0 };
+    auto prepared = std::ptrdiff_t { 0 };
+    for (auto const& event: threads)
+    {
+        (event == "executor" ? executors : prepared) += 1;
+        CHECK(prepared <= executors + (executors == Lanes ? 1 : 0));
+    }
+    auto const tail = std::vector<std::string> { "caps", "lockDown", "hello" };
+    CHECK(std::vector(events.end() - 3, events.end()) == tail);
+    // The sandbox restricted the host while its main thread was its only one.
+    CHECK(confined->threadsWhenRestricted.load() == 0);
+}
+
+TEST_CASE("HostProcess.everyConfinementStepRunsPastAFailure", "[vtextension][host]")
+{
+    auto confined = std::make_shared<Confined>();
+    auto const restriction = ConfinementFailure { .step = proto::LockdownStep::FileSystem, .code = 1 };
+    confined->restriction = std::unexpected(restriction);
+    confined->lockdown =
+        std::unexpected(ConfinementFailure { .step = proto::LockdownStep::SystemCalls, .code = 2 });
+    // The first step that failed is stated; every later one ran all the same.
+    CHECK(helloOf(confined) == helloSaying(proto::LockdownState::Failed));
+    auto const events = confined->recorded();
+    CHECK(std::ranges::count(events, std::string { "restrict" }) == 1);
+    CHECK(std::ranges::count(events, std::string { "caps" }) == 1);
+    CHECK(std::ranges::count(events, std::string { "lockDown" }) == 1);
+    // One line for the sandbox: what failed first.
+    CHECK(toldBy(*confined) == std::vector { toldOf("sandbox", restriction) });
+}
+
+TEST_CASE("HostProcess.hardeningFailureIsStatedAsItsStep", "[vtextension][host]")
+{
+    // A hardening that failed is what Hello states, whatever the later steps did; the host tells which step
+    // failed, in its row's words.
+    auto confined = std::make_shared<Confined>();
+    auto const failure = ConfinementFailure { .step = proto::LockdownStep::Dumpable, .code = 1 };
+    confined->hardening = std::unexpected(failure);
+    confined->lockdown =
+        std::unexpected(ConfinementFailure { .step = proto::LockdownStep::SystemCalls, .code = 2 });
+    CHECK(helloOf(confined) == helloSaying(proto::LockdownState::Failed));
+    CHECK(
+        toldBy(*confined)
+        == std::vector {
+            toldOf("hardening", failure),
+            toldOf("sandbox", ConfinementFailure { .step = proto::LockdownStep::SystemCalls, .code = 2 }) });
+}
+
+TEST_CASE("HostProcess.nullSandboxSaysUnsandboxed", "[vtextension][host]")
+{
+    // What every system does until it has a sandbox of its own: confines nothing, and says so.
+    auto confined = std::make_shared<Confined>();
+    auto confinement = testConfinement(confined);
+    confinement.sandbox = [](SandboxDescriptors) -> std::unique_ptr<ISandbox> {
+        return std::make_unique<NullSandbox>();
+    };
+    CHECK(helloOf(confined, confinement) == helloSaying(proto::LockdownState::Unsandboxed));
+}
+
+TEST_CASE("HostProcess.sandboxThatLocksDownSaysSo", "[vtextension][host]")
+{
+    auto confined = std::make_shared<Confined>();
+    confined->sandboxState = proto::LockdownState::LockedDown;
+    CHECK(helloOf(confined) == helloSaying(proto::LockdownState::LockedDown));
+}
+
+TEST_CASE("HostProcess.refusedCapIsStatedAsItsStep", "[vtextension][host]")
+{
+    auto confined = std::make_shared<Confined>();
+    auto confinement = testConfinement(confined);
+    auto const refused = ConfinementFailure { .step = proto::LockdownStep::ResourceCaps, .code = 1 };
+    confinement.confine = [refused](uint64_t) -> std::expected<void, ConfinementFailure> {
+        return std::unexpected(refused);
+    };
+    CHECK(helloOf(confined, confinement) == helloSaying(proto::LockdownState::Failed));
+    // The sandbox locked the host down all the same.
+    CHECK(std::ranges::count(confined->recorded(), std::string { "lockDown" }) == 1);
+    CHECK(toldBy(*confined) == std::vector { toldOf("resource caps", refused) });
 }
 
 TEST_CASE("HostBootstrap.hardeningNamesTheFirstFailedStep", "[vtextension][host]")
@@ -545,20 +746,9 @@ TEST_CASE("HostBootstrap.everyStepSaysWhatFailed", "[vtextension][host]")
     for (auto const& row: hardeningSteps())
     {
         CHECK(row.step != proto::LockdownStep::None);
-        CHECK(proto::lockdownStepText(row.step) != proto::lockdownStepText(proto::LockdownStep::None));
+        CHECK(vtextension::wasm::remote::proto::lockdownStepText(row.step)
+              != vtextension::wasm::remote::proto::lockdownStepText(proto::LockdownStep::None));
     }
-}
-
-TEST_CASE("HostBootstrap.failureSaysWhatTheSystemSaid", "[vtextension][host]")
-{
-    // The error code is read, not printed as a bare number: the line carries the system's word on it.
-    auto const failure = ConfinementFailure { .step = proto::LockdownStep::CoreDumps, .code = 1 };
-    auto const text = confinementFailureText(failure);
-    INFO(text);
-    CHECK(text
-          == std::string { proto::lockdownStepText(proto::LockdownStep::CoreDumps) } + ": "
-                 + systemErrorText(1));
-    CHECK_FALSE(systemErrorText(1).empty());
 }
 
 TEST_CASE("HostProcess.badArgumentsExit", "[vtextension][host]")

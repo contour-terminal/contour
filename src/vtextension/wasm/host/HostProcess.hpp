@@ -13,9 +13,11 @@
 #include <string_view>
 #include <vector>
 
+#include <vtextension/wasm/host/ExecutorThread.hpp>
 #include <vtextension/wasm/host/HostBootstrap.hpp>
 #include <vtextension/wasm/host/HostServer.hpp>
 #include <vtextension/wasm/host/IHostedEngine.hpp>
+#include <vtextension/wasm/host/Sandbox.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 #include <vtextension/wasm/remote/transport/ControlPage.hpp>
@@ -34,7 +36,7 @@ enum class HostProcessExit : uint8_t
     ParentGone,          ///< It could not bind itself to its parent, or that one ended already.
     EngineUnavailable,   ///< No engine could be created.
     ProtocolViolation,   ///< Contour sent what the protocol does not allow.
-    ExecutorUnavailable, ///< A lane's thread could not be started.
+    ExecutorUnavailable, ///< A thread to run extensions on could not be started or prepared.
     MemoryUnusable,      ///< Guest memory Contour granted could not be opened.
 };
 
@@ -82,8 +84,9 @@ class HostProcess
     /// @param config How its server runs; whether a slot is raised is the page's to say.
     HostProcess(IHostedEngine& engine, HostEndpoints endpoints, HostServerConfig config);
 
-    /// Starts listening for interrupts, serves until Contour closes the connection, it violates the protocol,
-    /// or stop() is called; then releases every engine object, and stops listening. Called once.
+    /// Starts listening for interrupts (on a thread HostServerConfig::startExecutor starts), serves until
+    /// Contour closes the connection, it violates the protocol, or stop() is called; then releases every
+    /// engine object, and stops listening. Called once.
     /// @return Why it stopped serving; `ExecutorUnavailable` if the listener's thread could not be started,
     ///         nothing being served then.
     [[nodiscard]] ServerExit run();
@@ -95,24 +98,33 @@ class HostProcess
     remote::transport::ControlPage
         _controlPage; ///< Where Contour raises an instance's interrupt; held while it serves.
     remote::transport::WakeReceiver _wake; ///< What tells it to look at the page; held while it serves.
+    ExecutorStarter _startThread;          ///< How the listener's thread is started, as the lanes' are.
     HostServer _server;
 };
 
 /// What the host process does to itself, as the operating system does it (systemConfinement()) or, in a test
-/// that runs the host in its own process, as a double does it.
+/// that runs the host in its own process, as a double does it. In the order the host does it: bind, harden,
+/// (adopt its endpoints, make its engine,) restrict, start its threads, (prepare them,) cap, lock down. Every
+/// step of the confinement runs, even past one that failed; the first that failed is what Hello states.
 struct HostConfinement
 {
     /// Binds the process to the parent it is given, as bindToParent() does.
     std::function<std::expected<void, BootstrapError>(int64_t parentProcessId)> bindToParent;
     /// Hardens the process while its main thread is its only one, as hardenProcess() does: right after it
     /// bound itself to its parent, before it adopts its endpoints, makes its engine or starts any thread.
-    /// What is set per thread and must reach every thread is set here.
     /// @return Nothing if it hardened itself wholly; the first step that failed otherwise, which the host
-    ///         tells of through tell and which makes Hello state `Failed` whatever confine returns.
+    ///         tells of through tell.
     std::function<std::expected<void, ConfinementFailure>()> beforeThreads;
-    /// Caps its resources once its threads run, to the data bytes it is given, as capResources() does.
-    /// @return Nothing once capped; the step that failed otherwise, which the host tells of through tell and
-    ///         which makes Hello state `Failed`.
+    /// Makes the host's sandbox for the endpoints it adopted, as makeSystemSandbox() does: once its engine is
+    /// made, while its main thread is still its only one. Never returns null.
+    std::function<std::unique_ptr<ISandbox>(SandboxDescriptors descriptors)> sandbox;
+    /// How the host starts each of its threads, its interrupt listener's and every lane's: the operating
+    /// system's threads (ExecutorThread::start), but in a test one that records each start.
+    ExecutorStarter startThread;
+    /// Caps its resources once its threads run and were prepared, to the data bytes it is given, as
+    /// capResources() does; before the sandbox locks it down, so that capping needs nothing the locked-down
+    /// host may not do.
+    /// @return Nothing once capped; the step that failed otherwise, which the host tells of through tell.
     std::function<std::expected<void, ConfinementFailure>(uint64_t dataBytes)> confine;
     /// Tells of a confinement the host could not complete, one line without its end: on stderr, after
     /// `contour-extension-host: `, as tellOnStandardError() does.
@@ -123,15 +135,16 @@ struct HostConfinement
 /// @param line The line, without its end.
 void tellOnStandardError(std::string_view line) noexcept;
 
-/// @return bindToParent(), hardenProcess(), and capResources() under BuildCapPolicy, which under `Skip` says
-///         so once on stderr; tellOnStandardError().
+/// @return bindToParent(), hardenProcess(), makeSystemSandbox(), ExecutorThread::start, and capResources()
+///         under BuildCapPolicy, which under `Skip` says so once on stderr; tellOnStandardError().
 [[nodiscard]] HostConfinement systemConfinement();
 
-/// The executable's body: parse, bind to the parent, harden, adopt, make the engine, serve. Every exit but
-/// `Served` writes one line, `contour-extension-host: <text>`, to stderr.
+/// The executable's body: parse, bind to the parent, harden, adopt, make the engine, restrict, serve -- which
+/// starts the threads, prepares them, caps and locks down before Hello. Every exit but `Served` writes one
+/// line, `contour-extension-host: <text>`, to stderr.
 /// @param arguments The command line after the program's name.
 /// @param engines Makes the engine; called only once everything before it succeeded.
-/// @param confinement How it binds to its parent, hardens and caps itself.
+/// @param confinement How it binds to its parent, hardens, sandboxes and caps itself, and starts its threads.
 /// @return The exit code.
 [[nodiscard]] int runExtensionHost(std::span<std::string_view const> arguments,
                                    EngineFactory const& engines,

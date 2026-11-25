@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <expected>
 #include <functional>
+#include <latch>
 #include <memory>
 #include <system_error>
 #include <utility>
@@ -23,6 +24,9 @@ namespace vtextension::wasm::host
 struct ExecutorThread::State
 {
     std::function<void()> body;
+    /// Counted down by the thread as it enters body: what the C library does to start a thread is done by
+    /// then.
+    std::latch running { 1 };
 #ifdef _WIN32
     HANDLE thread = nullptr;
 #else
@@ -33,15 +37,19 @@ struct ExecutorThread::State
 namespace
 {
 #ifdef _WIN32
-    DWORD WINAPI runBody(LPVOID state)
+    DWORD WINAPI runBody(LPVOID opaque)
     {
-        static_cast<ExecutorThread::State*>(state)->body();
+        auto* const state = static_cast<ExecutorThread::State*>(opaque);
+        state->running.count_down();
+        state->body();
         return 0;
     }
 #else
-    void* runBody(void* state)
+    void* runBody(void* opaque)
     {
-        static_cast<ExecutorThread::State*>(state)->body();
+        auto* const state = static_cast<ExecutorThread::State*>(opaque);
+        state->running.count_down();
+        state->body();
         return nullptr;
     }
 #endif
@@ -50,7 +58,7 @@ namespace
 std::expected<ExecutorThread, std::error_code> ExecutorThread::start(std::size_t stackBytes,
                                                                      std::function<void()> body)
 {
-    auto state = std::make_unique<State>(State { .body = std::move(body) });
+    auto state = std::make_unique<State>(std::move(body));
 #ifdef _WIN32
     // Reserved, not committed: the pages are touched only as deep as the calls go.
     state->thread = ::CreateThread(
@@ -70,6 +78,9 @@ std::expected<ExecutorThread, std::error_code> ExecutorThread::start(std::size_t
     if (failed != 0)
         return std::unexpected(std::error_code { failed, std::generic_category() });
 #endif
+    // A thread's start-up makes system calls of its own (on Linux, rseq() and set_robust_list(), with every
+    // signal blocked): one still starting as the host locks down would die by the filter, silently.
+    state->running.wait();
     return ExecutorThread { std::move(state) };
 }
 

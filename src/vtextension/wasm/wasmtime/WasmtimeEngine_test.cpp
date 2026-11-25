@@ -21,6 +21,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -1005,6 +1006,101 @@ TEST_CASE("WasmtimeEngine.signalTrapsPastTheObject", "[wasmtime]")
     checkSignalTrap(SignalFault { .what = "past the object",
                                   .initialPages = ContractObjectBytes / GuestPage,
                                   .index = static_cast<uint32_t>(ContractObjectBytes - 4) });
+}
+
+namespace
+{
+
+#ifndef _WIN32
+/// @return Whether the calling thread runs with an alternate signal stack.
+[[nodiscard]] bool hasAlternateSignalStack() noexcept
+{
+    auto current = stack_t {};
+    return sigaltstack(nullptr, &current) == 0 && (current.ss_flags & SS_DISABLE) == 0;
+}
+#endif
+
+/// Checks that @p trapMode's engine prepares each thread, once per thread, compiling its built-in module
+/// once for the engine, however many threads it prepares.
+void checkPrepareThread(TrapMode trapMode)
+{
+    using vtextension::wasm::wasmtime::testing::primingCompilations;
+    auto const engine = makeWasmtimeEngine(WasmtimeTraits::kind(), WasmtimeConfig { .trapMode = trapMode });
+    auto const compiledBefore = primingCompilations();
+
+    // On a thread of its own, which has run no guest yet.
+    auto const prepareOnANewThread = [&engine] {
+        return std::async(std::launch::async, [&engine] {
+#ifndef _WIN32
+            auto const stackBefore = hasAlternateSignalStack();
+#endif
+            auto const first = engine->prepareThread();
+            auto const again = engine->prepareThread();
+#ifndef _WIN32
+            // Under signal traps the thread runs on an alternate signal stack from then on, as Wasmtime
+            // installs one the first time a guest runs on a thread; a sanitizer's own may be there already.
+            auto const stackAfter = hasAlternateSignalStack();
+            return std::tuple { first.has_value(), again.has_value(), stackBefore, stackAfter };
+#else
+            return std::tuple { first.has_value(), again.has_value(), false, false };
+#endif
+        });
+    };
+    auto const [firstOk, againOk, stackBefore, stackAfter] = prepareOnANewThread().get();
+    CHECK(firstOk);
+    CHECK(againOk);
+    CHECK(primingCompilations() == compiledBefore + 1);
+#ifndef _WIN32
+    if (trapMode == TrapMode::Signals)
+    {
+        CHECK_FALSE(stackBefore);
+        CHECK(stackAfter);
+    }
+#endif
+
+    // Another thread runs it again, compiled already.
+    auto const [secondOk, secondAgainOk, ignoredBefore, ignoredAfter] = prepareOnANewThread().get();
+    CHECK(secondOk);
+    CHECK(secondAgainOk);
+    CHECK(primingCompilations() == compiledBefore + 1);
+
+    // And this thread, after which a guest runs here as before.
+    REQUIRE(engine->prepareThread().has_value());
+    CHECK(primingCompilations() == compiledBefore + 1);
+#ifndef _WIN32
+    auto const handlers =
+        trapMode == TrapMode::Signals ? std::optional<EngineSignalHandlers> { std::in_place } : std::nullopt;
+#endif
+    namespace contract = vtextension::wasm::testing::contract;
+    auto const runtime = contract::createRuntime(*engine);
+    auto const guard = contract::enterThread(*engine);
+    auto const module = contract::load(*runtime, vtextension::wasm::testing::GrowModule);
+    auto context = contract::RecordingHostContext {};
+    auto const instance = contract::instantiate(*module, context);
+    auto grown = std::array<uint32_t, 1> { 1 };
+    CHECK(instance->call(contract::functionOf(*instance, "grow"), grown).has_value());
+
+    // Another engine compiles its own.
+    auto const other = makeWasmtimeEngine(WasmtimeTraits::kind(), WasmtimeConfig { .trapMode = trapMode });
+    REQUIRE(other->prepareThread().has_value());
+    CHECK(primingCompilations() == compiledBefore + 2);
+}
+
+} // namespace
+
+TEST_CASE("WasmtimeEngine.prepareThreadRunsTheGuestPath", "[wasmtime]")
+{
+    SECTION("software traps")
+    {
+        checkPrepareThread(TrapMode::Software);
+    }
+    SECTION("signal traps")
+    {
+        if constexpr (vtextension::wasm::ThisBuildInstrumentation
+                      != vtextension::wasm::BuildInstrumentation::None)
+            SKIP("an instrumented build traps in software only");
+        checkPrepareThread(TrapMode::Signals);
+    }
 }
 
 TEST_CASE("WasmtimeEngine.privateMemoryIsUnchanged", "[wasmtime]")

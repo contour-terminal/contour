@@ -16,6 +16,7 @@
 #include <mutex>
 #include <optional>
 #include <ranges>
+#include <set>
 #include <span>
 #include <string_view>
 #include <system_error>
@@ -44,6 +45,7 @@
 #include <vtextension/wasm/testing/BackendContract.hpp>
 #include <vtextension/wasm/testing/DecoratedEngine.hpp>
 #include <vtextension/wasm/testing/HostedEngine.hpp>
+#include <vtextension/wasm/testing/PreparationHookEngine.hpp>
 #include <vtextension/wasm/testing/ProcessModules.hpp>
 
 #ifndef _WIN32
@@ -58,6 +60,7 @@ using vtextension::ExtensionError;
 using vtextension::testing::toModule;
 using vtextension::wasm::CallFailure;
 using vtextension::wasm::ModuleIdentity;
+using vtextension::wasm::host::ConfinementFailure;
 using vtextension::wasm::host::ExecutorThread;
 using vtextension::wasm::host::HostFrameBytes;
 using vtextension::wasm::host::HostServer;
@@ -84,6 +87,7 @@ using vtextension::wasm::remote::transport::SharedMapping;
 using vtextension::wasm::remote::transport::SharedObjectUse;
 using vtextension::wasm::remote::transport::StreamError;
 using vtextension::wasm::testing::makeHostedEngine;
+using vtextension::wasm::testing::PreparationHookEngine;
 #ifndef _WIN32
 using vtextension::wasm::remote::transport::testing::openDescriptorCount;
 #endif
@@ -888,9 +892,9 @@ TEST_CASE("HostServer.confineRunsAfterTheLanesStartAndBeforeHello", "[vtextensio
         starts->fetch_add(1);
         return ExecutorThread::start(stackBytes, std::move(body));
     };
-    config.confine = [starts, startsAtConfine] {
+    config.confine = [starts, startsAtConfine]() -> std::expected<proto::LockdownState, ConfinementFailure> {
         startsAtConfine->store(starts->load());
-        return proto::LockdownState::Failed;
+        return std::unexpected(ConfinementFailure { .step = proto::LockdownStep::SystemCalls, .code = -1 });
     };
     auto parent = ScriptedParent { std::move(config) };
     CHECK(parent.receiveControl()
@@ -898,6 +902,99 @@ TEST_CASE("HostServer.confineRunsAfterTheLanesStartAndBeforeHello", "[vtextensio
                                          .memoryMode = proto::MemoryMode::Copy,
                                          .lockdown = proto::LockdownState::Failed } });
     CHECK(startsAtConfine->load() == MaxLaneChannels);
+}
+
+namespace
+{
+
+/// What a counting engine and the server's starts saw, each on the thread it ran on.
+struct PreparedThreads
+{
+    std::mutex mutex;                       ///< Guards what follows.
+    std::vector<std::thread::id> prepared;  ///< Each thread prepared, in order.
+    std::vector<std::thread::id> executors; ///< Each executor's thread, as it began.
+    std::size_t preparedAtConfine = 0;      ///< How many were prepared when confine ran.
+    std::thread::id confinedOn;             ///< The thread confine ran on: the control thread.
+    std::size_t confines = 0;               ///< How often confine ran.
+};
+
+/// The index of the lane whose executor runs on this thread, from 1; 0 on any other thread.
+thread_local auto executorLane = std::size_t { 0 };
+
+/// @return A server configuration that records, in @p seen, each executor's thread as it begins and what
+///         confine finds, its executors' threads told their lane (executorLane).
+[[nodiscard]] HostServerConfig recordingThreads(std::shared_ptr<PreparedThreads> const& seen)
+{
+    auto config = HostServerConfig {};
+    auto lanes = std::make_shared<std::atomic<std::size_t>>(0);
+    config.startExecutor =
+        [seen, lanes](std::size_t stackBytes,
+                      std::function<void()> body) -> std::expected<ExecutorThread, std::error_code> {
+        return ExecutorThread::start(stackBytes,
+                                     [seen, lane = lanes->fetch_add(1) + 1, body = std::move(body)] {
+                                         executorLane = lane;
+                                         {
+                                             auto const lock = std::scoped_lock { seen->mutex };
+                                             seen->executors.push_back(std::this_thread::get_id());
+                                         }
+                                         body();
+                                     });
+    };
+    config.confine = [seen] {
+        auto const lock = std::scoped_lock { seen->mutex };
+        seen->preparedAtConfine = seen->prepared.size();
+        seen->confinedOn = std::this_thread::get_id();
+        ++seen->confines;
+        return proto::LockdownState::Unsandboxed;
+    };
+    return config;
+}
+
+/// @return An engine that records each thread it prepares in @p seen, and fails lane @p failingLane's
+///         (0: none).
+[[nodiscard]] std::unique_ptr<vtextension::wasm::host::IHostedEngine> countingEngine(
+    std::shared_ptr<PreparedThreads> seen, std::size_t failingLane = 0)
+{
+    return std::make_unique<PreparationHookEngine>(
+        makeHostedEngine(proto::MemoryMode::Copy),
+        [seen = std::move(seen), failingLane]() -> std::expected<void, ExtensionError> {
+            {
+                auto const lock = std::scoped_lock { seen->mutex };
+                seen->prepared.push_back(std::this_thread::get_id());
+            }
+            if (failingLane != 0 && executorLane == failingLane)
+                return std::unexpected(ExtensionError::RuntimeUnavailable);
+            return {};
+        });
+}
+
+} // namespace
+
+TEST_CASE("HostServer.everyThreadIsPreparedBeforeConfinement", "[vtextension][host]")
+{
+    auto const seen = std::make_shared<PreparedThreads>();
+    auto parent = ScriptedParent { countingEngine(seen), recordingThreads(seen) };
+    parent.skipHello();
+    auto const lock = std::scoped_lock { seen->mutex };
+    CHECK(seen->confines == 1);
+    // Every lane's thread and the control thread, each once, all before the host was confined.
+    CHECK(seen->preparedAtConfine == MaxLaneChannels + 1);
+    auto const distinct = std::set<std::thread::id>(seen->prepared.begin(), seen->prepared.end());
+    CHECK(distinct.size() == MaxLaneChannels + 1);
+    CHECK(distinct.contains(seen->confinedOn));
+    for (auto const executor: seen->executors)
+        CHECK(distinct.contains(executor));
+}
+
+TEST_CASE("HostServer.unpreparedThreadEndsTheHost", "[vtextension][host]")
+{
+    auto const seen = std::make_shared<PreparedThreads>();
+    auto parent = ScriptedParent { countingEngine(seen, 2), recordingThreads(seen) };
+    CHECK(parent.exitWithinDeadline() == ServerExit::ExecutorUnavailable);
+    // Nothing was sent, nor the host confined: a host that cannot prepare a thread never says Hello.
+    CHECK(parent.control->receive() == std::unexpected(StreamError::Closed));
+    auto const lock = std::scoped_lock { seen->mutex };
+    CHECK(seen->confines == 0);
 }
 
 TEST_CASE("HostServer.noConfineSendsTheConfiguredLockdown", "[vtextension][host]")

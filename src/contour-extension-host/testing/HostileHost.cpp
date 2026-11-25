@@ -30,6 +30,7 @@
 #include <contour-extension-host/testing/HostileModes.hpp>
 #include <vtextension/wasm/host/HelperEngine.hpp>
 #include <vtextension/wasm/host/HostProcess.hpp>
+#include <vtextension/wasm/host/Sandbox.hpp>
 #include <vtextension/wasm/remote/proto/Codec.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/proto/Wire.hpp>
@@ -99,7 +100,14 @@ constexpr auto Limits = proto::PduLimits {};
     auto views = std::vector<std::string_view> {};
     for (auto const& argument: arguments)
         views.emplace_back(argument);
-    return vtextension::wasm::host::runExtensionHost(views, enginesOf(memory));
+    // Hostility is measured against a host that confines nothing more than its hardening: a sandbox would
+    // refuse what the hostile modes do to the host itself.
+    auto confinement = vtextension::wasm::host::systemConfinement();
+    confinement.sandbox = [](vtextension::wasm::host::SandboxDescriptors)
+        -> std::unique_ptr<vtextension::wasm::host::ISandbox> {
+        return std::make_unique<vtextension::wasm::host::NullSandbox>();
+    };
+    return vtextension::wasm::host::runExtensionHost(views, enginesOf(memory), confinement);
 }
 
 /// Has the crash that follows end the process at once: without a core dump, which a system that collects
