@@ -23,7 +23,7 @@
 namespace process = vtextension::wasm::remote::process;
 using vtextension::ExtensionError;
 using vtextension::wasm::remote::HostRefusal;
-using vtextension::wasm::remote::hostRefusals;
+using vtextension::wasm::remote::refusalLine;
 
 TEST_CASE("ProcessHostConnector.launchFailureIsLoggedOncePerReason", "[vtextension]")
 {
@@ -53,7 +53,5 @@ TEST_CASE("ProcessHostConnector.launchFailureIsLoggedOncePerReason", "[vtextensi
             CHECK(connected.error() == ExtensionError::HostUnavailable);
         }
     }
-    CHECK(*lines
-          == std::vector<std::string> {
-              std::string { hostRefusals()[static_cast<std::size_t>(HostRefusal::HelperNotFound)].text } });
+    CHECK(*lines == std::vector<std::string> { refusalLine(HostRefusal::HelperNotFound) });
 }

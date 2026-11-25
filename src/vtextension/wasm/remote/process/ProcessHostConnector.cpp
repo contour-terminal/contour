@@ -67,21 +67,6 @@ namespace
         transport::WakeSender _wake;
         SupervisedHelper _helper; ///< Last, so that it goes first: let go before its page and wake signal.
     };
-
-    /// @return Why no host serves, when the launch failed with @p error; nothing when that is no reason to
-    ///         tell of (Contour is shutting down).
-    [[nodiscard]] std::optional<remote::HostRefusal> refusalOf(LaunchError error) noexcept
-    {
-        switch (error)
-        {
-            case LaunchError::NotFound: return remote::HostRefusal::HelperNotFound;
-            case LaunchError::Resources: return remote::HostRefusal::OutOfResources;
-            case LaunchError::Unsupported: return remote::HostRefusal::Unsupported;
-            case LaunchError::Io: return remote::HostRefusal::LaunchRefused;
-            case LaunchError::Stopped: return std::nullopt;
-        }
-        return std::nullopt;
-    }
 } // namespace
 
 ProcessHostConnector::ProcessHostConnector(std::shared_ptr<SupervisorMailbox> supervisor,
@@ -136,7 +121,7 @@ std::expected<remote::HostConnection, ExtensionError> ProcessHostConnector::conn
     auto helper = _supervisor->launch(std::move(spec));
     if (!helper)
     {
-        if (auto const refusal = refusalOf(helper.error()))
+        if (auto const refusal = launchErrors()[std::to_underlying(helper.error())].refusal)
             _refusals.refused(*refusal);
         return std::unexpected(ExtensionError::HostUnavailable);
     }

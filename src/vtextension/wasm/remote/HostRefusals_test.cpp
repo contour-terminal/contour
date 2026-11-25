@@ -5,6 +5,7 @@
 
 #include <cctype>
 #include <cstddef>
+#include <format>
 #include <memory>
 #include <mutex>
 #include <ranges>
@@ -15,10 +16,14 @@
 #include <vector>
 
 #include <vtextension/wasm/remote/HostRefusals.hpp>
+#include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
 
 using vtextension::wasm::remote::HostRefusal;
 using vtextension::wasm::remote::HostRefusalLog;
-using vtextension::wasm::remote::hostRefusals;
+using vtextension::wasm::remote::refusalLine;
+using vtextension::wasm::remote::process::LaunchError;
+using vtextension::wasm::remote::process::launchErrors;
+using vtextension::wasm::remote::process::launchErrorText;
 
 namespace
 {
@@ -50,18 +55,32 @@ struct Lines
 
 } // namespace
 
-TEST_CASE("HostRefusals.everyReasonHasItsLine", "[vtextension]")
+TEST_CASE("HostRefusals.everyRefusalHasALine", "[vtextension]")
 {
-    auto const rows = hostRefusals();
-    CHECK(rows.size() == static_cast<std::size_t>(HostRefusal::MemoryMode) + 1);
-    for (auto const& row: rows)
+    for (auto const value: std::views::iota(0, std::to_underlying(HostRefusal::MemoryMode) + 1))
     {
-        INFO(row.text);
-        CHECK_FALSE(row.text.empty());
+        auto const line = refusalLine(static_cast<HostRefusal>(value));
+        INFO(line);
+        CHECK_FALSE(line.empty());
         // Users read these: they name the role, never the engine.
         for (auto const engine: { "wasm", "wamr", "wasmtime", "webassembly" })
-            CHECK_FALSE(lowered(row.text).contains(engine));
+            CHECK_FALSE(lowered(line).contains(engine));
     }
+}
+
+TEST_CASE("HostRefusals.launchLinesSayWhatTheLauncherSays", "[vtextension]")
+{
+    for (auto const& row: launchErrors())
+    {
+        INFO(row.text);
+        CHECK(launchErrorText(row.error) == row.text);
+        if (row.refusal)
+            CHECK(
+                refusalLine(*row.refusal)
+                == std::format("The extension host cannot be started: {}. Extensions do not run.", row.text));
+    }
+    // Contour shutting down is no reason to tell of.
+    CHECK_FALSE(launchErrors()[std::to_underlying(LaunchError::Stopped)].refusal.has_value());
 }
 
 TEST_CASE("HostRefusals.eachReasonIsLoggedOnce", "[vtextension]")
@@ -73,11 +92,10 @@ TEST_CASE("HostRefusals.eachReasonIsLoggedOnce", "[vtextension]")
     log.refused(HostRefusal::HelperNotFound);
     log.refused(HostRefusal::LockdownFailed);
     log.refused(HostRefusal::HelperNotFound);
-    auto const rows = hostRefusals();
     CHECK(lines.written
           == std::vector<std::string> {
-              std::string { rows[static_cast<std::size_t>(HostRefusal::LockdownFailed)].text },
-              std::string { rows[static_cast<std::size_t>(HostRefusal::HelperNotFound)].text },
+              refusalLine(HostRefusal::LockdownFailed),
+              refusalLine(HostRefusal::HelperNotFound),
           });
 
     // Another log -- another backend's -- says it again.

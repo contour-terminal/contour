@@ -9,7 +9,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
-#include <span>
+#include <string>
 #include <string_view>
 
 namespace vtextension::wasm::remote
@@ -28,15 +28,10 @@ enum class HostRefusal : uint8_t
     MemoryMode,      ///< It shares memory, where Contour copies it.
 };
 
-/// One reason, and what is logged for it.
-struct HostRefusalRow
-{
-    HostRefusal refusal;   ///< The reason.
-    std::string_view text; ///< The line logged, user-readable, naming no engine.
-};
-
-/// @return Every reason, one row each, in the enum's order.
-[[nodiscard]] std::span<HostRefusalRow const> hostRefusals() noexcept;
+/// @param refusal Why no extension host serves.
+/// @return The line logged for it, user-readable, naming no engine. A host that could not be started says
+///         what the launcher says of its failure (launchErrors()), in one sentence for every such reason.
+[[nodiscard]] std::string refusalLine(HostRefusal refusal);
 
 /// Logs each reason the first time it comes up. Thread-safe; the reasons seen are kept wait-free.
 class HostRefusalLog

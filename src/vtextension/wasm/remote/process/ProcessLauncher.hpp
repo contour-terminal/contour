@@ -15,6 +15,7 @@
 
 #include <core/Clock.hpp>
 
+#include <array>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
@@ -27,6 +28,7 @@
 #include <utility>
 #include <vector>
 
+#include <vtextension/wasm/remote/HostRefusals.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 
 namespace vtextension::wasm::remote::process
@@ -51,20 +53,41 @@ enum class LaunchError : uint8_t
     Io,          ///< The system refused for any other reason.
 };
 
+/// One way a launch fails, said once: what it means, and what it tells of a host that failed to start so.
+struct LaunchErrorRow
+{
+    LaunchError error;     ///< The failure.
+    std::string_view text; ///< What it means, user-readable: a sentence's end, naming no system call.
+    /// Why no extension host serves when a host's launch fails so; nothing when that is no reason to tell of.
+    std::optional<HostRefusal> refusal;
+};
+
+/// @return Every LaunchError, one row each, at its enumerator's index.
+[[nodiscard]] inline std::span<LaunchErrorRow const> launchErrors() noexcept
+{
+    // Not constexpr: a constant-evaluated copy of a disengaged optional does not compile with every standard
+    // library this builds with.
+    static auto const table = std::array<LaunchErrorRow, 5> { {
+        { .error = LaunchError::NotFound,
+          .text = "the program is missing, or cannot be executed",
+          .refusal = HostRefusal::HelperNotFound },
+        { .error = LaunchError::Resources,
+          .text = "the system is out of memory, processes or handles",
+          .refusal = HostRefusal::OutOfResources },
+        { .error = LaunchError::Unsupported,
+          .text = "the system lacks what it takes (on Linux, kernel 5.4 or later)",
+          .refusal = HostRefusal::Unsupported },
+        { .error = LaunchError::Stopped, .text = "Contour is shutting down", .refusal = std::nullopt },
+        { .error = LaunchError::Io, .text = "the system refused", .refusal = HostRefusal::LaunchRefused },
+    } };
+    return table;
+}
+
 /// @param error Why a process could not be started, or watched.
 /// @return What it means, user-readable: a sentence's end, naming no system call.
-[[nodiscard]] constexpr std::string_view launchErrorText(LaunchError error) noexcept
+[[nodiscard]] inline std::string_view launchErrorText(LaunchError error) noexcept
 {
-    switch (error)
-    {
-        case LaunchError::NotFound: return "the program is missing, or cannot be executed";
-        case LaunchError::Resources: return "the system is out of memory, processes or handles";
-        case LaunchError::Unsupported:
-            return "the system lacks what it takes (on Linux, kernel 5.4 or later)";
-        case LaunchError::Stopped: return "Contour is shutting down";
-        case LaunchError::Io: return "the system refused";
-    }
-    return "the system refused";
+    return launchErrors()[std::to_underlying(error)].text;
 }
 
 /// How a process ended.

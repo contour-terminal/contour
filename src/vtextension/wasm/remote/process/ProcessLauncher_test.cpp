@@ -6,6 +6,7 @@
 // safe however late it comes. No child outlives its case: each is killed and reaped at the end, and the reap
 // is asserted. Then the test launchers the supervisor's tests stand on.
 #include <core/Clock.hpp>
+#include <core/Utils.hpp>
 #include <core/testing/EnvHelper.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -336,6 +337,18 @@ TEST_CASE("ProcessLauncher.killAfterReapDoesNothing", "[vtextension]")
     auto const again = probe->process->tryReap();
     REQUIRE(again.has_value());
     CHECK(*again == first);
+}
+
+TEST_CASE("LaunchErrors.oneRowPerError", "[vtextension]")
+{
+    auto const rows = process::launchErrors();
+    CHECK(rows.size() == std::size_t { std::to_underlying(LaunchError::Io) } + 1);
+    for (auto const& [index, row]: core::views::enumerate(rows))
+    {
+        INFO(row.text);
+        CHECK(std::size_t { std::to_underlying(row.error) } == index);
+        CHECK_FALSE(row.text.empty());
+    }
 }
 
 TEST_CASE("ProcessLauncher.missingExecutableIsNotFound", "[vtextension]")

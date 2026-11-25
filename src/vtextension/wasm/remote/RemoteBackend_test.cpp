@@ -78,7 +78,6 @@ using vtextension::wasm::remote::HostAttachment;
 using vtextension::wasm::remote::HostConnection;
 using vtextension::wasm::remote::HostRefusal;
 using vtextension::wasm::remote::HostRefusalLog;
-using vtextension::wasm::remote::hostRefusals;
 using vtextension::wasm::remote::HostStep;
 using vtextension::wasm::remote::IHostConnector;
 using vtextension::wasm::remote::IHostHandle;
@@ -87,6 +86,7 @@ using vtextension::wasm::remote::LaneWatch;
 using vtextension::wasm::remote::makeRemoteBackend;
 using vtextension::wasm::remote::makeRemoteKindState;
 using vtextension::wasm::remote::MaxLaneChannels;
+using vtextension::wasm::remote::refusalLine;
 using vtextension::wasm::remote::RemoteKindState;
 using vtextension::wasm::remote::StepWatch;
 using vtextension::wasm::remote::transport::Channel;
@@ -866,9 +866,7 @@ TEST_CASE("RemoteBackend.refusedHelloIsLoggedOncePerReason", "[vtextension][remo
             REQUIRE_FALSE(connected.has_value());
             CHECK(connected.error() == ExtensionError::HostUnavailable);
         }
-        CHECK(lines
-              == std::vector<std::string> {
-                  std::string { hostRefusals()[std::to_underlying(row.refusal)].text } });
+        CHECK(lines == std::vector<std::string> { refusalLine(row.refusal) });
     }
 }
 
