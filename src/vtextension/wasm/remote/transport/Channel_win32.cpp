@@ -404,4 +404,9 @@ std::expected<ChannelPair, ChannelError> makeChannelPair()
                          .helper = Channel { std::make_unique<Channel::Native>(client.release()) } };
 }
 
+void closeNativeHandle(NativeHandle handle) noexcept
+{
+    ::CloseHandle(handle);
+}
+
 } // namespace vtextension::wasm::remote::transport

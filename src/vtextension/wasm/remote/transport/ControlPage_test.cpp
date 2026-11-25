@@ -30,7 +30,6 @@
 
 using vtextension::wasm::remote::transport::ControlPage;
 using vtextension::wasm::remote::transport::ControlPageBytes;
-using vtextension::wasm::remote::transport::isControlPageSize;
 using vtextension::wasm::remote::transport::SharedObjectError;
 using vtextension::wasm::remote::transport::testing::duplicate;
 
@@ -72,30 +71,16 @@ TEST_CASE("ControlPage.helperViewSeesTheRaise", "[vtextension]")
     CHECK_FALSE(helper->isRaised(9));
 }
 
-TEST_CASE("ControlPage.sizeMayBeRoundedUpToThePage", "[vtextension]")
-{
-    // 4 KiB pages: the object is exactly the page.
-    CHECK(isControlPageSize(ControlPageBytes, 4096));
-    CHECK_FALSE(isControlPageSize(ControlPageBytes - 1, 4096));
-    CHECK_FALSE(isControlPageSize(ControlPageBytes + 1, 4096));
-    // 16 KiB pages (Apple silicon): XNU reports the object rounded up to the page.
-    CHECK(isControlPageSize(ControlPageBytes, 16384));
-    CHECK(isControlPageSize(16384, 16384));
-    CHECK_FALSE(isControlPageSize(16385, 16384));
-    CHECK_FALSE(isControlPageSize(32768, 16384));
-    CHECK_FALSE(isControlPageSize(ControlPageBytes - 1, 16384));
-}
-
 #ifndef _WIN32
 TEST_CASE("ControlPage.adoptRefusesAWrongSize", "[vtextension]")
 {
-    // Larger than any page the page's size rounds up to, 16 KiB on Apple silicon included; and, where the
-    // object keeps the size it is given (not XNU's shared memory, which rounds it up to the page), smaller.
-    auto const pageBytes = static_cast<off_t>(::sysconf(_SC_PAGESIZE));
+    // Larger than the largest page the page's size rounds up to (MaxPageBytes); and, where the object keeps
+    // the size it is given (not XNU's shared memory, which rounds it up to the page), smaller.
+    constexpr auto Larger = static_cast<off_t>(2 * vtextension::wasm::remote::transport::MaxPageBytes);
     #ifdef __APPLE__
-    auto const sizes = std::array { 4 * pageBytes };
+    auto const sizes = std::array { Larger };
     #else
-    auto const sizes = std::array { 4 * pageBytes, off_t { ControlPageBytes / 2 } };
+    auto const sizes = std::array { Larger, off_t { ControlPageBytes / 2 } };
     #endif
     for (auto const size: sizes)
     {
@@ -115,6 +100,23 @@ TEST_CASE("ControlPage.adoptRefusesAWrongSize", "[vtextension]")
         // A refused handle stays its owner's.
         CHECK(::close(descriptor) == 0);
     }
+}
+#endif
+
+#ifndef _WIN32
+TEST_CASE("ControlPage.adoptAcceptsThePageRoundedUpToTheLargestPage", "[vtextension]")
+{
+    // An arm64 parent's page, rounded up to its 16 KiB page, adopted by a helper whose own page may be 4 KiB
+    // (x86_64 under Rosetta): only the first ControlPageBytes are mapped.
+    auto const object = vtextension::wasm::remote::transport::createSharedObject(
+        vtextension::wasm::remote::transport::MaxPageBytes,
+        vtextension::wasm::remote::transport::SharedObjectUse::InterruptPage);
+    REQUIRE(object.has_value());
+    auto const copy = duplicate(object->get());
+    REQUIRE(copy.has_value());
+    auto const page = ControlPage::adopt(*copy);
+    REQUIRE(page.has_value());
+    CHECK_FALSE(page->isRaised(0));
 }
 #endif
 

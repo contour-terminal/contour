@@ -4,17 +4,19 @@
 # the helper process link them, and both are always built. On Windows the channel's owner-only pipe DACL
 # needs advapi32.
 
-# What both processes need of the operating system, one source per platform: the channel, the interrupt page and
-# the wake signal.
+# What both processes need of the operating system, one source per platform: the channel, the shared memory
+# objects (the interrupt page and guest memory) and the wake signal.
 set(_transport_sources
     transport/Channel_posix.cpp
     transport/ControlPage_posix.cpp
+    transport/SharedObject_posix.cpp
     transport/WakeSignal_posix.cpp
 )
 if(WIN32)
     set(_transport_sources
         transport/Channel_win32.cpp
         transport/ControlPage_win32.cpp
+        transport/SharedObject_win32.cpp
         transport/WakeSignal_win32.cpp
     )
 endif()
@@ -36,8 +38,11 @@ add_library(vtextension_remote_wire STATIC
     transport/ControlPage.hpp
     transport/HelperArguments.cpp
     transport/HelperArguments.hpp
+    transport/OwnedHandle.hpp
     transport/PduStream.cpp
     transport/PduStream.hpp
+    transport/SharedObject.cpp
+    transport/SharedObject.hpp
     transport/WakeSignal.hpp
     transport/WouldBlock.hpp
     ${_transport_sources}
@@ -128,6 +133,7 @@ if(_process_source)
             process/testing/RecordingLauncher.hpp
             transport/ControlPage_test.cpp
             transport/HelperArguments_test.cpp
+            transport/SharedObject_test.cpp
             transport/WakeSignal_test.cpp
         )
         target_link_libraries(vtextension_process_test PRIVATE

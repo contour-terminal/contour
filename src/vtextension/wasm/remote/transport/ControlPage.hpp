@@ -13,8 +13,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <utility>
 
 #include <vtextension/wasm/remote/transport/Channel.hpp>
+#include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
+#include <vtextension/wasm/remote/transport/SharedObject.hpp>
 
 namespace vtextension::wasm::remote::transport
 {
@@ -24,28 +27,6 @@ inline constexpr std::size_t ControlPageBytes = 4096;
 
 /// How many interrupt slots the page holds: a 32-bit flag each.
 inline constexpr uint32_t InterruptSlotCount = ControlPageBytes / sizeof(std::atomic<uint32_t>);
-
-/// Whether a shared memory object of @p objectBytes, as fstat() reports it, is the interrupt page: at least
-/// ControlPageBytes, and at most that rounded up to the system's page. XNU rounds a POSIX shared memory
-/// object's size up to the page at ftruncate(), and fstat() reports the rounded size -- 16 KiB on Apple
-/// silicon -- while a memfd and a Windows section keep the size they were given. Whatever lies beyond
-/// ControlPageBytes is never mapped.
-/// @param objectBytes The object's size.
-/// @param pageBytes The system's page size, a power of two.
-/// @return Whether it is the page's size.
-[[nodiscard]] constexpr bool isControlPageSize(uint64_t objectBytes, uint64_t pageBytes) noexcept
-{
-    auto const rounded = (uint64_t { ControlPageBytes } + pageBytes - 1) / pageBytes * pageBytes;
-    return objectBytes >= ControlPageBytes && objectBytes <= rounded;
-}
-
-/// Why a shared memory object could not be made or mapped.
-enum class SharedObjectError : uint8_t
-{
-    Unsupported, ///< The system has no shared memory object of the kind needed.
-    Io,          ///< The system refused.
-    WrongSize,   ///< The object adopted is not the size expected.
-};
 
 /// One page both processes map: a flag per interrupt slot. Move-only; unmapped and closed when destroyed. A
 /// moved-from page may only be assigned to or destroyed.
@@ -59,9 +40,8 @@ class ControlPage
     /// Maps a page this process inherited, read-only: the helper's side, which only reads the flags. Takes
     /// ownership of @p handle, made close-on-exec (not inheritable) again.
     /// @param handle The page's handle.
-    /// @return The page; `WrongSize` if the object is not of the page's size (isControlPageSize()), `Io` if
-    /// it cannot be
-    ///         mapped. On failure @p handle stays the caller's.
+    /// @return The page; `WrongSize` if the object is not of the page's size (fitsSharedObject()), `Io` if
+    ///         it cannot be mapped. On failure @p handle stays the caller's.
     [[nodiscard]] static std::expected<ControlPage, SharedObjectError> adopt(NativeHandle handle);
 
     /// Maps this page a second time, read-only, on a handle of its own, as adopt() maps an inherited one:
@@ -69,11 +49,11 @@ class ControlPage
     /// @return The second mapping; `Io` if the handle could not be duplicated or the page mapped.
     [[nodiscard]] std::expected<ControlPage, SharedObjectError> openHelperView() const;
 
-    ControlPage(ControlPage&& other) noexcept;
-    ControlPage& operator=(ControlPage&& other) noexcept;
+    ControlPage(ControlPage&& other) noexcept = default;
+    ControlPage& operator=(ControlPage&& other) noexcept = default;
     ControlPage(ControlPage const&) = delete;
     ControlPage& operator=(ControlPage const&) = delete;
-    ~ControlPage();
+    ~ControlPage() = default;
 
     /// Raises @p slot. Wait-free. Only on the page create() made: an adopted page is mapped read-only.
     /// @param slot The slot; below InterruptSlotCount, or else nothing happens.
@@ -94,21 +74,30 @@ class ControlPage
     [[nodiscard]] NativeHandle nativeHandle() const noexcept;
 
   private:
-    ControlPage(NativeHandle handle, uint32_t* flags) noexcept;
+    /// @param handle The page's handle, the one handed over.
+    /// @param mapping Its mapping, ControlPageBytes.
+    ControlPage(OwnedHandle handle, SharedMapping mapping) noexcept;
 
     /// @return @p slot's flag.
     [[nodiscard]] std::atomic_ref<uint32_t> flag(uint32_t slot) const noexcept;
 
-    /// Unmaps and closes what this page holds, if anything.
-    void release() noexcept;
-
-    NativeHandle _handle;
-    uint32_t* _flags; ///< The mapping, InterruptSlotCount flags; null once moved from.
+    OwnedHandle _handle;
+    SharedMapping _mapping; ///< InterruptSlotCount flags; empty once moved from.
 };
+
+inline ControlPage::ControlPage(OwnedHandle handle, SharedMapping mapping) noexcept:
+    _handle { std::move(handle) }, _mapping { std::move(mapping) }
+{
+}
+
+inline NativeHandle ControlPage::nativeHandle() const noexcept
+{
+    return _handle.get();
+}
 
 inline std::atomic_ref<uint32_t> ControlPage::flag(uint32_t slot) const noexcept
 {
-    return std::atomic_ref<uint32_t> { _flags[slot] };
+    return std::atomic_ref<uint32_t> { reinterpret_cast<uint32_t*>(_mapping.bytes().data())[slot] };
 }
 
 inline void ControlPage::raise(uint32_t slot) noexcept

@@ -32,6 +32,10 @@ using NativeHandle = void*;
 using NativeHandle = int;
 #endif
 
+/// Closes a handle this process owns: close() on POSIX, CloseHandle() on Windows.
+/// @param handle The handle; never used again.
+void closeNativeHandle(NativeHandle handle) noexcept;
+
 /// One end of a connected byte channel. Move-only; the end is closed when its owner is destroyed. A
 /// moved-from channel may only be shut down, assigned to or destroyed.
 class Channel

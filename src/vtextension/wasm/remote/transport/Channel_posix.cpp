@@ -189,4 +189,9 @@ std::expected<ChannelPair, ChannelError> makeChannelPair()
         });
 }
 
+void closeNativeHandle(NativeHandle handle) noexcept
+{
+    ::close(handle);
+}
+
 } // namespace vtextension::wasm::remote::transport
