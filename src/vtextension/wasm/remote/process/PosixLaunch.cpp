@@ -28,6 +28,8 @@
 #include <spawn.h>
 #include <unistd.h>
 
+#include <vtextension/wasm/BuildInstrumentation.hpp>
+
 #ifdef __APPLE__
     #include <Availability.h>
 #endif
@@ -350,11 +352,9 @@ ProcessId currentProcessId() noexcept
 
 std::optional<transport::NativeHandle> defaultHelperStandardError()
 {
-#ifdef CONTOUR_INSTRUMENTED_BUILD
-    return STDERR_FILENO;
-#else
+    if constexpr (ThisBuildInstrumentation != BuildInstrumentation::None)
+        return STDERR_FILENO;
     return std::nullopt;
-#endif
 }
 
 } // namespace vtextension::wasm::remote::process

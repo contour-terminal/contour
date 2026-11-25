@@ -3,6 +3,7 @@
 // The engine of the extension host executable: Wasmtime's.
 #include <vtextension/wasm/host/HelperEngine.hpp>
 
+#include <vtextension/wasm/BuildInstrumentation.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeEngine.hpp>
 
 namespace vtextension::wasm::host
@@ -12,11 +13,9 @@ namespace
 {
     /// How the helper's engine traps: in software where a sanitizer or coverage owns the signal handlers,
     /// through guard pages and signals otherwise.
-#ifdef CONTOUR_HELPER_SOFTWARE_TRAPS
-    constexpr auto HelperTrapMode = wasmtime::TrapMode::Software;
-#else
-    constexpr auto HelperTrapMode = wasmtime::TrapMode::Signals;
-#endif
+    constexpr auto HelperTrapMode = ThisBuildInstrumentation == BuildInstrumentation::None
+                                        ? wasmtime::TrapMode::Signals
+                                        : wasmtime::TrapMode::Software;
 } // namespace
 
 std::unique_ptr<IHostedEngine> makeHelperEngine()

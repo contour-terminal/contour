@@ -32,6 +32,8 @@
 #include <utility>
 #include <vector>
 
+#include <vtextension/wasm/BuildInstrumentation.hpp>
+#include <vtextension/wasm/host/HostBootstrap.hpp>
 #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
 #ifdef __linux__
     #include <vtextension/wasm/remote/process/Process_linux.hpp>
@@ -349,6 +351,28 @@ TEST_CASE("LaunchErrors.oneRowPerError", "[vtextension]")
         CHECK(std::size_t { std::to_underlying(row.error) } == index);
         CHECK_FALSE(row.text.empty());
     }
+}
+
+TEST_CASE("BuildInstrumentation.drivesCapsAndStderr", "[vtextension]")
+{
+    using vtextension::wasm::BuildInstrumentation;
+    using vtextension::wasm::ThisBuildInstrumentation;
+    using vtextension::wasm::host::BuildCapPolicy;
+    using vtextension::wasm::host::CapPolicy;
+
+    // A sanitizer's shadow memory and threads exceed any cap; only there is the host left uncapped.
+    auto const sanitized = ThisBuildInstrumentation == BuildInstrumentation::Sanitizers;
+    CHECK((BuildCapPolicy == CapPolicy::Skip) == sanitized);
+    // An instrumented build's helpers report to Contour's stderr; any other's to the null device.
+    auto const instrumented = ThisBuildInstrumentation != BuildInstrumentation::None;
+    CHECK(process::defaultHelperStandardError().has_value() == instrumented);
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+    CHECK(sanitized);
+#elifdef __has_feature
+    #if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+    CHECK(sanitized);
+    #endif
+#endif
 }
 
 TEST_CASE("ProcessLauncher.missingExecutableIsNotFound", "[vtextension]")

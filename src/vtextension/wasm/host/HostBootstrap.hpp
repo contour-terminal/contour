@@ -17,6 +17,7 @@
 #include <span>
 #include <string_view>
 
+#include <vtextension/wasm/BuildInstrumentation.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 
 namespace vtextension::wasm::host
@@ -85,12 +86,9 @@ enum class CapPolicy : uint8_t
     Apply, ///< It caps them.
 };
 
-/// How this build caps the host: not at all in a sanitizer build (CONTOUR_SANITIZED_BUILD).
-#ifdef CONTOUR_SANITIZED_BUILD
-inline constexpr CapPolicy BuildCapPolicy = CapPolicy::Skip;
-#else
-inline constexpr CapPolicy BuildCapPolicy = CapPolicy::Apply;
-#endif
+/// How this build caps the host: not at all in a sanitizer build.
+inline constexpr CapPolicy BuildCapPolicy =
+    ThisBuildInstrumentation == BuildInstrumentation::Sanitizers ? CapPolicy::Skip : CapPolicy::Apply;
 
 /// Caps this process's resources, as far as @p policy says: on Linux no further process or thread
 /// (RLIMIT_NPROC 0) and @p dataBytes of data memory (RLIMIT_DATA); on FreeBSD no further process or thread;

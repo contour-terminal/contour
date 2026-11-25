@@ -31,6 +31,7 @@ set(_codec_sources
 
 add_library(vtextension_remote_wire STATIC
     ${_codec_sources}
+    ../BuildInstrumentation.hpp
     transport/Channel.hpp
     transport/ControlPage.hpp
     transport/HelperArguments.cpp
@@ -51,6 +52,12 @@ target_include_directories(vtextension_remote_wire PUBLIC
 if(WIN32)
     target_link_libraries(vtextension_remote_wire PRIVATE advapi32)
 endif()
+
+# How this build is instrumented: 0 not at all, 1 for coverage, 2 by a sanitizer (../BuildInstrumentation.hpp,
+# its only reader). Public, so that both processes and everything between them agree on what the extension host
+# caps, where its stderr goes and how its engine traps.
+target_compile_definitions(vtextension_remote_wire PUBLIC
+    CONTOUR_BUILD_INSTRUMENTATION=$<IF:$<BOOL:${CONTOUR_SANITIZE}>,2,$<IF:$<BOOL:${CONTOUR_COVERAGE}>,1,0>>)
 
 # vtextension_remote_process: starting extension host processes and knowing when they end, one source per
 # operating system. It stays std-only -- the wire library and core-cpp, no engine and no vtbackend -- so that it,
@@ -89,11 +96,6 @@ if(_process_source)
         ${_process_source}
     )
     target_link_libraries(vtextension_remote_process PUBLIC core::platform)
-    # A sanitizer or coverage build's helpers report to Contour's stderr (defaultHelperStandardError()); any
-    # other build's get the null device.
-    if(CONTOUR_SANITIZE OR CONTOUR_COVERAGE)
-        target_compile_definitions(vtextension_remote_process PRIVATE CONTOUR_INSTRUMENTED_BUILD)
-    endif()
     # Where the extension host is installed, from the directory contour is (../../../CMakeLists.txt).
     target_compile_definitions(vtextension_remote_process PUBLIC
         CONTOUR_EXTENSION_HOST_RELATIVE_DIR="${CONTOUR_EXTENSION_HOST_RELATIVE_DIR}")

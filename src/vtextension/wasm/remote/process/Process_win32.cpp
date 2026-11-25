@@ -39,6 +39,7 @@
 #include <utility>
 #include <vector>
 
+#include <vtextension/wasm/BuildInstrumentation.hpp>
 #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
 
 #define WIN32_LEAN_AND_MEAN
@@ -497,10 +498,9 @@ ProcessId currentProcessId() noexcept
 
 std::optional<transport::NativeHandle> defaultHelperStandardError()
 {
-#ifdef CONTOUR_INSTRUMENTED_BUILD
-    if (auto* const own = ::GetStdHandle(STD_ERROR_HANDLE); own != nullptr && own != INVALID_HANDLE_VALUE)
-        return own;
-#endif
+    if constexpr (ThisBuildInstrumentation != BuildInstrumentation::None)
+        if (auto* const own = ::GetStdHandle(STD_ERROR_HANDLE); own != nullptr && own != INVALID_HANDLE_VALUE)
+            return own;
     return std::nullopt;
 }
 

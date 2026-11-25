@@ -30,9 +30,6 @@ add_library(vtextension_wasmtime_helper_engine STATIC
     ${PROJECT_SOURCE_DIR}/src/vtextension/wasm/host/HelperEngine.hpp
 )
 target_link_libraries(vtextension_wasmtime_helper_engine PUBLIC vtextension_host PRIVATE vtextension_wasmtime)
-if(CONTOUR_SANITIZE OR CONTOUR_COVERAGE)
-    target_compile_definitions(vtextension_wasmtime_helper_engine PRIVATE CONTOUR_HELPER_SOFTWARE_TRAPS)
-endif()
 
 if(VTEXTENSION_TESTING)
     # Test support for the extension host's suite (vtextension_remote_test): the engine a host process drives,
