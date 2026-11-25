@@ -25,11 +25,13 @@
     #include <csignal>
 
     #include <fcntl.h>
+    #include <unistd.h>
 #endif
 
 using vtextension::wasm::remote::transport::Channel;
 using vtextension::wasm::remote::transport::ChannelError;
 using vtextension::wasm::remote::transport::makeChannelPair;
+using vtextension::wasm::remote::transport::NativeHandle;
 
 namespace
 {
@@ -47,6 +49,33 @@ namespace
         filled += *some;
     }
     return received;
+}
+
+/// @return A second handle on what @p handle names, as a child process inherits one; nothing if it failed.
+[[nodiscard]] std::optional<NativeHandle> duplicate(NativeHandle handle) noexcept
+{
+#ifdef _WIN32
+    auto copy = HANDLE { nullptr };
+    if (!::DuplicateHandle(
+            ::GetCurrentProcess(), handle, ::GetCurrentProcess(), &copy, 0, FALSE, DUPLICATE_SAME_ACCESS))
+        return std::nullopt;
+    return copy;
+#else
+    auto const copy = ::dup(handle);
+    if (copy == -1)
+        return std::nullopt;
+    return copy;
+#endif
+}
+
+/// Closes a handle no channel owns.
+void closeHandle(NativeHandle handle) noexcept
+{
+#ifdef _WIN32
+    ::CloseHandle(handle);
+#else
+    ::close(handle);
+#endif
 }
 
 } // namespace
@@ -167,3 +196,41 @@ TEST_CASE("Channel.endsAreNotInheritable", "[vtextension]")
     }
 }
 #endif
+
+TEST_CASE("Channel.adoptTakesAnInheritedEnd", "[vtextension]")
+{
+    auto pair = makeChannelPair();
+    REQUIRE(pair.has_value());
+    auto const copy = duplicate(pair->helper.nativeHandle());
+    REQUIRE(copy.has_value());
+    auto adopted = Channel::adopt(*copy);
+    REQUIRE(adopted.has_value());
+    {
+        // Only the adopted end is left on the helper's side.
+        auto const helper = std::move(pair->helper);
+    }
+
+    auto const request = std::vector<uint8_t> { 1, 2, 3 };
+    REQUIRE(pair->parent.send(request).has_value());
+    CHECK(receiveExactly(*adopted, request.size()) == request);
+    auto const reply = std::vector<uint8_t> { 4, 5 };
+    REQUIRE(adopted->send(reply).has_value());
+    CHECK(receiveExactly(pair->parent, reply.size()) == reply);
+#ifndef _WIN32
+    // An end handed over is not handed on: close-on-exec again, as dup() left it not.
+    auto const flags = ::fcntl(adopted->nativeHandle(), F_GETFD);
+    REQUIRE(flags != -1);
+    CHECK((flags & FD_CLOEXEC) != 0);
+#endif
+}
+
+TEST_CASE("Channel.adoptRefusesAClosedHandle", "[vtextension]")
+{
+    auto pair = makeChannelPair();
+    REQUIRE(pair.has_value());
+    auto const copy = duplicate(pair->helper.nativeHandle());
+    REQUIRE(copy.has_value());
+    closeHandle(*copy);
+    // Nothing else of this test opens a handle meanwhile, so the number names nothing.
+    CHECK(Channel::adopt(*copy) == std::unexpected(ChannelError::Io));
+}

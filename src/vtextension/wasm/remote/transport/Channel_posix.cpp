@@ -4,6 +4,7 @@
 // raise SIGPIPE. Shutting an end down is ::shutdown(), which wakes a reader blocked on it; the descriptor is
 // closed only when the channel is destroyed, so that no thread can find its number reused.
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 
 #include <array>
@@ -46,14 +47,20 @@ namespace
         }
     }
 
-    /// Makes @p descriptor close-on-exec and SIGPIPE-free where socketpair() could not ask for that itself.
-    /// @return Whether it succeeded.
-    [[nodiscard]] std::expected<void, ChannelError> configureEnd([[maybe_unused]] int descriptor) noexcept
+    /// Whether an end is known to be close-on-exec already.
+    enum class CloseOnExec : uint8_t
     {
-#ifndef SOCK_CLOEXEC
-        if (::fcntl(descriptor, F_SETFD, FD_CLOEXEC) == -1)
+        Unknown, ///< It may not be: set it.
+        Set,     ///< socketpair() set it.
+    };
+
+    /// Makes @p descriptor close-on-exec and SIGPIPE-free where it is not yet.
+    /// @return Whether it succeeded.
+    [[nodiscard]] std::expected<void, ChannelError> configureEnd(int descriptor,
+                                                                 CloseOnExec closeOnExec) noexcept
+    {
+        if (closeOnExec == CloseOnExec::Unknown && ::fcntl(descriptor, F_SETFD, FD_CLOEXEC) == -1)
             return std::unexpected(ChannelError::Io);
-#endif
 #ifdef SO_NOSIGPIPE
         auto const enable = 1;
         if (::setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &enable, sizeof(enable)) == -1)
@@ -82,6 +89,16 @@ struct Channel::Native
 
 Channel::Channel(std::unique_ptr<Native> native) noexcept: _native { std::move(native) }
 {
+}
+
+std::expected<Channel, ChannelError> Channel::adopt(NativeHandle handle)
+{
+    struct stat status {};
+    if (::fstat(handle, &status) == -1 || !S_ISSOCK(status.st_mode))
+        return std::unexpected(ChannelError::Io);
+    return configureEnd(handle, CloseOnExec::Unknown).transform([&] {
+        return Channel { std::make_unique<Native>(handle) };
+    });
 }
 
 Channel::~Channel() = default;
@@ -134,15 +151,17 @@ std::expected<ChannelPair, ChannelError> makeChannelPair()
     auto descriptors = std::array<int, 2> { -1, -1 };
 #ifdef SOCK_CLOEXEC
     constexpr auto SocketType = SOCK_STREAM | SOCK_CLOEXEC;
+    constexpr auto PairCloseOnExec = CloseOnExec::Set;
 #else
     constexpr auto SocketType = SOCK_STREAM;
+    constexpr auto PairCloseOnExec = CloseOnExec::Unknown;
 #endif
     if (::socketpair(AF_UNIX, SocketType, 0, descriptors.data()) == -1)
         return std::unexpected(ChannelError::Io);
     auto parent = std::make_unique<Channel::Native>(descriptors[0]);
     auto helper = std::make_unique<Channel::Native>(descriptors[1]);
-    return configureEnd(parent->descriptor)
-        .and_then([&] { return configureEnd(helper->descriptor); })
+    return configureEnd(parent->descriptor, PairCloseOnExec)
+        .and_then([&] { return configureEnd(helper->descriptor, PairCloseOnExec); })
         .transform([&] {
             return ChannelPair { .parent = Channel { std::move(parent) },
                                  .helper = Channel { std::move(helper) } };

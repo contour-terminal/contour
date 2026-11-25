@@ -250,6 +250,16 @@ Channel::Channel(std::unique_ptr<Native> native) noexcept: _native { std::move(n
 {
 }
 
+std::expected<Channel, ChannelError> Channel::adopt(NativeHandle handle)
+{
+    // GetFileType() reports FILE_TYPE_UNKNOWN, with an error, for a handle that is not open.
+    if (handle == nullptr || handle == INVALID_HANDLE_VALUE || ::GetFileType(handle) != FILE_TYPE_PIPE)
+        return std::unexpected(ChannelError::Io);
+    if (!::SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0))
+        return std::unexpected(ChannelError::Io);
+    return Channel { std::make_unique<Native>(handle) };
+}
+
 Channel::~Channel() = default;
 Channel::Channel(Channel&&) noexcept = default;
 Channel& Channel::operator=(Channel&&) noexcept = default;

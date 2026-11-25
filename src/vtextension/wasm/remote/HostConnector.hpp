@@ -13,12 +13,10 @@
 
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
+#include <vtextension/wasm/remote/transport/HelperArguments.hpp>
 
 namespace vtextension::wasm::remote
 {
-
-/// How many lanes a host serves: one per thread that may call into its instances at once.
-inline constexpr std::size_t MaxLaneChannels = 4;
 
 /// One incarnation of a host process, as its parent holds it.
 class IHostHandle

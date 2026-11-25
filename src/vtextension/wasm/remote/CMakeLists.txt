@@ -4,9 +4,19 @@
 # the helper process link them, and both are always built. On Windows the channel's owner-only pipe DACL
 # needs advapi32.
 
-set(_channel_source transport/Channel_posix.cpp)
+# What both processes need of the operating system, one source per platform: the channel, the interrupt page and
+# the wake signal.
+set(_transport_sources
+    transport/Channel_posix.cpp
+    transport/ControlPage_posix.cpp
+    transport/WakeSignal_posix.cpp
+)
 if(WIN32)
-    set(_channel_source transport/Channel_win32.cpp)
+    set(_transport_sources
+        transport/Channel_win32.cpp
+        transport/ControlPage_win32.cpp
+        transport/WakeSignal_win32.cpp
+    )
 endif()
 
 # The codec's sources, compiled into the library and, with the fuzzer's flags, into the fuzz target below: one
@@ -22,9 +32,14 @@ set(_codec_sources
 add_library(vtextension_remote_wire STATIC
     ${_codec_sources}
     transport/Channel.hpp
-    ${_channel_source}
+    transport/ControlPage.hpp
+    transport/HelperArguments.cpp
+    transport/HelperArguments.hpp
     transport/PduStream.cpp
     transport/PduStream.hpp
+    transport/WakeSignal.hpp
+    transport/WouldBlock.hpp
+    ${_transport_sources}
 )
 # The codec names the runtime vocabulary (WasmRuntime.hpp, ExtensionError.hpp), which is header-only and
 # std-only: the include path is all it takes.
@@ -35,6 +50,23 @@ target_include_directories(vtextension_remote_wire PUBLIC
 
 if(WIN32)
     target_link_libraries(vtextension_remote_wire PRIVATE advapi32)
+endif()
+
+if(VTEXTENSION_TESTING)
+    # The transport's pieces the helper inherits; no engine, so that it cross-builds and runs under wine.
+    add_executable(vtextension_process_test
+        ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+        transport/ControlPage_test.cpp
+        transport/HelperArguments_test.cpp
+        transport/WakeSignal_test.cpp
+    )
+    target_link_libraries(vtextension_process_test PRIVATE
+        vtextension_remote_wire core::testing Catch2::Catch2 contour_test_trace)
+    add_test(NAME vtextension_process_test COMMAND vtextension_process_test)
+    if(NOT WIN32)
+        # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+        target_compile_options(vtextension_process_test PRIVATE -Wno-c2y-extensions)
+    endif()
 endif()
 
 # vtextension_remote: the backend that runs extensions in a separate host, over the channels above. It links no

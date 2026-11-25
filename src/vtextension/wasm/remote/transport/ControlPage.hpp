@@ -1,0 +1,110 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+/// @file
+/// The interrupt page: one page of shared memory Contour and its extension host process both map, a flag per
+/// interrupt slot. Contour raises an instance's slot to interrupt its running call; the helper, woken by the
+/// wake signal (WakeSignal.hpp), scans the page for raised slots.
+///
+/// Contour only ever stores to the page, never reads it back, so a helper that scribbles over it can mislead
+/// only itself.
+
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+
+#include <vtextension/wasm/remote/transport/Channel.hpp>
+
+namespace vtextension::wasm::remote::transport
+{
+
+/// The interrupt page's size: one page on every platform this runs on.
+inline constexpr std::size_t ControlPageBytes = 4096;
+
+/// How many interrupt slots the page holds: a 32-bit flag each.
+inline constexpr uint32_t InterruptSlotCount = ControlPageBytes / sizeof(std::atomic<uint32_t>);
+
+/// Why a shared memory object could not be made or mapped.
+enum class SharedObjectError : uint8_t
+{
+    Unsupported, ///< The system has no shared memory object of the kind needed.
+    Io,          ///< The system refused.
+    WrongSize,   ///< The object adopted is not the size expected.
+};
+
+/// One page both processes map: a flag per interrupt slot. Move-only; unmapped and closed when destroyed. A
+/// moved-from page may only be assigned to or destroyed.
+class ControlPage
+{
+  public:
+    /// Creates the page, all slots clear: Contour's side. Not inherited by a child unless handed over.
+    /// @return The page; `Unsupported` or `Io` if the system refused.
+    [[nodiscard]] static std::expected<ControlPage, SharedObjectError> create();
+
+    /// Maps a page this process inherited: the helper's side. Takes ownership of @p handle, made
+    /// close-on-exec (not inheritable) again.
+    /// @param handle The page's handle.
+    /// @return The page; `WrongSize` if the object is not ControlPageBytes large, `Io` if it cannot be
+    /// mapped.
+    ///         On failure @p handle stays the caller's.
+    [[nodiscard]] static std::expected<ControlPage, SharedObjectError> adopt(NativeHandle handle);
+
+    ControlPage(ControlPage&& other) noexcept;
+    ControlPage& operator=(ControlPage&& other) noexcept;
+    ControlPage(ControlPage const&) = delete;
+    ControlPage& operator=(ControlPage const&) = delete;
+    ~ControlPage();
+
+    /// Raises @p slot. Wait-free.
+    /// @param slot The slot; below InterruptSlotCount, or else nothing happens.
+    void raise(uint32_t slot) noexcept;
+
+    /// Clears @p slot. Wait-free.
+    /// @param slot The slot; below InterruptSlotCount, or else nothing happens.
+    void clear(uint32_t slot) noexcept;
+
+    /// @param slot The slot.
+    /// @return Whether @p slot is raised; never for one at or beyond InterruptSlotCount.
+    [[nodiscard]] bool isRaised(uint32_t slot) const noexcept;
+
+    /// @return The page's handle, still owned by the page: for handing it to a child process.
+    [[nodiscard]] NativeHandle nativeHandle() const noexcept;
+
+  private:
+    ControlPage(NativeHandle handle, uint32_t* flags) noexcept;
+
+    /// @return @p slot's flag.
+    [[nodiscard]] std::atomic_ref<uint32_t> flag(uint32_t slot) const noexcept;
+
+    /// Unmaps and closes what this page holds, if anything.
+    void release() noexcept;
+
+    NativeHandle _handle;
+    uint32_t* _flags; ///< The mapping, InterruptSlotCount flags; null once moved from.
+};
+
+inline std::atomic_ref<uint32_t> ControlPage::flag(uint32_t slot) const noexcept
+{
+    return std::atomic_ref<uint32_t> { _flags[slot] };
+}
+
+inline void ControlPage::raise(uint32_t slot) noexcept
+{
+    // Release: what the raiser wrote before it raised is seen by whoever sees the flag raised.
+    if (slot < InterruptSlotCount)
+        flag(slot).store(1, std::memory_order_release);
+}
+
+inline void ControlPage::clear(uint32_t slot) noexcept
+{
+    if (slot < InterruptSlotCount)
+        flag(slot).store(0, std::memory_order_release);
+}
+
+inline bool ControlPage::isRaised(uint32_t slot) const noexcept
+{
+    return slot < InterruptSlotCount && flag(slot).load(std::memory_order_acquire) != 0;
+}
+
+} // namespace vtextension::wasm::remote::transport

@@ -42,6 +42,15 @@ class Channel
     /// Takes ownership of an open end.
     /// @param native The end. Never null.
     explicit Channel(std::unique_ptr<Native> native) noexcept;
+
+    /// Takes ownership of an end this process inherited from its parent: a stream socket on POSIX, a pipe
+    /// opened for overlapped I/O on Windows. The end is made close-on-exec (not inheritable) again, and on
+    /// macOS SIGPIPE-free, as makeChannelPair()'s ends are.
+    /// @param handle The end.
+    /// @return The channel; `Io` if @p handle names no open socket (pipe), in which case it stays the
+    ///         caller's.
+    [[nodiscard]] static std::expected<Channel, ChannelError> adopt(NativeHandle handle);
+
     ~Channel();
     Channel(Channel&&) noexcept;
     Channel& operator=(Channel&&) noexcept;
