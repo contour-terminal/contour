@@ -225,11 +225,12 @@ namespace
 {
     // {{{ drawing
 
-    /// One run of text drawn in one role.
+    /// One run of text drawn in one role, and what a click on it lands on.
     struct Segment
     {
         std::string text;
         Role role = Role::Text;
+        std::optional<Hit> hit = std::nullopt; ///< What it records; none: nothing of its own.
     };
 
     /// One drawn line: segments from the left.
@@ -253,6 +254,14 @@ namespace
     [[nodiscard]] Segment labelOf(std::string_view label)
     {
         return Segment { .text = std::format("{:<{}}", label, LabelColumns), .role = Role::Dim };
+    }
+
+    /// @return A setting's label: a click on it picks the setting.
+    [[nodiscard]] Segment settingLabel(std::string_view label, FormField field)
+    {
+        auto segment = labelOf(label);
+        segment.hit = Hit { .kind = HitKind::DialogSetting, .value = std::to_underlying(field) };
+        return segment;
     }
 
     [[nodiscard]] Segment blankLabel(int indent = 0)
@@ -287,11 +296,16 @@ namespace
         return std::string { note };
     }
 
-    /// @return A stepped setting's value: between arrows, selected while it has the keys.
-    [[nodiscard]] Segment steppedValue(std::string_view value, bool focused)
+    /// Appends a stepped setting's value to @p line: between arrows, selected while it has the keys; a click
+    /// on the first arrow steps it back, one on the value or the second arrow steps it on.
+    void appendStepped(Line& line, std::string_view value, FormField field, bool focused)
     {
-        return Segment { .text = std::format("‹ {} ›", value),
-                         .role = focused ? Role::Selection : Role::Text };
+        auto const role = focused ? Role::Selection : Role::Text;
+        auto const step = [field](std::size_t forward) {
+            return Hit { .kind = HitKind::DialogStep, .value = (2 * std::to_underlying(field)) + forward };
+        };
+        line.push_back(Segment { .text = "‹ ", .role = role, .hit = step(0) });
+        line.push_back(Segment { .text = std::format("{} ›", value), .role = role, .hit = step(1) });
     }
 
     /// @return A worker's chip: its id and active runs, and what keeps it from a plain start.
@@ -319,14 +333,15 @@ namespace
         auto const tasks = config.tasks();
         auto const* const task = dialog.form.task < tasks.size() ? &tasks[dialog.form.task] : nullptr;
         auto const workers = config.workers();
-        auto line = Line { labelOf("worker") };
+        auto line = Line { settingLabel("worker", FormField::Worker) };
         for (auto const index: std::views::iota(std::size_t { 0 }, workers.size()))
         {
             auto const chosen = index == dialog.form.worker;
             auto chip = Segment { .text = std::format(" {} ", chipText(engine, config, task, workers[index])),
                                   .role = !chosen                               ? Role::Dim
                                           : dialog.setting == FormField::Worker ? Role::Selection
-                                                                                : Role::Accent };
+                                                                                : Role::Accent,
+                                  .hit = Hit { .kind = HitKind::WorkerChip, .value = index } };
             auto const room = width - columnsOf(line) - (line.size() > 1 ? 1 : 0);
             if (line.size() > 1 && view::columnsOf(chip.text) > room)
             {
@@ -391,38 +406,47 @@ namespace
             };
 
             // The task, and why it was suggested: beside it where it fits, else under it.
-            auto task =
-                Line { labelOf("task"),
-                       steppedValue(form.task < tasks.size() ? std::string_view { tasks[form.task].label }
-                                                             : "?"sv,
-                                    isFocused(FormField::Task)) };
+            auto task = Line { settingLabel("task", FormField::Task) };
+            appendStepped(task,
+                          form.task < tasks.size() ? std::string_view { tasks[form.task].label } : "?"sv,
+                          FormField::Task,
+                          isFocused(FormField::Task));
             auto const reason = Segment { .text = std::format("  {}", dialog.reason), .role = Role::Dim };
-            if (!dialog.reason.empty() && columnsOf(task) + view::columnsOf(reason.text) <= width)
+            auto const besides = columnsOf(task) + view::columnsOf(reason.text) <= width;
+            if (!dialog.reason.empty() && besides)
                 task.push_back(reason);
             lines.push_back(std::move(task));
-            if (!dialog.reason.empty() && lines.back().size() == 2)
+            if (!dialog.reason.empty() && !besides)
                 for (auto const& part: wrap(dialog.reason, width - LabelColumns, width - LabelColumns))
                     lines.push_back(Line { blankLabel(), Segment { .text = part, .role = Role::Dim } });
 
             appendWorkers(lines, dialog, engine, *config, width);
-            lines.push_back(Line {
-                labelOf("model"),
-                steppedValue(form.model < models.size() ? std::string_view { models[form.model] } : "?"sv,
-                             isFocused(FormField::Model)) });
+            auto model = Line { settingLabel("model", FormField::Model) };
+            appendStepped(model,
+                          form.model < models.size() ? std::string_view { models[form.model] } : "?"sv,
+                          FormField::Model,
+                          isFocused(FormField::Model));
+            lines.push_back(std::move(model));
             // A worker that takes no profile runs without one: there is nothing to choose.
             if (takesProfile(form, engine))
-                lines.push_back(Line { labelOf("perms"),
-                                       steppedValue(form.permissions < profiles.size()
-                                                        ? std::string_view { profiles[form.permissions].name }
-                                                        : "?"sv,
-                                                    isFocused(FormField::Permissions)) });
+            {
+                auto perms = Line { settingLabel("perms", FormField::Permissions) };
+                appendStepped(perms,
+                              form.permissions < profiles.size()
+                                  ? std::string_view { profiles[form.permissions].name }
+                                  : "?"sv,
+                              FormField::Permissions,
+                              isFocused(FormField::Permissions));
+                lines.push_back(std::move(perms));
+            }
             else
                 lines.push_back(Line { labelOf("perms"), Segment { .text = "none", .role = Role::Dim } });
-            auto note =
-                Line { labelOf("note"),
-                       Segment { .text = cut(noteText(form.note, isFocused(FormField::Note)),
-                                             std::max(width - LabelColumns, 4)),
-                                 .role = isFocused(FormField::Note) ? Role::Selection : Role::Text } };
+            auto note = Line { settingLabel("note", FormField::Note),
+                               Segment { .text = cut(noteText(form.note, isFocused(FormField::Note)),
+                                                     std::max(width - LabelColumns, 4)),
+                                         .role = isFocused(FormField::Note) ? Role::Selection : Role::Text,
+                                         .hit = Hit { .kind = HitKind::DialogSetting,
+                                                      .value = std::to_underlying(FormField::Note) } } };
             if (form.note.starts_with('-'))
                 note.back().role = Role::Failing;
             lines.push_back(std::move(note));
@@ -482,6 +506,7 @@ void StartDialogView::render(core::tui::Canvas& canvas)
     // The popup covers the dashboard.
     auto const hits = HitRecorder { _hits, { .x = screenBounds().x, .y = screenBounds().y } };
     hits.add(canvas.area(), Hit { .kind = HitKind::Popup });
+    auto const insideHits = hits.shifted(1, 1);
     auto const shown = std::min(lines.size(), static_cast<std::size_t>(std::max(inside.height(), 0)));
     for (auto const index: std::views::iota(std::size_t { 0 }, shown))
     {
@@ -490,8 +515,13 @@ void StartDialogView::render(core::tui::Canvas& canvas)
         {
             // Segments are sanitised already, and their blanks separate them: cutSanitised() keeps them.
             auto const text = cutSanitised(segment.text, width + 1 - x);
+            auto const columns = view::columnsOf(text);
             inside.putString(static_cast<int>(index), x, text, styleOf(theme, segment.role));
-            x += view::columnsOf(text);
+            if (segment.hit)
+                insideHits.add(
+                    core::tui::Rect { .x = x, .y = static_cast<int>(index), .width = columns, .height = 1 },
+                    *segment.hit);
+            x += columns;
         }
     }
 }

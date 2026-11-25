@@ -15,12 +15,14 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <variant>
 #include <vector>
 
 #include <orchestrator/core/Fixtures.hpp>
 #include <orchestrator/core/Reconcile.hpp>
 #include <orchestrator/core/Stats.hpp>
+#include <orchestrator/core/WorkItems.hpp>
 #include <orchestrator/view/Band.hpp>
 #include <orchestrator/view/BoardMarkdown.hpp>
 #include <orchestrator/view/Dashboard.hpp>
@@ -28,9 +30,11 @@
 #include <orchestrator/view/Focus.hpp>
 #include <orchestrator/view/HitMap.hpp>
 #include <orchestrator/view/Keys.hpp>
+#include <orchestrator/view/RowMenu.hpp>
 #include <orchestrator/view/Sections.hpp>
 #include <orchestrator/view/Theme.hpp>
 #include <orchestrator/view/ViewFixtures.hpp>
+#include <orchestrator/view/WorkBoard.hpp>
 
 using namespace std::string_literals;
 using namespace std::string_view_literals;
@@ -208,6 +212,7 @@ struct Scene
     std::string_view keys = {};                         ///< Typed before the screen is drawn.
     std::vector<Size> sizes = { Wide, Medium, Narrow }; ///< The sizes it is drawn at.
     std::string_view select = {};                       ///< A run selected before the keys; empty: none.
+    std::string_view then = {}; ///< Typed after a frame of the keys, such as a click on what they showed.
 };
 
 [[nodiscard]] std::vector<Scene> scenes()
@@ -291,6 +296,12 @@ struct Scene
         Scene { .name = "start-dialog", .world = workWorld(), .keys = "w\r", .sizes = { Narrow, Medium, Wide } },
         // The `n` box, a task typed: the defaults it starts on, the branch and worktree it makes.
         Scene { .name = "task-box", .world = World {}, .keys = "ninvestigate the flaky test", .sizes = { Narrow, Medium, Wide } },
+        // The row menu, opened with the right button on Needs you's first item: #2375's.
+        Scene { .name = "row-menu",
+                .world = workWorld(),
+                .keys = "w",
+                .sizes = { Medium, Wide },
+                .then = "[<2;31;5M[<2;31;5m" },
     };
 }
 
@@ -350,6 +361,13 @@ TEST_CASE("golden screens", "[orchestrator][view]")
                 // What the keys ask, such as a fold, is carried out as the guest does.
                 static_cast<void>(fixture.carryOut(fixture.dashboard.input(scene.keys), sceneAnswers()));
                 fixture.settle(sceneAnswers());
+                // A click lands on what the last frame drew.
+                if (!scene.then.empty())
+                {
+                    static_cast<void>(fixture.dashboard.frame());
+                    static_cast<void>(fixture.carryOut(fixture.dashboard.input(scene.then), sceneAnswers()));
+                    fixture.settle(sceneAnswers());
+                }
                 checkGolden(name, fixture.screen());
             }
         }
@@ -930,6 +948,457 @@ TEST_CASE("a click on a palette entry runs it; one beside the palette closes it"
     REQUIRE(entry != regions.end());
     static_cast<void>(fixture.dashboard.input(clickAt(entry->area.x + 2, entry->area.y)));
     CHECK_FALSE(fixture.dashboard.interaction().palette.has_value());
+}
+
+// }}}
+
+// {{{ the Work view's mouse
+
+namespace
+{
+/// @return The SGR report of a press and release of the right button at the 0-based cell (@p x, @p y).
+[[nodiscard]] std::string rightClickAt(int x, int y)
+{
+    return std::format("\x1b[<2;{};{}M\x1b[<2;{};{}m", x + 1, y + 1, x + 1, y + 1);
+}
+
+/// @return The SGR report of a press of the left button alone at the 0-based cell (@p x, @p y).
+[[nodiscard]] std::string pressAt(int x, int y)
+{
+    return std::format("\x1b[<0;{};{}M", x + 1, y + 1);
+}
+
+/// @return The SGR report of the pointer moving to the 0-based cell (@p x, @p y) with @p button held: 0 the
+///         left one, 3 none.
+[[nodiscard]] std::string moveAt(int button, int x, int y)
+{
+    return std::format("\x1b[<{};{};{}M", 32 + button, x + 1, y + 1);
+}
+
+/// @return The Work view's lines of @p fixture's dashboard, as it builds them.
+[[nodiscard]] std::vector<WorkLine> workLinesOf(Fixture const& fixture, std::vector<WorkItem>& items)
+{
+    items = fixture.engine.workItems();
+    auto const order = orderOf(items, fixture.engine.repositories(), sortOf(fixture.engine));
+    return workLines(items, order, fixture.engine, fixture.dashboard.interaction().work);
+}
+
+/// @return The index of the Work line whose item has @p key (workItemKey()); fails the test when none has.
+[[nodiscard]] std::size_t workLineOf(Fixture const& fixture, std::string_view key)
+{
+    auto items = std::vector<WorkItem> {};
+    auto const lines = workLinesOf(fixture, items);
+    for (auto const [at, line]: std::views::enumerate(lines))
+        if (line.kind == WorkLineKind::Item && workItemKey(items[line.item]) == key)
+            return static_cast<std::size_t>(at);
+    FAIL("no line of " << key);
+    return 0;
+}
+
+/// The key of #2375's item, Needs you's first.
+constexpr auto FirstMr = "contour/!2375"sv;
+
+/// @return The Work view of the Work world, drawn.
+[[nodiscard]] std::unique_ptr<Fixture> workFixture(World const& world = workWorld(), Size size = Wide)
+{
+    auto fixture = std::make_unique<Fixture>(world, size);
+    static_cast<void>(fixture->dashboard.frame());
+    CHECK(fixture->dashboard.input("w").empty());
+    static_cast<void>(fixture->dashboard.frame());
+    return fixture;
+}
+
+/// @return Every region the last frame recorded of @p kind.
+[[nodiscard]] std::vector<HitRegion> regionsOf(Dashboard const& dashboard, HitKind kind)
+{
+    return std::ranges::to<std::vector>(
+        dashboard.hits().regions()
+        | std::views::filter([kind](HitRegion const& region) { return region.hit.kind == kind; }));
+}
+
+/// The Work world with two workers and two tasks for a merge request.
+[[nodiscard]] World twoWorkersWorld()
+{
+    auto world = workWorld();
+    world.configJson = std::format(R"({{ "worktree_root": "~/worktrees", "models": ["opus", "sonnet"],
+  "workers": [ {{ "id": "a", "agent": "claude" }}, {{ "id": "b", "agent": "claude" }} ],
+  "repos": {},
+  "tasks": [
+    {{ "id": "fix_ci", "key": "f", "label": "fix CI", "applies_to": "pr", "model": "sonnet", "worker": "a",
+       "prompt": "/contour-workflows:fix-ci {{url}}" }},
+    {{ "id": "review", "key": "v", "label": "address review", "applies_to": "pr", "model": "sonnet",
+       "worker": "a", "prompt": "/contour-workflows:address-review {{url}}" }} ] }})",
+                                   WorkRepository);
+    world.stored = {};
+    return world;
+}
+} // namespace
+
+TEST_CASE("Work mouse: a right-click on a row opens its menu; Open MR opens it",
+          "[orchestrator][view][mouse][work]")
+{
+    auto const fixture = workFixture();
+    auto& dashboard = fixture->dashboard;
+    auto const row =
+        regionOf(dashboard, Hit { .kind = HitKind::WorkRow, .value = workLineOf(*fixture, FirstMr) });
+    CHECK(dashboard.input(rightClickAt(row.x + 30, row.y)).empty());
+    auto const& menu = dashboard.interaction().work.menu;
+    REQUIRE(menu.has_value());
+    CHECK(menu->itemKey == FirstMr);
+    CHECK(menu->at == core::tui::Point { .x = row.x + 30, .y = row.y });
+    static_cast<void>(dashboard.frame());
+    CHECK(regionsOf(dashboard, HitKind::MenuEntry).size() == RowMenuEntries.size());
+    auto const openMr = regionOf(dashboard, Hit { .kind = HitKind::MenuEntry, .value = 1 });
+    CHECK(dashboard.input(clickAt(openMr.x + 1, openMr.y))
+          == std::vector<UiAction> {
+              OpenUrlAction { .url = "https://github.com/example/contour/pull/2375", .label = "#2375" } });
+    CHECK_FALSE(dashboard.interaction().work.menu.has_value());
+
+    SECTION("on a ticket row, Open MR and Copy branch name do nothing")
+    {
+        static_cast<void>(dashboard.frame());
+        auto const ticket = regionOf(
+            dashboard, Hit { .kind = HitKind::WorkRow, .value = workLineOf(*fixture, "contour/PRJ-1302") });
+        CHECK(dashboard.input(rightClickAt(ticket.x + 30, ticket.y)).empty());
+        static_cast<void>(dashboard.frame());
+        for (auto const entry: { std::size_t { 1 }, std::size_t { 3 } })
+        {
+            auto const region = regionOf(dashboard, Hit { .kind = HitKind::MenuEntry, .value = entry });
+            CHECK(dashboard.input(clickAt(region.x + 1, region.y)).empty());
+            REQUIRE(dashboard.interaction().work.menu.has_value());
+            static_cast<void>(dashboard.frame());
+        }
+        CHECK(core::tui::test::canvasToString(dashboard.rendered()).contains("Copy branch name"));
+        // A click beside the menu closes it.
+        CHECK(dashboard.input(clickAt(0, 0)).empty());
+        CHECK_FALSE(dashboard.interaction().work.menu.has_value());
+    }
+}
+
+TEST_CASE("Work mouse: m opens the menu under the selected row; the keys run it",
+          "[orchestrator][view][mouse][work]")
+{
+    auto const fixture = workFixture();
+    auto& dashboard = fixture->dashboard;
+    auto const row =
+        regionOf(dashboard, Hit { .kind = HitKind::WorkRow, .value = workLineOf(*fixture, FirstMr) });
+    CHECK(dashboard.input("m").empty());
+    REQUIRE(dashboard.interaction().work.menu.has_value());
+    CHECK(dashboard.interaction().work.menu->at == core::tui::Point { .x = row.x + 2, .y = row.y + 1 });
+    // ↓ ↓ ⏎: Open ticket.
+    CHECK(dashboard.input("\x1b[B\x1b[B\r")
+          == std::vector<UiAction> { OpenUrlAction { .url = "https://example.atlassian.net/browse/PRJ-1234",
+                                                     .label = "PRJ-1234" } });
+    CHECK_FALSE(dashboard.interaction().work.menu.has_value());
+    // ⏎ on Start agent… opens the start dialog on the item.
+    CHECK(dashboard.input("m\r").empty());
+    REQUIRE(dashboard.interaction().startDialog.has_value());
+    CHECK(dashboard.interaction().startDialog->form.item == ItemRef { ChangeRequestRef { 2375 } });
+    CHECK_FALSE(dashboard.interaction().startDialog->form.session.empty());
+}
+
+TEST_CASE("Work mouse: copy branch name writes OSC 52", "[orchestrator][view][mouse][work]")
+{
+    auto const fixture = workFixture();
+    auto& dashboard = fixture->dashboard;
+    auto const row =
+        regionOf(dashboard, Hit { .kind = HitKind::WorkRow, .value = workLineOf(*fixture, FirstMr) });
+    CHECK(dashboard.input(rightClickAt(row.x + 30, row.y)).empty());
+    static_cast<void>(dashboard.frame());
+    auto const copy = regionOf(dashboard, Hit { .kind = HitKind::MenuEntry, .value = 3 });
+    CHECK(dashboard.input(clickAt(copy.x + 1, copy.y)).empty());
+    auto const frame = dashboard.frame();
+    CHECK(frame.contains(clipboardWrite("fix/flaky-test")));
+    CHECK(core::tui::test::canvasToString(dashboard.rendered()).contains("copied fix/flaky-test"));
+    // Written once.
+    CHECK(dashboard.input("j").empty());
+    CHECK_FALSE(dashboard.frame().contains("\x1b]52;"));
+}
+
+TEST_CASE("Work mouse: a click on a heading folds; a right-click folds the others",
+          "[orchestrator][view][mouse][work]")
+{
+    auto const fixture = workFixture();
+    auto& dashboard = fixture->dashboard;
+    auto const heading = regionOf(
+        dashboard, Hit { .kind = HitKind::WorkHeading, .value = std::to_underlying(WorkGroup::NeedsYou) });
+    CHECK(dashboard.input(clickAt(heading.x + 3, heading.y))
+          == std::vector<UiAction> { ToggleFoldAction { .group = "work/needs-you" } });
+    CHECK(dashboard.input(rightClickAt(heading.x + 3, heading.y))
+          == std::vector<UiAction> { ToggleFoldAction { .group = "work/ready" },
+                                     ToggleFoldAction { .group = "work/in-review" },
+                                     ToggleFoldAction { .group = "work/no-mr" } });
+}
+
+TEST_CASE("Work mouse: the wheel scrolls the list and keeps the selection until it leaves view",
+          "[orchestrator][view][mouse][work]")
+{
+    auto world = workWorld();
+    world.prs = { .text = manyPrs(60) };
+    world.issues = { .text = "[]" };
+    world.answers.clear();
+    world.repos = std::string { OneRepository };
+    auto const fixture = workFixture(world, Medium);
+    auto& dashboard = fixture->dashboard;
+    auto const& work = dashboard.interaction().work;
+    CHECK(dashboard.input("j").empty());
+    static_cast<void>(dashboard.frame());
+    REQUIRE(work.selected == 2);
+    auto const row = regionOf(dashboard, Hit { .kind = HitKind::WorkRow, .value = 4 });
+    CHECK(dashboard.input(wheelAt(row.x + 10, row.y, MouseWheel::Down)).empty());
+    CHECK(work.scroll == 3);
+    CHECK(work.selected == 3);
+    static_cast<void>(dashboard.frame());
+    CHECK(work.scroll == 3);
+    // Back up: the selection is still shown, and stays.
+    CHECK(dashboard.input(wheelAt(row.x + 10, row.y, MouseWheel::Up)).empty());
+    CHECK(work.scroll == 0);
+    CHECK(work.selected == 3);
+}
+
+TEST_CASE("Work mouse: the scrollbar jumps on a click and follows a drag",
+          "[orchestrator][view][mouse][work]")
+{
+    auto world = workWorld();
+    world.prs = { .text = manyPrs(60) };
+    world.issues = { .text = "[]" };
+    world.answers.clear();
+    world.repos = std::string { OneRepository };
+    auto const fixture = workFixture(world, Medium);
+    auto& dashboard = fixture->dashboard;
+    auto const& work = dashboard.interaction().work;
+    // A heading and sixty pull requests, eighteen of them shown.
+    constexpr auto End = std::size_t { 61 - 18 };
+    auto const bar = regionOf(dashboard, Hit { .kind = HitKind::WorkScrollbar });
+    CHECK(bar.height == 18);
+    CHECK(dashboard.input(clickAt(bar.x, bar.y + bar.height - 1)).empty());
+    CHECK(work.scroll == End);
+    static_cast<void>(dashboard.frame());
+    CHECK(work.scroll == End);
+
+    CHECK(dashboard.input(pressAt(bar.x, bar.y)).empty());
+    CHECK(work.scroll == 0);
+    CHECK(dashboard.input(moveAt(0, bar.x + 3, bar.y + ((bar.height - 1) / 2))).empty());
+    CHECK(work.scroll >= (End / 2) - 2);
+    CHECK(work.scroll <= (End / 2) + 2);
+    // Past its bottom: the end.
+    CHECK(dashboard.input(moveAt(0, bar.x, bar.y + bar.height + 4)).empty());
+    CHECK(work.scroll == End);
+    // Released, the pointer no longer drags.
+    CHECK(dashboard.input(std::format("\x1b[<0;{};{}m", bar.x + 1, bar.y + 1)).empty());
+    CHECK(dashboard.input(moveAt(0, bar.x, bar.y)).empty());
+    CHECK(work.scroll == End);
+}
+
+TEST_CASE("Work mouse: hover repaints only when the row under the pointer changes",
+          "[orchestrator][view][mouse][work]")
+{
+    auto const fixture = workFixture();
+    auto& dashboard = fixture->dashboard;
+    auto const first = regionOf(dashboard, Hit { .kind = HitKind::WorkRow, .value = 2 });
+    auto const second = regionOf(dashboard, Hit { .kind = HitKind::WorkRow, .value = 3 });
+    CHECK(dashboard.input(moveAt(3, first.x + 30, first.y)).empty());
+    CHECK(dashboard.interaction().work.hovered == std::optional { std::size_t { 2 } });
+    CHECK_FALSE(dashboard.frame().empty());
+    CHECK(dashboard.input(moveAt(3, first.x + 31, first.y)).empty());
+    CHECK(dashboard.frame().empty());
+    CHECK(dashboard.input(moveAt(3, second.x + 30, second.y)).empty());
+    CHECK_FALSE(dashboard.frame().empty());
+    CHECK(core::tui::test::canvasToString(dashboard.rendered()).contains("▏#2377"));
+    // Off the rows: nothing is hovered.
+    CHECK(dashboard.input(moveAt(3, 0, 0)).empty());
+    CHECK_FALSE(dashboard.interaction().work.hovered.has_value());
+}
+
+TEST_CASE("Work mouse: double-click on the ticket key opens the ticket", "[orchestrator][view][mouse][work]")
+{
+    auto const fixture = workFixture();
+    auto& dashboard = fixture->dashboard;
+    auto const key =
+        regionOf(dashboard, Hit { .kind = HitKind::WorkTicketLink, .value = workLineOf(*fixture, FirstMr) });
+    auto const click = clickAt(key.x + 1, key.y);
+    CHECK(dashboard.input(click + click)
+          == std::vector<UiAction> { OpenUrlAction { .url = "https://example.atlassian.net/browse/PRJ-1234",
+                                                     .label = "PRJ-1234" } });
+}
+
+TEST_CASE("Work mouse: a single click on an MR or ticket cell only selects",
+          "[orchestrator][view][mouse][work]")
+{
+    auto const fixture = workFixture();
+    auto& dashboard = fixture->dashboard;
+    auto const line = workLineOf(*fixture, "contour/!2377");
+    auto const mr = regionOf(dashboard, Hit { .kind = HitKind::WorkMrLink, .value = line });
+    CHECK(dashboard.input(clickAt(mr.x + 1, mr.y)).empty());
+    CHECK(dashboard.interaction().work.selected == line);
+    CHECK(dashboard.input("k").empty());
+    auto const ticket = regionOf(dashboard, Hit { .kind = HitKind::WorkTicketLink, .value = line });
+    CHECK(dashboard.input(clickAt(ticket.x + 1, ticket.y)).empty());
+    CHECK(dashboard.interaction().work.selected == line);
+
+    SECTION("a double click on the MR number opens it")
+    {
+        auto const click = clickAt(mr.x + 2, mr.y);
+        CHECK(dashboard.input(click + click)
+              == std::vector<UiAction> { OpenUrlAction {
+                  .url = "https://github.com/example/contour/pull/2377", .label = "#2377" } });
+    }
+}
+
+TEST_CASE("Work mouse: double-click on a row opens the start dialog", "[orchestrator][view][mouse][start]")
+{
+    auto const fixture = workFixture();
+    auto& dashboard = fixture->dashboard;
+    CHECK(dashboard.input("j").empty());
+    static_cast<void>(dashboard.frame());
+    auto const row =
+        regionOf(dashboard, Hit { .kind = HitKind::WorkRow, .value = workLineOf(*fixture, FirstMr) });
+    auto const click = clickAt(row.x + row.width - 3, row.y);
+    CHECK(dashboard.input(click + click).empty());
+    REQUIRE(dashboard.interaction().startDialog.has_value());
+    CHECK(dashboard.interaction().startDialog->form.item == ItemRef { ChangeRequestRef { 2375 } });
+    CHECK_FALSE(dashboard.interaction().startDialog->form.session.empty());
+}
+
+TEST_CASE("Work mouse: the dialog's settings step under the pointer", "[orchestrator][view][mouse][start]")
+{
+    auto const fixture = workFixture(twoWorkersWorld());
+    auto& dashboard = fixture->dashboard;
+    CHECK(dashboard.input("\r").empty());
+    static_cast<void>(dashboard.frame());
+    auto const& dialog = dashboard.interaction().startDialog;
+    REQUIRE(dialog.has_value());
+    CHECK(dialog->form.worker == 0);
+
+    // A worker chip picks it.
+    auto const chip = regionOf(dashboard, Hit { .kind = HitKind::WorkerChip, .value = 1 });
+    CHECK(dashboard.input(clickAt(chip.x + 1, chip.y)).empty());
+    CHECK(dialog->form.worker == 1);
+    CHECK(dialog->setting == FormField::Worker);
+    static_cast<void>(dashboard.frame());
+
+    // The wheel over Model steps it.
+    auto const model = regionOf(
+        dashboard, Hit { .kind = HitKind::DialogSetting, .value = std::to_underlying(FormField::Model) });
+    auto const modelBefore = dialog->form.model;
+    CHECK(dashboard.input(wheelAt(model.x + 1, model.y, MouseWheel::Down)).empty());
+    CHECK(dialog->form.model != modelBefore);
+    CHECK(dialog->setting == FormField::Model);
+    static_cast<void>(dashboard.frame());
+
+    // A right-click on Task's value steps it back; a click on its value steps it on.
+    auto const task =
+        regionOf(dashboard,
+                 Hit { .kind = HitKind::DialogStep, .value = (2 * std::to_underlying(FormField::Task)) + 1 });
+    auto const taskBefore = dialog->form.task;
+    CHECK(dashboard.input(rightClickAt(task.x + 1, task.y)).empty());
+    CHECK(dialog->form.task != taskBefore);
+    CHECK(dialog->setting == FormField::Task);
+    static_cast<void>(dashboard.frame());
+    CHECK(dashboard.input(clickAt(task.x + 1, task.y)).empty());
+    CHECK(dialog->form.task == taskBefore);
+    static_cast<void>(dashboard.frame());
+
+    // A click on a label picks the setting.
+    auto const note = regionOf(
+        dashboard, Hit { .kind = HitKind::DialogSetting, .value = std::to_underlying(FormField::Note) });
+    CHECK(dashboard.input(clickAt(note.x, note.y)).empty());
+    CHECK(dialog->setting == FormField::Note);
+
+    // A click outside closes it.
+    CHECK(dashboard.input(clickAt(0, 0)).empty());
+    CHECK_FALSE(dialog.has_value());
+}
+
+TEST_CASE("Work mouse: the n box's settings step under the pointer", "[orchestrator][view][mouse][start]")
+{
+    auto const fixture = workFixture(twoWorkersWorld());
+    auto& dashboard = fixture->dashboard;
+    CHECK(dashboard.input("n").empty());
+    static_cast<void>(dashboard.frame());
+    auto const& box = dashboard.interaction().taskBox;
+    REQUIRE(box.has_value());
+    auto const worker = regionOf(
+        dashboard,
+        Hit { .kind = HitKind::DialogStep, .value = (2 * std::to_underlying(TaskBoxField::Worker)) + 1 });
+    auto const before = box->form.worker;
+    CHECK(dashboard.input(clickAt(worker.x + 1, worker.y)).empty());
+    CHECK(box->focus == TaskBoxField::Worker);
+    CHECK(box->form.worker != before);
+    static_cast<void>(dashboard.frame());
+    auto const text = regionOf(
+        dashboard, Hit { .kind = HitKind::DialogSetting, .value = std::to_underlying(TaskBoxField::Text) });
+    CHECK(dashboard.input(clickAt(text.x, text.y)).empty());
+    CHECK(box->focus == TaskBoxField::Text);
+}
+
+TEST_CASE("Work mouse: a click on Agents/Work in the top bar switches views",
+          "[orchestrator][view][mouse][work]")
+{
+    auto fixture = Fixture { workWorld() };
+    auto& dashboard = fixture.dashboard;
+    static_cast<void>(dashboard.frame());
+    auto const work =
+        regionOf(dashboard, Hit { .kind = HitKind::ViewName, .value = std::to_underlying(View::Work) });
+    CHECK(dashboard.input(clickAt(work.x, work.y)).empty());
+    CHECK(dashboard.interaction().view == View::Work);
+    static_cast<void>(dashboard.frame());
+    // The shown view's name does nothing.
+    CHECK(dashboard.input(clickAt(work.x + 1, work.y)).empty());
+    CHECK(dashboard.interaction().view == View::Work);
+    auto const agents =
+        regionOf(dashboard, Hit { .kind = HitKind::ViewName, .value = std::to_underlying(View::Agents) });
+    CHECK(dashboard.input(clickAt(agents.x, agents.y)).empty());
+    CHECK(dashboard.interaction().view == View::Agents);
+}
+
+TEST_CASE("Work mouse: every hint in the bar runs its action", "[orchestrator][view][mouse][work]")
+{
+    auto const fixture = workFixture();
+    auto& dashboard = fixture->dashboard;
+    CHECK(core::tui::test::canvasToString(dashboard.rendered()).contains("⏎ start · n new task"));
+    auto const hint = [&](KeyCommand command) {
+        return regionOf(dashboard, Hit { .kind = HitKind::Command, .value = std::to_underlying(command) });
+    };
+    auto const start = hint(KeyCommand::Enter);
+    CHECK(dashboard.input(clickAt(start.x, start.y)).empty());
+    REQUIRE(dashboard.interaction().startDialog.has_value());
+    CHECK(dashboard.input("\x1b").empty());
+    static_cast<void>(fixture->escapeTimesOut());
+    CHECK_FALSE(dashboard.interaction().startDialog.has_value());
+    static_cast<void>(dashboard.frame());
+    auto const task = hint(KeyCommand::NewTask);
+    CHECK(dashboard.input(clickAt(task.x + 1, task.y)).empty());
+    CHECK(dashboard.interaction().taskBox.has_value());
+    CHECK(dashboard.input("\x1b").empty());
+    static_cast<void>(fixture->escapeTimesOut());
+    static_cast<void>(dashboard.frame());
+    // Every Work view hint the bar draws stands for its key.
+    for (auto const& region: regionsOf(dashboard, HitKind::Command))
+        if (region.area.y == Wide.height - 1)
+            CHECK((!workKeyNameOf(static_cast<KeyCommand>(region.hit.value)).empty()
+                   || static_cast<KeyCommand>(region.hit.value) == KeyCommand::Palette));
+    auto const palette = hint(KeyCommand::Palette);
+    CHECK(dashboard.input(clickAt(palette.x, palette.y)).empty());
+    CHECK(dashboard.interaction().palette.has_value());
+}
+
+TEST_CASE("Row menu: a poll that drops its item closes it", "[orchestrator][view][work]")
+{
+    auto fixture = workFixture();
+    auto& dashboard = fixture->dashboard;
+    CHECK(dashboard.input("m").empty());
+    REQUIRE(dashboard.interaction().work.menu.has_value());
+    static_cast<void>(dashboard.frame());
+    // The next poll lists every pull request but #2375.
+    auto prs = readFixture(FixtureRoot::Testdata, "github/prs-work.json");
+    auto const second = prs.find(",[2376,");
+    REQUIRE(second != std::string::npos);
+    fixture->world.prs = { .text = "[" + prs.substr(second + 1) };
+    fixture->poll();
+    static_cast<void>(dashboard.frame());
+    CHECK_FALSE(dashboard.interaction().work.menu.has_value());
+    CHECK_FALSE(core::tui::test::canvasToString(dashboard.rendered()).contains("Copy branch name"));
 }
 
 // }}}

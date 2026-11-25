@@ -35,6 +35,7 @@
 #include <orchestrator/view/Focus.hpp>
 #include <orchestrator/view/HitMap.hpp>
 #include <orchestrator/view/Palette.hpp>
+#include <orchestrator/view/RowMenu.hpp>
 #include <orchestrator/view/Sections.hpp>
 #include <orchestrator/view/StartDialog.hpp>
 #include <orchestrator/view/StatusBoard.hpp>
@@ -245,10 +246,30 @@ struct Dashboard::State
     [[nodiscard]] std::vector<UiAction> applyKeys(std::vector<core::tui::InputEvent> const& events,
                                                   HooksWarning hooksAtInput);
     /// Applies a mouse event to what the last frame drew under the pointer (MouseRows): a press of the left
-    /// button clicks, the wheel scrolls; a popup takes them alone, and a click beside it closes it.
+    /// button clicks, one of the right button right-clicks, the wheel scrolls, a move hovers or drags; a
+    /// popup takes them alone, and a click beside it closes it.
     /// @param mouse The event.
     /// @param actions What the engine is asked, appended to.
     void applyMouse(core::tui::MouseEvent const& mouse, std::vector<UiAction>& actions);
+    /// Applies a press of the right button: it steps a dialog's setting back, opens a Work row's menu, folds
+    /// the other groups from a heading, steps a chip back; beside an open popup it closes it.
+    /// @param under The regions under the pointer, the topmost first.
+    /// @param at The cell pressed, 0-based.
+    /// @param actions What the engine is asked, appended to.
+    void rightClick(std::span<HitRegion const> under, core::tui::Point at, std::vector<UiAction>& actions);
+    /// Applies a move of the pointer: with no button held over the Work view, the item line under it is
+    /// hovered; with the left button held after a press on the scrollbar, the list follows it.
+    /// @param mouse The event.
+    /// @param under The regions under the pointer, the topmost first.
+    void move(core::tui::MouseEvent const& mouse, std::span<HitRegion const> under);
+    /// Runs a row menu command on the item the menu was about.
+    /// @param command The command.
+    /// @param item The item.
+    /// @param actions What the engine is asked, appended to.
+    void runMenuCommand(RowMenuCommand command, WorkItem const& item, std::vector<UiAction>& actions);
+    /// Places a row menu a key or a hint opened under the selected row, as the last frame drew it.
+    /// @param before The menu before the command.
+    void anchorMenu(std::optional<RowMenuState> const& before);
     /// Applies one key as if typed, as a click that stands for it does.
     /// @param key The key.
     /// @param actions What the engine is asked, appended to.
@@ -282,10 +303,14 @@ struct Dashboard::State
     void syncStartDialog();
     /// Shows the `n` box centred, or hides it.
     void syncTaskBox();
+    /// Shows the row menu where it was opened, moved into the tab, or hides it.
+    void syncRowMenu();
     /// Shows the palette where the band puts it, listing what applies to the selected row; or hides it.
     void syncPalette();
     /// Shows @p overlay centred in the tab at @p wanted, or moves it there.
     void showCentred(Component& overlay, Size wanted);
+    /// Shows @p overlay with its top-left at @p at, or moves it there.
+    void showAt(Component& overlay, core::tui::Point at);
     /// Keeps the Focus's scroll within what its tab holds, once the last draw knows its end.
     void clampScroll() noexcept;
     /// @return What a key is applied to.
@@ -370,13 +395,17 @@ struct Dashboard::State
     std::vector<std::pair<PanelRole, Component*>> toggled; ///< Its panels shown by place.
     ProblemLines* problems = nullptr;                      ///< The current layout's problem lines.
     Repaint repaint = Repaint::Needed;
-    HitMap hits;                                ///< What the last frame drew where, for the mouse.
-    std::optional<LastClick> lastClick;         ///< The last press of the left button, for a double click.
-    std::unique_ptr<LauncherView> launcherView; ///< Draws interaction.launcher.
+    HitMap hits;                        ///< What the last frame drew where, for the mouse.
+    std::optional<LastClick> lastClick; ///< The last press of the left button, for a double click.
+    /// The Work view's scrollbar while the left button, pressed on it, is held: the list follows the pointer.
+    std::optional<Rect> scrollbarDrag;
+    std::string clipboard; ///< OSC 52 writes the next frame carries, as a copy from the row menu asked.
+    std::unique_ptr<LauncherView> launcherView;       ///< Draws interaction.launcher.
     std::unique_ptr<StartDialogView> startDialogView; ///< Draws interaction.startDialog.
     std::unique_ptr<TaskBoxView> taskBoxView;         ///< Draws interaction.taskBox.
     std::unique_ptr<PaletteView> paletteView;         ///< Draws interaction.palette.
     std::unique_ptr<TimelineView> timelineView;       ///< Draws the last 24 hours while Overlay::Timeline.
+    std::unique_ptr<RowMenuView> rowMenuView;         ///< Draws interaction.work.menu.
     /// Where each shown overlay was last put: moving one repaints the whole tab, so an overlay is moved only
     /// when it is put elsewhere, not on every frame it stays.
     std::vector<std::pair<Component const*, core::tui::Point>> overlayAt;
@@ -509,10 +538,8 @@ namespace
                 auto style = styleOf(theme, isShown ? Role::Focus : Role::Dim);
                 style.bold = isShown;
                 auto const columns = canvas.putString(0, x, shown.name, style);
-                if (!isShown)
-                    hits.add(Rect { .x = x, .y = 0, .width = columns, .height = 1 },
-                             Hit { .kind = HitKind::Command,
-                                   .value = std::to_underlying(KeyCommand::SwitchView) });
+                hits.add(Rect { .x = x, .y = 0, .width = columns, .height = 1 },
+                         Hit { .kind = HitKind::ViewName, .value = std::to_underlying(shown.view) });
                 x += columns;
             }
             if (!_state.engine.missingPlugins().empty())
@@ -691,11 +718,12 @@ namespace
     };
 
     /// The action bar: a notice until the next key, the question an `e` asks, or the actions that apply to
-    /// the selected row (barText()); and the gauge on its right while the top bar gave way.
+    /// the selected row (barText()); and the gauge on its right while the top bar gave way. In the Work view
+    /// each hint records what a click on it runs.
     class ActionBar final: public Component
     {
       public:
-        explicit ActionBar(Dashboard::State const& state): _state { state } {}
+        explicit ActionBar(Dashboard::State& state): _state { state } {}
 
         void render(Canvas& canvas) override
         {
@@ -739,7 +767,18 @@ namespace
                 auto const& lines = _state.work.lines;
                 auto const selected =
                     work.selected < lines.size() ? std::optional { lines[work.selected].kind } : std::nullopt;
-                canvas.putString(0, 1, workBarText(selected, columns), styleOf(theme, Role::Dim));
+                auto const hits =
+                    HitRecorder { _state.hits, { .x = screenBounds().x, .y = screenBounds().y } };
+                auto x = 1;
+                for (auto const& hint: workBarHints(selected, columns))
+                {
+                    if (x > 1)
+                        x += canvas.putString(0, x, HintSeparator, styleOf(theme, Role::Dim));
+                    auto const width = canvas.putString(0, x, hint.text, styleOf(theme, Role::Dim));
+                    hits.add(Rect { .x = x, .y = 0, .width = width, .height = 1 },
+                             Hit { .kind = HitKind::Command, .value = std::to_underlying(hint.command) });
+                    x += width;
+                }
             }
             else
             {
@@ -760,7 +799,7 @@ namespace
             return row != _state.rows.end() ? std::string_view { row->name } : run;
         }
 
-        Dashboard::State const& _state;
+        Dashboard::State& _state;
     };
 
 } // namespace
@@ -786,6 +825,7 @@ Dashboard::State::State(Engine const& engine,
     taskBoxView { std::make_unique<TaskBoxView>(engine, interaction.taskBox, hits) },
     paletteView { std::make_unique<PaletteView>(interaction.palette, hits) },
     timelineView { std::make_unique<TimelineView>(engine, hits) },
+    rowMenuView { std::make_unique<RowMenuView>(interaction.work.menu, work.items, hits) },
     spinner { core::tui::SpinnerType::Dots, clock },
     root { std::make_unique<core::tui::Responsive>(std::ranges::to<std::vector<core::tui::Breakpoint>>(
         std::views::iota(std::size_t { 0 }, BandBreakpoints.size())
@@ -801,11 +841,12 @@ Dashboard::State::State(Engine const& engine,
 
 Dashboard::State::~State()
 {
-    for (Component* const overlay: std::array<Component*, 5> { launcherView.get(),
+    for (Component* const overlay: std::array<Component*, 6> { launcherView.get(),
                                                                startDialogView.get(),
                                                                taskBoxView.get(),
                                                                paletteView.get(),
-                                                               timelineView.get() })
+                                                               timelineView.get(),
+                                                               rowMenuView.get() })
         if (screen.isOverlayVisible(*overlay))
             screen.hideOverlay(*overlay);
     screen.root().removeChild(*root);
@@ -893,8 +934,15 @@ void Dashboard::State::ensureRows()
 
 void Dashboard::State::syncWork()
 {
-    work.lines = workLines(work.items, work.order, engine, interaction.work);
-    keepWorkSelection(interaction.work, work.lines, work.items, work.listRows);
+    auto& state = interaction.work;
+    work.lines = workLines(work.items, work.order, engine, state);
+    keepWorkSelection(state, work.lines, work.items, work.listRows);
+    // A menu whose item a poll dropped closes; a hover past the lines is forgotten until the pointer moves.
+    if (state.menu && workItemOf(work.items, state.menu->itemKey) == nullptr)
+        state.menu.reset();
+    if (state.hovered
+        && (*state.hovered >= work.lines.size() || work.lines[*state.hovered].kind != WorkLineKind::Item))
+        state.hovered.reset();
 }
 
 Showing Dashboard::State::showing(Furniture given, FocusWidth width) const noexcept
@@ -1111,11 +1159,21 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
             continue;
         }
         auto const view = interaction.view;
+        // The row menu takes every key while it is open.
+        if (auto& menu = interaction.work.menu)
+        {
+            auto const* const item = workItemOf(work.items, menu->itemKey);
+            if (auto const command = applyRowMenuKey(*key, menu, item); command && item != nullptr)
+                runMenuCommand(*command, *item, actions);
+            afterCommand(view);
+            continue;
+        }
         // The Work view takes its own keys while nothing is over it.
         if (view == View::Work && !interaction.palette && interaction.overlay == Overlay::None)
         {
             if (auto action = applyWorkKey(*key, interaction, work.lines, work.items, engine, work.listRows))
                 actions.push_back(std::move(*action));
+            anchorMenu(std::nullopt);
         }
         else if (auto action = applyKey(*key, interaction, keyContext()))
             actions.push_back(std::move(*action));
@@ -1137,25 +1195,139 @@ namespace
     enum class Layer : uint8_t
     {
         Dashboard = 0, ///< The panes beneath.
-        Popup,         ///< A popup: the start dialog, the `n` box, the launcher, the palette or the timeline.
+        Popup, ///< A popup: the start dialog, the `n` box, the launcher, the palette, the timeline or the row
+               ///< menu.
     };
 
-    /// What a click on a hit of one kind does.
+    /// Where the pointer is, and the region of the hit it is on.
+    struct Pointer
+    {
+        core::tui::Point at {}; ///< The cell, 0-based.
+        Rect area {};           ///< The hit's region.
+    };
+
+    /// What a press of the left button on a hit of one kind does.
     using ClickHandler = void (*)(State& state,
                                   std::size_t value,
                                   Clicks clicks,
+                                  Pointer const& pointer,
                                   std::vector<UiAction>& actions);
+    /// What a press of the right button on a hit of one kind does.
+    using RightClickHandler = void (*)(State& state,
+                                       std::size_t value,
+                                       Pointer const& pointer,
+                                       std::vector<UiAction>& actions);
     /// What the wheel over a hit of one kind does; @p steps is negative upwards.
-    using WheelHandler = void (*)(State& state, int steps, std::vector<UiAction>& actions);
+    using WheelHandler = void (*)(State& state, std::size_t value, int steps, std::vector<UiAction>& actions);
 
     /// What the mouse does on one kind of hit.
     struct MouseRow
     {
-        HitKind kind = HitKind::Popup;  ///< The kind.
-        Layer layer = Layer::Dashboard; ///< Its layer.
-        ClickHandler click = nullptr;   ///< A press of the left button; nullptr: it falls through.
-        WheelHandler wheel = nullptr;   ///< The wheel; nullptr: it falls through.
+        HitKind kind = HitKind::Popup;          ///< The kind.
+        Layer layer = Layer::Dashboard;         ///< Its layer.
+        ClickHandler click = nullptr;           ///< A press of the left button; nullptr: it falls through.
+        RightClickHandler rightClick = nullptr; ///< A press of the right button; nullptr: it falls through.
+        WheelHandler wheel = nullptr;           ///< The wheel; nullptr: it falls through.
     };
+
+    // {{{ what the rows do
+
+    /// Gives the Work view's list the keys and selects one of its lines, as a click on it does.
+    void clickWorkLine(State& state, std::size_t line)
+    {
+        auto& work = state.interaction.work;
+        work.focus = WorkFocus::List;
+        work.filtering = Filtering::Off;
+        selectWorkLine(work, state.work, line);
+    }
+
+    /// @return The item a Work line stands for; nullptr for a heading, or a line no longer drawn.
+    [[nodiscard]] WorkItem const* itemOfLine(State const& state, std::size_t line) noexcept
+    {
+        auto const& lines = state.work.lines;
+        if (line >= lines.size() || lines[line].kind != WorkLineKind::Item)
+            return nullptr;
+        return &state.work.items[lines[line].item];
+    }
+
+    /// Scrolls the Work view's list by WheelLines a step.
+    void scrollWork(State& state, std::size_t /*value*/, int steps, std::vector<UiAction>& /*actions*/)
+    {
+        scrollWorkList(state.interaction.work, state.work, steps * WheelLines);
+    }
+
+    /// Selects a Work line and opens the row menu on its item at the pointer.
+    void openMenuAt(State& state,
+                    std::size_t line,
+                    Pointer const& pointer,
+                    std::vector<UiAction>& /*actions*/)
+    {
+        auto const* const item = itemOfLine(state, line);
+        if (item == nullptr)
+            return;
+        clickWorkLine(state, line);
+        state.interaction.work.menu =
+            RowMenuState { .itemKey = workItemKey(*item), .highlighted = 0, .at = pointer.at };
+    }
+
+    /// Picks a setting of the open start dialog or `n` box.
+    /// @param field A FormField of the dialog, or a TaskBoxField of the box.
+    void pickDialogSetting(State& state, std::size_t field)
+    {
+        if (auto& dialog = state.interaction.startDialog)
+            dialog->setting = static_cast<FormField>(field);
+        else if (auto& box = state.interaction.taskBox)
+            box->focus = static_cast<TaskBoxField>(field);
+    }
+
+    /// Picks a setting of the open start dialog or `n` box and steps it, as ←/→ do.
+    /// @param field A FormField of the dialog, or a TaskBoxField of the box.
+    /// @param step 1 on, -1 back.
+    void stepDialogSetting(State& state, std::size_t field, int step)
+    {
+        pickDialogSetting(state, field);
+        if (auto& dialog = state.interaction.startDialog)
+            changeSetting(dialog->form, dialog->setting, step, state.engine);
+        else if (auto& box = state.interaction.taskBox)
+            if (auto const setting = taskBoxSettingOf(box->focus))
+                changeSetting(box->form, *setting, step, state.engine);
+    }
+
+    /// @return The field a DialogStep hit steps.
+    [[nodiscard]] constexpr std::size_t stepField(std::size_t value) noexcept
+    {
+        return value / 2;
+    }
+
+    /// @return The way a DialogStep hit steps its field: 1 on, -1 back.
+    [[nodiscard]] constexpr int stepWay(std::size_t value) noexcept
+    {
+        return value % 2 == 1 ? 1 : -1;
+    }
+
+    /// Steps a chip of the Work view's filter bar, giving it the keys: the repository chip on or back, the
+    /// sort chip to the other sort; the filter is given the keys, as `/` does, and does not step.
+    void stepChip(State& state, WorkFocus chip, int step, std::vector<UiAction>& actions)
+    {
+        auto& work = state.interaction.work;
+        switch (chip)
+        {
+            case WorkFocus::Filter: state.run(KeyCommand::Filter, actions); return;
+            case WorkFocus::RepoChip:
+                work.focus = chip;
+                work.filtering = Filtering::Off;
+                state.run(step < 0 ? KeyCommand::RepoPrevious : KeyCommand::RepoNext, actions);
+                return;
+            case WorkFocus::SortChip:
+                work.focus = chip;
+                work.filtering = Filtering::Off;
+                state.run(KeyCommand::Sort, actions);
+                return;
+            case WorkFocus::List: break;
+        }
+    }
+
+    // }}}
 
     /// One row per HitKind, indexed by its value.
     constexpr auto MouseRows = std::array {
@@ -1163,9 +1335,10 @@ namespace
         // moves its highlight.
         MouseRow { .kind = HitKind::Popup,
                    .layer = Layer::Popup,
-                   .click = [](State&, std::size_t, Clicks, std::vector<UiAction>&) {},
+                   .click = [](State&, std::size_t, Clicks, Pointer const&, std::vector<UiAction>&) {},
+                   .rightClick = [](State&, std::size_t, Pointer const&, std::vector<UiAction>&) {},
                    .wheel =
-                       [](State& state, int steps, std::vector<UiAction>& actions) {
+                       [](State& state, std::size_t, int steps, std::vector<UiAction>& actions) {
                            state.press(steps < 0 ? core::tui::KeyCode::Up : core::tui::KeyCode::Down,
                                        actions);
                        } },
@@ -1173,7 +1346,7 @@ namespace
                    .layer = Layer::Dashboard,
                    .click = nullptr,
                    .wheel =
-                       [](State& state, int steps, std::vector<UiAction>& /*actions*/) {
+                       [](State& state, std::size_t, int steps, std::vector<UiAction>& /*actions*/) {
                            auto const at = static_cast<std::ptrdiff_t>(state.interaction.selected) + steps;
                            selectRow(state.interaction,
                                      state.keyContext(),
@@ -1183,14 +1356,18 @@ namespace
                    .layer = Layer::Dashboard,
                    .click = nullptr,
                    .wheel =
-                       [](State& state, int steps, std::vector<UiAction>& /*actions*/) {
+                       [](State& state, std::size_t, int steps, std::vector<UiAction>& /*actions*/) {
                            scrollFocus(state.interaction, state.keyContext(), steps * WheelLines);
                        } },
         // A click selects a row; a double click, or one on `+ new task`, runs its primary action.
         MouseRow { .kind = HitKind::Row,
                    .layer = Layer::Dashboard,
                    .click =
-                       [](State& state, std::size_t value, Clicks clicks, std::vector<UiAction>& actions) {
+                       [](State& state,
+                          std::size_t value,
+                          Clicks clicks,
+                          Pointer const&,
+                          std::vector<UiAction>& actions) {
                            selectRow(state.interaction, state.keyContext(), value);
                            state.refilter(State::Keep::Position);
                            auto const* const row = state.selectedRow();
@@ -1198,35 +1375,41 @@ namespace
                                state.run(KeyCommand::Enter, actions);
                        },
                    .wheel = nullptr },
-        // A tab or a chip runs what its key would.
-        MouseRow { .kind = HitKind::Command,
-                   .layer = Layer::Dashboard,
-                   .click =
-                       [](State& state, std::size_t value, Clicks, std::vector<UiAction>& actions) {
-                           state.run(static_cast<KeyCommand>(value), actions);
-                       },
-                   .wheel = nullptr },
+        // A tab, a chip or a hint runs what its key would.
+        MouseRow {
+            .kind = HitKind::Command,
+            .layer = Layer::Dashboard,
+            .click =
+                [](State& state, std::size_t value, Clicks, Pointer const&, std::vector<UiAction>& actions) {
+                    state.run(static_cast<KeyCommand>(value), actions);
+                },
+            .wheel = nullptr },
         MouseRow { .kind = HitKind::MessageBox,
                    .layer = Layer::Dashboard,
                    .click =
-                       [](State& state, std::size_t, Clicks, std::vector<UiAction>& actions) {
+                       [](State& state, std::size_t, Clicks, Pointer const&, std::vector<UiAction>& actions) {
                            state.run(KeyCommand::Open, actions);
                        },
                    .wheel = nullptr },
         // A palette entry runs at once, as the palette is a menu.
-        MouseRow { .kind = HitKind::PaletteEntry,
-                   .layer = Layer::Popup,
-                   .click =
-                       [](State& state, std::size_t value, Clicks, std::vector<UiAction>& actions) {
-                           state.interaction.palette->highlighted = value;
-                           state.press(core::tui::KeyCode::Enter, actions);
-                       },
-                   .wheel = nullptr },
+        MouseRow {
+            .kind = HitKind::PaletteEntry,
+            .layer = Layer::Popup,
+            .click =
+                [](State& state, std::size_t value, Clicks, Pointer const&, std::vector<UiAction>& actions) {
+                    state.interaction.palette->highlighted = value;
+                    state.press(core::tui::KeyCode::Enter, actions);
+                },
+            .wheel = nullptr },
         // A launcher candidate is highlighted, its settings shown; a double click starts it.
         MouseRow { .kind = HitKind::LauncherCandidate,
                    .layer = Layer::Popup,
                    .click =
-                       [](State& state, std::size_t value, Clicks clicks, std::vector<UiAction>& actions) {
+                       [](State& state,
+                          std::size_t value,
+                          Clicks clicks,
+                          Pointer const&,
+                          std::vector<UiAction>& actions) {
                            highlightCandidate(*state.interaction.launcher, state.engine, value);
                            if (clicks == Clicks::Double)
                                state.press(core::tui::KeyCode::Enter, actions);
@@ -1236,7 +1419,7 @@ namespace
         MouseRow { .kind = HitKind::LauncherRepo,
                    .layer = Layer::Popup,
                    .click =
-                       [](State& state, std::size_t value, Clicks, std::vector<UiAction>&) {
+                       [](State& state, std::size_t value, Clicks, Pointer const&, std::vector<UiAction>&) {
                            auto const repos = scopeRepos(state.engine);
                            auto& launcher = *state.interaction.launcher;
                            scopeLauncherToRepo(launcher,
@@ -1249,7 +1432,7 @@ namespace
         MouseRow { .kind = HitKind::LauncherKind,
                    .layer = Layer::Popup,
                    .click =
-                       [](State& state, std::size_t value, Clicks, std::vector<UiAction>&) {
+                       [](State& state, std::size_t value, Clicks, Pointer const&, std::vector<UiAction>&) {
                            auto& launcher = *state.interaction.launcher;
                            scopeLauncherToKind(launcher,
                                                state.engine,
@@ -1259,6 +1442,204 @@ namespace
                            state.interaction.launcherScope = launcher.scope;
                        },
                    .wheel = nullptr },
+        // A view's name in the top bar switches to it.
+        MouseRow {
+            .kind = HitKind::ViewName,
+            .layer = Layer::Dashboard,
+            .click =
+                [](State& state, std::size_t value, Clicks, Pointer const&, std::vector<UiAction>& actions) {
+                    if (value != std::to_underlying(state.interaction.view))
+                        state.run(KeyCommand::SwitchView, actions);
+                },
+            .wheel = nullptr },
+        // A Work row: a click selects it, a double click opens the start dialog on it, the right button its
+        // menu; the wheel scrolls the list.
+        MouseRow { .kind = HitKind::WorkRow,
+                   .layer = Layer::Dashboard,
+                   .click =
+                       [](State& state,
+                          std::size_t value,
+                          Clicks clicks,
+                          Pointer const&,
+                          std::vector<UiAction>& actions) {
+                           clickWorkLine(state, value);
+                           if (clicks == Clicks::Double)
+                               state.run(KeyCommand::Enter, actions);
+                       },
+                   .rightClick = openMenuAt,
+                   .wheel = scrollWork },
+        // An MR number: a click selects its row, a double click opens it in the browser.
+        MouseRow { .kind = HitKind::WorkMrLink,
+                   .layer = Layer::Dashboard,
+                   .click =
+                       [](State& state,
+                          std::size_t value,
+                          Clicks clicks,
+                          Pointer const&,
+                          std::vector<UiAction>& actions) {
+                           clickWorkLine(state, value);
+                           if (auto const* const item = itemOfLine(state, value);
+                               item != nullptr && clicks == Clicks::Double && item->changeRequest)
+                               actions.emplace_back(
+                                   OpenUrlAction { .url = item->changeRequest->url,
+                                                   .label = workMrLabel(state.engine, *item) });
+                       },
+                   .rightClick = openMenuAt,
+                   .wheel = scrollWork },
+        // A ticket key: a click selects its row, a double click opens the ticket in the browser.
+        MouseRow { .kind = HitKind::WorkTicketLink,
+                   .layer = Layer::Dashboard,
+                   .click =
+                       [](State& state,
+                          std::size_t value,
+                          Clicks clicks,
+                          Pointer const&,
+                          std::vector<UiAction>& actions) {
+                           clickWorkLine(state, value);
+                           if (auto const* const item = itemOfLine(state, value);
+                               item != nullptr && clicks == Clicks::Double
+                               && menuApplies(RowMenuCommand::OpenTicket, *item))
+                               actions.emplace_back(
+                                   OpenUrlAction { .url = item->ticket->url, .label = item->ticketKey });
+                       },
+                   .rightClick = openMenuAt,
+                   .wheel = scrollWork },
+        // A group's heading: a click folds or unfolds it (the second press of a double click adds nothing),
+        // the right button folds every other group shown open.
+        MouseRow {
+            .kind = HitKind::WorkHeading,
+            .layer = Layer::Dashboard,
+            .click =
+                [](State& state,
+                   std::size_t value,
+                   Clicks clicks,
+                   Pointer const&,
+                   std::vector<UiAction>& actions) {
+                    if (clicks == Clicks::Double)
+                        return;
+                    state.interaction.work.focus = WorkFocus::List;
+                    state.interaction.work.filtering = Filtering::Off;
+                    actions.push_back(foldWorkGroup(state.interaction.work, static_cast<WorkGroup>(value)));
+                },
+            .rightClick =
+                [](State& state, std::size_t value, Pointer const&, std::vector<UiAction>& actions) {
+                    for (auto const& line: state.work.lines)
+                        if (line.kind == WorkLineKind::Heading && std::to_underlying(line.group) != value
+                            && !isGroupFolded(state.engine, line.group))
+                            actions.emplace_back(ToggleFoldAction {
+                                .group =
+                                    std::string { WorkGroupRows[std::to_underlying(line.group)].foldKey } });
+                },
+            .wheel = scrollWork },
+        // The list's right edge: a press jumps there, and the list follows the pointer while it is held.
+        MouseRow { .kind = HitKind::WorkScrollbar,
+                   .layer = Layer::Dashboard,
+                   .click =
+                       [](State& state, std::size_t, Clicks, Pointer const& pointer, std::vector<UiAction>&) {
+                           state.scrollbarDrag = pointer.area;
+                           jumpWorkList(state.interaction.work,
+                                        state.work,
+                                        static_cast<std::size_t>(std::max(0, pointer.at.y - pointer.area.y)));
+                       },
+                   .wheel = scrollWork },
+        // The filter bar: a click gives the filter the keys or steps a chip, the right button steps it back,
+        // the wheel steps it.
+        MouseRow {
+            .kind = HitKind::WorkChip,
+            .layer = Layer::Dashboard,
+            .click =
+                [](State& state, std::size_t value, Clicks, Pointer const&, std::vector<UiAction>& actions) {
+                    stepChip(state, static_cast<WorkFocus>(value), 1, actions);
+                },
+            .rightClick =
+                [](State& state, std::size_t value, Pointer const&, std::vector<UiAction>& actions) {
+                    if (auto const chip = static_cast<WorkFocus>(value); chip != WorkFocus::Filter)
+                        stepChip(state, chip, -1, actions);
+                },
+            .wheel =
+                [](State& state, std::size_t value, int steps, std::vector<UiAction>& actions) {
+                    if (auto const chip = static_cast<WorkFocus>(value); chip != WorkFocus::Filter)
+                        stepChip(state, chip, steps, actions);
+                } },
+        // A dialog's setting: a click picks it, a double click starts, the right button and the wheel step
+        // it.
+        MouseRow { .kind = HitKind::DialogSetting,
+                   .layer = Layer::Popup,
+                   .click =
+                       [](State& state,
+                          std::size_t value,
+                          Clicks clicks,
+                          Pointer const&,
+                          std::vector<UiAction>& actions) {
+                           pickDialogSetting(state, value);
+                           if (clicks == Clicks::Double)
+                               state.press(core::tui::KeyCode::Enter, actions);
+                       },
+                   .rightClick =
+                       [](State& state, std::size_t value, Pointer const&, std::vector<UiAction>&) {
+                           stepDialogSetting(state, value, -1);
+                       },
+                   .wheel =
+                       [](State& state, std::size_t value, int steps, std::vector<UiAction>&) {
+                           stepDialogSetting(state, value, steps);
+                       } },
+        // A setting's value or arrows: a click steps it, a double click starts.
+        MouseRow { .kind = HitKind::DialogStep,
+                   .layer = Layer::Popup,
+                   .click =
+                       [](State& state,
+                          std::size_t value,
+                          Clicks clicks,
+                          Pointer const&,
+                          std::vector<UiAction>& actions) {
+                           if (clicks == Clicks::Double)
+                               state.press(core::tui::KeyCode::Enter, actions);
+                           else
+                               stepDialogSetting(state, stepField(value), stepWay(value));
+                       },
+                   .rightClick =
+                       [](State& state, std::size_t value, Pointer const&, std::vector<UiAction>&) {
+                           stepDialogSetting(state, stepField(value), -1);
+                       },
+                   .wheel =
+                       [](State& state, std::size_t value, int steps, std::vector<UiAction>&) {
+                           stepDialogSetting(state, stepField(value), steps);
+                       } },
+        // A worker chip: a click picks the worker, a double click starts.
+        MouseRow { .kind = HitKind::WorkerChip,
+                   .layer = Layer::Popup,
+                   .click =
+                       [](State& state,
+                          std::size_t value,
+                          Clicks clicks,
+                          Pointer const&,
+                          std::vector<UiAction>& actions) {
+                           if (auto& dialog = state.interaction.startDialog)
+                           {
+                               dialog->setting = FormField::Worker;
+                               dialog->form.worker = value;
+                           }
+                           if (clicks == Clicks::Double)
+                               state.press(core::tui::KeyCode::Enter, actions);
+                       },
+                   .rightClick =
+                       [](State& state, std::size_t, Pointer const&, std::vector<UiAction>&) {
+                           stepDialogSetting(state, std::to_underlying(FormField::Worker), -1);
+                       },
+                   .wheel =
+                       [](State& state, std::size_t, int steps, std::vector<UiAction>&) {
+                           stepDialogSetting(state, std::to_underlying(FormField::Worker), steps);
+                       } },
+        // A row menu entry runs at once where it applies; one that does not stays highlighted.
+        MouseRow {
+            .kind = HitKind::MenuEntry,
+            .layer = Layer::Popup,
+            .click =
+                [](State& state, std::size_t value, Clicks, Pointer const&, std::vector<UiAction>& actions) {
+                    state.interaction.work.menu->highlighted = value;
+                    state.press(core::tui::KeyCode::Enter, actions);
+                },
+            .wheel = nullptr },
     };
 
     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, MouseRows.size()),
@@ -1266,8 +1647,7 @@ namespace
                                           return std::to_underlying(MouseRows[index].kind) == index;
                                       }),
                   "MouseRows is indexed by the HitKind's value");
-    static_assert(MouseRows.size() == std::to_underlying(HitKind::LauncherKind) + 1U,
-                  "every HitKind has a row");
+    static_assert(MouseRows.size() == std::to_underlying(HitKind::MenuEntry) + 1U, "every HitKind has a row");
 
     /// What the mouse does on a hit.
     /// @param hit The hit.
@@ -1281,12 +1661,63 @@ namespace
 
     /// The most cells of a link the action bar names when it opens.
     constexpr auto LinkLabelColumns = 48;
+
+    /// What a row menu command does to the item the menu was about.
+    using MenuHandler = void (*)(State& state, WorkItem const& item, std::vector<UiAction>& actions);
+
+    /// One row menu command and what it does.
+    struct MenuRow
+    {
+        RowMenuCommand command = RowMenuCommand::StartAgent; ///< The command.
+        MenuHandler handler = nullptr;                       ///< What it does.
+    };
+
+    /// One row per RowMenuCommand, indexed by its value.
+    constexpr auto MenuRows = std::array {
+        MenuRow { .command = RowMenuCommand::StartAgent,
+                  .handler =
+                      [](State& state, WorkItem const& item, std::vector<UiAction>&) {
+                          openStartDialogFor(state.interaction, state.engine, item.repo, item.item, {});
+                      } },
+        MenuRow { .command = RowMenuCommand::OpenMr,
+                  .handler =
+                      [](State& state, WorkItem const& item, std::vector<UiAction>& actions) {
+                          actions.emplace_back(OpenUrlAction { .url = item.changeRequest->url,
+                                                               .label = workMrLabel(state.engine, item) });
+                      } },
+        MenuRow { .command = RowMenuCommand::OpenTicket,
+                  .handler =
+                      [](State&, WorkItem const& item, std::vector<UiAction>& actions) {
+                          actions.emplace_back(
+                              OpenUrlAction { .url = item.ticket->url, .label = item.ticketKey });
+                      } },
+        // The branch goes to the clipboard of the terminal the user sits at, in the next frame.
+        MenuRow { .command = RowMenuCommand::CopyBranch,
+                  .handler =
+                      [](State& state, WorkItem const& item, std::vector<UiAction>&) {
+                          auto const& branch = item.changeRequest->head;
+                          state.clipboard += clipboardWrite(branch);
+                          state.interaction.notice = std::format("copied {}", branch);
+                          state.repaint = State::Repaint::Needed;
+                      } },
+        MenuRow { .command = RowMenuCommand::FoldGroup,
+                  .handler =
+                      [](State& state, WorkItem const& item, std::vector<UiAction>& actions) {
+                          actions.push_back(foldWorkGroup(state.interaction.work, item.group));
+                      } },
+    };
+    static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, MenuRows.size()),
+                                      [](std::size_t index) {
+                                          return std::to_underlying(MenuRows[index].command) == index;
+                                      }),
+                  "MenuRows is indexed by the RowMenuCommand's value");
+    static_assert(MenuRows.size() == RowMenuEntries.size(), "every menu entry has a row");
 } // namespace
 
 bool Dashboard::State::popupOpen() const noexcept
 {
     return interaction.startDialog || interaction.taskBox || interaction.launcher || interaction.palette
-           || interaction.overlay != Overlay::None;
+           || interaction.overlay != Overlay::None || interaction.work.menu;
 }
 
 void Dashboard::State::press(core::tui::KeyCode key, std::vector<UiAction>& actions)
@@ -1298,11 +1729,13 @@ void Dashboard::State::press(core::tui::KeyCode key, std::vector<UiAction>& acti
 void Dashboard::State::run(KeyCommand command, std::vector<UiAction>& actions)
 {
     auto const view = interaction.view;
+    auto const menu = interaction.work.menu;
     auto action = view == View::Work
                       ? applyWorkCommand(command, interaction, work.lines, work.items, engine, work.listRows)
                       : dispatch(command, interaction, keyContext());
     if (action)
         actions.push_back(std::move(*action));
+    anchorMenu(menu);
     afterCommand(view);
 }
 
@@ -1319,52 +1752,126 @@ void Dashboard::State::afterCommand(View before)
         refilter(Keep::Position);
 }
 
+void Dashboard::State::runMenuCommand(RowMenuCommand command,
+                                      WorkItem const& item,
+                                      std::vector<UiAction>& actions)
+{
+    MenuRows[std::to_underlying(command)].handler(*this, item, actions);
+}
+
+void Dashboard::State::anchorMenu(std::optional<RowMenuState> const& before)
+{
+    auto& menu = interaction.work.menu;
+    if (before || !menu)
+        return;
+    // Under the selected row, a little in from its left edge, as the last frame drew it.
+    auto const regions = hits.regions();
+    auto const row = std::ranges::find(
+        regions, Hit { .kind = HitKind::WorkRow, .value = interaction.work.selected }, &HitRegion::hit);
+    if (row != regions.end())
+        menu->at = core::tui::Point { .x = row->area.x + 2, .y = row->area.y + 1 };
+}
+
+void Dashboard::State::rightClick(std::span<HitRegion const> under,
+                                  core::tui::Point at,
+                                  std::vector<UiAction>& actions)
+{
+    // A click beside an open popup closes it, as esc does.
+    if (popupOpen() && (under.empty() || mouseRowOf(under.front().hit).layer != Layer::Popup))
+    {
+        press(core::tui::KeyCode::Escape, actions);
+        return;
+    }
+    auto const target = std::ranges::find_if(
+        under, [](HitRegion const& region) { return mouseRowOf(region.hit).rightClick != nullptr; });
+    if (target != under.end())
+        mouseRowOf(target->hit)
+            .rightClick(*this, target->hit.value, Pointer { .at = at, .area = target->area }, actions);
+}
+
+void Dashboard::State::move(core::tui::MouseEvent const& mouse, std::span<HitRegion const> under)
+{
+    // The button that pressed the scrollbar is held: the list follows the pointer, past the bar's ends too.
+    if (mouse.button == 0 && scrollbarDrag)
+    {
+        jumpWorkList(
+            interaction.work, work, static_cast<std::size_t>(std::max(0, mouse.y - 1 - scrollbarDrag->y)));
+        return;
+    }
+    // A move with no button held (3): a drag whose release went elsewhere is over.
+    if (mouse.button != 3)
+        return;
+    scrollbarDrag.reset();
+    if (interaction.view != View::Work || popupOpen())
+        return;
+    // The item line under the pointer is hovered; applyKeys() repaints only when that changed.
+    auto const row = std::ranges::find_if(under, [](HitRegion const& region) {
+        auto const kind = region.hit.kind;
+        return kind == HitKind::WorkRow || kind == HitKind::WorkMrLink || kind == HitKind::WorkTicketLink;
+    });
+    interaction.work.hovered = row != under.end() ? std::optional { row->hit.value } : std::nullopt;
+}
+
 void Dashboard::State::applyMouse(core::tui::MouseEvent const& mouse, std::vector<UiAction>& actions)
 {
     using Type = core::tui::MouseEvent::Type;
-    auto const x = mouse.x - 1;
-    auto const y = mouse.y - 1;
-    auto const under = hits.hitsAt(x, y);
+    auto const at = core::tui::Point { .x = mouse.x - 1, .y = mouse.y - 1 };
+    auto const under = hits.regionsAt(at.x, at.y);
     auto const takes = [&](Hit const& hit) {
         return !popupOpen() || mouseRowOf(hit).layer == Layer::Popup;
     };
-    if (mouse.type == Type::ScrollUp || mouse.type == Type::ScrollDown)
+    switch (mouse.type)
     {
-        // The pane under the pointer scrolls: the topmost hit that the wheel moves.
-        auto const pane =
-            std::ranges::find_if(under, [](Hit const& hit) { return mouseRowOf(hit).wheel != nullptr; });
-        if (pane != under.end() && takes(*pane))
-            mouseRowOf(*pane).wheel(*this, mouse.type == Type::ScrollUp ? -1 : 1, actions);
+        case Type::Move: move(mouse, under); return;
+        case Type::Release: scrollbarDrag.reset(); return;
+        case Type::ScrollUp:
+        case Type::ScrollDown: {
+            // The pane under the pointer scrolls: the topmost hit that the wheel moves.
+            auto const pane = std::ranges::find_if(
+                under, [](HitRegion const& region) { return mouseRowOf(region.hit).wheel != nullptr; });
+            if (pane != under.end() && takes(pane->hit))
+                mouseRowOf(pane->hit).wheel(
+                    *this, pane->hit.value, mouse.type == Type::ScrollUp ? -1 : 1, actions);
+            return;
+        }
+        case Type::Press: break;
+    }
+    if (mouse.button == 2)
+    {
+        interaction.notice.clear();
+        rightClick(under, at, actions);
         return;
     }
-    if (mouse.type != Type::Press || mouse.button != 0)
+    if (mouse.button != 0)
         return;
     auto const now = nowMonoMs();
     auto const clicks =
-        lastClick && lastClick->x == x && lastClick->y == y && now - lastClick->atMs <= DoubleClickMs
+        lastClick && lastClick->x == at.x && lastClick->y == at.y && now - lastClick->atMs <= DoubleClickMs
             ? Clicks::Double
             : Clicks::Single;
-    lastClick =
-        clicks == Clicks::Double ? std::nullopt : std::optional { LastClick { .x = x, .y = y, .atMs = now } };
+    lastClick = clicks == Clicks::Double ? std::nullopt
+                                         : std::optional { LastClick { .x = at.x, .y = at.y, .atMs = now } };
     interaction.notice.clear();
-    auto const target =
-        std::ranges::find_if(under, [](Hit const& hit) { return mouseRowOf(hit).click != nullptr; });
+    auto const target = std::ranges::find_if(
+        under, [](HitRegion const& region) { return mouseRowOf(region.hit).click != nullptr; });
     // A click beside an open popup closes it, as esc does.
-    if (popupOpen() && (under.empty() || !takes(under.front())))
+    if (popupOpen() && (under.empty() || !takes(under.front().hit)))
     {
         press(core::tui::KeyCode::Escape, actions);
         return;
     }
     // A link opens on the machine the user sits at.
     if (!popupOpen())
-        if (auto const uri = core::tui::HyperlinkIndex { screen.renderedBuffer() }.uriAt(y, x); !uri.empty())
+        if (auto const uri = core::tui::HyperlinkIndex { screen.renderedBuffer() }.uriAt(at.y, at.x);
+            !uri.empty())
         {
             actions.emplace_back(
                 OpenUrlAction { .url = std::string { uri }, .label = cut(uri, LinkLabelColumns) });
             return;
         }
     if (target != under.end())
-        mouseRowOf(*target).click(*this, target->value, clicks, actions);
+        mouseRowOf(target->hit)
+            .click(*this, target->hit.value, clicks, Pointer { .at = at, .area = target->area }, actions);
 }
 
 // }}}
@@ -1504,6 +2011,7 @@ void Dashboard::State::syncLayout()
     syncStartDialog();
     syncTaskBox();
     syncPalette();
+    syncRowMenu();
     if (interaction.overlay == Overlay::Timeline)
     {
         auto const wanted = timelineView->preferredSize();
@@ -1517,8 +2025,28 @@ void Dashboard::State::syncLayout()
 
 void Dashboard::State::showCentred(Component& overlay, Size wanted)
 {
-    auto const at =
-        core::tui::Point { .x = (size.width - wanted.width) / 2, .y = (size.height - wanted.height) / 2 };
+    showAt(overlay,
+           core::tui::Point { .x = (size.width - wanted.width) / 2, .y = (size.height - wanted.height) / 2 });
+}
+
+void Dashboard::State::syncRowMenu()
+{
+    auto const& menu = interaction.work.menu;
+    if (!menu || interaction.view != View::Work)
+    {
+        if (screen.isOverlayVisible(*rowMenuView))
+            screen.hideOverlay(*rowMenuView);
+        return;
+    }
+    // Where it was opened, moved left or up as far as it must to fit in the tab.
+    auto const wanted = rowMenuView->preferredSize();
+    showAt(*rowMenuView,
+           core::tui::Point { .x = std::clamp(menu->at.x, 0, std::max(0, size.width - wanted.width)),
+                              .y = std::clamp(menu->at.y, 0, std::max(0, size.height - wanted.height)) });
+}
+
+void Dashboard::State::showAt(Component& overlay, core::tui::Point at)
+{
     auto const last =
         std::ranges::find(overlayAt, &overlay, &std::pair<Component const*, core::tui::Point>::first);
     if (screen.isOverlayVisible(overlay))
@@ -1874,6 +2402,8 @@ std::string Dashboard::frame()
     // Bracketed paste on, in every frame, so that a tab the host drew in the meantime gets it back: a paste
     // arrives as text, never as the keys it spells (an Enter in it would confirm the form).
     auto bytes = std::exchange(state.frameBytes, {});
+    // What the row menu copied goes to the clipboard of the terminal the user sits at (OSC 52).
+    bytes += std::exchange(state.clipboard, {});
     bytes += BracketedPasteOn;
     bytes += MouseReportingOn;
     // The Work view asks for the pointer's every move, for hovering and dragging; the view after it, no more.

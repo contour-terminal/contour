@@ -86,6 +86,12 @@ namespace
     // }}}
 } // namespace
 
+std::optional<FormField> taskBoxSettingOf(TaskBoxField field) noexcept
+{
+    auto const index = std::to_underlying(field);
+    return index < FieldRows.size() ? FieldRows[index].setting : std::nullopt;
+}
+
 std::expected<TaskBoxState, StartRefusal> openTaskBox(Engine const& engine,
                                                       std::string_view chipRepo,
                                                       std::string_view selectedRepo,
@@ -175,12 +181,19 @@ namespace
 {
     // {{{ drawing
 
-    /// One run of text drawn in one role.
+    /// One run of text drawn in one role, and what a click on it lands on.
     struct Segment
     {
         std::string text;
         Role role = Role::Text;
+        std::optional<Hit> hit = std::nullopt; ///< What it records; none: nothing of its own.
     };
+
+    /// @return What a click on a place's label, or on the text, records: it picks the place.
+    [[nodiscard]] Hit placeHit(TaskBoxField field) noexcept
+    {
+        return Hit { .kind = HitKind::DialogSetting, .value = std::to_underlying(field) };
+    }
 
     /// One drawn line: segments from the left.
     using Line = std::vector<Segment>;
@@ -202,11 +215,15 @@ namespace
                        Segment { .text = part, .role = role } });
     }
 
-    /// Appends text of its own, wrapped to the width.
-    void appendText(std::vector<Line>& lines, std::string_view text, Role role, int width)
+    /// Appends text of its own, wrapped to the width; each line records @p hit, where there is one.
+    void appendText(std::vector<Line>& lines,
+                    std::string_view text,
+                    Role role,
+                    int width,
+                    std::optional<Hit> hit = std::nullopt)
     {
         for (auto const& part: wrap(text, width, width))
-            lines.push_back(Line { Segment { .text = part, .role = role } });
+            lines.push_back(Line { Segment { .text = part, .role = role, .hit = hit } });
     }
 
     /// @return What a setting shows: the configured value the form holds, for the worker with its active
@@ -255,26 +272,43 @@ namespace
         auto& lines = layout.lines;
 
         // The text, with a cursor while it has the keys.
-        lines.push_back(Line { Segment { .text = "What should the agent do?", .role = Role::Dim } });
+        lines.push_back(Line { Segment {
+            .text = "What should the agent do?", .role = Role::Dim, .hit = placeHit(TaskBoxField::Text) } });
         auto const typing = box.focus == TaskBoxField::Text;
         auto const textRole = box.text.starts_with('-') ? Role::Failing
                               : typing                  ? Role::Selection
                                                         : Role::Text;
         auto const textLine = lines.size();
-        appendText(lines, typing ? std::format("{}▏", box.text) : box.text, textRole, width);
+        appendText(lines,
+                   typing ? std::format("{}▏", box.text) : box.text,
+                   textRole,
+                   width,
+                   placeHit(TaskBoxField::Text));
         // An empty text keeps its line, so the settings below do not move as it is left.
         if (lines.size() == textLine)
             lines.emplace_back();
         lines.emplace_back();
 
-        // The settings it starts with, each stepped with ←/→ while it has the keys.
+        // The settings it starts with, each stepped with ←/→ while it has the keys, or a click: on its first
+        // arrow back, on its value or its second arrow on.
         for (auto const& row: FieldRows)
             if (row.setting)
-                lines.push_back(Line {
-                    Segment { .text = std::format("{:<{}}", row.label, LabelColumns), .role = Role::Dim },
-                    Segment { .text = cut(std::format("‹ {} ›", settingText(*row.setting, box, engine)),
-                                          std::max(width - LabelColumns, 4)),
-                              .role = box.focus == row.field ? Role::Selection : Role::Text } });
+            {
+                auto const role = box.focus == row.field ? Role::Selection : Role::Text;
+                auto const step = [&row](std::size_t forward) {
+                    return Hit { .kind = HitKind::DialogStep,
+                                 .value = (2 * std::to_underlying(row.field)) + forward };
+                };
+                lines.push_back(
+                    Line { Segment { .text = std::format("{:<{}}", row.label, LabelColumns),
+                                     .role = Role::Dim,
+                                     .hit = placeHit(row.field) },
+                           Segment { .text = "‹ ", .role = role, .hit = step(0) },
+                           Segment { .text = cut(std::format("{} ›", settingText(*row.setting, box, engine)),
+                                                 std::max(width - LabelColumns - 2, 4)),
+                                     .role = role,
+                                     .hit = step(1) } });
+            }
 
         // What it starts, or why the engine would refuse it: only once there is something to start.
         auto const form = formOf(box);
@@ -335,6 +369,7 @@ void TaskBoxView::render(core::tui::Canvas& canvas)
     // The popup covers the dashboard.
     auto const hits = HitRecorder { _hits, { .x = screenBounds().x, .y = screenBounds().y } };
     hits.add(canvas.area(), Hit { .kind = HitKind::Popup });
+    auto const insideHits = hits.shifted(1, 1);
     auto const shown = std::min(lines.size(), static_cast<std::size_t>(std::max(inside.height(), 0)));
     for (auto const index: std::views::iota(std::size_t { 0 }, shown))
     {
@@ -343,8 +378,13 @@ void TaskBoxView::render(core::tui::Canvas& canvas)
         {
             // Segments are sanitised already, and their blanks separate them: cutSanitised() keeps them.
             auto const text = cutSanitised(segment.text, width + 1 - x);
+            auto const columns = view::columnsOf(text);
             inside.putString(static_cast<int>(index), x, text, styleOf(theme, segment.role));
-            x += view::columnsOf(text);
+            if (segment.hit)
+                insideHits.add(
+                    core::tui::Rect { .x = x, .y = static_cast<int>(index), .width = columns, .height = 1 },
+                    *segment.hit);
+            x += columns;
         }
     }
 }

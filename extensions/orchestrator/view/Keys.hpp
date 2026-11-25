@@ -20,6 +20,7 @@
 #include <orchestrator/view/DispatchForm.hpp>
 #include <orchestrator/view/Fleet.hpp>
 #include <orchestrator/view/Launcher.hpp>
+#include <orchestrator/view/RowMenu.hpp>
 #include <orchestrator/view/StartDialog.hpp>
 #include <orchestrator/view/TaskBox.hpp>
 
@@ -183,6 +184,7 @@ enum class KeyCommand : uint8_t
     Sort,           ///< The Work view: sort by importance ⇄ by last update.
     RepoPrevious,   ///< The Work view: step the repository chip back.
     RepoNext,       ///< The Work view: step the repository chip on.
+    RowMenu,        ///< The Work view: open the row menu on the selected item.
     Reply1,         ///< Answer the selected agent that asks with the quick reply on `1`.
     Reply2,         ///< … on `2`.
     Reply3,         ///< … on `3`.
@@ -338,6 +340,10 @@ struct WorkState
     std::size_t repoChip = 0;             ///< 0: every repository; else 1 + its index in the configuration.
     std::string selectedKey = {}; ///< workItemKey() of the selected item, or `group:<foldKey>` of a heading;
                                   ///< empty: none chosen yet, the first item is.
+    std::optional<RowMenuState> menu = {}; ///< The row menu, while it is open: it takes every key.
+    std::optional<std::size_t>
+        hovered = {}; ///< The item line under the pointer, into the lines drawn; none:
+                      ///< the pointer is on no item, or the terminal reports no motion.
     [[nodiscard]] bool operator==(WorkState const&) const = default;
 };
 

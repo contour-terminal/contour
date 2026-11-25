@@ -151,15 +151,6 @@ namespace
         return found != config->repos().end() ? found->forge : Forge::GitHub;
     }
 
-    /// @return An MR row's number as its forge spells it, `!812` or `#2375`; empty for a ticket row.
-    [[nodiscard]] std::string mrLabel(Engine const& engine, WorkItem const& item)
-    {
-        if (!item.changeRequest)
-            return {};
-        return std::format(
-            "{}{}", forgeOf(engine, item.repo) == Forge::GitLab ? "!" : "#", item.changeRequest->number);
-    }
-
     /// @return The Pipeline cell's look.
     [[nodiscard]] Look pipelineLook(WorkItem const& item) noexcept
     {
@@ -244,7 +235,7 @@ namespace
         auto workers = 0;
         for (auto const& item: items)
         {
-            widest.mr = std::max(widest.mr, columnsOf(mrLabel(engine, item)));
+            widest.mr = std::max(widest.mr, columnsOf(workMrLabel(engine, item)));
             widest.ticket = std::max(widest.ticket, columnsOf(item.ticketKey));
             widest.jira = std::max(widest.jira, columnsOf(jiraCell(item).text));
             if (!item.agentRun.empty())
@@ -326,14 +317,6 @@ namespace
         return state.selected < lines.size() ? &lines[state.selected] : nullptr;
     }
 
-    /// Folds or unfolds @p group, and selects its heading once the lines are built again.
-    [[nodiscard]] std::optional<UiAction> foldGroup(WorkState& state, WorkGroup group)
-    {
-        state.selectedKey = workLineKey(WorkLine { .kind = WorkLineKind::Heading, .group = group }, {});
-        return UiAction { ToggleFoldAction {
-            .group = std::string { WorkGroupRows[std::to_underlying(group)].foldKey } } };
-    }
-
     /// Steps the repository chip by @p step over every repository and the configured ones.
     void stepRepoChip(WorkState& state, Engine const& engine, std::ptrdiff_t step) noexcept
     {
@@ -354,10 +337,43 @@ namespace
         auto const& item = context.items[line->item];
         if (item.changeRequest)
             return UiAction { OpenUrlAction { .url = item.changeRequest->url,
-                                              .label = mrLabel(context.engine, item) } };
+                                              .label = workMrLabel(context.engine, item) } };
         if (item.ticket)
             return UiAction { OpenUrlAction { .url = item.ticket->url, .label = item.ticketKey } };
         return std::nullopt;
+    }
+
+    /// What `m` opens: the row menu on the selected item, below its row once the dashboard places it.
+    [[nodiscard]] std::optional<UiAction> openMenu(Interaction& interaction, WorkContext const& context)
+    {
+        auto const* const line = selectedLine(interaction.work, context.lines);
+        if (line == nullptr || line->kind != WorkLineKind::Item)
+        {
+            interaction.notice = "m menu · select a merge request or a ticket";
+            return std::nullopt;
+        }
+        interaction.work.menu = RowMenuState { .itemKey = workItemKey(context.items[line->item]) };
+        return std::nullopt;
+    }
+
+    /// Keeps the selection among the lines shown once the list scrolled: on the first one shown when it was
+    /// above them, on the last one when it was below.
+    void keepSelectionShown(WorkState& state, WorkBoardData const& data)
+    {
+        if (data.lines.empty() || data.listRows == 0)
+            return;
+        auto const last = std::min(data.lines.size(), state.scroll + data.listRows) - 1;
+        auto const kept = std::clamp(state.selected, state.scroll, last);
+        if (kept == state.selected)
+            return;
+        state.selected = kept;
+        state.selectedKey = workLineKey(data.lines[kept], data.items);
+    }
+
+    /// @return The furthest the list scrolls: its last line at the bottom.
+    [[nodiscard]] std::size_t maxScrollOf(WorkBoardData const& data) noexcept
+    {
+        return data.lines.size() > data.listRows ? data.lines.size() - data.listRows : 0;
     }
 
     using WorkHandler = std::optional<UiAction> (*)(Interaction&, WorkContext const&);
@@ -426,7 +442,7 @@ namespace
                 if (line == nullptr)
                     return std::nullopt;
                 if (line->kind == WorkLineKind::Heading)
-                    return foldGroup(work, line->group);
+                    return foldWorkGroup(work, line->group);
                 // Its session id is left empty for the dashboard, which holds the source of them, to mint.
                 auto const& item = context.items[line->item];
                 auto dialog = openStartDialog(context.engine, item, {}, {});
@@ -442,7 +458,7 @@ namespace
                 auto const* const line = selectedLine(interaction.work, context.lines);
                 if (line == nullptr)
                     return std::nullopt;
-                return foldGroup(interaction.work, line->group);
+                return foldWorkGroup(interaction.work, line->group);
             } },
         WorkHandlerRow {
             .command = KeyCommand::Filter,
@@ -478,6 +494,7 @@ namespace
                 return std::nullopt;
             } },
         WorkHandlerRow { .command = KeyCommand::OpenLink, .handler = openSelected },
+        WorkHandlerRow { .command = KeyCommand::RowMenu, .handler = openMenu },
         // tab moves the keys along the list and the filter bar's chips; the filter types while it has them.
         WorkHandlerRow {
             .command = KeyCommand::Tab,
@@ -502,6 +519,50 @@ bool isGroupFolded(Engine const& engine, WorkGroup group) noexcept
 WorkSort sortOf(Engine const& engine) noexcept
 {
     return engine.isFolded(SortByUpdateKey) ? WorkSort::LastUpdate : WorkSort::Importance;
+}
+
+std::string workMrLabel(Engine const& engine, WorkItem const& item)
+{
+    if (!item.changeRequest)
+        return {};
+    return std::format(
+        "{}{}", forgeOf(engine, item.repo) == Forge::GitLab ? "!" : "#", item.changeRequest->number);
+}
+
+UiAction foldWorkGroup(WorkState& state, WorkGroup group)
+{
+    state.selectedKey = workLineKey(WorkLine { .kind = WorkLineKind::Heading, .group = group }, {});
+    return ToggleFoldAction { .group = std::string { WorkGroupRows[std::to_underlying(group)].foldKey } };
+}
+
+void selectWorkLine(WorkState& state, WorkBoardData const& data, std::size_t index)
+{
+    if (data.lines.empty())
+        return;
+    state.selected = std::min(index, data.lines.size() - 1);
+    state.selectedKey = workLineKey(data.lines[state.selected], data.items);
+    scrollIntoView(state, data.lines.size(), data.listRows);
+}
+
+void scrollWorkList(WorkState& state, WorkBoardData const& data, std::ptrdiff_t lines)
+{
+    auto const scrolled = std::clamp(static_cast<std::ptrdiff_t>(state.scroll) + lines,
+                                     std::ptrdiff_t { 0 },
+                                     static_cast<std::ptrdiff_t>(maxScrollOf(data)));
+    state.scroll = static_cast<std::size_t>(scrolled);
+    keepSelectionShown(state, data);
+}
+
+void jumpWorkList(WorkState& state, WorkBoardData const& data, std::size_t row)
+{
+    if (data.listRows == 0)
+        return;
+    auto const bottom = data.listRows - 1;
+    auto const maxScroll = maxScrollOf(data);
+    // The scrollbar's top cell is the list's start, its bottom cell its end; the cells between, in
+    // proportion.
+    state.scroll = bottom == 0 ? 0 : ((std::min(row, bottom) * maxScroll) + (bottom / 2)) / bottom;
+    keepSelectionShown(state, data);
 }
 
 std::vector<WorkLine> workLines(std::span<WorkItem const> items,
@@ -681,7 +742,7 @@ namespace
     [[nodiscard]] std::string detailsOf(Engine const& engine, WorkItem const& item)
     {
         auto parts = std::vector<std::string> {};
-        auto const label = mrLabel(engine, item);
+        auto const label = workMrLabel(engine, item);
         parts.push_back(label.empty() ? item.ticketKey : label);
         parts.push_back(item.repo);
         if (auto const& mr = item.changeRequest)
@@ -739,7 +800,7 @@ namespace
     };
 
     /// Draws the filter bar on the first line: the filter on the left, the repository and sort chips on the
-    /// right, the one that has the keys in the focus colour; each records the command a click runs.
+    /// right, the one that has the keys in the focus colour; each records its WorkChip hit.
     void drawFilterBar(Frame const& frame)
     {
         auto const& theme = frame.inside.theme();
@@ -747,10 +808,10 @@ namespace
         auto const focused = [&](WorkFocus focus, Role role) {
             return styleOf(theme, work.focus == focus ? Role::Focus : role);
         };
-        auto const chip = [&](int x, std::string_view text, WorkFocus focus, KeyCommand command) {
+        auto const chip = [&](int x, std::string_view text, WorkFocus focus) {
             frame.inside.putString(0, x, text, focused(focus, Role::Dim));
             frame.hits.add(Rect { .x = x, .y = 0, .width = columnsOf(text), .height = 1 },
-                           Hit { .kind = HitKind::Command, .value = std::to_underlying(command) });
+                           Hit { .kind = HitKind::WorkChip, .value = std::to_underlying(focus) });
         };
         auto const repos = frame.engine.repositories();
         auto const repo = work.repoChip > 0 && work.repoChip <= repos.size()
@@ -760,9 +821,9 @@ namespace
         auto const sortText = std::format(
             "sort: {}", sortOf(frame.engine) == WorkSort::LastUpdate ? "last update"sv : "importance"sv);
         auto x = frame.inside.width() - 1 - columnsOf(sortText);
-        chip(x, sortText, WorkFocus::SortChip, KeyCommand::Sort);
+        chip(x, sortText, WorkFocus::SortChip);
         x -= columnsOf(repoText) + 2;
-        chip(x, repoText, WorkFocus::RepoChip, KeyCommand::RepoNext);
+        chip(x, repoText, WorkFocus::RepoChip);
         auto const typing = work.filtering == Filtering::Typing;
         auto const shown = typing || !work.filter.empty();
         auto const filterText =
@@ -771,7 +832,7 @@ namespace
         frame.inside.putString(
             0, 1, cut(filterText, filterColumns), focused(WorkFocus::Filter, shown ? Role::Text : Role::Dim));
         frame.hits.add(Rect { .x = 0, .y = 0, .width = filterColumns + 1, .height = 1 },
-                       Hit { .kind = HitKind::Command, .value = std::to_underlying(KeyCommand::Filter) });
+                       Hit { .kind = HitKind::WorkChip, .value = std::to_underlying(WorkFocus::Filter) });
     }
 
     /// @return Why the list is empty.
@@ -803,7 +864,7 @@ namespace
                   Pick const& pick)
     {
         auto x = 1;
-        x = putCell(list, y, x, columns.mr, mrLabel(engine, item), pick(Role::Text), columns.gap);
+        x = putCell(list, y, x, columns.mr, workMrLabel(engine, item), pick(Role::Text), columns.gap);
         auto const hasKey = !item.ticketKey.empty();
         x = putCell(list,
                     y,
@@ -828,6 +889,24 @@ namespace
         x = putCell(list, y, x, columns.jira, jira.text, pick(jira.role), columns.gap);
         auto const agent = agentCell(item, nowWallMs, columns.detail);
         static_cast<void>(putCell(list, y, x, columns.agent, agent.text, pick(agent.role), columns.gap));
+    }
+
+    /// Records where an item's MR number and ticket key are drawn on @p y, as drawItem() lays them out: a
+    /// double click there opens them.
+    void recordLinks(
+        HitRecorder const& hits, int y, std::size_t line, WorkItem const& item, Columns const& columns)
+    {
+        auto x = 1;
+        if (columns.mr > 0)
+        {
+            if (item.changeRequest)
+                hits.add(Rect { .x = x, .y = y, .width = columns.mr, .height = 1 },
+                         Hit { .kind = HitKind::WorkMrLink, .value = line });
+            x += columns.mr + columns.gap;
+        }
+        if (columns.ticket > 0 && !item.ticketKey.empty())
+            hits.add(Rect { .x = x, .y = y, .width = columns.ticket, .height = 1 },
+                     Hit { .kind = HitKind::WorkTicketLink, .value = line });
     }
 
     /// Draws the scrollbar on the list's right edge, @p rows high, while the list holds more than it shows.
@@ -889,6 +968,10 @@ void WorkBoardView::render(Canvas& canvas)
     keepWorkSelection(work, lines, items, _data.listRows);
     auto list =
         inside.subcanvas(Rect { .x = 0, .y = 1, .width = std::max(0, inside.width() - 1), .height = rows });
+    auto const listHits = hits.shifted(0, 1);
+    // The list's right edge is the scrollbar's, whether it is drawn or not: a click there jumps.
+    listHits.add(Rect { .x = list.width(), .y = 0, .width = 1, .height = rows },
+                 Hit { .kind = HitKind::WorkScrollbar });
     if (lines.empty())
         list.putString(0, 1, cut(whyEmpty(_engine, work), list.width() - 2), styleOf(theme, Role::Dim));
     auto const columns = columnsFor(_engine, items, list.width() - 2, canvas.width());
@@ -916,15 +999,21 @@ void WorkBoardView::render(Canvas& canvas)
             list.fill(Rect { .x = 0, .y = y, .width = list.width(), .height = 1 }, ' ', pick(Role::Text));
             list.putString(y, 0, "▍", pick(Role::Accent));
         }
+        else if (work.hovered == at)
+            list.putString(y, 0, "▏", pick(Role::Dim));
+        auto const row = Rect { .x = 0, .y = y, .width = list.width(), .height = 1 };
         if (line.kind == WorkLineKind::Item)
         {
             auto const& item = items[line.item];
+            listHits.add(row, Hit { .kind = HitKind::WorkRow, .value = at });
+            recordLinks(listHits, y, at, item, columns);
             drawItem(list, y, _engine, item, columns, nowWallMs, pick);
             if (auto const age = shownAgeOf(item, nowWallMs); age && columns.detail == Detail::Full)
                 _data.ageChangeMs = std::min(_data.ageChangeMs.value_or(std::numeric_limits<uint64_t>::max()),
                                              nowMonoMs + untilAgeChanges(*age));
             continue;
         }
+        listHits.add(row, Hit { .kind = HitKind::WorkHeading, .value = std::to_underlying(line.group) });
         auto style = pick(GroupRoles[std::to_underlying(line.group)]);
         style.bold = true;
         // Sanitised already: the table's name and a count, two spaces apart.

@@ -94,6 +94,11 @@ inline constexpr auto WorkRunId = "pr-2376-20261113-150847"sv;
 ///         and a run working on #2376.
 [[nodiscard]] World workWorld();
 
+/// @param count How many.
+/// @return Pull requests 1 to @p count, as `gh-prs` prints them: no checks, no review, each a minute older
+///         than the one before.
+[[nodiscard]] std::string manyPrs(int count);
+
 /// @param world What the engine is started from.
 /// @return The engine, started and with every poll command answered.
 [[nodiscard]] Engine bootEngine(World const& world);

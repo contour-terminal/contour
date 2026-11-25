@@ -94,25 +94,6 @@ struct BoardLines
     return board.names()[work.selected];
 }
 
-/// @return Pull requests 1 to @p count, as `gh-prs` prints them: no checks, no review, each a minute older
-///         than the one before.
-[[nodiscard]] std::string manyPrs(int count)
-{
-    constexpr auto DayMinutes = 24 * 60;
-    auto json = std::string { "[" };
-    for (auto const number: std::views::iota(1, count + 1))
-        json += std::format(R"({}[{},"title {}","https://github.com/example/contour/pull/{}","h{}","master",)"
-                            R"(false,false,"",[],[],"MERGEABLE","2026-11-12T{:02}:{:02}:00Z"])",
-                            number == 1 ? "" : ",",
-                            number,
-                            number,
-                            number,
-                            number,
-                            (DayMinutes - number) / 60,
-                            (DayMinutes - number) % 60);
-    return json + "]";
-}
-
 } // namespace
 
 TEST_CASE("Work view: w switches views and back", "[orchestrator][view][work]")

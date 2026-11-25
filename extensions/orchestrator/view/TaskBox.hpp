@@ -58,6 +58,10 @@ struct TaskBoxState
                                                                     std::string text,
                                                                     std::string session);
 
+/// @param field A place the box's keys go.
+/// @return The form's setting ←/→ step there; std::nullopt for the text, which has none.
+[[nodiscard]] std::optional<FormField> taskBoxSettingOf(TaskBoxField field) noexcept;
+
 /// @param box An open box.
 /// @return What it dispatches: its form, its topic the text typed.
 [[nodiscard]] DispatchFormState formOf(TaskBoxState const& box);

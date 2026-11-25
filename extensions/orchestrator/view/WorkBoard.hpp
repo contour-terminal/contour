@@ -99,6 +99,37 @@ void keepWorkSelection(WorkState& state,
                        std::span<WorkItem const> items,
                        std::size_t pageRows);
 
+/// @param engine The engine: the forge of the item's repository.
+/// @param item An item.
+/// @return An MR row's number as its forge spells it, `!812` or `#2375`; empty for a ticket row.
+[[nodiscard]] std::string workMrLabel(Engine const& engine, WorkItem const& item);
+
+/// Folds or unfolds @p group, and selects its heading once the lines are built again.
+/// @param state The Work view's interaction: its selection moves to the heading.
+/// @param group The group.
+/// @return The ToggleFoldAction of the group's fold key.
+[[nodiscard]] UiAction foldWorkGroup(WorkState& state, WorkGroup group);
+
+/// Selects a line, as a click on it does, and scrolls it into view.
+/// @param state The Work view's interaction.
+/// @param data The lines as drawn, and how many the list shows.
+/// @param index The line, into @p data's lines; kept within them.
+void selectWorkLine(WorkState& state, WorkBoardData const& data, std::size_t index);
+
+/// Scrolls the list, as the wheel does: within its ends; the selection stays on its line while that line is
+/// shown, else moves to the nearest line shown.
+/// @param state The Work view's interaction.
+/// @param data The lines as drawn, and how many the list shows.
+/// @param lines How far: negative is up.
+void scrollWorkList(WorkState& state, WorkBoardData const& data, std::ptrdiff_t lines);
+
+/// Scrolls the list to where a click or a drag on the scrollbar points: its top cell is the list's start, its
+/// bottom cell its end. The selection is kept shown as scrollWorkList() keeps it.
+/// @param state The Work view's interaction.
+/// @param data The lines as drawn, and how many the list shows.
+/// @param row The scrollbar's cell pointed at, 0 at its top; past its bottom counts as its bottom.
+void jumpWorkList(WorkState& state, WorkBoardData const& data, std::size_t row);
+
 /// @param ms How long ago, in milliseconds.
 /// @return `45s`, `12m`, `3h`, `2d`: the age of a last update, rounded down.
 [[nodiscard]] std::string updateAgeText(uint64_t ms);
@@ -110,7 +141,8 @@ void keepWorkSelection(WorkState& state,
 /// Applies one Work-view command. Fold on a line, or Enter on a heading, folds its group by ToggleFoldAction
 /// of the group's key and selects the heading; Sort toggles SortByUpdateKey; Enter on an item opens the start
 /// dialog on it (its session id left for the caller to mint), or says on the action bar why it cannot.
-/// SwitchView, NewTask and Palette act as in the Agents view (dispatch()).
+/// RowMenu opens the row menu on a selected item, its place left for the caller to set. SwitchView, NewTask
+/// and Palette act as in the Agents view (dispatch()).
 /// @param command The command (KeyCommand).
 /// @param interaction Where the user is; its WorkState changed.
 /// @param lines The lines as drawn.
@@ -142,8 +174,10 @@ void keepWorkSelection(WorkState& state,
                                                    std::size_t pageRows);
 
 /// The Work view: the filter bar (the filter, the repository chip, the sort chip), the lines that fit, the
-/// scrollbar on the list's right edge, and the details line of the selected one. Records the hits of its
-/// chips.
+/// scrollbar on the list's right edge, and the details line of the selected one; the hovered item line
+/// carries a `▏`. Records the hits of its chips (WorkChip), of each drawn line (WorkRow, WorkHeading), of
+/// each item's MR number and ticket key (WorkMrLink, WorkTicketLink), and of the list's right edge
+/// (WorkScrollbar).
 class WorkBoardView final: public core::tui::Component
 {
   public:

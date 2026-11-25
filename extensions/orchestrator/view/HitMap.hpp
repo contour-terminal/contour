@@ -29,6 +29,18 @@ enum class HitKind : uint8_t
     LauncherRepo,      ///< A launcher's repository chip; Hit::value is 0 for every one, else 1 + its position
                        ///< among scopeRepos().
     LauncherKind,      ///< A launcher's kind chip; Hit::value is the KindScope.
+    ViewName,          ///< A view's name in the top bar; Hit::value is the View.
+    WorkRow,           ///< A Work line; Hit::value is its index into workLines().
+    WorkMrLink,        ///< An item's MR number cell; Hit::value is its line.
+    WorkTicketLink,    ///< An item's ticket key cell; Hit::value is its line.
+    WorkHeading,       ///< A group heading; Hit::value is the WorkGroup.
+    WorkScrollbar,     ///< The list's right edge; Hit::value is unused (the pointer's line decides).
+    WorkChip,          ///< The filter bar; Hit::value is the WorkFocus (Filter, RepoChip, SortChip).
+    DialogSetting,     ///< A dialog's or the `n` box's setting label; Hit::value is the FormField or the
+                       ///< TaskBoxField.
+    DialogStep,        ///< Its value or `‹ ›`; Hit::value is 2 × the field + (0 back, 1 forward).
+    WorkerChip,        ///< A worker chip; Hit::value is its index in Config::workers().
+    MenuEntry,         ///< A row menu entry; Hit::value is its index in RowMenuEntries.
 };
 
 /// What a click lands on.
@@ -65,6 +77,11 @@ class HitMap
     /// @param y A line, 0-based.
     /// @return What lies at the cell, the topmost first: what was drawn last.
     [[nodiscard]] std::vector<Hit> hitsAt(int x, int y) const;
+
+    /// @param x A column, 0-based.
+    /// @param y A line, 0-based.
+    /// @return The regions that cover the cell, the topmost first: what hitsAt() answers, with where each is.
+    [[nodiscard]] std::vector<HitRegion> regionsAt(int x, int y) const;
 
     /// @return Every region, in the order it was recorded.
     [[nodiscard]] std::span<HitRegion const> regions() const noexcept { return _regions; }

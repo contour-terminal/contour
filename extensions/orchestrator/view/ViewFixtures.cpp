@@ -10,6 +10,7 @@
 #include <deque>
 #include <format>
 #include <iterator>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -285,6 +286,23 @@ World workWorld()
                                        .answer = { "jira/issues-lookup-work.json" } },
                        CommandAnswer { .command = "acli-issues", .answer = { "jira/issues-work.json" } },
                    } };
+}
+
+std::string manyPrs(int count)
+{
+    constexpr auto DayMinutes = 24 * 60;
+    auto json = std::string { "[" };
+    for (auto const number: std::views::iota(1, count + 1))
+        json += std::format(R"({}[{},"title {}","https://github.com/example/contour/pull/{}","h{}","master",)"
+                            R"(false,false,"",[],[],"MERGEABLE","2026-11-12T{:02}:{:02}:00Z"])",
+                            number == 1 ? "" : ",",
+                            number,
+                            number,
+                            number,
+                            number,
+                            (DayMinutes - number) / 60,
+                            (DayMinutes - number) % 60);
+    return json + "]";
 }
 
 Engine bootEngine(World const& world)

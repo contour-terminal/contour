@@ -154,6 +154,8 @@ add_library(orchestrator_view STATIC
     view/LazyLines.hpp
     view/Palette.cpp
     view/Palette.hpp
+    view/RowMenu.cpp
+    view/RowMenu.hpp
     view/Sections.cpp
     view/Sections.hpp
     view/StartDialog.cpp
@@ -235,6 +237,7 @@ if(ORCHESTRATOR_TESTING)
         view/Launcher_test.cpp
         view/Keys_test.cpp
         view/Palette_test.cpp
+        view/RowMenu_test.cpp
         view/Sections_test.cpp
         view/StartDialog_test.cpp
         view/TaskBox_test.cpp

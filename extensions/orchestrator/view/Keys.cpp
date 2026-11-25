@@ -91,6 +91,7 @@ namespace
         KeyRow { .key = "left"sv, .command = KeyCommand::RepoPrevious },
         KeyRow { .key = "right"sv, .command = KeyCommand::RepoNext },
         KeyRow { .key = "o"sv, .command = KeyCommand::OpenLink },
+        KeyRow { .key = "m"sv, .command = KeyCommand::RowMenu },
         KeyRow { .key = "n"sv, .command = KeyCommand::NewTask },
         KeyRow { .key = "w"sv, .command = KeyCommand::SwitchView },
         KeyRow { .key = "^k"sv, .command = KeyCommand::Palette },

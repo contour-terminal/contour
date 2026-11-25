@@ -15,10 +15,14 @@ void HitMap::add(core::tui::Rect area, Hit hit)
 
 std::vector<Hit> HitMap::hitsAt(int x, int y) const
 {
+    return std::ranges::to<std::vector>(regionsAt(x, y) | std::views::transform(&HitRegion::hit));
+}
+
+std::vector<HitRegion> HitMap::regionsAt(int x, int y) const
+{
     return std::ranges::to<std::vector>(
         _regions | std::views::reverse
-        | std::views::filter([&](HitRegion const& region) { return region.area.contains(x, y); })
-        | std::views::transform(&HitRegion::hit));
+        | std::views::filter([&](HitRegion const& region) { return region.area.contains(x, y); }));
 }
 
 } // namespace orchestrator::view
