@@ -1545,7 +1545,7 @@ class ExtensionRig
                 .config = _config,
                 .placement = index == 0 ? vtextension::Placement::TakeOver : vtextension::Placement::Segment,
                 .runCommand = vtextension::CommandPermission::Deny });
-        return vtextension::prepareExtensions(std::move(config), _engines.acquire());
+        return vtextension::prepareExtensions(std::move(config), _engines.acquire(), nullptr);
     }
 
     /// @param published Where the terminal hears of a published frame.

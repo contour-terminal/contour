@@ -419,7 +419,7 @@ TEST_CASE("a module importing the control interface instantiates", "[vtextension
     REQUIRE(engine.has_value());
     auto const threadGuard = vtextension::testing::preparedThread(*backend);
     auto const compiled = CompiledExtension::load(
-        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::ControlImportingModule));
+        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::ControlImportingModule), nullptr);
     REQUIRE(compiled.has_value());
     auto services = FakeHostServices {};
     auto clock = core::platform::ManualClock {};
@@ -485,7 +485,8 @@ TEST_CASE("an instance's deadline expiring during a control call faults it, writ
         **engine,
         wasm::ModuleIdentity {},
         vtextension::testing::withManifest(toModule(vtextension::testing::MinimalModule),
-                                           "name = reader\nversion = 1\ncontrol read\n"));
+                                           "name = reader\nversion = 1\ncontrol read\n"),
+        nullptr);
     REQUIRE(compiled.has_value());
     auto services = FakeHostServices {};
     services.controlAnswer =

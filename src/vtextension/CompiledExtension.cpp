@@ -116,13 +116,20 @@ namespace
 CompiledExtension::CompiledExtension(PrivateTag /*unused*/,
                                      std::shared_ptr<Engine> engine,
                                      std::optional<Manifest> manifest,
-                                     std::shared_ptr<wasm::IWasmModule> module):
-    _engine { std::move(engine) }, _manifest { std::move(manifest) }, _module { std::move(module) }
+                                     std::shared_ptr<wasm::IWasmModule> module,
+                                     std::shared_ptr<HostBreaker> breaker):
+    _engine { std::move(engine) },
+    _manifest { std::move(manifest) },
+    _module { std::move(module) },
+    _breaker { std::move(breaker) }
 {
 }
 
 std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> CompiledExtension::load(
-    Engine& engine, wasm::ModuleIdentity identity, std::vector<std::byte> bytes)
+    Engine& engine,
+    wasm::ModuleIdentity identity,
+    std::vector<std::byte> bytes,
+    std::shared_ptr<HostBreaker> breaker)
 {
     // The manifest is read before the runtime sees the bytes, which its loader may rewrite in place.
     auto manifest = parseManifest(bytes);
@@ -156,7 +163,8 @@ std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> CompiledExtens
                                                engine.shared_from_this(),
                                                manifest ? std::optional { std::move(*manifest) }
                                                         : std::nullopt,
-                                               std::move(*module));
+                                               std::move(*module),
+                                               std::move(breaker));
 }
 
 } // namespace vtextension

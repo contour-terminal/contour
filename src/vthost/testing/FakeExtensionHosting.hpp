@@ -128,6 +128,8 @@ class FakeExtensionHosting final: public IExtensionHosting
 
     void releaseRetired() noexcept override { ++releases; }
 
+    void configurationReloaded() noexcept override { ++reloads; }
+
     void stop() noexcept override { ++stops; }
 
     /// Every session's extensions made, oldest first; a session gone leaves its pointer dangling.
@@ -135,6 +137,7 @@ class FakeExtensionHosting final: public IExtensionHosting
     std::map<std::pair<std::string, std::string>, GrantState> answers; ///< What lookup() answers.
     std::vector<GrantState> answered; ///< Every answer() call's answer, in order.
     int releases = 0;                 ///< How many times releaseRetired() was called.
+    int reloads = 0;                  ///< How many times configurationReloaded() was called.
     int stops = 0;                    ///< How many times stop() was called.
 };
 

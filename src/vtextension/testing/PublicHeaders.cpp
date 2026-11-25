@@ -20,9 +20,11 @@
 #include <vtextension/ExtensionGrantStore.hpp>
 #include <vtextension/ExtensionHost.hpp>
 #include <vtextension/ExtensionLimits.hpp>
+#include <vtextension/ExtensionRegistry.hpp>
 #include <vtextension/ExtensionScheduler.hpp>
 #include <vtextension/ExtensionWorkerPool.hpp>
 #include <vtextension/HostBindings.hpp>
+#include <vtextension/HostBreaker.hpp>
 #include <vtextension/HostState.hpp>
 #include <vtextension/IHostServices.hpp>
 #include <vtextension/Instance.hpp>

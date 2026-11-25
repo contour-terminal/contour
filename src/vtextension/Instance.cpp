@@ -236,14 +236,16 @@ Instance::Instance(PrivateTag /*unused*/,
                    std::shared_ptr<CompiledExtension const> compiled,
                    IHostServices& services,
                    core::platform::IClock& clock,
-                   ExtensionLimits limits):
+                   ExtensionLimits limits,
+                   HostAdmission admission):
     _compiled { std::move(compiled) },
     _engine { _compiled->engine().shared_from_this() },
     _services { services },
     _clock { clock },
     _limits { limits },
     _declaredControl { declaredControlOf(*_compiled) },
-    _memory { std::make_unique<GuestMemory>(*this) }
+    _memory { std::make_unique<GuestMemory>(*this) },
+    _admission { admission }
 {
 }
 
@@ -259,9 +261,26 @@ std::expected<std::unique_ptr<Instance>, ExtensionError> Instance::create(Engine
     // The memory and stack caps are the engine's runtime's: an instance cannot be held to others.
     Require(limits.memoryBytes == engine.limits().memoryBytes
             && limits.stackBytes == engine.limits().stackBytes);
-    auto instance =
-        std::make_unique<Instance>(PrivateTag {}, compiled.shared_from_this(), services, clock, limits);
-    return instance->instantiate().transform([&] { return std::move(instance); });
+    // Refused before anything is instantiated: a host that keeps dying is not started again.
+    auto const admission = compiled.admitHost();
+    if (!admission)
+        return std::unexpected(admission.error());
+    auto instance = std::make_unique<Instance>(
+        PrivateTag {}, compiled.shared_from_this(), services, clock, limits, *admission);
+    if (auto instantiated = instance->instantiate(); !instantiated)
+    {
+        instance->reportHostFault(instantiated.error());
+        return std::unexpected(instantiated.error());
+    }
+    return instance;
+}
+
+void Instance::reportHostFault(ExtensionError error) noexcept
+{
+    if (error != ExtensionError::HostUnavailable)
+        return;
+    if (auto const admission = std::exchange(_admission, std::nullopt))
+        _compiled->recordHostFault(*admission);
 }
 
 std::expected<void, ExtensionError> Instance::instantiate()
@@ -338,7 +357,10 @@ auto Instance::guarded(std::chrono::milliseconds timeout, Body const& body) -> d
         _fault = ExtensionError::DeadlineExceeded;
 
     if (_fault)
+    {
+        reportHostFault(*_fault);
         return std::unexpected(*_fault);
+    }
     return result;
 }
 

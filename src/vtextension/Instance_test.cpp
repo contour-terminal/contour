@@ -48,7 +48,7 @@ namespace
 {
     auto const engine = Engine::create(backend, ExtensionLimits {});
     REQUIRE(engine.has_value());
-    return CompiledExtension::load(**engine, wasm::ModuleIdentity {}, std::move(module));
+    return CompiledExtension::load(**engine, wasm::ModuleIdentity {}, std::move(module), nullptr);
 }
 
 /// Loads @p module on a fresh engine under @p limits and, if that succeeds, creates an instance of it, which
@@ -61,7 +61,8 @@ namespace
     auto const engine = Engine::create(*backend, limits);
     REQUIRE(engine.has_value());
     auto const threadGuard = vtextension::testing::preparedThread(*backend);
-    auto const compiled = CompiledExtension::load(**engine, wasm::ModuleIdentity {}, std::move(module));
+    auto const compiled =
+        CompiledExtension::load(**engine, wasm::ModuleIdentity {}, std::move(module), nullptr);
     if (!compiled)
         return compiled.error();
     auto services = vtextension::testing::FakeHostServices {};
@@ -143,7 +144,7 @@ TEST_CASE("CompiledExtension.passesIdentityToTheRuntime", "[vtextension]")
     auto const engine = Engine::create(backend, ExtensionLimits {});
     REQUIRE(engine.has_value());
     auto const compiled = CompiledExtension::load(
-        **engine, wasm::ModuleIdentity { "x" }, toModule(vtextension::testing::MinimalModule));
+        **engine, wasm::ModuleIdentity { "x" }, toModule(vtextension::testing::MinimalModule), nullptr);
     REQUIRE(compiled.has_value());
     CHECK(backend.loads() == 1);
     CHECK(backend.lastIdentity() == wasm::ModuleIdentity { "x" });
@@ -161,7 +162,7 @@ TEST_CASE("Instance.hostCrashedIsHostUnavailable", "[vtextension]")
     auto const engine = Engine::create(backend, limits);
     REQUIRE(engine.has_value());
     auto const compiled = CompiledExtension::load(
-        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule));
+        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule), nullptr);
     REQUIRE(compiled.has_value());
     auto services = vtextension::testing::FakeHostServices {};
     auto clock = core::platform::ManualClock {};
@@ -185,7 +186,7 @@ TEST_CASE("Instance.hostCrashedOutranksAFailedHostCall", "[vtextension]")
     auto const engine = Engine::create(backend, limits);
     REQUIRE(engine.has_value());
     auto const compiled = CompiledExtension::load(
-        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule));
+        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule), nullptr);
     REQUIRE(compiled.has_value());
     auto services = vtextension::testing::FakeHostServices {};
     auto clock = core::platform::ManualClock {};
@@ -212,7 +213,7 @@ TEST_CASE("Instance.memoryCap.atInstantiation", "[vtextension]")
     REQUIRE(engine.has_value());
     auto const threadGuard = vtextension::testing::preparedThread(*backend);
     auto const compiled = CompiledExtension::load(
-        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule));
+        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule), nullptr);
     REQUIRE(compiled.has_value());
     auto services = vtextension::testing::FakeHostServices {};
     auto clock = core::platform::ManualClock {};
@@ -329,7 +330,7 @@ TEST_CASE("Instance.deadlineSpentBeforeCommand", "[vtextension]")
     REQUIRE(engine.has_value());
     auto const threadGuard = vtextension::testing::preparedThread(*backend);
     auto const compiled = CompiledExtension::load(
-        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MaliciousModule));
+        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MaliciousModule), nullptr);
     REQUIRE(compiled.has_value());
     auto services = vtextension::testing::FakeHostServices {};
     services.commandAnswer = "";
@@ -388,7 +389,7 @@ TEST_CASE("Instance.expiredBetweenCalls", "[vtextension]")
     auto const engine = Engine::create(backend, limits);
     REQUIRE(engine.has_value());
     auto const compiled = CompiledExtension::load(
-        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule));
+        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule), nullptr);
     REQUIRE(compiled.has_value());
     auto services = vtextension::testing::FakeHostServices {};
     auto clock = core::platform::ManualClock {};
@@ -448,7 +449,7 @@ TEST_CASE("Instance.growthRefusedInHostCallAllocation", "[vtextension]")
         auto const engine = Engine::create(backend, limits);
         REQUIRE(engine.has_value());
         auto const compiled = CompiledExtension::load(
-            **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule));
+            **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule), nullptr);
         REQUIRE(compiled.has_value());
         auto services = vtextension::testing::FakeHostServices {};
         services.snapshot.title = "a title the host must allocate for";

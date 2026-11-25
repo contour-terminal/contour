@@ -27,6 +27,7 @@
 #include <vtextension/ExtensionGrantStore.hpp>
 #include <vtextension/ExtensionHost.hpp>
 #include <vtextension/ExtensionLimits.hpp>
+#include <vtextension/ExtensionRegistry.hpp>
 #include <vtextension/ExtensionScheduler.hpp>
 #include <vtextension/ExtensionWorkerPool.hpp>
 #include <vtextension/IHostServices.hpp>
@@ -42,12 +43,13 @@ namespace vtextension
 /// @see RunnerServices
 struct SessionExtensionServices
 {
-    IEngineProvider& engines;                       ///< Where the engine comes from.
-    IRetirementSink& retirement;                    ///< Where runners and abandoned builds hand engines back.
-    IExtensionScheduler& scheduler;                 ///< The lanes the runners live on.
-    core::async::IExecutor& builds;                 ///< Where modules are found, read and loaded.
-    IGrantStore& grants;                            ///< Where command permissions are looked up.
-    vtpty::CommandCapture& capture;                 ///< Runs the commands extensions ask for.
+    IEngineProvider& engines;       ///< Where the engine comes from.
+    IRetirementSink& retirement;    ///< Where runners and abandoned builds hand engines back.
+    ExtensionRegistry& registry;    ///< Where a module is shared with the other panes running it.
+    IExtensionScheduler& scheduler; ///< The lanes the runners live on.
+    core::async::IExecutor& builds; ///< Where modules are found, read and loaded.
+    IGrantStore& grants;            ///< Where command permissions are looked up.
+    vtpty::CommandCapture& capture; ///< Runs the commands extensions ask for.
     core::platform::IWallClock const& wallClock;    ///< The time `state` answers with.
     vtbackend::LocalTimeConverter const& localTime; ///< The time zone `state`'s UTC offset is read in.
     core::Environment const& environment;           ///< What the extensions' private terminals read.
@@ -245,7 +247,8 @@ struct ExtensionRuntimeServices
 /// **Lifetime.** Owned by the application, declared after what it borrows (the backend, the capture, the
 /// environment, the filesystem) and before the session manager, whose sessions -- and so every runner -- are
 /// destroyed first. Its own members are declared so that the build thread is joined first (a build blocked on
-/// a hung filesystem delays that), then the pool, whose workers run the jobs still posted (each runner's last
+/// a hung filesystem delays that), then the registry's entries go (each a weak reference, with its breaker,
+/// which reads the pool's clock), then the pool, whose workers run the jobs still posted (each runner's last
 /// job destroys its instance on its lane and retires the engine), before the engine provider releases what
 /// was retired, on this thread, and before the grants go.
 class ExtensionRuntime
@@ -260,6 +263,10 @@ class ExtensionRuntime
 
     /// @return Where the user's answers are kept.
     [[nodiscard]] IGrantStore& grants() noexcept { return _grants; }
+
+    /// Tells the runtime the configuration was reloaded: every extension's breaker closes, so that one whose
+    /// host kept dying is started again. Owner's thread.
+    void configurationReloaded() noexcept { _registry.resetBreakers(); }
 
     /// @return How many worker threads run; none until the first extension is started.
     [[nodiscard]] std::size_t runningWorkers() const noexcept { return _pool.runningWorkers(); }
@@ -285,6 +292,7 @@ class ExtensionRuntime
     ExtensionGrantStore _grants;
     EngineProvider _engines;
     ExtensionWorkerPool _pool;
+    ExtensionRegistry _registry;                     ///< After the pool, whose clock its breakers read.
     std::unique_ptr<core::async::IExecutor> _builds; ///< Last: joined first.
 };
 

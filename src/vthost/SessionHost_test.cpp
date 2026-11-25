@@ -3787,6 +3787,30 @@ TEST_CASE("replaceProfiles re-limits running sessions and serves new ones from t
     CHECK(h.programs == std::vector<std::string> { "/bin/zsh", "/bin/zsh-next" });
 }
 
+TEST_CASE("replaceProfiles tells the extensions of the reload", "[vthost][profiles][reload]")
+{
+    // A reload is what starts an extension whose host process kept dying again: the daemon's as the GUI's.
+    auto clock = core::platform::ManualClock {};
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source, clock };
+    auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                          .extensions = hosting } };
+
+    // No catalog, no reload.
+    host.replaceProfiles(nullptr);
+    CHECK(hosting->reloads == 0);
+
+    host.replaceProfiles(profileCatalog("/bin/zsh-next", vtbackend::LineCount(3000)));
+    CHECK(hosting->reloads == 1);
+}
+
 TEST_CASE("replaceProfiles leaves the limits a client stated for an unnamed session",
           "[vthost][profiles][reload]")
 {

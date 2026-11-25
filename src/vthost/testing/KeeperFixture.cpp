@@ -254,6 +254,7 @@ namespace
         }
 
         void releaseRetired() noexcept override {}
+        void configurationReloaded() noexcept override {}
 
         void stop() noexcept override
         {

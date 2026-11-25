@@ -16,7 +16,9 @@ set(vtextension_SOURCES
     ExtensionConsent.cpp
     ExtensionGrantStore.cpp
     ExtensionHost.cpp
+    ExtensionRegistry.cpp
     ExtensionWorkerPool.cpp
+    HostBreaker.cpp
     HostState.cpp
     Instance.cpp
     Manifest.cpp
@@ -47,9 +49,11 @@ set(vtextension_HEADERS
     ExtensionGrantStore.hpp
     ExtensionHost.hpp
     ExtensionLimits.hpp
+    ExtensionRegistry.hpp
     ExtensionScheduler.hpp
     ExtensionWorkerPool.hpp
     HostBindings.hpp
+    HostBreaker.hpp
     HostState.hpp
     IHostServices.hpp
     Instance.hpp
@@ -111,6 +115,7 @@ if(VTEXTENSION_TESTING)
         ExtensionError_test.cpp
         ExtensionGrantStore_test.cpp
         ExtensionHost_test.cpp
+        ExtensionRegistry_test.cpp
         ExtensionWorkerPool_test.cpp
         HostState_test.cpp
         Instance_test.cpp

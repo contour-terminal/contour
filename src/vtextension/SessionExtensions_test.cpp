@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <core/async/testing/ManualExecutor.hpp>
+#include <core/platform/Clock.hpp>
 #include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -58,6 +59,8 @@ struct Fixture
     RunnerHarness harness;
     vtextension::ExtensionLimits limits {}; ///< What the engines are created with, and each extension costs.
     vtextension::EngineProvider engines { *harness.backend, limits };
+    core::platform::ManualClock clock {};
+    vtextension::ExtensionRegistry registry { clock, limits };
     core::async::testing::ManualExecutor builds;
     core::platform::testing::InMemoryFileSystem fileSystem;
     std::shared_ptr<QueuedOwner> owner = std::make_shared<QueuedOwner>();
@@ -67,6 +70,7 @@ struct Fixture
     {
         return { .engines = engines,
                  .retirement = engines,
+                 .registry = registry,
                  .scheduler = harness.scheduler,
                  .builds = builds,
                  .grants = harness.grants,
@@ -122,8 +126,8 @@ struct Fixture
                                                 .placement = placement,
                                                 .runCommand = vtextension::CommandPermission::Deny });
     return std::make_shared<HostedExtensions>(
-        vtextension::prepareExtensions(std::move(config),
-                                       std::unexpected(vtextension::ExtensionError::ModuleUnavailable)),
+        vtextension::prepareExtensions(
+            std::move(config), std::unexpected(vtextension::ExtensionError::ModuleUnavailable), nullptr),
         vtextension::ExtensionHostServices {
             .engines = fixture.engines,
             .runners = fixture.harness.services(fixture.harness.scheduler, fixture.engines) });

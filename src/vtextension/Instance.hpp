@@ -60,6 +60,9 @@ using ConfigMap = std::vector<std::pair<std::string, std::string>>;
 ///   `maxRenderBytes`, or a guest that breaks the Canonical ABI) leaves the instance unusable: every
 ///   later call fails with the same error without entering the guest. The host creates a new
 ///   instance to recover.
+/// - **Host deaths.** An instance is created only if the module's breaker admits it
+///   (CompiledExtension::admitHost()); a host death it sees (`HostUnavailable`, while instantiating or from
+///   any call) it reports to that breaker, once. Its other faults are the Runner's to count.
 /// - **Threads.** Calls must not overlap. A thread other than the one that created the first engine
 ///   holds a thread guard of the engine's backend while it calls in; calling in without one is a
 ///   precondition violation. The host services are called on the calling thread, from inside the call.
@@ -78,8 +81,11 @@ class Instance final: private wasm::IHostContext
     ///        instance. The watchdog itself enforces deadlines in real time.
     /// @param limits The limits this instance is held to. Its `memoryBytes` and `stackBytes` must be the
     ///        engine's (@p engine's limits()), whose runtime enforces them; the rest are the instance's.
-    /// @return The instance; `OutOfMemory` if the module needs more memory than @p limits allow,
-    ///         `InvalidComponent` if the runtime cannot instantiate it, or the error a WASI reactor's
+    /// @return The instance; `HostUnavailable` if the module's host keeps dying (its breaker is open: nothing
+    /// is
+    ///         instantiated) or cannot be reached, `OutOfMemory` if the module needs more memory than @p
+    ///         limits allow, `InvalidComponent` if the runtime cannot instantiate it, or the error a WASI
+    ///         reactor's
     ///         `_initialize` failed with.
     [[nodiscard]] static std::expected<std::unique_ptr<Instance>, ExtensionError> create(
         Engine& engine,
@@ -93,7 +99,8 @@ class Instance final: private wasm::IHostContext
              std::shared_ptr<CompiledExtension const> compiled,
              IHostServices& services,
              core::platform::IClock& clock,
-             ExtensionLimits limits);
+             ExtensionLimits limits,
+             HostAdmission admission);
 
     ~Instance() override;
 
@@ -181,6 +188,9 @@ class Instance final: private wasm::IHostContext
     /// @return Why the call that just failed in the guest failed, given what the runtime reported.
     [[nodiscard]] ExtensionError guestFailure(wasm::CallFailure failure) const noexcept;
 
+    /// Reports @p error to the module's breaker if it is a death of the instance's host, the first time only.
+    void reportHostFault(ExtensionError error) noexcept;
+
     /// Records an error a host function hit: the call it faults fails with it.
     /// @return The error, for the runtime.
     [[nodiscard]] std::unexpected<ExtensionError> failHostCall(ExtensionError error) noexcept;
@@ -198,6 +208,8 @@ class Instance final: private wasm::IHostContext
     Exports _exports;
     std::unique_ptr<GuestMemory> _memory;
     std::optional<ExtensionError> _fault;
+    /// What the instance was admitted under; taken by the one report of its host's death.
+    std::optional<HostAdmission> _admission;
     std::optional<ExtensionError> _hostCallError; ///< What a host function failed with, this call.
     HostCallState _hostCall = HostCallState::Idle;
     core::platform::SteadyTimePoint _deadline; ///< When the current call's deadline expires, by _clock.

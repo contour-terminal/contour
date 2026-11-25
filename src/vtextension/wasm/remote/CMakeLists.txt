@@ -85,6 +85,7 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
         ../host/ExecutorThread_test.cpp
         ../host/HostServer_test.cpp
+        RegistryRemote_test.cpp
         RemoteBackend_test.cpp
         testing/RemoteDefaultBackend.cpp
         ${PROJECT_SOURCE_DIR}/src/vtextension/Bundled_test.cpp

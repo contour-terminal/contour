@@ -159,7 +159,8 @@ class RunningGuest
         _engine = std::move(*engine);
         // Prepared once the engine's runtime is up: a backend prepares no thread before it has one.
         _threadGuard = preparedThread(*_backend);
-        auto compiled = CompiledExtension::load(*_engine, wasm::ModuleIdentity {}, std::move(module));
+        auto compiled =
+            CompiledExtension::load(*_engine, wasm::ModuleIdentity {}, std::move(module), nullptr);
         REQUIRE(compiled.has_value());
         _compiled = std::move(*compiled);
         restart();

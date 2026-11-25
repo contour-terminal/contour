@@ -1,0 +1,172 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// The registry and its breaker over a real host: one extension's helper shared by its panes, whose death
+// counts once however many of them saw it, and which an open breaker no longer spawns.
+#include <core/platform/Clock.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <cstddef>
+#include <expected>
+#include <memory>
+#include <optional>
+#include <ranges>
+#include <thread>
+#include <utility>
+#include <vector>
+
+#include <vtextension/CompiledExtension.hpp>
+#include <vtextension/Engine.hpp>
+#include <vtextension/ExtensionError.hpp>
+#include <vtextension/ExtensionHost.hpp>
+#include <vtextension/ExtensionLimits.hpp>
+#include <vtextension/ExtensionRegistry.hpp>
+#include <vtextension/HostBreaker.hpp>
+#include <vtextension/Instance.hpp>
+#include <vtextension/testing/Harness.hpp>
+#include <vtextension/testing/TestModules.hpp>
+#include <vtextension/wasm/BackendConfig.hpp>
+#include <vtextension/wasm/DefaultBackend.hpp>
+#include <vtextension/wasm/WasmRuntime.hpp>
+#include <vtextension/wasm/host/HostServer.hpp>
+#include <vtextension/wasm/host/InProcessHost.hpp>
+#include <vtextension/wasm/testing/HostedEngine.hpp>
+
+using namespace vtextension;
+using vtextension::testing::surface;
+using vtextension::testing::toModule;
+using vtextension::wasm::host::HostServerConfig;
+using vtextension::wasm::host::InProcessHostConnector;
+
+namespace
+{
+
+/// Every pane of these tests is held to the default limits.
+constexpr auto Limits = ExtensionLimits {};
+
+/// @return A connector starting each host in this process, on an engine of its own.
+[[nodiscard]] std::shared_ptr<InProcessHostConnector> makeConnector()
+{
+    return std::make_shared<InProcessHostConnector>([] { return wasm::testing::makeHostedEngine(); },
+                                                    HostServerConfig {});
+}
+
+/// A registry and an engine whose hosts run in this process, started through a connector the test sees.
+struct RemoteRig
+{
+    /// @param hosts What starts the hosts.
+    explicit RemoteRig(std::shared_ptr<InProcessHostConnector> hosts = makeConnector()):
+        connector { std::move(hosts) }
+    {
+    }
+
+    std::shared_ptr<InProcessHostConnector> connector;
+    std::unique_ptr<wasm::IWasmBackend> backend = wasm::makeDefaultBackend(
+        wasm::BackendConfig { .helper = {}, .timeouts = {}, .connector = connector });
+    std::shared_ptr<Engine> engine = [this] {
+        auto created = Engine::create(*backend, Limits);
+        REQUIRE(created.has_value());
+        return std::move(*created);
+    }();
+    std::unique_ptr<wasm::IThreadGuard> threadGuard = vtextension::testing::preparedThread(*backend);
+    core::platform::ManualClock clock;
+    ExtensionRegistry registry { clock, Limits };
+    vtextension::testing::FakeHostServices services;
+
+    /// @return The minimal statusline module, acquired from the registry; it must load.
+    [[nodiscard]] std::shared_ptr<CompiledExtension> acquire()
+    {
+        auto compiled = registry.acquire(*engine, key(), toModule(vtextension::testing::MinimalModule));
+        REQUIRE(compiled.has_value());
+        return std::move(*compiled);
+    }
+
+    /// @return A pane's instance of @p compiled, or why there is none.
+    [[nodiscard]] std::expected<std::unique_ptr<Instance>, ExtensionError> instantiate(
+        CompiledExtension const& compiled)
+    {
+        return Instance::create(*engine, compiled, services, clock, Limits);
+    }
+
+    /// @return The key every pane of these tests names its extension by.
+    [[nodiscard]] static RegistryKey key()
+    {
+        auto const spec = ExtensionSpec { .name = "clock",
+                                          .hostId = "clock@/ext/minimal.wasm",
+                                          .module = toModule(vtextension::testing::MinimalModule),
+                                          .config = {},
+                                          .placement = Placement::Segment,
+                                          .runCommand = CommandPermission::Deny };
+        return registryKeyOf(spec, ExtensionWorld::StatusLine);
+    }
+};
+
+} // namespace
+
+TEST_CASE("one death counts once across panes", "[vtextension][remote][registry]")
+{
+    auto rig = RemoteRig {};
+    auto const compiled = rig.acquire();
+    auto panes = std::vector<std::unique_ptr<Instance>> {};
+    for ([[maybe_unused]] auto const pane: std::views::iota(0, 10))
+    {
+        auto instance = rig.instantiate(*compiled);
+        REQUIRE(instance.has_value());
+        panes.push_back(std::move(*instance));
+    }
+    REQUIRE(rig.connector->connects() == 1);
+
+    CHECK(rig.connector->terminateAll() == 1);
+    for (auto const& pane: panes)
+        CHECK(pane->render(surface(10, 1)).error() == ExtensionError::HostUnavailable);
+    CHECK(compiled->breaker()->faultCount() == 1);
+    CHECK(compiled->breaker()->state() == BreakerState::Closed);
+    CHECK(rig.connector->connects() == 1);
+
+    // One respawn, for the next pane.
+    auto const next = rig.instantiate(*compiled);
+    REQUIRE(next.has_value());
+    CHECK(rig.connector->connects() == 2);
+}
+
+TEST_CASE("breaker open fails fast without spawning", "[vtextension][remote][registry]")
+{
+    auto rig = RemoteRig {};
+    auto const compiled = rig.acquire();
+    for ([[maybe_unused]] auto const death: std::views::iota(0, 3))
+    {
+        auto const instance = rig.instantiate(*compiled);
+        REQUIRE(instance.has_value());
+        REQUIRE(rig.connector->terminateAll() == 1);
+        CHECK((*instance)->render(surface(10, 1)).error() == ExtensionError::HostUnavailable);
+    }
+    REQUIRE(compiled->breaker()->state() == BreakerState::Open);
+    auto const connects = rig.connector->connects();
+
+    CHECK(rig.instantiate(*compiled).error() == ExtensionError::HostUnavailable);
+    CHECK(rig.connector->connects() == connects);
+    CHECK(rig.connector->liveHosts() == 0);
+}
+
+TEST_CASE("registry drop races instantiate (remote)", "[vtextension][remote][registry][threading]")
+{
+    // As over the fake backend, with a real helper behind each entry: whichever thread wins, nothing is
+    // left running once every reference is gone.
+    auto const connector = makeConnector();
+    {
+        auto rig = RemoteRig { connector };
+        for ([[maybe_unused]] auto const round: std::views::iota(0, 200))
+        {
+            auto first = std::optional { rig.acquire() };
+            auto dropper = std::jthread { [&first] { first.reset(); } };
+            auto const second = rig.registry.acquire(
+                *rig.engine, RemoteRig::key(), toModule(vtextension::testing::MinimalModule));
+            REQUIRE(second);
+            auto const instance = rig.instantiate(**second);
+            CHECK(instance);
+            dropper.join();
+            CHECK(rig.registry.liveEntries() <= 1);
+        }
+    }
+    CHECK(connector->liveHosts() == 0);
+}

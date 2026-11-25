@@ -2857,6 +2857,12 @@ void ContourGuiApp::runWithoutWindow(actions::Action const& action, QScreen* anc
 
 void ContourGuiApp::onConfigurationReloaded()
 {
+#ifdef CONTOUR_EXTENSIONS
+    // A reload is what starts an extension whose host kept dying again, whether its sessions rebuild it or
+    // keep it as it was.
+    if (auto* const runtime = startedExtensionRuntime())
+        runtime->configurationReloaded();
+#endif
     refreshChromeStyle();
     // Every link states the reloaded session settings to its daemon, not only the launch's.
     for (auto const& link: _daemonLinks)

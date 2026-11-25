@@ -113,7 +113,8 @@ TEST_CASE("ExtensionHost.loadsUnderTheHostId", "[vtextension]")
     auto backend = vtextension::testing::FakeWasmBackend {};
     auto config = ExtensionHostConfig {};
     config.extensions.push_back(minimal("one"));
-    auto const prepared = prepareExtensions(std::move(config), Engine::create(backend, ExtensionLimits {}));
+    auto const prepared =
+        prepareExtensions(std::move(config), Engine::create(backend, ExtensionLimits {}), nullptr);
     REQUIRE(prepared.extensions.size() == 1);
     CHECK(prepared.extensions.front().compiled.has_value());
     CHECK(backend.loads() == 1);
@@ -174,7 +175,7 @@ namespace
     config.extensions.push_back(std::move(large));
 
     auto prepared = PreparedExtensions {};
-    auto loader = std::thread { [&] { prepared = prepareExtensions(std::move(config), engine); } };
+    auto loader = std::thread { [&] { prepared = prepareExtensions(std::move(config), engine, nullptr); } };
     loader.join();
     REQUIRE(prepared.extensions.size() == 2);
     CHECK(prepared.extensions[0].compiled.has_value());
