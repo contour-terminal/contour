@@ -380,7 +380,10 @@ class SupervisorLoop
     /// How the loop learns of a helper's end.
     enum class Watching : uint8_t
     {
-        Polled,  ///< The set refused it: the loop looks every DegradedPollPeriod, by the injected clock.
+        /// The set refused it: the loop looks every DegradedPollPeriod, by the injected clock. Once a wait on
+        /// the set failed, the loop and reapUntil() alike wait on the mailbox instead, and there the period
+        /// is real time.
+        Polled,
         Watched, ///< The set reports it.
     };
 

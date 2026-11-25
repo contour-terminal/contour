@@ -176,7 +176,7 @@ class SupervisorMailbox: public std::enable_shared_from_this<SupervisorMailbox>
     };
 
     /// Queues @p command and wakes the supervisor.
-    /// @return Whether it was queued; not once the mailbox closed.
+    /// @return Delivery::Queued if the supervisor will process it; Delivery::Dropped once the mailbox closed.
     [[nodiscard]] Delivery post(Command command) noexcept;
 
     /// @return Every command queued, in order; the queue empty.
