@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <orchestrator/core/Engine.hpp>
+#include <orchestrator/core/NavKeys.hpp>
 #include <orchestrator/core/QuickReplies.hpp>
 #include <orchestrator/view/DispatchForm.hpp>
 #include <orchestrator/view/Fleet.hpp>
@@ -194,6 +195,8 @@ enum class KeyCommand : uint8_t
     RepoNext,       ///< The Work view: step the repository chip on.
     RowMenu,        ///< The Work view: open the row menu on the selected item.
     FoldOthers,     ///< The Work view: fold every group shown open but the selected line's.
+    HalfPageUp,     ///< Move a list's selection, or scroll the Focus's tab, up by half a page.
+    HalfPageDown,   ///< Move a list's selection, or scroll the Focus's tab, down by half a page.
     Reply1,         ///< Answer the selected agent that asks with the quick reply on `1`.
     Reply2,         ///< … on `2`.
     Reply3,         ///< … on `3`.
@@ -230,12 +233,14 @@ struct KeyRow
     KeyCommand command = KeyCommand::Up; ///< What it does.
 };
 
-/// @return Every key the dashboard acts on; the first row of a command names its key (keyNameOf()).
+/// @return Every key the dashboard binds to a command; the first row of a command names its key
+///         (keyNameOf()). The navigation keys are not among them: the keys in force (NavKeys) map those to
+///         the commands listCommandOf() names.
 [[nodiscard]] std::span<KeyRow const> keyRows() noexcept;
 
-/// @return The keys the Work view acts on; the first row of a command names its key (workKeyNameOf()). None
-///         is added to dashboardKeys(): that would refuse today's configurations with a task keyed `w`, `s`
-///         or `o`.
+/// @return The keys the Work view binds to a command; the first row of a command names its key
+///         (workKeyNameOf()). None is added to dashboardKeys(): that would refuse today's configurations with
+///         a task keyed `w`, `s` or `o`. The navigation keys are not among them, as for keyRows().
 [[nodiscard]] std::span<KeyRow const> workKeyRows() noexcept;
 
 /// @param key A key the terminal sent.
@@ -244,18 +249,22 @@ struct KeyRow
 [[nodiscard]] std::optional<KeyCommand> workCommandFor(core::tui::KeyEvent const& key) noexcept;
 
 /// @param command A command.
-/// @return How the Work view's bar names its key, such as `z` or `←`; empty for a command no key of the Work
+/// @param keys The navigation keys in force: they name a command a navigation action stands for
+///        (navKeyLabel()).
+/// @return How the Work view's bar names its key, such as `z` or `→`; empty for a command no key of the Work
 ///         view is bound to.
-[[nodiscard]] std::string_view workKeyNameOf(KeyCommand command) noexcept;
+[[nodiscard]] std::string workKeyNameOf(KeyCommand command, NavKeys const& keys);
 
 /// @param key A key the terminal sent.
 /// @return What it does; std::nullopt for a key no row names, or one with Alt.
 [[nodiscard]] std::optional<KeyCommand> commandFor(core::tui::KeyEvent const& key) noexcept;
 
 /// @param command A command.
+/// @param keys The navigation keys in force: they name a command a navigation action stands for
+///        (navKeyLabel()).
 /// @return How the bar and the palette name its key, such as `⏎`, `e`, `del` or `^k`; empty for a command no
 ///         key is bound to.
-[[nodiscard]] std::string_view keyNameOf(KeyCommand command) noexcept;
+[[nodiscard]] std::string keyNameOf(KeyCommand command, NavKeys const& keys);
 
 /// @param command A command.
 /// @return Whether it acts on the selected row only where the row offers it (Row::offers): the Focus tabs and
@@ -394,6 +403,7 @@ struct Interaction
     std::optional<StartDialogState> startDialog = {};
     /// The `n` box, while it is open: it takes every key. Opened from either view.
     std::optional<TaskBoxState> taskBox = {};
+    std::string pendingKey = {}; ///< The first key of a sequence, until the next key.
     [[nodiscard]] bool operator==(Interaction const&) const = default;
 };
 
@@ -415,6 +425,7 @@ struct KeyContext
     FocusTab tab = FocusTab::Board; ///< The Focus tab shown for the selected row (activeTabOf()).
     std::size_t lines = 0;          ///< How many lines the Focus's tab has, as last drawn.
     std::size_t rows = 0;           ///< How many of them it showed at once.
+    std::size_t fleetRows = 0;      ///< How many Fleet rows were shown, as last drawn.
     uint32_t pages = 0;             ///< How many pages the shown transcript has, as last read; 0: unknown.
     uint64_t nowMonoMs = 0;         ///< Now, in the engine's monotonic milliseconds: when a reply is sent.
 };
@@ -544,14 +555,18 @@ enum class FilterInput : uint8_t
                                          std::string& filter);
 
 /// Applies one key: to the palette while it is open (applyPaletteKey()), to the timeline while it is shown
-/// (esc and ⏎ close it, `^K` opens the palette), to the message box while it has the keys, to the filter
-/// while it is typed, to a pending end's confirmation, else by the key table. While an end waits for its
-/// confirmation, any key but `e` on the same run keeps the run and does nothing else.
+/// (close, esc and ⏎ close it, `^K` opens the palette), to the message box while it has the keys, to the
+/// filter while it is typed, to a pending end's confirmation, else as @p nav's list command (listCommandOf())
+/// or by the key table. While an end waits for its confirmation, any key but `e` on the same run keeps the
+/// run and does nothing else. A key the message box or the filter passes on (messagePassKeys(), `tab`, an
+/// arrow) is resolved again as if nothing were typed, and acts so.
 /// @param key A key the terminal sent.
+/// @param nav What @p key resolved to (navActionOf()) in navContextOf()'s context; std::nullopt: nothing.
 /// @param interaction Where the user is; changed by the key.
 /// @param context The selected row, the engine and the Focus tab as last drawn.
 /// @return What the engine is asked, if anything.
 [[nodiscard]] std::optional<UiAction> applyKey(core::tui::KeyEvent const& key,
+                                               std::optional<NavAction> nav,
                                                Interaction& interaction,
                                                KeyContext const& context);
 

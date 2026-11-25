@@ -27,7 +27,7 @@ namespace orchestrator::view
 struct PaletteEntry
 {
     KeyCommand command = KeyCommand::Open; ///< What it runs: what its key would.
-    std::string_view key = {};             ///< Its key, `⏎` for the primary action; empty: palette only.
+    std::string key = {};                  ///< Its key, `⏎` for the primary action; empty: palette only.
     std::string_view label = {};           ///< What it is called, for the selected row.
     std::string reason = {};               ///< Why it does not apply now, drawn dimmed; empty: it applies.
     [[nodiscard]] bool operator==(PaletteEntry const&) const = default;

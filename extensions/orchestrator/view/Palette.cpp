@@ -21,6 +21,7 @@
 #include <orchestrator/core/Timeline.hpp>
 #include <orchestrator/core/Utf8.hpp>
 #include <orchestrator/view/Actions.hpp>
+#include <orchestrator/view/NavInput.hpp>
 #include <orchestrator/view/TextEdit.hpp>
 #include <orchestrator/view/Theme.hpp>
 
@@ -47,6 +48,7 @@ namespace
 std::vector<PaletteEntry> paletteEntries(Row const* row, Engine const* engine)
 {
     auto entries = std::vector<PaletteEntry> {};
+    auto const& keys = keysInForce(engine);
     auto const listed = [&](KeyCommand command) {
         return std::ranges::contains(entries, command, &PaletteEntry::command);
     };
@@ -54,21 +56,22 @@ std::vector<PaletteEntry> paletteEntries(Row const* row, Engine const* engine)
     auto const state = row != nullptr ? row->rowState : RowState::None;
     for (auto const [rank, action]: std::views::enumerate(actionsFor(state)))
         if (whyNot(row, action.command, engine).empty())
-            entries.push_back(
-                PaletteEntry { .command = action.command,
-                               .key = rank == 0 ? keyNameOf(KeyCommand::Enter) : keyNameOf(action.command),
-                               .label = actionLabel(row, action) });
+            entries.push_back(PaletteEntry { .command = action.command,
+                                             .key = rank == 0 ? keyNameOf(KeyCommand::Enter, keys)
+                                                              : keyNameOf(action.command, keys),
+                                             .label = actionLabel(row, action) });
     // The global commands that apply, then everything else, with the reason it does not.
     for (auto const& command: commandRows())
         if (command.scope == CommandScope::Global && !listed(command.command)
             && whyNot(row, command.command, engine).empty())
-            entries.push_back(PaletteEntry {
-                .command = command.command, .key = keyNameOf(command.command), .label = command.label });
+            entries.push_back(PaletteEntry { .command = command.command,
+                                             .key = keyNameOf(command.command, keys),
+                                             .label = command.label });
     // A reply is listed only where it answers: nine dimmed digits would bury the rest.
     for (auto const& command: commandRows())
         if (!listed(command.command) && !replyDigitOf(command.command))
             entries.push_back(PaletteEntry { .command = command.command,
-                                             .key = keyNameOf(command.command),
+                                             .key = keyNameOf(command.command, keys),
                                              .label = command.label,
                                              .reason = whyNot(row, command.command, engine) });
     return entries;

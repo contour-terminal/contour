@@ -8,10 +8,12 @@
 #include <array>
 #include <cstddef>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
 #include <orchestrator/view/Keys.hpp>
+#include <orchestrator/view/NavInput.hpp>
 #include <orchestrator/view/Sections.hpp>
 #include <orchestrator/view/ViewFixtures.hpp>
 
@@ -59,6 +61,20 @@ struct LiveRun
     }
 };
 
+/// Types @p keys as the dashboard does: each resolved by the keys in force (the engine's, else the defaults),
+/// a sequence's first key held in Interaction::pendingKey until the next.
+void typeKeys(std::span<KeyEvent const> keys, Interaction& interaction, KeyContext const& context)
+{
+    for (auto const& key: keys)
+    {
+        auto const nav = navActionOf(
+            key, navContextOf(interaction, context), keysInForce(context.engine), interaction.pendingKey);
+        if (!nav && nav.error() == NavMiss::Pending)
+            continue;
+        static_cast<void>(applyKey(key, nav ? std::optional { *nav } : std::nullopt, interaction, context));
+    }
+}
+
 } // namespace
 
 TEST_CASE("keyRows: every row's command is dispatched", "[orchestrator][view][keys]")
@@ -86,10 +102,11 @@ TEST_CASE("commandFor names keys by the table", "[orchestrator][view][keys]")
         std::optional<KeyCommand> expected = std::nullopt;
     };
     auto const cases = std::array {
-        Case { .key = special(KeyCode::Up), .expected = KeyCommand::Up },
-        Case { .key = character(U'k'), .expected = KeyCommand::Up },
-        Case { .key = character(U'j'), .expected = KeyCommand::Down },
-        Case { .key = special(KeyCode::End), .expected = KeyCommand::End },
+        // The navigation keys are the keys in force's (listCommandOf()), not the table's.
+        Case { .key = special(KeyCode::Up), .expected = std::nullopt },
+        Case { .key = character(U'k'), .expected = std::nullopt },
+        Case { .key = character(U'j'), .expected = std::nullopt },
+        Case { .key = special(KeyCode::End), .expected = std::nullopt },
         Case { .key = special(KeyCode::Escape), .expected = KeyCommand::Back },
         Case { .key = special(KeyCode::Tab), .expected = KeyCommand::Tab },
         Case { .key = special(KeyCode::Delete), .expected = KeyCommand::Dismiss },
@@ -156,10 +173,10 @@ TEST_CASE("Del while typing a filter edits nothing and dismisses nothing", "[orc
                                 .rowState = RowState::Finished };
     auto interaction = Interaction { .filtering = Filtering::Typing, .filter = "pr" };
     auto const context = KeyContext { .selectable = 1, .selected = &finished };
-    CHECK(applyKey(special(KeyCode::Delete), interaction, context) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::Delete), interaction, context) == std::nullopt);
     CHECK(interaction == Interaction { .filtering = Filtering::Typing, .filter = "pr" });
     interaction.filtering = Filtering::Off;
-    CHECK(applyKey(special(KeyCode::Delete), interaction, context)
+    CHECK(applyResolvedKey(special(KeyCode::Delete), interaction, context)
           == std::optional<UiAction> { DismissAction { .run = std::string { RunId } } });
 }
 
@@ -172,9 +189,9 @@ TEST_CASE("ending a run asks once", "[orchestrator][view][keys]")
     auto const context = KeyContext { .selectable = 2, .selected = &agent };
 
     auto interaction = Interaction {};
-    CHECK(applyKey(character(U'e'), interaction, context) == std::nullopt);
+    CHECK(applyResolvedKey(character(U'e'), interaction, context) == std::nullopt);
     CHECK(interaction.pendingEnd == RunId);
-    CHECK(applyKey(character(U'e'), interaction, context)
+    CHECK(applyResolvedKey(character(U'e'), interaction, context)
           == std::optional<UiAction> { EndRunAction { .run = std::string { RunId } } });
     CHECK(interaction == Interaction {});
 
@@ -183,8 +200,8 @@ TEST_CASE("ending a run asks once", "[orchestrator][view][keys]")
     {
         CAPTURE(static_cast<uint32_t>(key.key));
         auto asked = Interaction {};
-        CHECK(applyKey(character(U'e'), asked, context) == std::nullopt);
-        CHECK(applyKey(key, asked, context) == std::nullopt);
+        CHECK(applyResolvedKey(character(U'e'), asked, context) == std::nullopt);
+        CHECK(applyResolvedKey(key, asked, context) == std::nullopt);
         CHECK(asked == Interaction {});
     }
 }
@@ -194,13 +211,13 @@ TEST_CASE("Enter and Tab give a live run's Focus the keys; Esc and Tab give them
 {
     auto const live = LiveRun {};
     auto interaction = Interaction {};
-    CHECK(applyKey(special(KeyCode::Enter), interaction, live.context()) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::Enter), interaction, live.context()) == std::nullopt);
     CHECK(interaction.place == Place::Focus);
-    CHECK(applyKey(special(KeyCode::Escape), interaction, live.context()) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::Escape), interaction, live.context()) == std::nullopt);
     CHECK(interaction.place == Place::Fleet);
-    CHECK(applyKey(special(KeyCode::Tab), interaction, live.context()) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::Tab), interaction, live.context()) == std::nullopt);
     CHECK(interaction.place == Place::Focus);
-    CHECK(applyKey(special(KeyCode::Tab), interaction, live.context()) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::Tab), interaction, live.context()) == std::nullopt);
     CHECK(interaction.place == Place::Fleet);
 }
 
@@ -216,13 +233,13 @@ TEST_CASE("in the message box no letter is a command: every printable key types"
             continue;
         CAPTURE(row.key);
         auto const key = static_cast<char32_t>(row.key.front());
-        CHECK(applyKey(character(key), interaction, live.context()) == std::nullopt);
+        CHECK(applyResolvedKey(character(key), interaction, live.context()) == std::nullopt);
         typed += row.key;
     }
     // Digits type too: nothing answers while the box has the keys.
     for (auto const digit: { U'1', U'2', U'3' })
     {
-        CHECK(applyKey(character(digit), interaction, live.context()) == std::nullopt);
+        CHECK(applyResolvedKey(character(digit), interaction, live.context()) == std::nullopt);
         typed += static_cast<char>(digit);
     }
     CHECK(interaction.place == Place::Focus);
@@ -237,19 +254,20 @@ TEST_CASE("Esc keeps the draft and sends nothing; Enter sends it and the keys re
     auto interaction = Interaction { .place = Place::Focus };
     for (auto const c: U"rebase")
         if (c != U'\0')
-            CHECK(applyKey(character(c), interaction, live.context()) == std::nullopt);
-    CHECK(applyKey(special(KeyCode::Enter, Modifier::Alt), interaction, live.context()) == std::nullopt);
-    CHECK(applyKey(character(U'x'), interaction, live.context()) == std::nullopt);
+            CHECK(applyResolvedKey(character(c), interaction, live.context()) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::Enter, Modifier::Alt), interaction, live.context())
+          == std::nullopt);
+    CHECK(applyResolvedKey(character(U'x'), interaction, live.context()) == std::nullopt);
     CHECK(interaction.drafts.at(std::string { RunId }) == "rebase\nx");
 
-    CHECK(applyKey(special(KeyCode::Escape), interaction, live.context()) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::Escape), interaction, live.context()) == std::nullopt);
     CHECK(interaction.place == Place::Fleet);
     CHECK(interaction.drafts.at(std::string { RunId }) == "rebase\nx");
 
     // Back in the box, the draft is there; Enter sends it.
-    CHECK(applyKey(special(KeyCode::Enter), interaction, live.context()) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::Enter), interaction, live.context()) == std::nullopt);
     REQUIRE(interaction.place == Place::Focus);
-    CHECK(applyKey(special(KeyCode::Enter), interaction, live.context())
+    CHECK(applyResolvedKey(special(KeyCode::Enter), interaction, live.context())
           == std::optional<UiAction> {
               SendMessageAction { .run = std::string { RunId }, .text = "rebase\nx" } });
     CHECK(interaction.place == Place::Fleet);
@@ -263,7 +281,7 @@ TEST_CASE("an empty message box sends nothing", "[orchestrator][view][keys]")
 {
     auto const live = LiveRun {};
     auto interaction = Interaction { .place = Place::Focus };
-    CHECK(applyKey(special(KeyCode::Enter), interaction, live.context()) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::Enter), interaction, live.context()) == std::nullopt);
     CHECK(interaction.place == Place::Focus);
 }
 
@@ -311,24 +329,24 @@ TEST_CASE("the transcript follows the agent until it is scrolled up, and end ret
     auto interaction = Interaction { .place = Place::Focus };
     REQUIRE(interaction.follow == Follow::Live);
 
-    CHECK(applyKey(special(KeyCode::PageUp), interaction, context) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::PageUp), interaction, context) == std::nullopt);
     CHECK(interaction.follow == Follow::Away);
     CHECK(interaction.scroll == 80 - 19);
 
     // Scrolled back down to the end, it follows again.
-    CHECK(applyKey(special(KeyCode::PageDown), interaction, context) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::PageDown), interaction, context) == std::nullopt);
     CHECK(interaction.follow == Follow::Live);
 
     // From the Fleet, too: pgup scrolls the Focus's tab.
     interaction.place = Place::Fleet;
-    CHECK(applyKey(special(KeyCode::PageUp), interaction, context) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::PageUp), interaction, context) == std::nullopt);
     CHECK(interaction.follow == Follow::Away);
-    CHECK(applyKey(character(U'k'), interaction, context)
+    CHECK(applyResolvedKey(character(U'k'), interaction, context)
           == std::nullopt); // moves the selection, not the tab
     CHECK(interaction.follow == Follow::Away);
 
     interaction.place = Place::Focus;
-    CHECK(applyKey(special(KeyCode::End), interaction, context) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::End), interaction, context) == std::nullopt);
     CHECK(interaction.follow == Follow::Live);
     CHECK(interaction.scroll == 0);
 }
@@ -340,10 +358,10 @@ TEST_CASE("left turns the transcript to an earlier page, which stops following; 
     auto context = live.context(FocusTab::Transcript);
     context.pages = 3;
     auto interaction = Interaction { .place = Place::Focus };
-    CHECK(applyKey(special(KeyCode::Left), interaction, context) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::Left), interaction, context) == std::nullopt);
     CHECK(interaction.page == 2);
     CHECK(interaction.follow == Follow::Away);
-    CHECK(applyKey(special(KeyCode::Right), interaction, context) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::Right), interaction, context) == std::nullopt);
     CHECK(interaction.page == 0);
     CHECK(interaction.follow == Follow::Live);
 }
@@ -360,7 +378,7 @@ TEST_CASE(
     auto const press = [&](KeyCode code, FocusTab tab, uint32_t pages = 0) {
         auto context = live.context(tab);
         context.pages = pages;
-        CHECK(applyKey(special(code), interaction, context) == std::nullopt);
+        CHECK(applyResolvedKey(special(code), interaction, context) == std::nullopt);
     };
 
     // The message box has the keys and keeps them: the arrows are not text.
@@ -392,19 +410,20 @@ TEST_CASE("the message box takes the line-editing keys", "[orchestrator][view][k
     auto interaction = Interaction { .place = Place::Focus };
     for (auto const c: U"fix the flaky test")
         if (c != U'\0')
-            CHECK(applyKey(character(c), interaction, live.context()) == std::nullopt);
-    CHECK(applyKey(special(KeyCode::Backspace, Modifier::Alt), interaction, live.context()) == std::nullopt);
+            CHECK(applyResolvedKey(character(c), interaction, live.context()) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::Backspace, Modifier::Alt), interaction, live.context())
+          == std::nullopt);
     CHECK(interaction.place == Place::Focus);
     CHECK(interaction.drafts.at(std::string { RunId }) == "fix the flaky ");
     auto const ctrlW = core::tui::KeyEvent { .key = static_cast<KeyCode>(U'w'),
                                              .modifiers = Modifier::Ctrl,
                                              .codepoint = U'w' };
-    CHECK(applyKey(ctrlW, interaction, live.context()) == std::nullopt);
+    CHECK(applyResolvedKey(ctrlW, interaction, live.context()) == std::nullopt);
     CHECK(interaction.drafts.at(std::string { RunId }) == "fix the ");
     auto const ctrlU = core::tui::KeyEvent { .key = static_cast<KeyCode>(U'u'),
                                              .modifiers = Modifier::Ctrl,
                                              .codepoint = U'u' };
-    CHECK(applyKey(ctrlU, interaction, live.context()) == std::nullopt);
+    CHECK(applyResolvedKey(ctrlU, interaction, live.context()) == std::nullopt);
     // A draft emptied is no draft.
     CHECK_FALSE(interaction.drafts.contains(std::string { RunId }));
     CHECK(interaction.place == Place::Focus);
@@ -415,7 +434,7 @@ TEST_CASE("o asks to open the run's link", "[orchestrator][view][keys]")
     auto live = LiveRun {};
     live.row.offers.push_back(KeyCommand::OpenLink);
     auto interaction = Interaction {};
-    CHECK(applyKey(character(U'o'), interaction, live.context())
+    CHECK(applyResolvedKey(character(U'o'), interaction, live.context())
           == UiAction {
               OpenUrlAction { .url = "https://github.com/contour-terminal/contour/pull/1", .label = "#1" } });
 }
@@ -431,4 +450,103 @@ TEST_CASE("chipRepository: the chip's repository, empty for every one or one gon
     CHECK(chipOn(1) == "contour");
     CHECK(chipOn(2) == "other");
     CHECK(chipOn(3).empty());
+}
+
+TEST_CASE("G selects the Fleet's last row, gg its first", "[orchestrator][view][keys]")
+{
+    auto interaction = Interaction {};
+    auto const context = KeyContext { .selectable = 5 };
+    typeKeys(std::array { character(U'G', Modifier::Shift) }, interaction, context);
+    CHECK(interaction.selected == 4);
+    typeKeys(std::array { character(U'g') }, interaction, context);
+    CHECK(interaction.pendingKey == "g");
+    CHECK(interaction.selected == 4);
+    typeKeys(std::array { character(U'g') }, interaction, context);
+    CHECK(interaction.pendingKey.empty());
+    CHECK(interaction.selected == 0);
+}
+
+TEST_CASE("Ctrl+D and Ctrl+U move the Fleet's selection by half the rows shown", "[orchestrator][view][keys]")
+{
+    auto interaction = Interaction {};
+    auto const context = KeyContext { .selectable = 20, .fleetRows = 10 };
+    typeKeys(std::array { character(U'd', Modifier::Ctrl) }, interaction, context);
+    CHECK(interaction.selected == 5);
+    typeKeys(std::array { character(U'u', Modifier::Ctrl) }, interaction, context);
+    CHECK(interaction.selected == 0);
+}
+
+TEST_CASE("in the Focus without a message box, j scrolls a line and Ctrl+D half a page",
+          "[orchestrator][view][keys]")
+{
+    auto const live = LiveRun {};
+    // No engine: the run has no message box, so the Focus's keys move.
+    auto context = KeyContext {
+        .selectable = 2, .selected = &live.row, .tab = FocusTab::Board, .lines = 100, .rows = 20
+    };
+    auto interaction = Interaction { .place = Place::Focus };
+    typeKeys(std::array { character(U'j') }, interaction, context);
+    CHECK(interaction.scroll == 1);
+    typeKeys(std::array { character(U'd', Modifier::Ctrl) }, interaction, context);
+    CHECK(interaction.scroll == 11);
+    typeKeys(std::array { character(U'k') }, interaction, context);
+    CHECK(interaction.scroll == 10);
+    CHECK(interaction.place == Place::Focus);
+}
+
+TEST_CASE("h and l turn the transcript's pages, as left and right do", "[orchestrator][view][keys]")
+{
+    auto const live = LiveRun {};
+    auto context =
+        KeyContext { .selectable = 2, .selected = &live.row, .tab = FocusTab::Transcript, .pages = 3 };
+    auto interaction = Interaction { .place = Place::Focus };
+    typeKeys(std::array { character(U'h') }, interaction, context);
+    CHECK(interaction.page == 2);
+    CHECK(interaction.follow == Follow::Away);
+    typeKeys(std::array { character(U'l') }, interaction, context);
+    CHECK(interaction.page == 0);
+    CHECK(interaction.follow == Follow::Live);
+}
+
+TEST_CASE("q closes the timeline, and does nothing in the Fleet with nothing open",
+          "[orchestrator][view][keys]")
+{
+    auto const context = KeyContext { .selectable = 3 };
+    auto interaction = Interaction { .overlay = Overlay::Timeline };
+    typeKeys(std::array { character(U'q') }, interaction, context);
+    CHECK(interaction.overlay == Overlay::None);
+    auto const before = Interaction { .selected = 1 };
+    interaction = before;
+    typeKeys(std::array { character(U'q') }, interaction, context);
+    CHECK(interaction == before);
+}
+
+TEST_CASE("with keys.vim false, j does nothing in the Fleet and the arrows still move",
+          "[orchestrator][view][keys]")
+{
+    auto const engine = bootEngine(World { .keys = R"({ "vim": false })" });
+    REQUIRE(engine.config() != nullptr);
+    auto const context = KeyContext { .selectable = 3, .engine = &engine };
+    auto interaction = Interaction {};
+    typeKeys(std::array { character(U'j') }, interaction, context);
+    CHECK(interaction.selected == 0);
+    typeKeys(std::array { special(KeyCode::Down) }, interaction, context);
+    CHECK(interaction.selected == 1);
+}
+
+TEST_CASE("a task keyed as a navigation key leaves the key to navigation", "[orchestrator][view][keys]")
+{
+    // A task's key starts nothing in a list (an item's agent starts from the Work view), so a navigation key
+    // that equals it moves: navigation wins.
+    auto const engine =
+        bootEngine(World { .configJson = R"({ "worktree_root": "~/worktrees", "models": ["sonnet"],
+  "repos": [ { "name": "contour", "path": "~/projects/contour", "forge": "github" } ],
+  "tasks": [ { "id": "last", "key": "G", "label": "last", "applies_to": "pr", "model": "sonnet",
+               "prompt": "/contour-workflows:fix-ci {url}" } ] })" });
+    REQUIRE(engine.config() != nullptr);
+    REQUIRE(engine.config()->tasks().front().key == 'G');
+    auto const context = KeyContext { .selectable = 3, .engine = &engine };
+    auto interaction = Interaction {};
+    typeKeys(std::array { character(U'G', Modifier::Shift) }, interaction, context);
+    CHECK(interaction.selected == 2);
 }

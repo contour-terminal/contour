@@ -12,6 +12,8 @@
 #include <string_view>
 #include <vector>
 
+#include <orchestrator/view/NavInput.hpp>
+
 using namespace std::string_view_literals;
 
 namespace orchestrator::view
@@ -20,6 +22,14 @@ namespace orchestrator::view
 namespace
 {
     // {{{ the commands
+
+    /// @return How the Agents view's bar names @p command's key, for a command the key table binds: no
+    ///         navigation action stands for the commands actionHints() and barText() name, so the keys in
+    ///         force do not change them, and those take no engine.
+    [[nodiscard]] std::string commandKeyName(KeyCommand command)
+    {
+        return keyNameOf(command, keysInForce(nullptr));
+    }
 
     /// Why the `n` box does not open.
     [[nodiscard]] std::string_view whyNoTaskBox(Engine const* engine)
@@ -387,7 +397,7 @@ std::string refusalNotice(Row const* row, KeyCommand command, Engine const* engi
     auto const why = whyNot(row, command, engine);
     if (why.empty())
         return {};
-    auto const key = keyNameOf(command);
+    auto const key = keyNameOf(command, keysInForce(engine));
     return key.empty() ? std::format("{} · {}", labelOf(command), why)
                        : std::format("{} {} · {}", key, labelOf(command), why);
 }
@@ -402,7 +412,7 @@ std::vector<std::string> actionHints(Row const* row)
     for (auto const [rank, action]: std::views::enumerate(actionsFor(stateOf(row))))
     {
         // The primary action is `⏎`'s; any other is hinted only with a key of its own.
-        auto const key = rank == 0 ? keyNameOf(KeyCommand::Enter) : keyNameOf(action.command);
+        auto const key = rank == 0 ? commandKeyName(KeyCommand::Enter) : commandKeyName(action.command);
         // A global command a state lists, such as `+ new task`'s, is hinted wherever the bar is drawn.
         auto const isRowScoped = commandRowOf(action.command)->scope == CommandScope::Row;
         if (key.empty() || action.hinted == Hinted::PaletteOnly
@@ -415,7 +425,7 @@ std::vector<std::string> actionHints(Row const* row)
 
 std::string barText(Row const* row, Place place, MessageKeys keys, int columns)
 {
-    auto const palette = std::format("{} all actions", keyNameOf(KeyCommand::Palette));
+    auto const palette = std::format("{} all actions", commandKeyName(KeyCommand::Palette));
     auto hints = std::vector<std::string> {};
     auto const joined = [&](int room) {
         auto const views =
@@ -431,9 +441,10 @@ std::string barText(Row const* row, Place place, MessageKeys keys, int columns)
     }
     hints = actionHints(row);
     if (place == Place::Focus)
-        hints.push_back(std::format("{} back", keyNameOf(KeyCommand::Back)));
+        hints.push_back(std::format("{} back", commandKeyName(KeyCommand::Back)));
     if (!std::ranges::contains(actionsFor(stateOf(row)), KeyCommand::NewTask, &ActionRow::command))
-        hints.push_back(std::format("{} {}", keyNameOf(KeyCommand::NewTask), labelOf(KeyCommand::NewTask)));
+        hints.push_back(
+            std::format("{} {}", commandKeyName(KeyCommand::NewTask), labelOf(KeyCommand::NewTask)));
     // The palette always shows: whatever was cut is in it.
     auto const line = joined(columns - columnsOf(palette) - columnsOf(HintSeparator));
     if (line.empty())
@@ -441,10 +452,10 @@ std::string barText(Row const* row, Place place, MessageKeys keys, int columns)
     return std::format("{}{}{}", line, HintSeparator, palette);
 }
 
-std::vector<BarHint> workBarHints(std::optional<WorkLineKind> selected, int columns)
+std::vector<BarHint> workBarHints(std::optional<WorkLineKind> selected, int columns, NavKeys const& keys)
 {
     auto palette = BarHint { .command = KeyCommand::Palette,
-                             .text = std::format("{} all actions", keyNameOf(KeyCommand::Palette)) };
+                             .text = std::format("{} all actions", keyNameOf(KeyCommand::Palette, keys)) };
     // The palette always shows: whatever was cut is in it. The hints before it take what is left, whole.
     auto const room = columns - columnsOf(palette.text) - columnsOf(HintSeparator);
     auto hints = std::vector<BarHint> {};
@@ -453,7 +464,7 @@ std::vector<BarHint> workBarHints(std::optional<WorkLineKind> selected, int colu
     {
         if (!isHintedOn(hint.on, selected))
             continue;
-        auto text = std::format("{} {}", workKeyNameOf(hint.command), hint.label);
+        auto text = std::format("{} {}", workKeyNameOf(hint.command, keys), hint.label);
         auto const next = used + (hints.empty() ? 0 : columnsOf(HintSeparator)) + columnsOf(text);
         if (next > room)
             break;
@@ -466,10 +477,10 @@ std::vector<BarHint> workBarHints(std::optional<WorkLineKind> selected, int colu
     return hints;
 }
 
-std::string workBarText(std::optional<WorkLineKind> selected, int columns)
+std::string workBarText(std::optional<WorkLineKind> selected, int columns, NavKeys const& keys)
 {
     auto line = std::string {};
-    for (auto const& hint: workBarHints(selected, columns))
+    for (auto const& hint: workBarHints(selected, columns, keys))
         line += line.empty() ? hint.text : std::format("{}{}", HintSeparator, hint.text);
     return line;
 }

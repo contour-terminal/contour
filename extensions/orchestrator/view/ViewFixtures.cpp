@@ -19,10 +19,25 @@
 #include <vector>
 
 #include <orchestrator/core/Fixtures.hpp>
+#include <orchestrator/view/NavInput.hpp>
 #include <orchestrator/view/Theme.hpp>
 
 namespace orchestrator::view::test
 {
+
+std::optional<NavAction> navFor(core::tui::KeyEvent const& key, NavContext context)
+{
+    auto pending = std::string {};
+    auto const action = navActionOf(key, context, NavKeys::defaults(VimKeys::On), pending);
+    return action ? std::optional { *action } : std::nullopt;
+}
+
+std::optional<UiAction> applyResolvedKey(core::tui::KeyEvent const& key,
+                                         Interaction& interaction,
+                                         KeyContext const& context)
+{
+    return applyKey(key, navFor(key, navContextOf(interaction, context)), interaction, context);
+}
 
 namespace
 {
@@ -37,9 +52,10 @@ namespace
     {{ "id": "fix_ci", "key": "f", "label": "fix CI", "applies_to": "pr", "model": "sonnet",
        "prompt": "/contour-workflows:fix-ci {{url}}" }},
     {{ "id": "issue", "key": "w", "label": "work on issue", "applies_to": "issue", "model": "opus",
-       "prompt": "/contour-workflows:work-issue {{url}}" }} ]{} }})",
+       "prompt": "/contour-workflows:work-issue {{url}}" }} ]{}{} }})",
                            world.repos,
-                           world.work.empty() ? std::string {} : std::format(R"(, "work": {})", world.work));
+                           world.work.empty() ? std::string {} : std::format(R"(, "work": {})", world.work),
+                           world.keys.empty() ? std::string {} : std::format(R"(, "keys": {})", world.keys));
     }
 
     [[nodiscard]] ProcessOutcome ok(std::string text)

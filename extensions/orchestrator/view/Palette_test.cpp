@@ -145,7 +145,7 @@ TEST_CASE("running a command from the palette equals pressing its key", "[orches
             continue;
         CAPTURE(entry.label);
         auto pressed = Interaction {};
-        auto const byKey = applyKey(eventOf(entry.key), pressed, live.context());
+        auto const byKey = applyResolvedKey(eventOf(entry.key), pressed, live.context());
         auto chosen =
             Interaction { .palette = PaletteState { .highlighted = static_cast<std::size_t>(index) } };
         auto const byPalette = applyPaletteKey(special(KeyCode::Enter), chosen, live.context());
@@ -159,35 +159,35 @@ TEST_CASE("the palette's keys: type, move, run; esc closes it and keeps the quer
 {
     auto const live = LiveRun {};
     auto interaction = Interaction {};
-    CHECK(applyKey(character(U'k', Modifier::Ctrl), interaction, live.context()) == std::nullopt);
+    CHECK(applyResolvedKey(character(U'k', Modifier::Ctrl), interaction, live.context()) == std::nullopt);
     REQUIRE(interaction.palette.has_value());
     // Every printable key types: `e` is no command here.
     for (auto const c: U"enx")
         if (c != U'\0')
-            CHECK(applyKey(character(c), interaction, live.context()) == std::nullopt);
+            CHECK(applyResolvedKey(character(c), interaction, live.context()) == std::nullopt);
     CHECK(interaction.palette->query == "enx");
     CHECK(interaction.pendingEnd.empty());
-    CHECK(applyKey(special(KeyCode::Backspace), interaction, live.context()) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::Backspace), interaction, live.context()) == std::nullopt);
     CHECK(interaction.palette->query == "en");
-    CHECK(applyKey(special(KeyCode::Down), interaction, live.context()) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::Down), interaction, live.context()) == std::nullopt);
     CHECK(interaction.palette->highlighted == 1);
 
-    CHECK(applyKey(special(KeyCode::Escape), interaction, live.context()) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::Escape), interaction, live.context()) == std::nullopt);
     CHECK_FALSE(interaction.palette.has_value());
     CHECK(interaction.paletteQuery == "en");
     // `?` opens it again, on the same query.
-    CHECK(applyKey(character(U'?'), interaction, live.context()) == std::nullopt);
+    CHECK(applyResolvedKey(character(U'?'), interaction, live.context()) == std::nullopt);
     REQUIRE(interaction.palette.has_value());
     CHECK(interaction.palette->query == "en");
     CHECK(interaction.paletteQuery.empty());
 
     // A key with Alt is an esc read with the next key: it closes it too.
-    CHECK(applyKey(character(U'j', Modifier::Alt), interaction, live.context()) == std::nullopt);
+    CHECK(applyResolvedKey(character(U'j', Modifier::Alt), interaction, live.context()) == std::nullopt);
     CHECK_FALSE(interaction.palette.has_value());
 
     // ⏎ runs the highlighted command: `end` asks once, as `e` does.
     interaction = Interaction { .palette = PaletteState { .query = "end" } };
-    CHECK(applyKey(special(KeyCode::Enter), interaction, live.context()) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::Enter), interaction, live.context()) == std::nullopt);
     CHECK_FALSE(interaction.palette.has_value());
     CHECK(interaction.pendingEnd == RunId);
 }
@@ -206,7 +206,7 @@ TEST_CASE("a dimmed command run from the palette says why on the bar", "[orchest
 {
     auto const live = LiveRun {};
     auto interaction = Interaction { .palette = PaletteState { .query = "dismiss" } };
-    CHECK(applyKey(special(KeyCode::Enter), interaction, live.context()) == std::nullopt);
+    CHECK(applyResolvedKey(special(KeyCode::Enter), interaction, live.context()) == std::nullopt);
     CHECK_FALSE(interaction.palette.has_value());
     CHECK(interaction.notice == "del dismiss · not while it is working");
 }

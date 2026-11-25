@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -15,6 +16,7 @@
 #include <vector>
 
 #include <orchestrator/core/WorkItems.hpp>
+#include <orchestrator/view/Actions.hpp>
 #include <orchestrator/view/Dashboard.hpp>
 #include <orchestrator/view/Keys.hpp>
 #include <orchestrator/view/ViewFixtures.hpp>
@@ -453,4 +455,72 @@ TEST_CASE("Work view: fold_empty false shows every group's heading", "[orchestra
                                 [](WorkItem const& item) { return item.group == WorkGroup::NeedsYou; }));
     CHECK(headings(hidden) == 1);
     CHECK(headings(bootEngine(needsYouOnly(R"({ "fold_empty": false })"))) == 5);
+}
+
+TEST_CASE("Work view: h and l step the repository chip", "[orchestrator][view][work]")
+{
+    auto world = workWorld();
+    world.repos = R"([ { "name": "contour", "path": "~/projects/contour", "forge": "github" },
+                       { "name": "other", "path": "~/projects/other", "forge": "github" } ])";
+    world.repoPaths = { std::string { ContourPath }, std::string { OtherPath } };
+    auto fixture = DashboardFixture { world, Wide };
+    CHECK(fixture.dashboard.input("w").empty());
+    CHECK(fixture.dashboard.input("l").empty());
+    CHECK(fixture.dashboard.interaction().work.repoChip == 1);
+    CHECK(fixture.dashboard.input("h").empty());
+    CHECK(fixture.dashboard.interaction().work.repoChip == 0);
+}
+
+TEST_CASE("Work view: on the sort chip, left, right, h and l toggle the sort (Decision 16)",
+          "[orchestrator][view][work]")
+{
+    auto fixture = DashboardFixture { workWorld(), Wide };
+    CHECK(fixture.dashboard.input("w\t\t\t").empty());
+    REQUIRE(fixture.dashboard.interaction().work.focus == WorkFocus::SortChip);
+    auto const toggle =
+        std::vector<UiAction> { ToggleFoldAction { .group = std::string { SortByUpdateKey } } };
+    for (auto const* const key: { "l", "\x1b[C", "h", "\x1b[D" })
+    {
+        CAPTURE(key);
+        CHECK(fixture.dashboard.input(key) == toggle);
+    }
+    CHECK(fixture.dashboard.interaction().work.repoChip == 0);
+}
+
+TEST_CASE("Work view: Ctrl+D and Ctrl+U move by half the lines shown; G and gg to the ends",
+          "[orchestrator][view][work]")
+{
+    auto world = workWorld();
+    world.prs = { .text = manyPrs(60) };
+    world.issues = { .text = "[]" };
+    world.answers.clear();
+    world.repos = std::string { OneRepository };
+    auto fixture = DashboardFixture { world, Medium };
+    CHECK(fixture.dashboard.input("w").empty());
+    static_cast<void>(fixture.screen());
+    auto const& work = fixture.dashboard.interaction().work;
+    // A heading and the sixty pull requests; the list shows 18 lines at 80x24.
+    constexpr auto Lines = std::size_t { 61 };
+    constexpr auto Rows = std::size_t { 18 };
+    REQUIRE(work.selected == 1);
+    CHECK(fixture.dashboard.input("\x04").empty());
+    CHECK(work.selected == 1 + (Rows / 2));
+    CHECK(fixture.dashboard.input("\x15").empty());
+    CHECK(work.selected == 1);
+    CHECK(fixture.dashboard.input("G").empty());
+    CHECK(work.selected == Lines - 1);
+    CHECK(fixture.dashboard.input("g").empty());
+    CHECK(work.selected == Lines - 1);
+    CHECK(fixture.dashboard.input("g").empty());
+    CHECK(work.selected == 0);
+}
+
+TEST_CASE("Work view: the bar names next_value's first key", "[orchestrator][view][work]")
+{
+    CHECK(workBarText(std::nullopt, 200, NavKeys::defaults(VimKeys::On)).contains("→ repository"));
+    auto world = workWorld();
+    world.keys = R"({ "next_value": ["l"] })";
+    auto fixture = DashboardFixture { world, { .width = 160, .height = 40 } };
+    CHECK(fixture.dashboard.input("w").empty());
+    CHECK(fixture.screen().contains("l repository"));
 }

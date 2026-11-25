@@ -116,12 +116,14 @@ has the keys: every printable key types, digits too, so no letter is ever both a
 
 | Key | In the Fleet |
 | --- | --- |
-| `↑` `↓` `j` `k` `Home` `End` | move the selection |
+| `↑` `↓` `j` `k` | move the selection |
+| `Home` `End` `gg` `G` | select the first or the last row |
+| `Ctrl+D` `Ctrl+U` | move the selection by half the rows shown |
 | `Enter` | the selected row's primary action, which the action bar lists first (below) |
 | `Tab` | give the Focus the keys |
 | `b` `t` `d` | show the Focus's Board, Transcript or Details tab |
 | `PgUp` `PgDn` | scroll the Focus's tab |
-| `←` `→` | turn the transcript's pages; on the Board or Details, or past the transcript's first or last page, show the tab beside |
+| `←` `→` `h` `l` | turn the transcript's pages; on the Board or Details, or past the transcript's first or last page, show the tab beside |
 | `n` | start a custom task: the `n` box (below) |
 | `w` | show the Work view |
 | `/` | filter the runs by text, Finished's folded ones too; Enter keeps the filter, Esc drops it |
@@ -150,7 +152,8 @@ not while it is working`) and nothing happens.
 | `Ctrl+K` | open the command palette |
 
 In the Focus of a run without a message box — one finished, preparing or ending, or a leftover worktree — the
-Fleet's letters act, and `↑` `↓` scroll instead of moving. `Esc` or `Tab` goes back.
+Fleet's letters act, and `↑` `↓` `j` `k` scroll a line instead of moving, `Ctrl+D` `Ctrl+U` half the tab,
+`Home` `End` `gg` `G` to its top or end. `Esc` or `Tab` goes back.
 
 **Actions and the palette.** What the dashboard offers follows the selected row. Each row's state has its
 actions in rank order; the first is what `Enter` does, and the action bar lists them while they fit, then
@@ -179,7 +182,7 @@ plugins, show the last 24 hours, switch view, fold the other groups (the Work vi
 the last 24 hours"), the matched letters underlined; `↑` `↓` choose; `Enter` runs the command exactly as its
 key would; `Esc` closes it and keeps what you typed for the next time. Refreshing the lists and installing the
 plugins have no key: they are the palette's. "Show the last 24 hours" opens a popup that charts, an hour a bar,
-the agents active, the tokens they wrote and the runs started and ended; `Esc` closes it.
+the agents active, the tokens they wrote and the runs started and ended; `Esc` or `q` closes it.
 
 The layout follows the tab's width:
 
@@ -264,13 +267,15 @@ unless `work.fold_empty` is `false`: then every group shows its heading, an empt
 
 | Key | In the Work view |
 | --- | --- |
-| `↑` `↓` `j` `k` `PgUp` `PgDn` `Home` `End` | move the selection |
+| `↑` `↓` `j` `k` `PgUp` `PgDn` | move the selection |
+| `Home` `End` `gg` `G` | select the first or the last line |
+| `Ctrl+D` `Ctrl+U` | move the selection by half the lines shown |
 | `Enter` | on a row, open the start dialog (below); on a group's heading, fold or unfold it |
 | `z` | fold or unfold the selected line's group |
 | `/` | filter: what you type matches a merge request's number (`!812`, `#2375`, `2375`), a ticket's key, a title, a repository or a URL, case-insensitively; `Enter` keeps the filter, `Esc` clears it |
 | `Esc` | clear the filter |
 | `s` | sort by importance (in groups) or by last update (one flat list) |
-| `←` `→` | step the repository chip |
+| `←` `→` `h` `l` | step the chip with the keys: on the sort chip, switch the sort; anywhere else, step the repository chip |
 | `o` | open the selected merge request, or a ticket row's ticket, on your machine (see "Links" above) |
 | `m` | open the row menu |
 | `n` | start a custom task: the `n` box (below) |
@@ -409,6 +414,46 @@ work:
   `in_review`, `no_mr_yet` and `everything_else`; the default is `[everything_else]`, and `[]` opens every group.
   A group you folded or unfolded yourself keeps your choice, whatever the list says.
 - **`fold_empty`**: `true`, the default, hides a group with nothing in it; `false` shows every group's heading.
+
+**`keys`** (optional) rebinds the navigation keys of the lists and, later, the dialogs:
+
+```yaml
+keys:
+    vim: false              # arrows, Home/End, Esc and Enter only
+    move_down: [down, "^n"] # a list replaces the action's defaults
+```
+
+`vim` (default `true`) adds the vim keys to each action's plain ones; `vim: false` keeps the plain keys alone.
+Each action takes a list of keys, and a list replaces that action's defaults whole, whatever `vim` says. The
+defaults, plain then vim (the action bar names an action by its first key):
+
+| Action | Defaults | What it does |
+| --- | --- | --- |
+| `move_up` | `up` `k` | the row or line above; in the Focus, scroll up a line |
+| `move_down` | `down` `j` | the row or line below; in the Focus, scroll down a line |
+| `first` | `home` `gg` | the first row or line; the Focus's top |
+| `last` | `end` `G` | the last row or line; the Focus's end, live |
+| `half_page_up` | `^u` | half the rows shown up; in the Focus, scroll half the tab |
+| `half_page_down` | `^d` | half the rows shown down; in the Focus, scroll half the tab |
+| `previous_value` | `left` `h` | the transcript's previous page; the Work view's chip back |
+| `next_value` | `right` `l` | the transcript's next page; the Work view's chip on |
+| `leave_field` | `esc` | stop typing a text field (acts only while one is typed) |
+| `enter_field` | `enter` `i` | start typing a dialog's text field (`⏎` stays a list row's own key) |
+| `close` | `esc` `q` | close what is open, such as the last 24 hours |
+
+A key is a printable character, `^` and a letter for Ctrl (not `^h`, `^i`, `^j` or `^m`, which terminals send as
+Backspace, Tab, LF and CR), two characters such as `gg`, or one of `up down left right home end pgup pgdn enter
+esc tab del`. Quote a key YAML reads as something else: `"^n"`, `"?"`, `"1"`. A key may act only once where it
+acts: one that another action, or one of the dashboard's own commands (`e`, `/`, `w`, the digits, ...), already
+holds is refused, and so is a two-character key whose first character is bound alone, or the reverse. The
+problem line names the other holder:
+
+    keys.close[0]: is already bound: j, also keys.move_down
+
+A task's `key` is not a navigation key's concern: it starts nothing from a list, so a task keyed `G`, `q` or `l`
+still loads, and the navigation key wins in the lists. For now the keys take effect in the Fleet, the Focus, the
+Work list and the last 24 hours; the start dialog, the `n` box, the row menu, the palette, the filters and the
+message box still take their own keys, so `leave_field` and `enter_field` do not act yet.
 
 **GitLab.** `glab mr list` carries no pipeline and no approvals, so per GitLab repository and poll the orchestrator
 also asks for the project's newest pipelines and its failed jobs, two REST calls through `glab api`:

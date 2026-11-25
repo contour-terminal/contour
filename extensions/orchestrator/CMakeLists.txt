@@ -153,6 +153,8 @@ add_library(orchestrator_view STATIC
     view/Keys.cpp
     view/Keys.hpp
     view/LazyLines.hpp
+    view/NavInput.cpp
+    view/NavInput.hpp
     view/Palette.cpp
     view/Palette.hpp
     view/RowMenu.cpp
@@ -238,6 +240,7 @@ if(ORCHESTRATOR_TESTING)
         view/Dashboard_test.cpp
         view/DispatchForm_test.cpp
         view/Keys_test.cpp
+        view/NavInput_test.cpp
         view/Palette_test.cpp
         view/RowMenu_test.cpp
         view/Sections_test.cpp

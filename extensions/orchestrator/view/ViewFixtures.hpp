@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/Clock.hpp>
+#include <core/tui/InputEvent.hpp>
 #include <core/tui/Rect.hpp>
 
 #include <array>
@@ -16,6 +17,7 @@
 
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/core/Model.hpp>
+#include <orchestrator/core/NavKeys.hpp>
 #include <orchestrator/core/Reconcile.hpp>
 #include <orchestrator/core/Run.hpp>
 #include <orchestrator/core/Uuid.hpp>
@@ -63,6 +65,7 @@ struct World
                                                           ///< one with @ref repos.
     std::string repos = std::string { OneRepository };    ///< The `repos` array.
     std::string work = {}; ///< The `work` object of the default configuration; empty: none.
+    std::string keys = {}; ///< The `keys` object of the default configuration; empty: none.
     std::vector<std::string> repoPaths = { std::string { ContourPath } }; ///< Each repository, resolved.
     ListAnswer prs = { "github/prs-open.json" };                          ///< What `gh-prs` prints.
     ListAnswer issues = { "github/issues-open.json" };                    ///< What `gh-issues` prints.
@@ -79,6 +82,24 @@ struct World
                                                                        ///< lists with its status.
     std::vector<CommandAnswer> answers = {}; ///< Consulted before every other field.
 };
+
+/// Resolves @p key as a list surface would, with the default keys and no key pending before it: what tests
+/// pass applyKey() and applyWorkKey() as `nav`.
+/// @param key A key the terminal sent.
+/// @param context Where it was pressed.
+/// @return The action it does; std::nullopt: none, or it starts a sequence.
+[[nodiscard]] std::optional<NavAction> navFor(core::tui::KeyEvent const& key,
+                                              NavContext context = NavContext::Navigating);
+
+/// Applies @p key as the Agents view does (applyKey()), with `nav` resolved by navFor() in navContextOf()'s
+/// context.
+/// @param key A key the terminal sent.
+/// @param interaction Where the user is; changed by the key.
+/// @param context The selected row, the engine and the Focus tab as last drawn.
+/// @return What the engine is asked, if anything.
+[[nodiscard]] std::optional<UiAction> applyResolvedKey(core::tui::KeyEvent const& key,
+                                                       Interaction& interaction,
+                                                       KeyContext const& context);
 
 /// The contour repository with a Jira source beside its forge's.
 inline constexpr auto WorkRepository =

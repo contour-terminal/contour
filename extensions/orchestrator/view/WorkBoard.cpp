@@ -21,6 +21,7 @@
 #include <vector>
 
 #include <orchestrator/view/Band.hpp>
+#include <orchestrator/view/NavInput.hpp>
 #include <orchestrator/view/Sections.hpp>
 #include <orchestrator/view/StartDialog.hpp>
 #include <orchestrator/view/Theme.hpp>
@@ -327,6 +328,16 @@ namespace
         state.repoChip = static_cast<std::size_t>(next);
     }
 
+    /// Steps the chip with the keys by @p step: the sort chip toggles the sort, any other the repository's.
+    /// @return What the engine is asked: the sort toggled, or nothing.
+    [[nodiscard]] std::vector<UiAction> stepChip(WorkState& state, Engine const& engine, std::ptrdiff_t step)
+    {
+        if (state.focus == WorkFocus::SortChip)
+            return { ToggleFoldAction { .group = std::string { SortByUpdateKey } } };
+        stepRepoChip(state, engine, step);
+        return {};
+    }
+
     /// What `o` opens: the selected MR, else the selected ticket.
     [[nodiscard]] std::vector<UiAction> openSelected(Interaction& interaction, WorkContext const& context)
     {
@@ -427,6 +438,23 @@ namespace
                 selectLine(interaction.work, context, interaction.work.selected + pageOf(context.pageRows));
                 return {};
             } },
+        // Half a page: by half the lines the list shows, at least one.
+        WorkHandlerRow {
+            .command = KeyCommand::HalfPageUp,
+            .handler = [](Interaction& interaction, WorkContext const& context) -> std::vector<UiAction> {
+                auto const at = interaction.work.selected;
+                auto const half = std::max<std::size_t>(1, context.pageRows / 2);
+                selectLine(interaction.work, context, at > half ? at - half : 0);
+                return {};
+            } },
+        WorkHandlerRow {
+            .command = KeyCommand::HalfPageDown,
+            .handler = [](Interaction& interaction, WorkContext const& context) -> std::vector<UiAction> {
+                selectLine(interaction.work,
+                           context,
+                           interaction.work.selected + std::max<std::size_t>(1, context.pageRows / 2));
+                return {};
+            } },
         // ⏎ folds on a heading, steps a chip that has the keys; on an item, opens the start dialog.
         WorkHandlerRow {
             .command = KeyCommand::Enter,
@@ -482,17 +510,17 @@ namespace
                          .handler = [](Interaction&, WorkContext const&) -> std::vector<UiAction> {
                              return { ToggleFoldAction { .group = std::string { SortByUpdateKey } } };
                          } },
+        // ← and → step the chip with the keys: the sort chip has two values, so either way toggles it;
+        // anywhere else they step the repository chip (Decision 16).
         WorkHandlerRow {
             .command = KeyCommand::RepoPrevious,
             .handler = [](Interaction& interaction, WorkContext const& context) -> std::vector<UiAction> {
-                stepRepoChip(interaction.work, context.engine, -1);
-                return {};
+                return stepChip(interaction.work, context.engine, -1);
             } },
         WorkHandlerRow {
             .command = KeyCommand::RepoNext,
             .handler = [](Interaction& interaction, WorkContext const& context) -> std::vector<UiAction> {
-                stepRepoChip(interaction.work, context.engine, 1);
-                return {};
+                return stepChip(interaction.work, context.engine, 1);
             } },
         WorkHandlerRow { .command = KeyCommand::OpenLink, .handler = openSelected },
         WorkHandlerRow { .command = KeyCommand::RowMenu, .handler = openMenu },
@@ -734,6 +762,7 @@ std::vector<UiAction> foldOtherGroups(WorkState& state,
 }
 
 std::vector<UiAction> applyWorkKey(core::tui::KeyEvent const& key,
+                                   std::optional<NavAction> nav,
                                    Interaction& interaction,
                                    std::span<WorkLine const> lines,
                                    std::span<WorkItem const> items,
@@ -741,13 +770,22 @@ std::vector<UiAction> applyWorkKey(core::tui::KeyEvent const& key,
                                    std::size_t pageRows)
 {
     auto& work = interaction.work;
+    auto const typing = work.filtering == Filtering::Typing;
     if (typeIntoFilter(key, work.filtering, work.filter) == FilterInput::Taken)
     {
         if (work.filtering == Filtering::Off)
             work.focus = WorkFocus::List;
         return {};
     }
-    auto const command = workCommandFor(key);
+    // A key the filter passed on acts as it would with nothing typed: ↓ still moves the selection.
+    if (typing)
+    {
+        auto none = std::string {};
+        auto const again = navActionOf(key, NavContext::Navigating, keysInForce(engine), none);
+        nav = again ? std::optional { *again } : std::nullopt;
+    }
+    auto const listCommand = nav ? listCommandOf(*nav, View::Work) : std::nullopt;
+    auto const command = listCommand ? listCommand : workCommandFor(key);
     return command ? applyWorkCommand(*command, interaction, lines, items, engine, pageRows)
                    : std::vector<UiAction> {};
 }
@@ -979,7 +1017,7 @@ namespace
             return detailsOf(engine, items[line->item]);
         return std::format("{} · {} folds it",
                            WorkGroupRows[std::to_underlying(line->group)].name,
-                           workKeyNameOf(KeyCommand::Fold));
+                           workKeyNameOf(KeyCommand::Fold, keysInForce(engine)));
     }
 } // namespace
 

@@ -688,6 +688,57 @@ TEST_CASE("drafts are kept per run", "[orchestrator][view][message]")
     CHECK(drafts.at(std::string { DoneId }) == "second");
 }
 
+TEST_CASE("the message box passes the page keys on: right turns the transcript's page, End follows it",
+          "[orchestrator][view][message]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.select(RunningId).empty());
+    auto const page = [](uint32_t number, uint32_t pages) {
+        return printed(
+            std::format(R"({{"format":1,"session":"00000000-0000-4000-8000-000000000001",)"
+                        R"("writtenBy":"2.1.328","page":{},"pages":{},"notUnderstood":0,"entries":[]}})",
+                        number,
+                        pages));
+    };
+    REQUIRE(fixture.settle(Answers { .transcript = page(1, 3) }).size() == 1);
+    REQUIRE(fixture.settle(Answers { .transcript = page(3, 3) }).size() == 1);
+    // The Transcript tab, then the message box has the keys.
+    CHECK(fixture.dashboard.input("t\r").empty());
+    static_cast<void>(fixture.screen());
+    auto const& interaction = fixture.dashboard.interaction();
+    REQUIRE(interaction.place == Place::Focus);
+    CHECK(fixture.dashboard.input("\x1b[D").empty());
+    CHECK(interaction.page == 2);
+    CHECK(interaction.follow == Follow::Away);
+    CHECK(fixture.dashboard.input("\x1b[C").empty());
+    CHECK(interaction.page == 0);
+    CHECK(interaction.follow == Follow::Live);
+    CHECK(fixture.dashboard.input("\x1b[D").empty());
+    CHECK(interaction.follow == Follow::Away);
+    CHECK(fixture.dashboard.input("\x1b[F").empty());
+    CHECK(interaction.follow == Follow::Live);
+    // The box kept the keys, and typed nothing.
+    CHECK(interaction.place == Place::Focus);
+    CHECK_FALSE(interaction.drafts.contains(std::string { RunningId }));
+}
+
+TEST_CASE("a paste drops a pending g: a g after it does not jump", "[orchestrator][view][keys]")
+{
+    auto fixture = Fixture { fleetWorld() };
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.select(DoneId).empty());
+    auto const selected = fixture.dashboard.interaction().selected;
+    REQUIRE(selected > 0);
+    CHECK(fixture.dashboard.input("g").empty());
+    CHECK(fixture.dashboard.interaction().pendingKey == "g");
+    CHECK(fixture.dashboard.input("\x1b[200~pasted\x1b[201~").empty());
+    CHECK(fixture.dashboard.interaction().pendingKey.empty());
+    CHECK(fixture.dashboard.input("g").empty());
+    CHECK(fixture.dashboard.interaction().selected == selected);
+    CHECK(fixture.dashboard.interaction().pendingKey == "g");
+}
+
 // {{{ quick replies
 
 namespace
@@ -1440,7 +1491,8 @@ TEST_CASE("Work mouse: every hint in the bar runs its action", "[orchestrator][v
     // Every Work view hint the bar draws stands for its key.
     for (auto const& region: regionsOf(dashboard, HitKind::Command))
         if (region.area.y == Wide.height - 1)
-            CHECK((!workKeyNameOf(static_cast<KeyCommand>(region.hit.value)).empty()
+            CHECK((!workKeyNameOf(static_cast<KeyCommand>(region.hit.value), NavKeys::defaults(VimKeys::On))
+                        .empty()
                    || static_cast<KeyCommand>(region.hit.value) == KeyCommand::Palette));
     auto const palette = hint(KeyCommand::Palette);
     CHECK(dashboard.input(clickAt(palette.x, palette.y)).empty());

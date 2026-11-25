@@ -34,6 +34,7 @@
 #include <orchestrator/view/Fleet.hpp>
 #include <orchestrator/view/Focus.hpp>
 #include <orchestrator/view/HitMap.hpp>
+#include <orchestrator/view/NavInput.hpp>
 #include <orchestrator/view/Palette.hpp>
 #include <orchestrator/view/RowMenu.hpp>
 #include <orchestrator/view/Sections.hpp>
@@ -268,6 +269,21 @@ struct Dashboard::State
     /// @param key The key.
     /// @param actions What the engine is asked, appended to.
     void press(core::tui::KeyCode key, std::vector<UiAction>& actions);
+    /// Routes @p action as resolved to the surface with the keys, whatever key the configuration binds it to
+    /// and whether a field is typed (Decision 17): the mouse acts on intent, never through the key table. A
+    /// dialog, the `n` box, the palette and the row menu still take keys: they are given the plain key that
+    /// does @p action there (`esc`, `up`, `down`).
+    /// @param action What the mouse asks.
+    /// @param actions What the engine is asked, appended to.
+    void press(NavAction action, std::vector<UiAction>& actions);
+    /// Applies one key to a list surface: the Work view's list while nothing is over it, the palette's entry
+    /// the Work view has a command for, else applyKey().
+    /// @param key The key.
+    /// @param nav What it resolved to; std::nullopt: nothing.
+    /// @param actions What the engine is asked, appended to.
+    void applyListKey(core::tui::KeyEvent const& key,
+                      std::optional<NavAction> nav,
+                      std::vector<UiAction>& actions);
     /// Runs a command as its key would, as a click on a tab or a chip does.
     /// @param command The command.
     /// @param actions What the engine is asked, appended to.
@@ -381,6 +397,7 @@ struct Dashboard::State
         rowChangeMs; ///< When a row changes next with time alone (nextRowChange()); std::nullopt: none does.
     std::optional<core::SteadyTimePoint> escapeHeldSince; ///< When a lone ESC that ended an input arrived.
     std::size_t scrollTop = 0;                            ///< The first visible row the Fleet shows.
+    std::size_t fleetRows = 0; ///< How many rows the Fleet showed, as last drawn: what half a page moves by.
     Component const* shownLayout = nullptr; ///< The layout @ref toggled and @ref problems belong to.
     std::vector<std::pair<PanelRole, Component*>> toggled; ///< Its panels shown by place.
     ProblemLines* problems = nullptr;                      ///< The current layout's problem lines.
@@ -598,10 +615,12 @@ namespace
             while (top > 0 && linesBetween(top - 1, rows.size()) <= height)
                 --top;
             auto y = 0;
+            _state.fleetRows = 0;
             for (auto const at: std::views::iota(top, rows.size()))
             {
                 if (y >= height)
                     break;
+                ++_state.fleetRows;
                 auto const shift = apart && at + 1 == rows.size() ? 1 : 0;
                 auto const& row = _state.rows[rows[at]];
                 if (row.isSelectable())
@@ -758,7 +777,7 @@ namespace
                 auto const hits =
                     HitRecorder { _state.hits, { .x = screenBounds().x, .y = screenBounds().y } };
                 auto x = 1;
-                for (auto const& hint: workBarHints(selected, columns))
+                for (auto const& hint: workBarHints(selected, columns, keysInForce(_state.engine)))
                 {
                     if (x > 1)
                         x += canvas.putString(0, x, HintSeparator, styleOf(theme, Role::Dim));
@@ -1079,6 +1098,7 @@ KeyContext Dashboard::State::keyContext() const noexcept
                         .tab = tab,
                         .lines = lines,
                         .rows = shown,
+                        .fleetRows = fleetRows,
                         .pages = view != nullptr && view->content ? view->content->pages : 0,
                         .nowMonoMs = nowMonoMs() };
 }
@@ -1096,12 +1116,15 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
             hooksAtInput = HooksWarning::None;
         if (auto const* const paste = std::get_if<core::tui::PasteEvent>(&event))
         {
+            // A paste is text, never the second key of a sequence.
+            interaction.pendingKey.clear();
             interaction.notice.clear();
             pasteInto(interaction, keyContext(), paste->text);
             continue;
         }
         if (auto const* const mouse = std::get_if<core::tui::MouseEvent>(&event))
         {
+            interaction.pendingKey.clear();
             applyMouse(*mouse, actions);
             continue;
         }
@@ -1140,32 +1163,51 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
             afterCommand(view);
             continue;
         }
-        // The Work view takes its own keys while nothing is over it.
-        if (view == View::Work && !interaction.palette && interaction.overlay == Overlay::None)
+        // A list surface resolves the key once (the palette types every key into its query); a key that
+        // starts a sequence waits for the next one.
+        auto nav = std::optional<NavAction> {};
+        if (!interaction.palette)
         {
-            std::ranges::move(applyWorkKey(*key, interaction, work.lines, work.items, engine, work.listRows),
-                              std::back_inserter(actions));
-            anchorMenu(std::nullopt);
+            auto const resolved = navActionOf(
+                *key, navContextOf(interaction, keyContext()), keysInForce(engine), interaction.pendingKey);
+            if (!resolved && resolved.error() == NavMiss::Pending)
+                continue;
+            nav = resolved ? std::optional { *resolved } : std::nullopt;
         }
-        // In the Work view a palette entry the Work view has a command for runs there, as its key would.
-        else if (auto const command = view == View::Work && interaction.palette
-                                              && key->key == core::tui::KeyCode::Enter
-                                              && key->modifiers == core::tui::Modifier::None
-                                          ? highlightedCommand(*interaction.palette, keyContext())
-                                          : std::nullopt;
-                 command && isWorkCommand(*command))
-        {
-            interaction.palette.reset();
-            run(*command, actions);
-            continue;
-        }
-        else if (auto action = applyKey(*key, interaction, keyContext()))
-            actions.push_back(std::move(*action));
-        afterCommand(view);
+        applyListKey(*key, nav, actions);
     }
     if (interaction != before)
         repaint = Repaint::Needed;
     return actions;
+}
+
+void Dashboard::State::applyListKey(core::tui::KeyEvent const& key,
+                                    std::optional<NavAction> nav,
+                                    std::vector<UiAction>& actions)
+{
+    auto const view = interaction.view;
+    // The Work view takes its own keys while nothing is over it.
+    if (view == View::Work && !interaction.palette && interaction.overlay == Overlay::None)
+    {
+        std::ranges::move(applyWorkKey(key, nav, interaction, work.lines, work.items, engine, work.listRows),
+                          std::back_inserter(actions));
+        anchorMenu(std::nullopt);
+    }
+    // In the Work view a palette entry the Work view has a command for runs there, as its key would.
+    else if (auto const command = view == View::Work && interaction.palette
+                                          && key.key == core::tui::KeyCode::Enter
+                                          && key.modifiers == core::tui::Modifier::None
+                                      ? highlightedCommand(*interaction.palette, keyContext())
+                                      : std::nullopt;
+             command && isWorkCommand(*command))
+    {
+        interaction.palette.reset();
+        run(*command, actions);
+        return;
+    }
+    else if (auto action = applyKey(key, nav, interaction, keyContext()))
+        actions.push_back(std::move(*action));
+    afterCommand(view);
 }
 
 // }}}
@@ -1322,8 +1364,7 @@ namespace
                    .rightClick = [](State&, std::size_t, Pointer const&, std::vector<UiAction>&) {},
                    .wheel =
                        [](State& state, std::size_t, int steps, std::vector<UiAction>& actions) {
-                           state.press(steps < 0 ? core::tui::KeyCode::Up : core::tui::KeyCode::Down,
-                                       actions);
+                           state.press(steps < 0 ? NavAction::MoveUp : NavAction::MoveDown, actions);
                        } },
         MouseRow { .kind = HitKind::FleetPane,
                    .layer = Layer::Dashboard,
@@ -1648,6 +1689,19 @@ namespace
                                       }),
                   "MenuRows is indexed by the RowMenuCommand's value");
     static_assert(MenuRows.size() == RowMenuEntries.size(), "every menu entry has a row");
+
+    /// The key a surface that still takes keys is given for an action the mouse asks (press(NavAction)).
+    struct PlainKey
+    {
+        NavAction action = NavAction::Close;                 ///< What the mouse asks.
+        core::tui::KeyCode key = core::tui::KeyCode::Escape; ///< The key that does it there.
+    };
+
+    constexpr auto PlainKeys = std::array {
+        PlainKey { .action = NavAction::Close, .key = core::tui::KeyCode::Escape },
+        PlainKey { .action = NavAction::MoveUp, .key = core::tui::KeyCode::Up },
+        PlainKey { .action = NavAction::MoveDown, .key = core::tui::KeyCode::Down },
+    };
 } // namespace
 
 bool Dashboard::State::popupOpen() const noexcept
@@ -1660,6 +1714,24 @@ void Dashboard::State::press(core::tui::KeyCode key, std::vector<UiAction>& acti
 {
     std::ranges::move(applyKeys({ core::tui::KeyEvent { .key = key } }, dialogHooks()),
                       std::back_inserter(actions));
+}
+
+void Dashboard::State::press(NavAction action, std::vector<UiAction>& actions)
+{
+    interaction.pendingKey.clear();
+    auto const plain = std::ranges::find(PlainKeys, action, &PlainKey::action);
+    auto const key = plain != PlainKeys.end() ? plain->key : core::tui::KeyCode::None;
+    // The boxes, the palette and the row menu take keys until they take a resolved action of their own.
+    if (interaction.startDialog || interaction.taskBox || interaction.palette || interaction.work.menu)
+    {
+        press(key, actions);
+        return;
+    }
+    auto const before = interaction;
+    interaction.notice.clear();
+    applyListKey(core::tui::KeyEvent { .key = key }, action, actions);
+    if (interaction != before)
+        repaint = Repaint::Needed;
 }
 
 void Dashboard::State::run(KeyCommand command, std::vector<UiAction>& actions)
@@ -1713,10 +1785,10 @@ void Dashboard::State::rightClick(std::span<HitRegion const> under,
                                   core::tui::Point at,
                                   std::vector<UiAction>& actions)
 {
-    // A click beside an open popup closes it, as esc does.
+    // A click beside an open popup closes it, as close does.
     if (popupOpen() && (under.empty() || mouseRowOf(under.front().hit).layer != Layer::Popup))
     {
-        press(core::tui::KeyCode::Escape, actions);
+        press(NavAction::Close, actions);
         return;
     }
     auto const target = std::ranges::find_if(
@@ -1791,10 +1863,10 @@ void Dashboard::State::applyMouse(core::tui::MouseEvent const& mouse, std::vecto
     interaction.notice.clear();
     auto const target = std::ranges::find_if(
         under, [](HitRegion const& region) { return mouseRowOf(region.hit).click != nullptr; });
-    // A click beside an open popup closes it, as esc does.
+    // A click beside an open popup closes it, as close does.
     if (popupOpen() && (under.empty() || !takes(under.front().hit)))
     {
-        press(core::tui::KeyCode::Escape, actions);
+        press(NavAction::Close, actions);
         return;
     }
     // A link opens on the machine the user sits at.

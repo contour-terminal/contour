@@ -134,15 +134,19 @@ struct BarHint
 
 /// @param selected What the Work view's selected line is; std::nullopt: none is.
 /// @param columns The cells the line may take.
+/// @param keys The navigation keys in force: `→ repository` names next_value's first key.
 /// @return The Work view's action bar hints, as many whole ones as fit in order: what `⏎` does on the
 ///         selected line (`⏎ start` on an item, `⏎ fold` on a heading), `n new task`, then the Work view's
 ///         other keys (workKeyRows()), then `^k all actions`, which always shows (cut when nothing else
 ///         fits).
-[[nodiscard]] std::vector<BarHint> workBarHints(std::optional<WorkLineKind> selected, int columns);
+[[nodiscard]] std::vector<BarHint> workBarHints(std::optional<WorkLineKind> selected,
+                                                int columns,
+                                                NavKeys const& keys);
 
 /// @param selected What the Work view's selected line is; std::nullopt: none is.
 /// @param columns The cells the line may take.
+/// @param keys The navigation keys in force.
 /// @return The Work view's action bar line: workBarHints() joined by HintSeparator.
-[[nodiscard]] std::string workBarText(std::optional<WorkLineKind> selected, int columns);
+[[nodiscard]] std::string workBarText(std::optional<WorkLineKind> selected, int columns, NavKeys const& keys);
 
 } // namespace orchestrator::view

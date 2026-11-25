@@ -17,9 +17,11 @@
 #include <string_view>
 #include <variant>
 
+#include <orchestrator/core/DashboardKeys.hpp>
 #include <orchestrator/core/Utf8.hpp>
 #include <orchestrator/core/WorkItems.hpp>
 #include <orchestrator/view/Actions.hpp>
+#include <orchestrator/view/NavInput.hpp>
 #include <orchestrator/view/Palette.hpp>
 #include <orchestrator/view/Sections.hpp>
 #include <orchestrator/view/TextEdit.hpp>
@@ -33,14 +35,9 @@ namespace
 {
     // {{{ the keys
 
-    // The first row of a command names its key on the bar and in the palette (keyNameOf()).
+    // The first row of a command names its key on the bar and in the palette (keyNameOf()). The navigation
+    // keys are not here: the keys in force map them to commands (listCommandOf()).
     constexpr auto KeyTable = std::array {
-        KeyRow { .key = "up"sv, .command = KeyCommand::Up },
-        KeyRow { .key = "k"sv, .command = KeyCommand::Up },
-        KeyRow { .key = "down"sv, .command = KeyCommand::Down },
-        KeyRow { .key = "j"sv, .command = KeyCommand::Down },
-        KeyRow { .key = "home"sv, .command = KeyCommand::Home },
-        KeyRow { .key = "end"sv, .command = KeyCommand::End },
         KeyRow { .key = "enter"sv, .command = KeyCommand::Enter },
         KeyRow { .key = "esc"sv, .command = KeyCommand::Back },
         KeyRow { .key = "tab"sv, .command = KeyCommand::Tab },
@@ -57,8 +54,6 @@ namespace
         KeyRow { .key = "z"sv, .command = KeyCommand::Fold },
         KeyRow { .key = "pgup"sv, .command = KeyCommand::ScrollPageUp },
         KeyRow { .key = "pgdn"sv, .command = KeyCommand::ScrollPageDown },
-        KeyRow { .key = "left"sv, .command = KeyCommand::PreviousPage },
-        KeyRow { .key = "right"sv, .command = KeyCommand::NextPage },
         KeyRow { .key = "^k"sv, .command = KeyCommand::Palette },
         KeyRow { .key = "?"sv, .command = KeyCommand::Palette },
         KeyRow { .key = "w"sv, .command = KeyCommand::SwitchView },
@@ -75,21 +70,13 @@ namespace
 
     // The Work view's keys: the first row of a command names its key on the bar (workKeyNameOf()).
     constexpr auto WorkKeyTable = std::array {
-        KeyRow { .key = "up"sv, .command = KeyCommand::Up },
-        KeyRow { .key = "k"sv, .command = KeyCommand::Up },
-        KeyRow { .key = "down"sv, .command = KeyCommand::Down },
-        KeyRow { .key = "j"sv, .command = KeyCommand::Down },
         KeyRow { .key = "pgup"sv, .command = KeyCommand::ScrollPageUp },
         KeyRow { .key = "pgdn"sv, .command = KeyCommand::ScrollPageDown },
-        KeyRow { .key = "home"sv, .command = KeyCommand::Home },
-        KeyRow { .key = "end"sv, .command = KeyCommand::End },
         KeyRow { .key = "enter"sv, .command = KeyCommand::Enter },
         KeyRow { .key = "z"sv, .command = KeyCommand::Fold },
         KeyRow { .key = "/"sv, .command = KeyCommand::Filter },
         KeyRow { .key = "esc"sv, .command = KeyCommand::Back },
         KeyRow { .key = "s"sv, .command = KeyCommand::Sort },
-        KeyRow { .key = "left"sv, .command = KeyCommand::RepoPrevious },
-        KeyRow { .key = "right"sv, .command = KeyCommand::RepoNext },
         KeyRow { .key = "o"sv, .command = KeyCommand::OpenLink },
         KeyRow { .key = "m"sv, .command = KeyCommand::RowMenu },
         KeyRow { .key = "n"sv, .command = KeyCommand::NewTask },
@@ -119,32 +106,6 @@ namespace
         TabCommand { .command = KeyCommand::DetailsTab, .tab = FocusTab::Details },
     };
 
-    /// The name of a key that is not a character.
-    struct SpecialKey
-    {
-        core::tui::KeyCode code = core::tui::KeyCode::None; ///< The key.
-        std::string_view name = {};                         ///< What KeyRow::key calls it.
-        std::string_view shown = {};                        ///< How the bar and the palette name it.
-    };
-
-    constexpr auto SpecialKeys = std::array {
-        SpecialKey { .code = core::tui::KeyCode::Up, .name = "up"sv, .shown = "↑"sv },
-        SpecialKey { .code = core::tui::KeyCode::Down, .name = "down"sv, .shown = "↓"sv },
-        SpecialKey { .code = core::tui::KeyCode::Home, .name = "home"sv, .shown = "home"sv },
-        SpecialKey { .code = core::tui::KeyCode::End, .name = "end"sv, .shown = "end"sv },
-        SpecialKey { .code = core::tui::KeyCode::Enter, .name = "enter"sv, .shown = "⏎"sv },
-        SpecialKey { .code = core::tui::KeyCode::Escape, .name = "esc"sv, .shown = "esc"sv },
-        SpecialKey { .code = core::tui::KeyCode::Tab, .name = "tab"sv, .shown = "tab"sv },
-        SpecialKey { .code = core::tui::KeyCode::Delete, .name = "del"sv, .shown = "del"sv },
-        SpecialKey { .code = core::tui::KeyCode::PageUp, .name = "pgup"sv, .shown = "pgup"sv },
-        SpecialKey { .code = core::tui::KeyCode::PageDown, .name = "pgdn"sv, .shown = "pgdn"sv },
-        SpecialKey { .code = core::tui::KeyCode::Left, .name = "left"sv, .shown = "←"sv },
-        SpecialKey { .code = core::tui::KeyCode::Right, .name = "right"sv, .shown = "→"sv },
-    };
-
-    /// The Ctrl chords the table names, as `^` and the letter.
-    constexpr auto CtrlLetters = std::array { U'k' };
-
     /// @return Whether @p key was pressed with Alt, which no row of the table names.
     [[nodiscard]] bool hasAlt(core::tui::KeyEvent const& key) noexcept
     {
@@ -157,44 +118,29 @@ namespace
         return core::tui::hasModifier(key.modifiers, core::tui::Modifier::Ctrl) || hasAlt(key);
     }
 
-    /// @return The name KeyRow::key gives @p key; empty for a key no name is given.
-    [[nodiscard]] std::string nameOf(core::tui::KeyEvent const& key)
-    {
-        if (core::tui::hasModifier(key.modifiers, core::tui::Modifier::Ctrl))
-        {
-            auto const letter =
-                std::ranges::find_if(CtrlLetters, [&](char32_t candidate) { return isCtrl(key, candidate); });
-            return letter != CtrlLetters.end() ? std::format("^{}", static_cast<char>(*letter))
-                                               : std::string {};
-        }
-        if (auto const special = std::ranges::find(SpecialKeys, key.key, &SpecialKey::code);
-            special != SpecialKeys.end())
-            return std::string { special->name };
-        auto name = std::string {};
-        if (auto const printable = printableOf(key))
-            appendUtf8(name, *printable);
-        return name;
-    }
-
     /// @return What @p key does by @p table; std::nullopt for a key no row names, or one with Alt.
     [[nodiscard]] std::optional<KeyCommand> commandIn(std::span<KeyRow const> table,
                                                       core::tui::KeyEvent const& key)
     {
         if (hasAlt(key))
             return std::nullopt;
-        auto const name = nameOf(key);
+        auto const name = keyNameFor(key);
         auto const row = std::ranges::find(table, name, &KeyRow::key);
         return row != table.end() ? std::optional { row->command } : std::nullopt;
     }
 
-    /// @return How the bar names the key @p table binds @p command to first; empty: none.
-    [[nodiscard]] std::string_view keyNameIn(std::span<KeyRow const> table, KeyCommand command) noexcept
+    /// @return How the bar names the key @p command is bound to first: the first key in force of the
+    ///         navigation action that does @p command in @p view, else @p table's first row; empty: none.
+    [[nodiscard]] std::string keyNameIn(std::span<KeyRow const> table,
+                                        View view,
+                                        KeyCommand command,
+                                        NavKeys const& keys)
     {
+        for (auto const& action: navActionRows())
+            if (listCommandOf(action.action, view) == command)
+                return navKeyLabel(keys, action.action);
         auto const row = std::ranges::find(table, command, &KeyRow::command);
-        if (row == table.end())
-            return {};
-        auto const special = std::ranges::find(SpecialKeys, row->key, &SpecialKey::name);
-        return special != SpecialKeys.end() ? special->shown : row->key;
+        return row != table.end() ? std::string { shownKeyName(row->key) } : std::string {};
     }
 
     // }}}
@@ -267,6 +213,28 @@ namespace
     [[nodiscard]] std::size_t scrollOf(Interaction const& interaction, KeyContext const& context) noexcept
     {
         return isFollowing(interaction, context) ? lastScroll(context) : interaction.scroll;
+    }
+
+    /// Which way a half-page key moves.
+    enum class Direction : uint8_t
+    {
+        Up = 0, ///< Towards the first row, the top.
+        Down,   ///< Towards the last row, the end.
+    };
+
+    /// Moves the Fleet's selection by half the rows it showed, or scrolls the Focus's tab by half its height;
+    /// at least by one.
+    void moveHalfPage(Interaction& interaction, KeyContext const& context, Direction direction) noexcept
+    {
+        if (interaction.place == Place::Focus)
+        {
+            auto const half = static_cast<std::ptrdiff_t>(std::max<std::size_t>(1, context.rows / 2));
+            scrollFocus(interaction, context, direction == Direction::Up ? -half : half);
+            return;
+        }
+        auto const half = std::max<std::size_t>(1, context.fleetRows / 2);
+        auto const at = interaction.selected;
+        select(interaction, context, direction == Direction::Up ? (at > half ? at - half : 0) : at + half);
     }
 
     /// Starts the selected finished run again: a topic's text in the `n` box, in its repository; an item in
@@ -512,6 +480,19 @@ namespace
                     return std::nullopt;
                 }
                 scrollTo(interaction, context, lastScroll(context));
+                return std::nullopt;
+            } },
+        // Half a page: the Fleet's selection by half the rows it shows, the Focus's tab by half its height.
+        HandlerRow {
+            .command = KeyCommand::HalfPageUp,
+            .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
+                moveHalfPage(interaction, context, Direction::Up);
+                return std::nullopt;
+            } },
+        HandlerRow {
+            .command = KeyCommand::HalfPageDown,
+            .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
+                moveHalfPage(interaction, context, Direction::Down);
                 return std::nullopt;
             } },
         HandlerRow {
@@ -775,14 +756,14 @@ std::optional<KeyCommand> workCommandFor(core::tui::KeyEvent const& key) noexcep
     return commandIn(WorkKeyTable, key);
 }
 
-std::string_view keyNameOf(KeyCommand command) noexcept
+std::string keyNameOf(KeyCommand command, NavKeys const& keys)
 {
-    return keyNameIn(KeyTable, command);
+    return keyNameIn(KeyTable, View::Agents, command, keys);
 }
 
-std::string_view workKeyNameOf(KeyCommand command) noexcept
+std::string workKeyNameOf(KeyCommand command, NavKeys const& keys)
 {
-    return keyNameIn(WorkKeyTable, command);
+    return keyNameIn(WorkKeyTable, View::Work, command, keys);
 }
 
 bool isRowCommand(KeyCommand command) noexcept
@@ -907,10 +888,17 @@ bool isDispatched(KeyCommand command) noexcept
 
 namespace
 {
+    /// @return Whether the message box passes @p key on to the Focus: one of messagePassKeys(), which scroll
+    ///         the Focus's tab or turn the transcript's pages, or `tab`, which leaves it.
+    [[nodiscard]] bool passesMessageKey(core::tui::KeyEvent const& key)
+    {
+        auto const name = keyNameFor(key);
+        return name == "tab" || std::ranges::contains(messagePassKeys(), name, &MessagePassKey::name);
+    }
+
     /// Types @p key into the message box, while it has the keys.
-    /// @return Nothing when it does not have them, or the key scrolls the Focus's tab (`pgup`, `pgdn`, `end`,
-    ///         `←`, `→`) or leaves it (`tab`), so that the key table decides; else what the key asks: the
-    ///         message to send, or nothing.
+    /// @return Nothing when it does not have them, or the box passes the key on (passesMessageKey()), so that
+    ///         the Focus decides; else what the key asks: the message to send, or nothing.
     [[nodiscard]] std::optional<std::optional<UiAction>> typeIntoMessage(core::tui::KeyEvent const& key,
                                                                          Interaction& interaction,
                                                                          KeyContext const& context)
@@ -920,17 +908,9 @@ namespace
         // `^K` opens the palette from the box too: a chord is never text.
         if (commandFor(key) == KeyCommand::Palette && isChord(key))
             return std::nullopt;
-        switch (key.key)
-        {
-            // The box has no cursor to move yet: ← and → turn the transcript's pages, as in the Fleet.
-            case core::tui::KeyCode::PageUp:
-            case core::tui::KeyCode::PageDown:
-            case core::tui::KeyCode::End:
-            case core::tui::KeyCode::Left:
-            case core::tui::KeyCode::Right:
-            case core::tui::KeyCode::Tab: return std::nullopt;
-            default: break;
-        }
+        // The box has no cursor to move yet: ← and → turn the transcript's pages, as in the Fleet.
+        if (passesMessageKey(key))
+            return std::nullopt;
         auto const& run = context.selected->run;
         auto& draft = interaction.drafts[run];
         // The line-editing keys come first: Alt+Backspace drops a word rather than reading as Esc.
@@ -1006,6 +986,7 @@ FilterInput typeIntoFilter(core::tui::KeyEvent const& key, Interaction& interact
 }
 
 std::optional<UiAction> applyKey(core::tui::KeyEvent const& key,
+                                 std::optional<NavAction> nav,
                                  Interaction& interaction,
                                  KeyContext const& context)
 {
@@ -1013,18 +994,29 @@ std::optional<UiAction> applyKey(core::tui::KeyEvent const& key,
         return applyPaletteKey(key, interaction, context);
     if (interaction.overlay == Overlay::Timeline)
     {
-        // The timeline takes no command but the palette's: esc and ⏎ close it, as anything leaving it does.
+        // The timeline takes no command but the palette's: close, esc and ⏎ close it, as anything leaving it
+        // does.
         auto const command = commandFor(key);
-        if (command == KeyCommand::Palette || command == KeyCommand::Back || command == KeyCommand::Enter
-            || hasAlt(key))
+        if (nav == NavAction::Close || command == KeyCommand::Palette || command == KeyCommand::Back
+            || command == KeyCommand::Enter || hasAlt(key))
             interaction.overlay = Overlay::None;
         return command == KeyCommand::Palette ? dispatch(*command, interaction, context) : std::nullopt;
     }
+    auto const fieldContext = navContextOf(interaction, context);
     if (auto typed = typeIntoMessage(key, interaction, context))
         return std::move(*typed);
     if (typeIntoFilter(key, interaction) == FilterInput::Taken)
         return std::nullopt;
-    auto const command = commandFor(key);
+    // A key the message box or the filter passed on acts as it would with nothing typed: ← still turns the
+    // transcript's pages, ↓ still moves the selection.
+    if (fieldContext == NavContext::Typing)
+    {
+        auto none = std::string {};
+        auto const again = navActionOf(key, NavContext::Navigating, keysInForce(context.engine), none);
+        nav = again ? std::optional { *again } : std::nullopt;
+    }
+    auto const listCommand = nav ? listCommandOf(*nav, View::Agents) : std::nullopt;
+    auto const command = listCommand ? listCommand : commandFor(key);
     if (!interaction.pendingEnd.empty() && command != KeyCommand::EndRun)
     {
         interaction.pendingEnd.clear();

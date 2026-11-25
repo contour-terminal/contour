@@ -161,9 +161,11 @@ void jumpWorkList(WorkState& state, WorkBoardData const& data, std::size_t row);
 /// Applies one Work-view command. Fold on a line, or Enter on a heading, folds its group by SetFoldAction
 /// of the group's key and selects the heading; Sort toggles SortByUpdateKey; Enter on an item opens the start
 /// dialog on it (its session id left for the caller to mint), or says on the action bar why it cannot.
-/// RowMenu opens the row menu on a selected item, its place left for the caller to set; FoldOthers folds
-/// every group shown open but the selected line's (foldOtherGroups()). SwitchView, NewTask and Palette act as
-/// in the Agents view (dispatch()).
+/// RepoPrevious and RepoNext step the chip with the keys: the sort chip toggles the sort, else the repository
+/// chip steps (Decision 16). HalfPageUp and HalfPageDown move the selection by half the lines shown. RowMenu
+/// opens the row menu on a selected item, its place left for the caller to set; FoldOthers folds every group
+/// shown open but the selected line's (foldOtherGroups()). SwitchView, NewTask and Palette act as in the
+/// Agents view (dispatch()).
 /// @param command The command (KeyCommand).
 /// @param interaction Where the user is; its WorkState changed.
 /// @param lines The lines as drawn.
@@ -179,8 +181,10 @@ void jumpWorkList(WorkState& state, WorkBoardData const& data, std::size_t row);
                                                      std::size_t pageRows);
 
 /// Applies one key in the Work view: to its filter while it is typed (Enter or Esc give the list the keys
-/// again), else by workKeyRows().
+/// again), else as @p nav's list command (listCommandOf()), else by workKeyRows(). A key the filter passes
+/// on, such as an arrow, is resolved again as if nothing were typed, and acts so.
 /// @param key A key the terminal sent.
+/// @param nav What @p key resolved to (navActionOf()) in navContextOf()'s context; std::nullopt: nothing.
 /// @param interaction Where the user is; changed by the key.
 /// @param lines The lines as drawn.
 /// @param items The items they index.
@@ -188,6 +192,7 @@ void jumpWorkList(WorkState& state, WorkBoardData const& data, std::size_t row);
 /// @param pageRows How many lines the list shows.
 /// @return What the engine is asked, in order; empty: nothing.
 [[nodiscard]] std::vector<UiAction> applyWorkKey(core::tui::KeyEvent const& key,
+                                                 std::optional<NavAction> nav,
                                                  Interaction& interaction,
                                                  std::span<WorkLine const> lines,
                                                  std::span<WorkItem const> items,
