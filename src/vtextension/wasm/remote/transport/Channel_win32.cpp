@@ -26,7 +26,6 @@
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 
 #define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
 #include <Windows.h>
 
 namespace vtextension::wasm::remote::transport
