@@ -30,6 +30,17 @@ any task.
 > grammar (no brace, space or quote may stand in a version-2 word), which is out of proportion for one extension.
 > Approval stays inferred from `detailed_merge_status`. Still bounded, never one call per MR. Wherever this plan
 > and the spec's **GitLab** paragraph differ, this note wins.
+>
+> **Further amendments (controller's rulings on the pre-flight scan, 2026-11-25).**
+> 1. **No new `acli` command.** The spec's new `acli` command for `key in (…)` lookups and the `in_progress_jql`
+>    query (with `--fields key`) is replaced by the existing `acli-issues` command with another `{jql}` (its argv
+>    would be identical; Decision 3). Still one call per Jira source with `in_progress_jql` and one lookup per poll.
+> 2. **No second-`⏎` override for an item an agent works on.** The spec's "asks for a second `⏎`" becomes: the
+>    dialog says `⬢ <worker> already works on this`, and `⏎` shows the engine's `AlreadyRunning` refusal (dispatch
+>    is unchanged per the spec's Non-goals; Decision 7).
+> 3. **Screen-test sizes.** The grouped board is drawn at 50×20, 80×24, 120×40 and 160×40; the folded group, the
+>    flat sort, the filter and the row menu at 80×24 and 120×40; the start dialog and the `n` box at 50×20, 80×24
+>    and 120×40 — not every scene at all four sizes.
 
 ## Global Constraints
 
@@ -74,7 +85,7 @@ any task.
   `contour`/`other`. `ctest --test-dir out/build/clangcl-release -R fixture-privacy` passes after every fixture
   change.
 - Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
-- **Subagent models (user's rule):** Haiku for Tasks 1, 4, 5, 6, 8 (fully specified); Opus for Tasks 2, 3, 7,
+- **Subagent models (user's rule):** Haiku for Tasks 1, 4, 6, 8 (fully specified); Opus for Tasks 2, 3, 5, 7,
   9, 10, 11, 12, 13, 14 (recordings on the user's machine, engine wiring, views and goldens, docs procedure).
   Every review on Opus. A Haiku task that comes back blocked, or reaches a 4th fix round, is re-dispatched on Opus.
 
@@ -90,13 +101,16 @@ any task.
    holds `=`), and a line's head ends at its first `=`, which precedes the argv. No host change.
 2. **Joining and falling back.** A listed MR's pipeline is the highest-`id` pipeline whose `sha` is the MR's `sha`
    (the REST MR list carries `sha`); its `status` gives `ci`; the failed jobs whose `pipeline.id` is that id give
-   `failingChecks`. Review is inferred from `detailed_merge_status`: `requested_changes` → ChangesRequested,
-   `not_approved` → Required, any other → Approved (so a passing pipeline with no conflicts is Ready to merge, per
-   the controller's ruling). An MR with no matched pipeline (the pipelines call failed, its `sha` is not among the
+   `failingChecks`. Review is inferred from `detailed_merge_status` by the existing `reviewStateOf()` (below), so
+   a matched MR with a passing pipeline, no conflicts and no `not_approved`/`requested_changes` is Ready to merge.
+   An MR with no matched pipeline (the pipelines call failed, its `sha` is not among the
    100 newest, a fork's pipeline runs in its own project, or the project has no CI) keeps today's inference and is
    `StateSource::Inferred`. A failed jobs call leaves `failingChecks` empty with a problem line; a failed pipelines
    call has its own problem line. **Conflicts, draft and update time come from the REST list** (`has_conflicts`,
-   `draft`, `updated_at`, already in the recorded fixture).
+   `draft`, `updated_at`, already in the recorded fixture). Review keeps today's `reviewStateOf()` for every GitLab
+   MR (`not_approved` Required, `requested_changes` ChangesRequested, `mergeable` Approved, any other None): a
+   status that says nothing about approval is never shown as `✓ approved` (pre-flight finding 8). Grouping is the
+   same, since `groupOf` treats None and Approved alike for a Complete row.
 3. **No new `acli` command.** The key lookup and the `in_progress_jql` query have exactly `acli-issues`' argv with
    another `{jql}`; a second identical declaration would only show the same line twice on the consent dialog.
    `acli-issues` gains `--fields key,summary,status,issuetype,updated` (spec). If the recording (Task 3) shows that
@@ -118,8 +132,10 @@ any task.
    unchanged). The dialog says `⬢ <worker> already works on this` before `⏎`, and `⏎` shows the refusal instead
    of dispatching; there is no second-`⏎` override.
 8. **A worker that takes no permission profile** (Copilot) chosen for a task with its own `permissions` is refused
-   (`DispatchRefusal::WorkerTakesNoProfile`), matching the configuration's `ProfileOnCopilot` rule; the dialog marks
-   such a worker `(no profile)`.
+   (`DispatchRefusal::WorkerTakesNoProfile`), matching the configuration's `ProfileOnCopilot` rule through one
+   shared helper `takesNoProfileFor(TaskDef const&, WorkerDef const&)`; the profile the dispatch carries does not
+   count (the dialog always sends one, and a no-profile worker ignores it). The dialog marks such a worker
+   `(no profile)`.
 9. **GitLab without a matched pipeline** (Decision 2): `ChangeRequest::source = StateSource::Inferred`; such an
    MR is Ready to merge only when `detailed_merge_status` is `mergeable`.
 10. **Folds and sort persist as fold keys** (`ToggleFoldAction`, `FoldsKey`): `work/needs-you`, `work/ready`,
@@ -132,6 +148,11 @@ any task.
     `copied <branch>`.
 13. **Narrow widths** drop, in order: the Agent column's age (a `⬢ worker` stays), then Review text → glyph, then
     Pipeline text → glyph, then the Ticket column at under 60 columns.
+14. **The start dialog keeps the permission profile** as its fifth setting (Task → Worker → Model → Perms →
+    Note), defaulting as today (the task's profile, else the default); `FormField::Permissions` survives the
+    launcher's removal.
+15. **One rule for a run without `worker`:** `workerIdOf(Run const&)` (empty → `ImplicitWorkerId`, `"claude"`),
+    used by the busy count and the Agent column alike.
 
 ## Review Focus
 
@@ -144,7 +165,7 @@ any task.
    rules the user wrote (Task 8).
 4. **A configuration whose task key is `w`, `s` or `o`** loads unchanged (Task 4).
 5. **The list changes under an open dialog or menu** (a poll drops the merged MR): `⏎` dispatches nothing stale —
-   the dialog shows the engine's refusal — and an open row menu closes (Task 10).
+   the dialog shows the engine's refusal (Task 10) — and an open row menu closes (Task 12).
 
 ---
 
@@ -208,7 +229,7 @@ TEST_CASE("unixMsOf reads the three forges' spellings", "[orchestrator][timestam
 }
 ```
 
-  `GitHub_test.cpp`: the recorded-fixture case gains `CHECK(prs.items[0].updatedWallMs != 0)` for every row, and:
+  `GitHub_test.cpp`: the recorded-fixture case gains `for (auto const& pr: prs.items) CHECK(pr.updatedWallMs != 0);`, and:
 
 ```cpp
 TEST_CASE("GitHub: mergeable CONFLICTING is a conflict, and updatedAt the update time", "[github]")
@@ -236,9 +257,9 @@ TEST_CASE("GitHub: mergeable CONFLICTING is a conflict, and updatedAt the update
 - [ ] **Step 4: The fixtures** (there is no `jq` on this machine): confirm the value shapes once with
   `gh pr list --repo contour-terminal/contour --state open --limit 5 --json number,mergeable,updatedAt` (public,
   read-only). Then with a small Python script kept in `$S` (not committed): add `"mergeable"` and `"updatedAt"` to
-  every object of both `*.raw.json` files (recorded rows: `MERGEABLE` and their own `createdAt` value if present,
-  else `"2026-11-13T12:00:00Z"`; `prs-mixed-checks.raw.json`'s #2375 `CONFLICTING` with `"2026-11-13T12:00:00Z"`,
-  its #2376 `UNKNOWN`), and
+  every object of both `*.raw.json` files (neither raw file has a `createdAt`: every recorded row gets
+  `MERGEABLE` and `"2026-11-13T12:00:00Z"`; `prs-mixed-checks.raw.json`'s #2375 gets `CONFLICTING` and
+  `"2026-11-13T12:00:00Z"`, its #2376 `UNKNOWN` and `"2026-11-13T11:00:00Z"`), and
   append the same two values, in that order, to each positional row of the matching projected file. Regenerate
   `prs-100.json` with `python -I -X utf8 extensions/orchestrator/harness/scale-fixture.py
   extensions/orchestrator/core/testdata/github/prs-open.json extensions/orchestrator/core/testdata/github/prs-100.json`.
@@ -255,7 +276,7 @@ TEST_CASE("GitHub: mergeable CONFLICTING is a conflict, and updatedAt the update
 **Files:**
 - Modify: `extensions/orchestrator/core/Model.hpp` (`PipelineInfo`, `FailedJob`, `ChangeRequest::headSha`)
 - Modify: `extensions/orchestrator/core/GitLabJson.hpp`, `extensions/orchestrator/core/GitLab.hpp/.cpp`
-- Modify: `extensions/orchestrator/core/Provider.hpp/.cpp` (four members per row)
+- Modify: `extensions/orchestrator/core/Provider.hpp/.cpp` (five members per row)
 - Modify: `extensions/orchestrator/core/Commands.cpp` (`glab-pipelines`, `glab-failed-jobs`)
 - Modify: `extensions/orchestrator/harness/scrub-fixture.py` (shapes `glab-pipelines`, `glab-jobs`)
 - Create: `extensions/orchestrator/core/testdata/gitlab/pipelines.json`, `jobs-failed.json` (recorded, scrubbed),
@@ -282,16 +303,13 @@ struct FailedJob { uint64_t pipelineId = 0; std::string name; bool operator==(Fa
 /// @return success, skipped: Passing; failed, canceled: Failing; every other value (running, pending, created,
 ///         waiting_for_resource, preparing, manual, scheduled, canceling, unknown): Pending.
 [[nodiscard]] CiState pipelineStateOf(std::string_view status) noexcept;
-/// @param detailedMergeStatus A merge request's `detailed_merge_status`.
-/// @return requested_changes: ChangesRequested; not_approved: Required; any other: Approved (Decision 2).
-[[nodiscard]] ReviewState approvalOf(std::string_view detailedMergeStatus) noexcept;
 /// Maps `glab-pipelines`: a JSON array of `{id, sha, status, …}`; an entry without `id` or `sha` is skipped.
 [[nodiscard]] std::expected<std::vector<PipelineInfo>, ParseError> pipelines(std::string_view stdoutText, OutputExtent extent);
 /// Maps `glab-failed-jobs`: a JSON array of `{name, pipeline: {id}, …}`; names sanitised (displayText, MaxTitleChars).
 [[nodiscard]] std::expected<std::vector<FailedJob>, ParseError> failedJobs(std::string_view stdoutText, OutputExtent extent);
-/// Joins pipelines and failed jobs into the REST list (Decision 2). An MR whose `headSha` matches a pipeline
-/// takes the highest-id one's ci, that pipeline's failed jobs (list order, each name once) and approvalOf() of its
-/// merge status, and is Complete; without a match it stays as changeRequests() mapped it and is Inferred.
+/// Joins pipelines and failed jobs into the REST list. An MR whose `headSha` matches a pipeline
+/// takes the highest-id one's ci and that pipeline's failed jobs (list order, each name once), keeps the review
+/// the existing reviewStateOf() gave it, and is Complete; without a match it stays as changeRequests() mapped it and is Inferred.
 /// @param listed The REST list's merge requests.
 /// @param pipelines What pipelines() read; std::nullopt: the call failed.
 /// @param jobs What failedJobs() read; std::nullopt: the call failed (failingChecks stay empty).
@@ -308,11 +326,16 @@ std::string_view listPipelines = {};  ///< Lists the project's newest pipelines;
 std::string_view listFailedJobs = {}; ///< Lists the project's failed jobs; empty: none.
 std::expected<std::vector<PipelineInfo>, ParseError> (*mapPipelines)(std::string_view, OutputExtent) = nullptr;
 std::expected<std::vector<FailedJob>, ParseError> (*mapFailedJobs)(std::string_view, OutputExtent) = nullptr;
+/// Joins what the two read into listChangeRequests' mapping; nullptr: none (the engine calls it through the row).
+std::vector<ChangeRequest> (*enrich)(std::vector<ChangeRequest>, std::optional<std::span<PipelineInfo const>>,
+                                     std::optional<std::span<FailedJob const>>) = nullptr;
 ```
 
   REST mapping: `conflicts = hasConflicts ? Conflicting : None`; `updatedWallMs = unixMsOf(updatedAt).value_or(0)`;
-  `headSha = sha`; `source = StateSource::Inferred` (enriched() makes a matched one Complete). The `detailed_merge_status`
-  is kept where enriched() can read it (a `ChangeRequest` member `std::string mergeStatus = {}`, GitLab only).
+  `headSha = sha`; `source = StateSource::Inferred` (enriched() makes a matched one Complete); `review` stays
+  `reviewStateOf(detailed_merge_status)` as today, so no merge-status member is needed. GitLab's provider row:
+  `listPipelines = "glab-pipelines"`, `listFailedJobs = "glab-failed-jobs"`, `mapPipelines = &gitlab::pipelines`,
+  `mapFailedJobs = &gitlab::failedJobs`, `enrich = &gitlab::enriched`.
   Command rows, after `glab-mrs`: `glab-pipelines` with argv `glab api projects/:id/pipelines?per_page=100&order_by=id&sort=desc`
   and `glab-failed-jobs` with argv `glab api projects/:id/jobs?scope[]=failed&per_page=100`; both `Timeout::Long`,
   `Root::Repos`, `Verification::Recorded`.
@@ -333,20 +356,22 @@ std::expected<std::vector<FailedJob>, ParseError> (*mapFailedJobs)(std::string_v
 - [ ] **Step 3: Write the failing tests** (`GitLab_test.cpp`, tag `[gitlab]`):
 
 ```cpp
-TEST_CASE("GitLab: pipeline statuses and approval by table", "[gitlab]")
+TEST_CASE("GitLab: pipeline statuses by table", "[gitlab]")
 {
     for (auto const [text, state]: std::array { std::pair { "success"sv, CiState::Passing }, { "skipped"sv, CiState::Passing },
              { "failed"sv, CiState::Failing }, { "canceled"sv, CiState::Failing }, { "running"sv, CiState::Pending },
              { "manual"sv, CiState::Pending }, { "new_value"sv, CiState::Pending } })
         CHECK(gitlab::pipelineStateOf(text) == state);
-    CHECK(gitlab::approvalOf("not_approved") == ReviewState::Required);
-    CHECK(gitlab::approvalOf("requested_changes") == ReviewState::ChangesRequested);
-    CHECK(gitlab::approvalOf("mergeable") == ReviewState::Approved);
 }
 TEST_CASE("GitLab: the recorded pipelines and failed jobs map", "[gitlab]")
 {
-    // pipelines.json: non-empty, every id != 0 and sha non-empty; jobs-failed.json: every pipelineId != 0 and
-    // every name starts with "job-".
+    auto const pipes = gitlab::pipelines(readFixture(FixtureRoot::Testdata, "gitlab/pipelines.json"), OutputExtent::Whole);
+    auto const jobs = gitlab::failedJobs(readFixture(FixtureRoot::Testdata, "gitlab/jobs-failed.json"), OutputExtent::Whole);
+    REQUIRE(pipes.has_value());
+    REQUIRE(jobs.has_value());
+    CHECK_FALSE(pipes->empty());
+    CHECK(std::ranges::all_of(*pipes, [](PipelineInfo const& p) { return p.id != 0 && !p.sha.empty(); }));
+    CHECK(std::ranges::all_of(*jobs, [](FailedJob const& j) { return j.pipelineId != 0 && j.name.starts_with("job-"); }));
 }
 TEST_CASE("GitLab: an MR's newest pipeline of its sha decides, and its failed jobs are named", "[gitlab]")
 {
@@ -361,6 +386,7 @@ TEST_CASE("GitLab: an MR's newest pipeline of its sha decides, and its failed jo
     CHECK(mrs[0].failingChecks == std::vector<std::string> { "test-windows", "lint" });
     CHECK(mrs[1].ci == CiState::Passing);
     CHECK(mrs[2].ci == CiState::Pending);
+    CHECK(mrs[0].review == listed->items[0].review); // reviewStateOf(), unchanged by the join
     CHECK(mrs[0].source == StateSource::Complete);
     CHECK(mrs[3].source == StateSource::Inferred); // no pipeline of its sha
     CHECK(gitlab::enriched(listed->items, std::nullopt, std::nullopt)[0].source == StateSource::Inferred);
@@ -368,18 +394,24 @@ TEST_CASE("GitLab: an MR's newest pipeline of its sha decides, and its failed jo
 }
 TEST_CASE("GitLab: the REST list carries conflicts, update time and the head commit", "[gitlab]")
 {
-    // mrs-open.json (recorded): iid 5696 (detailed_merge_status `conflict`) and 5729 (`draft_status`, has_conflicts
-    // true) are Conflicting; 5752 is not; 5696's updatedWallMs == unixMsOf("2026-11-20T10:24:50.48+01:00");
-    // every entry's updatedWallMs is non-zero and its headSha non-empty.
+    auto const listed = gitlab::changeRequests(readFixture(FixtureRoot::Testdata, "gitlab/mrs-open.json"), OutputExtent::Whole);
+    REQUIRE(listed.has_value());
+    auto const byIid = [&](uint64_t iid) { return *std::ranges::find(listed->items, iid, &ChangeRequest::number); };
+    CHECK(byIid(5696).conflicts == Conflicts::Conflicting); // detailed_merge_status `conflict`
+    CHECK(byIid(5729).conflicts == Conflicts::Conflicting); // `draft_status`, has_conflicts true
+    CHECK(byIid(5752).conflicts == Conflicts::None);
+    CHECK(byIid(5696).updatedWallMs == unixMsOf("2026-11-20T10:24:50.48+01:00"));
+    CHECK(std::ranges::all_of(listed->items, [](ChangeRequest const& mr) { return mr.updatedWallMs != 0 && !mr.headSha.empty(); }));
 }
 ```
 
-  `Commands_test.cpp`: `findCommand("glab-pipelines")` and `findCommand("glab-failed-jobs")` exist with Decision 1's
-  argv, and `manifestText()` holds both lines as written. `Provider_test.cpp`: GitLab's row names both commands and
-  non-null mappings; GitHub's names none.
+  `Commands_test.cpp`: `findCommand("glab-pipelines")` and `findCommand("glab-failed-jobs")` exist with the argv
+  above, and `manifestText()` holds both lines as written. `Provider_test.cpp`: GitLab's row names both commands and
+  has non-null `mapPipelines`, `mapFailedJobs` and `enrich`; GitHub's names none and has all three null.
 - [ ] **Step 4:** Build; `orchestrator_test.exe "[gitlab]"` → fail.
 - [ ] **Step 5: Implement** the JSON shapes and `glz::meta` (`has_conflicts`, `updated_at`, `sha`; the pipeline and
-  job keys are already snake-free), the mappings, `enriched()`, the provider members and the two command rows.
+  job keys are already snake-free), the mappings, `enriched()`, the provider members (five, with `enrich`) and the
+  two command rows.
 - [ ] **Step 6:** Regenerate the manifest and consent goldens (two new command lines). Rebuild;
   `orchestrator_test.exe` (all); `vtextension_test.exe "[consent]"` and `vtextension_test.exe "[corpus]"` (the
   orchestrator manifest still parses under the host's unchanged rules); `ctest --test-dir
@@ -397,10 +429,10 @@ TEST_CASE("GitLab: the REST list carries conflicts, update time and the head com
   (if acli changed); `extensions/orchestrator/harness/scrub-fixture.py` (if `updated` needs a rule)
 - Create: `extensions/orchestrator/core/testdata/jira/issues-work.json` (hand-made)
 - Modify: the manifest and consent goldens
-- Test: `extensions/orchestrator/core/Jira_test.cpp`
+- Test: `extensions/orchestrator/core/Jira_test.cpp`, `extensions/orchestrator/core/Commands_test.cpp`
 
 **Interfaces:**
-- Consumes: `unixMsOf` (Task 1).
+- Consumes: `unixMsOf(std::string_view) -> std::optional<uint64_t>` (`core/Timestamps.hpp`, Task 1).
 - Produces:
 
 ```cpp
@@ -421,18 +453,20 @@ uint64_t updatedWallMs = 0;                         ///< When it was last update
   `JsonFields` gains `std::optional<JsonStatus> status; std::optional<std::string> updated;` with
   `JsonStatus { std::string name; std::optional<JsonStatusCategory> statusCategory; }`,
   `JsonStatusCategory { std::string key; }`. `AcliIssuesArgv` gains `--fields key,summary,status,issuetype,updated`
-  after `{jql}` (Decision 3 for the fallback list). Status names go through `displayText(name, MaxTitleChars)`.
+  after `{jql}`; if the recording shows `acli` refuses `key` in `--fields`, use
+  `summary,status,issuetype,updated` (the key is always printed) and say so in the Jira README. The same command
+  later serves the key lookup and the `in_progress_jql` query (Task 7), so no new `acli` command is declared. Status names go through `displayText(name, MaxTitleChars)`.
 
 - [ ] **Step 1: Record (on the user's machine; read-only).** If `acli jira auth status` fails, stop and report
   BLOCKED. Run `acli jira workitem search --jql "assignee = currentUser() AND resolution = Unresolved" --fields
-  key,summary,status,issuetype,updated --limit 100 --json > $S/issues-recorded.json` (if `key` is refused, Decision
-  3). Scrub: `python -I -X utf8 extensions/orchestrator/harness/scrub-fixture.py --shape acli-issues
+  key,summary,status,issuetype,updated --limit 100 --json > $S/issues-recorded.json` (if `key` is refused, the
+  fallback list above). Scrub: `python -I -X utf8 extensions/orchestrator/harness/scrub-fixture.py --shape acli-issues
   $S/issues-recorded.json extensions/orchestrator/core/testdata/jira/issues-open.json`; replace any site-specific
   status name as the README already describes. Grep the result for the site and the user's name: none.
 - [ ] **Step 2: Hand-make** `issues-work.json` (acli's shape, site `example.atlassian.net`): `PRJ-1234` "In
   Progress"/`indeterminate`, `PRJ-1240` "Selected for Development"/`new`, `PRJ-1300` "To Do"/`new`, `PRJ-1301` "In
-  Review"/`indeterminate`, each with an `updated` such as `2026-11-13T12:00:00.000+0000`, and `PRJ-1302` whose
-  status name holds `\u001b[31m`. Document it in the README.
+  Review"/`indeterminate`, each with an `updated` such as `2026-11-13T12:00:00.000+0000`, and `PRJ-1302`
+  `indeterminate` (no merge request names it, so the Work world's "No MR yet" group holds it), whose status name holds `\u001b[31m`. Document it in the README.
 - [ ] **Step 3: Write the failing tests** (`Jira_test.cpp`, `[jira]`):
 
 ```cpp
@@ -451,7 +485,12 @@ TEST_CASE("Jira: status, category and update time", "[jira]")
 }
 TEST_CASE("Jira: the recorded search carries status and update time", "[jira]")
 {
-    // issues-open.json: every item has a non-empty status, a category other than Unknown, and updatedWallMs != 0.
+    auto const listed = jira::issues(readFixture(FixtureRoot::Testdata, "jira/issues-open.json"), OutputExtent::Whole,
+                                     IssueSourceContext { .site = "https://example.atlassian.net" });
+    REQUIRE(listed.has_value());
+    CHECK(std::ranges::all_of(listed->items, [](Issue const& issue) {
+        return !issue.status.empty() && issue.category != StatusCategory::Unknown && issue.updatedWallMs != 0;
+    }));
 }
 ```
 
@@ -498,7 +537,8 @@ inline constexpr auto TaskRoleRows = std::array {
   Rules: `in_progress_jql` is read only where the row's `progressKey` names it (else `UnknownKey`, like `jql` on a
   forge source); checked as Text; `(<jql>) AND (<in_progress_jql>)` longer than `MaxTextBytes` → `NotText` on
   `repos[i].issues[j].in_progress_jql`. `role` unknown → `UnknownRole` with the four spellings in its text.
-  `dashboardKeys()` is **not** changed (Decision 6).
+  `dashboardKeys()` is **not** changed: adding `w`, `s` or `o` would refuse today's configurations whose task key is
+  one of them (the view fixtures' `issue` task is keyed `w`), and task keys no longer act on the dashboard.
 
 - [ ] **Step 1: Write the failing tests** (`Config_test.cpp`, `[config]`):
 
@@ -528,7 +568,7 @@ TEST_CASE("task keys w, s and o stay valid", "[config]")
 - [ ] **Step 4:** Rebuild; `orchestrator_test.exe` (all) → pass; portability → 0; `clang-format -i`.
 - [ ] **Step 5: Commit** — message `feat(orchestrator): in_progress_jql and a task's role in the configuration`.
 
-### Task 5: `core/WorkItems` — linking, de-duplication, groups and order — Haiku
+### Task 5: `core/WorkItems` — linking, de-duplication, groups and order — Opus
 
 **Files:**
 - Create: `extensions/orchestrator/core/WorkItems.hpp`, `extensions/orchestrator/core/WorkItems.cpp`,
@@ -536,8 +576,11 @@ TEST_CASE("task keys w, s and o stay valid", "[config]")
 - Modify: `extensions/orchestrator/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `ChangeRequest` (Tasks 1–2), `Issue`/`StatusCategory` (Task 3), `IssueQuery` (Task 4), `Run`,
-  `countsAsActive` (`Run.hpp`), `isJiraKey` (`Naming.hpp`).
+- Consumes: `ChangeRequest` with `conflicts`, `updatedWallMs`, `source` (`Conflicts::{None,Conflicting}`,
+  `StateSource::{Complete,Inferred}`, Task 1) and `headSha` (Task 2); `Issue` with `status`, `category`,
+  `updatedWallMs` (`StatusCategory::{Unknown,ToDo,InProgress,Done}`, Task 3); `Repo::issueQueries` with
+  `IssueQuery::{source,text,site,inProgressJql}` (Task 4); `Run`, `Run::worker`, `countsAsActive` (`Run.hpp`);
+  `ImplicitWorkerId` (`Config.hpp`); `isJiraKey` (`Naming.hpp`).
 - Produces (namespace `orchestrator`):
 
 ```cpp
@@ -553,7 +596,8 @@ inline constexpr auto WorkGroupRows = std::array {
     WorkGroupRow { WorkGroup::NoMrYet, "work/no-mr", "No MR yet", FoldDefault::Open },
     WorkGroupRow { WorkGroup::EverythingElse, "work/else", "Everything else", FoldDefault::Folded },
 };
-/// The fold key whose presence means the flat sort by last update (Decision 10).
+/// The fold key whose presence means the flat sort by last update. A group's fold key held by the engine means
+/// "toggled from the group's FoldDefault"; folds and sort persist through ToggleFoldAction, with no store change.
 inline constexpr std::string_view SortByUpdateKey = "work/sort-by-update";
 
 /// Whether a ticket or forge issue is being worked on.
@@ -585,12 +629,18 @@ struct WorkInput
     std::span<Issue const> linkedTickets;       ///< The key lookup's tickets (Engine::linkedTickets()).
     std::span<std::string const> jiraProjects;  ///< jiraProjectsOf().
     std::span<Run const> runs;                  ///< Every run; only active ones (countsAsActive) count.
-    std::string_view implicitWorker;            ///< The worker id a run without `worker` ran on.
 };
 
-/// @return The covered Jira projects (Decision 4): the project part of every JiraRef in @p listed, and every
-///         project @p queries' JQL names; upper case, sorted, unique.
-[[nodiscard]] std::vector<std::string> jiraProjectsOf(std::span<IssueQuery const> queries, std::span<Issue const> listed);
+/// @return The worker @p run runs on: Run::worker, or ImplicitWorkerId (`claude`) when it is empty (Decision 15).
+[[nodiscard]] std::string_view workerIdOf(Run const& run) noexcept;
+/// @return The item's identity across rebuilds: `<repo>/!<n>` for an MR row, `<repo>/<JIRA-KEY>` or `<repo>/#<n>`
+///         for a ticket row; what the view keeps a selection and an open menu on.
+[[nodiscard]] std::string workItemKey(WorkItem const& item);
+
+/// @return The covered Jira projects (a key links only into one of them; see the scanner below): the project part of every JiraRef among @p listed's issues, and
+///         every project the JQL of @p repos' Jira queries names; upper case, sorted, unique. Takes what the engine
+///         holds, so nothing is copied.
+[[nodiscard]] std::vector<std::string> jiraProjectsOf(std::span<Repo const> repos, std::span<RepoWork const> listed);
 /// @return The first covered Jira key in @p title (case-sensitive), else in @p branch (case-insensitive, upper-cased).
 [[nodiscard]] std::optional<std::string> linkedJiraKey(std::string_view title, std::string_view branch,
                                                        std::span<std::string const> projects);
@@ -616,7 +666,8 @@ enum class WorkSort : uint8_t { Importance = 0, LastUpdate };
 [[nodiscard]] bool matchesFilter(WorkItem const& item, std::string_view filter);
 ```
 
-  `groupOf(ChangeRequest)` (spec's matching order, Decision 9):
+  `groupOf(ChangeRequest)` (the spec's matching order; an Inferred GitLab MR — no matched pipeline — is Ready only
+  when GitLab says `mergeable`, i.e. review Approved):
 
 ```
 if readiness == Draft                                   -> EverythingElse
@@ -638,7 +689,7 @@ if ready                                                -> ReadyToMerge
   issue (`#<n>`, its `ListedIssue` in the same repository). (2) Ticket rows: every listed issue no MR named, keyed
   by Jira key or (repo, number), kept in the first repository that lists it; group by `groupOf(progress)`.
   (3) Agents: an active run of the same repository whose `item` equals the row's `item` (or, for an MR row, its
-  linked ticket's `JiraRef`/`IssueRef`); `agentWorker` = `run.worker` or @p implicitWorker when empty.
+  linked ticket's `JiraRef`/`IssueRef`); `agentWorker = workerIdOf(run)`.
 
 - [ ] **Step 1: Write the failing tests** (`WorkItems_test.cpp`, tag `[orchestrator][work]`), each a table:
 
@@ -657,11 +708,12 @@ TEST_CASE("WorkItems: a key links only at word boundaries and in a covered proje
 }
 TEST_CASE("WorkItems: the covered projects come from listed keys and the JQL", "[orchestrator][work]")
 {
-    auto const queries = std::vector<IssueQuery> {
+    auto const repos = std::vector<Repo> { { .name = "contour", .issueQueries = {
         { .source = "jira", .text = R"(project = "abc" AND assignee = currentUser())", .site = "https://example.atlassian.net" },
-        { .source = "jira", .text = "PROJECT in (Xyz, \"QQ\") ORDER BY updated", .site = "https://example.atlassian.net" } };
-    auto const listed = std::vector<Issue> { { .item = JiraRef { "PRJ-1" }, .title = "t", .url = "u" } };
-    CHECK(jiraProjectsOf(queries, listed) == std::vector<std::string> { "ABC", "PRJ", "QQ", "XYZ" });
+        { .source = "jira", .text = "PROJECT in (Xyz, \"QQ\") ORDER BY updated", .site = "https://example.atlassian.net" } } } };
+    auto const issues = std::vector<ListedIssue> { { .issue = { .item = JiraRef { "PRJ-1" }, .title = "t", .url = "u" } } };
+    auto const listed = std::vector<RepoWork> { { .repo = "contour", .changeRequests = {}, .issues = issues } };
+    CHECK(jiraProjectsOf(repos, listed) == std::vector<std::string> { "ABC", "PRJ", "QQ", "XYZ" });
 }
 TEST_CASE("WorkItems: an MR's group is the first row of the spec's table that matches", "[orchestrator][work]")
 {
@@ -697,8 +749,13 @@ TEST_CASE("WorkItems: a key the sources did not list is found among the looked-u
 TEST_CASE("WorkItems: an active run on the item or its ticket shows its worker", "[orchestrator][work]")
 {
     // active run on ChangeRequestRef{2375}, worker "claude-work" → agentWorker "claude-work";
-    // active run on JiraRef{"PRJ-1234"} with worker "" and the MR linking PRJ-1234 → agentWorker == implicitWorker;
-    // a Finished run → none.
+    // active run on JiraRef{"PRJ-1234"} with worker "" and the MR linking PRJ-1234 → agentWorker == "claude"
+    // (workerIdOf), even when the configured workers' first is another; a Finished run → none.
+}
+TEST_CASE("WorkItems: an item's key is stable and distinct", "[orchestrator][work]")
+{
+    // MR #2375 of contour → "contour/!2375"; ticket PRJ-1300 → "contour/PRJ-1300"; forge issue 78 → "contour/#78";
+    // the same item built twice gives the same key.
 }
 TEST_CASE("WorkItems: order by importance or by last update", "[orchestrator][work]")
 {
@@ -721,7 +778,10 @@ TEST_CASE("WorkItems: the filter matches number, key, title, repository and URL"
 - Modify: `extensions/orchestrator/core/WorkItems.hpp/.cpp`, `extensions/orchestrator/core/WorkItems_test.cpp`
 
 **Interfaces:**
-- Consumes: `TaskRole`, `TaskDef::role` (Task 4), `WorkItem` (Task 5), `Config`, `WorkerDef`.
+- Consumes: `TaskRole::{None,FixCi,ResolveConflicts,AddressReview,WorkOnIssue}` and `TaskDef::role`
+  (`core/TaskRoles.hpp`, `Config.hpp`, Task 4); `WorkItem` (its `changeRequest`, `ticket`, `item`) and
+  `workerIdOf(Run const&)` (empty `Run::worker` → `ImplicitWorkerId`, `"claude"`) (`core/WorkItems.hpp`, Task 5);
+  `Config::tasks()`, `findTask()`, `workers()`, `workerFor()`, `appliesToOf()`; `countsAsActive` (`Run.hpp`).
 - Produces:
 
 ```cpp
@@ -737,7 +797,7 @@ struct TaskSuggestion
 /// reason `first task for a merge request` / `first task for a ticket`. A role no applicable task has falls
 /// through to the next rule.
 [[nodiscard]] TaskSuggestion suggestTask(Config const& config, WorkItem const& item);
-/// @return How many active runs (countsAsActive) run on @p workerId (a run without `worker` counts for the first worker).
+/// @return How many active runs (countsAsActive) run on @p workerId, each counted by workerIdOf() (Decision 15).
 [[nodiscard]] std::size_t activeRunsOn(Config const& config, std::span<Run const> runs, std::string_view workerId) noexcept;
 /// @return The task's own worker; when it runs at least one agent, the worker with the fewest active runs, ties
 ///         in configuration order.
@@ -762,6 +822,7 @@ TEST_CASE("WorkItems: the worker defaults to the task's, else the least busy", "
     // no runs → a; one active run on a → b (b, c both 0: configuration order);
     // runs: a×1, b×1 → c; a×2, b×1, c×1 → b; a Finished run on a counts nothing → a.
     // implicit-only config: a run with worker "" counts for "claude"; defaultWorker is still "claude".
+    // workers x (first), claude: a run with worker "" counts for "claude", not for x.
 }
 ```
 
@@ -779,10 +840,18 @@ TEST_CASE("WorkItems: the worker defaults to the task's, else the least busy", "
 - Test: `extensions/orchestrator/core/Engine_test.cpp`
 
 **Interfaces:**
-- Consumes: `glab-pipelines`, `glab-failed-jobs`, `Provider::listPipelines/listFailedJobs/mapPipelines/
-  mapFailedJobs`, `gitlab::enriched` (Task 2),
-  `IssueQuery::inProgressJql` (Task 4), `ListedIssue`, `progressOf`, `jiraProjectsOf`, `linkedJiraKey`,
-  `workItems` (Task 5).
+- Consumes (exact signatures in the tasks that made them):
+  - Task 2 (`Model.hpp`, `Provider.hpp`): `PipelineInfo`, `FailedJob`; the Provider row's `listPipelines`,
+    `listFailedJobs` (command names), `mapPipelines(std::string_view, OutputExtent)`,
+    `mapFailedJobs(std::string_view, OutputExtent)` (both `std::expected<std::vector<…>, ParseError>`), and
+    `enrich(std::vector<ChangeRequest>, std::optional<std::span<PipelineInfo const>>,
+    std::optional<std::span<FailedJob const>>) -> std::vector<ChangeRequest>`; null on GitHub's row.
+  - Task 4 (`Config.hpp`): `IssueQuery::inProgressJql` (empty: none).
+  - Task 5 (`WorkItems.hpp`): `ListedIssue { Issue issue; Progress progress; }`, `progressOf(Issue const&,
+    std::optional<std::span<std::string const>>)`, `jiraProjectsOf(std::span<Repo const>, std::span<RepoWork const>)`,
+    `linkedJiraKey(title, branch, projects) -> std::optional<std::string>`, `RepoWork`, `WorkInput`,
+    `workItems(WorkInput const&) -> std::vector<WorkItem>`.
+  - Existing: `jira::issues(text, extent, IssueSourceContext)`, `ListLimit`, `isJiraKey`.
 - Produces:
 
 ```cpp
@@ -799,6 +868,12 @@ std::optional<std::vector<PipelineInfo>> pipelines;  ///< The last pipelines; nu
 std::optional<std::vector<FailedJob>> failedJobs;    ///< The last failed jobs; nullopt: none or failed.
 std::vector<std::optional<std::vector<std::string>>> inProgressByQuery; ///< Per query: the in-progress keys; nullopt: not asked or failed.
 std::vector<ListedIssue> issues;                              ///< listedIssues().
+// Engine gains (private):
+std::vector<Issue> _linkedTickets;                            ///< linkedTickets(); kept across a failed lookup.
+/// Whether this poll's key lookup was issued; reset to NotIssued when a poll starts.
+enum class LookupPhase : uint8_t { NotIssued = 0, Issued };
+LookupPhase _lookupPhase = LookupPhase::NotIssued;
+// ShownLists (EnginePoll.cpp, what `shownOf` compares to bump `_revision`) gains the repo's `issues`.
 ```
 
   Poll lists (in `EnginePoll.cpp`'s anonymous namespace, beside `PrsList`): `PipelinesList = "pipelines"`, `FailedJobsList = "failed-jobs"`,
@@ -812,8 +887,8 @@ std::vector<ListedIssue> issues;                              ///< listedIssues(
     nullopt and the problem line `<repo>: the pipeline list could not be read; CI and review are inferred from
     GitLab's merge status`); `FailedJobsList` stores `failedJobs` (failure → nullopt and `<repo>: the failed job
     list could not be read; failing jobs are not named`); each then sets `changeRequests =
-    gitlab::enriched(listedChangeRequests, pipelines, failedJobs)` for a provider that has them (`changeRequests`
-    as before otherwise). `ProgressList` stores the keys of the listed items
+    provider->enrich(listedChangeRequests, pipelines, failedJobs)` when the row's `enrich` is not null
+    (`changeRequests` as before otherwise) — through the row, never `gitlab::` by name. `ProgressList` stores the keys of the listed items
     (failure → nullopt, problem line `<repo>: the Jira in-progress query "<in_progress_jql>" failed; tickets in
     progress are those Jira counts as in progress`). After any issue or progress result the repo's `issues` are
     rebuilt: de-duplicated as today, each with `progressOf(issue, <its query's keys>)` (an issue listed by several
@@ -824,8 +899,13 @@ std::vector<ListedIssue> issues;                              ///< listedIssues(
     `acli-issues` in the first such repository with `jql = "key in (" + keys joined by ", " + ")"` under
     `poll/<repo>/jira-keys` and count it in `_pollOutstanding`; the poll ends (backoff, drain) once it answered.
     Its result replaces `_linkedTickets` (mapped with that query's site); a failure keeps the previous ones and
-    adds a problem line.
-  - `workItems()` builds `WorkInput` from the repositories in configuration order and calls `workItems()`.
+    adds a problem line. A change of `_linkedTickets` bumps `_revision`, and so does a change of a repo's `issues`
+    (they join `ShownLists`), so the Work board, which rebuilds on `revision()`, sees progress-only changes.
+  - **Failures of the new lists only write their own problem line** (pipelines, failed jobs, progress, key
+    lookup): unlike today's `failed()`, they leave `_pollResult` and `_authCheck` alone, so they neither back the
+    poll off nor ask for a forge login check (the spec: they "fall back").
+  - `workItems()` builds `WorkInput` from the repositories in configuration order and calls
+    `orchestrator::workItems(input)` — qualified, because the member of the same name hides the free function.
 
 - [ ] **Step 1: Write the failing tests** (`Engine_test.cpp`, reuse its fixture helpers; configurations hand-written
   with `example.atlassian.net`):
@@ -844,20 +924,26 @@ TEST_CASE("a failed pipeline list leaves inferred rows and a problem line", "[or
     // discussions_not_resolved is in InReview, not ReadyToMerge (Review Focus 1).
     // SECTION "a failed job list only loses the names": glab-failed-jobs exits 1 → [0].ci == Failing,
     // failingChecks empty, problems() holds "the failed job list could not be read".
+    // Each section: the next poll's WakeAt is at poll_every (no backoff), and no "glab-auth" runs next poll.
 }
 TEST_CASE("an in_progress_jql runs once per poll and decides progress", "[orchestrator][engine][jira][work]")
 {
     // jira source jql "assignee = currentUser()", in_progress_jql 'status = "Selected for Development"':
     // one acli-issues with jql `(assignee = currentUser()) AND (status = "Selected for Development")`;
     // answered with PRJ-1240 only → listedIssues: PRJ-1240 InProgress, PRJ-1234 (indeterminate) NotStarted.
-    // SECTION "a failed query keeps the default rule": exit 1 → PRJ-1234 InProgress, problem line names the query.
+    // SECTION "a failed query keeps the default rule": exit 1 → PRJ-1234 InProgress, problem line names the query;
+    // the next poll's WakeAt is at poll_every (no backoff).
+    // SECTION "a progress-only change shows": a later poll answers the query with PRJ-1234 too, nothing else
+    // changes → revision() rises and listedIssues marks PRJ-1234 InProgress.
 }
 TEST_CASE("one key lookup per poll for tickets MRs name that no source listed", "[orchestrator][engine][jira][work]")
 {
     // GitHub repo with PRs titled "PRJ-1999: …", "UTF-8 fix", "OTHER-5 …" and a Jira source listing PRJ-1234:
     // after the lists, exactly one acli-issues whose jql is "key in (PRJ-1999)" (no UTF-8, no OTHER-5:
     // Review Focus 2); answered with PRJ-1999 → linkedTickets()[0].item == JiraRef{"PRJ-1999"};
-    // the poll's backoff starts only after it answered. A poll where every key was listed issues no lookup.
+    // the poll's backoff starts only after it answered; revision() rises when linkedTickets() changes.
+    // A poll where every key was listed issues no lookup. A failed lookup keeps the previous linkedTickets(), adds a
+    // problem line, and does not back the poll off.
 }
 TEST_CASE("workItems joins the engine's lists in configuration order", "[orchestrator][engine][work]")
 {
@@ -878,28 +964,38 @@ TEST_CASE("workItems joins the engine's lists in configuration order", "[orchest
 **Files:**
 - Modify: `extensions/orchestrator/core/Engine.hpp` (`Dispatch::worker`, two `DispatchRefusal` values),
   `extensions/orchestrator/core/EngineDispatch.cpp` (`preview`)
+- Modify: `extensions/orchestrator/core/Config.hpp/.cpp` (`takesNoProfileFor`, which the anonymous
+  `profileRefused` (~Config.cpp:1210) now calls)
 - Modify: `extensions/orchestrator/view/DispatchForm.hpp/.cpp` (`DispatchAction::worker`, `refusalText` rows),
   `extensions/orchestrator/guest/Driver.cpp` (passes `worker` from `DispatchAction` to `Dispatch`)
-- Test: `extensions/orchestrator/core/Engine_test.cpp`, `extensions/orchestrator/view/DispatchForm_test.cpp`,
-  `extensions/orchestrator/guest/Driver_test.cpp`
+- Test: `extensions/orchestrator/core/Engine_test.cpp`, `extensions/orchestrator/core/Config_test.cpp`,
+  `extensions/orchestrator/view/DispatchForm_test.cpp`, `extensions/orchestrator/guest/Driver_test.cpp`
 
 **Interfaces:**
+- Consumes: `Config::workerFor(taskId)`, `Config::findWorker(id)`, `agentRowOf(AgentKind).settings`
+  (`SettingsProfile::{NotTaken,Taken}`, `core/Agents.hpp`), `TaskDef::permissions`.
 - Produces:
 
 ```cpp
+// Config.hpp
+/// @return Whether @p task has its own permission profile (`permissions`) and @p worker's agent takes none: the
+///         configuration's ProfileOnCopilot rule and a dispatch's WorkerTakesNoProfile share it.
+[[nodiscard]] bool takesNoProfileFor(TaskDef const& task, WorkerDef const& worker) noexcept;
+
 // Dispatch and DispatchAction each gain, after `permissions`:
 std::string worker = {}; ///< The worker it runs on, this run only; empty: the task's (Config::workerFor).
 // DispatchRefusal gains, last:
 UnknownWorker,        ///< No worker has that id.
-WorkerTakesNoProfile, ///< The worker's agent takes no permission profile, and the task or the dispatch names one.
+WorkerTakesNoProfile, ///< The worker's agent takes no permission profile, and the task has its own.
 // refusalText rows: "no worker has that id: check `workers`";
 //                   "that worker takes no permission profile, and this task has one: pick another worker"
 ```
 
   `preview`: `auto const* worker = request.worker.empty() ? &_config->workerFor(task->id) :
-  _config->findWorker(request.worker)`; null → `UnknownWorker`; when `!request.worker.empty()`, the agent takes no
-  profile, and (`!task->permissions.empty()` or `!request.permissions.empty()`) → `WorkerTakesNoProfile`. The stored
-  `run.worker` stays empty for the implicit worker alone (as today).
+  _config->findWorker(request.worker)`; null → `UnknownWorker`; `takesNoProfileFor(*task, *worker)` →
+  `WorkerTakesNoProfile`. `request.permissions` does not count: the dialog always sends a profile name, and a
+  no-profile worker runs without it, as today. The stored `run.worker` stays empty for the implicit worker alone
+  (as today).
 
 - [ ] **Step 1: Write the failing tests:**
 
@@ -914,11 +1010,15 @@ TEST_CASE("a dispatch's worker overrides the task's for that run only", "[orches
 TEST_CASE("a worker that takes no profile is refused for a task with one", "[orchestrator][engine][workers]")
 {
     // workers: claude, copilot (agent copilot); task fix_ci (worker claude) with permissions "read_only".
-    // Dispatch{ worker = "copilot" } → WorkerTakesNoProfile (Review Focus 3); a task without permissions → accepted,
-    // run.agent == AgentKind::Copilot.
+    // Dispatch{ worker = "copilot" } → WorkerTakesNoProfile (Review Focus 3); a task without permissions, dispatched
+    // with worker "copilot" and permissions "default" (as the dialog sends) → accepted, run.agent == AgentKind::Copilot,
+    // run.permissions empty.
 }
 ```
 
+  `Config_test.cpp` (add to Test): the existing Copilot-profile cases still pass through `takesNoProfileFor`, and
+  `takesNoProfileFor({ .permissions = "read_only" }, { .agent = AgentKind::Copilot })` is true,
+  `… { .agent = AgentKind::Claude }` false, `{ .permissions = "" }` with Copilot false.
   `DispatchForm_test.cpp`: `refusalText(DispatchRefusal::UnknownWorker)` and `WorkerTakesNoProfile` are non-empty
   and distinct. `Driver_test.cpp`: a `DispatchAction` with `worker = "claude-b"` steps a `Dispatch` with the same.
 - [ ] **Step 2–4:** build → fail; implement; rebuild → `orchestrator_test.exe` (all) pass; portability;
@@ -934,15 +1034,21 @@ TEST_CASE("a worker that takes no profile is refused for a task with one", "[orc
   `workKeyRows()`), `extensions/orchestrator/view/Dashboard.cpp` (top bar view names, the Work layout, frame bytes),
   `extensions/orchestrator/view/Actions.cpp` (palette rows `SwitchView`, action-bar hints in the Work view)
 - Modify: `extensions/orchestrator/view/ViewFixtures.hpp/.cpp` (`World::answers`)
-- Create (hand-made): `extensions/orchestrator/core/testdata/github/prs-work.json` (projected rows; README row)
+- Create (hand-made): `extensions/orchestrator/core/testdata/github/prs-work.json` (projected rows; a row in
+  `core/testdata/github/README.md`), `extensions/orchestrator/core/testdata/jira/issues-lookup-work.json` (the key
+  lookup's answer; a row in `core/testdata/jira/README.md`)
 - Create (goldens): `view/testdata/work-{50x20,80x24,120x40,160x40}.screen`, `work-folded-{80x24,120x40}.screen`,
   `work-flat-{80x24,120x40}.screen`, `work-filter-{80x24,120x40}.screen`
 - Modify: `extensions/orchestrator/CMakeLists.txt`
 - Test: `extensions/orchestrator/view/WorkBoard_test.cpp`, `extensions/orchestrator/view/Dashboard_test.cpp` (scenes)
 
 **Interfaces:**
-- Consumes: `Engine::workItems()` (Task 7), `WorkGroupRows`, `SortByUpdateKey`, `orderOf`, `matchesFilter`
-  (Task 5), `ToggleFoldAction`, `Engine::isFolded`.
+- Consumes: `Engine::workItems() const -> std::vector<WorkItem>` and `Engine::revision()` (Task 7: it rises when
+  the lists, issue progress or the looked-up tickets change); from `core/WorkItems.hpp` (Task 5): `WorkItem`
+  (`group`, `repo`, `changeRequest`, `ticket`, `ticketKey`, `item`, `updatedWallMs`, `agentRun`, `agentWorker`),
+  `WorkGroup`, `WorkGroupRows` (`foldKey`, `name`, `FoldDefault`), `SortByUpdateKey` (`"work/sort-by-update"`),
+  `WorkSort`, `orderOf(items, repoOrder, sort)`, `matchesFilter(item, filter)`, `workItemKey(item)`;
+  `ToggleFoldAction`, `Engine::isFolded(group)`, `OpenUrlAction`, `jira::browseUrl`.
 - Produces:
 
 ```cpp
@@ -961,11 +1067,12 @@ struct WorkState
     Filtering filtering = Filtering::Off;
     std::string filter = {};
     std::size_t repoChip = 0;              ///< 0: every repository; else 1 + its index in the configuration.
-    std::string selectedKey = {};          ///< The selected line's identity, kept across rebuilds.
+    std::string selectedKey = {};          ///< workItemKey() of the selected item, or `group:<foldKey>` of a heading.
     bool operator==(WorkState const&) const = default;
 };
 // Interaction gains: View view = View::Agents; WorkState work = {};
-/// @return The keys the Work view acts on (Decision 6: none of them is added to dashboardKeys()).
+/// @return The keys the Work view acts on (none is added to dashboardKeys(): that would
+///         refuse today's configurations with a task keyed `w`, `s` or `o`).
 [[nodiscard]] std::span<KeyRow const> workKeyRows() noexcept;
 
 // WorkBoard.hpp
@@ -999,10 +1106,13 @@ class WorkBoardView final: public core::tui::Component { /* ctor(Engine const&, 
   Pipeline `✗ pipeline` (Failing) / `◌ running` (Pending) / `✓ pipeline` (Passing) / `·`; Review `⚠ conflicts`
   (wins) / `⟲ changes` / `✓ approved` / `… review` (Required) / `· no review` (None); Jira `◆ <status>` (a forge
   issue `● open`, a key without a status `◆ ?`, none `·`); Agent `⬢ <worker>` or `updateAgeText`. Roles:
-  Failing/Warning/Passing/Working/Dim as the Fleet pairs glyph and colour. Narrow widths per Decision 13. The top
+  Failing/Warning/Passing/Working/Dim as the Fleet pairs glyph and colour. Narrow widths drop, in order: the Agent
+  column's age (a `⬢ worker` stays), then Review text → glyph, then Pipeline text → glyph, then the Ticket column
+  under 60 columns. The MR and ticket cells are drawn **without** OSC 8 hyperlinks: `Dashboard::applyMouse` opens
+  any hyperlink on a single press, and the spec wants a click to select (double-click opens, Task 12). The top
   bar shows `Agents  Work` (the shown one in the Focus role) before the gauge and pill; the Work view replaces the
   Fleet and Focus panes. While it is shown the frame also sets `\033[?1003h` and on leaving `\033[?1003l`
-  (Decision 11; the hover and drag themselves are Task 12).
+  (any-motion reporting, for Task 12's hover and drag; without motion events nothing else changes).
   `World::answers`: `std::vector<CommandAnswer>` where `struct CommandAnswer { std::string command; std::string
   argumentContains = {}; ListAnswer answer; }`, consulted first by `answerFor` (first match whose command equals and
   some argument value contains `argumentContains`).
@@ -1010,7 +1120,10 @@ class WorkBoardView final: public core::tui::Component { /* ctor(Engine const&, 
   fix the flaky test" Failing (`test-windows`); #2376 "address the review" CHANGES_REQUESTED; #2377 "PRJ-1301:
   rebase" CONFLICTING + APPROVED; #2378 "ready one" passing + APPROVED; #2379 "PRJ-1999: running" pending; #2380
   "draft work" isDraft. The Work world: `OneRepository` plus a Jira source (`site: https://example.atlassian.net`),
-  `gh-prs` → `prs-work.json`, `acli-issues` → `jira/issues-work.json`, the key lookup → a hand JSON for PRJ-1999.
+  `gh-prs` → `prs-work.json`, `acli-issues` → `jira/issues-work.json` (Task 3: PRJ-1234, PRJ-1240, PRJ-1300,
+  PRJ-1301, PRJ-1302 `indeterminate` and unnamed), the key lookup (`argumentContains = "key in"`) →
+  `jira/issues-lookup-work.json`: one work item, `PRJ-1999` "In Review"/`indeterminate`, acli's shape, site
+  `example.atlassian.net`.
 
 - [ ] **Step 1: Write the failing tests** (`WorkBoard_test.cpp`, `[orchestrator][view][work]`):
 
@@ -1023,7 +1136,8 @@ TEST_CASE("Work view: w switches views and back", "[orchestrator][view][work]")
 TEST_CASE("Work view: groups in order, Everything else folded", "[orchestrator][view][work]")
 {
     // workLines of the Work world: headings in the order Needs you, Ready to merge, In review, No MR yet,
-    // Everything else; Everything else has no item lines; Needs you holds #2375, #2376, #2377 newest first.
+    // Everything else; Everything else has no item lines; Needs you holds #2375, #2376, #2377 newest first;
+    // No MR yet holds PRJ-1302; #2379's Jira cell reads "◆ In Review" (from the lookup).
 }
 TEST_CASE("Work view: z folds the selected row's group and the fold persists", "[orchestrator][view][work]")
 {
@@ -1061,8 +1175,9 @@ TEST_CASE("Work view: o opens the selected MR or ticket", "[orchestrator][view][
 - [ ] **Step 2:** Add files to `CMakeLists.txt`; build; `orchestrator_test.exe "[work]"` → fail.
 - [ ] **Step 3: Implement.** The items are cached in the dashboard's state and rebuilt only when
   `engine.revision()` changes; the view renders only the lines that fit (Constraints: the daemon's call deadline).
+  The selection is kept by `selectedKey` across rebuilds; when its line is gone it moves to the nearest line.
 - [ ] **Step 4: Goldens.** `ORCHESTRATOR_UPDATE_GOLDENS=1 … "golden screens"`; read every new `work-*.screen`:
-  each column the spec names is present at 120 and 160 columns, the drops of Decision 13 at 80 and 50; the
+  each column the spec names is present at 120 and 160 columns, the narrow-width drops at 80 and 50; the
   existing screens are unchanged except the top bar's `Agents  Work` names (read that diff in full).
 - [ ] **Step 5:** `orchestrator_test.exe` (all); `ctest --test-dir out/build/clangcl-release -R
   "orchestrator|fixture-privacy"` → pass; portability → 0; `clang-format -i`.
@@ -1074,7 +1189,7 @@ TEST_CASE("Work view: o opens the selected MR or ticket", "[orchestrator][view][
 - Create: `extensions/orchestrator/view/StartDialog.hpp`, `extensions/orchestrator/view/StartDialog.cpp`,
   `extensions/orchestrator/view/StartDialog_test.cpp`
 - Modify: `extensions/orchestrator/view/DispatchForm.hpp/.cpp` (`DispatchFormState::worker`, `FormField::Worker`,
-  `workerOf`, `actionOf`, `changeSetting`)
+  `workerOf`, `actionOf`, `changeSetting`, `openDispatchForm`, `openTopicForm`)
 - Modify: `extensions/orchestrator/view/Keys.hpp` (`Interaction` gains `std::optional<StartDialogState>
   startDialog`: in `Interaction`, not `WorkState`, because a finished run's "run again" opens it from the Agents
   view), `extensions/orchestrator/view/Dashboard.cpp` (shows the dialog as an overlay, as the launcher was; `⏎` on
@@ -1084,8 +1199,14 @@ TEST_CASE("Work view: o opens the selected MR or ticket", "[orchestrator][view][
 - Test: `StartDialog_test.cpp`, `DispatchForm_test.cpp`, `Dashboard_test.cpp` (scenes)
 
 **Interfaces:**
-- Consumes: `suggestTask`, `defaultWorker`, `activeRunsOn` (Task 6), `Dispatch::worker` (Task 8), `isSetupIncomplete`,
-  `setupWarnings`, `previewOf`, `canConfirm`, `commandShown`, `checkoutText` (`DispatchForm.hpp`).
+- Consumes: from `core/WorkItems.hpp` (Tasks 5–6): `WorkItem`, `suggestTask(Config const&, WorkItem const&) ->
+  TaskSuggestion { TaskDef const* task; std::string reason; }`, `defaultWorker(Config const&, std::span<Run const>,
+  std::string_view taskId) -> WorkerDef const&`, `activeRunsOn(Config const&, std::span<Run const>,
+  std::string_view workerId) -> std::size_t`; `DispatchAction::worker` and `DispatchRefusal::{UnknownWorker,
+  WorkerTakesNoProfile}` with their `refusalText` rows, `takesNoProfileFor(TaskDef const&, WorkerDef const&)` (Task 8);
+  `Engine::workItems()`, `Engine::runs()`, `Engine::activeRunOn(repo, item)`; existing `DispatchForm.hpp`:
+  `isSetupIncomplete`, `setupWarnings`, `previewOf`, `canConfirm`, `commandShown`, `checkoutText`, `refusalText`,
+  `HooksWarning`, `FormField::{Task,Model,Note,Repo,Permissions}`.
 - Produces:
 
 ```cpp
@@ -1093,7 +1214,9 @@ TEST_CASE("Work view: o opens the selected MR or ticket", "[orchestrator][view][
 // DispatchFormState gains: std::size_t worker = 0; ///< Index into Config::workers().
 // FormField gains, last: Worker ///< ←/→ cycle the workers.
 // workerOf(form, engine) now returns &workers()[form.worker]; actionOf sets DispatchAction::worker to its id;
-// changeSetting(Task) also resets worker to defaultWorker(task).
+// changeSetting(Task) also resets worker to defaultWorker(task). openDispatchForm() and openTopicForm() set worker
+// to the index of defaultWorker(engine.config(), engine.runs(), task) — never left at 0 (pre-flight finding 2).
+// FormField::Permissions stays: the profile is the dialog's fifth setting, defaulting as today.
 
 // StartDialog.hpp
 /// How much of what a dispatch runs the dialog shows.
@@ -1114,7 +1237,7 @@ enum class StartRefusal : uint8_t { NotConfigured = 0, NotListed, NoTask };
 ///         again"), its model, defaultWorker(), and the reason; or why it cannot open.
 [[nodiscard]] std::expected<StartDialogState, StartRefusal> openStartDialog(Engine const& engine, WorkItem const& item,
                                                                             std::string_view task, std::string session);
-/// Applies one key: Tab moves Task → Worker → Model → Note → Task; ←/→ step the setting; typing edits the note;
+/// Applies one key: Tab moves Task → Worker → Model → Perms → Note → Task; ←/→ step the setting; typing edits the note;
 /// Ctrl+P toggles the preview; Esc closes; ⏎ dispatches unless canConfirm() is false (the engine's refusal is shown)
 /// or the worker's setup is incomplete and hooks != Confirmed (first ⏎ only confirms).
 [[nodiscard]] std::optional<DispatchAction> applyStartDialogKey(core::tui::KeyEvent const& key,
@@ -1122,9 +1245,10 @@ enum class StartRefusal : uint8_t { NotConfigured = 0, NotListed, NoTask };
                                                                 Engine const& engine, HooksWarning hooksAtInput,
                                                                 std::string_view nearTab);
 /// The dialog, in a rounded box titled `▶ Start agent`: the item, Task (with `‹ ›` and the reason), Worker (each
-/// worker as a chip `name n` with its active runs, `(setup)` when isSetupIncomplete, `(no profile)` per Decision 8),
-/// Model, Note, the checkout and worktree, the setup warnings, `⬢ <worker> already works on this` when an active
-/// run is on the item (Decision 7), and with Full the prompt and command line.
+/// worker as a chip `name n` with its active runs, `(setup)` when isSetupIncomplete, `(no profile)` when
+/// takesNoProfileFor(task, worker)), Model, Perms, Note, the checkout and worktree, the setup warnings,
+/// `⬢ <worker> already works on this` when an active run is on the item (⏎ then shows the engine's AlreadyRunning
+/// refusal; there is no second-⏎ override), and with Full the prompt and command line.
 class StartDialogView final: public core::tui::Component { /* ctor(Engine const&, std::optional<StartDialogState> const&, HitMap&) */ };
 ```
 
@@ -1137,8 +1261,20 @@ TEST_CASE("Start dialog: ⏎ on #2375 suggests fix CI with its failing check", "
 }
 TEST_CASE("Start dialog: the worker defaults by the busy rule and can be changed", "[orchestrator][view][start]")
 {
-    // workers a (task's), b; one active run on a → the dialog opens on b. Tab, → → worker a; Enter →
-    // DispatchAction{ .worker = "a", .task = "fix_ci", .item = ChangeRequestRef{2375} }.
+    // workers a (task's), b; one active run on a, on another PR (#2378) → the dialog on #2375 opens on b.
+    // Tab (to Worker), → (one step, wraps to a); Enter → DispatchAction{ .worker = "a", .task = "fix_ci",
+    // .item = ChangeRequestRef{2375} }.
+}
+TEST_CASE("Start dialog: the permission profile is its fifth setting", "[orchestrator][view][start]")
+{
+    // Tab ×3 reaches Perms; it starts on the task's profile (else the default); → steps it; Enter → the
+    // DispatchAction's permissions is the stepped profile.
+}
+TEST_CASE("Start dialog: Copilot chosen for a task without permissions dispatches", "[orchestrator][view][start]")
+{
+    // workers claude, copilot; task fix_ci without `permissions`: choose copilot, Enter → one DispatchAction with
+    // worker "copilot" (no WorkerTakesNoProfile refusal shown). A task with `permissions`: the chip reads
+    // "copilot (no profile)" and Enter shows refusalText(WorkerTakesNoProfile).
 }
 TEST_CASE("Start dialog: an incomplete setup asks for a second ⏎", "[orchestrator][view][start]")
 {
@@ -1154,14 +1290,11 @@ TEST_CASE("Start dialog: the list changing under it dispatches nothing stale", "
     // open on #2375; the next poll lists no #2375 (engineChanged) → Enter dispatches nothing and the dialog shows
     // refusalText(BaseUnknown) (Review Focus 5).
 }
-TEST_CASE("Start dialog: double-click on a row opens it too", "[orchestrator][view][start][mouse]")
-{
-    // two presses on #2375's row within DoubleClickMs → the dialog is open on it.
-}
 ```
 
   `DispatchForm_test.cpp`: `changeSetting(form, FormField::Worker, 1, engine)` cycles the workers and wraps;
-  `actionOf` carries `worker`. Scenes: `start-dialog` (keys `w` then `\r` on Needs you's first item) at Narrow,
+  `actionOf` carries `worker`; `openDispatchForm` and `openTopicForm` open on the task's worker (workers a, b, the
+  task's b, no runs → `form.worker == 1`), and on the least busy one when the task's has an active run. Scenes: `start-dialog` (keys `w` then `\r` on Needs you's first item) at Narrow,
   Medium, Wide.
 - [ ] **Step 2:** build → fail. **Step 3: Implement.** **Step 4:** goldens (read them: the reason, the worker chips
   with their counts, the checkout line). **Step 5:** `orchestrator_test.exe` (all); `ctest … -R orchestrator` →
@@ -1178,10 +1311,25 @@ TEST_CASE("Start dialog: double-click on a row opens it too", "[orchestrator][vi
   `new task`), `extensions/orchestrator/view/Sections.cpp/.hpp` (`RowKind::NewAgent` → `NewTask`, `+ new task`),
   `extensions/orchestrator/view/Dashboard.hpp/.cpp` (`openLauncherOn` → `openStartDialogOn`; the box overlay)
 - Create (goldens): `view/testdata/task-box-{50x20,80x24,120x40}.screen`; regenerated Fleet goldens (`+ new task`)
+- Modify: `extensions/orchestrator/CMakeLists.txt` (TaskBox files)
+- Modify/Delete (the launcher's tests that reach it through `n` or `openLauncherOn`, so this commit is green; the
+  launcher's code itself goes in Task 13): `view/DispatchForm_test.cpp` ("dispatch form goldens", "the launcher
+  browses…", "…names each row's repository…", "topic form goldens", "a finished topic run's form…"),
+  `view/Launcher_test.cpp` (every case that opens the launcher through `n`, `openLauncherOn` or `RunAgain`),
+  `view/Dashboard_test.cpp` (the launcher scenes and "n opens the launcher…", "the launcher opens again as it was
+  narrowed", "a click on a launcher candidate…"), `guest/Driver_test.cpp` (launcher references), and the
+  `view/testdata/launcher-*.screen` goldens (13 files, `git rm` by name). Each deleted case is either covered by a
+  Work-view, start-dialog or box test (name it in the commit body) or rewritten onto them.
 - Test: `TaskBox_test.cpp`, `Keys_test.cpp`, `Dashboard_test.cpp`
 
 **Interfaces:**
-- Consumes: `openTopicForm`, `defaultWorker` (Task 6), `StartDialogState`/`openStartDialog` (Task 10).
+- Consumes: `openTopicForm(Engine const&, std::string_view repo, std::string topic, std::string session) ->
+  std::optional<DispatchFormState>` (it now sets `worker` to `defaultWorker`'s index, Task 10); `defaultWorker(Config
+  const&, std::span<Run const>, std::string_view taskId) -> WorkerDef const&` (Task 6); `StartDialogState`,
+  `StartRefusal::{NotConfigured,NotListed,NoTask}`, `openStartDialog(Engine const&, WorkItem const&,
+  std::string_view task, std::string session) -> std::expected<StartDialogState, StartRefusal>` and
+  `Interaction::startDialog` (Task 10); `workItemKey`/`Engine::workItems()` (Tasks 5, 7); `HooksWarning`,
+  `isSetupIncomplete`, `actionOf`, `canConfirm` (`DispatchForm.hpp`); `Config::firstTaskFor(AppliesTo::Topic)`.
 - Produces:
 
 ```cpp
@@ -1198,8 +1346,10 @@ struct TaskBoxState
 };
 /// @return The box: repository = the repository chip's, else the selected row's, else the first; worker =
 ///         defaultWorker(topic task); model = the topic task's; @p text typed (a finished topic run's, or empty).
-[[nodiscard]] std::optional<TaskBoxState> openTaskBox(Engine const& engine, std::string_view chipRepo,
-                                                      std::string_view selectedRepo, std::string text, std::string session);
+///         StartRefusal::NotConfigured when the engine has no configuration or no repository.
+[[nodiscard]] std::expected<TaskBoxState, StartRefusal> openTaskBox(Engine const& engine, std::string_view chipRepo,
+                                                                    std::string_view selectedRepo, std::string text,
+                                                                    std::string session);
 /// Typing edits the text; Tab moves Text → Repo → Worker → Model → Text; ←/→ step a setting; ⏎ dispatches the
 /// text as a topic at once (nothing to choose), not when the text is blank; Esc closes. Incomplete setup: second ⏎.
 [[nodiscard]] std::optional<DispatchAction> applyTaskBoxKey(core::tui::KeyEvent const& key, std::optional<TaskBoxState>& box,
@@ -1239,9 +1389,10 @@ TEST_CASE("+ new task in the Fleet opens the box", "[orchestrator][view][taskbox
 }
 ```
 
-- [ ] **Step 2–3:** build → fail; implement. **Step 4:** goldens — the `task-box` scenes (keys `n` then text) at
-  Narrow, Medium, Wide; regenerated Fleet screens may change only `+ new agent` → `+ new task` and the hint label
-  (read every diff). **Step 5:** `orchestrator_test.exe` (all) → pass; portability; `clang-format -i`.
+- [ ] **Step 2–3:** build → fail; implement; delete or rewrite the launcher tests and goldens listed under Files.
+  **Step 4:** goldens — the `task-box` scenes (keys `n` then text) at Narrow, Medium, Wide; regenerated Fleet screens
+  may change only `+ new agent` → `+ new task` and the hint label (read every diff); `git status --short
+  extensions/orchestrator/view/testdata` shows the 13 `launcher-*` deletions and nothing else unexpected. **Step 5:** `orchestrator_test.exe` (all) → pass; portability; `clang-format -i`.
 - [ ] **Step 6: Commit** — message `feat(orchestrator): n starts a custom task directly`.
 
 ### Task 12: Mouse — hit regions, the row menu, the scrollbar, hover and copy — Opus
@@ -1251,11 +1402,18 @@ TEST_CASE("+ new task in the Fleet opens the box", "[orchestrator][view][taskbox
   `extensions/orchestrator/view/RowMenu_test.cpp`
 - Modify: `extensions/orchestrator/view/HitMap.hpp` (kinds), `extensions/orchestrator/view/Dashboard.cpp`
   (`MouseRows`, `applyMouse`: right button, motion), `WorkBoard.cpp`, `StartDialog.cpp`, `TaskBox.cpp` (record hits),
-  `extensions/orchestrator/view/Keys.hpp` (`WorkState` gains `menu`, `hovered`)
+  `extensions/orchestrator/view/Keys.hpp/.cpp` (`WorkState` gains `menu`, `hovered`; `KeyCommand::RowMenu` and its
+  `m` row in `workKeyRows()`), `extensions/orchestrator/CMakeLists.txt` (RowMenu files)
 - Create (goldens): `view/testdata/row-menu-{80x24,120x40}.screen`
 - Test: `RowMenu_test.cpp`, `HitMap_test.cpp`, `Dashboard_test.cpp`
 
 **Interfaces:**
+- Consumes: `WorkItem`, `workItemKey(WorkItem const&)` (Task 5); `WorkState`, `View`, `WorkFocus`, `WorkLine`,
+  `workLines()`, `isGroupFolded()`, `WorkBoardView` (Task 9: MR/ticket cells carry no OSC 8 link);
+  `StartDialogState`, `openStartDialog()`, `FormField::{Task,Worker,Model,Permissions,Note}`,
+  `applyStartDialogKey()` (Task 10); `TaskBoxState`, `TaskBoxField` (Task 11); `ToggleFoldAction`, `OpenUrlAction`;
+  `core::base64::encode(std::string_view)` (`<core/Base64.hpp>`); `core::tui::MouseEvent` (`Type::Move` with
+  button 0 = drag, 3 = no button held); the dashboard's `Clicks`, `DoubleClickMs`, `WheelLines` (3), `MouseRows`.
 - Produces:
 
 ```cpp
@@ -1286,7 +1444,8 @@ struct RowMenuState { std::string itemKey; std::size_t highlighted = 0; core::tu
 [[nodiscard]] std::string clipboardWrite(std::string_view text);
 ```
 
-  `MouseRow` gains `RightClickHandler rightClick = nullptr;`; the spec's **Mouse** table is the rows' content:
+  `MouseRow` gains `RightClickHandler rightClick = nullptr;` (the `static_assert` that `MouseRows` ends at
+  `LauncherKind` moves to `MenuEntry`); the spec's **Mouse** table is the rows' content:
   Row — click selects, double-click opens the dialog, right-click opens the menu at the pointer, wheel scrolls 3
   lines with the selection kept until it leaves view; MR/ticket cell — click selects, double-click opens it in the
   browser (`OpenUrlAction`), right-click and wheel as the row; heading — click/double-click fold, right-click folds
@@ -1298,7 +1457,8 @@ struct RowMenuState { std::string itemKey; std::size_t highlighted = 0; core::tu
   same row does nothing (no repaint). Keyboard parity: `KeyCommand` gains `RowMenu`, bound to `m` in
   `workKeyRows()` only (`m` is already among `dashboardKeys()`), which opens the menu on the selected item; the
   menu takes ↑/↓/⏎/Esc. `WorkState` gains `std::optional<RowMenuState> menu` and `std::optional<std::size_t>
-  hovered`. A menu whose item is gone after a rebuild closes.
+  hovered`. A menu whose item is gone after a rebuild closes. While the Work view is shown each frame sets
+  `[?1003h` (Task 9); without motion events everything else works and the scrollbar takes clicks.
 
 - [ ] **Step 1: Write the failing tests** (`[orchestrator][view][mouse][work]`; reuse `Dashboard_test.cpp`'s
   `clickAt`/`wheelAt` helpers, add `rightClickAt` = `\x1b[<2;x;yM\x1b[<2;x;ym` and `moveAt(button)` =
@@ -1337,12 +1497,24 @@ TEST_CASE("Work mouse: double-click on the ticket key opens the ticket", "[orche
 {
     // → OpenUrlAction{ "https://example.atlassian.net/browse/PRJ-1234", "PRJ-1234" }.
 }
+TEST_CASE("Work mouse: a single click on an MR or ticket cell only selects", "[orchestrator][view][mouse][work]")
+{
+    // one press on #2375's MR cell → no action, the row is selected; one press on its ticket cell → the same.
+}
+TEST_CASE("Work mouse: double-click on a row opens the start dialog", "[orchestrator][view][mouse][start]")
+{
+    // two presses on #2375's row (outside its MR and ticket cells) within DoubleClickMs → interaction().startDialog
+    // is open on ChangeRequestRef{2375}.
+}
 TEST_CASE("Work mouse: the dialog's settings step under the pointer", "[orchestrator][view][mouse][start]")
 {
     // dialog open: click a worker chip → form.worker is it; wheel over Model steps it; right-click on Task's value
     // steps back; a click outside closes the dialog.
 }
-TEST_CASE("Work mouse: a click on Agents/Work in the top bar switches views", "[orchestrator][view][mouse][work]") {}
+TEST_CASE("Work mouse: a click on Agents/Work in the top bar switches views", "[orchestrator][view][mouse][work]")
+{
+    // click the `Work` name → interaction().view == View::Work; click `Agents` → View::Agents.
+}
 TEST_CASE("Row menu: a poll that drops its item closes it", "[orchestrator][view][work]")
 {
     // menu on #2375; the next poll lists no #2375 → the menu is closed (Review Focus 5).
@@ -1354,7 +1526,7 @@ TEST_CASE("Row menu: a poll that drops its item closes it", "[orchestrator][view
 - [ ] **Step 2–3:** build → fail; implement. **Step 4: Check the host.** Run the dashboard in Contour
   (`contour daemon` with the orchestrator configured, open its tab): with `?1003h` set, moving the pointer over
   the Work rows highlights them and dragging the thumb scrolls. Write what was observed into the task's report; if
-  motion does not arrive, nothing else changes (Decision 11) and the README (Task 14) says hover and drag need a
+  motion does not arrive, nothing else changes and the README (Task 14) says hover and drag need a
   terminal that reports motion. **Step 5:** goldens; `orchestrator_test.exe` (all) → pass; portability;
   `clang-format -i`.
 - [ ] **Step 6: Commit** — message `feat(orchestrator): mouse for the Work view, its dialogs and a row menu`.
@@ -1362,12 +1534,13 @@ TEST_CASE("Row menu: a poll that drops its item closes it", "[orchestrator][view
 ### Task 13: Remove the launcher — Opus
 
 **Files:**
-- Delete: `extensions/orchestrator/view/Launcher.hpp`, `Launcher.cpp`, `Launcher_test.cpp`,
-  `view/testdata/launcher-*.screen` (13 files)
+- Delete: `extensions/orchestrator/view/Launcher.hpp`, `Launcher.cpp`, `Launcher_test.cpp` (what Task 11 left
+  of it; the `launcher-*.screen` goldens and the tests reaching the launcher through `n` went in Task 11)
 - Modify: `extensions/orchestrator/CMakeLists.txt`, `view/Dashboard.hpp/.cpp` (no `LauncherView`, `launcher()`,
   `launcherScope`), `view/Keys.hpp/.cpp` (`Interaction::launcher`, `launcherScope`, `openLauncherFor`), `view/HitMap.hpp`
   (drop `LauncherCandidate`, `LauncherRepo`, `LauncherKind`; renumber `MouseRows`), `view/DispatchForm.hpp/.cpp`
-  (keep what the dialog and the box use; drop what only the launcher used), `view/Sections.*`, `view/Actions.cpp`,
+  (keep what the dialog and the box use — including `FormField::Permissions`, the dialog's fifth setting; drop what
+  only the launcher used), `view/Sections.*`, `view/Actions.cpp`,
   `view/TextEdit.hpp` (comments), `core/EnginePoll.cpp` (comment), `guest/Driver_test.cpp`, `view/Palette_test.cpp`,
   `view/Transcript_test.cpp`, `view/Dashboard_test.cpp`, `view/DispatchForm_test.cpp`, `view/Sections_test.cpp`
   (launcher references)
@@ -1379,9 +1552,10 @@ TEST_CASE("Row menu: a poll that drops its item closes it", "[orchestrator][view
   editing. Every reference either goes, or is renamed to the start dialog / task box it now means.
 - [ ] **Step 2:** Delete and edit. Tests that drove the launcher are deleted when the Work view, the dialog or the
   box test the same behaviour (name the replacing test in the commit message body), and rewritten otherwise.
+  This task removes code and the tests of that code only; no behaviour changes.
   An item query the launcher matched exactly (`#2375`, a URL, a Jira key) is covered by Task 5's filter test.
 - [ ] **Step 3:** Build; `orchestrator_test.exe` (all) → pass; `ORCHESTRATOR_UPDATE_GOLDENS=1 … "golden screens"`
-  writes nothing (`git status --short extensions/orchestrator/view/testdata` shows only the deletions);
+  writes nothing (`git status --short extensions/orchestrator/view/testdata` is empty);
   `ctest --test-dir out/build/clangcl-release -R orchestrator` → pass; build the guest:
   `CMAKE_BUILD_PARALLEL_LEVEL=2 cmake --build --preset clangcl-release -j 2 --target orchestrator_wasm_cxx` →
   succeeds; portability and include budget → 0; `clang-format -i`.
