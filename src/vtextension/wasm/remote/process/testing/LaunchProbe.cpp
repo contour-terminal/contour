@@ -269,7 +269,8 @@ enum class StandardStream : uint8_t
                                      .environment = process::defaultHelperEnvironment(),
                                      .extraArguments = { std::next(firstOther), arguments.end() },
                                      .caps = {},
-                                     .standardError = std::nullopt }
+                                     .standardError = std::nullopt },
+        vtextension::wasm::remote::errorLogWriter()
     };
     auto connection = connector.connect();
     if (!connection || recording->processIds().empty())

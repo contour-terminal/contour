@@ -45,27 +45,35 @@ namespace
                                           return std::to_underlying(StepBudgets[index].step) == index;
                                       }));
 
-    /// @return Whether a host confined as @p state may be driven under @p requirement: one that failed to
-    ///         confine itself never is.
-    [[nodiscard]] constexpr bool isConfinedEnough(proto::LockdownState state,
-                                                  LockdownRequirement requirement) noexcept
+    /// @return Why a host confined as @p state is not driven under @p requirement; nothing if it is. One that
+    ///         failed to confine itself never is.
+    [[nodiscard]] constexpr std::optional<HostRefusal> lockdownRefusalOf(
+        proto::LockdownState state, LockdownRequirement requirement) noexcept
     {
         switch (state)
         {
-            case proto::LockdownState::Failed: return false;
+            case proto::LockdownState::Failed: return HostRefusal::LockdownFailed;
             case proto::LockdownState::Unsandboxed:
-                return requirement == LockdownRequirement::AcceptUnsandboxed;
-            case proto::LockdownState::LockedDown: return true;
+                if (requirement == LockdownRequirement::AcceptUnsandboxed)
+                    return std::nullopt;
+                return HostRefusal::Unsandboxed;
+            case proto::LockdownState::LockedDown: return std::nullopt;
         }
-        return false;
+        return HostRefusal::LockdownFailed;
     }
 
-    /// @return Whether a host that said @p hello may be driven: it speaks this protocol, is confined as
-    ///         @p requirement asks, and copies memory, which is how this parent reaches it.
-    [[nodiscard]] bool isAcceptable(proto::Hello const& hello, LockdownRequirement requirement) noexcept
+    /// @return Why a host that said @p hello is not driven; nothing if it is: it speaks this protocol, is
+    ///         confined as @p requirement asks, and copies memory, which is how this parent reaches it.
+    [[nodiscard]] std::optional<HostRefusal> refusalOf(proto::Hello const& hello,
+                                                       LockdownRequirement requirement) noexcept
     {
-        return hello.version == proto::ProtocolVersion && isConfinedEnough(hello.lockdown, requirement)
-               && hello.memoryMode == proto::MemoryMode::Copy;
+        if (hello.version != proto::ProtocolVersion)
+            return HostRefusal::ProtocolVersion;
+        if (auto const refusal = lockdownRefusalOf(hello.lockdown, requirement))
+            return refusal;
+        if (hello.memoryMode != proto::MemoryMode::Copy)
+            return HostRefusal::MemoryMode;
+        return std::nullopt;
     }
 
     /// @return The parent's end of @p channel as a stream of @p kind.
@@ -76,7 +84,10 @@ namespace
 } // namespace
 
 std::expected<std::shared_ptr<HelperIncarnation>, ExtensionError> HelperIncarnation::connect(
-    IHostConnector& connector, proto::CreateRuntime const& runtime, HelperPolicy const& policy)
+    IHostConnector& connector,
+    proto::CreateRuntime const& runtime,
+    HelperPolicy const& policy,
+    HostRefusalLog& refusals)
 {
     auto connection = connector.connect();
     if (!connection)
@@ -107,9 +118,13 @@ std::expected<std::shared_ptr<HelperIncarnation>, ExtensionError> HelperIncarnat
         auto const lock = std::scoped_lock { incarnation->_controlMutex };
         auto const watch = incarnation->watch(HostStep::Handshake);
         auto const hello = incarnation->_control.receive();
-        if (!hello || !std::holds_alternative<proto::Hello>(*hello)
-            || !isAcceptable(std::get<proto::Hello>(*hello), policy.lockdown))
+        if (!hello || !std::holds_alternative<proto::Hello>(*hello))
             return false;
+        if (auto const refusal = refusalOf(std::get<proto::Hello>(*hello), policy.lockdown))
+        {
+            refusals.refused(*refusal);
+            return false;
+        }
         auto request = runtime;
         request.runtimeId = RuntimeId;
         auto const reply = incarnation->exchange(request);

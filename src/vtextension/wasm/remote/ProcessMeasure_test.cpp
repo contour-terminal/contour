@@ -30,6 +30,7 @@
 #include <vtextension/wasm/BackendConfig.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 #include <vtextension/wasm/remote/HelperIncarnation.hpp>
+#include <vtextension/wasm/remote/HostRefusals.hpp>
 #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
 #include <vtextension/wasm/remote/process/testing/HelperComposition.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
@@ -140,6 +141,7 @@ TEST_CASE("Process.measureSpawn", "[.measure]")
     auto const config = realHelper();
     auto const connector = process::testing::binaryComposition().connector(config);
     auto const policy = HelperPolicy { .timeouts = config.timeouts, .lockdown = config.lockdown };
+    auto refusals = vtextension::wasm::remote::HostRefusalLog { vtextension::wasm::remote::errorLogWriter() };
 
     auto& clock = core::defaultSteadyClock();
     auto durations = std::vector<std::chrono::nanoseconds> {};
@@ -147,7 +149,7 @@ TEST_CASE("Process.measureSpawn", "[.measure]")
     for (auto const incarnation: std::views::iota(0, Incarnations))
     {
         auto const start = clock.now();
-        auto const connected = HelperIncarnation::connect(*connector, runtime, policy);
+        auto const connected = HelperIncarnation::connect(*connector, runtime, policy, refusals);
         durations.emplace_back(clock.now() - start);
         REQUIRE(connected.has_value());
         if (incarnation == 0)

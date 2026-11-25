@@ -27,6 +27,7 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <variant>
@@ -40,6 +41,7 @@
 #include <vtextension/wasm/host/InProcessHost.hpp>
 #include <vtextension/wasm/remote/HelperIncarnation.hpp>
 #include <vtextension/wasm/remote/HostConnector.hpp>
+#include <vtextension/wasm/remote/HostRefusals.hpp>
 #include <vtextension/wasm/remote/RemoteBackend.hpp>
 #include <vtextension/wasm/remote/proto/Codec.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
@@ -70,8 +72,13 @@ using vtextension::wasm::ModuleIdentity;
 using vtextension::wasm::ValueType;
 using vtextension::wasm::host::HostServerConfig;
 using vtextension::wasm::host::InProcessHostConnector;
+using vtextension::wasm::remote::HelperIncarnation;
+using vtextension::wasm::remote::HelperPolicy;
 using vtextension::wasm::remote::HostAttachment;
 using vtextension::wasm::remote::HostConnection;
+using vtextension::wasm::remote::HostRefusal;
+using vtextension::wasm::remote::HostRefusalLog;
+using vtextension::wasm::remote::hostRefusals;
 using vtextension::wasm::remote::HostStep;
 using vtextension::wasm::remote::IHostConnector;
 using vtextension::wasm::remote::IHostHandle;
@@ -817,6 +824,53 @@ TEST_CASE("RemoteBackend.unsandboxedIsRefusedUnlessAccepted", "[vtextension][rem
     lockedDown.lockdown = proto::LockdownState::LockedDown;
     CHECK(loadAfterHello(lockedDown, terminations, LockdownRequirement::RequireLockedDown) == std::nullopt);
     CHECK(terminations == 0);
+}
+
+TEST_CASE("RemoteBackend.refusedHelloIsLoggedOncePerReason", "[vtextension][remote]")
+{
+    struct RefusalRow
+    {
+        proto::Hello hello;
+        LockdownRequirement lockdown = LockdownRequirement::AcceptUnsandboxed;
+        HostRefusal refusal = HostRefusal::ProtocolVersion;
+    };
+    auto versioned = HonestHello;
+    versioned.version = proto::ProtocolVersion + 1;
+    auto failed = HonestHello;
+    failed.lockdown = proto::LockdownState::Failed;
+    auto shared = HonestHello;
+    shared.memoryMode = proto::MemoryMode::Shared;
+    auto const rows = std::array {
+        RefusalRow { versioned, LockdownRequirement::AcceptUnsandboxed, HostRefusal::ProtocolVersion },
+        RefusalRow { failed, LockdownRequirement::AcceptUnsandboxed, HostRefusal::LockdownFailed },
+        RefusalRow { HonestHello, LockdownRequirement::RequireLockedDown, HostRefusal::Unsandboxed },
+        RefusalRow { shared, LockdownRequirement::AcceptUnsandboxed, HostRefusal::MemoryMode },
+    };
+    auto const runtime = proto::CreateRuntime {
+        .runtimeId = HelperIncarnation::RuntimeId, .memoryBytes = 65536, .stackBytes = 65536, .functions = {}
+    };
+    for (auto const& row: rows)
+    {
+        INFO(std::to_underlying(row.refusal));
+        auto const connector = std::make_shared<ScriptedConnector>(
+            [hello = row.hello](HelperEnds& ends, std::size_t /*connection*/) {
+                if (ends.send(hello))
+                    ends.drain();
+            });
+        auto lines = std::vector<std::string> {};
+        // One log, as one backend has: the same host refused again says nothing new.
+        auto refusals = HostRefusalLog { [&lines](std::string_view line) { lines.emplace_back(line); } };
+        for ([[maybe_unused]] auto const attempt: { 1, 2 })
+        {
+            auto const connected = HelperIncarnation::connect(
+                *connector, runtime, HelperPolicy { .timeouts = {}, .lockdown = row.lockdown }, refusals);
+            REQUIRE_FALSE(connected.has_value());
+            CHECK(connected.error() == ExtensionError::HostUnavailable);
+        }
+        CHECK(lines
+              == std::vector<std::string> {
+                  std::string { hostRefusals()[std::to_underlying(row.refusal)].text } });
+    }
 }
 
 TEST_CASE("RemoteBackend.eachStepIsWatched", "[vtextension][remote]")

@@ -28,6 +28,7 @@
 #include <vtextension/wasm/remote/CopyPathMemory.hpp>
 #include <vtextension/wasm/remote/HelperIncarnation.hpp>
 #include <vtextension/wasm/remote/HostConnector.hpp>
+#include <vtextension/wasm/remote/HostRefusals.hpp>
 #include <vtextension/wasm/remote/LaneWatch.hpp>
 #include <vtextension/wasm/remote/RemoteKindState.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
@@ -220,12 +221,15 @@ namespace
         /// @param runtime The runtime each incarnation is created with.
         /// @param policy What each incarnation's host is held to.
         /// @param roster Where each incarnation is listed, to go with the backend.
+        /// @param refusals Where why a host was refused is logged: the backend's.
         HelperSlot(std::shared_ptr<IncarnationRoster> roster,
                    std::shared_ptr<IHostConnector> connector,
+                   std::shared_ptr<HostRefusalLog> refusals,
                    proto::CreateRuntime runtime,
                    HelperPolicy policy) noexcept:
             _roster { std::move(roster) },
             _connector { std::move(connector) },
+            _refusals { std::move(refusals) },
             _runtime { std::move(runtime) },
             _policy { policy }
         {
@@ -239,7 +243,7 @@ namespace
                 return _current;
             if (!_connector || !_roster->isOpen())
                 return std::unexpected(ExtensionError::HostUnavailable);
-            return HelperIncarnation::connect(*_connector, _runtime, _policy)
+            return HelperIncarnation::connect(*_connector, _runtime, _policy, *_refusals)
                 .and_then([this](std::shared_ptr<HelperIncarnation> started)
                               -> std::expected<std::shared_ptr<HelperIncarnation>, ExtensionError> {
                     if (!_roster->enlist(started))
@@ -255,6 +259,7 @@ namespace
       private:
         std::shared_ptr<IncarnationRoster> _roster;
         std::shared_ptr<IHostConnector> _connector;
+        std::shared_ptr<HostRefusalLog> _refusals;
         proto::CreateRuntime _runtime;
         HelperPolicy _policy;
         std::mutex _mutex; ///< Guards what follows.
@@ -270,12 +275,14 @@ namespace
         RemoteRuntime(std::shared_ptr<RemoteKindState> kind,
                       std::shared_ptr<IncarnationRoster> roster,
                       std::shared_ptr<IHostConnector> connector,
+                      std::shared_ptr<HostRefusalLog> refusals,
                       HelperPolicy policy,
                       RuntimeLimits limits,
                       proto::CreateRuntime create) noexcept:
             _kind { std::move(kind) },
             _roster { std::move(roster) },
             _connector { std::move(connector) },
+            _refusals { std::move(refusals) },
             _policy { policy },
             _limits { limits },
             _create { std::move(create) }
@@ -309,7 +316,7 @@ namespace
         [[nodiscard]] std::shared_ptr<HelperSlot> slotFor(std::string const& key)
         {
             if (key.empty())
-                return std::make_shared<HelperSlot>(_roster, _connector, _create, _policy);
+                return std::make_shared<HelperSlot>(_roster, _connector, _refusals, _create, _policy);
             auto const lock = std::scoped_lock { _mutex };
             // The hosts of identities whose last module went are forgotten.
             std::erase_if(_slots, [](auto const& entry) { return entry.second.expired(); });
@@ -317,7 +324,7 @@ namespace
             auto slot = entry.lock();
             if (!slot)
             {
-                slot = std::make_shared<HelperSlot>(_roster, _connector, _create, _policy);
+                slot = std::make_shared<HelperSlot>(_roster, _connector, _refusals, _create, _policy);
                 entry = slot;
             }
             return slot;
@@ -326,6 +333,7 @@ namespace
         std::shared_ptr<RemoteKindState> _kind;
         std::shared_ptr<IncarnationRoster> _roster;
         std::shared_ptr<IHostConnector> _connector;
+        std::shared_ptr<HostRefusalLog> _refusals;
         HelperPolicy _policy;
         RuntimeLimits _limits;
         proto::CreateRuntime _create; ///< What creates the runtime in each of its hosts.
@@ -787,6 +795,7 @@ namespace
                 _kind,
                 _roster,
                 _config.connector,
+                _refusals,
                 HelperPolicy { .timeouts = _config.timeouts, .lockdown = _config.lockdown },
                 limits,
                 std::move(create));
@@ -815,6 +824,8 @@ namespace
         std::shared_ptr<RemoteKindState> _kind;
         BackendConfig _config;
         std::shared_ptr<IncarnationRoster> _roster = std::make_shared<IncarnationRoster>();
+        /// Why its hosts were refused, each reason logged once for the backend.
+        std::shared_ptr<HostRefusalLog> _refusals = std::make_shared<HostRefusalLog>(errorLogWriter());
     };
 } // namespace
 

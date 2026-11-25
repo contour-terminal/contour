@@ -15,6 +15,7 @@
 
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/wasm/remote/HostConnector.hpp>
+#include <vtextension/wasm/remote/HostRefusals.hpp>
 #include <vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp>
 #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
 
@@ -41,16 +42,22 @@ class ProcessHostConnector final: public remote::IHostConnector
   public:
     /// @param supervisor What launches and supervises the processes.
     /// @param config How each one is started.
-    ProcessHostConnector(std::shared_ptr<SupervisorMailbox> supervisor, ProcessHostConfig config);
+    /// @param refusals Where why a host could not be started is logged, once per reason: errorLogWriter() in
+    ///        Contour.
+    ProcessHostConnector(std::shared_ptr<SupervisorMailbox> supervisor,
+                         ProcessHostConfig config,
+                         remote::HostRefusalLog::Writer refusals);
 
     /// Creates the channels, the page and the wake signal, and has the supervisor start a host on their
     /// helper ends, which close here once it started.
-    /// @return The connection; `HostUnavailable` if any of it could not be created, or the host not started.
+    /// @return The connection; `HostUnavailable` if any of it could not be created, or the host not started
+    ///         -- logged the first time for each reason the system gave.
     [[nodiscard]] std::expected<remote::HostConnection, ExtensionError> connect() override;
 
   private:
     std::shared_ptr<SupervisorMailbox> _supervisor;
     ProcessHostConfig _config;
+    remote::HostRefusalLog _refusals;
 };
 
 } // namespace vtextension::wasm::remote::process

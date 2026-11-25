@@ -64,15 +64,18 @@ if(_process_source AND NOT WIN32)
     # What the POSIX launchers share.
     list(APPEND _process_source process/PosixLaunch.cpp process/PosixLaunch.hpp)
 endif()
-# What every system has of it: the lanes' watch, which the remote backend keeps and the supervisor reads.
+# What every system has of it: the lanes' watch, which the remote backend keeps and the supervisor reads, and the
+# log of why no host serves, which the backend and the process connector both write to (through core::log).
 add_library(vtextension_remote_process STATIC
+    HostRefusals.cpp
+    HostRefusals.hpp
     LaneWatch.cpp
     LaneWatch.hpp
 )
-target_link_libraries(vtextension_remote_process PUBLIC vtextension_remote_wire core::base)
+target_link_libraries(vtextension_remote_process PUBLIC vtextension_remote_wire core::base core::log)
 if(_process_source)
     # The supervisor and the process connector sit on the launcher: they name the connector's vocabulary
-    # (HostConnector.hpp), which is header-only and std-only, and log through core::log.
+    # (HostConnector.hpp), which is header-only and std-only.
     target_sources(vtextension_remote_process PRIVATE
         process/ExtensionHostSupervisor.cpp
         process/ExtensionHostSupervisor.hpp
@@ -85,7 +88,7 @@ if(_process_source)
         process/ProcessLauncher.hpp
         ${_process_source}
     )
-    target_link_libraries(vtextension_remote_process PUBLIC core::log core::platform)
+    target_link_libraries(vtextension_remote_process PUBLIC core::platform)
     # A sanitizer or coverage build's helpers report to Contour's stderr (defaultHelperStandardError()); any
     # other build's get the null device.
     if(CONTOUR_SANITIZE OR CONTOUR_COVERAGE)
@@ -109,10 +112,12 @@ if(_process_source)
         # no engine, so that it cross-builds and runs under wine.
         add_executable(vtextension_process_test
             ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+            HostRefusals_test.cpp
             LaneWatch_test.cpp
             process/ExtensionHostSupervisor_test.cpp
             process/HelperLocation_test.cpp
             process/HostTimers_test.cpp
+            process/ProcessHostConnector_test.cpp
             process/ProcessLauncher_test.cpp
             process/testing/FakeProcessLauncher.cpp
             process/testing/FakeProcessLauncher.hpp

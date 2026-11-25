@@ -19,6 +19,7 @@
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/wasm/BackendConfig.hpp>
 #include <vtextension/wasm/remote/HostConnector.hpp>
+#include <vtextension/wasm/remote/HostRefusals.hpp>
 #include <vtextension/wasm/remote/LaneWatch.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/ControlPage.hpp>
@@ -91,12 +92,16 @@ class HelperIncarnation
     /// @param connector What starts the host.
     /// @param runtime The runtime to create; its id is RuntimeId.
     /// @param policy The budgets, and which confinement a host must report.
+    /// @param refusals Where why a host's Hello was refused is logged, once per reason: one per backend.
     /// @return The incarnation; `HostUnavailable` if the host could not be started, speaks another protocol
     ///         version, failed to confine itself or is not confined as @p policy requires, shares memory
     ///         where the parent copies it, did not create the runtime, or overstayed the handshake. A host
     ///         refused after it was started is terminated.
     [[nodiscard]] static std::expected<std::shared_ptr<HelperIncarnation>, ExtensionError> connect(
-        IHostConnector& connector, proto::CreateRuntime const& runtime, HelperPolicy const& policy);
+        IHostConnector& connector,
+        proto::CreateRuntime const& runtime,
+        HelperPolicy const& policy,
+        HostRefusalLog& refusals);
 
     /// Use connect(). Public for std::make_shared only.
     /// @param connection The started host's channels and handle; as many lanes as MaxLaneChannels.
