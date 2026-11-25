@@ -15,7 +15,7 @@
 │   │ checkout  gh pr checkout 2375 --branch agent/pr-2375-…               │   │
 │   │ worktree  /home/u/worktrees/contour/pr-2375-…                        │   │
 │   │                                                                      │   │
-│   │ enter start · ↑↓ settings · ←→ change · i note · ctrl+p more         │   │
+│   │ enter start · ↑↓ settings · ←→ change · i note · esc close           │   │
 │ ▸ ╰──────────────────────────────────────────────────────────────────────╯   │
 │                                                                              │
 │                                                                              │

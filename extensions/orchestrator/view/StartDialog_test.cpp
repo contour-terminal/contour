@@ -410,14 +410,14 @@ TEST_CASE("start dialog: i types into the note; esc leaves it, a second esc clos
     pressEsc(fixture);
     CHECK(dialogOf(fixture).mode == FieldMode::Navigating);
     CHECK(dialogOf(fixture).setting == FormField::Note);
-    CHECK(fixture.screen().contains("⏎ note · ↑↓ settings · ←→ change · i note · ctrl+p more · esc close"));
+    CHECK(fixture.screen().contains("⏎ note · ↑↓ settings · ←→ change · i note · esc close · ctrl+p more"));
     pressEsc(fixture);
     CHECK_FALSE(fixture.dashboard.interaction().startDialog.has_value());
 
     // ⏎ on the Note line types it; a second ⏎ starts, as ⏎ always has.
     reopen(fixture);
     CHECK(fixture.screen().contains(
-        "enter start · ↑↓ settings · ←→ change · i note · ctrl+p more · esc close"));
+        "enter start · ↑↓ settings · ←→ change · i note · esc close · ctrl+p more"));
     CHECK(fixture.dashboard.input("G").empty());
     CHECK(fixture.dashboard.input("\r").empty());
     CHECK(dialogOf(fixture).setting == FormField::Note);
@@ -459,4 +459,48 @@ TEST_CASE("start dialog: i types into the note; esc leaves it, a second esc clos
     CHECK(dialogOf(fixture).setting == FormField::Permissions);
     CHECK(dialogOf(fixture).mode == FieldMode::Navigating);
     CHECK(dialogOf(fixture).form.note == "jk");
+}
+
+TEST_CASE("start dialog: the line-editing keys edit the note, and on the settings do nothing",
+          "[orchestrator][view][start][startdialog]")
+{
+    auto fixture = DashboardFixture { workWorld(), Wide };
+    static_cast<void>(openOnFirst(fixture));
+    CHECK(fixture.dashboard.input("i").empty());
+    CHECK(fixture.dashboard.input("keep the old flag").empty());
+    CHECK(fixture.dashboard.input("\x1b\x7f").empty()); // Alt+Backspace drops a word
+    CHECK(dialogOf(fixture).form.note == "keep the old ");
+    CHECK(fixture.dashboard.input("\x17").empty()); // Ctrl+W drops back to the last blank
+    CHECK(dialogOf(fixture).form.note == "keep the ");
+    CHECK(dialogOf(fixture).mode == FieldMode::Typing);
+
+    // On the settings there is no text to edit: the dialog stays open, its note whole.
+    pressEsc(fixture);
+    REQUIRE(dialogOf(fixture).mode == FieldMode::Navigating);
+    for (auto const* const edit: { "\x1b\x7f", "\x17", "\x7f", "\x15" })
+    {
+        CAPTURE(edit);
+        CHECK(fixture.dashboard.input(edit).empty());
+        CHECK(dialogOf(fixture).form.note == "keep the ");
+        CHECK(dialogOf(fixture).mode == FieldMode::Navigating);
+    }
+}
+
+TEST_CASE("start dialog: with close rebound away from esc, Esc still closes it on the settings",
+          "[orchestrator][view][start][startdialog]")
+{
+    auto world = navigationWorld();
+    REQUIRE(world.configJson.has_value());
+    world.configJson->insert(1, R"( "keys": { "close": ["q"] },)");
+    auto fixture = DashboardFixture { world, Wide };
+    REQUIRE(fixture.engine.config() != nullptr);
+    static_cast<void>(openOnFirst(fixture));
+    REQUIRE(dialogOf(fixture).mode == FieldMode::Navigating);
+    pressEsc(fixture);
+    CHECK_FALSE(fixture.dashboard.interaction().startDialog.has_value());
+
+    // A key with Alt reads as that Esc.
+    reopen(fixture);
+    CHECK(fixture.dashboard.input("\x1bj").empty());
+    CHECK_FALSE(fixture.dashboard.interaction().startDialog.has_value());
 }

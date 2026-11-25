@@ -184,6 +184,9 @@ NavContext navContextOf(Interaction const& interaction, KeyContext const& contex
         return contextOf(interaction.startDialog->mode);
     if (interaction.taskBox)
         return contextOf(interaction.taskBox->mode);
+    // An overlay covers the filter and the message box beneath it, and takes no text.
+    if (interaction.overlay != Overlay::None)
+        return NavContext::Navigating;
     if (interaction.view == View::Work)
         return interaction.work.filtering == Filtering::Typing ? NavContext::Typing : NavContext::Navigating;
     auto const inMessageBox =

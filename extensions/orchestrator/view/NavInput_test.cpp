@@ -142,3 +142,11 @@ TEST_CASE("navContextOf follows the start dialog's and the n box's mode", "[orch
     CHECK(dialog.dashboard.input("i").empty());
     CHECK(navContextOf(dialog.dashboard.interaction(), KeyContext {}) == NavContext::Typing);
 }
+
+TEST_CASE("navContextOf: an overlay over a typed filter navigates", "[orchestrator][view][navinput]")
+{
+    auto interaction = Interaction { .overlay = Overlay::Timeline, .filtering = Filtering::Typing };
+    CHECK(navContextOf(interaction, KeyContext {}) == NavContext::Navigating);
+    interaction.overlay = Overlay::None;
+    CHECK(navContextOf(interaction, KeyContext {}) == NavContext::Typing);
+}

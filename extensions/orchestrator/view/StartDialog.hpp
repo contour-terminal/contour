@@ -80,8 +80,9 @@ enum class StartRefusal : uint8_t
 /// - `nav == Close` closes it, whatever the mode.
 /// - Navigating: move_up/move_down step between Task, Worker, Model, Perms and Note, stopping at the ends;
 ///   first/last go to Task/Note; previous_value/next_value step the setting; enter_field types the note, but
-///   `⏎` off the Note line confirms; Ctrl+P toggles the preview; no printable key types; a key with Alt does
-///   what `esc` does there (close, with the defaults).
+///   `⏎` off the Note line confirms; Ctrl+P toggles the preview; no printable or line-editing key acts;
+///   `Esc`, and a key with Alt, do what `esc` does there, and close the dialog where `esc` is bound to
+///   nothing there.
 /// - Typing (on Note): the line-editing and printable keys edit the note, `⏎` confirms, leave_field (or a key
 ///   with Alt, as `esc`) turns to Navigating on Note, Ctrl+P toggles the preview; a plain special key acts as
 ///   it would navigating (passedKeyAction()), and no chord acts.

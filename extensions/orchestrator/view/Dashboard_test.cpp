@@ -1509,6 +1509,65 @@ TEST_CASE("Work mouse: the n box's settings step under the pointer", "[orchestra
     CHECK_FALSE(box.has_value());
 }
 
+TEST_CASE("Work mouse: the wheel over a box being typed in leaves it typing",
+          "[orchestrator][view][mouse][start]")
+{
+    auto const fixture = workFixture(twoWorkersWorld());
+    auto& dashboard = fixture->dashboard;
+
+    // The n box, its text typed: the wheel on its frame moves nothing, and the next letters still type.
+    CHECK(dashboard.input("n").empty());
+    CHECK(dashboard.input("fix").empty());
+    static_cast<void>(dashboard.frame());
+    auto const& box = dashboard.interaction().taskBox;
+    REQUIRE(box.has_value());
+    auto const boxFrame = regionOf(dashboard, Hit { .kind = HitKind::Popup });
+    CHECK(dashboard.input(wheelAt(boxFrame.x, boxFrame.y, MouseWheel::Down)).empty());
+    CHECK(box->focus == TaskBoxField::Text);
+    CHECK(box->mode == FieldMode::Typing);
+    CHECK(dashboard.input("q").empty());
+    REQUIRE(box.has_value());
+    CHECK(box->text == "fixq");
+    CHECK(box->mode == FieldMode::Typing);
+    // On its settings the wheel moves between them, as ↓ does.
+    CHECK(dashboard.input("").empty());
+    static_cast<void>(fixture->escapeTimesOut());
+    REQUIRE(box->mode == FieldMode::Navigating);
+    auto const settingBefore = box->focus;
+    static_cast<void>(dashboard.frame());
+    CHECK(dashboard.input(wheelAt(boxFrame.x, boxFrame.y, MouseWheel::Down)).empty());
+    CHECK(box->focus != settingBefore);
+    CHECK(dashboard.input(clickAt(0, 0)).empty());
+    REQUIRE_FALSE(box.has_value());
+
+    // The start dialog, its note typed: likewise.
+    CHECK(dashboard.input("").empty());
+    auto const& dialog = dashboard.interaction().startDialog;
+    REQUIRE(dialog.has_value());
+    CHECK(dashboard.input("i").empty());
+    CHECK(dashboard.input("ab").empty());
+    static_cast<void>(dashboard.frame());
+    auto const dialogFrame = regionOf(dashboard, Hit { .kind = HitKind::Popup });
+    CHECK(dashboard.input(wheelAt(dialogFrame.x, dialogFrame.y, MouseWheel::Up)).empty());
+    CHECK(dialog->setting == FormField::Note);
+    CHECK(dialog->mode == FieldMode::Typing);
+    CHECK(dashboard.input("q").empty());
+    REQUIRE(dialog.has_value());
+    CHECK(dialog->form.note == "abq");
+}
+
+TEST_CASE("Row menu: a key with Alt closes it, as esc does", "[orchestrator][view][work][rowmenu]")
+{
+    auto const fixture = workFixture();
+    auto& dashboard = fixture->dashboard;
+    CHECK(dashboard.input("m").empty());
+    REQUIRE(dashboard.interaction().work.menu.has_value());
+    CHECK(dashboard.input("j").empty());
+    CHECK_FALSE(dashboard.interaction().work.menu.has_value());
+    // The list's own keys did not act behind it.
+    CHECK_FALSE(dashboard.interaction().startDialog.has_value());
+}
+
 TEST_CASE("Work mouse: a click on Agents/Work in the top bar switches views",
           "[orchestrator][view][mouse][work]")
 {

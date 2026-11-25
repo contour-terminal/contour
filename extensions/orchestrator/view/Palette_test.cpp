@@ -313,3 +313,16 @@ TEST_CASE("one esc closes the palette from a typed query, keeping the query", "[
     CHECK_FALSE(fixture.dashboard.interaction().palette.has_value());
     CHECK(fixture.dashboard.interaction().paletteQuery == "re");
 }
+
+TEST_CASE("q closes the timeline opened from a typed filter, which keeps its text",
+          "[orchestrator][view][palette]")
+{
+    auto fixture = DashboardFixture { World {} };
+    CHECK(fixture.dashboard.input("/ab").empty());
+    REQUIRE(fixture.dashboard.interaction().filtering == Filtering::Typing);
+    CHECK(fixture.dashboard.input("\x0blast 24\r").empty());
+    REQUIRE(fixture.dashboard.interaction().overlay == Overlay::Timeline);
+    CHECK(fixture.dashboard.input("q").empty());
+    CHECK(fixture.dashboard.interaction().overlay == Overlay::None);
+    CHECK(fixture.dashboard.interaction().filter == "ab");
+}

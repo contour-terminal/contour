@@ -107,7 +107,8 @@ click selects a row of the Fleet, and a double click runs its primary action; on
 `n` box. A click switches the Focus's tab, answers with a quick-reply chip, gives the message box the keys, opens
 a link, or runs a palette entry. A click on a view's name in the top bar shows that view. A click beside an open
 popup closes it. The wheel moves the Fleet's selection, scrolls the Focus's tab, or moves a popup's highlight,
-whichever is under the pointer. Each frame records what it drew where, so a click lands on what you see.
+whichever is under the pointer. While the `n` box's text or the dialog's note is typed, the wheel over the box
+does nothing but step a setting under the pointer, which then has the keys. Each frame records what it drew where, so a click lands on what you see.
 Shift+drag still selects text in Contour. The Work view's mouse is described with it, below.
 
 **Places and keys.** The Fleet has the keys by default, and its letters are commands; the Focus gets them with
@@ -338,14 +339,15 @@ The dialog opens on its settings, Task selected. `j` `k` (or `↑` `↓`, `Tab` 
 `gg` `G` (or `Home` `End`) go to the first and the last; `h` `l` (or `←` `→`) change the one selected. No letter
 types there. `i` types the note, as `Tab` onto it or a click on it does; while it is typed every letter is text,
 `j`, `k` and `q` included, and `Esc` leaves the note for the settings. `Enter` on the Note line types the note;
-anywhere else, and while the note is typed, it starts the agent. A second `Esc`, or `q`, closes the dialog. While an agent already works on the item the dialog says so (`⬢ claude-work
-already works on this`) with the engine's refusal, and `Enter` starts nothing; so does any other dispatch the
-engine would refuse. `⏎ run again` on a finished run opens the dialog on the same item and task, while the Work
-view still lists the item.
+anywhere else, and while the note is typed, it starts the agent. A second `Esc`, or `q`, closes the dialog. While
+an agent already works on the item the dialog says so (`⬢ claude-work already works on this`) with the engine's
+refusal, and `Enter` starts nothing; so does any other dispatch the engine would refuse. `⏎ run again` on a
+finished run opens the dialog on the same item and task, while the Work view still lists the item.
 
 The `n` box's text, the dialog's note, the message box, the filters and the palette all take `Backspace`,
 `Alt+Backspace` (a word), `Ctrl+W` (back to the last blank) and `Ctrl+U` (everything). A paste into the box's
-text or the note arrives as one line of text; the message box keeps a paste's line feeds.
+text or the note arrives as one line of text; the message box keeps a paste's line feeds. On the settings of the
+box or the dialog, where there is no text to edit, these keys do nothing.
 
 A task's `key` is still read, and may not be one of the dashboard's reserved keys (the configuration is refused
 with a line that names them), but it starts nothing: an item's agent starts from the Work view.
@@ -422,7 +424,7 @@ work:
   A group you folded or unfolded yourself keeps your choice, whatever the list says.
 - **`fold_empty`**: `true`, the default, hides a group with nothing in it; `false` shows every group's heading.
 
-**`keys`** (optional) rebinds the navigation keys of the lists and, later, the dialogs:
+**`keys`** (optional) rebinds the navigation keys of the lists and the dialogs:
 
 ```yaml
 keys:
@@ -446,7 +448,7 @@ defaults, plain then vim (the action bar names an action by its first key):
 | `next_value` | `right` `l` | the transcript's next page; the Work view's chip on; a dialog's setting on |
 | `leave_field` | `esc` | stop typing a text field (acts only while one is typed): a filter keeps its text, the message box returns to the Fleet with the draft kept, the `n` box goes to Repo |
 | `enter_field` | `enter` `i` | type a dialog's text field (`⏎` types only on the field's line, and stays a list row's own key) |
-| `close` | `esc` `q` | close what is open, such as the last 24 hours or the row menu; `Esc` still closes those when `close` is rebound |
+| `close` | `esc` `q` | close what is open: the last 24 hours, the row menu, or the start dialog and the `n` box on their settings; `Esc` still closes each of them when `close` is rebound |
 
 A key is a printable character, `^` and a letter for Ctrl (not `^h`, `^i`, `^j` or `^m`, which terminals send as
 Backspace, Tab, LF and CR), two characters such as `gg`, or one of `up down left right home end pgup pgdn enter
@@ -462,8 +464,8 @@ still loads, and the navigation key wins in the lists and in the start dialog, w
 The keys take effect in the Fleet, the Focus, the Work list, the row menu, the last 24 hours, the start dialog
 and the `n` box, and `leave_field` in the filters and the message box. The palette consults none of them: it
 always types its query, and only `↑` `↓` `Ctrl+N` `Ctrl+P` choose there. While a text field is typed, a letter or
-a chord never acts as navigation; the plain special keys (`↑` `↓` `Home` `End`) still move between the settings
-and the rows. A key with `Alt` is how `Esc` reads when the next key follows it at once, so while a field is typed
+a chord never acts as navigation; the plain special keys (`↑` `↓` `Home` `End`) still move between a dialog's
+settings, and from a filter between the rows (the message box keeps them). A key with `Alt` is how `Esc` reads when the next key follows it at once, so while a field is typed
 it does what `Esc` does there, and with `Esc` rebound away from `leave_field` it does nothing.
 
 **GitLab.** `glab mr list` carries no pipeline and no approvals, so per GitLab repository and poll the orchestrator

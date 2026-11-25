@@ -380,3 +380,51 @@ TEST_CASE("n box: opens typing; esc goes to the settings; a second esc closes",
     REQUIRE(dispatched.size() == 1);
     CHECK(dispatched.front().topic == "tidy the docs");
 }
+
+TEST_CASE("n box: the line-editing keys edit the text, and on the settings do nothing",
+          "[orchestrator][view][taskbox]")
+{
+    auto fixture = DashboardFixture { twoWorkers() };
+    REQUIRE(fixture.engine.config() != nullptr);
+    CHECK(fixture.dashboard.input("n").empty());
+    CHECK(fixture.dashboard.input("fix the flaky test").empty());
+    CHECK(fixture.dashboard.input("\x1b\x7f").empty()); // Alt+Backspace drops a word
+    CHECK(boxOf(fixture).text == "fix the flaky ");
+    CHECK(fixture.dashboard.input("\x17").empty()); // Ctrl+W drops back to the last blank
+    CHECK(boxOf(fixture).text == "fix the ");
+    CHECK(boxOf(fixture).mode == FieldMode::Typing);
+
+    // On the settings there is no text to edit: the box stays open, its text whole.
+    pressEsc(fixture);
+    REQUIRE(boxOf(fixture).mode == FieldMode::Navigating);
+    for (auto const* const edit: { "\x1b\x7f", "\x17", "\x7f", "\x15" })
+    {
+        CAPTURE(edit);
+        CHECK(fixture.dashboard.input(edit).empty());
+        CHECK(boxOf(fixture).text == "fix the ");
+        CHECK(boxOf(fixture).mode == FieldMode::Navigating);
+    }
+}
+
+TEST_CASE("n box: with close rebound away from esc, Esc still closes it on the settings",
+          "[orchestrator][view][taskbox]")
+{
+    auto world = twoWorkers();
+    REQUIRE(world.configJson.has_value());
+    world.configJson->insert(1, R"( "keys": { "close": ["q"] },)");
+    auto fixture = DashboardFixture { world };
+    REQUIRE(fixture.engine.config() != nullptr);
+    CHECK(fixture.dashboard.input("n").empty());
+    CHECK(fixture.dashboard.input("tidy").empty());
+    pressEsc(fixture);
+    REQUIRE(boxOf(fixture).mode == FieldMode::Navigating);
+    pressEsc(fixture);
+    CHECK_FALSE(fixture.dashboard.interaction().taskBox.has_value());
+
+    // A key with Alt reads as that Esc.
+    CHECK(fixture.dashboard.input("n").empty());
+    pressEsc(fixture);
+    REQUIRE(boxOf(fixture).mode == FieldMode::Navigating);
+    CHECK(fixture.dashboard.input("\x1bj").empty());
+    CHECK_FALSE(fixture.dashboard.interaction().taskBox.has_value());
+}

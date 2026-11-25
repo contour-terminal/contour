@@ -216,18 +216,23 @@ std::optional<DispatchAction> applyTaskBoxKey(core::tui::KeyEvent const& key,
         box.reset();
         return std::nullopt;
     }
-    // The line-editing keys come first while typing: Alt+Backspace drops a word rather than reading as Esc.
-    if (auto const edit = textEditOf(key); edit && typing)
+    // The line-editing keys come first: Alt+Backspace drops a word rather than reading as Esc. While
+    // navigating there is no text to edit, and the key does nothing unless a navigation action holds it.
+    if (auto const edit = textEditOf(key); edit && (typing || !nav))
     {
-        applyTextEdit(state.text, *edit);
+        if (typing)
+            applyTextEdit(state.text, *edit);
         return std::nullopt;
     }
     // A key with Alt is how an Esc reads when the next key follows it in the same read: it does what Esc
     // does there (Decision 11).
     if (core::tui::hasModifier(key.modifiers, Modifier::Alt))
     {
-        auto const asEsc = keys.actionFor("esc", typing ? NavContext::Typing : NavContext::Navigating);
-        return asEsc ? applyNavAction(*asEsc, key, box, engine, hooksAtInput, nearTab) : std::nullopt;
+        if (auto const asEsc = keys.actionFor("esc", typing ? NavContext::Typing : NavContext::Navigating))
+            return applyNavAction(*asEsc, key, box, engine, hooksAtInput, nearTab);
+        if (!typing)
+            box.reset();
+        return std::nullopt;
     }
     if (nav)
         return applyNavAction(*nav, key, box, engine, hooksAtInput, nearTab);
@@ -236,6 +241,14 @@ std::optional<DispatchAction> applyTaskBoxKey(core::tui::KeyEvent const& key,
 
     switch (key.key)
     {
+        // Esc closes it while navigating even where `close` is bound elsewhere, as it closes every popup.
+        case KeyCode::Escape:
+            if (!typing)
+            {
+                box.reset();
+                return std::nullopt;
+            }
+            break;
         case KeyCode::Tab:
             pickTaskBoxField(
                 state,

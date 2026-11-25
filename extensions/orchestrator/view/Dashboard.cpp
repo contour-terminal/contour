@@ -1167,7 +1167,14 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
                 navActionOf(*key, NavContext::Navigating, keysInForce(engine), interaction.pendingKey);
             if (!resolved && resolved.error() == NavMiss::Pending)
                 continue;
-            applyMenuKey(*key, resolved ? std::optional { *resolved } : std::nullopt, actions);
+            // A key with Alt is how an Esc reads when the next key follows it in the same read: it does what
+            // Esc does (Decision 11).
+            if (core::tui::hasModifier(key->modifiers, core::tui::Modifier::Alt))
+                applyMenuKey(core::tui::KeyEvent { .key = core::tui::KeyCode::Escape },
+                             keysInForce(engine).actionFor("esc", NavContext::Navigating),
+                             actions);
+            else
+                applyMenuKey(*key, resolved ? std::optional { *resolved } : std::nullopt, actions);
             continue;
         }
         // A list surface resolves the key once (the palette types every key into its query); a key that
@@ -1768,7 +1775,12 @@ void Dashboard::State::press(NavAction action, std::vector<UiAction>& actions)
     else if (interaction.work.menu)
         applyMenuKey(core::tui::KeyEvent { .key = key }, action, actions);
     else if (interaction.startDialog || interaction.taskBox)
-        applyBoxKey(core::tui::KeyEvent { .key = key }, action, dialogHooks(), actions);
+    {
+        // The wheel does not move a box out of its text: the letters typed next would act.
+        auto const isMove = action == NavAction::MoveUp || action == NavAction::MoveDown;
+        if (!isMove || navContextOf(interaction, keyContext()) != NavContext::Typing)
+            applyBoxKey(core::tui::KeyEvent { .key = key }, action, dialogHooks(), actions);
+    }
     else
         applyListKey(core::tui::KeyEvent { .key = key }, action, actions);
     if (interaction != before)

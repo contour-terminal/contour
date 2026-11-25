@@ -74,11 +74,10 @@ struct TaskBoxState
 ///   would navigating (passedKeyAction()), and no chord acts.
 /// - Navigating: move_up/move_down step between Text, Repo, Worker and Model, stopping at the ends;
 ///   first/last go to Text/Model; previous_value/next_value step the setting; enter_field types the text, but
-///   `⏎` off the Text line confirms; no printable key types; a key with Alt does what `esc` does there
-///   (close, with the defaults).
+///   `⏎` off the Text line confirms; no printable or line-editing key acts; `Esc`, and a key with Alt,
+///   do what `esc` does there, and close the box where `esc` is bound to nothing there.
 /// - Tab/Shift+Tab, in either mode, move to the next/previous place, wrapping: arriving on Text types,
-/// arriving
-///   elsewhere navigates.
+///   arriving elsewhere navigates.
 /// A move by a navigation key that leaves Text stops typing; one that arrives on Text only selects it.
 /// ⏎ dispatches the text as a topic at once (nothing to choose), not while the text is blank or canConfirm()
 /// is false, and past an incomplete setup only with an Enter of a later input than the one that confirmed the

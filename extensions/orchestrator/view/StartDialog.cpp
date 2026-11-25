@@ -258,18 +258,23 @@ std::optional<DispatchAction> applyStartDialogKey(core::tui::KeyEvent const& key
         dialog.reset();
         return std::nullopt;
     }
-    // The line-editing keys come first while typing: Alt+Backspace drops a word rather than reading as Esc.
-    if (auto const edit = textEditOf(key); edit && typing)
+    // The line-editing keys come first: Alt+Backspace drops a word rather than reading as Esc. While
+    // navigating there is no text to edit, and the key does nothing unless a navigation action holds it.
+    if (auto const edit = textEditOf(key); edit && (typing || !nav))
     {
-        applyTextEdit(state.form.note, *edit);
+        if (typing)
+            applyTextEdit(state.form.note, *edit);
         return std::nullopt;
     }
     // A key with Alt is how an Esc reads when the next key follows it in the same read: it does what Esc
     // does there (Decision 11).
     if (core::tui::hasModifier(key.modifiers, Modifier::Alt))
     {
-        auto const asEsc = keys.actionFor("esc", typing ? NavContext::Typing : NavContext::Navigating);
-        return asEsc ? applyNavAction(*asEsc, key, dialog, engine, hooksAtInput, nearTab) : std::nullopt;
+        if (auto const asEsc = keys.actionFor("esc", typing ? NavContext::Typing : NavContext::Navigating))
+            return applyNavAction(*asEsc, key, dialog, engine, hooksAtInput, nearTab);
+        if (!typing)
+            dialog.reset();
+        return std::nullopt;
     }
     if (isCtrl(key, U'p'))
     {
@@ -283,6 +288,14 @@ std::optional<DispatchAction> applyStartDialogKey(core::tui::KeyEvent const& key
 
     switch (key.key)
     {
+        // Esc closes it while navigating even where `close` is bound elsewhere, as it closes every popup.
+        case KeyCode::Escape:
+            if (!typing)
+            {
+                dialog.reset();
+                return std::nullopt;
+            }
+            break;
         case KeyCode::Tab:
             pickStartDialogSetting(
                 state,
@@ -478,9 +491,10 @@ namespace
             add(label(NavAction::PreviousValue) + label(NavAction::NextValue), "change"sv);
             add(label(NavAction::EnterField), "note"sv);
         }
-        hints.emplace_back(dialog.preview == DialogPreview::Short ? "ctrl+p more"sv : "ctrl+p less"sv);
+        // How to close it comes before the preview, so that 80 columns still show it.
         if (!typing)
             add(label(NavAction::Close), "close"sv);
+        hints.emplace_back(dialog.preview == DialogPreview::Short ? "ctrl+p more"sv : "ctrl+p less"sv);
         auto const views = std::vector<std::string_view> { hints.begin(), hints.end() };
         return Line { Segment { .text = joinHints(views, width), .role = Role::Dim } };
     }
