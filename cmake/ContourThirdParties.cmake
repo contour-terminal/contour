@@ -208,13 +208,15 @@ set(_WAMR_PROBE_REASONS
     "9|it installs a SIGUSR1 handler (built with wakeup of blocking operations)"
     "10|it loads a module using @FEATURE@, which extensions may not use"
     "11|it refuses a module using @FEATURE@, which extensions may use"
+    "12|it compiles guest code to native code (built with a JIT; the extension host interprets)"
 )
 
 # ContourThirdParties_WamrTerminates(<target> <result-variable>)
 #
 # Sets <result-variable> to TRUE if a program linked against <target> stops a looping guest call
 # when another thread calls wasm_runtime_terminate() and its runtime initialization installs no
-# SIGSEGV or SIGUSR1 handler and it loads exactly the WebAssembly features extensions may use, FALSE
+# SIGSEGV or SIGUSR1 handler, it has no JIT running mode, and it loads exactly the WebAssembly features
+# extensions may use, FALSE
 # otherwise (including when the probe cannot run, as when cross-compiling).
 # Sets <result-variable>_REASON to why a WAMR was rejected.
 function(ContourThirdParties_WamrTerminates target resultVar)
@@ -296,7 +298,7 @@ if(CONTOUR_EXTENSIONS)
                 set(_wamr_found "None is installed.")
             endif()
             message(FATAL_ERROR "Could not find a usable WAMR >= ${WAMR_MINIMAL_VERSION}: one built with "
-                "WAMR_BUILD_THREAD_MGR=1, without hardware bounds checks or wakeup of blocking operations, "
+                "WAMR_BUILD_THREAD_MGR=1, without a JIT, hardware bounds checks or wakeup of blocking operations, "
                 "and with exactly the WebAssembly features src/vtextension/wasm/EngineFeatures.hpp allows. "
                 "${_wamr_found} "
                 "Install one, set CONTOUR_USE_CPM=ON, or configure with -DCONTOUR_EXTENSIONS=OFF.")

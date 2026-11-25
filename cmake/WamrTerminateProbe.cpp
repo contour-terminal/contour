@@ -11,6 +11,10 @@
 // installs a SIGUSR1 handler: one built with wakeup of blocking operations, which takes over SIGUSR1
 // for the whole process. POSIX only; Windows has no sigaction.
 //
+// It rejects (exit code 12) a WAMR with any JIT running mode (Fast JIT, LLVM JIT, multi-tier): one that
+// compiles guest code to native code, whose code cache the extension host's sandbox, made for an
+// interpreter, would either kill it for or leave executable.
+//
 // It rejects (exit code 10) a WAMR that loads a module using a feature extensions may not use, and
 // (exit code 11) one that refuses a feature they may use, naming the feature on standard output:
 // src/vtextension/wasm/EngineFeatures.hpp is the table, and the modules are the ones the backend
@@ -82,6 +86,9 @@ int main()
     if (usr1After.sa_handler != usr1Before.sa_handler || usr1After.sa_flags != usr1Before.sa_flags)
         return 9;
 #endif
+    for (auto const mode: { Mode_Fast_JIT, Mode_LLVM_JIT, Mode_Multi_Tier_JIT })
+        if (wasm_runtime_is_running_mode_supported(mode))
+            return 12;
     // The first feature module WAMR gets wrong is named on standard output, for the configure's reason.
     for (auto const& [feature, module]: vtextension::wasm::testing::FeatureModules)
     {
