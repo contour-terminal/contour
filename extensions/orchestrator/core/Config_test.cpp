@@ -21,6 +21,7 @@
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/NavKeys.hpp>
 #include <orchestrator/core/UnmeasuredSources.hpp>
+#include <orchestrator/core/WorkGroups.hpp>
 
 using namespace std::string_view_literals;
 using namespace std::chrono_literals;
@@ -1306,4 +1307,79 @@ TEST_CASE("keys: task keys the vim defaults use still load", "[config]")
     REQUIRE(config.has_value());
     CHECK(std::ranges::equal(config->tasks() | std::views::take(6) | std::views::transform(&TaskDef::key),
                              std::array { 'q', 'g', 'G', 'h', 'l', 'i' }));
+}
+
+namespace
+{
+
+/// @return The example with @p work as its `work` value.
+[[nodiscard]] std::expected<Config, ConfigError> parseWork(std::string_view work)
+{
+    auto const replaced = std::format(R"("max_agents": 4, "work": {},)", work);
+    return parse(Input { .find = R"("max_agents": 4,)", .replace = replaced });
+}
+
+} // namespace
+
+TEST_CASE("work: the default folds everything else, and hides empty groups", "[config]")
+{
+    auto const config = parse(Input {});
+    REQUIRE(config.has_value());
+    CHECK(config->work()
+          == WorkSettings { .folded = { WorkGroup::EverythingElse }, .empty = EmptyGroups::Hidden });
+}
+
+TEST_CASE("work: folded and fold_empty of one's own, in row order, each group once", "[config]")
+{
+    auto const config = parseWork(R"({ "folded": ["everything_else", "needs_you"], "fold_empty": false })");
+    REQUIRE(config.has_value());
+    CHECK(config->work()
+          == WorkSettings { .folded = { WorkGroup::NeedsYou, WorkGroup::EverythingElse },
+                            .empty = EmptyGroups::Shown });
+
+    auto const twice = parseWork(R"({ "folded": ["needs_you", "needs_you"] })");
+    REQUIRE(twice.has_value());
+    CHECK(twice->work() == WorkSettings { .folded = { WorkGroup::NeedsYou }, .empty = EmptyGroups::Hidden });
+}
+
+TEST_CASE("work: an empty folded list folds no group", "[config]")
+{
+    auto const config = parseWork(R"({ "folded": [] })");
+    REQUIRE(config.has_value());
+    CHECK(config->work().folded.empty());
+}
+
+TEST_CASE("work: what is refused, and where", "[config]")
+{
+    struct Row
+    {
+        std::string_view work;
+        std::string_view key;
+        ConfigProblem problem;
+    };
+    for (auto const& row: {
+             Row { .work = R"({ "folded": ["later"] })",
+                   .key = "work.folded[0]",
+                   .problem = ConfigProblem::UnknownGroup },
+             Row { .work = R"({ "fold_empty": "yes" })",
+                   .key = "work.fold_empty",
+                   .problem = ConfigProblem::WrongType },
+             Row { .work = R"({ "sort": "x" })", .key = "work.sort", .problem = ConfigProblem::UnknownKey },
+         })
+    {
+        CAPTURE(row.work);
+        auto const config = parseWork(row.work);
+        REQUIRE_FALSE(config.has_value());
+        CHECK(config.error().key == row.key);
+        CHECK(config.error().problem == row.problem);
+    }
+}
+
+TEST_CASE("work: an unknown group's message lists the five names", "[config]")
+{
+    auto const config = parseWork(R"({ "folded": ["later"] })");
+    REQUIRE_FALSE(config.has_value());
+    CHECK(message(config.error(), sourceTables())
+          == "work.folded[0]: must be one of: needs_you, ready_to_merge, in_review, no_mr_yet, "
+             "everything_else");
 }

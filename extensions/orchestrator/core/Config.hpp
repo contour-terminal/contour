@@ -22,6 +22,7 @@
 #include <orchestrator/core/Provider.hpp>
 #include <orchestrator/core/QuickReplies.hpp>
 #include <orchestrator/core/TaskRoles.hpp>
+#include <orchestrator/core/WorkGroups.hpp>
 
 namespace orchestrator
 {
@@ -175,6 +176,7 @@ enum class ConfigProblem : uint8_t
     NotAKeyName,      ///< A `keys` entry that is no key spelling.
     KeyTaken,         ///< A `keys` entry another binding, or a command, already holds.
     TypesText,        ///< A `leave_field` key that would type.
+    UnknownGroup,     ///< A `work.folded` entry no WorkGroupRows row spells.
 };
 
 /// Why a configuration was refused.
@@ -297,6 +299,8 @@ class Config
     [[nodiscard]] PermissionProfile const& profileFor(std::string_view taskId) const noexcept;
     /// @return The navigation keys in force (`keys`): the defaults with the vim keys, as `keys` changed them.
     [[nodiscard]] NavKeys const& keys() const noexcept { return _keys; }
+    /// @return The Work board's settings (`work`): the groups folded at start, and whether empty groups show.
+    [[nodiscard]] WorkSettings const& work() const noexcept { return _work; }
     /// @return How long an agent stays done before its run is ended; 0: never.
     [[nodiscard]] std::chrono::milliseconds endDoneAfter() const noexcept { return _endDoneAfter; }
 
@@ -352,6 +356,7 @@ class Config
         std::vector<PermissionProfile> profiles = {};
         std::string defaultProfile = std::string { DefaultProfileName };
         NavKeys keys = NavKeys::defaults(VimKeys::On);
+        WorkSettings work = defaultWorkSettings();
         std::chrono::milliseconds endDoneAfter = DefaultEndDoneAfter;
         std::chrono::milliseconds finishedRetention = DefaultFinishedRetention;
         std::vector<Repo> repos = {};
@@ -382,6 +387,7 @@ class Config
     std::vector<PermissionProfile> _profiles;
     std::string _defaultProfile;
     NavKeys _keys;
+    WorkSettings _work;
     SourceTables _sources;
 };
 

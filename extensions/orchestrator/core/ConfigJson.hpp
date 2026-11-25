@@ -84,6 +84,14 @@ struct JsonKeys
     std::optional<std::vector<JsonKey>> close;
 };
 
+/// The `work` map: the groups folded at start and whether empty groups show; Config.cpp maps the snake_case
+/// names.
+struct JsonWork
+{
+    std::optional<std::vector<std::string>> folded; ///< The configNames of the groups folded at start.
+    std::optional<bool> foldEmpty;                  ///< `fold_empty`.
+};
+
 /// One `workers` entry.
 struct JsonWorker
 {
@@ -127,6 +135,7 @@ struct JsonConfig
     std::optional<std::vector<JsonPermissionProfile>> permissionProfiles;
     std::optional<std::vector<JsonQuickReply>> quickReplies;
     std::optional<JsonKeys> keys;
+    std::optional<JsonWork> work;
 };
 
 } // namespace orchestrator::config::detail

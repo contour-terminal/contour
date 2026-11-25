@@ -120,6 +120,7 @@ add_library(orchestrator_core STATIC
     core/Uuid.cpp
     core/Uuid.hpp
     core/WorkItems.cpp
+    core/WorkGroups.hpp
     core/WorkItems.hpp
 )
 target_compile_features(orchestrator_core PUBLIC cxx_std_23)

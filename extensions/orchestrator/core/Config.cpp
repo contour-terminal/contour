@@ -34,6 +34,7 @@
 #include <orchestrator/core/Prompt.hpp>
 #include <orchestrator/core/Provider.hpp>
 #include <orchestrator/core/QuickReplies.hpp>
+#include <orchestrator/core/WorkGroups.hpp>
 
 using namespace std::string_view_literals;
 
@@ -77,7 +78,19 @@ struct glz::meta<orchestrator::config::detail::JsonConfig>
                                               "quick_replies",
                                               &T::quickReplies,
                                               "keys",
-                                              &T::keys);
+                                              &T::keys,
+                                              "work",
+                                              &T::work);
+};
+
+/// The `work` map's snake_case names.
+template <>
+struct glz::meta<orchestrator::config::detail::JsonWork>
+{
+    using T = orchestrator::config::detail::JsonWork;
+    // Glaze finds the table by this spelling, as the standard library finds `value_type`.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr auto value = glz::object("folded", &T::folded, "fold_empty", &T::foldEmpty);
 };
 
 /// The `keys` map's snake_case names.
@@ -186,6 +199,7 @@ namespace
     using config::detail::JsonQuickReply;
     using config::detail::JsonRepo;
     using config::detail::JsonTask;
+    using config::detail::JsonWork;
     using config::detail::JsonWorker;
 
     template <typename T>
@@ -239,6 +253,7 @@ namespace
         AfterReplies,    ///< afterReplyNames().
         TaskRoles,       ///< TaskRoleRows.
         KeyNames,        ///< SpecialKeyNames.
+        WorkGroups,      ///< WorkGroupRows' configNames.
     };
 
     /// What each problem means; one row per ConfigProblem, in its order.
@@ -355,6 +370,9 @@ namespace
                       .text =
                           "would type into a text field instead of leaving it; use esc, ^ and a letter, or "
                           "another special key" },
+        ProblemText { .problem = ConfigProblem::UnknownGroup,
+                      .text = "must be one of",
+                      .listing = Listing::WorkGroups },
     };
 
     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ProblemTexts.size()),
@@ -362,7 +380,7 @@ namespace
                                           return static_cast<std::size_t>(ProblemTexts[i].problem) == i;
                                       }),
                   "ProblemTexts has one row per ConfigProblem, in its order");
-    static_assert(ProblemTexts.size() == static_cast<std::size_t>(ConfigProblem::TypesText) + 1,
+    static_assert(ProblemTexts.size() == static_cast<std::size_t>(ConfigProblem::UnknownGroup) + 1,
                   "ProblemTexts covers every ConfigProblem");
 
     /// @return The values @p listing names, as the user writes them, of the rows @p sources holds.
@@ -409,6 +427,10 @@ namespace
                     values.push_back(row.spelling);
                 break;
             case Listing::KeyNames: std::ranges::copy(SpecialKeyNames, std::back_inserter(values)); break;
+            case Listing::WorkGroups:
+                for (auto const& row: WorkGroupRows)
+                    values.push_back(row.configName);
+                break;
         }
         return values;
     }
@@ -466,6 +488,7 @@ namespace
         QuickReply,
         Worker,
         Keys,
+        Work,
     };
 
     /// One key an object may have, and the type of its value.
@@ -497,6 +520,7 @@ namespace
                 .object = ObjectKind::PermissionProfile },
         Field { .key = "quick_replies", .type = JsonType::Objects, .object = ObjectKind::QuickReply },
         Field { .key = "keys", .type = JsonType::Object, .object = ObjectKind::Keys },
+        Field { .key = "work", .type = JsonType::Object, .object = ObjectKind::Work },
     };
 
     constexpr auto RepoFields = std::array {
@@ -580,6 +604,11 @@ namespace
     static_assert(KeyListMembers.size() == NavActionCount, "KeyListMembers has one member per NavAction");
     static_assert(KeysFields.size() == NavActionCount + 1, "KeysFields is vim and one list per NavAction");
 
+    constexpr auto WorkFields = std::array {
+        Field { .key = "folded", .type = JsonType::Strings },
+        Field { .key = "fold_empty", .type = JsonType::Bool },
+    };
+
     [[nodiscard]] constexpr std::span<Field const> fieldsOf(ObjectKind kind) noexcept
     {
         switch (kind)
@@ -593,6 +622,7 @@ namespace
             case ObjectKind::QuickReply: return QuickReplyFields;
             case ObjectKind::Worker: return WorkerFields;
             case ObjectKind::Keys: return KeysFields;
+            case ObjectKind::Work: return WorkFields;
         }
         return {};
     }
@@ -621,6 +651,7 @@ namespace
                   "QuickReplyFields and JsonQuickReply name the same keys");
     static_assert(matchesMirror<JsonWorker>(WorkerFields), "WorkerFields and JsonWorker name the same keys");
     static_assert(matchesMirror<JsonKeys>(KeysFields), "KeysFields and JsonKeys name the same keys");
+    static_assert(matchesMirror<JsonWork>(WorkFields), "WorkFields and JsonWork name the same keys");
 
     /// Integers are read exactly, so that a count is never a rounded double.
     using Generic = glz::generic_u64;
@@ -1348,6 +1379,31 @@ namespace
         return navKeysOf(vim, configured).transform_error(keyErrorOf);
     }
 
+    /// @return The Work board's settings `work` asks for: the groups it names folded at start, each once and
+    /// in
+    ///         row order, and whether empty groups show; without it, the defaults.
+    [[nodiscard]] Checked<WorkSettings> workOf(std::optional<JsonWork> const& value)
+    {
+        if (!value)
+            return defaultWorkSettings();
+        auto settings = defaultWorkSettings();
+        if (value->foldEmpty)
+            settings.empty = *value->foldEmpty ? EmptyGroups::Hidden : EmptyGroups::Shown;
+        if (!value->folded)
+            return settings;
+        auto const& names = *value->folded;
+        for (auto const [index, name]: std::views::enumerate(names))
+            if (std::ranges::none_of(WorkGroupRows,
+                                     [&](WorkGroupRow const& row) { return row.configName == name; }))
+                return fail(std::format("work.folded[{}]", index), ConfigProblem::UnknownGroup);
+        settings.folded = WorkGroupRows | std::views::filter([&](WorkGroupRow const& row) {
+                              return std::ranges::any_of(
+                                  names, [&](std::string const& name) { return name == row.configName; });
+                          })
+                          | std::views::transform(&WorkGroupRow::group) | std::ranges::to<std::vector>();
+        return settings;
+    }
+
     /// @return The rules of a profile's @p list, each checked, reported at `<key>[i]`.
     [[nodiscard]] Checked<std::vector<std::string>> checkedRules(
         std::optional<std::vector<std::string>> const& list, std::string const& key)
@@ -1597,6 +1653,8 @@ std::expected<Config, ConfigError> Config::parse(std::string_view json,
             return e;
         if (auto e = assign(values.keys, keysOf(document.keys)))
             return e;
+        if (auto e = assign(values.work, workOf(document.work)))
+            return e;
         auto permissions = permissionsOf(document.permissions, document.permissionProfiles, values.tasks);
         if (!permissions)
             return std::move(permissions.error());
@@ -1636,6 +1694,7 @@ Config::Config(Values values) noexcept:
     _profiles { std::move(values.profiles) },
     _defaultProfile { std::move(values.defaultProfile) },
     _keys { std::move(values.keys) },
+    _work { std::move(values.work) },
     _sources { values.sources }
 {
     // Every configuration can start an agent on a topic: without a task of its own, the topic's text is the
