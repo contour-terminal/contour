@@ -149,13 +149,17 @@ namespace
             if (_interruption.load(std::memory_order_acquire) == Interruption::Requested)
                 return std::unexpected(CallFailure::Interrupted);
 
+            // A nested call records its own failure from scratch; what the call it is nested in recorded so
+            // far is that call's, and comes back once the nested call returns.
+            auto const outerFault = _callDepth > 0 ? std::exchange(_fault, std::nullopt) : std::nullopt;
             ++_callDepth;
             auto const returned =
                 wasm_runtime_call_wasm(_execEnv.get(), entry.function, entry.parameterCount, argv.data());
             --_callDepth;
             auto const failed = returned ? std::nullopt : std::optional { failure() };
             if (_callDepth > 0)
-                endNestedCall(failed.has_value() ? NestedCallOutcome::Failed : NestedCallOutcome::Returned);
+                endNestedCall(failed.has_value() ? NestedCallOutcome::Failed : NestedCallOutcome::Returned,
+                              outerFault);
             if (failed)
                 return std::unexpected(*failed);
             return {};
@@ -212,9 +216,10 @@ namespace
         /// keeps a failure's exception on the instance, where it would stop the outer call as soon as the
         /// host function returns: it is cleared, unless it is an interrupt's, which stays final.
         /// @param outcome How the nested call ended.
-        void endNestedCall(NestedCallOutcome outcome) noexcept
+        /// @param outerFault What the call it is nested in had recorded when the nested call began.
+        void endNestedCall(NestedCallOutcome outcome, std::optional<CallFailure> outerFault) noexcept
         {
-            _fault = std::nullopt;
+            _fault = outerFault;
             if (outcome == NestedCallOutcome::Returned)
                 return;
             wasm_runtime_clear_exception(_instance.get());

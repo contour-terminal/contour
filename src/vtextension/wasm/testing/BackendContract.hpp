@@ -375,6 +375,26 @@ inline constexpr auto NestedCallModule = std::to_array<uint8_t>({
     0x61, 0x6d, 0x65, 0x01, 0x07, 0x01, 0x00, 0x04, 0x70, 0x69, 0x6e, 0x67,
 });
 
+/// What the growth case of the nested-call case runs: `fail` calls `ping(1)`; `grow-absorb-then-trap`
+/// grows its memory by 4 pages, ignoring a refusal, then calls `ping(0)`, then traps on its own.
+///
+///     (module
+///       (import "contract:test/host@0" "ping" (func (param i32)))
+///       (memory (export "memory") 1)
+///       (func (export "fail") (call 0 (i32.const 1)))
+///       (func (export "grow-absorb-then-trap")
+///         (drop (memory.grow (i32.const 4))) (call 0 (i32.const 0)) unreachable))
+inline constexpr auto GrowThenNestedCallModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x60, 0x01, 0x7f, 0x00, 0x60,
+    0x00, 0x00, 0x02, 0x1d, 0x01, 0x14, 0x63, 0x6f, 0x6e, 0x74, 0x72, 0x61, 0x63, 0x74, 0x3a, 0x74,
+    0x65, 0x73, 0x74, 0x2f, 0x68, 0x6f, 0x73, 0x74, 0x40, 0x30, 0x04, 0x70, 0x69, 0x6e, 0x67, 0x00,
+    0x00, 0x03, 0x03, 0x02, 0x01, 0x01, 0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0x29, 0x03, 0x06, 0x6d,
+    0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00, 0x04, 0x66, 0x61, 0x69, 0x6c, 0x00, 0x01, 0x15, 0x67,
+    0x72, 0x6f, 0x77, 0x2d, 0x61, 0x62, 0x73, 0x6f, 0x72, 0x62, 0x2d, 0x74, 0x68, 0x65, 0x6e, 0x2d,
+    0x74, 0x72, 0x61, 0x70, 0x00, 0x02, 0x0a, 0x15, 0x02, 0x06, 0x00, 0x41, 0x01, 0x10, 0x00, 0x0b,
+    0x0c, 0x00, 0x41, 0x04, 0x40, 0x00, 0x1a, 0x41, 0x00, 0x10, 0x00, 0x00, 0x0b,
+});
+
 /// Passes its two parameters on to the two-parameter host function, in order.
 ///
 ///     (module
@@ -997,6 +1017,31 @@ void nestedHostFailureStaysNested()
     CHECK(result[0] == 7);
 }
 
+/// What a call recorded before a host function called back into its instance is still its own once that
+/// nested call returned: a refused growth, then an absorbed nested failure, then the guest's own trap
+/// fails the call as the refused growth, where the backend reports one.
+template <typename T>
+void nestedCallKeepsTheOuterRecord()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(
+        *backend,
+        RuntimeLimits { .memoryBytes = std::size_t { 2 } * PageBytes, .stackBytes = Limits.stackBytes });
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, GrowThenNestedCallModule);
+    auto context = AbsorbingHostContext {};
+    auto const instance = instantiate(*module, context);
+    context.attach(*instance);
+
+    auto const called = instance->call(functionOf(*instance, "grow-absorb-then-trap"), {});
+    CHECK(context.nested() == std::expected<void, CallFailure> { std::unexpected(CallFailure::HostFailure) });
+    REQUIRE_FALSE(called.has_value());
+    auto const expected = backend->capabilities().memoryGrowth == MemoryGrowthReporting::Reported
+                              ? CallFailure::MemoryGrowthRefused
+                              : CallFailure::Trap;
+    CHECK(called.error() == expected);
+}
+
 /// Which of two runtimes alive at once goes first.
 enum class FirstToGo : uint8_t
 {
@@ -1371,6 +1416,7 @@ void wasiStdioGoesNowhere()
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArgumentsInOrder)  \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackErrorFails)                \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, nestedHostFailureStaysNested)          \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, nestedCallKeepsTheOuterRecord)         \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoRuntimesShareHostImports)           \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, olderRuntimeOutlivesNewer)             \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesGrowth)                \
