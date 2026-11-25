@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <format>
@@ -355,4 +356,48 @@ TEST_CASE("Work view: an update's age", "[orchestrator][view][work]")
     CHECK(updateAgeText((12 * 60'000) + 59'000) == "12m");
     CHECK(updateAgeText((3 * 3'600'000) + 1) == "3h");
     CHECK(updateAgeText((uint64_t { 2 } * 86'400'000) + 3'600'000) == "2d");
+}
+
+TEST_CASE("Work view: an age changes once the rest of its unit passed", "[orchestrator][view][work]")
+{
+    CHECK(untilAgeChanges(45'400) == 600);
+    CHECK(untilAgeChanges(uint64_t { 12 } * 60'000) == 60'000);
+    CHECK(untilAgeChanges((3 * 3'600'000) + 1) == 3'599'999);
+    CHECK(untilAgeChanges(uint64_t { 2 } * 86'400'000) == 86'400'000);
+}
+
+TEST_CASE("Work view: the hidden Fleet and Focus ask for no wake and read nothing",
+          "[orchestrator][view][work]")
+{
+    auto fixture = DashboardFixture { workWorld(), Wide };
+    static_cast<void>(fixture.screen());
+    // The running run is in the Focus, its transcript read and its age counting in its row.
+    CHECK(fixture.dashboard.select(WorkRunId).empty());
+    static_cast<void>(fixture.settle());
+    static_cast<void>(fixture.screen());
+    CHECK(fixture.dashboard.input("w").empty());
+    static_cast<void>(fixture.settle());
+    static_cast<void>(fixture.screen());
+
+    // Past the Fleet row's next change and the transcript's next read: nothing of them is due.
+    fixture.clock.advance(std::chrono::minutes { 2 });
+    CHECK(fixture.settle().empty());
+    static_cast<void>(fixture.dashboard.frame());
+    auto const due = fixture.dashboard.nextRepaintDue();
+    REQUIRE(due.has_value());
+    CHECK(*due > fixture.clock.now());
+    CHECK(fixture.dashboard.frame().empty());
+
+    // The next due time is the Work view's own: the first age it draws that moves on, and it does move on.
+    auto const before = fixture.screen();
+    CHECK(before.contains("3h"));
+    fixture.clock.advance(*due - fixture.clock.now());
+    CHECK_FALSE(fixture.dashboard.frame().empty());
+    CHECK(*fixture.dashboard.nextRepaintDue() > fixture.clock.now());
+    CHECK(fixture.screen() != before);
+
+    // Back in the Agents view, the Fleet's timers count again.
+    CHECK(fixture.dashboard.input("w").empty());
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.nextRepaintDue().has_value());
 }

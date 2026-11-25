@@ -4,6 +4,8 @@
 // sortable and filtered; its keys, and the component that draws it.
 #pragma once
 
+#include <core/Clock.hpp>
+#include <core/Defines.hpp>
 #include <core/tui/Component.hpp>
 
 #include <cstddef>
@@ -37,6 +39,13 @@ struct WorkLine
     [[nodiscard]] bool operator==(WorkLine const&) const = default;
 };
 
+/// The engine's wall clock, and when the board saw it.
+struct WallSample
+{
+    uint64_t wallMs = 0; ///< Engine::wallMs() as it was seen.
+    uint64_t monoMs = 0; ///< When, in monotonic milliseconds.
+};
+
 /// What the Work view draws from, kept by the dashboard across frames: the items are built again only when
 /// the engine's revision changed, and the lines whenever the interaction or the folds may have moved them.
 struct WorkBoardData
@@ -46,6 +55,11 @@ struct WorkBoardData
     std::vector<WorkLine> lines = {};                ///< workLines() of them.
     std::optional<uint64_t> revision = std::nullopt; ///< The engine's revision they were built at.
     std::size_t listRows = 0;                        ///< How many lines the list showed, as last drawn.
+    /// The engine's wall clock as the board last saw it change, and when, in monotonic milliseconds: the ages
+    /// are measured against it moved on by the time since, so that they move on between the engine's wakes.
+    std::optional<WallSample> wall = std::nullopt;
+    /// When an age the last frame drew changes next, in monotonic milliseconds; std::nullopt: none does.
+    std::optional<uint64_t> ageChangeMs = std::nullopt;
 };
 
 /// @param engine The engine: the fold keys it holds.
@@ -89,6 +103,10 @@ void keepWorkSelection(WorkState& state,
 /// @return `45s`, `12m`, `3h`, `2d`: the age of a last update, rounded down.
 [[nodiscard]] std::string updateAgeText(uint64_t ms);
 
+/// @param ms How long ago, in milliseconds.
+/// @return How many milliseconds later updateAgeText() says something else: the rest of its unit.
+[[nodiscard]] uint64_t untilAgeChanges(uint64_t ms) noexcept;
+
 /// Applies one Work-view command. Fold on a line, or Enter on a heading, folds its group by ToggleFoldAction
 /// of the group's key and selects the heading; Sort toggles SortByUpdateKey; Enter on an item is left to the
 /// caller. SwitchView, NewAgent and Palette act as in the Agents view (dispatch()).
@@ -130,9 +148,14 @@ class WorkBoardView final: public core::tui::Component
   public:
     /// @param engine The engine: its repositories, forges and wall clock.
     /// @param interaction Where the user is: its scroll is kept so that the selection stays in view.
-    /// @param data What it draws: its listRows is set as it draws.
+    /// @param data What it draws: its listRows, wall sample and next age change are set as it draws.
     /// @param hits Where it records what a click lands on.
-    WorkBoardView(Engine const& engine, Interaction& interaction, WorkBoardData& data, HitMap& hits);
+    /// @param clock What the ages move on with between the engine's wakes; it must outlive the view.
+    WorkBoardView(Engine const& engine,
+                  Interaction& interaction,
+                  WorkBoardData& data,
+                  HitMap& hits,
+                  core::IClock const& clock CORE_LIFETIMEBOUND);
 
     void render(core::tui::Canvas& canvas) override;
 
@@ -141,6 +164,7 @@ class WorkBoardView final: public core::tui::Component
     Interaction& _interaction;
     WorkBoardData& _data;
     HitMap& _hits;
+    core::IClock const& _clock;
 };
 
 } // namespace orchestrator::view

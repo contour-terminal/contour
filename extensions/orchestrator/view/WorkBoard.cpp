@@ -5,10 +5,12 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <format>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -194,6 +196,15 @@ namespace
         return Cell { .text = "·", .role = Role::Dim };
     }
 
+    /// @return The age of an item's last update the Agent cell shows: none while a run works on it, or
+    ///         when its update time is unknown.
+    [[nodiscard]] std::optional<uint64_t> shownAgeOf(WorkItem const& item, uint64_t nowWallMs) noexcept
+    {
+        if (!item.agentRun.empty() || item.updatedWallMs == 0)
+            return std::nullopt;
+        return nowWallMs > item.updatedWallMs ? nowWallMs - item.updatedWallMs : 0;
+    }
+
     /// @return The Agent cell: `⬢ <worker>` while a run works on the item; else, at Detail::Full, the age
     ///         of its last update, or `·` when that is unknown; else nothing.
     [[nodiscard]] Cell agentCell(WorkItem const& item, uint64_t nowWallMs, Detail detail)
@@ -202,11 +213,9 @@ namespace
             return Cell { .text = std::format("⬢ {}", item.agentWorker), .role = Role::Working };
         if (detail != Detail::Full)
             return {};
-        if (item.updatedWallMs == 0)
-            return Cell { .text = "·", .role = Role::Dim };
-        return Cell { .text =
-                          updateAgeText(nowWallMs > item.updatedWallMs ? nowWallMs - item.updatedWallMs : 0),
-                      .role = Role::Dim };
+        if (auto const age = shownAgeOf(item, nowWallMs))
+            return Cell { .text = updateAgeText(*age), .role = Role::Dim };
+        return Cell { .text = "·", .role = Role::Dim };
     }
 
     /// The widths a list's columns take, a level of detail chosen.
@@ -555,19 +564,45 @@ void keepWorkSelection(WorkState& state,
     scrollIntoView(state, lines.size(), pageRows);
 }
 
+namespace
+{
+    /// One unit an age is told in: below @ref below, in @ref unit, spelt with @ref suffix.
+    struct AgeUnit
+    {
+        uint64_t below = 0;           ///< The first age the next unit tells.
+        uint64_t unit = 0;            ///< Its length in milliseconds.
+        std::string_view suffix = {}; ///< Such as `m`.
+    };
+
+    constexpr auto SecondMs = uint64_t { 1'000 };
+    constexpr auto MinuteMs = 60 * SecondMs;
+    constexpr auto HourMs = 60 * MinuteMs;
+    constexpr auto DayMs = 24 * HourMs;
+
+    constexpr auto AgeUnits = std::array {
+        AgeUnit { .below = MinuteMs, .unit = SecondMs, .suffix = "s"sv },
+        AgeUnit { .below = HourMs, .unit = MinuteMs, .suffix = "m"sv },
+        AgeUnit { .below = DayMs, .unit = HourMs, .suffix = "h"sv },
+        AgeUnit { .below = std::numeric_limits<uint64_t>::max(), .unit = DayMs, .suffix = "d"sv },
+    };
+
+    /// @return The unit @p ms is told in.
+    [[nodiscard]] AgeUnit const& ageUnitOf(uint64_t ms) noexcept
+    {
+        return *std::ranges::find_if(AgeUnits, [ms](AgeUnit const& unit) { return ms < unit.below; });
+    }
+} // namespace
+
 std::string updateAgeText(uint64_t ms)
 {
-    constexpr auto Second = uint64_t { 1'000 };
-    constexpr auto Minute = 60 * Second;
-    constexpr auto Hour = 60 * Minute;
-    constexpr auto Day = 24 * Hour;
-    if (ms < Minute)
-        return std::format("{}s", ms / Second);
-    if (ms < Hour)
-        return std::format("{}m", ms / Minute);
-    if (ms < Day)
-        return std::format("{}h", ms / Hour);
-    return std::format("{}d", ms / Day);
+    auto const& unit = ageUnitOf(ms);
+    return std::format("{}{}", ms / unit.unit, unit.suffix);
+}
+
+uint64_t untilAgeChanges(uint64_t ms) noexcept
+{
+    auto const unit = ageUnitOf(ms).unit;
+    return unit - (ms % unit);
 }
 
 std::optional<UiAction> applyWorkCommand(KeyCommand command,
@@ -677,8 +712,9 @@ namespace
 WorkBoardView::WorkBoardView(Engine const& engine,
                              Interaction& interaction,
                              WorkBoardData& data,
-                             HitMap& hits):
-    _engine { engine }, _interaction { interaction }, _data { data }, _hits { hits }
+                             HitMap& hits,
+                             core::IClock const& clock):
+    _engine { engine }, _interaction { interaction }, _data { data }, _hits { hits }, _clock { clock }
 {
 }
 
@@ -754,6 +790,7 @@ namespace
                   Engine const& engine,
                   WorkItem const& item,
                   Columns const& columns,
+                  uint64_t nowWallMs,
                   Pick const& pick)
     {
         auto x = 1;
@@ -780,7 +817,7 @@ namespace
             list, y, x, columns.review, lookText(review, columns.review), pick(review.role), columns.gap);
         auto const jira = jiraCell(item);
         x = putCell(list, y, x, columns.jira, jira.text, pick(jira.role), columns.gap);
-        auto const agent = agentCell(item, engine.wallMs(), columns.detail);
+        auto const agent = agentCell(item, nowWallMs, columns.detail);
         static_cast<void>(putCell(list, y, x, columns.agent, agent.text, pick(agent.role), columns.gap));
     }
 
@@ -846,6 +883,14 @@ void WorkBoardView::render(Canvas& canvas)
     if (lines.empty())
         list.putString(0, 1, cut(whyEmpty(_engine, work), list.width() - 2), styleOf(theme, Role::Dim));
     auto const columns = columnsFor(_engine, items, list.width() - 2, canvas.width());
+    // The engine's wall clock moves only when it wakes: the ages move on from it with the clock, and the
+    // frame says when the next one it draws changes.
+    auto const nowMonoMs = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(_clock.now().time_since_epoch()).count());
+    if (!_data.wall || _data.wall->wallMs != _engine.wallMs())
+        _data.wall = WallSample { .wallMs = _engine.wallMs(), .monoMs = nowMonoMs };
+    auto const nowWallMs = _data.wall->wallMs + (nowMonoMs - std::min(nowMonoMs, _data.wall->monoMs));
+    _data.ageChangeMs.reset();
     for (auto const at: std::views::iota(work.scroll, std::min(lines.size(), work.scroll + _data.listRows)))
     {
         auto const y = static_cast<int>(at - work.scroll);
@@ -864,7 +909,11 @@ void WorkBoardView::render(Canvas& canvas)
         }
         if (line.kind == WorkLineKind::Item)
         {
-            drawItem(list, y, _engine, items[line.item], columns, pick);
+            auto const& item = items[line.item];
+            drawItem(list, y, _engine, item, columns, nowWallMs, pick);
+            if (auto const age = shownAgeOf(item, nowWallMs); age && columns.detail == Detail::Full)
+                _data.ageChangeMs = std::min(_data.ageChangeMs.value_or(std::numeric_limits<uint64_t>::max()),
+                                             nowMonoMs + untilAgeChanges(*age));
             continue;
         }
         auto style = pick(GroupRoles[std::to_underlying(line.group)]);

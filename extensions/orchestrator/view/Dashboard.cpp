@@ -821,7 +821,7 @@ std::unique_ptr<Component> Dashboard::State::buildLayout(std::size_t breakpoint)
            body->add(std::make_unique<Focus>(engine, interaction, focus, tab, clock, focusPanels, hits),
                      layout::Style { .grow = FocusShare, .basis = 0 }));
     toggle(PanelRole::Work,
-           body->add(std::make_unique<WorkBoardView>(engine, interaction, work, hits),
+           body->add(std::make_unique<WorkBoardView>(engine, interaction, work, hits, clock),
                      layout::Style { .grow = 1, .basis = 0 }));
     column->add(std::move(body), layout::Style { .grow = 1, .basis = 0 });
     column->add(std::make_unique<ActionBar>(*this), layout::Style { .shrink = 0 });
@@ -1333,7 +1333,8 @@ void Dashboard::State::applyMouse(core::tui::MouseEvent const& mouse, std::vecto
 
 void Dashboard::State::syncBoard(std::vector<UiAction>& actions)
 {
-    auto const* const row = selectedRow();
+    // The Work view hides the Focus: no board is read for it.
+    auto const* const row = keyContext().selected;
     auto wanted = row != nullptr && std::ranges::contains(row->offers, KeyCommand::BoardTab) ? row->run
                                                                                              : std::string {};
     if (wanted == shownBoard)
@@ -1357,8 +1358,8 @@ uint32_t Dashboard::State::wantedPage() const noexcept
 std::optional<uint64_t> Dashboard::State::transcriptDueMs() const noexcept
 {
     auto const* const run = selectedRun();
-    if (run == nullptr || !countsAsActive(*run) || interaction.follow != Follow::Live
-        || shownTranscript != run->id)
+    if (interaction.view != View::Agents || run == nullptr || !countsAsActive(*run)
+        || interaction.follow != Follow::Live || shownTranscript != run->id)
         return std::nullopt;
     return transcriptAskedMs + TranscriptFollowMs;
 }
@@ -1366,8 +1367,9 @@ std::optional<uint64_t> Dashboard::State::transcriptDueMs() const noexcept
 void Dashboard::State::syncTranscript(std::vector<UiAction>& actions)
 {
     auto const* const run = selectedRun();
-    // The engine reads no transcript while its configuration is refused.
-    if (run == nullptr || engine.config() == nullptr)
+    // The engine reads no transcript while its configuration is refused, nor while the Work view hides the
+    // Focus.
+    if (interaction.view != View::Agents || run == nullptr || engine.config() == nullptr)
         return;
     auto const page = wantedPage();
     auto const* const view = engine.transcript(tab, run->id);
@@ -1583,15 +1585,22 @@ std::optional<core::SteadyTimePoint> Dashboard::pendingEscapeDeadline() const no
 std::optional<core::SteadyTimePoint> Dashboard::nextRepaintDue() const noexcept
 {
     auto const& state = *_state;
-    // An agent's age moves on in its row; a board's in the Board tab; a followed transcript is read again.
-    auto earliest = state.rowChangeMs;
+    // An agent's age moves on in its row; a board's in the Board tab; a followed transcript is read again;
+    // in the Work view, an item's age. Only the view shown asks for a wake.
+    auto earliest = std::optional<uint64_t> {};
     auto const consider = [&](std::optional<uint64_t> due) {
         if (due)
             earliest = earliest ? std::min(*earliest, *due) : *due;
     };
-    if (state.focus.tab == FocusTab::Board)
-        consider(state.focusPanels.board.ageChangeMs);
-    consider(state.transcriptDueMs());
+    if (state.interaction.view == View::Work)
+        consider(state.work.ageChangeMs);
+    else
+    {
+        consider(state.rowChangeMs);
+        if (state.focus.tab == FocusTab::Board)
+            consider(state.focusPanels.board.ageChangeMs);
+        consider(state.transcriptDueMs());
+    }
     consider(state.stillAsksDueMs());
     return earliest ? std::optional { core::SteadyTimePoint { std::chrono::milliseconds { *earliest } } }
                     : std::nullopt;
@@ -1751,17 +1760,21 @@ std::string Dashboard::frame()
     static_cast<void>(state.resolveOverdueEscape());
     // A row changed with time alone (an age moved on, a trust-prompt hint fell due): the rows are built and
     // drawn again, though the engine did not change.
-    if (state.rowChangeMs && state.nowMonoMs() >= *state.rowChangeMs)
+    // Only the view shown changes with time: the Fleet's rows and the Board's age, or the Work view's ages.
+    auto const agents = state.interaction.view == View::Agents;
+    if (agents && state.rowChangeMs && state.nowMonoMs() >= *state.rowChangeMs)
     {
         state.rowsState = State::Rows::Stale;
         state.repaint = State::Repaint::Needed;
     }
+    if (!agents && state.work.ageChangeMs && state.nowMonoMs() >= *state.work.ageChangeMs)
+        state.repaint = State::Repaint::Needed;
     // An answered agent may still ask: the frame says so.
     if (auto const due = state.stillAsksDueMs(); due && state.nowMonoMs() >= *due)
         state.repaint = State::Repaint::Needed;
     // A board's age moved on.
     if (auto const due = state.focusPanels.board.ageChangeMs;
-        state.focus.tab == FocusTab::Board && due && state.nowMonoMs() >= *due)
+        agents && state.focus.tab == FocusTab::Board && due && state.nowMonoMs() >= *due)
         state.repaint = State::Repaint::Needed;
     if (state.repaint == State::Repaint::Clean)
         return {};
