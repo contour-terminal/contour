@@ -804,9 +804,11 @@ Key                   | Meaning
 `status_board_after`  | How long an agent runs before the orchestrator starts looking for its board, its `STATUS.md`. Default `15m`; `0` never looks, while `b` still shows a board.
 `status_board`        | What every agent's system prompt asks of it about its board (Claude Code's `--append-system-prompt`). Default: keep `STATUS.md` at the worktree's root with the `contour-workflows:status-board` skill, current at every state change, never committed. Your own words replace that; `off` asks for nothing.
 `plugins`             | The Claude Code plugins the tasks' prompts need, each `{ id: <plugin>@<marketplace>, marketplace: <source> }`. Default: `contour-workflows@contour-terminal` from `contour-terminal/claude-marketplace`. The orchestrator asks `claude plugin list --json` whether each one is installed and enabled, and lists the missing ones as problems; the dashboard palette's "install the missing plugins" installs them. `[]` checks for none.
-`permissions`         | The permission profile an agent starts with when its task names none, passed to Claude Code as `--settings`. Default `standard`: edits inside the worktree, `cmake`, `ctest`, local `git` (status, diff, log, show, add, commit, switch, rebase, fetch), read-only `gh` and the `contour-workflows` skills need no approval; `sudo`, `rm -rf`, `git push --force` and `git reset --hard` are denied; anything else, pushing and opening a pull request included, still asks. `trusted` is `standard` plus `git push`, `gh pr create` and `gh pr edit`. `ask` leaves every decision to Claude Code's own prompts. Your Claude Code settings still apply beneath the profile.
+`permissions`         | The permission profile an agent starts with when its task names none, passed to Claude Code as `--settings`. Default `auto`: Claude Code's auto mode on top of `standard`'s rules, so Claude Code decides what needs approval, and the denies of `standard` still hold. If your Claude Code cannot run an agent in auto mode, it decides how the agent runs; `permissions: standard` keeps today's behaviour. `standard`: edits inside the worktree, `cmake`, `ctest`, local `git` (status, diff, log, show, add, commit, switch, rebase, fetch), read-only `gh` and the `contour-workflows` skills need no approval; `sudo`, `rm -rf`, `git push --force` and `git reset --hard` are denied; anything else, pushing and opening a pull request included, still asks. `trusted` is `standard` plus `git push`, `gh pr create` and `gh pr edit`. `ask` leaves every decision to Claude Code's own prompts. Your Claude Code settings still apply beneath the profile.
 `quick_replies`       | What the digits answer an agent that asks for a permission with, each `{ key, label, press, then }`: `key` the dashboard's digit, `1` to `9`; `label` what its chip says, at most 40 bytes; `press` the key pressed in the agent's tab, a digit or `esc` (default: `key`); `then` `wait` (default) or `message`, which opens the message box for a reason. Default `1 yes`, `2 yes, don't ask again`, and `3 no, and say why`, which presses `esc` (Claude Code's No moves between 2, 3 and 4 with the menu, while Escape rejects on every one) and opens the message box. The labels are never read from the agent's tab. `[]` turns the chips off.
-`permission_profiles` | Profiles of your own, or replacements for the built-in ones, each `{ name, extends, mode, allow, deny }`. `extends` names the profile it builds on: it takes that profile's mode unless it sets its own, and that profile's rules followed by its own. `mode` is `default`, `acceptEdits` or `plan`; `bypassPermissions` is refused. A rule is a tool, or a tool and its specifier, as Claude Code writes them (`Read`, `Bash(git push:*)`). A profile that extends itself, or one too large for a `--settings` argument, is refused.
+`keys`                | The navigation keys, each action's list of keys: `{ vim, move_up, move_down, first, last, half_page_up, half_page_down, previous_value, next_value, leave_field, enter_field, close }`. `vim` (default `true`) adds the vim keys to the defaults; `vim: false` keeps only the plain ones. The defaults, plain then vim: `move_up` `up` `k`; `move_down` `down` `j`; `first` `home` `gg`; `last` `end` `G`; `half_page_up` `^u`; `half_page_down` `^d`; `previous_value` `left` `h`; `next_value` `right` `l`; `leave_field` `esc` (while a text field is typed); `enter_field` `enter` `i`; `close` `esc` `q` (`Esc` still closes what is open when `close` is rebound). A list replaces that action's defaults, whatever `vim` says (`move_down: [J, down]` drops `j`); `[]` leaves it without a key, except for `close` and `leave_field`, which must keep one. A key is one printable character (a bare `0` to `9` reads as that digit), `^` and a lower-case letter other than `h`, `i`, `j` or `m` (terminals send those as Backspace, Tab, LF and CR), two characters such as `gg`, or one of `up down left right home end pgup pgdn enter esc tab del`. `leave_field` takes no single character and no two-character sequence such as `gg`, which would type instead. A key is refused when another action or one of the dashboard's own commands already holds it where it acts (`e`, `/`, `w`, the digits, `pgup`; `^u`, `^w`, `^n`, `^p`, and `up`/`down`, which choose in the palette, while typing), and so is a two-character key whose first character is bound alone, or the reverse; an action may keep a key of its own defaults, as `close` keeps `esc`. The problem line names the other holder, as in `keys.close[0]: is already bound: j, also keys.move_down`.
+`work`                | The Work view's groups, `{ folded, fold_empty }`. `folded` (default `[everything_else]`) lists the groups the view folds until you unfold them, each by name: `needs_you`, `ready_to_merge`, `in_review`, `no_mr_yet` and `everything_else`. A group named twice counts once, `[]` folds none, and a name no group has is refused. `fold_empty` (default `true`) hides a group with no item; `false` shows its heading with no rows.
+`permission_profiles` | Profiles of your own, or replacements for the built-in ones, each `{ name, extends, mode, allow, deny }`. `extends` names the profile it builds on: it takes that profile's mode unless it sets its own, and that profile's rules followed by its own. `mode` is `default`, `acceptEdits`, `plan` or `auto`; `bypassPermissions` is refused. A rule is a tool, or a tool and its specifier, as Claude Code writes them (`Read`, `Bash(git push:*)`). A profile that extends itself, or one too large for a `--settings` argument, is refused.
 `end_done_after`      | How long an agent stays done before the orchestrator ends its run, as `e` would: its tab closes and its worktree is removed unless it holds work. The run is listed as completed. An agent that goes back to work, because you answered it, waits the whole time again. Done is a turn that ended with nothing in flight, which the dashboard shows as *waiting for you*: it also covers an agent that asked you a question in plain text, which this ends unanswered. An agent waiting on its own background work or a scheduled wake-up is not done, and shows what it waits for. A task can set its own (below). Default `0`: a done run waits for you.
 `finished_retention`  | How long a finished run stays in the Finished list. Default `30d`. Every finished run is also appended, for good, to `agent-runs.jsonl` in the daemon's state directory, with what its agent spent and did.
 `repos`               | Required. The repositories, one entry each (below).
@@ -885,19 +887,24 @@ The dashboard is one screen: the **Fleet** on the left lists your runs, grouped 
 shows the selected run, its Board, Transcript or Details tab, the latest of what it said, and the box to write
 to it. `w` switches to the Work view, which lists your merge requests and tickets in five groups — Needs you,
 Ready to merge, In review, No MR yet, Everything else — with their pipeline, review, conflicts and Jira status;
-`Enter` on one opens the start dialog (task, worker, model, permission profile, note), and its folds and sort
+`Enter` on one opens the start dialog (task, worker, model, permission profile, note). Its groups start folded
+as `work.folded` says; a group you fold or unfold keeps your choice over that list, and your folds and the sort
 are kept across restarts. In a tab narrower than 100
 columns the Focus goes below the Fleet, or, narrower than 60, takes its place while it has the keys. The action
 bar lists what applies to the selected row, `Enter`'s action first; `Ctrl+K` or `?` opens the command palette,
-which lists every action, those that do not apply dimmed with the reason.
+which lists every action, those that do not apply dimmed with the reason. It always types its query, `j`
+and `k` included; `↑` `↓` or `Ctrl+N` `Ctrl+P` choose, and `Esc` closes it at once, keeping the query.
 
 Key                     | Does, in the Fleet
 ------------------------|---------------------------------------------------------------------------------------
-`↑` `↓` `j` `k` `Home` `End` | move the selection
+`↑` `↓` `j` `k`         | move the selection
+`Home` `End` `gg` `G`   | select the first or the last row
+`Ctrl+D` `Ctrl+U`       | move the selection by half the rows shown
 `Enter`                 | the selected row's primary action: write to a live run in the Focus; run a finished one again (the start dialog, or the `n` box for a topic); retry a kept one's removal; unfold a group; on `+ new task`, start a custom task
 `Tab`                   | give the Focus the keys
 `b` `t` `d`             | show the Focus's Board, Transcript or Details tab
 `PgUp` `PgDn`           | scroll the Focus's tab
+`←` `→` `h` `l`         | turn the transcript's pages; on the Board or Details, or past the transcript's first or last page, show the tab beside
 `n`                     | start a custom task: a box for the text, with the repository, worker and model
 `w`                     | show the Work view
 `e`                     | end the selected run; asks once
@@ -905,16 +912,22 @@ Key                     | Does, in the Fleet
 `o`                     | open the run's link on your machine (`url-open`)
 `x`                     | check a kept worktree again
 `Del`                   | drop a finished run from the list
-`/`                     | filter the runs by text
+`/`                     | filter the runs by text; `Enter` or `Esc` stops typing and keeps the filter, `/` types it again
 `z`                     | fold the selected run's group
 `Ctrl+K` `?`             | the command palette: every action, and those without a key (refresh the lists, install the missing plugins, the last 24 hours)
-`Esc`                   | drop the filter
+`Esc`                   | drop the filter (after the `Esc` that stopped typing it)
 
 In the Focus of a live run the message box has the keys: every printable key types, `Enter` sends, `Alt+Enter`
-adds a line, `PgUp` `PgDn` `End` scroll, and `Esc` goes back keeping the draft. The start dialog shows the item,
+adds a line, `PgUp` `PgDn` `End` scroll, and `Esc` goes back keeping the draft. The navigation keys (`j` `k`
+`gg` `G` `Ctrl+D` `Ctrl+U` `h` `l`, and `q` that closes the last 24 hours) are the defaults of `keys`, and a
+task's `key` never takes one from a list. The start dialog shows the item,
 the task it suggests and why, every worker with its runs, the model, the permission profile, the worktree and,
-with `Ctrl+P`, the agent's exact command line. `Enter` starts the agent; `Esc` closes it. Nothing starts
-without it. The orchestrator's README has the Work view's keys and mouse: [The Work view][orchestrator-work].
+with `Ctrl+P`, the agent's exact command line. The dialog opens on its settings: `j` `k` (or `↑` `↓`, `Tab`) move
+between them, `h` `l` (or `←` `→`) change one, and `i` types the note, where every letter is text and `Esc` goes
+back to the settings. `Enter` on the Note line types the note; anywhere else, and while the note is typed, it
+starts the agent. A second `Esc`, or `q`, closes it. No item's agent starts without it. The `n` box opens typing its
+text, so typing and then `Enter` starts at once; `Esc` goes to its settings, where the same keys work, and `i`
+types the text again. The orchestrator's README has the Work view's keys and mouse: [The Work view][orchestrator-work].
 
 ### Boards
 
