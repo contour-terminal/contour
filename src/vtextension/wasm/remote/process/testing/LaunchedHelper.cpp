@@ -6,11 +6,15 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <iterator>
 #include <optional>
 #include <ranges>
+#include <string>
+#include <string_view>
 #include <tuple>
+#include <vector>
 
 #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
 
@@ -62,6 +66,24 @@ std::optional<ExitStatus> awaitReap(IProcessLauncher& launcher, IProcessHandle& 
         if (!(*set)->wait(deadline))
             return std::nullopt;
     }
+}
+
+std::optional<std::vector<std::string>> readReport(transport::Channel& channel)
+{
+    auto text = std::string {};
+    auto buffer = std::array<uint8_t, 4096> {};
+    while (!text.ends_with("end\n"))
+    {
+        auto const received = channel.receiveSome(buffer);
+        if (!received)
+            return std::nullopt;
+        text.append(reinterpret_cast<char const*>(buffer.data()), *received);
+    }
+    auto lines = std::vector<std::string> {};
+    for (auto const line: std::views::split(std::string_view { text }, '\n'))
+        if (!line.empty())
+            lines.emplace_back(std::string_view { line });
+    return lines;
 }
 
 bool endAndReap(IProcessLauncher& launcher, IProcessHandle& process)

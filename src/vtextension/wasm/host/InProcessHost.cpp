@@ -67,6 +67,7 @@ InProcessHost::InProcessHost(std::shared_ptr<InProcessHostRegistry> registry,
                              remote::transport::WakeSender wake,
                              HostServerConfig config):
     _registry { std::move(registry) },
+    _target { remote::transport::HandleTarget::currentProcess() },
     _engine { std::move(engine) },
     _page { std::move(page) },
     _wake { std::move(wake) },

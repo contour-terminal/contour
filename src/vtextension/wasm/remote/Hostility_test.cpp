@@ -55,6 +55,7 @@
 #include <vtextension/wasm/testing/BackendContract.hpp>
 
 namespace process = vtextension::wasm::remote::process;
+namespace transport = vtextension::wasm::remote::transport;
 namespace contract = vtextension::wasm::testing::contract;
 using contour::extension_host::testing::GarbageAnswer;
 using contour::extension_host::testing::hostileModeNamed;
@@ -199,6 +200,11 @@ class StampingHandle final: public IHostHandle
     void terminate() noexcept override { _inner->terminate(); }
     void letGo() noexcept override { _inner->letGo(); }
     void attach(HostAttachment attachment) override { _inner->attach(std::move(attachment)); }
+
+    [[nodiscard]] transport::HandleTarget const& handleTarget() const noexcept override
+    {
+        return _inner->handleTarget();
+    }
 
     [[nodiscard]] StepWatch watch(HostStep step, std::chrono::milliseconds budget) override
     {

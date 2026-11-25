@@ -5,6 +5,7 @@
 //
 //   extension_host_probe --report <helper arguments> [--check-handle=H]…
 //   extension_host_probe --parent <helper arguments> <helper executable> [its extra arguments]…
+//   extension_host_probe --receive-grant <helper arguments>
 //
 // Before it reports, it does to itself what the extension host does: it binds itself to its parent (exiting
 // as the host does if that is not the process named), and caps its resources to its `--data-bytes`.
@@ -13,6 +14,11 @@
 // supervisor and has it start the helper executable, as Contour does, and once the helper said Hello sends
 // `helper=<pid>` and `end` lines on its control channel, and then waits for that channel to end -- or to be
 // killed, which is what the tests of a helper outliving its parent do.
+//
+// With --receive-grant, it is the helper side of a handle grant: bound to its parent likewise, it reads one
+// Instantiate off its control channel, claims the handle it names, maps it as the object it promises, and
+// writes `probe` at its start. It reports `granted=ok`, or `granted=refused` if any of that failed, and `end`
+// on its first lane, then waits for its control channel to end.
 //
 // The report is one `key=value` line each: `cwd=` its working directory, `env=NAME` per environment variable,
 // `stdin=`, `stdout=` and `stderr=` each `null` if it is the null device, `terminal` if a terminal, else
@@ -48,8 +54,10 @@
 #include <vtextension/wasm/remote/process/testing/RecordingLauncher.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
+#include <vtextension/wasm/remote/transport/HandleGrant.hpp>
 #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
 #include <vtextension/wasm/remote/transport/PduStream.hpp>
+#include <vtextension/wasm/remote/transport/SharedObject.hpp>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -296,6 +304,72 @@ enum class StandardStream : uint8_t
     return ProbeExit::Reported;
 }
 
+/// What the probe writes at the start of a granted object.
+constexpr auto GrantMark = std::string_view { "probe" };
+
+/// Claims the handle @p request names off @p control, maps it as the object @p request promises, and marks
+/// it.
+/// @return The mapping, which keeps the object; nothing if the grant is refused.
+[[nodiscard]] std::optional<vtextension::wasm::remote::transport::SharedMapping> takeGrant(
+    vtextension::wasm::remote::transport::PduStream& control,
+    vtextension::wasm::remote::proto::Instantiate const& request)
+{
+    namespace transport = vtextension::wasm::remote::transport;
+    auto handle = transport::claimGrantedHandle(control, request.memory.handle);
+    if (!handle)
+        return std::nullopt;
+    auto mapping = transport::SharedMapping::map(
+        handle->get(), request.memory.objectBytes, transport::MapAccess::ReadWrite);
+    if (!mapping)
+    {
+#ifdef _WIN32
+        // A value that names no such object may name a handle of this process's own: let go, never closed.
+        std::ignore = handle->release();
+#endif
+        return std::nullopt;
+    }
+    auto const first =
+        std::min<uint64_t>(request.memory.objectBytes, vtextension::wasm::remote::proto::WasmPageBytes);
+    if (GrantMark.size() > first || !mapping->commit(0, first))
+        return std::nullopt;
+    std::ranges::copy(std::as_bytes(std::span { GrantMark }), mapping->bytes().begin());
+    return *std::move(mapping);
+}
+
+/// Takes one grant, reports how it went on the first lane, then waits for its control channel to end.
+[[nodiscard]] ProbeExit receiveGrant(std::span<std::string_view const> arguments)
+{
+    namespace remote = vtextension::wasm::remote;
+    auto const parsed = parseHelperArguments(arguments);
+    if (!parsed)
+        return ProbeExit::Usage;
+    if (!vtextension::wasm::host::bindToParent(parsed->parentProcessId))
+        return ProbeExit::ParentGone;
+    auto controlEnd = Channel::adopt(parsed->control);
+    if (!controlEnd)
+        return ProbeExit::NoControl;
+    auto lane = Channel::adopt(parsed->lanes.front());
+    if (!lane)
+        return ProbeExit::NoControl;
+    auto control = remote::transport::PduStream { *std::move(controlEnd),
+                                                  remote::proto::ChannelKind::Control,
+                                                  remote::proto::Direction::ToHelper,
+                                                  remote::proto::PduLimits {} };
+
+    auto const request = control.receive();
+    auto const* const instantiate = request ? std::get_if<remote::proto::Instantiate>(&*request) : nullptr;
+    auto const mapping =
+        instantiate ? takeGrant(control, *instantiate) : std::optional<remote::transport::SharedMapping> {};
+    auto const text = std::format("granted={}\nend\n", mapping ? "ok" : "refused");
+    if (!lane->send(std::span { reinterpret_cast<uint8_t const*>(text.data()), text.size() }))
+        return ProbeExit::ReportFailed;
+    // Mapped until the parent is done with it: whatever arrives is ignored.
+    while (control.receive())
+    {
+    }
+    return ProbeExit::Reported;
+}
+
 } // namespace
 
 // The third parameter is what POSIX systems pass and Windows' C runtime passes too: the environment, read
@@ -303,10 +377,18 @@ enum class StandardStream : uint8_t
 int main(int argc, char const* argv[], char const* envp[])
 {
     auto const arguments = std::vector<std::string_view>(argv + 1, argv + argc);
-    if (arguments.empty() || (arguments.front() != "--report" && arguments.front() != "--parent"))
+    if (arguments.empty())
         return static_cast<int>(ProbeExit::Usage);
     auto const rest = std::span { arguments }.subspan(1);
-    auto const exit = arguments.front() == "--report" ? report(rest, envp) : parent(rest);
+    auto const exit = [&] {
+        if (arguments.front() == "--report")
+            return report(rest, envp);
+        if (arguments.front() == "--parent")
+            return parent(rest);
+        if (arguments.front() == "--receive-grant")
+            return receiveGrant(rest);
+        return ProbeExit::Usage;
+    }();
     if (exit == ProbeExit::ParentGone)
         return vtextension::wasm::host::exitCodeOf(vtextension::wasm::host::HostProcessExit::ParentGone);
     return static_cast<int>(exit);

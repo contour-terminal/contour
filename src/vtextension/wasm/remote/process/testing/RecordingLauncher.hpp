@@ -144,6 +144,11 @@ class RecordingLauncher final: public IProcessLauncher
 
         [[nodiscard]] Waitable waitable() const noexcept override { return _inner->waitable(); }
 
+        [[nodiscard]] std::expected<transport::HandleTarget, LaunchError> handleTarget() override
+        {
+            return _inner->handleTarget();
+        }
+
       private:
         std::unique_ptr<IProcessHandle> _inner;
         std::shared_ptr<Records> _records;

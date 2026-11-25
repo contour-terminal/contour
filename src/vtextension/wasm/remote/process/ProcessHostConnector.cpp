@@ -62,6 +62,11 @@ namespace
 
         void attach(remote::HostAttachment attachment) override { _helper.attach(std::move(attachment)); }
 
+        [[nodiscard]] transport::HandleTarget const& handleTarget() const noexcept override
+        {
+            return _helper.handleTarget();
+        }
+
       private:
         transport::ControlPage _page;
         transport::WakeSender _wake;

@@ -471,6 +471,25 @@ TEST_CASE("Supervisor.refusedWatchIsPolledAndReaped", "[vtextension]")
     CHECK(rig.fake->lastDeadline() == std::nullopt);
 }
 
+TEST_CASE("Supervisor.launchCarriesAHandleTarget", "[vtextension]")
+{
+    // Made once per launch, on the supervisor's thread, and handed out with the helper.
+    auto rig = Rig {};
+    auto const helper = rig.launch();
+    rig.settle();
+    CHECK(rig.fake->handleTargetThreads() == std::vector { rig.supervisor->threadId() });
+    CHECK(rig.fake->kills().empty());
+
+    // A helper no handle can be granted to does not run: it is killed, and the launch fails.
+    rig.fake->failHandleTargets(LaunchError::Resources);
+    CHECK(rig.supervisor->mailbox()->launch(fakeSpec()).error() == LaunchError::Io);
+    rig.settle();
+    CHECK(rig.fake->kills() == std::vector<std::size_t> { 1 });
+    CHECK(killsFor(*rig.supervisor, KillReason::Shutdown) == 1);
+    CHECK(rig.supervisor->counters().launches == 2);
+    CHECK(rig.fake->handleTargetThreads().size() == 2);
+}
+
 TEST_CASE("Supervisor.killIsCountedOnce", "[vtextension]")
 {
     // A helper killed for a timeout is told to die again by its holder (markDead() terminates): one kill.

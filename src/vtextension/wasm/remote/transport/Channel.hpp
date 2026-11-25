@@ -13,6 +13,7 @@
 #include <expected>
 #include <memory>
 #include <span>
+#include <vector>
 
 namespace vtextension::wasm::remote::transport
 {
@@ -31,6 +32,8 @@ using NativeHandle = void*;
 /// The operating system's name for one end: a socket descriptor.
 using NativeHandle = int;
 #endif
+
+class OwnedHandle;
 
 /// Closes a handle this process owns: close() on POSIX, CloseHandle() on Windows.
 /// @param handle The handle; never used again.
@@ -73,11 +76,34 @@ class Channel
     ///         this end was shut down.
     [[nodiscard]] std::expected<std::size_t, ChannelError> trySend(std::span<uint8_t const> bytes);
 
-    /// Receives at least one byte, blocking until one arrives.
+    /// Receives at least one byte, blocking until one arrives. A descriptor the peer attached to them is
+    /// discarded by the system, never installed in this process.
     /// @param buffer Where the bytes go. Not empty.
     /// @return How many bytes arrived, at least one; `Closed` at the peer's end of stream, or once this end
     ///         was shut down.
     [[nodiscard]] std::expected<std::size_t, ChannelError> receiveSome(std::span<uint8_t> buffer);
+
+#ifndef _WIN32
+    /// Sends all of @p bytes, as send() does, with a duplicate of @p handle attached to their first byte
+    /// (SCM_RIGHTS): the peer receives it with that byte, as receiveSomeWithHandles() does.
+    /// @param bytes The bytes to send; not empty.
+    /// @param handle The descriptor; still the caller's.
+    /// @return Nothing once every byte is sent; `Closed` if the peer is gone or this end was shut down.
+    [[nodiscard]] std::expected<void, ChannelError> sendWithHandle(std::span<uint8_t const> bytes,
+                                                                   NativeHandle handle);
+
+    /// Receives at least one byte, as receiveSome() does, and installs the descriptors attached to them,
+    /// close-on-exec. At most two are taken in at once, so that a reader tells a peer that attached one
+    /// more than a message may carry from one that did not; past that, the system truncates them, and the
+    /// receive fails.
+    /// @param buffer Where the bytes go. Not empty.
+    /// @param handles Where the descriptors that arrived are appended, now the caller's.
+    /// @return How many bytes arrived, at least one; `Closed` as receiveSome(); `Io` if the system truncated
+    ///         what was attached, or something other than descriptors was, every descriptor received then
+    ///         closed.
+    [[nodiscard]] std::expected<std::size_t, ChannelError> receiveSomeWithHandles(
+        std::span<uint8_t> buffer, std::vector<OwnedHandle>& handles);
+#endif
 
     /// Ends the stream, both ways and for both ends: a receive or send blocked on this end now, from any
     /// thread, returns `Closed`, as does every later one; and the peer's stream ends as if this end were

@@ -69,6 +69,12 @@ class FakeProcessLauncher final: public IProcessLauncher
     /// Makes every watch() of every set fail with @p error from now on.
     void failWatches(LaunchError error);
 
+    /// Makes every process's handleTarget() fail with @p error from now on.
+    void failHandleTargets(LaunchError error);
+
+    /// @return The thread each handleTarget() of any process ran on, in call order.
+    [[nodiscard]] std::vector<std::thread::id> handleTargetThreads() const;
+
     /// Makes every wait() of every set fail with @p error from now on, a wait blocked now included.
     void failWaits(LaunchError error);
 

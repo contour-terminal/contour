@@ -291,6 +291,21 @@ namespace
 
         [[nodiscard]] Waitable waitable() const noexcept override { return _process.get(); }
 
+        [[nodiscard]] std::expected<transport::HandleTarget, LaunchError> handleTarget() override
+        {
+            // A handle of its own, with no more access than duplicating into the process takes.
+            auto target = HANDLE { nullptr };
+            if (!::DuplicateHandle(::GetCurrentProcess(),
+                                   _process.get(),
+                                   ::GetCurrentProcess(),
+                                   &target,
+                                   PROCESS_DUP_HANDLE,
+                                   FALSE,
+                                   0))
+                return std::unexpected(launchErrorOf(::GetLastError()));
+            return transport::HandleTarget::ofProcess(transport::OwnedHandle { target });
+        }
+
       private:
         OwnedHandle _process;
         OwnedHandle _job; ///< Its close ends the process, if it still runs.

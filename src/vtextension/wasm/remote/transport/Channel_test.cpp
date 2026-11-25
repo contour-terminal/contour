@@ -14,9 +14,11 @@
 #include <expected>
 #include <future>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <thread>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <vtextension/wasm/remote/transport/Channel.hpp>
@@ -30,6 +32,11 @@
 
     #include <fcntl.h>
     #include <unistd.h>
+
+    #include <vtextension/wasm/remote/proto/Codec.hpp>
+    #include <vtextension/wasm/remote/proto/Pdu.hpp>
+    #include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
+    #include <vtextension/wasm/remote/transport/PduStream.hpp>
 #endif
 
 using vtextension::wasm::remote::transport::Channel;
@@ -258,3 +265,86 @@ TEST_CASE("Channel.trySendNeverBlocks", "[vtextension]")
     pair->helper.shutdown();
     CHECK(pair->parent.trySend(chunk) == std::unexpected(ChannelError::Closed));
 }
+
+#ifndef _WIN32
+namespace proto = vtextension::wasm::remote::proto;
+using vtextension::wasm::remote::transport::OwnedHandle;
+using vtextension::wasm::remote::transport::testing::inodeOf;
+using vtextension::wasm::remote::transport::testing::openDescriptorCount;
+
+namespace
+{
+
+/// A pipe's two ends, closed when it is destroyed.
+struct Pipe
+{
+    OwnedHandle reader;
+    OwnedHandle writer;
+};
+
+/// @return A fresh pipe.
+[[nodiscard]] Pipe makePipe()
+{
+    auto ends = std::array<int, 2> { -1, -1 };
+    REQUIRE(::pipe(ends.data()) == 0);
+    return Pipe { .reader = OwnedHandle { ends[0] }, .writer = OwnedHandle { ends[1] } };
+}
+
+} // namespace
+
+TEST_CASE("Channel.handleTravelsWithItsBytes", "[vtextension]")
+{
+    auto pair = makeChannelPair();
+    REQUIRE(pair.has_value());
+    auto const pipe = makePipe();
+    auto const bytes = std::array<uint8_t, 3> { 1, 2, 3 };
+    REQUIRE(pair->parent.sendWithHandle(bytes, pipe.writer.get()).has_value());
+
+    auto received = std::array<uint8_t, 8> {};
+    auto handles = std::vector<OwnedHandle> {};
+    auto const count = pair->helper.receiveSomeWithHandles(received, handles);
+    REQUIRE(count == std::size_t { 3 });
+    CHECK(std::ranges::equal(std::span { received }.first(3), bytes));
+    REQUIRE(handles.size() == 1);
+    // A descriptor of the receiver's own, on what the sender's named, that no child inherits.
+    CHECK(handles.front().get() != pipe.writer.get());
+    CHECK(inodeOf(handles.front().get()) == inodeOf(pipe.writer.get()));
+    auto const flags = ::fcntl(handles.front().get(), F_GETFD);
+    REQUIRE(flags != -1);
+    CHECK((flags & FD_CLOEXEC) != 0);
+
+    // Plain bytes after it carry nothing.
+    REQUIRE(pair->parent.send(bytes).has_value());
+    auto none = std::vector<OwnedHandle> {};
+    CHECK(pair->helper.receiveSomeWithHandles(received, none) == std::size_t { 3 });
+    CHECK(none.empty());
+}
+
+TEST_CASE("Channel.parentInstallsNoDescriptorFromTheHelper", "[vtextension]")
+{
+    // A helper attaches a descriptor to every frame it sends; Contour's reader takes in none of them.
+    auto pair = makeChannelPair();
+    REQUIRE(pair.has_value());
+    auto parent = vtextension::wasm::remote::transport::PduStream {
+        std::move(pair->parent), proto::ChannelKind::Control, proto::Direction::ToParent, proto::PduLimits {}
+    };
+    auto const frame = proto::encodeFrame(proto::RuntimeCreated { .runtimeId = 7, .error = std::nullopt });
+    REQUIRE(frame.has_value());
+    constexpr auto Frames = 100;
+
+    auto const before = openDescriptorCount();
+    for ([[maybe_unused]] auto const index: std::views::iota(0, Frames))
+    {
+        // Sent and received one at a time, so that the socket's buffer never fills.
+        {
+            auto const pipe = makePipe();
+            REQUIRE(pair->helper.sendWithHandle(*frame, pipe.writer.get()).has_value());
+        }
+        auto const received = parent.receive();
+        REQUIRE(received.has_value());
+        CHECK(std::holds_alternative<proto::RuntimeCreated>(*received));
+    }
+    CHECK(openDescriptorCount() == before);
+    CHECK_FALSE(parent.takeAttachedHandle());
+}
+#endif

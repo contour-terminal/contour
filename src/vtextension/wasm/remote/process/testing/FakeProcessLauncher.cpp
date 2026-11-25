@@ -37,7 +37,10 @@ struct FakeProcessLauncher::State
     std::optional<core::SteadyTimePoint> lastDeadline;
     std::optional<LaunchError> waitFailure;  ///< What every wait() fails with; nothing while they work.
     std::optional<LaunchError> watchFailure; ///< What every watch() fails with; nothing while they work.
-    std::set<std::size_t> survivors;         ///< The processes kill() does not end.
+    /// What every handleTarget() fails with; nothing while they work.
+    std::optional<LaunchError> targetFailure;
+    std::vector<std::thread::id> targetThreads; ///< The thread each handleTarget() ran on, in call order.
+    std::set<std::size_t> survivors;            ///< The processes kill() does not end.
     std::map<std::size_t, LaunchError>
         reapFailures; ///< What each process's tryReap() fails with, if it does.
 };
@@ -80,6 +83,15 @@ namespace
         }
 
         [[nodiscard]] Waitable waitable() const noexcept override { return Waitable {}; }
+
+        [[nodiscard]] std::expected<transport::HandleTarget, LaunchError> handleTarget() override
+        {
+            auto const lock = std::scoped_lock { _state->mutex };
+            _state->targetThreads.push_back(std::this_thread::get_id());
+            if (_state->targetFailure)
+                return std::unexpected(*_state->targetFailure);
+            return transport::HandleTarget::currentProcess();
+        }
 
         /// @return Which process this is, counted from 0 in launch order.
         [[nodiscard]] std::size_t index() const noexcept { return _index; }
@@ -198,6 +210,18 @@ void FakeProcessLauncher::failWatches(LaunchError error)
 {
     auto const lock = std::scoped_lock { _state->mutex };
     _state->watchFailure = error;
+}
+
+void FakeProcessLauncher::failHandleTargets(LaunchError error)
+{
+    auto const lock = std::scoped_lock { _state->mutex };
+    _state->targetFailure = error;
+}
+
+std::vector<std::thread::id> FakeProcessLauncher::handleTargetThreads() const
+{
+    auto const lock = std::scoped_lock { _state->mutex };
+    return _state->targetThreads;
 }
 
 void FakeProcessLauncher::failWaits(LaunchError error)

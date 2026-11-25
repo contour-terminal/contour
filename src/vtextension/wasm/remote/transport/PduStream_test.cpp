@@ -4,6 +4,7 @@
 // for the reason it gave.
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -20,6 +21,14 @@
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 #include <vtextension/wasm/remote/transport/PduStream.hpp>
+
+#ifndef _WIN32
+    #include <unistd.h>
+
+    #include <vtextension/wasm/remote/transport/HandleGrant.hpp>
+    #include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
+    #include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
+#endif
 
 using namespace vtextension::wasm::remote;
 using transport::makeChannelPair;
@@ -268,3 +277,115 @@ TEST_CASE("PduStream.trySendKeepsAPartialFrame", "[vtextension]")
     auto const expected = std::views::iota(uint32_t { 1 }, sentFrames + 2);
     CHECK(reading.get() == std::vector<uint32_t>(expected.begin(), expected.end()));
 }
+
+#ifndef _WIN32
+using transport::testing::inodeOf;
+
+namespace
+{
+
+/// A shared memory object stand-in: one end of a fresh pipe, closed when it is destroyed.
+[[nodiscard]] transport::OwnedHandle makeObject()
+{
+    auto ends = std::array<int, 2> { -1, -1 };
+    REQUIRE(::pipe(ends.data()) == 0);
+    ::close(ends[1]);
+    return transport::OwnedHandle { ends[0] };
+}
+
+/// @return An Instantiate naming @p grant's handle, as the parent sends it.
+[[nodiscard]] proto::Pdu instantiateWith(transport::HandleGrant const& grant, uint32_t instanceId = 1)
+{
+    return proto::Instantiate { .moduleId = 1,
+                                .instanceId = instanceId,
+                                .interruptSlot = 0,
+                                .memory = proto::MemoryGrant { .handle = grant.wireValue,
+                                                               .objectBytes = proto::WasmPageBytes,
+                                                               .initialBytes = proto::WasmPageBytes } };
+}
+
+/// @return A grant of @p object to this process.
+[[nodiscard]] transport::HandleGrant grantOf(transport::OwnedHandle const& object)
+{
+    auto grant = transport::grantHandle(transport::HandleTarget::currentProcess(), object.get());
+    REQUIRE(grant.has_value());
+    return *grant;
+}
+
+} // namespace
+
+TEST_CASE("PduStream.instantiateCarriesItsDescriptor", "[vtextension]")
+{
+    auto pair = makeControlPair();
+    auto const object = makeObject();
+    auto const grant = grantOf(object);
+    CHECK(grant.wireValue == 0);
+    REQUIRE(pair.parent.send(instantiateWith(grant), grant).has_value());
+
+    auto const received = pair.helper.receive();
+    REQUIRE(received.has_value());
+    REQUIRE(std::holds_alternative<proto::Instantiate>(*received));
+    auto const claimed =
+        transport::claimGrantedHandle(pair.helper, std::get<proto::Instantiate>(*received).memory.handle);
+    REQUIRE(claimed.has_value());
+    CHECK(inodeOf(claimed->get()) == inodeOf(object.get()));
+    // Claimed once: there is nothing left to claim.
+    CHECK(transport::claimGrantedHandle(pair.helper, 0) == std::unexpected(StreamError::Malformed));
+}
+
+TEST_CASE("PduStream.secondUnclaimedDescriptorIsMalformed", "[vtextension]")
+{
+    auto pair = makeControlPair();
+    auto const first = makeObject();
+    auto const second = makeObject();
+    // The first arrives with its descriptor, which nobody claims; the second's finds it still held. Sent one
+    // at a time, as the parent sends them, so that no system reads both in one receive.
+    REQUIRE(pair.parent.send(instantiateWith(grantOf(first), 1), grantOf(first)).has_value());
+    auto const received = pair.helper.receive();
+    REQUIRE(received.has_value());
+    CHECK(std::holds_alternative<proto::Instantiate>(*received));
+    REQUIRE(pair.parent.send(instantiateWith(grantOf(second), 2), grantOf(second)).has_value());
+    auto const before = transport::testing::openDescriptorCount();
+    CHECK(pair.helper.receive() == std::unexpected(StreamError::Malformed));
+    // The second was closed at once; the first is still the stream's.
+    CHECK(transport::testing::openDescriptorCount() == before);
+    CHECK(pair.helper.takeAttachedHandle());
+}
+
+TEST_CASE("PduStream.lanesNeverInstallADescriptor", "[vtextension]")
+{
+    auto channels = makeChannelPair();
+    REQUIRE(channels.has_value());
+    auto lane = PduStream {
+        std::move(channels->helper), proto::ChannelKind::Lane, proto::Direction::ToHelper, proto::PduLimits {}
+    };
+    auto const frame = proto::encodeFrame(proto::Call { .instanceId = 1, .exportOrdinal = 0, .argv = {} });
+    REQUIRE(frame.has_value());
+    auto const before = transport::testing::openDescriptorCount();
+    {
+        auto const object = makeObject();
+        REQUIRE(channels->parent.sendWithHandle(*frame, object.get()).has_value());
+    }
+    auto const received = lane.receive();
+    REQUIRE(received.has_value());
+    CHECK(std::holds_alternative<proto::Call>(*received));
+    CHECK_FALSE(lane.takeAttachedHandle());
+    CHECK(transport::testing::openDescriptorCount() == before);
+}
+
+TEST_CASE("PduStream.claimWithoutADescriptorIsMalformed", "[vtextension]")
+{
+    auto pair = makeControlPair();
+    auto const object = makeObject();
+    // Sent without what the grant attaches: the PDU names a handle that never came.
+    REQUIRE(pair.parent.send(instantiateWith(grantOf(object))).has_value());
+    auto const received = pair.helper.receive();
+    REQUIRE(received.has_value());
+    CHECK(transport::claimGrantedHandle(pair.helper, 0) == std::unexpected(StreamError::Malformed));
+
+    // A descriptor that came is not claimed by a value POSIX never sends.
+    REQUIRE(pair.parent.send(instantiateWith(grantOf(object)), grantOf(object)).has_value());
+    REQUIRE(pair.helper.receive().has_value());
+    CHECK(transport::claimGrantedHandle(pair.helper, 0x1F4) == std::unexpected(StreamError::Malformed));
+}
+#endif

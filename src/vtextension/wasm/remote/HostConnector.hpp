@@ -17,6 +17,7 @@
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/wasm/remote/LaneWatch.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
+#include <vtextension/wasm/remote/transport/HandleGrant.hpp>
 #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
 
 namespace vtextension::wasm::remote
@@ -128,6 +129,10 @@ class IHostHandle
     /// connection is made.
     /// @param attachment Its onDeath runs once the host is gone, at once if it is gone already.
     virtual void attach(HostAttachment attachment) = 0;
+
+    /// @return What handles are granted to the host through (HandleGrant.hpp): the process the supervisor
+    ///         started, or this process for a host serving in it. Thread-safe; valid while the handle lives.
+    [[nodiscard]] virtual transport::HandleTarget const& handleTarget() const noexcept = 0;
 };
 
 /// A host process started and connected: the parent's ends of its channels, and the handle on it.

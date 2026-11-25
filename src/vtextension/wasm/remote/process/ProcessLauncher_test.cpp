@@ -64,7 +64,6 @@ using process::IProcessHandle;
 using process::IProcessLauncher;
 using process::LaunchError;
 using process::LaunchSpec;
-using transport::Channel;
 using transport::ChannelError;
 using transport::NativeHandle;
 
@@ -75,6 +74,7 @@ using process::testing::awaitReap;
 using process::testing::ChildPatience;
 using process::testing::endAndReap;
 using process::testing::ownProcessId;
+using process::testing::readReport;
 using Probe = process::testing::LaunchedHelper;
 
 #ifdef _WIN32
@@ -97,26 +97,6 @@ struct ProbeOptions
     /// Its stderr: this process's own, so that what it reports shows.
     std::optional<NativeHandle> standardError = process::testing::ownStandardError();
 };
-
-/// @return The probe's report on @p control, one line each, once it wrote all of it; nothing if the channel
-///         failed first.
-[[nodiscard]] std::optional<std::vector<std::string>> readReport(Channel& control)
-{
-    auto text = std::string {};
-    auto buffer = std::array<uint8_t, 4096> {};
-    while (!text.ends_with("end\n"))
-    {
-        auto const received = control.receiveSome(buffer);
-        if (!received)
-            return std::nullopt;
-        text.append(reinterpret_cast<char const*>(buffer.data()), *received);
-    }
-    auto lines = std::vector<std::string> {};
-    for (auto const line: std::views::split(std::string_view { text }, '\n'))
-        if (!line.empty())
-            lines.emplace_back(std::string_view { line });
-    return lines;
-}
 
 /// @return The values of @p report's lines that start with @p key, sorted.
 [[nodiscard]] std::vector<std::string> valuesOf(std::vector<std::string> const& report, std::string_view key)
@@ -486,6 +466,11 @@ class CopiedWaitable final: public IProcessHandle
         return _process.tryReap();
     }
     [[nodiscard]] process::Waitable waitable() const noexcept override { return _copy; }
+
+    [[nodiscard]] std::expected<transport::HandleTarget, LaunchError> handleTarget() override
+    {
+        return _process.handleTarget();
+    }
 
   private:
     IProcessHandle& _process;

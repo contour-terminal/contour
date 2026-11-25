@@ -95,6 +95,7 @@ using vtextension::wasm::remote::transport::PduStream;
 using vtextension::wasm::testing::makeHostedEngine;
 
 namespace proto = vtextension::wasm::remote::proto;
+namespace transport = vtextension::wasm::remote::transport;
 namespace contract = vtextension::wasm::testing::contract;
 
 namespace
@@ -437,7 +438,10 @@ class CountingHandle final: public IHostHandle
         _records->attachment = std::move(attachment);
     }
 
+    [[nodiscard]] transport::HandleTarget const& handleTarget() const noexcept override { return _target; }
+
   private:
+    transport::HandleTarget _target = transport::HandleTarget::currentProcess();
     std::shared_ptr<HandleRecords> _records;
 };
 

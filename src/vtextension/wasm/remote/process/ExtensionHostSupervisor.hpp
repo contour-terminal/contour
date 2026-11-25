@@ -94,6 +94,10 @@ class SupervisedHelper
     /// @return The helper's process id.
     [[nodiscard]] ProcessId processId() const noexcept { return _processId; }
 
+    /// @return What handles are granted to the helper through (HandleGrant.hpp), made by the supervisor once
+    ///         it started the helper. Thread-safe: granting reads it, and nothing changes it but a move.
+    [[nodiscard]] transport::HandleTarget const& handleTarget() const noexcept { return _target; }
+
     /// Has the supervisor kill the helper. Posts, and returns.
     void kill() noexcept;
 
@@ -122,11 +126,15 @@ class SupervisedHelper
   private:
     friend class SupervisorMailbox;
 
-    SupervisedHelper(std::shared_ptr<SupervisorMailbox> mailbox, uint64_t key, ProcessId processId) noexcept;
+    SupervisedHelper(std::shared_ptr<SupervisorMailbox> mailbox,
+                     uint64_t key,
+                     ProcessId processId,
+                     transport::HandleTarget target) noexcept;
 
     std::shared_ptr<SupervisorMailbox> _mailbox;
     std::atomic<uint64_t> _key = 0; ///< The supervisor's name for the helper; 0 once moved from or let go.
     ProcessId _processId = 0;
+    transport::HandleTarget _target; ///< What handles are granted to the helper through.
 };
 
 /// The supervisor's command queue, and the wake of the set it waits on. Shared and thread-safe; outlives the
@@ -156,8 +164,8 @@ class SupervisorMailbox: public std::enable_shared_from_this<SupervisorMailbox>
     /// Launches @p spec on the supervisor's thread, and blocks the caller until it did. Never called on the
     /// supervisor's thread.
     /// @return The helper; why it did not start -- `Stopped` once the supervisor is gone, or can no longer
-    /// wait
-    ///         for its helpers.
+    ///         wait for its helpers; `Io` if no handle could be granted to it
+    ///         (IProcessHandle::handleTarget()), in which case it was killed.
     [[nodiscard]] std::expected<SupervisedHelper, LaunchError> launch(LaunchSpec spec);
 
   private:

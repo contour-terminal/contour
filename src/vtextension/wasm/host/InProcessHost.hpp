@@ -23,6 +23,7 @@
 #include <vtextension/wasm/remote/HostConnector.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 #include <vtextension/wasm/remote/transport/ControlPage.hpp>
+#include <vtextension/wasm/remote/transport/HandleGrant.hpp>
 #include <vtextension/wasm/remote/transport/WakeSignal.hpp>
 
 namespace vtextension::wasm::host
@@ -88,6 +89,12 @@ class InProcessHost final: public remote::IHostHandle
     /// once if it returned already.
     void attach(remote::HostAttachment attachment) override;
 
+    /// @return This process: the host serves in it.
+    [[nodiscard]] remote::transport::HandleTarget const& handleTarget() const noexcept override
+    {
+        return _target;
+    }
+
     /// @return Whether its server still serves.
     [[nodiscard]] ServingState state() const noexcept;
 
@@ -103,6 +110,7 @@ class InProcessHost final: public remote::IHostHandle
     [[nodiscard]] std::function<void()> runReturned();
 
     std::shared_ptr<InProcessHostRegistry> _registry;
+    remote::transport::HandleTarget _target; ///< This process, which the host serves in.
     std::atomic<ServingState> _state { ServingState::Serving };
     std::mutex _attachmentMutex;       ///< Guards the two below.
     RunState _run = RunState::Running; ///< Guarded by _attachmentMutex.

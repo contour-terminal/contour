@@ -66,6 +66,12 @@ namespace
 
         [[nodiscard]] Waitable waitable() const noexcept override { return _descriptor.get(); }
 
+        [[nodiscard]] std::expected<transport::HandleTarget, LaunchError> handleTarget() override
+        {
+            // A descriptor travels with its frame: there is nothing to name the process by.
+            return transport::HandleTarget::currentProcess();
+        }
+
       private:
         pid_t _pid;
         UniqueFd _descriptor;

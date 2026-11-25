@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <expected>
 #include <memory>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -13,6 +14,7 @@
 #include <vtextension/wasm/remote/proto/Codec.hpp>
 #include <vtextension/wasm/remote/proto/PduTable.hpp>
 #include <vtextension/wasm/remote/proto/Wire.hpp>
+#include <vtextension/wasm/remote/transport/HandleGrant.hpp>
 
 namespace vtextension::wasm::remote::transport
 {
@@ -46,6 +48,21 @@ namespace
         return header.varint64().value_or(1) - 1;
     }
 
+    /// @return Whether the stream of @p kind that receives PDUs travelling @p arriving takes in what a peer
+    ///         attaches: only the helper's control stream does, and none on Windows, where nothing travels
+    ///         beside a frame.
+    [[nodiscard]] constexpr PduStream::Attachments attachmentsOf(
+        [[maybe_unused]] proto::ChannelKind kind, [[maybe_unused]] proto::Direction arriving) noexcept
+    {
+#ifdef _WIN32
+        return PduStream::Attachments::Discarded;
+#else
+        return kind == proto::ChannelKind::Control && arriving == proto::Direction::ToHelper
+                   ? PduStream::Attachments::Taken
+                   : PduStream::Attachments::Discarded;
+#endif
+    }
+
     /// @return The stream's reason for a frame the codec refused; never called with NeedMoreData.
     [[nodiscard]] StreamError streamErrorOf(proto::DecodeError error) noexcept
     {
@@ -57,7 +74,11 @@ PduStream::PduStream(Channel channel,
                      proto::ChannelKind kind,
                      proto::Direction arriving,
                      proto::PduLimits limits):
-    _channel { std::move(channel) }, _kind { kind }, _arriving { arriving }, _limits { limits }
+    _channel { std::move(channel) },
+    _kind { kind },
+    _arriving { arriving },
+    _limits { limits },
+    _attachments { attachmentsOf(kind, arriving) }
 {
 }
 
@@ -73,21 +94,46 @@ std::expected<std::vector<uint8_t>, StreamError> PduStream::frameOf(proto::Pdu c
     return *std::move(frame);
 }
 
+std::expected<void, StreamError> PduStream::flushUnsentTail()
+{
+    if (_unsentTail.empty())
+        return {};
+    if (auto const tail = _channel.send(_unsentTail); !tail)
+        return std::unexpected(streamErrorOf(tail.error()));
+    _unsentTail.clear();
+    return {};
+}
+
 std::expected<void, StreamError> PduStream::send(proto::Pdu const& pdu)
+{
+    return sendAttaching(pdu, std::nullopt);
+}
+
+std::expected<void, StreamError> PduStream::send(proto::Pdu const& pdu, HandleGrant const& grant)
+{
+    return sendAttaching(pdu, grant.attached);
+}
+
+std::expected<void, StreamError> PduStream::sendAttaching(
+    proto::Pdu const& pdu, [[maybe_unused]] std::optional<NativeHandle> attached)
 {
     auto const frame = frameOf(pdu);
     if (!frame)
         return std::unexpected(frame.error());
-    auto const toStreamError = [](ChannelError error) {
-        return streamErrorOf(error);
-    };
-    if (!_unsentTail.empty())
-    {
-        if (auto const tail = _channel.send(_unsentTail); !tail)
-            return std::unexpected(toStreamError(tail.error()));
-        _unsentTail.clear();
-    }
-    return _channel.send(*frame).transform_error(toStreamError);
+    return flushUnsentTail().and_then([&] {
+#ifndef _WIN32
+        if (attached)
+            return _channel.sendWithHandle(*frame, *attached).transform_error([](ChannelError error) {
+                return streamErrorOf(error);
+            });
+#endif
+        return _channel.send(*frame).transform_error([](ChannelError error) { return streamErrorOf(error); });
+    });
+}
+
+OwnedHandle PduStream::takeAttachedHandle() noexcept
+{
+    return std::move(_attached);
 }
 
 std::expected<SendOutcome, StreamError> PduStream::trySend(proto::Pdu const& pdu)
@@ -138,11 +184,34 @@ std::expected<proto::Pdu, StreamError> PduStream::receive()
             proto::frameSizeOf(buffered, _arriving, _kind, _limits).value_or(_buffered + 1);
         if (_capacity < frameBytes || _capacity == _buffered)
             reallocate(std::max({ frameBytes, _buffered + 1, ReceiveChunk }));
-        auto const received = _channel.receiveSome(std::span { _buffer.get(), _capacity }.subspan(_buffered));
+        auto const received = receiveMore();
         if (!received)
-            return std::unexpected(streamErrorOf(received.error()));
+            return std::unexpected(received.error());
         _buffered += *received;
     }
+}
+
+std::expected<std::size_t, StreamError> PduStream::receiveMore()
+{
+    auto const space = std::span { _buffer.get(), _capacity }.subspan(_buffered);
+    if (_attachments == Attachments::Discarded)
+        return _channel.receiveSome(space).transform_error(
+            [](ChannelError error) { return streamErrorOf(error); });
+#ifdef _WIN32
+    // No stream takes handles in on Windows (attachmentsOf()).
+    std::unreachable();
+#else
+    auto arrived = std::vector<OwnedHandle> {};
+    auto const received = _channel.receiveSomeWithHandles(space, arrived);
+    if (!received)
+        return std::unexpected(streamErrorOf(received.error()));
+    // At most one waits to be claimed: a second is a peer that broke the protocol, and is closed with it.
+    if (arrived.size() > 1 || (!arrived.empty() && _attached))
+        return std::unexpected(StreamError::Malformed);
+    if (!arrived.empty())
+        _attached = std::move(arrived.front());
+    return *received;
+#endif
 }
 
 void PduStream::reallocate(std::size_t capacity)

@@ -69,6 +69,7 @@ namespace
     {
         uint64_t key = 0;
         ProcessId processId = 0;
+        transport::HandleTarget target; ///< What handles are granted to it through.
     };
 
     using LaunchResult = std::expected<LaunchedProcess, LaunchError>;
@@ -135,15 +136,17 @@ struct SupervisorMailbox::Command
 
 SupervisedHelper::SupervisedHelper(std::shared_ptr<SupervisorMailbox> mailbox,
                                    uint64_t key,
-                                   ProcessId processId) noexcept:
-    _mailbox { std::move(mailbox) }, _key { key }, _processId { processId }
+                                   ProcessId processId,
+                                   transport::HandleTarget target) noexcept:
+    _mailbox { std::move(mailbox) }, _key { key }, _processId { processId }, _target { std::move(target) }
 {
 }
 
 SupervisedHelper::SupervisedHelper(SupervisedHelper&& other) noexcept:
     _mailbox { std::move(other._mailbox) },
     _key { other._key.exchange(0) },
-    _processId { std::exchange(other._processId, 0) }
+    _processId { std::exchange(other._processId, 0) },
+    _target { std::move(other._target) }
 {
 }
 
@@ -155,6 +158,7 @@ SupervisedHelper& SupervisedHelper::operator=(SupervisedHelper&& other) noexcept
         _mailbox = std::move(other._mailbox);
         _key = other._key.exchange(0);
         _processId = std::exchange(other._processId, 0);
+        _target = std::move(other._target);
     }
     return *this;
 }
@@ -229,7 +233,7 @@ std::expected<SupervisedHelper, LaunchError> SupervisorMailbox::launch(LaunchSpe
     if (post(Command { LaunchCommand { .spec = std::move(spec), .launched = std::move(launched) } })
         == Delivery::Dropped)
         return std::unexpected(LaunchError::Stopped);
-    auto const outcome = [&]() -> LaunchResult {
+    auto outcome = [&]() -> LaunchResult {
         try
         {
             return result.get();
@@ -240,8 +244,10 @@ std::expected<SupervisedHelper, LaunchError> SupervisorMailbox::launch(LaunchSpe
             return std::unexpected(LaunchError::Stopped);
         }
     }();
-    return outcome.transform([&](LaunchedProcess const& process) {
-        return SupervisedHelper { shared_from_this(), process.key, process.processId };
+    return std::move(outcome).transform([&](LaunchedProcess process) {
+        return SupervisedHelper {
+            shared_from_this(), process.key, process.processId, std::move(process.target)
+        };
     });
 }
 
@@ -416,6 +422,9 @@ class SupervisorLoop
     };
 
     void launch(LaunchCommand& command);
+    /// Keeps a helper launched and then refused, killed, until it is reaped: by polling, as the loop looks
+    /// every DegradedPollPeriod until it is gone. It is never handed out.
+    void refuseLaunched(uint64_t key, std::unique_ptr<IProcessHandle> process) noexcept;
     void watch(WatchCommand const& command);
     void disarm(DisarmCommand const& command);
     void attach(AttachCommand& command);
@@ -539,24 +548,18 @@ void SupervisorLoop::launch(LaunchCommand& command)
     }
     auto const key = _nextKey++;
     ++_counters.launches;
+    // A helper no handle can be granted to cannot serve: it does not run.
+    auto target = (*process)->handleTarget();
+    if (!target)
+    {
+        refuseLaunched(key, std::move(*process));
+        command.launched.set_value(std::unexpected(LaunchError::Io));
+        return;
+    }
+    // Nor does a helper the set cannot wait for.
     if (auto const watched = _waitSet.watch(key, **process); !watched)
     {
-        // A helper the set cannot wait for does not run: killed as the supervisor kills what it cannot wait
-        // for, and reaped by polling, as the loop looks every DegradedPollPeriod until it is gone.
-        auto& refused = _helpers
-                            .emplace(key,
-                                     Supervised { .process = std::move(*process),
-                                                  .onDeath = nullptr,
-                                                  .notice = DeathNotice::Given,
-                                                  .holding = Holding::Dropped,
-                                                  .killed = KillState::None,
-                                                  .watching = Watching::Polled,
-                                                  .steps = {},
-                                                  .lanes = nullptr,
-                                                  .interruptGrace = {},
-                                                  .tracks = {} })
-                            .first->second;
-        killProcess(refused, KillReason::Shutdown);
+        refuseLaunched(key, std::move(*process));
         command.launched.set_value(std::unexpected(watched.error()));
         return;
     }
@@ -572,7 +575,27 @@ void SupervisorLoop::launch(LaunchCommand& command)
                                   .lanes = nullptr,
                                   .interruptGrace = {},
                                   .tracks = {} });
-    command.launched.set_value(LaunchedProcess { .key = key, .processId = processId });
+    command.launched.set_value(
+        LaunchedProcess { .key = key, .processId = processId, .target = *std::move(target) });
+}
+
+void SupervisorLoop::refuseLaunched(uint64_t key, std::unique_ptr<IProcessHandle> process) noexcept
+{
+    // Killed as the supervisor kills what it cannot wait for.
+    auto& refused = _helpers
+                        .emplace(key,
+                                 Supervised { .process = std::move(process),
+                                              .onDeath = nullptr,
+                                              .notice = DeathNotice::Given,
+                                              .holding = Holding::Dropped,
+                                              .killed = KillState::None,
+                                              .watching = Watching::Polled,
+                                              .steps = {},
+                                              .lanes = nullptr,
+                                              .interruptGrace = {},
+                                              .tracks = {} })
+                        .first->second;
+    killProcess(refused, KillReason::Shutdown);
 }
 
 void SupervisorLoop::watch(WatchCommand const& command)

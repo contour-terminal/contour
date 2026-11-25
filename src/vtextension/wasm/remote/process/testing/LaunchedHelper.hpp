@@ -44,6 +44,10 @@ inline constexpr auto ChildPatience = std::chrono::seconds { 5 };
 /// @return Whether it is reaped: whether it is gone for good.
 [[nodiscard]] bool endAndReap(IProcessLauncher& launcher, IProcessHandle& process);
 
+/// Reads a probe's report off @p channel: `key=value` lines, the last `end`.
+/// @return Its lines, `end` included, once all of it arrived; nothing if the channel failed first.
+[[nodiscard]] std::optional<std::vector<std::string>> readReport(transport::Channel& channel);
+
 /// What to start, and how.
 struct HelperLaunch
 {

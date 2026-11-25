@@ -30,6 +30,7 @@
 
 #include <vtextension/wasm/remote/HostRefusals.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
+#include <vtextension/wasm/remote/transport/HandleGrant.hpp>
 
 namespace vtextension::wasm::remote::process
 {
@@ -175,6 +176,12 @@ class IProcessHandle
 
     /// @return What its exit is waited on by, still owned by the handle.
     [[nodiscard]] virtual Waitable waitable() const noexcept = 0;
+
+    /// Makes what Contour grants the process handles through, once, right after it started: on Windows a
+    /// duplicate of the process handle with PROCESS_DUP_HANDLE access, the target's own; on POSIX
+    /// HandleTarget::currentProcess(), a descriptor travelling with its frame.
+    /// @return The target; why it could not be made.
+    [[nodiscard]] virtual std::expected<transport::HandleTarget, LaunchError> handleTarget() = 0;
 };
 
 /// Waits for any of several processes to end. All but wake() are called by one thread (the supervisor's).
