@@ -80,6 +80,7 @@
     #include <vtextension/BundledExtensions.hpp>
     #include <vtextension/ExtensionGrantStore.hpp>
     #include <vtextension/ExtensionWorkerPool.hpp>
+    #include <vtextension/wasm/BackendConfig.hpp>
     #include <vtextension/wasm/DefaultBackend.hpp>
     #include <vtextension/wasm/WasmRuntime.hpp>
     #include <vthost/DaemonExtensions.hpp>
@@ -1064,6 +1065,14 @@ namespace
     }
 
 #ifdef CONTOUR_EXTENSIONS
+    /// @return The backend a daemon's status-line extensions run on.
+    [[nodiscard]] std::unique_ptr<vtextension::wasm::IWasmBackend> makeDaemonExtensionBackend()
+    {
+        // How the extensions' host processes are started: the one place the daemon configures it.
+        auto backendConfig = vtextension::wasm::BackendConfig {};
+        return vtextension::wasm::makeDefaultBackend(std::move(backendConfig));
+    }
+
     /// What a daemon's status-line extensions borrow. Made before the daemon runs, so that it outlives the
     /// extensions the daemon's session host owns.
     struct DaemonExtensionResources
@@ -1079,7 +1088,7 @@ namespace
 
         /// What the extensions' engines are created from. First: it outlives everything made from it, and
         /// only a reference to it travels with the services.
-        std::unique_ptr<vtextension::wasm::IWasmBackend> backend = vtextension::wasm::makeDefaultBackend();
+        std::unique_ptr<vtextension::wasm::IWasmBackend> backend = makeDaemonExtensionBackend();
         core::async::StopSource commandShutdown;
         vtpty::SystemCommandCapture capture;
         core::platform::SystemWallClock wallClock;

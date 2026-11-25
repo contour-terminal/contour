@@ -220,8 +220,8 @@ class RunnerHarness
     }
 
     /// What the harness's engines are created from. First: it outlives every engine its tests retire here.
-    std::unique_ptr<wasm::IWasmBackend> backend = wasm::makeDefaultBackend();
-    ManualScheduler scheduler;
+    std::unique_ptr<wasm::IWasmBackend> backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+    ManualScheduler scheduler { *backend };
     RetirementCollector retirement;
     InMemoryGrantStore grants;
     RecordingCommandCapture capture;

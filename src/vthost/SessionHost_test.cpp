@@ -3251,7 +3251,8 @@ struct DaemonExtensionsHarness
     }
 
     /// What the extensions' engines are created from; first, so that it outlives them.
-    std::unique_ptr<vtextension::wasm::IWasmBackend> wasmBackend = vtextension::wasm::makeDefaultBackend();
+    std::unique_ptr<vtextension::wasm::IWasmBackend> wasmBackend =
+        vtextension::wasm::makeDefaultBackend(vtextension::wasm::BackendConfig {});
     std::filesystem::path modulePath { "/extensions/spawner.wasm" };
     vthost::testing::GatedFileSystem fileSystem;
     core::async::StopSource commandShutdown;

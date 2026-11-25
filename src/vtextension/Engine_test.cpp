@@ -225,10 +225,13 @@ TEST_CASE("Engine.deadline.endToEnd")
 {
     // End to end on the default backend: the deadline stops a guest spinning in an endless loop, and a call
     // that finished in time leaves its instance usable once its deadline is disarmed.
-    auto const backend = vtextension::wasm::makeDefaultBackend();
+    auto const backend = vtextension::wasm::makeDefaultBackend(vtextension::wasm::BackendConfig {});
     auto limits = ExtensionLimits {};
     limits.callDeadline = std::chrono::milliseconds { 50 };
     auto const engine = createEngine(*backend, limits);
+    // The calls below come from this thread: prepared once the engine's runtime is up.
+    auto const threadGuard = backend->enterThread();
+    REQUIRE(threadGuard.has_value());
     auto module = engine->runtime().load(vtextension::wasm::ModuleIdentity {}, hostOnlyModule());
     REQUIRE(module.has_value());
 

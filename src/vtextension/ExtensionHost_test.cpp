@@ -206,7 +206,7 @@ TEST_CASE("ExtensionHost.preparedElsewhere", "[vtextension]")
 TEST_CASE("ExtensionHost.preparedRetired", "[vtextension]")
 {
     // Loaded but never started: retired, and released by the owner.
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     auto engines = CountingEngineProvider { *backend };
     auto engine = engines.acquire();
     REQUIRE(engine.has_value());
@@ -223,7 +223,7 @@ TEST_CASE("ExtensionHost.preparedRetired", "[vtextension]")
 
 TEST_CASE("EngineProvider.shares", "[vtextension]")
 {
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     auto provider = EngineProvider { *backend, ExtensionLimits {} };
     auto first = provider.acquire();
     auto second = provider.acquire();
@@ -244,7 +244,7 @@ TEST_CASE("EngineProvider.shares", "[vtextension]")
 TEST_CASE("EngineProvider.retirement", "[vtextension]")
 {
     // What a runner retires lives in the provider until an owner thread releases it.
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     auto provider = EngineProvider { *backend, ExtensionLimits {} };
     auto engine = provider.acquire();
     REQUIRE(engine.has_value());

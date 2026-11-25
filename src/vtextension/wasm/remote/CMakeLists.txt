@@ -77,16 +77,37 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
     # The host's server, and the backend that reaches it, driven over real channels on a real engine:
     # Wasmtime's, the engine a host process runs, reached through its directory's neutral test probe
     # (vtextension_wasmtime_hosted_engine).
+    #
+    # Beside them, the suites vtextension_test runs on the default backend, here composed by
+    # testing/RemoteDefaultBackend.cpp as the remote backend over hosts in this process: their real guests
+    # run through the protocol. A case that depends on an in-process engine is tagged [in-process] and
+    # excluded from this binary's run.
     add_executable(vtextension_remote_test
         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
         ../host/ExecutorThread_test.cpp
         ../host/HostServer_test.cpp
         RemoteBackend_test.cpp
+        testing/RemoteDefaultBackend.cpp
+        ${PROJECT_SOURCE_DIR}/src/vtextension/Bundled_test.cpp
+        ${PROJECT_SOURCE_DIR}/src/vtextension/ControlImports_test.cpp
+        ${PROJECT_SOURCE_DIR}/src/vtextension/Engine_test.cpp
+        ${PROJECT_SOURCE_DIR}/src/vtextension/ExtensionHost_test.cpp
+        ${PROJECT_SOURCE_DIR}/src/vtextension/ExtensionWorkerPool_test.cpp
+        ${PROJECT_SOURCE_DIR}/src/vtextension/Instance_test.cpp
     )
     target_link_libraries(vtextension_remote_test PRIVATE
         vtextension vtextension_remote vtextension_remote_wire vtextension_host vtextension_wasmtime vtextension_wasmtime_hosted_engine
-        contour::wasmtime core::testing Catch2::Catch2 contour_test_trace)
-    add_test(NAME vtextension_remote_test COMMAND vtextension_remote_test)
+        contour::wasmtime glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
+    if(CONTOUR_WASM_GUESTS)
+        # The guests vtextension_test reads, from where it reads them (../../CMakeLists.txt).
+        foreach(_guest IN ITEMS echo hostile sleeper spawner)
+            add_dependencies(vtextension_remote_test ${_guest}_wasm)
+        endforeach()
+        add_dependencies(vtextension_remote_test contour_bundled_extensions)
+        target_compile_definitions(vtextension_remote_test PRIVATE
+            VTEXTENSION_TEST_MODULE_DIR="${VTEXTENSION_TEST_MODULE_DIR}")
+    endif()
+    add_test(NAME vtextension_remote_test COMMAND vtextension_remote_test "~[in-process]")
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
         target_compile_options(vtextension_remote_test PRIVATE -Wno-c2y-extensions)

@@ -57,9 +57,10 @@ namespace
 [[nodiscard]] std::optional<ExtensionError> outcomeOf(std::vector<std::byte> module,
                                                       ExtensionLimits limits = {})
 {
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     auto const engine = Engine::create(*backend, limits);
     REQUIRE(engine.has_value());
+    auto const threadGuard = vtextension::testing::preparedThread(*backend);
     auto const compiled = CompiledExtension::load(**engine, wasm::ModuleIdentity {}, std::move(module));
     if (!compiled)
         return compiled.error();
@@ -72,7 +73,7 @@ namespace
 
 TEST_CASE("CompiledExtension.load", "[vtextension]")
 {
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     auto const compiled = loadModule(*backend, toModule(vtextension::testing::MinimalModule));
     REQUIRE(compiled.has_value());
     // A module without a manifest loads; it declares no commands.
@@ -81,7 +82,7 @@ TEST_CASE("CompiledExtension.load", "[vtextension]")
 
 TEST_CASE("CompiledExtension.invalid", "[vtextension]")
 {
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     CHECK(errorOf(loadModule(*backend, {})) == ExtensionError::InvalidComponent);
     auto truncated = toModule(vtextension::testing::MinimalModule);
     truncated.resize(truncated.size() / 2);
@@ -90,7 +91,7 @@ TEST_CASE("CompiledExtension.invalid", "[vtextension]")
 
 TEST_CASE("CompiledExtension.worldMismatch", "[vtextension]")
 {
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     // The runtime links imports lazily, so each of these would load and fail only when called.
     SECTION("an unknown host function")
     {
@@ -206,9 +207,10 @@ TEST_CASE("Instance.memoryCap.atInstantiation", "[vtextension]")
     // The minimal module asks for one 64 KiB page up front; a cap below that refuses it.
     auto limits = ExtensionLimits {};
     limits.memoryBytes = std::size_t { 32 } * 1024;
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     auto const engine = Engine::create(*backend, limits);
     REQUIRE(engine.has_value());
+    auto const threadGuard = vtextension::testing::preparedThread(*backend);
     auto const compiled = CompiledExtension::load(
         **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule));
     REQUIRE(compiled.has_value());
@@ -322,9 +324,10 @@ TEST_CASE("Instance.deadlineSpentBeforeCommand", "[vtextension]")
 {
     // When the call's deadline is spent by the time the guest asks for a command, the command does
     // not run, and the call fails as overrun.
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     auto const engine = Engine::create(*backend, ExtensionLimits {});
     REQUIRE(engine.has_value());
+    auto const threadGuard = vtextension::testing::preparedThread(*backend);
     auto const compiled = CompiledExtension::load(
         **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MaliciousModule));
     REQUIRE(compiled.has_value());
@@ -486,7 +489,7 @@ TEST_CASE("Instance.stackOverflow", "[vtextension]")
 
 TEST_CASE("CompiledExtension.wasi", "[vtextension]")
 {
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     // Only WASI functions that return at once and reach nothing outside the module are provided.
     CHECK(loadModule(*backend, toModule(vtextension::testing::WasiAllowedModule)).has_value());
     CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::WasiPollOneoffModule)))
@@ -543,27 +546,19 @@ TEST_CASE("Instance.wasiReactor", "[vtextension]")
     }
 }
 
-TEST_CASE("CompiledExtension.instantiationHooks", "[vtextension]")
+namespace
 {
-    // What the runtime would run by itself while instantiating -- where no deadline stops it and host
-    // functions fail -- refuses the module before it can run, and promptly: none of these is instantiated.
-    struct Case
-    {
-        std::string_view description;
-        std::vector<std::byte> module;
-    };
-    auto const cases = std::vector<Case> {
-        { .description = "__post_instantiate",
-          .module = toModule(vtextension::testing::PostInstantiateSpinningModule) },
-        { .description = "__wasm_call_ctors without WASI",
-          .module = toModule(vtextension::testing::CallCtorsSpinningModule) },
-        { .description = "_initialize followed by a NUL",
-          .module = toModule(vtextension::testing::NulInitializerModule) },
-        { .description = "two export sections",
-          .module = toModule(vtextension::testing::TwoExportSectionsModule) },
-        { .description = "the backend's alias of _initialize",
-          .module = toModule(vtextension::testing::AliasExportingModule) },
-    };
+
+/// A module the runtime would run code of by itself while instantiating it.
+struct InstantiationHookCase
+{
+    std::string_view description;
+    std::vector<std::byte> module;
+};
+
+/// Checks that none of @p cases is instantiated, and that each is refused promptly.
+void checkRefusedPromptly(std::span<InstantiationHookCase const> cases)
+{
     auto const limits = ExtensionLimits {};
     for (auto const& [description, module]: cases)
     {
@@ -572,6 +567,35 @@ TEST_CASE("CompiledExtension.instantiationHooks", "[vtextension]")
         CHECK(outcomeOf(module, limits) == ExtensionError::InvalidComponent);
         CHECK(std::chrono::steady_clock::now() - start < 10 * limits.loadDeadline);
     }
+}
+
+} // namespace
+
+TEST_CASE("CompiledExtension.instantiationHooks", "[vtextension]")
+{
+    // What the runtime would run by itself while instantiating -- where no deadline stops it and host
+    // functions fail -- refuses the module before it can run, and promptly: none of these is instantiated.
+    checkRefusedPromptly(std::vector<InstantiationHookCase> {
+        { .description = "two export sections",
+          .module = toModule(vtextension::testing::TwoExportSectionsModule) },
+    });
+}
+
+// In-process only: the hooks the in-process engine runs by itself while instantiating, and the export names
+// it would take for one. An engine that runs none, as an extension host's does, has nothing to refuse, and
+// instantiates these modules.
+TEST_CASE("CompiledExtension.instantiationHooks.engineRun", "[vtextension][in-process]")
+{
+    checkRefusedPromptly(std::vector<InstantiationHookCase> {
+        { .description = "__post_instantiate",
+          .module = toModule(vtextension::testing::PostInstantiateSpinningModule) },
+        { .description = "__wasm_call_ctors without WASI",
+          .module = toModule(vtextension::testing::CallCtorsSpinningModule) },
+        { .description = "_initialize followed by a NUL",
+          .module = toModule(vtextension::testing::NulInitializerModule) },
+        { .description = "the backend's alias of _initialize",
+          .module = toModule(vtextension::testing::AliasExportingModule) },
+    });
 }
 
 TEST_CASE("Instance.realloc", "[vtextension]")
@@ -639,7 +663,7 @@ namespace
 
 TEST_CASE("CompiledExtension.sleeper", "[vtextension][guest]")
 {
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     // A Rust guest that sleeps imports WASI's poll_oneoff, a wait no deadline can interrupt.
     CHECK(errorOf(loadModule(*backend, readTestModule("sleeper.wasm"))) == ExtensionError::WorldMismatch);
 }

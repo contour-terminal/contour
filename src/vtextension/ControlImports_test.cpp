@@ -414,9 +414,10 @@ TEST_CASE("a control import the guest calls wrongly traps", "[vtextension][contr
 
 TEST_CASE("a module importing the control interface instantiates", "[vtextension][control]")
 {
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     auto const engine = Engine::create(*backend, ExtensionLimits {});
     REQUIRE(engine.has_value());
+    auto const threadGuard = vtextension::testing::preparedThread(*backend);
     auto const compiled = CompiledExtension::load(
         **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::ControlImportingModule));
     REQUIRE(compiled.has_value());

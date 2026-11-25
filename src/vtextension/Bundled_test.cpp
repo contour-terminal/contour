@@ -188,7 +188,7 @@ constexpr auto DirtyMain = std::string_view { "# branch.oid 0123456789abcdef\n"
 
 TEST_CASE("Bundled: every module declares what it is", "[vtextension][bundled][guest]")
 {
-    auto const backend = vtextension::wasm::makeDefaultBackend();
+    auto const backend = vtextension::wasm::makeDefaultBackend(vtextension::wasm::BackendConfig {});
     for (auto const& extension: bundledExtensions())
     {
         INFO(extension.name);
@@ -208,7 +208,7 @@ TEST_CASE("Bundled: every declared command can be written for both shells", "[vt
     // A command runs through the platform shell (CommandCapture takes one command line), and an argument the
     // shell would interpret is refused rather than quoted: cmd.exe's metacharacters cannot be. So a declared
     // argv must survive both dialects, or the command can never run on that platform.
-    auto const backend = vtextension::wasm::makeDefaultBackend();
+    auto const backend = vtextension::wasm::makeDefaultBackend(vtextension::wasm::BackendConfig {});
     for (auto const& extension: bundledExtensions())
     {
         auto const module = loadModule(*backend, readTestModule(extension.artifact));
