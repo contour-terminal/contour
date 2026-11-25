@@ -608,6 +608,11 @@ namespace
     std::expected<std::shared_ptr<IWasmModule>, ExtensionError> RemoteRuntime::load(
         ModuleIdentity identity, std::vector<std::byte> bytes)
     {
+        // The parent's own reading of the module's memory, before any host is asked: a module the parent
+        // cannot read is refused without being loaded anywhere, so no host holds a module nobody releases.
+        auto const initialPages = binary::largestInitialMemoryPages(bytes);
+        if (!initialPages)
+            return std::unexpected(ExtensionError::InvalidComponent);
         auto slot = slotFor(identity.key);
         auto incarnation = slot->live();
         if (!incarnation)
@@ -615,10 +620,6 @@ namespace
         auto loaded = loadInto(**incarnation, bytes);
         if (!loaded)
             return std::unexpected(loaded.error());
-        // The parent's own reading of the module's memory: a host loaded it, so it is well-formed.
-        auto const initialPages = binary::largestInitialMemoryPages(bytes);
-        if (!initialPages)
-            return std::unexpected(ExtensionError::InvalidComponent);
         auto const memory = ModuleMemory {
             .initialBytes = uint64_t { *initialPages } * proto::WasmPageBytes,
             .exported = std::ranges::contains(loaded->exports, ExternKind::Memory, &ExportDescription::kind)
@@ -636,6 +637,12 @@ namespace
     std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> RemoteModule::instantiate(
         IHostContext& context)
     {
+        // A memory past the cap is refused here, before anything is made or sent, and before a dead host is
+        // replaced: by the parent's own reading of the module, whatever a host would make of it.
+        auto const capBytes = uint64_t { _runtime->limits().memoryBytes };
+        if (_memory.initialBytes > capBytes)
+            return std::unexpected(ExtensionError::OutOfMemory);
+
         auto const lock = std::scoped_lock { _mutex };
         auto incarnation = _slot->live();
         if (!incarnation)
@@ -658,12 +665,6 @@ namespace
             _loadedIn = *incarnation;
             _moduleId = reloaded->moduleId;
         }
-
-        // A memory past the cap is refused here, before anything is made or sent: by the parent's own reading
-        // of the module, whatever a host would make of it.
-        auto const capBytes = uint64_t { _runtime->limits().memoryBytes };
-        if (_memory.initialBytes > capBytes)
-            return std::unexpected(ExtensionError::OutOfMemory);
 
         // Every live instance holds a slot of the host's interrupt page; with none left, the host takes no
         // more instances, which is no fault of the host's.
@@ -689,6 +690,10 @@ namespace
             auto made = SharedGuestMemory::create(capBytes, _memory.initialBytes);
             if (!made)
                 return refused(made.error());
+            // Production hosts are children: a grant is a duplicate in the child, and dies with it. A host in
+            // this process (the in-process host, Windows) is granted a duplicate in this process, which leaks
+            // when the request fails before that host claims it -- one handle per such failure, which kills
+            // the incarnation.
             auto granted = transport::grantHandle(host.handleTarget(), made->object());
             if (!granted)
                 return refused(ExtensionError::RuntimeUnavailable);

@@ -1883,6 +1883,23 @@ constexpr auto TwoPageModule = std::to_array<uint8_t>({
     };
 }
 
+/// One page of memory, exported, and nothing else.
+///
+///     (module (memory (export "memory") 1))
+constexpr auto OnePageModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,                       // magic, version 1
+    0x05, 0x03, 0x01, 0x00, 0x01,                                         // memory section: min 1
+    0x07, 0x0a, 0x01, 0x06, 'm',  'e',  'm',  'o',  'r', 'y', 0x02, 0x00, // export section: memory 0
+});
+
+/// OnePageModule's description, as a host describes it.
+[[nodiscard]] proto::Loaded onePageDescription(uint32_t moduleId)
+{
+    auto loaded = twoPageDescription(moduleId);
+    loaded.exports.front().initialPages = 1;
+    return loaded;
+}
+
 /// A bump allocator that grows its memory for every allocation: `cabi_realloc` returns the end of the memory
 /// and grows it by the pages the allocation takes (trapping if it cannot); `load8` reads a byte.
 ///
@@ -2162,6 +2179,67 @@ TEST_CASE("RemoteBackend.initialSizeComesFromTheModule", "[vtextension][remote]"
         CHECK(instantiatesAmong(transcript->awaitAtLeast(1)).empty());
     }
     CHECK(connector->terminations() == 0);
+}
+
+TEST_CASE("RemoteBackend.unreadableModuleIsNeverLoaded", "[vtextension][remote]")
+{
+    // The parent reads a module's memory before asking a host to load it: bytes it cannot read are refused
+    // without a Load, so no host is left holding a module the parent never releases.
+    auto const transcript = std::make_shared<Transcript>();
+    auto const connector =
+        honestConnector(HonestScript { .describe = &twoPageDescription, .callables = {} }, transcript);
+    auto const backend = makeBackend(connector);
+    auto const runtime = contract::createRuntime(*backend);
+    // Cut inside the memory section: the module's initial memory cannot be read.
+    auto truncated = toModule(TwoPageModule);
+    truncated.resize(11);
+    auto const refused = runtime->load(ModuleIdentity {}, std::move(truncated));
+    CHECK(refused == std::unexpected(ExtensionError::InvalidComponent));
+
+    // A module that reads is loaded as ever: its Load is the first and only one the host received.
+    auto const module = contract::load(*runtime, TwoPageModule);
+    auto const pdus = transcript->awaitAtLeast(1);
+    REQUIRE(pdus.size() == 1);
+    auto const* const load = std::get_if<proto::Load>(&pdus.front());
+    REQUIRE(load != nullptr);
+    CHECK(load->bytes == toModule(TwoPageModule));
+}
+
+TEST_CASE("RemoteBackend.overCapModuleStartsNoHost", "[vtextension][remote]")
+{
+    // A one-page runtime: one module fits, the two-page one does not. The first host answers the first
+    // Instantiate for another instance, which kills it; instantiating the module past the cap then fails
+    // before a host is started in its place.
+    auto const transcript = std::make_shared<Transcript>();
+    auto const connector =
+        std::make_shared<ScriptedConnector>([transcript](HelperEnds& ends, std::size_t connection) {
+            auto loads = std::make_shared<std::size_t>(0);
+            auto script = HonestScript { .describe =
+                                             [loads](uint32_t moduleId) {
+                                                 return (*loads)++ == 0 ? onePageDescription(moduleId)
+                                                                        : twoPageDescription(moduleId);
+                                             },
+                                         .callables = {} };
+            if (connection == 0)
+                script.beforeInstantiated = [](HelperEnds& host, proto::Instantiate const& request) {
+                    std::ignore = host.send(proto::Instantiated {
+                        .instanceId = request.instanceId + 1, .error = std::nullopt, .callableExports = {} });
+                    return false;
+                };
+            serveHonestly(ends, script, *transcript);
+        });
+    auto const backend = makeBackend(connector);
+    auto const runtime = contract::createRuntime(*backend, OnePageLimits);
+    // Under one identity, so that both are the same host's.
+    auto const fits = loadAs(*runtime, "extension", OnePageModule);
+    auto const overCap = loadAs(*runtime, "extension", TwoPageModule);
+    auto context = contract::RecordingHostContext {};
+    REQUIRE(fits->instantiate(context) == std::unexpected(ExtensionError::HostUnavailable));
+    REQUIRE(connector->connections() == 1);
+
+    auto const refused = overCap->instantiate(context);
+    CHECK(refused == std::unexpected(ExtensionError::OutOfMemory));
+    CHECK(connector->connections() == 1);
 }
 
 TEST_CASE("RemoteBackend.unexportedMemoryIsOutOfBounds", "[vtextension][remote]")

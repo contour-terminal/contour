@@ -20,6 +20,7 @@
 #include <memory>
 #include <optional>
 #include <print>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -86,6 +87,26 @@ constexpr auto OrphanBound = std::chrono::seconds { 2 };
 
 /// The module a load that a host stops reading blocks on: larger than any channel's buffer.
 constexpr auto LargeModuleBytes = std::size_t { 16 } * 1024 * 1024;
+
+/// @return A module of LargeModuleBytes that the parent reads before sending it: the header, then one custom
+///         section of no name, filled with zeros, that pads it out.
+[[nodiscard]] std::vector<std::byte> largeModule()
+{
+    constexpr auto Header = std::to_array<uint8_t>({ 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 });
+    constexpr auto SizeBytes = std::size_t { 4 }; // the section's size, as LEB128
+    constexpr auto Content = LargeModuleBytes - Header.size() - 1 - SizeBytes;
+    static_assert(Content >= (std::size_t { 1 } << 21) && Content < (std::size_t { 1 } << 28));
+    auto module = std::vector<std::byte>(LargeModuleBytes);
+    std::ranges::transform(Header, module.begin(), [](uint8_t byte) { return std::byte { byte }; });
+    // module[Header.size()] is the custom section's id, 0; its content begins with a name length of 0.
+    for (auto const index: std::views::iota(std::size_t { 0 }, SizeBytes))
+    {
+        auto const group = (Content >> (7 * index)) & 0x7FU;
+        auto const more = index + 1 < SizeBytes ? 0x80U : 0x00U;
+        module[Header.size() + 1 + index] = static_cast<std::byte>(group | more);
+    }
+    return module;
+}
 
 /// Ends the test run, rather than wait forever on a thread or a future that a regression keeps from
 /// finishing: their destructors would join or wait.
@@ -254,7 +275,7 @@ TEST_CASE("teardown never blocks the owner thread", "[vtextension][process][thre
             instances.push_back(contract::instantiate(*module, context));
 
         auto loading = std::async(std::launch::async, [worker = runtime] {
-            return worker->load(ModuleIdentity { "same" }, std::vector<std::byte>(LargeModuleBytes));
+            return worker->load(ModuleIdentity { "same" }, largeModule());
         });
         // Still blocked a while later: the host reads none of the module.
         REQUIRE(loading.wait_for(200ms) == std::future_status::timeout);
