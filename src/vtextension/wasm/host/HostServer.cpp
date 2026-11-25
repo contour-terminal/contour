@@ -217,12 +217,17 @@ class HostServer::Impl
     /// The server whose control thread is instantiating on this thread; null outside an instantiation.
     static thread_local Impl* CurrentInstantiation;
 
-    /// Asks the parent whether instance @p instanceId's memory may grow to @p bytes, on the channel the guest
-    /// running on this thread was entered through: the lane of its call, or control while it is being
-    /// instantiated (a start function). Anywhere else growth is refused.
-    /// @return The parent's answer; Refused where nobody can be asked, or the channel failed or was answered
-    ///         with anything but Grown, which ends the connection once the guest returned.
-    [[nodiscard]] proto::GrowStatus growOnCurrentChannel(uint32_t instanceId, uint64_t bytes) noexcept;
+    /// Grows instance @p instanceId's memory to @p bytes (GrowRequest): asks the parent on the channel the
+    /// guest running on this thread was entered through -- the lane of its call, or control while it is being
+    /// instantiated (a start function) -- and opens the bytes once the parent granted them. Anywhere else
+    /// growth is refused.
+    /// @return Granted once the bytes are open. Refused where nobody can be asked; or the channel failed or
+    /// was
+    ///         answered with anything but Grown, or the granted bytes could not be opened, each of which ends
+    ///         the connection once the guest returned.
+    [[nodiscard]] proto::GrowStatus growOnCurrentChannel(uint32_t instanceId,
+                                                         GuestMemoryMapping& memory,
+                                                         uint64_t bytes) noexcept;
 
     /// Sends Grow on @p stream and reads its one answer, which must be Grown.
     /// @param ended Why the channel stopped serving; set here if it does, and nothing is asked once set.
@@ -564,10 +569,10 @@ Served HostServer::Impl::serve(proto::Instantiate const& request)
         auto scope = std::optional<ProvisionScope> {};
         if (*provision)
             scope.emplace(std::move(**provision));
-        auto const outer = std::exchange(CurrentInstantiation, this);
-        auto instantiated = module->module->instantiate(_hostContext);
-        CurrentInstantiation = outer;
-        return instantiated;
+        auto const instantiating = core::Finally { [outer = std::exchange(CurrentInstantiation, this)] {
+            CurrentInstantiation = outer;
+        } };
+        return module->module->instantiate(_hostContext);
     });
     if (auto const ended = std::exchange(_instantiationEnded, std::nullopt))
         return std::unexpected(*ended);
@@ -647,18 +652,40 @@ std::expected<std::optional<MemoryProvision>, ServerExit> HostServer::Impl::prov
     // Proven, the handle is ours, and closed: the mapping keeps the object alive.
     std::ignore = std::move(*claimed).adopt();
     return MemoryProvision { .memory = std::move(*mapping),
-                             .grow = [this, instanceId = request.instanceId](uint64_t bytes) {
-                                 return growOnCurrentChannel(instanceId, bytes);
+                             .grow = [this, instanceId = request.instanceId](GuestMemoryMapping& memory,
+                                                                             uint64_t bytes) {
+                                 return growOnCurrentChannel(instanceId, memory, bytes);
                              } };
 }
 
-proto::GrowStatus HostServer::Impl::growOnCurrentChannel(uint32_t instanceId, uint64_t bytes) noexcept
+proto::GrowStatus HostServer::Impl::growOnCurrentChannel(uint32_t instanceId,
+                                                         GuestMemoryMapping& memory,
+                                                         uint64_t bytes) noexcept
 {
+    auto* stream = static_cast<PduStream*>(nullptr);
+    auto* ended = static_cast<std::optional<ServerExit>*>(nullptr);
     if (auto* const lane = CurrentLane; lane != nullptr && lane->server == this)
-        return askToGrow(lane->stream, lane->ended, instanceId, bytes);
-    if (CurrentInstantiation == this)
-        return askToGrow(_control, _instantiationEnded, instanceId, bytes);
-    return proto::GrowStatus::Refused;
+    {
+        stream = &lane->stream;
+        ended = &lane->ended;
+    }
+    else if (CurrentInstantiation == this)
+    {
+        stream = &_control;
+        ended = &_instantiationEnded;
+    }
+    else
+        return proto::GrowStatus::Refused;
+
+    if (askToGrow(*stream, *ended, instanceId, bytes) != proto::GrowStatus::Granted)
+        return proto::GrowStatus::Refused;
+    // The parent counts the bytes as the memory's now: failing to open them is this host's own failure.
+    if (!_config.openGuestMemory(memory, bytes))
+    {
+        *ended = ServerExit::MemoryUnusable;
+        return proto::GrowStatus::Refused;
+    }
+    return proto::GrowStatus::Granted;
 }
 
 proto::GrowStatus HostServer::Impl::askToGrow(PduStream& stream,

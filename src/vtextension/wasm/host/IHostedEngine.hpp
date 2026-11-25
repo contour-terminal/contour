@@ -24,9 +24,8 @@ class IHostedEngine: public IWasmBackend
     [[nodiscard]] virtual remote::proto::MemoryMode memoryMode() const noexcept = 0;
 
     /// @return Under MemoryMode::Shared, how many inaccessible bytes must follow each instance's memory
-    /// object
-    ///         where the host maps it: the guard the engine's compiled code relies on (MemoryProvision); 0
-    ///         for an engine that copies memory.
+    ///         object where the host maps it: the guard the engine's compiled code relies on
+    ///         (MemoryProvision). 0 for an engine that copies memory.
     [[nodiscard]] virtual uint64_t memoryGuardBytes() const noexcept = 0;
 };
 

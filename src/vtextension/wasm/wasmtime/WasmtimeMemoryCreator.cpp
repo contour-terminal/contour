@@ -37,7 +37,7 @@ namespace
         return reinterpret_cast<uint8_t*>(mapping.base());
     }
 
-    /// Wasmtime's LinearMemory::grow_to: asks Contour, and opens the new bytes once it granted them. Any
+    /// Wasmtime's LinearMemory::grow_to: asks Contour, which opens the new bytes once it granted them. Any
     /// error makes the guest's memory.grow return -1.
     wasmtime_error_t* growMemory(void* env, std::size_t newBytes) noexcept
     {
@@ -46,10 +46,10 @@ namespace
             return nullptr;
         if (newBytes > provision.memory.objectBytes())
             return wasmtime_error_new("guest memory cannot grow past its object");
-        if (!provision.grow || provision.grow(newBytes) != remote::proto::GrowStatus::Granted)
+        // The request opens what Contour granted, and fails the host itself if it cannot.
+        if (!provision.grow
+            || provision.grow(provision.memory, newBytes) != remote::proto::GrowStatus::Granted)
             return wasmtime_error_new("guest memory growth was refused");
-        if (!provision.memory.open(newBytes))
-            return wasmtime_error_new("guest memory could not be opened");
         return nullptr;
     }
 

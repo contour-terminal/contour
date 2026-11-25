@@ -36,6 +36,7 @@
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 #include <vtextension/wasm/remote/transport/ControlPage.hpp>
+#include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
 #include <vtextension/wasm/remote/transport/HandleGrant.hpp>
 #include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
 #include <vtextension/wasm/remote/transport/PduStream.hpp>
@@ -70,11 +71,13 @@ using vtextension::wasm::remote::transport::Channel;
 using vtextension::wasm::remote::transport::ChannelError;
 using vtextension::wasm::remote::transport::createSharedObject;
 using vtextension::wasm::remote::transport::grantHandle;
+using vtextension::wasm::remote::transport::GuestMemoryMapping;
 using vtextension::wasm::remote::transport::HandleGrant;
 using vtextension::wasm::remote::transport::HandleTarget;
 using vtextension::wasm::remote::transport::InterruptSlotCount;
 using vtextension::wasm::remote::transport::makeChannelPair;
 using vtextension::wasm::remote::transport::MapAccess;
+using vtextension::wasm::remote::transport::MappingError;
 using vtextension::wasm::remote::transport::OwnedHandle;
 using vtextension::wasm::remote::transport::PduStream;
 using vtextension::wasm::remote::transport::SharedMapping;
@@ -1231,9 +1234,9 @@ class ParentObject
 };
 
 /// @return A scripted parent of a host whose engine runs instances in the memory granted to them.
-[[nodiscard]] std::unique_ptr<ScriptedParent> sharingParent()
+[[nodiscard]] std::unique_ptr<ScriptedParent> sharingParent(HostServerConfig config = {})
 {
-    return std::make_unique<ScriptedParent>(makeHostedEngine(proto::MemoryMode::Shared), HostServerConfig {});
+    return std::make_unique<ScriptedParent>(makeHostedEngine(proto::MemoryMode::Shared), std::move(config));
 }
 
 /// Sends an Instantiate of module 1 as instance 1 on @p parent's control, granting what @p grant grants with
@@ -1261,10 +1264,13 @@ void instantiateGranted(ScriptedParent& parent, ParentObject const& object)
 /// A parent with runtime 1 and GrowModule loaded as module 1 on a host that shares memory.
 struct GrowingParent
 {
-    std::unique_ptr<ScriptedParent> parent = sharingParent(); ///< The parent.
-    proto::Loaded loaded;                                     ///< What GrowModule was described as.
+    std::unique_ptr<ScriptedParent> parent; ///< The parent.
+    proto::Loaded loaded;                   ///< What GrowModule was described as.
 
-    GrowingParent(): loaded { prepared(*parent) } {}
+    explicit GrowingParent(HostServerConfig config = {}):
+        parent { sharingParent(std::move(config)) }, loaded { prepared(*parent) }
+    {
+    }
 
   private:
     [[nodiscard]] static proto::Loaded prepared(ScriptedParent& parent)
@@ -1374,6 +1380,54 @@ TEST_CASE("HostServer.growDuringInstantiateGoesThroughTheParent", "[vtextension]
     {
         CHECK(answered(proto::GrowStatus::Refused) == std::vector<uint32_t> { 0xFFFF'FFFF });
         CHECK(object.wordAt(StartGrowAddress) == 0);
+    }
+}
+
+TEST_CASE("HostServer.grantedGrowthThatCannotBeOpenedEndsTheHost", "[vtextension][host]")
+{
+    // The parent counts granted bytes as the memory's: a host that cannot open them fails itself, rather than
+    // let the guest see a refusal the parent never gave.
+    auto const failingToOpen = [] {
+        auto config = HostServerConfig {};
+        config.openGuestMemory = [](GuestMemoryMapping& /*memory*/, uint64_t /*bytes*/) {
+            return std::expected<void, MappingError> { std::unexpected(MappingError::Io) };
+        };
+        return config;
+    };
+
+    SECTION("on a lane")
+    {
+        auto growing = GrowingParent { failingToOpen() };
+        auto& parent = *growing.parent;
+        auto const object = ParentObject {};
+        instantiateGranted(parent, object);
+        parent.send(0,
+                    proto::Call {
+                        .instanceId = 1, .exportOrdinal = ordinalOf(growing.loaded, "grow"), .argv = { 1 } });
+        REQUIRE(std::holds_alternative<proto::Grow>(parent.receive(0)));
+        parent.send(0, proto::Grown { .status = proto::GrowStatus::Granted });
+        CHECK(parent.exitWithinDeadline() == ServerExit::MemoryUnusable);
+        // The call is never answered.
+        CHECK_FALSE(parent.lanes.at(0).receive().has_value());
+    }
+
+    SECTION("in a start function")
+    {
+        auto parent = sharingParent(failingToOpen());
+        parent->skipHello();
+        parent->createRuntime(1);
+        std::ignore = parent->loadOk(1, 1, toModule(vtextension::wasm::testing::StartGrowModule));
+        auto const object = ParentObject {};
+        auto const grant = object.grant();
+        sendGranted(*parent,
+                    proto::MemoryGrant {
+                        .handle = grant.wireValue, .objectBytes = ObjectBytes, .initialBytes = GuestPage },
+                    grant);
+        REQUIRE(std::holds_alternative<proto::Grow>(parent->receiveControl()));
+        parent->sendControl(proto::Grown { .status = proto::GrowStatus::Granted });
+        CHECK(parent->exitWithinDeadline() == ServerExit::MemoryUnusable);
+        // The instance is never announced.
+        CHECK_FALSE(parent->control->receive().has_value());
     }
 }
 

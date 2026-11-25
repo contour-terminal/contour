@@ -634,7 +634,7 @@ TEST_CASE("HostProcess.exitCodesAreDistinct", "[vtextension][host]")
         CHECK_FALSE(row.text.empty());
         CHECK(exitCodeOf(row.exit) == row.code);
     }
-    CHECK(exits.size() == static_cast<std::size_t>(HostProcessExit::ExecutorUnavailable) + 1);
+    CHECK(exits.size() == static_cast<std::size_t>(HostProcessExit::MemoryUnusable) + 1);
     CHECK(exitCodeOf(HostProcessExit::Served) == 0);
 }
 
@@ -644,6 +644,7 @@ TEST_CASE("HostProcess.serverExitsMapToProcessExits", "[vtextension][host]")
     CHECK(hostProcessExitOf(ServerExit::Stopped) == HostProcessExit::Served);
     CHECK(hostProcessExitOf(ServerExit::ProtocolViolation) == HostProcessExit::ProtocolViolation);
     CHECK(hostProcessExitOf(ServerExit::ExecutorUnavailable) == HostProcessExit::ExecutorUnavailable);
+    CHECK(hostProcessExitOf(ServerExit::MemoryUnusable) == HostProcessExit::MemoryUnusable);
 }
 
 #if defined(__linux__) || defined(__FreeBSD__)

@@ -20,17 +20,23 @@
 namespace vtextension::wasm::host
 {
 
-/// Asks Contour whether an instance's memory may grow to a size, and waits for the answer.
+/// Grows an instance's memory: asks Contour whether it may grow to a size, waits for the answer, and once
+/// Contour granted it opens the new bytes. Bytes Contour granted that cannot be opened are the host's own
+/// failure: the host ends the connection for it once the guest returns, rather than let Contour believe the
+/// memory spans what the guest cannot reach.
+/// @param memory The memory's mapping, where the bytes are opened.
 /// @param bytes The size it would grow to: whole guest pages, more than it spans now.
-/// @return Whether Contour granted it.
-using GrowRequest = std::function<remote::proto::GrowStatus(uint64_t bytes)>;
+/// @return Granted once the bytes are open; Refused if Contour refused, nobody could be asked, or they could
+///         not be opened.
+using GrowRequest =
+    std::function<remote::proto::GrowStatus(remote::transport::GuestMemoryMapping& memory, uint64_t bytes)>;
 
 /// What one instance's memory is made of.
 struct MemoryProvision
 {
     /// The object Contour granted, mapped, with the bytes its memory spans at first open.
     remote::transport::GuestMemoryMapping memory;
-    /// Asks Contour before the memory grows; nothing more is opened unless it grants.
+    /// Grows the memory, asking Contour first; nothing more is opened unless it grants.
     GrowRequest grow;
 };
 

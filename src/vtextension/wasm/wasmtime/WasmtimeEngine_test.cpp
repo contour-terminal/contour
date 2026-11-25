@@ -292,11 +292,14 @@ class GrantedObject
     transport::SharedMapping _parent;
 };
 
-/// @return A growth request answering every growth with @p status, and recording the size each asked for.
+/// @return A growth request answering every growth with @p status, opening what it grants, and recording
+///         the size each asked for.
 [[nodiscard]] host::GrowRequest answering(proto::GrowStatus status, std::vector<uint64_t>& asked)
 {
-    return [status, &asked](uint64_t bytes) {
+    return [status, &asked](transport::GuestMemoryMapping& memory, uint64_t bytes) {
         asked.push_back(bytes);
+        if (status == proto::GrowStatus::Granted && !memory.open(bytes))
+            return proto::GrowStatus::Refused;
         return status;
     };
 }

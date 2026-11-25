@@ -28,6 +28,7 @@
 #include <vtextension/wasm/host/IHostedEngine.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
+#include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
 
 namespace vtextension::wasm::host
 {
@@ -43,6 +44,10 @@ inline constexpr std::size_t ExecutorStackBytes =
 /// Starts the thread a lane's executor runs on, with the stack it asks for, as ExecutorThread::start does.
 using ExecutorStarter =
     std::function<std::expected<ExecutorThread, std::error_code>(std::size_t, std::function<void()>)>;
+
+/// Opens a guest memory mapping's first bytes, as GuestMemoryMapping::open() does.
+using GuestMemoryOpener = std::function<std::expected<void, remote::transport::MappingError>(
+    remote::transport::GuestMemoryMapping& memory, uint64_t bytes)>;
 
 /// How a host server runs.
 struct HostServerConfig
@@ -60,6 +65,9 @@ struct HostServerConfig
     /// interrupts: what tells the instance a slot was raised for from one that holds the slot since. Null:
     /// every interruptSlot() interrupts.
     std::function<bool(uint32_t slot)> isInterruptRaised {};
+    /// How the bytes a guest's memory grew into, once the parent granted them, are opened: the operating
+    /// system's way, but in a test that makes it fail.
+    GuestMemoryOpener openGuestMemory = &remote::transport::GuestMemoryMapping::open;
 };
 
 /// Why a host server stopped serving.
@@ -69,6 +77,7 @@ enum class ServerExit : uint8_t
     PeerClosed,          ///< The parent closed a channel, or a channel failed.
     Stopped,             ///< stop() was called.
     ExecutorUnavailable, ///< A lane's executor thread could not be started.
+    MemoryUnusable,      ///< Guest memory the parent granted to grow into could not be opened.
 };
 
 /// Serves one engine over a control channel and its lanes.

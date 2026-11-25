@@ -46,6 +46,9 @@ namespace
         HostProcessExitRow { .exit = HostProcessExit::ExecutorUnavailable,
                              .code = 75,
                              .text = "a thread to run extensions on cannot be started" },
+        HostProcessExitRow { .exit = HostProcessExit::MemoryUnusable,
+                             .code = 76,
+                             .text = "memory Contour granted an extension could not be opened" },
     };
 
     /// @return @p exit's row.
@@ -90,6 +93,7 @@ HostProcessExit hostProcessExitOf(ServerExit exit) noexcept
         case ServerExit::Stopped: return HostProcessExit::Served;
         case ServerExit::ProtocolViolation: return HostProcessExit::ProtocolViolation;
         case ServerExit::ExecutorUnavailable: return HostProcessExit::ExecutorUnavailable;
+        case ServerExit::MemoryUnusable: return HostProcessExit::MemoryUnusable;
     }
     return HostProcessExit::ProtocolViolation;
 }

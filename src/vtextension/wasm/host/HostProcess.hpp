@@ -35,6 +35,7 @@ enum class HostProcessExit : uint8_t
     EngineUnavailable,   ///< No engine could be created.
     ProtocolViolation,   ///< Contour sent what the protocol does not allow.
     ExecutorUnavailable, ///< A lane's thread could not be started.
+    MemoryUnusable,      ///< Guest memory Contour granted could not be opened.
 };
 
 /// One way the host process ends.
