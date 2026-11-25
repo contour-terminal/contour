@@ -8,8 +8,8 @@ composition roots and the test executables link. This gate fails when that conta
 backend in BACKENDS:
 
 1. A file under src/ outside the backend's directory includes one of its runtime's own C headers (WAMR's
-   wasm_export.h, wasm_c_api.h, lib_export.h, wasm_runtime.h; Wasmtime's wasmtime.h, wasm.h, wasi.h and
-   wasmtime/...). No exception, tests included: a test of a runtime's C API belongs beside its backend.
+   wasm_export.h, wasm_c_api.h, lib_export.h, wasm_runtime.h; Wasmtime's wasmtime.h, wasm.h, wasi.h, the
+   C++ API's wasmtime.hh and wasm.hh, and wasmtime/...). No exception, tests included: a test of a runtime's C API belongs beside its backend.
 2. src/vtextension/CMakeLists.txt or src/vthost/CMakeLists.txt mentions the runtime's link target
    (contour::wamr, contour::wasmtime). Neither library links a runtime; whoever composes the program does.
 3. A file under src/ outside the backend's directory includes a header of that backend
@@ -56,7 +56,7 @@ BACKENDS = (
     Backend(
         name="Wasmtime",
         directory=Path("src/vtextension/wasm/wasmtime"),
-        c_header=re.compile(r'#include\s*[<"]((wasmtime|wasm|wasi)\.h[>"]|wasmtime/)'),
+        c_header=re.compile(r'#include\s*[<"]((wasmtime|wasm|wasi)\.hh?[>"]|wasmtime/)'),
         backend_header=re.compile(r'#include\s*[<"](vtextension/)?wasm/wasmtime/'),
         link=re.compile(r"contour::wasmtime\b"),
     ),
@@ -136,6 +136,9 @@ def self_test() -> int:
         ("wasm.h", bool(WASMTIME.c_header.search("#include <wasm.h>")), True),
         ("wasi.h", bool(WASMTIME.c_header.search('#include "wasi.h"')), True),
         ("a wasmtime/ header", bool(WASMTIME.c_header.search("#include <wasmtime/config.h>")), True),
+        ("Wasmtime's C++ header wasmtime.hh", bool(WASMTIME.c_header.search("#include <wasmtime.hh>")), True),
+        ("Wasmtime's C++ header wasm.hh", bool(WASMTIME.c_header.search('#include "wasm.hh"')), True),
+        ("a wasmtime/ C++ header", bool(WASMTIME.c_header.search("#include <wasmtime/store.hh>")), True),
         ("WAMR header is not Wasmtime", bool(WASMTIME.c_header.search("#include <wasm_export.h>")), False),
         ("a .hpp of the same stem is not Wasmtime", bool(WASMTIME.c_header.search("#include <wasm.hpp>")), False),
         ("similar name is not Wasmtime", bool(WASMTIME.c_header.search("#include <my_wasm.h>")), False),
