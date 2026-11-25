@@ -3,8 +3,11 @@
 // The backend that runs extensions in a separate host: the contract every backend meets, run through hosts
 // serving in this process; and what only a remote backend does, against real hosts and against a test that
 // plays the host itself.
+#include <core/Clock.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -16,6 +19,7 @@
 #include <latch>
 #include <memory>
 #include <optional>
+#include <print>
 #include <ranges>
 #include <span>
 #include <string>
@@ -36,6 +40,7 @@
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 #include <vtextension/wasm/testing/BackendContract.hpp>
 #include <vtextension/wasm/testing/HostedEngine.hpp>
+#include <vtextension/wasm/testing/RenderMeasurement.hpp>
 
 using vtextension::ExtensionError;
 using vtextension::testing::toModule;
@@ -884,4 +889,51 @@ TEST_CASE("RemoteBackend.preparedGenerationFollowsTheOutermostGuard", "[vtextens
     CHECK(generations
           == std::array<uint64_t, 3> { 0, backend->runtimeGeneration(), backend->runtimeGeneration() });
     CHECK(vtextension::wasm::remote::preparedGeneration() == 0);
+}
+
+TEST_CASE("Remote.measureRender", "[.measure]")
+{
+    // Reported, not asserted; vtextension_wasmtime_test's twin measures the same engine in this process.
+    auto const backend = RemoteTraits::make();
+    vtextension::wasm::testing::measureBundledRender(*backend, "Remote");
+}
+
+TEST_CASE("Remote.measureRoundTrip", "[.measure]")
+{
+    // One call of a trivial export is one round trip to the host and back: what every call costs before
+    // the guest does any work. Reported, not asserted.
+    constexpr auto Calls = std::size_t { 10'000 };
+    auto const backend = RemoteTraits::make();
+    auto const runtime = contract::createRuntime(*backend);
+    auto const guard = contract::enterThread(*backend);
+    auto const module = contract::load(*runtime, contract::InstanceModule);
+    auto context = contract::RecordingHostContext {};
+    auto const instance = contract::instantiate(*module, context);
+    auto const add = contract::functionOf(*instance, "add");
+    REQUIRE(addFailure(*instance) == std::nullopt);
+
+    auto& clock = core::defaultSteadyClock();
+    auto durations = std::vector<std::chrono::nanoseconds> {};
+    durations.reserve(Calls);
+    auto const allStart = clock.now();
+    for ([[maybe_unused]] auto const call: std::views::iota(std::size_t { 0 }, Calls))
+    {
+        auto argv = std::array<uint32_t, 2> { 2, 3 };
+        auto const callStart = clock.now();
+        auto const called = instance->call(add, argv);
+        durations.emplace_back(clock.now() - callStart);
+        REQUIRE(called.has_value());
+    }
+    auto const all = clock.now() - allStart;
+    std::ranges::sort(durations);
+
+    using Micros = std::chrono::duration<double, std::micro>;
+    std::println(stdout,
+                 "Remote round trip ({} calls): median {:.1f} us, p90 {:.1f} us, fastest {:.1f} us; "
+                 "{:.1f} ms in all",
+                 Calls,
+                 Micros { durations[durations.size() / 2] }.count(),
+                 Micros { durations[durations.size() * 9 / 10] }.count(),
+                 Micros { durations.front() }.count(),
+                 Micros { all }.count() / 1000.0);
 }
