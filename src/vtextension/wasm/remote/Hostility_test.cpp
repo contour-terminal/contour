@@ -194,10 +194,7 @@ class StampingHandle final: public IHostHandle
     {
     }
 
-    void interrupt(uint32_t instanceId, uint32_t interruptSlot) noexcept override
-    {
-        _inner->interrupt(instanceId, interruptSlot);
-    }
+    void interrupt(uint32_t interruptSlot) noexcept override { _inner->interrupt(interruptSlot); }
     void clearInterrupt(uint32_t interruptSlot) noexcept override { _inner->clearInterrupt(interruptSlot); }
     void terminate() noexcept override { _inner->terminate(); }
     void letGo() noexcept override { _inner->letGo(); }
@@ -263,8 +260,7 @@ class StampingConnector final: public IHostConnector
 {
     return vtextension::wasm::remote::makeRemoteBackend(
         composition.kind(),
-        vtextension::wasm::BackendConfig { .helper = config.helper,
-                                           .timeouts = config.timeouts,
+        vtextension::wasm::BackendConfig { .timeouts = config.timeouts,
                                            .connector = std::make_shared<StampingConnector>(
                                                composition.connector(config), std::move(stamps)),
                                            .lockdown = config.lockdown });

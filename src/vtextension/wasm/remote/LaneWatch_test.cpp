@@ -30,20 +30,21 @@ TEST_CASE("LaneWatch.interruptArmsOnlyAFrameOnTheLane", "[vtextension]")
 {
     auto watch = LaneWatch {};
     CHECK(watch.observe().place == LanePlace::Idle);
-    CHECK_FALSE(watch.interrupt(7)); // nothing runs
+    watch.interrupt(7); // nothing runs
+    CHECK(watch.observe().arming == LaneArming::Disarmed);
 
     watch.enter(7);
-    CHECK_FALSE(watch.interrupt(8));
+    watch.interrupt(8);
     CHECK(watch.observe().arming == LaneArming::Disarmed);
     CHECK(watch.observe().place == LanePlace::InHelper);
 
-    CHECK(watch.interrupt(7));
+    watch.interrupt(7);
     auto const armed = watch.observe();
     CHECK(armed.arming == LaneArming::Armed);
     CHECK(armed.place == LanePlace::InHelper);
 
     // Interrupted again, the same frame stays armed: the backstop's grace runs on.
-    CHECK(watch.interrupt(7));
+    watch.interrupt(7);
     CHECK(watch.observe().epoch == armed.epoch);
 }
 
@@ -52,7 +53,7 @@ TEST_CASE("LaneWatch.leavingTheInterruptedFrameDisarms", "[vtextension]")
     auto watch = LaneWatch {};
     watch.enter(7);
     watch.enter(9);
-    CHECK(watch.interrupt(9));
+    watch.interrupt(9);
     auto const armed = watch.observe();
     CHECK(armed.arming == LaneArming::Armed);
 
@@ -62,7 +63,7 @@ TEST_CASE("LaneWatch.leavingTheInterruptedFrameDisarms", "[vtextension]")
     CHECK(left.epoch != armed.epoch);
     CHECK(left.place == LanePlace::InHelper);
 
-    CHECK(watch.interrupt(7));
+    watch.interrupt(7);
     auto const again = watch.observe();
     CHECK(again.arming == LaneArming::Armed);
     CHECK(again.epoch != armed.epoch);
@@ -78,7 +79,8 @@ TEST_CASE("LaneWatch.frameEnteredAfterItsInstanceLeftIsNotArmed", "[vtextension]
     // An interrupt arms the frame it found, not a later one of the same instance.
     auto watch = LaneWatch {};
     watch.enter(7);
-    CHECK(watch.interrupt(7));
+    watch.interrupt(7);
+    CHECK(watch.observe().arming == LaneArming::Armed);
     watch.leave();
     watch.enter(7);
     CHECK(watch.observe().arming == LaneArming::Disarmed);
@@ -123,7 +125,7 @@ TEST_CASE("LaneWatch.interruptNeverArmsAnotherInstancesFrame", "[vtextension]")
     auto watch = LaneWatch { race.probe() };
     race.watch = &watch;
     watch.enter(7);
-    std::ignore = watch.interrupt(7);
+    watch.interrupt(7);
     CHECK(race.isRun);
     CHECK(watch.observe().arming == LaneArming::Disarmed);
 }
@@ -136,14 +138,14 @@ TEST_CASE("LaneWatch.staleInterruptKeepsANewerArming", "[vtextension]")
                            [](LaneWatch& lane) {
                                lane.leave();
                                lane.enter(7);
-                               CHECK(lane.interrupt(7));
+                               lane.interrupt(7);
                            },
                        .watch = nullptr,
                        .isRun = false };
     auto watch = LaneWatch { race.probe() };
     race.watch = &watch;
     watch.enter(7);
-    CHECK(watch.interrupt(7));
+    watch.interrupt(7);
     CHECK(race.isRun);
     CHECK(watch.observe().arming == LaneArming::Armed);
 }
@@ -177,8 +179,10 @@ TEST_CASE("LaneWatch.deepNestingIsBalanced", "[vtextension]")
     CHECK(watch.observe().place == LanePlace::InHelper);
 
     // Recorded up to MaxCallDepth + 1 frames; the deeper ones are counted only, and cannot be armed.
-    CHECK(watch.interrupt(proto::MaxCallDepth + 1));
-    CHECK_FALSE(watch.interrupt(Depth));
+    watch.interrupt(Depth);
+    CHECK(watch.observe().arming == LaneArming::Disarmed);
+    watch.interrupt(proto::MaxCallDepth + 1);
+    CHECK(watch.observe().arming == LaneArming::Armed);
 
     for ([[maybe_unused]] auto const index: std::views::iota(uint32_t { 0 }, Depth))
         watch.leave();
@@ -192,8 +196,10 @@ TEST_CASE("LaneWatchSet.interruptsTheLaneTheInstanceRunsOn", "[vtextension]")
     auto set = LaneWatchSet {};
     CHECK(set.lanes().size() == MaxLaneChannels);
     set.lane(2).enter(5);
-    CHECK_FALSE(set.interrupt(6));
-    CHECK(set.interrupt(5));
+    set.interrupt(6);
+    for (auto const& lane: set.lanes())
+        CHECK(lane.observe().arming == LaneArming::Disarmed);
+    set.interrupt(5);
     for (auto const index: std::views::iota(std::size_t { 0 }, MaxLaneChannels))
         CHECK((set.lanes()[index].observe().arming == LaneArming::Armed) == (index == 2));
 }
@@ -218,8 +224,8 @@ TEST_CASE("LaneWatchSet.interruptRacesFrames", "[vtextension][threading]")
     auto observations = std::size_t { 0 };
     while (running.load())
     {
-        std::ignore = set.interrupt(7);
-        std::ignore = set.interrupt(9);
+        set.interrupt(7);
+        set.interrupt(9);
         std::ignore = set.lanes()[0].observe();
         ++observations;
     }

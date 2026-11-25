@@ -586,7 +586,7 @@ struct GraceRig
     /// supervisor; then lets the supervisor see it before the test moves the clock on.
     void interrupt(uint32_t instanceId)
     {
-        std::ignore = lanes->interrupt(instanceId);
+        lanes->interrupt(instanceId);
         helper.nudge();
         rig.supervisor->sync();
     }

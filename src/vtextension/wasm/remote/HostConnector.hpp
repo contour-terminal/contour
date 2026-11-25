@@ -97,10 +97,11 @@ class IHostHandle
     virtual ~IHostHandle() = default;
 
     /// Interrupts one instance's running call, for good: raises its interrupt slot, wakes the host to look,
-    /// and has the backstop look at the lanes. Wait-free: no lock, no allocation, no I/O that waits.
-    /// @param instanceId The parent-chosen id of the instance.
+    /// and has the backstop look at the lanes. Wait-free: no lock, no allocation, no I/O that waits. The slot
+    /// names the instance: the host knows it by the slot alone, and the lanes' frames were armed by its id
+    /// already (HelperIncarnation::interrupt()).
     /// @param interruptSlot The slot it was instantiated with; one the host has no instance at is ignored.
-    virtual void interrupt(uint32_t instanceId, uint32_t interruptSlot) noexcept = 0;
+    virtual void interrupt(uint32_t interruptSlot) noexcept = 0;
 
     /// Lowers an interrupt slot, before it is handed to another instance. Wait-free.
     /// @param interruptSlot The slot, whose instance was released.

@@ -52,7 +52,7 @@ void LaneWatch::endHostCall() noexcept
         _frames[depth - 1].state.store(FrameState::Running);
 }
 
-bool LaneWatch::interrupt(uint32_t instanceId) noexcept
+void LaneWatch::interrupt(uint32_t instanceId) noexcept
 {
     auto const depth = std::min(_depth.load(), LaneFrameCapacity);
     for (auto& frame: std::span { _frames }.first(depth))
@@ -70,9 +70,8 @@ bool LaneWatch::interrupt(uint32_t instanceId) noexcept
         while (armed < serial && !frame.armedSerial.compare_exchange_weak(armed, serial))
         {
         }
-        return true;
+        return;
     }
-    return false;
 }
 
 LaneObservation LaneWatch::observe() const noexcept
@@ -105,12 +104,10 @@ LaneWatch& LaneWatchSet::lane(std::size_t index) noexcept
     return _lanes[index];
 }
 
-bool LaneWatchSet::interrupt(uint32_t instanceId) noexcept
+void LaneWatchSet::interrupt(uint32_t instanceId) noexcept
 {
-    auto found = false;
     for (auto& lane: _lanes)
-        found = lane.interrupt(instanceId) || found;
-    return found;
+        lane.interrupt(instanceId);
 }
 
 } // namespace vtextension::wasm::remote

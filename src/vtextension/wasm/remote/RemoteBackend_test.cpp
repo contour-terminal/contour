@@ -121,8 +121,7 @@ namespace
 {
     return makeRemoteBackend(
         sharedKind(),
-        BackendConfig {
-            .helper = {}, .timeouts = {}, .connector = std::move(connector), .lockdown = lockdown });
+        BackendConfig { .timeouts = {}, .connector = std::move(connector), .lockdown = lockdown });
 }
 
 struct RemoteTraits
@@ -411,7 +410,7 @@ class CountingHandle final: public IHostHandle
     {
     }
 
-    void interrupt(uint32_t /*instanceId*/, uint32_t /*interruptSlot*/) noexcept override {}
+    void interrupt(uint32_t /*interruptSlot*/) noexcept override {}
     void clearInterrupt(uint32_t /*interruptSlot*/) noexcept override {}
     void terminate() noexcept override { _records->terminations.fetch_add(1); }
     void letGo() noexcept override { _records->lettings.fetch_add(1); }
@@ -879,8 +878,7 @@ TEST_CASE("RemoteBackend.eachStepIsWatched", "[vtextension][remote]")
     {
         auto const backend = makeRemoteBackend(
             sharedKind(),
-            BackendConfig { .helper = {},
-                            .timeouts = { .load = std::chrono::milliseconds { 11 },
+            BackendConfig { .timeouts = { .load = std::chrono::milliseconds { 11 },
                                           .instantiate = std::chrono::milliseconds { 12 },
                                           .handshake = std::chrono::milliseconds { 13 },
                                           .interruptGrace = std::chrono::milliseconds { 14 } },

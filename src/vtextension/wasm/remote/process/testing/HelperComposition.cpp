@@ -149,8 +149,7 @@ std::shared_ptr<ProcessHostConnector> HelperComposition::connector(HelperBackend
 std::unique_ptr<IWasmBackend> HelperComposition::backend(HelperBackendConfig const& config) const
 {
     return makeRemoteBackend(_kind,
-                             BackendConfig { .helper = config.helper,
-                                             .timeouts = config.timeouts,
+                             BackendConfig { .timeouts = config.timeouts,
                                              .connector = connector(config),
                                              .lockdown = config.lockdown });
 }

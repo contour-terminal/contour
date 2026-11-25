@@ -92,7 +92,7 @@ InProcessHost::~InProcessHost()
         _thread.join();
 }
 
-void InProcessHost::interrupt(uint32_t /*instanceId*/, uint32_t interruptSlot) noexcept
+void InProcessHost::interrupt(uint32_t interruptSlot) noexcept
 {
     _page.raise(interruptSlot);
     std::ignore = _wake.signal();

@@ -91,10 +91,9 @@ class LaneWatch
     void endHostCall() noexcept;
 
     /// Any thread, wait-free: arms the outermost frame of @p instanceId on the lane, if there is one; a frame
-    /// armed already stays armed as it was.
+    /// armed already stays armed as it was. What it armed is what observe() sees.
     /// @param instanceId The instance interrupted.
-    /// @return Whether a frame of it was on the lane.
-    [[nodiscard]] bool interrupt(uint32_t instanceId) noexcept;
+    void interrupt(uint32_t instanceId) noexcept;
 
     /// The supervisor: what the lane does now. Wait-free; a frame that enters or leaves meanwhile may or may
     /// not be seen, as the next look will.
@@ -133,8 +132,7 @@ class LaneWatchSet
 
     /// Any thread, wait-free: arms the frames of @p instanceId on every lane (LaneWatch::interrupt()).
     /// @param instanceId The instance interrupted.
-    /// @return Whether any lane runs a frame of it.
-    [[nodiscard]] bool interrupt(uint32_t instanceId) noexcept;
+    void interrupt(uint32_t instanceId) noexcept;
 
     /// @return Every lane, in index order.
     [[nodiscard]] std::span<LaneWatch const> lanes() const noexcept { return _lanes; }

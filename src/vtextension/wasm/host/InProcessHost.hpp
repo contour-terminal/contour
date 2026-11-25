@@ -69,7 +69,7 @@ class InProcessHost final: public remote::IHostHandle
     ~InProcessHost() override;
 
     /// Raises @p interruptSlot and wakes the host's listener, as a host process is interrupted.
-    void interrupt(uint32_t instanceId, uint32_t interruptSlot) noexcept override;
+    void interrupt(uint32_t interruptSlot) noexcept override;
 
     /// Lowers @p interruptSlot.
     void clearInterrupt(uint32_t interruptSlot) noexcept override;

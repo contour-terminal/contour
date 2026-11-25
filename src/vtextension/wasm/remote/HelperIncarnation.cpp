@@ -310,8 +310,8 @@ void HelperIncarnation::interrupt(uint32_t instanceId, uint32_t interruptSlot) n
     if (!isAlive())
         return;
     // Armed before the backstop is woken to look.
-    std::ignore = _laneWatches->interrupt(instanceId);
-    _handle->interrupt(instanceId, interruptSlot);
+    _laneWatches->interrupt(instanceId);
+    _handle->interrupt(interruptSlot);
 }
 
 void HelperIncarnation::clearInterrupt(uint32_t interruptSlot) noexcept

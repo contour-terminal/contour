@@ -42,7 +42,7 @@ namespace
 
         /// Raises the slot, wakes the host's listener to look at the page, and wakes the supervisor to look
         /// at the lanes, which the caller armed. A full wake signal means a wake is pending already.
-        void interrupt(uint32_t /*instanceId*/, uint32_t interruptSlot) noexcept override
+        void interrupt(uint32_t interruptSlot) noexcept override
         {
             _page.raise(interruptSlot);
             std::ignore = _wake.signal();

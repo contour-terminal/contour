@@ -2,12 +2,12 @@
 #pragma once
 
 /// @file
-/// How the composition root configures the backend that runs extensions: where their host process comes
-/// from, and how long it may take. Names no engine.
+/// How the composition root configures the backend that runs extensions: how their host processes are
+/// started -- by the connector, which alone knows the host executable -- and how long they may take. Names no
+/// engine.
 
 #include <chrono>
 #include <cstdint>
-#include <filesystem>
 #include <memory>
 
 namespace vtextension::wasm
@@ -38,7 +38,6 @@ enum class LockdownRequirement : uint8_t
 /// How the backend that runs extensions is set up.
 struct BackendConfig
 {
-    std::filesystem::path helper; ///< The extension host executable.
     /// How long a host may take: a host overstaying its handshake, a load or an instantiation is stopped, and
     /// so is one whose interrupted call runs on past `interruptGrace` of its own time. A host serving in this
     /// process has no such backstop.

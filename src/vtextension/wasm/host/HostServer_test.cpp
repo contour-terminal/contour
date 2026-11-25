@@ -1226,7 +1226,7 @@ TEST_CASE("InProcessHost.handleInterrupts", "[vtextension][host]")
                 .has_value());
     std::this_thread::sleep_for(std::chrono::milliseconds { 50 });
     // Through the interrupt page and the wake signal, as a host process is interrupted.
-    connection->handle->interrupt(7, 9);
+    connection->handle->interrupt(9);
     auto received = std::async(std::launch::async, [&lane] { return lane.receive(); });
     if (received.wait_for(InterruptDeadline) != std::future_status::ready)
     {
