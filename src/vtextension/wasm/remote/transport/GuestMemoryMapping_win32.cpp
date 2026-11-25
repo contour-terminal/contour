@@ -3,8 +3,11 @@
 // Guest memory on Windows, through placeholders: a placeholder reservation of the object and its guard
 // (VirtualAlloc2), split where the object ends, the section mapped over the object's placeholder
 // (MapViewOfFile3, MEM_REPLACE_PLACEHOLDER) with write access, and the open pages committed through this view
-// (VirtualAlloc, MEM_COMMIT): a reserved section's pages are committed by whoever touches them, so the helper
-// commits what it opens itself, whether Windows commits for the section or for each view.
+// (VirtualAlloc, MEM_COMMIT). Windows commits a reserved section's pages for the section, not for a view
+// (wine commits them per view): the helper commits what it opens itself, so that it does not rely on that,
+// but it cannot close a page another view committed. The object's closed pages -- which, under signal traps,
+// are all that stops a guest access past its memory's size -- stay closed only because Contour commits no
+// more than it granted (SharedGuestMemory).
 //
 // The placeholder functions are Windows 10 1803's; they are looked up in kernelbase at run time, so that an
 // older system says it cannot map guest memory (canMapGuestMemory()) rather than fail to load. A section too

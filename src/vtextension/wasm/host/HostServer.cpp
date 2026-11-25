@@ -221,10 +221,9 @@ class HostServer::Impl
     /// guest running on this thread was entered through -- the lane of its call, or control while it is being
     /// instantiated (a start function) -- and opens the bytes once the parent granted them. Anywhere else
     /// growth is refused.
-    /// @return Granted once the bytes are open. Refused where nobody can be asked; or the channel failed or
-    /// was
-    ///         answered with anything but Grown, or the granted bytes could not be opened, each of which ends
-    ///         the connection once the guest returned.
+    /// @return Granted once the bytes are open. Refused where nobody can be asked, or when the channel
+    ///         failed, was answered with anything but Grown, or the granted bytes could not be opened; each
+    ///         of these ends the connection once the guest returned.
     [[nodiscard]] proto::GrowStatus growOnCurrentChannel(uint32_t instanceId,
                                                          GuestMemoryMapping& memory,
                                                          uint64_t bytes) noexcept;

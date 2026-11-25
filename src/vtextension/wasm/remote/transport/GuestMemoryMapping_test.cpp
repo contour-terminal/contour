@@ -161,6 +161,34 @@ TEST_CASE("GuestMemoryMapping.openedBytesAreTheParentsBytes", "[vtextension]")
     CHECK(parent->bytes()[Page + 8] == std::byte { 9 });
 }
 
+#ifdef _WIN32
+TEST_CASE("GuestMemoryMapping.closedPagesAreThoseNoViewCommitted", "[vtextension]")
+{
+    // Windows commits a reserved section's pages for the section: the helper's closed pages stay closed only
+    // while the parent commits no more than it granted, which is why SharedGuestMemory commits exactly that.
+    if (runsUnderWine())
+        SKIP("wine commits a reserved section per view, unlike Windows");
+    requireGuestMapping();
+    auto const object = createSharedObject(ObjectBytes, SharedObjectUse::GuestMemory);
+    REQUIRE(object.has_value());
+    auto parent = SharedMapping::map(object->get(), ObjectBytes, MapAccess::ReadWrite);
+    REQUIRE(parent.has_value());
+    REQUIRE(parent->commit(0, Page).has_value());
+    auto const helper = GuestMemoryMapping::map(object->get(), ObjectBytes, Page, GuardBytes);
+    REQUIRE(helper.has_value());
+    auto const stateAt = [&](uint64_t offset) {
+        auto region = MEMORY_BASIC_INFORMATION {};
+        REQUIRE(::VirtualQuery(helper->base() + offset, &region, sizeof(region)) != 0);
+        return region.State;
+    };
+    CHECK(stateAt(Page) == MEM_RESERVE);
+
+    REQUIRE(parent->commit(Page, 2 * Page).has_value());
+    CHECK(stateAt(Page) == MEM_COMMIT);
+    CHECK(stateAt(2 * Page) == MEM_RESERVE);
+}
+#endif
+
 TEST_CASE("GuestMemoryMapping.refusesAnObjectTooSmall", "[vtextension]")
 {
     requireGuestMapping();

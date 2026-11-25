@@ -50,6 +50,9 @@ namespace
         if (!provision.grow
             || provision.grow(provision.memory, newBytes) != remote::proto::GrowStatus::Granted)
             return wasmtime_error_new("guest memory growth was refused");
+        // A grant is not proof the bytes are open: the guest spans only what the mapping opened.
+        if (provision.memory.accessibleBytes() < newBytes)
+            return wasmtime_error_new("guest memory growth was granted but not opened");
         return nullptr;
     }
 
