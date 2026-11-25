@@ -579,7 +579,7 @@ TEST_CASE("CompiledExtension.instantiationHooks", "[vtextension]")
     checkRefusedPromptly(std::vector<InstantiationHookCase> {
         { .description = "__post_instantiate",
           .module = toModule(vtextension::testing::PostInstantiateSpinningModule) },
-        { .description = "__wasm_call_ctors without WASI",
+        { .description = "__wasm_call_ctors",
           .module = toModule(vtextension::testing::CallCtorsSpinningModule) },
         { .description = "_initialize followed by a NUL",
           .module = toModule(vtextension::testing::NulInitializerModule) },
