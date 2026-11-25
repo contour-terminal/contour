@@ -382,6 +382,7 @@ the configuration.
 | `pane-env <pane> <KEY> = value` | `pane-env agent GIT_CONFIG_COUNT = 1` | Environment for one pane. |
 | `pane-env-set <pane> {<arg>} = <VAR> …` | `pane-env-set agent {env-set} = CLAUDE_CONFIG_DIR NO_PROXY` | Variables one pane may take from the user's set the call names. |
 | `command-env-set <command> {<arg>} = <VAR> …` | `command-env-set agent-transcript {env-set} = CLAUDE_CONFIG_DIR` | Variables one command may take from the user's set the call names. |
+| `command-drop-lines <command> = <prefix>` | `command-drop-lines git-index-flags = H 10` | A line of the command's standard output that begins with `<prefix>` (the whole value, single spaces included) is dropped as the host reads it, before the cap on what it keeps of the stream applies. At most 64 bytes, not empty, each given once, at most 16 per command; the command is declared earlier. It narrows what the extension is handed and grants nothing, so the consent dialog does not list it. |
 | `pane-input` | `pane-input` | `pane-send` may type text the user wrote into the extension's panes, and `pane-key` press a digit or Escape in them. The consent dialog says so. |
 | `inbox <name> = text` | `inbox note = A reviewer left a comment.` | Reserved: refused until a version of the manifest supports it. |
 | `serve <scheme>` | `serve orchestrator` | The extension serves `<scheme>://` tabs. |
@@ -391,6 +392,13 @@ the configuration.
 In `pane-env-set` and `command-env-set` the argument is an `arg … = name`, which a call may leave out (then no
 set applies), and every variable listed must be one a user's set may hold (above): the manifest names the
 variables, the user's set gives their values.
+
+A command whose output is a long listing of which only a few lines matter declares the lines it does not need
+with `command-drop-lines`: the host drops them as they arrive, on standard output only, so its 1 MiB cap on a
+stream bounds what the extension reads rather than what the program printed. The orchestrator's index check
+drops plain files and symbolic links (`H 10`, `H 12`) from `git ls-files -v --stage`, so a clean index of any size
+reads empty and only marked entries and gitlinks reach it. A line is judged on its first bytes alone, each
+compared once with each prefix it still matches.
 
 A conformance corpus of valid and invalid version-2 manifests, which Contour's parser is tested
 against, lives in [`extensions/orchestrator/contract/manifest-v2`][corpus].
