@@ -27,6 +27,7 @@
 #include <vtextension/wasm/wasi/Preview1Shim.hpp>
 #include <vtextension/wasm/wasi/Preview1Signatures.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
+#include <vtextension/wasm/wasmtime/WasmtimeMemoryCreator.hpp>
 // Every feature switch the table drives must exist: a Wasmtime built without one of these could neither
 // be told to refuse what the table forbids nor be trusted to accept what it allows. Generated from the
 // list the configure-time probe checks too (cmake/ContourThirdParties.cmake).
@@ -147,6 +148,15 @@ namespace
                && std::ranges::none_of(featureSetters,
                                        [](FeatureSetterRow const& row) { return row.setter == nullptr; });
     }
+    /// @return The guard that follows each instance's memory of an engine configured by @p config, where the
+    ///         host maps it: SignalsGuardBytes for provided memory trapping through signals, else none.
+    [[nodiscard]] uint64_t memoryGuardBytesOf(WasmtimeConfig const& config) noexcept
+    {
+        return config.memory == MemorySharing::Provided && config.trapMode == TrapMode::Signals
+                   ? SignalsGuardBytes
+                   : 0;
+    }
+
     /// @return A configuration for one runtime's engine, from EngineFeatures, @p config and @p limits.
     [[nodiscard]] wasm_config_t* engineConfig(WasmtimeConfig const& config, RuntimeLimits limits)
     {
@@ -168,6 +178,19 @@ namespace
         wasmtime_config_parallel_compilation_set(engineConfig, false);
         // Mach ports would install a process-wide exception handler thread on macOS.
         wasmtime_config_macos_use_mach_ports_set(engineConfig, false);
+        if (config.memory == MemorySharing::Provided)
+        {
+            // Every memory lives in the object Contour granted for it, reserved whole, never moved, and
+            // followed by exactly the guard the host maps: nothing Wasmtime would size on its own.
+            wasmtime_config_memory_reservation_set(engineConfig,
+                                                   remote::proto::memoryObjectBytes(limits.memoryBytes));
+            wasmtime_config_memory_guard_size_set(engineConfig, memoryGuardBytesOf(config));
+            wasmtime_config_memory_reservation_for_growth_set(engineConfig, 0);
+            wasmtime_config_memory_may_move_set(engineConfig, false);
+            // Data segments are copied into the object, rather than mapped copy-on-write over it.
+            wasmtime_config_memory_init_cow_set(engineConfig, false);
+            provideMemories(engineConfig);
+        }
         return engineConfig;
     }
 
@@ -351,7 +374,13 @@ namespace
 
         [[nodiscard]] remote::proto::MemoryMode memoryMode() const noexcept override
         {
-            return remote::proto::MemoryMode::Copy;
+            return _config.memory == MemorySharing::Provided ? remote::proto::MemoryMode::Shared
+                                                             : remote::proto::MemoryMode::Copy;
+        }
+
+        [[nodiscard]] uint64_t memoryGuardBytes() const noexcept override
+        {
+            return memoryGuardBytesOf(_config);
         }
 
       private:

@@ -13,6 +13,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -22,8 +23,11 @@
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 #include <vtextension/wasm/host/ExecutorThread.hpp>
+#include <vtextension/wasm/host/MemoryProvision.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/ControlPage.hpp>
+#include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
+#include <vtextension/wasm/remote/transport/HandleGrant.hpp>
 #include <vtextension/wasm/remote/transport/PduStream.hpp>
 
 namespace vtextension::wasm::host
@@ -31,6 +35,7 @@ namespace vtextension::wasm::host
 
 namespace proto = remote::proto;
 using remote::transport::Channel;
+using remote::transport::GuestMemoryMapping;
 using remote::transport::PduStream;
 using remote::transport::StreamError;
 
@@ -89,6 +94,8 @@ namespace
     {
         std::vector<proto::WireHostFunction> functions; ///< Declared first, so released last.
         std::shared_ptr<IWasmRuntime> runtime;
+        /// Its memory cap: what the object granted to each of its instances is sized for.
+        uint64_t memoryBytes = 0;
     };
 
     /// A module, and the runtime it was loaded on.
@@ -207,6 +214,30 @@ class HostServer::Impl
     /// The lane whose call runs on this thread; null outside a call, and on the control thread.
     static thread_local Lane* CurrentLane;
 
+    /// The server whose control thread is instantiating on this thread; null outside an instantiation.
+    static thread_local Impl* CurrentInstantiation;
+
+    /// Asks the parent whether instance @p instanceId's memory may grow to @p bytes, on the channel the guest
+    /// running on this thread was entered through: the lane of its call, or control while it is being
+    /// instantiated (a start function). Anywhere else growth is refused.
+    /// @return The parent's answer; Refused where nobody can be asked, or the channel failed or was answered
+    ///         with anything but Grown, which ends the connection once the guest returned.
+    [[nodiscard]] proto::GrowStatus growOnCurrentChannel(uint32_t instanceId, uint64_t bytes) noexcept;
+
+    /// Sends Grow on @p stream and reads its one answer, which must be Grown.
+    /// @param ended Why the channel stopped serving; set here if it does, and nothing is asked once set.
+    [[nodiscard]] static proto::GrowStatus askToGrow(PduStream& stream,
+                                                     std::optional<ServerExit>& ended,
+                                                     uint32_t instanceId,
+                                                     uint64_t bytes) noexcept;
+
+    /// Checks what an Instantiate grants against how this host shares memory, and maps it.
+    /// @return Under MemoryMode::Copy nothing, once the grant is empty and nothing came with it; under
+    ///         MemoryMode::Shared the provision of the granted object, mapped, its handle adopted; a
+    ///         ProtocolViolation for a grant that is neither.
+    [[nodiscard]] std::expected<std::optional<MemoryProvision>, ServerExit> provisionOf(
+        proto::Instantiate const& request, RuntimeSlot const& runtime);
+
     /// Ends the connection for @p reason, unless it ended already: interrupts every live instance, then shuts
     /// every channel down, so that every thread blocked on one returns. Repeating it is harmless.
     void finish(ServerExit reason) noexcept;
@@ -272,9 +303,13 @@ class HostServer::Impl
     std::unordered_map<uint32_t, std::shared_ptr<InstanceSlot>> _instances;
     std::unordered_map<uint32_t, uint32_t> _slotInstances; ///< The live instance at each slot held, by slot.
     std::optional<ServerExit> _exit; ///< Why the connection ended; nothing while it serves.
+    /// Why control stopped serving during the instantiation running, through a growth asked there; the
+    /// control thread's alone.
+    std::optional<ServerExit> _instantiationEnded;
 };
 
 thread_local HostServer::Impl::Lane* HostServer::Impl::CurrentLane = nullptr;
+thread_local HostServer::Impl* HostServer::Impl::CurrentInstantiation = nullptr;
 
 HostServer::Impl::Impl(IHostedEngine& engine,
                        std::vector<Channel> lanes,
@@ -344,6 +379,13 @@ void HostServer::Impl::serveControl()
         if (!request)
         {
             finish(exitOf(request.error()));
+            return;
+        }
+        // Only an Instantiate claims what came with its frame: anything else that brought a handle along is a
+        // violation, and the handle is closed with the connection.
+        if (!std::holds_alternative<proto::Instantiate>(*request) && _control.takeAttachedHandle())
+        {
+            finish(ServerExit::ProtocolViolation);
             return;
         }
         auto const served = std::visit([&](auto& pdu) { return serve(pdu); }, *request);
@@ -425,8 +467,8 @@ Served HostServer::Impl::serve(proto::CreateRuntime const& request)
     if (!_runtimeIds.insert(request.runtimeId).second)
         return std::unexpected(ServerExit::ProtocolViolation);
     // The engine is handed views of the server's own copy of the strings, which outlives the runtime.
-    auto slot =
-        std::make_shared<RuntimeSlot>(RuntimeSlot { .functions = request.functions, .runtime = nullptr });
+    auto slot = std::make_shared<RuntimeSlot>(RuntimeSlot {
+        .functions = request.functions, .runtime = nullptr, .memoryBytes = request.memoryBytes });
     // A stack the executors cannot hold MaxCallDepth of is refused, before the engine sees it.
     // So is a table cap no engine accepts, before it is narrowed to RuntimeLimits' width.
     if (request.stackBytes > proto::MaxRuntimeStackBytes || request.tableElements > MaxTableElements)
@@ -512,10 +554,23 @@ Served HostServer::Impl::serve(proto::Instantiate const& request)
     };
     if (!module || !isSlotFree() || !_instanceIds.insert(request.instanceId).second)
         return std::unexpected(ServerExit::ProtocolViolation);
+    auto provision = provisionOf(request, *module->runtime);
+    if (!provision)
+        return std::unexpected(provision.error());
 
-    // A start function runs here, on the control thread, where a host call finds no lane and fails.
-    auto instance =
-        prepare(_controlGuard).and_then([&] { return module->module->instantiate(_hostContext); });
+    // A start function runs here, on the control thread, where a host call finds no lane and fails, and
+    // growing its memory asks the parent on control.
+    auto instance = prepare(_controlGuard).and_then([&] {
+        auto scope = std::optional<ProvisionScope> {};
+        if (*provision)
+            scope.emplace(std::move(**provision));
+        auto const outer = std::exchange(CurrentInstantiation, this);
+        auto instantiated = module->module->instantiate(_hostContext);
+        CurrentInstantiation = outer;
+        return instantiated;
+    });
+    if (auto const ended = std::exchange(_instantiationEnded, std::nullopt))
+        return std::unexpected(*ended);
     if (!instance)
         return send(_control,
                     proto::Instantiated {
@@ -562,6 +617,73 @@ Served HostServer::Impl::serve(proto::Instantiate const& request)
         _instances.erase(request.instanceId);
         _slotInstances.erase(request.interruptSlot);
     });
+}
+
+std::expected<std::optional<MemoryProvision>, ServerExit> HostServer::Impl::provisionOf(
+    proto::Instantiate const& request, RuntimeSlot const& runtime)
+{
+    auto const& grant = request.memory;
+    if (_engine.memoryMode() == proto::MemoryMode::Copy)
+    {
+        // A host that copies memory is granted nothing, and nothing travels with the request.
+        if (grant != proto::MemoryGrant {} || _control.takeAttachedHandle())
+            return std::unexpected(ServerExit::ProtocolViolation);
+        return std::nullopt;
+    }
+
+    // The object is the one the runtime's cap sizes, and the memory spans whole pages of it at first.
+    if (grant.objectBytes != proto::memoryObjectBytes(runtime.memoryBytes)
+        || grant.initialBytes > grant.objectBytes || grant.initialBytes % proto::WasmPageBytes != 0)
+        return std::unexpected(ServerExit::ProtocolViolation);
+    auto claimed = remote::transport::claimGrantedHandle(_control, grant.handle);
+    if (!claimed)
+        return std::unexpected(ServerExit::ProtocolViolation);
+    // What cannot be mapped as the object, writable, is not the object granted: let go of unproven, never
+    // closed on Windows, where the value may name a handle of this process's own.
+    auto mapping = GuestMemoryMapping::map(
+        claimed->get(), grant.objectBytes, grant.initialBytes, _engine.memoryGuardBytes());
+    if (!mapping)
+        return std::unexpected(ServerExit::ProtocolViolation);
+    // Proven, the handle is ours, and closed: the mapping keeps the object alive.
+    std::ignore = std::move(*claimed).adopt();
+    return MemoryProvision { .memory = std::move(*mapping),
+                             .grow = [this, instanceId = request.instanceId](uint64_t bytes) {
+                                 return growOnCurrentChannel(instanceId, bytes);
+                             } };
+}
+
+proto::GrowStatus HostServer::Impl::growOnCurrentChannel(uint32_t instanceId, uint64_t bytes) noexcept
+{
+    if (auto* const lane = CurrentLane; lane != nullptr && lane->server == this)
+        return askToGrow(lane->stream, lane->ended, instanceId, bytes);
+    if (CurrentInstantiation == this)
+        return askToGrow(_control, _instantiationEnded, instanceId, bytes);
+    return proto::GrowStatus::Refused;
+}
+
+proto::GrowStatus HostServer::Impl::askToGrow(PduStream& stream,
+                                              std::optional<ServerExit>& ended,
+                                              uint32_t instanceId,
+                                              uint64_t bytes) noexcept
+{
+    if (ended)
+        return proto::GrowStatus::Refused;
+    if (auto const sent = send(stream, proto::Grow { .instanceId = instanceId, .bytes = bytes }); !sent)
+    {
+        ended = sent.error();
+        return proto::GrowStatus::Refused;
+    }
+    // Exactly one answer: the parent serves nothing else on this channel before it.
+    auto const answer = stream.receive();
+    if (!answer)
+    {
+        ended = exitOf(answer.error());
+        return proto::GrowStatus::Refused;
+    }
+    if (auto const* const grown = std::get_if<proto::Grown>(&*answer))
+        return grown->status;
+    ended = ServerExit::ProtocolViolation;
+    return proto::GrowStatus::Refused;
 }
 
 Served HostServer::Impl::serve(proto::Release const& request)

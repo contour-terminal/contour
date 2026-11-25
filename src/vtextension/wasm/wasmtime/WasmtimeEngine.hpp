@@ -23,6 +23,18 @@ enum class TrapMode : uint8_t
     Signals,  ///< Guard pages and a process signal handler, as Wasmtime does by default.
 };
 
+/// Where an engine's instances keep their linear memory.
+enum class MemorySharing : uint8_t
+{
+    Private,  ///< In memory Wasmtime allocates; the host copies it to the parent (MemoryMode::Copy).
+    Provided, ///< In the object Contour granted, mapped by the host (host/MemoryProvision.hpp;
+              ///< MemoryMode::Shared).
+};
+
+/// The guard that follows provided memory under TrapMode::Signals: what lets compiled code fold a static
+/// offset into the bounds check it makes on the index.
+inline constexpr uint64_t SignalsGuardBytes = uint64_t { 32 } * 1024 * 1024;
+
 /// How every Wasmtime engine of a process is set up.
 struct WasmtimeConfig
 {
@@ -30,6 +42,9 @@ struct WasmtimeConfig
     TrapMode trapMode = TrapMode::Software;
     /// Where the WASI functions every instance imports read clocks and random bytes from.
     wasi::ShimEnvironment wasiEnvironment = wasi::systemEnvironment();
+    /// Where instances keep their linear memory. Provided needs a provision offered around every
+    /// instantiation of a module that has memory, or that instantiation fails.
+    MemorySharing memory = MemorySharing::Private;
 };
 
 /// What all Wasmtime engines of a process share: the bring-up generation and the count of runtimes
@@ -46,7 +61,8 @@ class KindState;
 /// @param config How the engine sets up each Wasmtime engine it creates.
 /// @return The engine. Refused memory growth is not reported (MemoryGrowthReporting::Unreported): the
 ///         guest's memory.grow returns -1, and whatever the guest does about it fails the call. Its memory is
-///         copied to the parent (MemoryMode::Copy).
+///         copied to the parent (MemoryMode::Copy) under MemorySharing::Private, and shared with it
+///         (MemoryMode::Shared) under MemorySharing::Provided.
 [[nodiscard]] std::unique_ptr<host::IHostedEngine> makeWasmtimeEngine(std::shared_ptr<KindState> kind,
                                                                       WasmtimeConfig config);
 

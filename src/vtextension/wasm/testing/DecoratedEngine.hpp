@@ -150,6 +150,8 @@ class DecoratedEngine final: public host::IHostedEngine
         return _inner->memoryMode();
     }
 
+    [[nodiscard]] uint64_t memoryGuardBytes() const noexcept override { return _inner->memoryGuardBytes(); }
+
   private:
     std::unique_ptr<host::IHostedEngine> _inner;
     InstanceDecorator _decorate;

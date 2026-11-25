@@ -5,6 +5,7 @@
 /// What the extension host process runs modules on: a WebAssembly backend, and how it shares an instance's
 /// memory with Contour.
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 
@@ -21,6 +22,12 @@ class IHostedEngine: public IWasmBackend
     /// @return How the engine's instances share their linear memory with the parent: what the host states in
     ///         its Hello, and so how the parent reaches that memory.
     [[nodiscard]] virtual remote::proto::MemoryMode memoryMode() const noexcept = 0;
+
+    /// @return Under MemoryMode::Shared, how many inaccessible bytes must follow each instance's memory
+    /// object
+    ///         where the host maps it: the guard the engine's compiled code relies on (MemoryProvision); 0
+    ///         for an engine that copies memory.
+    [[nodiscard]] virtual uint64_t memoryGuardBytes() const noexcept = 0;
 };
 
 /// Creates the engine one host runs on; null if none can be.

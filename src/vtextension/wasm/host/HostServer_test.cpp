@@ -20,6 +20,7 @@
 #include <string_view>
 #include <system_error>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -35,10 +36,18 @@
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 #include <vtextension/wasm/remote/transport/ControlPage.hpp>
+#include <vtextension/wasm/remote/transport/HandleGrant.hpp>
+#include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
 #include <vtextension/wasm/remote/transport/PduStream.hpp>
+#include <vtextension/wasm/remote/transport/SharedObject.hpp>
 #include <vtextension/wasm/testing/BackendContract.hpp>
 #include <vtextension/wasm/testing/DecoratedEngine.hpp>
 #include <vtextension/wasm/testing/HostedEngine.hpp>
+#include <vtextension/wasm/testing/ProcessModules.hpp>
+
+#ifndef _WIN32
+    #include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
+#endif
 
 #if defined(_MSC_VER) && !defined(__clang__)
     #include <intrin.h>
@@ -59,11 +68,22 @@ using vtextension::wasm::remote::proto::MaxCallDepth;
 using vtextension::wasm::remote::proto::MaxRuntimeStackBytes;
 using vtextension::wasm::remote::transport::Channel;
 using vtextension::wasm::remote::transport::ChannelError;
+using vtextension::wasm::remote::transport::createSharedObject;
+using vtextension::wasm::remote::transport::grantHandle;
+using vtextension::wasm::remote::transport::HandleGrant;
+using vtextension::wasm::remote::transport::HandleTarget;
 using vtextension::wasm::remote::transport::InterruptSlotCount;
 using vtextension::wasm::remote::transport::makeChannelPair;
+using vtextension::wasm::remote::transport::MapAccess;
+using vtextension::wasm::remote::transport::OwnedHandle;
 using vtextension::wasm::remote::transport::PduStream;
+using vtextension::wasm::remote::transport::SharedMapping;
+using vtextension::wasm::remote::transport::SharedObjectUse;
 using vtextension::wasm::remote::transport::StreamError;
 using vtextension::wasm::testing::makeHostedEngine;
+#ifndef _WIN32
+using vtextension::wasm::remote::transport::testing::openDescriptorCount;
+#endif
 
 namespace proto = vtextension::wasm::remote::proto;
 namespace contract = vtextension::wasm::testing::contract;
@@ -1152,6 +1172,348 @@ TEST_CASE("HostServer.callablesPastTheCapFailTheInstantiation", "[vtextension][h
     parent.send(0, proto::Call { .instanceId = 1, .exportOrdinal = 0, .argv = {} });
     CHECK(parent.exitWithinDeadline() == ServerExit::ProtocolViolation);
 }
+
+namespace
+{
+
+/// A guest page.
+constexpr auto GuestPage = proto::WasmPageBytes;
+
+/// The object the parent grants each instance of a runtime of the contract's limits.
+constexpr auto ObjectBytes = proto::memoryObjectBytes(contract::Limits.memoryBytes);
+
+/// One instance's memory object as the parent holds it: made, and mapped whole, its pages committed.
+class ParentObject
+{
+  public:
+    /// @param bytes The object's size.
+    explicit ParentObject(uint64_t bytes = ObjectBytes):
+        _handle { created(bytes) }, _mapping { mapped(_handle, bytes) }
+    {
+    }
+
+    /// @return A grant of the object to a host serving in this process.
+    [[nodiscard]] HandleGrant grant() const
+    {
+        auto granted = grantHandle(HandleTarget::currentProcess(), _handle.get());
+        REQUIRE(granted.has_value());
+        return *granted;
+    }
+
+    /// @return The 32-bit little-endian word at @p address, as the parent's mapping reads it.
+    [[nodiscard]] uint32_t wordAt(std::size_t address) const
+    {
+        auto word = uint32_t { 0 };
+        for (auto const index: std::views::iota(std::size_t { 0 }, std::size_t { 4 }))
+            word |= std::to_integer<uint32_t>(_mapping.bytes()[address + index]) << (index * 8);
+        return word;
+    }
+
+  private:
+    [[nodiscard]] static OwnedHandle created(uint64_t bytes)
+    {
+        auto object = createSharedObject(bytes, SharedObjectUse::GuestMemory);
+        REQUIRE(object.has_value());
+        return std::move(*object);
+    }
+
+    [[nodiscard]] static SharedMapping mapped(OwnedHandle const& handle, uint64_t bytes)
+    {
+        auto mapping = SharedMapping::map(handle.get(), bytes, MapAccess::ReadWrite);
+        REQUIRE(mapping.has_value());
+        // Contour commits what it grants through its own view (Windows); the host does through its own.
+        REQUIRE(mapping->commit(0, bytes).has_value());
+        return std::move(*mapping);
+    }
+
+    OwnedHandle _handle;
+    SharedMapping _mapping;
+};
+
+/// @return A scripted parent of a host whose engine runs instances in the memory granted to them.
+[[nodiscard]] std::unique_ptr<ScriptedParent> sharingParent()
+{
+    return std::make_unique<ScriptedParent>(makeHostedEngine(proto::MemoryMode::Shared), HostServerConfig {});
+}
+
+/// Sends an Instantiate of module 1 as instance 1 on @p parent's control, granting what @p grant grants with
+/// @p memory's sizes.
+void sendGranted(ScriptedParent& parent, proto::MemoryGrant memory, HandleGrant const& grant)
+{
+    auto const sent = parent.control->send(
+        proto::Instantiate { .moduleId = 1, .instanceId = 1, .interruptSlot = 1, .memory = memory }, grant);
+    REQUIRE(sent.has_value());
+}
+
+/// Instantiates module 1 as instance 1, granting @p object with its first page open, which must succeed.
+void instantiateGranted(ScriptedParent& parent, ParentObject const& object)
+{
+    auto const grant = object.grant();
+    sendGranted(parent,
+                proto::MemoryGrant {
+                    .handle = grant.wireValue, .objectBytes = ObjectBytes, .initialBytes = GuestPage },
+                grant);
+    auto const answer = parent.receiveControl();
+    REQUIRE(std::holds_alternative<proto::Instantiated>(answer));
+    REQUIRE_FALSE(std::get<proto::Instantiated>(answer).error.has_value());
+}
+
+/// A parent with runtime 1 and GrowModule loaded as module 1 on a host that shares memory.
+struct GrowingParent
+{
+    std::unique_ptr<ScriptedParent> parent = sharingParent(); ///< The parent.
+    proto::Loaded loaded;                                     ///< What GrowModule was described as.
+
+    GrowingParent(): loaded { prepared(*parent) } {}
+
+  private:
+    [[nodiscard]] static proto::Loaded prepared(ScriptedParent& parent)
+    {
+        CHECK(parent.receiveControl()
+              == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
+                                             .memoryMode = proto::MemoryMode::Shared,
+                                             .lockdown = proto::LockdownState::Unsandboxed } });
+        parent.createRuntime(1);
+        return parent.loadOk(1, 1, toModule(vtextension::wasm::testing::GrowModule));
+    }
+};
+
+} // namespace
+
+TEST_CASE("HostServer.sharedInstantiateMapsTheGrant", "[vtextension][host]")
+{
+    auto growing = GrowingParent {};
+    auto& parent = *growing.parent;
+    auto const object = ParentObject {};
+#ifndef _WIN32
+    auto const descriptorsBefore = openDescriptorCount();
+#endif
+    instantiateGranted(parent, object);
+#ifndef _WIN32
+    // The host keeps the mapping, not the descriptor it came with.
+    CHECK(openDescriptorCount() == descriptorsBefore);
+#endif
+
+    parent.send(0,
+                proto::Call { .instanceId = 1,
+                              .exportOrdinal = ordinalOf(growing.loaded, "store"),
+                              .argv = { 16, 42 } });
+    CHECK(parent.receive(0) == proto::Pdu { proto::CallResult {} });
+    CHECK(object.wordAt(16) == 42);
+}
+
+TEST_CASE("HostServer.growGoesThroughTheParent", "[vtextension][host]")
+{
+    auto growing = GrowingParent {};
+    auto& parent = *growing.parent;
+    auto const object = ParentObject {};
+    instantiateGranted(parent, object);
+    auto const grow = ordinalOf(growing.loaded, "grow");
+
+    parent.send(0, proto::Call { .instanceId = 1, .exportOrdinal = grow, .argv = { 1 } });
+    CHECK(parent.receive(0) == proto::Pdu { proto::Grow { .instanceId = 1, .bytes = 2 * GuestPage } });
+
+    SECTION("granted")
+    {
+        parent.send(0, proto::Grown { .status = proto::GrowStatus::Granted });
+        CHECK(parent.receive(0)
+              == proto::Pdu { proto::CallResult { .failure = std::nullopt, .argv = { 1 } } });
+        auto const address = static_cast<uint32_t>(GuestPage + 8);
+        parent.send(0,
+                    proto::Call { .instanceId = 1,
+                                  .exportOrdinal = ordinalOf(growing.loaded, "store"),
+                                  .argv = { address, 7 } });
+        CHECK(parent.receive(0) == proto::Pdu { proto::CallResult {} });
+        CHECK(object.wordAt(address) == 7);
+    }
+
+    SECTION("refused")
+    {
+        parent.send(0, proto::Grown { .status = proto::GrowStatus::Refused });
+        CHECK(parent.receive(0)
+              == proto::Pdu { proto::CallResult { .failure = std::nullopt, .argv = { 0xFFFF'FFFF } } });
+    }
+}
+
+TEST_CASE("HostServer.growDuringInstantiateGoesThroughTheParent", "[vtextension][host]")
+{
+    using vtextension::wasm::testing::StartGrowAddress;
+    using vtextension::wasm::testing::StartGrowValue;
+    auto parent = sharingParent();
+    parent->skipHello();
+    parent->createRuntime(1);
+    auto const loaded = parent->loadOk(1, 1, toModule(vtextension::wasm::testing::StartGrowModule));
+    auto const object = ParentObject {};
+    auto const grant = object.grant();
+    sendGranted(*parent,
+                proto::MemoryGrant {
+                    .handle = grant.wireValue, .objectBytes = ObjectBytes, .initialBytes = GuestPage },
+                grant);
+
+    // The start function asks on control, before the instance is announced.
+    CHECK(parent->receiveControl() == proto::Pdu { proto::Grow { .instanceId = 1, .bytes = 2 * GuestPage } });
+    auto const answered = [&](proto::GrowStatus status) {
+        parent->sendControl(proto::Grown { .status = status });
+        auto const instantiated = parent->receiveControl();
+        REQUIRE(std::holds_alternative<proto::Instantiated>(instantiated));
+        REQUIRE_FALSE(std::get<proto::Instantiated>(instantiated).error.has_value());
+        parent->send(
+            0, proto::Call { .instanceId = 1, .exportOrdinal = ordinalOf(loaded, "grown"), .argv = {} });
+        auto const result = parent->receive(0);
+        REQUIRE(std::holds_alternative<proto::CallResult>(result));
+        return std::get<proto::CallResult>(result).argv;
+    };
+
+    SECTION("granted")
+    {
+        CHECK(answered(proto::GrowStatus::Granted) == std::vector<uint32_t> { 1 });
+        CHECK(object.wordAt(StartGrowAddress) == StartGrowValue);
+    }
+
+    SECTION("refused")
+    {
+        CHECK(answered(proto::GrowStatus::Refused) == std::vector<uint32_t> { 0xFFFF'FFFF });
+        CHECK(object.wordAt(StartGrowAddress) == 0);
+    }
+}
+
+TEST_CASE("HostServer.wrongGrantIsAViolation", "[vtextension][host]")
+{
+    /// Whether the object travels with the request.
+    enum class Granted : uint8_t
+    {
+        Nothing, ///< Nothing is granted.
+        Object,  ///< The object the parent made is.
+    };
+    /// One way a grant is not the object it must be.
+    struct WrongGrant
+    {
+        std::string_view what;
+        uint64_t madeBytes;        ///< The size of the object the parent makes.
+        proto::MemoryGrant memory; ///< What the Instantiate says; a handle of 0 is the grant's own.
+        Granted granted;           ///< Whether the object is granted at all.
+    };
+    // clang-format off
+    auto const rows = std::to_array<WrongGrant>({
+        { .what = "an object other than the runtime's cap sizes", .madeBytes = ObjectBytes + GuestPage,
+          .memory = { .handle = 0, .objectBytes = ObjectBytes + GuestPage, .initialBytes = GuestPage }, .granted = Granted::Object },
+        { .what = "more initial bytes than the object", .madeBytes = ObjectBytes,
+          .memory = { .handle = 0, .objectBytes = ObjectBytes, .initialBytes = ObjectBytes + GuestPage }, .granted = Granted::Object },
+        { .what = "initial bytes that are no whole page", .madeBytes = ObjectBytes,
+          .memory = { .handle = 0, .objectBytes = ObjectBytes, .initialBytes = GuestPage + 4096 }, .granted = Granted::Object },
+        { .what = "no object granted", .madeBytes = ObjectBytes,
+          .memory = { .handle = 0, .objectBytes = ObjectBytes, .initialBytes = GuestPage }, .granted = Granted::Nothing },
+        { .what = "an object half the size", .madeBytes = ObjectBytes / 2,
+          .memory = { .handle = 0, .objectBytes = ObjectBytes, .initialBytes = GuestPage }, .granted = Granted::Object },
+#ifdef _WIN32
+        { .what = "a value naming no object", .madeBytes = ObjectBytes,
+          .memory = { .handle = 0x1F4, .objectBytes = ObjectBytes, .initialBytes = GuestPage }, .granted = Granted::Nothing },
+#else
+        { .what = "a handle value beside the descriptor", .madeBytes = ObjectBytes,
+          .memory = { .handle = 1, .objectBytes = ObjectBytes, .initialBytes = GuestPage }, .granted = Granted::Object },
+#endif
+    });
+    // clang-format on
+    for (auto const& row: rows)
+    {
+        INFO(row.what);
+        auto parent = sharingParent();
+        parent->skipHello();
+        parent->createRuntime(1);
+        std::ignore = parent->loadOk(1, 1, toModule(vtextension::wasm::testing::GrowModule));
+        auto const object = ParentObject { row.madeBytes };
+        auto grant = row.granted == Granted::Object ? object.grant() : HandleGrant {};
+        auto memory = row.memory;
+        if (memory.handle == 0)
+            memory.handle = grant.wireValue;
+        sendGranted(*parent, memory, grant);
+        CHECK(parent->exitWithinDeadline() == ServerExit::ProtocolViolation);
+    }
+}
+
+TEST_CASE("HostServer.anythingButGrownAnswersAGrowIsAViolation", "[vtextension][host]")
+{
+    SECTION("on a lane")
+    {
+        for (auto const& answer:
+             { proto::Pdu { proto::HostResult {} },
+               proto::Pdu { proto::MemoryRead { .instanceId = 1, .address = 0, .size = 1 } } })
+        {
+            auto growing = GrowingParent {};
+            auto& parent = *growing.parent;
+            auto const object = ParentObject {};
+            instantiateGranted(parent, object);
+            parent.send(0,
+                        proto::Call { .instanceId = 1,
+                                      .exportOrdinal = ordinalOf(growing.loaded, "grow"),
+                                      .argv = { 1 } });
+            REQUIRE(std::holds_alternative<proto::Grow>(parent.receive(0)));
+            parent.send(0, answer);
+            CHECK(parent.exitWithinDeadline() == ServerExit::ProtocolViolation);
+        }
+    }
+
+    SECTION("on control")
+    {
+        auto parent = sharingParent();
+        parent->skipHello();
+        parent->createRuntime(1);
+        std::ignore = parent->loadOk(1, 1, toModule(vtextension::wasm::testing::StartGrowModule));
+        auto const object = ParentObject {};
+        auto const grant = object.grant();
+        sendGranted(*parent,
+                    proto::MemoryGrant {
+                        .handle = grant.wireValue, .objectBytes = ObjectBytes, .initialBytes = GuestPage },
+                    grant);
+        REQUIRE(std::holds_alternative<proto::Grow>(parent->receiveControl()));
+        parent->sendControl(proto::Release { .target = proto::ReleaseTarget::Module, .id = 1 });
+        CHECK(parent->exitWithinDeadline() == ServerExit::ProtocolViolation);
+    }
+}
+
+TEST_CASE("HostServer.copyEngineRefusesAGrant", "[vtextension][host]")
+{
+    auto const grants = [] {
+        auto rows = std::vector<std::pair<std::string_view, proto::MemoryGrant>> {
+            { "an object's sizes", { .handle = 0, .objectBytes = ObjectBytes, .initialBytes = GuestPage } },
+            { "initial bytes alone", { .handle = 0, .objectBytes = 0, .initialBytes = GuestPage } },
+            { "a handle value alone", { .handle = 4, .objectBytes = 0, .initialBytes = 0 } },
+        };
+#ifndef _WIN32
+        // An empty grant that a descriptor travels with all the same.
+        rows.emplace_back("a descriptor", proto::MemoryGrant {});
+#endif
+        return rows;
+    }();
+    for (auto const& [what, memory]: grants)
+    {
+        INFO(what);
+        auto parent = ScriptedParent {};
+        parent.skipHello();
+        parent.createRuntime(1);
+        std::ignore = parent.loadOk(1, 1, toModule(vtextension::wasm::testing::GrowModule));
+        auto const object = ParentObject {};
+        // The descriptor travels only with the empty grant; Windows hands the copy engine no handle at all.
+        auto const grant = memory == proto::MemoryGrant {} ? object.grant() : HandleGrant {};
+        sendGranted(parent, memory, grant);
+        CHECK(parent.exitWithinDeadline() == ServerExit::ProtocolViolation);
+    }
+}
+
+#ifndef _WIN32
+TEST_CASE("HostServer.onlyAnInstantiateBringsAHandle", "[vtextension][host]")
+{
+    // A descriptor travelling with anything but an Instantiate is claimed by nothing: a violation, closed
+    // with the connection. (On Windows nothing travels beside a frame.)
+    auto growing = GrowingParent {};
+    auto& parent = *growing.parent;
+    auto const object = ParentObject {};
+    auto const grant = object.grant();
+    REQUIRE(parent.control->send(proto::Release { .target = proto::ReleaseTarget::Module, .id = 1 }, grant)
+                .has_value());
+    CHECK(parent.exitWithinDeadline() == ServerExit::ProtocolViolation);
+}
+#endif
 
 TEST_CASE("InProcessHost.connectStartsAServingHost", "[vtextension][host]")
 {

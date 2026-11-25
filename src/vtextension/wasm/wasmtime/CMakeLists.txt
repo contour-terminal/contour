@@ -8,9 +8,12 @@ add_library(vtextension_wasmtime STATIC
     WasmtimeModule.cpp
     WasmtimeEngine.hpp
     WasmtimeHandles.hpp
+    WasmtimeMemoryCreator.cpp
+    WasmtimeMemoryCreator.hpp
     WasmtimeRuntime.hpp
 )
-target_link_libraries(vtextension_wasmtime PUBLIC vtextension PRIVATE contour::wasmtime)
+# vtextension_host for the memory a host provides an instance with (../host/MemoryProvision.hpp).
+target_link_libraries(vtextension_wasmtime PUBLIC vtextension vtextension_host PRIVATE contour::wasmtime)
 
 # The backstop WasmtimeEngine.cpp includes: it stops the build unless the Wasmtime headers have every
 # feature the backend switches, from the same list the configure-time probe checks an installed Wasmtime

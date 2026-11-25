@@ -9,6 +9,7 @@
 set(_transport_sources
     transport/Channel_posix.cpp
     transport/ControlPage_posix.cpp
+    transport/GuestMemoryMapping_posix.cpp
     transport/HandleGrant_posix.cpp
     transport/SharedObject_posix.cpp
     transport/WakeSignal_posix.cpp
@@ -17,6 +18,7 @@ if(WIN32)
     set(_transport_sources
         transport/Channel_win32.cpp
         transport/ControlPage_win32.cpp
+        transport/GuestMemoryMapping_win32.cpp
         transport/HandleGrant_win32.cpp
         transport/SharedObject_win32.cpp
         transport/WakeSignal_win32.cpp
@@ -38,6 +40,8 @@ add_library(vtextension_remote_wire STATIC
     ../BuildInstrumentation.hpp
     transport/Channel.hpp
     transport/ControlPage.hpp
+    transport/GuestMemoryMapping.cpp
+    transport/GuestMemoryMapping.hpp
     transport/HandleGrant.hpp
     transport/HelperArguments.cpp
     transport/HelperArguments.hpp
@@ -135,6 +139,7 @@ if(_process_source)
             process/testing/LaunchedHelper.hpp
             process/testing/RecordingLauncher.hpp
             transport/ControlPage_test.cpp
+            transport/GuestMemoryMapping_test.cpp
             transport/HandleGrant_test.cpp
             transport/HelperArguments_test.cpp
             transport/SharedObject_test.cpp

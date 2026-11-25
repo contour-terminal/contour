@@ -9,11 +9,16 @@
 namespace vtextension::wasm::testing
 {
 
-std::unique_ptr<host::IHostedEngine> makeHostedEngine()
+std::unique_ptr<host::IHostedEngine> makeHostedEngine(remote::proto::MemoryMode memoryMode)
 {
     static auto const kind = wasmtime::makeKindState();
-    return wasmtime::makeWasmtimeEngine(
-        kind, wasmtime::WasmtimeConfig { .trapMode = wasmtime::TrapMode::Software });
+    return wasmtime::makeWasmtimeEngine(kind,
+                                        wasmtime::WasmtimeConfig {
+                                            .trapMode = wasmtime::TrapMode::Software,
+                                            .memory = memoryMode == remote::proto::MemoryMode::Shared
+                                                          ? wasmtime::MemorySharing::Provided
+                                                          : wasmtime::MemorySharing::Private,
+                                        });
 }
 
 } // namespace vtextension::wasm::testing

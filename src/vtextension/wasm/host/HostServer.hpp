@@ -10,6 +10,11 @@
 /// its own. A host call a guest makes is sent on the lane the call came in on, and the parent may call back
 /// in, on that lane, before it answers. Ids are the parent's: one the parent never created, or creates twice,
 /// is a protocol violation, as is any PDU out of place. A violation ends the connection.
+///
+/// An engine that shares memory (MemoryMode::Shared) runs each instance in the object its Instantiate grants:
+/// the server maps it before instantiating, and a grant it cannot map as that object is a violation. Growing
+/// that memory asks the parent first, with a Grow answered by exactly one Grown: on the lane whose call grows
+/// it, or on control while a start function runs. An engine that copies memory is granted nothing.
 
 #include <cstddef>
 #include <cstdint>
