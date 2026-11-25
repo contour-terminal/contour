@@ -15,13 +15,36 @@
 
 #include <vtextension/wasm/remote/transport/WakeSignal.hpp>
 
-#ifndef _WIN32
+#ifdef _WIN32
+    #define WIN32_LEAN_AND_MEAN
+    #include <Windows.h>
+#else
     #include <csignal>
+
+    #include <fcntl.h>
 #endif
 
 using vtextension::wasm::remote::transport::makeWakePair;
 using vtextension::wasm::remote::transport::WakeResult;
 using vtextension::wasm::remote::transport::WakeWait;
+
+TEST_CASE("WakeSignal.endsAreNotInherited", "[vtextension]")
+{
+    auto const pair = makeWakePair();
+    REQUIRE(pair.has_value());
+    for (auto const handle: { pair->parent.nativeHandle(), pair->helper.nativeHandle() })
+    {
+#ifdef _WIN32
+        auto flags = DWORD { 0 };
+        REQUIRE(::GetHandleInformation(handle, &flags));
+        CHECK((flags & HANDLE_FLAG_INHERIT) == 0);
+#else
+        auto const flags = ::fcntl(handle, F_GETFD);
+        REQUIRE(flags != -1);
+        CHECK((flags & FD_CLOEXEC) != 0);
+#endif
+    }
+}
 
 TEST_CASE("WakeSignal.signalWakesTheReceiver", "[vtextension]")
 {

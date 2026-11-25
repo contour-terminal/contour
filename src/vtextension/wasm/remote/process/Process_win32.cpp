@@ -1,14 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // The launcher on Windows. CreateProcessW() with two attributes: PROC_THREAD_ATTRIBUTE_HANDLE_LIST, so that
-// the child inherits exactly the inheritable duplicates made for it (closed again once it started) and no
-// other inheritable handle of this process; and PROC_THREAD_ATTRIBUTE_JOB_LIST, which puts it in its job
-// before its first instruction -- no suspended start, no window outside the job. The job kills the child when
-// its last handle closes (the process handle's), allows it no second process, caps its memory and lets an
-// unhandled exception end it rather than open a dialog.
+// the child inherits exactly the duplicates made for it (closed again once it started) and no other
+// inheritable handle of this process; and PROC_THREAD_ATTRIBUTE_JOB_LIST, which puts it in its job before its
+// first instruction -- no suspended start, no window outside the job. The job kills the child when its last
+// handle closes (the process handle's), allows it no second process, caps its memory and lets an unhandled
+// exception end it rather than open a dialog.
 //
 // The child gets the null device as stdin and stdout, this process's stderr, the environment it is given and
 // nothing else, and the root of its executable's volume as its working directory.
+//
+// The inheritance window. The handle list binds only this CreateProcessW(): while the duplicates are
+// inheritable, any other CreateProcess() of this process that inherits handles without a list of its own
+// (QProcess, a library's launcher) inherits them too -- a channel end, the interrupt page, the wake event --
+// and that stranger's copy of a lane end keeps a dead helper's lane from ending (its parent end would never
+// read Closed). So the duplicates are made uninheritable, the command line is built from their values, and
+// only right before CreateProcessW() are they made inheritable; right after it they are closed, whatever it
+// returned. The window is that one call. Helper launches never race one another in it: every one runs on the
+// supervisor's thread. macOS has the like window, on its channel ends (Process_macos.cpp).
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -178,12 +187,14 @@ namespace
         }
 
         /// Sets @p attribute to the handles @p values, which must outlive the list's use.
-        /// @return Whether the list took it.
-        [[nodiscard]] bool set(DWORD_PTR attribute, std::span<HANDLE> values) noexcept
+        /// @return Nothing; or why the list refused it.
+        [[nodiscard]] std::expected<void, LaunchError> set(DWORD_PTR attribute,
+                                                           std::span<HANDLE> values) noexcept
         {
-            return ::UpdateProcThreadAttribute(
-                       _list, 0, attribute, values.data(), values.size_bytes(), nullptr, nullptr)
-                   != FALSE;
+            if (!::UpdateProcThreadAttribute(
+                    _list, 0, attribute, values.data(), values.size_bytes(), nullptr, nullptr))
+                return std::unexpected(launchErrorOf(::GetLastError()));
+            return {};
         }
 
         [[nodiscard]] LPPROC_THREAD_ATTRIBUTE_LIST get() const noexcept { return _list; }
@@ -198,14 +209,24 @@ namespace
         LPPROC_THREAD_ATTRIBUTE_LIST _list;
     };
 
-    /// @return An inheritable duplicate of @p handle; nothing if it could not be made.
-    [[nodiscard]] OwnedHandle inheritableCopyOf(HANDLE handle) noexcept
+    /// @return A duplicate of @p handle, not inheritable (yet); nothing if it could not be made.
+    [[nodiscard]] OwnedHandle copyOf(HANDLE handle) noexcept
     {
         auto copy = HANDLE { nullptr };
         if (!::DuplicateHandle(
-                ::GetCurrentProcess(), handle, ::GetCurrentProcess(), &copy, 0, TRUE, DUPLICATE_SAME_ACCESS))
+                ::GetCurrentProcess(), handle, ::GetCurrentProcess(), &copy, 0, FALSE, DUPLICATE_SAME_ACCESS))
             return OwnedHandle {};
         return OwnedHandle { copy };
+    }
+
+    /// Makes each of @p handles inheritable.
+    /// @return Nothing; or why one could not be.
+    [[nodiscard]] std::expected<void, LaunchError> allowInheritance(std::span<HANDLE const> handles) noexcept
+    {
+        for (auto* const handle: handles)
+            if (!::SetHandleInformation(handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
+                return std::unexpected(launchErrorOf(::GetLastError()));
+        return {};
     }
 
     /// @return A job that kills its process when closed, allows it no second one, caps its memory at
@@ -292,7 +313,8 @@ namespace
             std::erase_if(_watched, [&](auto const& watched) { return watched.first == key; });
         }
 
-        [[nodiscard]] std::vector<uint64_t> wait(std::optional<core::SteadyTimePoint> deadline) override
+        [[nodiscard]] std::expected<std::vector<uint64_t>, LaunchError> wait(
+            std::optional<core::SteadyTimePoint> deadline) override
         {
             while (true)
             {
@@ -301,12 +323,14 @@ namespace
                     handles.push_back(process);
                 auto const result = ::WaitForMultipleObjects(
                     static_cast<DWORD>(handles.size()), handles.data(), FALSE, timeoutOf(deadline));
+                // A watched handle closed while watched: waiting again would fail again, at once.
+                if (result == WAIT_FAILED)
+                    return std::unexpected(launchErrorOf(::GetLastError()));
                 auto ended = std::vector<uint64_t> {};
                 for (auto const& [key, process]: _watched)
                     if (::WaitForSingleObject(process, 0) == WAIT_OBJECT_0)
                         ended.push_back(key);
-                auto const isWoken = result == WAIT_OBJECT_0 || result == WAIT_FAILED;
-                if (!ended.empty() || isWoken || (deadline && _clock->now() >= *deadline))
+                if (!ended.empty() || result == WAIT_OBJECT_0 || (deadline && _clock->now() >= *deadline))
                     return ended;
             }
         }
@@ -347,25 +371,21 @@ namespace
             if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
                 return std::unexpected(LaunchError::NotFound);
 
-            // The child's copies: inheritable duplicates, which the handle list hands to it alone, and which
-            // close here once it holds its own.
+            // The child's copies, uninheritable until right before CreateProcessW() (the file head's window).
             auto owned = std::vector<OwnedHandle> {};
             auto childHandles = std::vector<transport::NativeHandle> {};
             for (auto const handle: spec.inherited)
             {
-                auto copy = inheritableCopyOf(handle);
+                auto copy = copyOf(handle);
                 if (!copy)
                     return std::unexpected(launchErrorOf(::GetLastError()));
                 childHandles.push_back(copy.get());
                 owned.push_back(std::move(copy));
             }
-            auto inheritable = SECURITY_ATTRIBUTES { .nLength = sizeof(SECURITY_ATTRIBUTES),
-                                                     .lpSecurityDescriptor = nullptr,
-                                                     .bInheritHandle = TRUE };
             auto nullDevice = OwnedHandle { ::CreateFileW(L"NUL",
                                                           GENERIC_READ | GENERIC_WRITE,
                                                           FILE_SHARE_READ | FILE_SHARE_WRITE,
-                                                          &inheritable,
+                                                          nullptr,
                                                           OPEN_EXISTING,
                                                           0,
                                                           nullptr) };
@@ -378,7 +398,7 @@ namespace
             auto errorOutput = OwnedHandle {};
             if (auto* const own = ::GetStdHandle(STD_ERROR_HANDLE);
                 own != nullptr && own != INVALID_HANDLE_VALUE)
-                errorOutput = inheritableCopyOf(own);
+                errorOutput = copyOf(own);
             auto* const childError = errorOutput ? errorOutput.get() : nullDevice.get();
 
             auto handleList = childHandles;
@@ -393,9 +413,11 @@ namespace
             auto list = AttributeList::create(2);
             if (!list)
                 return std::unexpected(launchErrorOf(::GetLastError()));
-            if (!list->set(PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handleList)
-                || !list->set(PROC_THREAD_ATTRIBUTE_JOB_LIST, jobList))
-                return std::unexpected(launchErrorOf(::GetLastError()));
+            if (auto const set = list->set(PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handleList).and_then([&] {
+                    return list->set(PROC_THREAD_ATTRIBUTE_JOB_LIST, jobList);
+                });
+                !set)
+                return std::unexpected(set.error());
 
             auto commandLine = std::wstring {};
             appendArgument(commandLine, executable.wstring());
@@ -420,18 +442,26 @@ namespace
             startup.StartupInfo.hStdError = childError;
             startup.lpAttributeList = list->get();
             auto info = PROCESS_INFORMATION {};
-            if (!::CreateProcessW(executable.c_str(),
-                                  commandLine.data(),
-                                  nullptr,
-                                  nullptr,
-                                  TRUE,
-                                  EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT
-                                      | CREATE_NO_WINDOW,
-                                  block->data(),
-                                  workingDirectory.c_str(),
-                                  &startup.StartupInfo,
-                                  &info))
-                return std::unexpected(launchErrorOf(::GetLastError()));
+            if (auto const allowed = allowInheritance(handleList); !allowed)
+                return std::unexpected(allowed.error());
+            auto const created =
+                ::CreateProcessW(executable.c_str(),
+                                 commandLine.data(),
+                                 nullptr,
+                                 nullptr,
+                                 TRUE,
+                                 EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
+                                 block->data(),
+                                 workingDirectory.c_str(),
+                                 &startup.StartupInfo,
+                                 &info);
+            auto const error = ::GetLastError();
+            // Closed at once: the child holds its own copies, and no other process may inherit these.
+            owned.clear();
+            nullDevice.reset();
+            errorOutput.reset();
+            if (!created)
+                return std::unexpected(launchErrorOf(error));
             ::CloseHandle(info.hThread);
             return std::make_unique<Win32ProcessHandle>(
                 OwnedHandle { info.hProcess }, std::move(job), static_cast<ProcessId>(info.dwProcessId));
@@ -463,7 +493,9 @@ std::vector<std::pair<std::string, std::string>> defaultHelperEnvironment()
     if (length == 0 || length >= value.size())
         return {};
     value.resize(length);
-    return { { "SystemRoot", std::filesystem::path { value }.string() } };
+    // UTF-8, as every string of the launcher's is; path::string() would spell it in the ANSI code page.
+    auto const utf8 = std::filesystem::path { value }.u8string();
+    return { { "SystemRoot", std::string { utf8.begin(), utf8.end() } } };
 }
 
 } // namespace vtextension::wasm::remote::process

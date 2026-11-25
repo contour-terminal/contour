@@ -6,8 +6,8 @@
 //   extension_host_probe --report <helper arguments> [--check-handle=H]…
 //
 // The report is one `key=value` line each: `cwd=` its working directory, `env=NAME` per environment variable,
-// and `fd=N` per open descriptor (POSIX) or `handle=H:valid|invalid` per --check-handle (Windows); then
-// `end`.
+// `stdin=` and `stdout=` each `null` if it is the null device, else `other`; and `fd=N` per open descriptor
+// (POSIX) or `handle=H:valid|invalid` per --check-handle (Windows); then `end`.
 #include <array>
 #include <bit>
 #include <charconv>
@@ -27,6 +27,8 @@
     #define WIN32_LEAN_AND_MEAN
     #include <Windows.h>
 #else
+    #include <sys/stat.h>
+
     #include <algorithm>
     #include <ranges>
 
@@ -79,6 +81,33 @@ constexpr auto CheckHandle = std::string_view { "--check-handle=" };
     return lines;
 }
 
+/// The standard streams the report names.
+enum class StandardStream : uint8_t
+{
+    Input,
+    Output,
+};
+
+/// @return Whether @p stream is the null device: `null`, else `other`.
+[[nodiscard]] std::string_view deviceOf(StandardStream stream)
+{
+#ifdef _WIN32
+    auto* const handle =
+        ::GetStdHandle(stream == StandardStream::Input ? STD_INPUT_HANDLE : STD_OUTPUT_HANDLE);
+    // NUL is a character device, and unlike a console it has no console mode.
+    auto mode = DWORD { 0 };
+    auto const isNull = handle != nullptr && handle != INVALID_HANDLE_VALUE
+                        && ::GetFileType(handle) == FILE_TYPE_CHAR && !::GetConsoleMode(handle, &mode);
+#else
+    struct stat opened {};
+    struct stat nullDevice {};
+    auto const descriptor = stream == StandardStream::Input ? STDIN_FILENO : STDOUT_FILENO;
+    auto const isNull = ::fstat(descriptor, &opened) == 0 && ::stat("/dev/null", &nullDevice) == 0
+                        && opened.st_dev == nullDevice.st_dev && opened.st_ino == nullDevice.st_ino;
+#endif
+    return isNull ? "null" : "other";
+}
+
 /// @return The open handles, one line each: every descriptor (POSIX), or the validity of each of @p checked
 ///         (Windows).
 [[nodiscard]] std::string handleLines([[maybe_unused]] std::span<std::string_view const> checked)
@@ -123,8 +152,10 @@ constexpr auto CheckHandle = std::string_view { "--check-handle=" };
     if (!control)
         return ProbeExit::NoControl;
 
-    auto const text = std::format("cwd={}\n{}{}end\n",
+    auto const text = std::format("cwd={}\nstdin={}\nstdout={}\n{}{}end\n",
                                   std::filesystem::current_path().string(),
+                                  deviceOf(StandardStream::Input),
+                                  deviceOf(StandardStream::Output),
                                   environmentLines(environment),
                                   handleLines(checked));
     auto const bytes = std::span { reinterpret_cast<uint8_t const*>(text.data()), text.size() };

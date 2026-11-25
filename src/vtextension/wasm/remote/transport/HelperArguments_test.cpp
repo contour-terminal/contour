@@ -140,6 +140,14 @@ TEST_CASE("HelperArguments.rejects", "[vtextension]")
         { .name = "a parent that is no number",
           .arguments = validWith("--parent=x"),
           .error = ArgumentError::Malformed },
+        { .name = "two roles on one handle",
+          .arguments = validWith("--wake=3"),
+          .error = ArgumentError::Malformed },
+#ifndef _WIN32
+        { .name = "a standard stream as a handle",
+          .arguments = validWith("--page=2"),
+          .error = ArgumentError::Malformed },
+#endif
         { .name = "a negative cap",
           .arguments = validWith("--data-bytes=-1"),
           .error = ArgumentError::Malformed },

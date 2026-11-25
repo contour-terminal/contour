@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include <fcntl.h>
 #include <unistd.h>
 
 #include <vtextension/wasm/remote/process/PosixLaunch.hpp>
@@ -81,6 +82,16 @@ namespace
         std::optional<ExitStatus> _status; ///< Set once reaped.
     };
 
+    /// Makes @p source the child's descriptor @p target, kept across exec. dup2() onto itself would keep the
+    /// descriptor's close-on-exec flag, so that case clears it instead. Async-signal-safe.
+    /// @return Whether it worked.
+    [[nodiscard]] bool inheritAs(int source, int target) noexcept
+    {
+        if (source == target)
+            return ::fcntl(target, F_SETFD, 0) != -1;
+        return ::dup2(source, target) != -1;
+    }
+
     /// Becomes @p prepared's program, in the child of pdfork(). Async-signal-safe throughout; never returns.
     [[noreturn]] void becomeChild(posix::PreparedLaunch& prepared,
                                   char* const* argv,
@@ -95,12 +106,12 @@ namespace
         sigemptyset(&empty);
         ::sigprocmask(SIG_SETMASK, &empty, nullptr);
 
-        if (::dup2(prepared.nullDevice.get(), STDIN_FILENO) == -1
-            || ::dup2(prepared.nullDevice.get(), STDOUT_FILENO) == -1)
+        if (!inheritAs(prepared.nullDevice.get(), STDIN_FILENO)
+            || !inheritAs(prepared.nullDevice.get(), STDOUT_FILENO))
             ::_exit(ExecFailed);
         auto child = posix::FirstChildDescriptor;
         for (auto const& parked: prepared.parked)
-            if (::dup2(parked.get(), child++) == -1)
+            if (!inheritAs(parked.get(), child++))
                 ::_exit(ExecFailed);
         ::closefrom(prepared.childEnd());
         if (::chdir("/") == -1)

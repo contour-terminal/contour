@@ -4,6 +4,12 @@
 // so that neither process can make the other's mapping fault past the object's end. macOS has no memfd: a
 // POSIX shared memory object under a name unique to this process, created exclusively and unlinked at once,
 // so that it is reachable only through the descriptor.
+//
+// The helper maps the page read-only. On Linux (5.1 and later) the memfd is also sealed against every write
+// mapping made after Contour's own (F_SEAL_FUTURE_WRITE), so that a helper cannot map it writable even if it
+// tried, nor mprotect() its mapping writable. Where the seal is missing -- an older kernel, FreeBSD, macOS --
+// the read-only mapping is the helper's own choice; a helper that writes to the page anyway still misleads
+// only itself, as Contour never reads it back.
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -63,7 +69,7 @@ namespace
         if (descriptor == -1)
             return std::unexpected(sharedObjectErrorOf(errno));
         if (::ftruncate(descriptor, static_cast<off_t>(ControlPageBytes)) == -1
-            || ::fcntl(descriptor, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) == -1)
+            || ::fcntl(descriptor, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW) == -1)
         {
             auto const error = errno;
             ::close(descriptor);
@@ -73,14 +79,39 @@ namespace
 #endif
     }
 
-    /// @return @p descriptor's page mapped shared, readable and writable; or why it could not be.
-    [[nodiscard]] std::expected<uint32_t*, SharedObjectError> mapPage(int descriptor) noexcept
+    /// Who maps the page, and so what it may do to it.
+    enum class PageAccess : uint8_t
     {
-        auto* const mapping =
-            ::mmap(nullptr, ControlPageBytes, PROT_READ | PROT_WRITE, MAP_SHARED, descriptor, 0);
+        ReadOnly,  ///< The helper: it reads the flags.
+        ReadWrite, ///< Contour: it raises and clears them.
+    };
+
+    /// @return @p descriptor's page mapped shared with @p access; or why it could not be.
+    [[nodiscard]] std::expected<uint32_t*, SharedObjectError> mapPage(int descriptor,
+                                                                      PageAccess access) noexcept
+    {
+        auto const protection = access == PageAccess::ReadWrite ? PROT_READ | PROT_WRITE : PROT_READ;
+        auto* const mapping = ::mmap(nullptr, ControlPageBytes, protection, MAP_SHARED, descriptor, 0);
         if (mapping == MAP_FAILED)
             return std::unexpected(SharedObjectError::Io);
         return static_cast<uint32_t*>(mapping);
+    }
+
+    /// Seals @p descriptor, once Contour mapped it: against any later write mapping where the system can, and
+    /// against further seals. Nothing to do where the object is no memfd (macOS).
+    /// @return Nothing; or why it could not be sealed.
+    [[nodiscard]] std::expected<void, SharedObjectError> sealMapped([[maybe_unused]] int descriptor) noexcept
+    {
+#ifndef __APPLE__
+    #ifdef F_SEAL_FUTURE_WRITE
+        // EINVAL: a kernel older than the seal; the helper's read-only mapping is then the only guard.
+        if (::fcntl(descriptor, F_ADD_SEALS, F_SEAL_FUTURE_WRITE) == -1 && errno != EINVAL)
+            return std::unexpected(sharedObjectErrorOf(errno));
+    #endif
+        if (::fcntl(descriptor, F_ADD_SEALS, F_SEAL_SEAL) == -1)
+            return std::unexpected(sharedObjectErrorOf(errno));
+#endif
+        return {};
     }
 } // namespace
 
@@ -93,13 +124,14 @@ std::expected<ControlPage, SharedObjectError> ControlPage::create()
     auto const descriptor = createObject();
     if (!descriptor)
         return std::unexpected(descriptor.error());
-    auto const flags = mapPage(*descriptor);
+    auto const flags = mapPage(*descriptor, PageAccess::ReadWrite);
     if (!flags)
     {
         ::close(*descriptor);
         return std::unexpected(flags.error());
     }
-    return ControlPage { *descriptor, *flags };
+    auto page = ControlPage { *descriptor, *flags };
+    return sealMapped(*descriptor).transform([&] { return std::move(page); });
 }
 
 std::expected<ControlPage, SharedObjectError> ControlPage::adopt(NativeHandle handle)
@@ -111,7 +143,9 @@ std::expected<ControlPage, SharedObjectError> ControlPage::adopt(NativeHandle ha
         return std::unexpected(SharedObjectError::WrongSize);
     if (::fcntl(handle, F_SETFD, FD_CLOEXEC) == -1)
         return std::unexpected(SharedObjectError::Io);
-    return mapPage(handle).transform([&](uint32_t* flags) { return ControlPage { handle, flags }; });
+    return mapPage(handle, PageAccess::ReadOnly).transform([&](uint32_t* flags) {
+        return ControlPage { handle, flags };
+    });
 }
 
 ControlPage::ControlPage(ControlPage&& other) noexcept:

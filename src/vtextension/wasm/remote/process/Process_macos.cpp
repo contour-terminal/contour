@@ -91,6 +91,16 @@ namespace
         std::optional<ExitStatus> _status; ///< Set once reaped.
     };
 
+    /// @return Whether @p pid, a child not yet reaped, has exited. Does not reap it.
+    [[nodiscard]] bool hasExited(pid_t pid) noexcept
+    {
+        auto info = siginfo_t {};
+        while (::waitid(P_PID, static_cast<id_t>(pid), &info, WEXITED | WNOHANG | WNOWAIT) == -1)
+            if (errno != EINTR)
+                return false;
+        return info.si_pid == pid;
+    }
+
     /// Waits on a kqueue: EVFILT_PROC NOTE_EXIT per process, EVFILT_USER for wake().
     class KqueueExitWaitSet final: public IExitWaitSet
     {
@@ -119,6 +129,11 @@ namespace
                     return std::unexpected(posix::launchErrorOf(errno));
                 _exited.push_back(key);
             }
+            else if (hasExited(pid))
+            {
+                // An exit racing the attach may never fire the event: looked at once, without reaping.
+                _exited.push_back(key);
+            }
             _watched.insert_or_assign(key, pid);
             return {};
         }
@@ -136,7 +151,8 @@ namespace
             std::erase(_exited, key);
         }
 
-        [[nodiscard]] std::vector<uint64_t> wait(std::optional<core::SteadyTimePoint> deadline) override
+        [[nodiscard]] std::expected<std::vector<uint64_t>, LaunchError> wait(
+            std::optional<core::SteadyTimePoint> deadline) override
         {
             // An exit seen once is reported as long as it is watched, as a polled descriptor would be.
             auto ended = _exited;
@@ -163,6 +179,8 @@ namespace
                 if (received != -1 || errno != EINTR)
                     break;
             }
+            if (received == -1)
+                return std::unexpected(posix::launchErrorOf(errno));
             for (auto const& event:
                  std::span { events }.first(static_cast<std::size_t>(std::max(received, 0))))
             {

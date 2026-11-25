@@ -16,8 +16,10 @@
     #include <Windows.h>
 #else
     #include <sys/mman.h>
+    #include <sys/wait.h>
 
     #include <cerrno>
+    #include <csignal>
     #include <format>
 
     #include <fcntl.h>
@@ -121,5 +123,61 @@ TEST_CASE("ControlPage.isNotInherited", "[vtextension]")
     auto const flags = ::fcntl(page->nativeHandle(), F_GETFD);
     REQUIRE(flags != -1);
     CHECK((flags & FD_CLOEXEC) != 0);
+#endif
+}
+
+TEST_CASE("ControlPage.helperCannotWrite", "[vtextension]")
+{
+    auto parent = ControlPage::create();
+    REQUIRE(parent.has_value());
+#ifdef _WIN32
+    // The handle handed over grants reading only.
+    auto* const view = ::MapViewOfFile(parent->nativeHandle(), FILE_MAP_WRITE, 0, 0, 0);
+    CHECK(view == nullptr);
+    if (view != nullptr)
+        ::UnmapViewOfFile(view);
+#else
+    #if defined(__linux__) && defined(F_SEAL_FUTURE_WRITE)
+    // Sealed: no write mapping after Contour's own.
+    auto* const mapping = ::mmap(nullptr,
+                                 vtextension::wasm::remote::transport::ControlPageBytes,
+                                 PROT_READ | PROT_WRITE,
+                                 MAP_SHARED,
+                                 parent->nativeHandle(),
+                                 0);
+    auto const error = errno;
+    CHECK(mapping == MAP_FAILED);
+    CHECK(error == EPERM);
+    if (mapping != MAP_FAILED)
+        ::munmap(mapping, vtextension::wasm::remote::transport::ControlPageBytes);
+    #endif
+    // An adopted page is mapped read-only: a store through it faults. Tried in a child, which the fault ends
+    // (or the sanitizer's report of it, with a non-zero status).
+    auto const copy = duplicate(parent->nativeHandle());
+    REQUIRE(copy.has_value());
+    auto const child = ::fork();
+    REQUIRE(child != -1);
+    if (child == 0)
+    {
+        // Quietly: neither the test framework's fault handler nor the sanitizer's may report from here.
+        auto const nullDevice = ::open("/dev/null", O_WRONLY);
+        if (nullDevice == -1)
+            ::_exit(1);
+        ::dup2(nullDevice, STDOUT_FILENO);
+        ::dup2(nullDevice, STDERR_FILENO);
+        struct sigaction byDefault {};
+        byDefault.sa_handler = SIG_DFL;
+        ::sigaction(SIGSEGV, &byDefault, nullptr);
+        ::sigaction(SIGBUS, &byDefault, nullptr);
+        auto helper = ControlPage::adopt(*copy);
+        if (helper)
+            helper->raise(5);
+        ::_exit(0);
+    }
+    ::close(*copy);
+    auto status = 0;
+    REQUIRE(::waitpid(child, &status, 0) == child);
+    CHECK_FALSE((WIFEXITED(status) && WEXITSTATUS(status) == 0));
+    CHECK_FALSE(parent->isRaised(5));
 #endif
 }

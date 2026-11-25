@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // The interrupt page on Windows: an unnamed, pagefile-backed section of one page, not inheritable until it is
-// handed over. A section cannot be resized once created, so it needs no seal.
+// handed over. A section cannot be resized once created, so it needs no seal. Contour maps it writable and
+// then keeps only a handle that grants FILE_MAP_READ, the one it hands over: the helper cannot map the page
+// writable through it.
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -21,11 +23,12 @@ static_assert(std::atomic_ref<uint32_t>::is_always_lock_free,
 
 namespace
 {
-    /// @return @p section's whole view mapped readable and writable, and its size; or why it could not be.
+    /// @return @p section's whole view mapped with @p access (FILE_MAP_…), and its size; or why it could not
+    /// be.
     [[nodiscard]] std::expected<std::pair<uint32_t*, std::size_t>, SharedObjectError> mapSection(
-        HANDLE section) noexcept
+        HANDLE section, DWORD access) noexcept
     {
-        auto* const view = ::MapViewOfFile(section, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 0);
+        auto* const view = ::MapViewOfFile(section, access, 0, 0, 0);
         if (view == nullptr)
             return std::unexpected(SharedObjectError::Io);
         auto region = MEMORY_BASIC_INFORMATION {};
@@ -48,18 +51,28 @@ std::expected<ControlPage, SharedObjectError> ControlPage::create()
         ::CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, ControlPageBytes, nullptr);
     if (section == nullptr)
         return std::unexpected(SharedObjectError::Io);
-    auto const mapped = mapSection(section);
+    auto const mapped = mapSection(section, FILE_MAP_READ | FILE_MAP_WRITE);
     if (!mapped)
     {
         ::CloseHandle(section);
         return std::unexpected(mapped.error());
     }
-    return ControlPage { section, mapped->first };
+    // The view keeps the section alive; the full-access handle goes, and a read-only one stays.
+    auto readOnly = HANDLE { nullptr };
+    auto const duplicated = ::DuplicateHandle(
+        ::GetCurrentProcess(), section, ::GetCurrentProcess(), &readOnly, FILE_MAP_READ, FALSE, 0);
+    ::CloseHandle(section);
+    if (!duplicated)
+    {
+        ::UnmapViewOfFile(mapped->first);
+        return std::unexpected(SharedObjectError::Io);
+    }
+    return ControlPage { readOnly, mapped->first };
 }
 
 std::expected<ControlPage, SharedObjectError> ControlPage::adopt(NativeHandle handle)
 {
-    auto const mapped = mapSection(handle);
+    auto const mapped = mapSection(handle, FILE_MAP_READ);
     if (!mapped)
         return std::unexpected(mapped.error());
     if (mapped->second != ControlPageBytes)

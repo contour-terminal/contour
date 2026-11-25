@@ -4,6 +4,10 @@
 // it is written from them. A new option is a new row; nothing else changes.
 #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
 
+#ifndef _WIN32
+    #include <unistd.h>
+#endif
+
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -45,7 +49,8 @@ namespace
 #else
         return numberOf<NativeHandle>(text).and_then(
             [](NativeHandle value) -> std::expected<NativeHandle, ArgumentError> {
-                if (value < 0)
+                // 0, 1 and 2 are the standard streams, never a handle handed over.
+                if (value <= STDERR_FILENO)
                     return std::unexpected(ArgumentError::Malformed);
                 return value;
             });
@@ -198,6 +203,12 @@ std::expected<HelperArguments, ArgumentError> parseHelperArguments(
     }
     if (!seen.all())
         return std::unexpected(ArgumentError::Missing);
+    // Each role its own handle: two roles on one would have the helper read its control channel as a lane.
+    auto handles = std::vector<NativeHandle> { result.control, result.controlPage, result.wake };
+    handles.insert(handles.end(), result.lanes.begin(), result.lanes.end());
+    std::ranges::sort(handles);
+    if (std::ranges::adjacent_find(handles) != handles.end())
+        return std::unexpected(ArgumentError::Malformed);
     return result;
 }
 

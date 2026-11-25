@@ -103,7 +103,8 @@ namespace
             _watched.erase(key);
         }
 
-        [[nodiscard]] std::vector<uint64_t> wait(std::optional<core::SteadyTimePoint> deadline) override
+        [[nodiscard]] std::expected<std::vector<uint64_t>, LaunchError> wait(
+            std::optional<core::SteadyTimePoint> deadline) override
         {
             auto lock = std::unique_lock { _state->mutex };
             _state->lastDeadline = deadline;

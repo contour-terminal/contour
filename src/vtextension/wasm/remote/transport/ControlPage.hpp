@@ -42,12 +42,11 @@ class ControlPage
     /// @return The page; `Unsupported` or `Io` if the system refused.
     [[nodiscard]] static std::expected<ControlPage, SharedObjectError> create();
 
-    /// Maps a page this process inherited: the helper's side. Takes ownership of @p handle, made
-    /// close-on-exec (not inheritable) again.
+    /// Maps a page this process inherited, read-only: the helper's side, which only reads the flags. Takes
+    /// ownership of @p handle, made close-on-exec (not inheritable) again.
     /// @param handle The page's handle.
     /// @return The page; `WrongSize` if the object is not ControlPageBytes large, `Io` if it cannot be
-    /// mapped.
-    ///         On failure @p handle stays the caller's.
+    ///         mapped. On failure @p handle stays the caller's.
     [[nodiscard]] static std::expected<ControlPage, SharedObjectError> adopt(NativeHandle handle);
 
     ControlPage(ControlPage&& other) noexcept;
@@ -56,11 +55,11 @@ class ControlPage
     ControlPage& operator=(ControlPage const&) = delete;
     ~ControlPage();
 
-    /// Raises @p slot. Wait-free.
+    /// Raises @p slot. Wait-free. Only on the page create() made: an adopted page is mapped read-only.
     /// @param slot The slot; below InterruptSlotCount, or else nothing happens.
     void raise(uint32_t slot) noexcept;
 
-    /// Clears @p slot. Wait-free.
+    /// Clears @p slot. Wait-free. Only on the page create() made: an adopted page is mapped read-only.
     /// @param slot The slot; below InterruptSlotCount, or else nothing happens.
     void clear(uint32_t slot) noexcept;
 
@@ -68,7 +67,8 @@ class ControlPage
     /// @return Whether @p slot is raised; never for one at or beyond InterruptSlotCount.
     [[nodiscard]] bool isRaised(uint32_t slot) const noexcept;
 
-    /// @return The page's handle, still owned by the page: for handing it to a child process.
+    /// @return The page's handle, still owned by the page: for handing it to a child process. On Windows it
+    ///         grants read access only, so that the child cannot map the page writable.
     [[nodiscard]] NativeHandle nativeHandle() const noexcept;
 
   private:

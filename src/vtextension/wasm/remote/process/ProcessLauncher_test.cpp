@@ -99,7 +99,8 @@ constexpr auto ChildPatience = std::chrono::seconds { 5 };
             return status;
         if (clock.now() >= deadline)
             return std::nullopt;
-        std::ignore = (*set)->wait(deadline);
+        if (!(*set)->wait(deadline))
+            return std::nullopt;
     }
 }
 
@@ -284,7 +285,7 @@ TEST_CASE("ProcessLauncher.childGetsACleanEnvironment", "[vtextension]")
     CHECK(endAndReap(*probe->launcher, *probe->process));
 }
 
-TEST_CASE("ProcessLauncher.childRunsAtTheRoot", "[vtextension]")
+TEST_CASE("ProcessLauncher.childRunsAtTheRootOnTheNullDevice", "[vtextension]")
 {
     auto probe = launchProbe(process::makeSystemProcessLauncher());
     REQUIRE(probe.has_value());
@@ -296,6 +297,8 @@ TEST_CASE("ProcessLauncher.childRunsAtTheRoot", "[vtextension]")
     auto const root = std::string { "/" };
 #endif
     CHECK(valuesOf(*report, "cwd=") == std::vector<std::string> { root });
+    CHECK(valuesOf(*report, "stdin=") == std::vector<std::string> { "null" });
+    CHECK(valuesOf(*report, "stdout=") == std::vector<std::string> { "null" });
     CHECK(endAndReap(*probe->launcher, *probe->process));
 }
 
@@ -449,13 +452,14 @@ TEST_CASE("ExitWaitSet.wakeEndsAWait", "[vtextension]")
     auto clock = core::SteadyClock {};
     auto set = launcher->makeWaitSet(clock);
     REQUIRE(set.has_value());
-    auto result = std::promise<std::vector<uint64_t>> {};
+    using WaitResult = std::expected<std::vector<uint64_t>, LaunchError>;
+    auto result = std::promise<WaitResult> {};
     auto ended = result.get_future();
     auto waiter = std::jthread { [&] { result.set_value((*set)->wait(std::nullopt)); } };
     std::this_thread::sleep_for(std::chrono::milliseconds { 20 });
     (*set)->wake();
     REQUIRE(ended.wait_for(ChildPatience) == std::future_status::ready);
-    CHECK(ended.get().empty());
+    CHECK(ended.get() == std::vector<uint64_t> {});
 }
 
 TEST_CASE("ExitWaitSet.deadlineEndsAWait", "[vtextension]")
@@ -465,7 +469,7 @@ TEST_CASE("ExitWaitSet.deadlineEndsAWait", "[vtextension]")
     auto set = launcher->makeWaitSet(clock);
     REQUIRE(set.has_value());
     auto const start = clock.now();
-    CHECK((*set)->wait(start + std::chrono::milliseconds { 20 }).empty());
+    CHECK((*set)->wait(start + std::chrono::milliseconds { 20 }) == std::vector<uint64_t> {});
     CHECK(clock.now() - start >= std::chrono::milliseconds { 20 });
 }
 
@@ -507,7 +511,7 @@ TEST_CASE("FakeProcessLauncher.recordsAndExits", "[vtextension]")
 
     SECTION("an exit wakes the set and is reaped")
     {
-        auto result = std::promise<std::vector<uint64_t>> {};
+        auto result = std::promise<std::expected<std::vector<uint64_t>, LaunchError>> {};
         auto woken = result.get_future();
         auto const deadline = clock.now() + std::chrono::seconds { 1 };
         auto waiter = std::jthread { [&] { result.set_value((*set)->wait(deadline)); } };
@@ -530,7 +534,7 @@ TEST_CASE("FakeProcessLauncher.recordsAndExits", "[vtextension]")
     SECTION("a wake ends a wait with nothing")
     {
         (*set)->wake();
-        CHECK((*set)->wait(std::nullopt).empty());
+        CHECK((*set)->wait(std::nullopt) == std::vector<uint64_t> {});
     }
 }
 

@@ -152,7 +152,8 @@ namespace
 
         void unwatch(uint64_t key) noexcept override { _watched.erase(key); }
 
-        [[nodiscard]] std::vector<uint64_t> wait(std::optional<core::SteadyTimePoint> deadline) override
+        [[nodiscard]] std::expected<std::vector<uint64_t>, LaunchError> wait(
+            std::optional<core::SteadyTimePoint> deadline) override
         {
             auto descriptors = std::vector<pollfd> {};
             descriptors.reserve(_watched.size() + 1);
@@ -165,10 +166,16 @@ namespace
                 auto const ready = ::poll(descriptors.data(), descriptors.size(), timeoutOf(deadline));
                 if (ready == -1 && errno == EINTR)
                     continue;
-                if (ready <= 0)
-                    return {};
+                if (ready == -1)
+                    return std::unexpected(launchErrorOf(errno));
+                if (ready == 0)
+                    return std::vector<uint64_t> {};
                 break;
             }
+            // A descriptor closed while watched: its number may name anything by now.
+            if (std::ranges::any_of(descriptors,
+                                    [](pollfd const& polled) { return (polled.revents & POLLNVAL) != 0; }))
+                return std::unexpected(LaunchError::Io);
             if (descriptors.front().revents != 0)
                 drainWakes();
             // A process descriptor polls readable (Linux) or hung up (FreeBSD) once its process exited.

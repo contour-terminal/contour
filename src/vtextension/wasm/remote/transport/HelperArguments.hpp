@@ -50,7 +50,8 @@ enum class ArgumentError : uint8_t
     Unknown,   ///< An argument names no option.
     Duplicate, ///< An option is given twice.
     Missing,   ///< An option is not given.
-    Malformed, ///< An option's value is not what it takes.
+    Malformed, ///< An option's value is not what it takes, or two roles name one handle, or (POSIX) a handle
+               ///< is a standard stream.
 };
 
 /// @param arguments What to tell the helper.
