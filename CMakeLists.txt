@@ -171,16 +171,6 @@ option(CONTOUR_BUILD_NATIVE "Build for native architecture [default: OFF]" OFF)
 option(CONTOUR_EXTENSIONS "Enables WebAssembly status-line extensions [default: ON]" ON)
 include(CMakeDependentOption)
 cmake_dependent_option(CONTOUR_EXTENSIONS_BUNDLED "Builds the bundled status-line extensions; needs cargo and the wasm32-wasip1 Rust target [default: ON]" ON "CONTOUR_EXTENSIONS" OFF)
-# The WebAssembly runtime behind src/vtextension/wasm/WasmRuntime.hpp. Each value names a backend directory,
-# src/vtextension/wasm/<value>/, whose target vtextension_<value> defines makeDefaultBackend(); adding a runtime
-# is adding that directory and a value here. Checked only when extensions are built: nothing reads it otherwise.
-set(CONTOUR_WASM_RUNTIME "wamr" CACHE STRING "WebAssembly runtime backing status-line extensions")
-set(_CONTOUR_WASM_RUNTIMES wamr)
-set_property(CACHE CONTOUR_WASM_RUNTIME PROPERTY STRINGS ${_CONTOUR_WASM_RUNTIMES})
-if(CONTOUR_EXTENSIONS AND NOT CONTOUR_WASM_RUNTIME IN_LIST _CONTOUR_WASM_RUNTIMES)
-    message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is \"${CONTOUR_WASM_RUNTIME}\", which is not a WebAssembly runtime "
-                        "Contour has a backend for. Known: ${_CONTOUR_WASM_RUNTIMES}.")
-endif()
 # Where status-line extensions run: out-of-process, in contour-extension-host processes Contour starts, one
 # per extension, each locked in the platform's sandbox; or in-process, inside Contour itself. Out of process
 # by default where Contour has a sandbox for the extension host, a row of _CONTOUR_SANDBOXED_PLATFORMS each:
@@ -211,6 +201,28 @@ set_property(CACHE CONTOUR_EXTENSION_HOST PROPERTY STRINGS ${_CONTOUR_EXTENSION_
 if(CONTOUR_EXTENSIONS AND NOT CONTOUR_EXTENSION_HOST IN_LIST _CONTOUR_EXTENSION_HOSTS)
     message(FATAL_ERROR "CONTOUR_EXTENSION_HOST is \"${CONTOUR_EXTENSION_HOST}\", which is not where extensions can "
                         "run. Known: ${_CONTOUR_EXTENSION_HOSTS}.")
+endif()
+# The WebAssembly engine that runs the extensions: in the extension host where they run out of process, in
+# Contour itself where they run in process. Each value names a backend directory, src/vtextension/wasm/<value>/;
+# adding an engine is adding that directory and a value here. Empty, the default, picks once the third parties
+# are resolved (below): wasmtime, which compiles guests to native code, where a Wasmtime was found and
+# extensions run out of process; wamr, which interprets them, otherwise. Wasmtime runs only in the extension
+# host, whose sandbox lets it make the code it compiled executable; Contour itself never may. Checked only when
+# extensions are built: nothing reads it otherwise.
+set(CONTOUR_WASM_RUNTIME "" CACHE STRING
+    "WebAssembly engine running status-line extensions: wasmtime or wamr [default: wasmtime where one is found and extensions run out of process, else wamr]")
+set(_CONTOUR_WASM_RUNTIMES wamr wasmtime)
+set_property(CACHE CONTOUR_WASM_RUNTIME PROPERTY STRINGS ${_CONTOUR_WASM_RUNTIMES})
+if(CONTOUR_EXTENSIONS AND CONTOUR_WASM_RUNTIME)
+    if(NOT CONTOUR_WASM_RUNTIME IN_LIST _CONTOUR_WASM_RUNTIMES)
+        message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is \"${CONTOUR_WASM_RUNTIME}\", which is not a WebAssembly "
+                            "engine Contour has a backend for. Known: ${_CONTOUR_WASM_RUNTIMES}.")
+    endif()
+    if(CONTOUR_WASM_RUNTIME STREQUAL "wasmtime" AND CONTOUR_EXTENSION_HOST STREQUAL "in-process")
+        message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is wasmtime, which runs extensions only in the extension host, "
+                            "but CONTOUR_EXTENSION_HOST is in-process. Choose CONTOUR_EXTENSION_HOST=out-of-process, "
+                            "or CONTOUR_WASM_RUNTIME=wamr.")
+    endif()
 endif()
 # Whether the extension host can run Wasmtime: set ON by cmake/ContourThirdParties.cmake once a Wasmtime
 # resolves (the pinned prebuilt archive, or an installed one), never by the user.
@@ -457,6 +469,17 @@ include(ContourThirdParties)
 include(Tracy)
 if(CONTOUR_EXTENSIONS)
     include(ContourCargo)
+    # The engine, now that it is known whether a Wasmtime was found (CONTOUR_WASM_RUNTIME, above).
+    if(NOT CONTOUR_WASM_RUNTIME)
+        if(CONTOUR_HAVE_WASMTIME AND CONTOUR_EXTENSION_HOST STREQUAL "out-of-process")
+            set(CONTOUR_WASM_RUNTIME wasmtime)
+        else()
+            set(CONTOUR_WASM_RUNTIME wamr)
+        endif()
+    elseif(CONTOUR_WASM_RUNTIME STREQUAL "wasmtime" AND NOT CONTOUR_HAVE_WASMTIME)
+        message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is wasmtime, but no Wasmtime can be used: "
+                            "${CONTOUR_WASMTIME_STRING}.")
+    endif()
 endif()
 # Only the GUI draws text, so only the GUI has any use for a font to fall back to.
 if(CONTOUR_FRONTEND_GUI)
@@ -519,7 +542,7 @@ macro(ContourConfigurationSummary)
     if(CONTOUR_EXTENSIONS)
         message(STATUS "|> Where extensions run:                            ${CONTOUR_EXTENSION_HOST}")
         message(STATUS "|> WebAssembly runtime:                             ${CONTOUR_WASM_RUNTIME}")
-        message(STATUS "|> Wasmtime for the extension host:                 ${CONTOUR_WASMTIME_STRING}")
+        message(STATUS "|> Wasmtime:                                        ${CONTOUR_WASMTIME_STRING}")
     endif()
     message(STATUS "Build contour using mimalloc:                       ${CONTOUR_BUILD_WITH_MIMALLOC}")
     message(STATUS "Clang Tidy:                                         ${USING_TIDY_STRING}")

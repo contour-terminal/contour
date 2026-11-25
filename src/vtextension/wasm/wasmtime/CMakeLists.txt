@@ -1,6 +1,7 @@
 # vtextension_wasmtime: the Wasmtime backend of the WebAssembly runtime interface (../WasmRuntime.hpp). The only
-# target that links Wasmtime, and built only where CONTOUR_HAVE_WASMTIME is ON. It is not the default backend
-# yet: nothing but its own tests links it. scripts/check-wasm-runtime-containment.py keeps it contained.
+# target that links Wasmtime, and built only where CONTOUR_HAVE_WASMTIME is ON. No program of Contour's links it:
+# the extension host runs it where CONTOUR_WASM_RUNTIME is wasmtime (vtextension_wasmtime_helper_engine below).
+# scripts/check-wasm-runtime-containment.py keeps it contained.
 
 add_library(vtextension_wasmtime STATIC
     WasmtimeEngine.cpp

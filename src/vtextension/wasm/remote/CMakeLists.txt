@@ -306,7 +306,7 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wamr_engine)
     endif()
 endif()
 
-if(VTEXTENSION_TESTING AND CONTOUR_EXTENSION_HOST_ENGINE STREQUAL "wasmtime" AND _process_source)
+if(VTEXTENSION_TESTING AND CONTOUR_WASM_RUNTIME STREQUAL "wasmtime" AND _process_source)
     # The extension host executable itself (../../../contour-extension-host, on Wasmtime's engine, as here),
     # started as Contour starts it. Links no engine: the engine runs in the helper. vtextension_host only for
     # the build's cap policy (HostBootstrap.hpp), which tells what the helper caps.
@@ -366,7 +366,7 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wamr_helper_engine AND _process_so
     # vtextension_helper_test, composed by testing/ProcessDefaultBackend.cpp over that helper, locked down where
     # the build has a sandbox.
     set(_wamr_helper contour-extension-host-wamr)
-    if(CONTOUR_EXTENSION_HOST_ENGINE STREQUAL "wamr")
+    if(CONTOUR_WASM_RUNTIME STREQUAL "wamr")
         set(_wamr_helper contour-extension-host)
     endif()
     add_executable(vtextension_wamr_helper_test

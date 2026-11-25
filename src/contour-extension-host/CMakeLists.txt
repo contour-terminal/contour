@@ -1,7 +1,7 @@
 # contour-extension-host: the process Contour runs extensions in, apart from itself. Its body is
 # vtextension_host's runExtensionHost(); main.cpp only hands it the command line and the engine, the one
-# CONTOUR_EXTENSION_HOST_ENGINE names (../CMakeLists.txt).
-set(_extension_host_engine vtextension_${CONTOUR_EXTENSION_HOST_ENGINE}_helper_engine)
+# CONTOUR_WASM_RUNTIME names (../../CMakeLists.txt).
+set(_extension_host_engine vtextension_${CONTOUR_WASM_RUNTIME}_helper_engine)
 
 add_executable(contour-extension-host main.cpp)
 target_link_libraries(contour-extension-host PRIVATE
@@ -30,7 +30,7 @@ if(VTEXTENSION_TESTING)
     target_include_directories(contour-extension-host-hostile PRIVATE ${PROJECT_SOURCE_DIR}/src)
     set_target_properties(contour-extension-host-hostile PROPERTIES WIN32_EXECUTABLE OFF)
 
-    if(NOT CONTOUR_EXTENSION_HOST_ENGINE STREQUAL "wamr" AND TARGET vtextension_wamr_helper_engine)
+    if(NOT CONTOUR_WASM_RUNTIME STREQUAL "wamr" AND TARGET vtextension_wamr_helper_engine)
         # The extension host on WAMR's engine, beside the one this build runs: what a build without Wasmtime
         # ships, proven here by vtextension_wamr_helper_test. Never installed.
         add_executable(contour-extension-host-wamr main.cpp)

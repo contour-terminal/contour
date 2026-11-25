@@ -596,15 +596,14 @@ if(CONTOUR_EXTENSIONS)
         endif()
     endif()
 
-    # Nothing ships Wasmtime yet: extensions run on WAMR (CONTOUR_WASM_RUNTIME), and only the Wasmtime
-    # backend's own tests use it.
+    # Whether the extension host runs it is CONTOUR_WASM_RUNTIME's to say (../CMakeLists.txt).
     if(CONTOUR_HAVE_WASMTIME)
-        set(CONTOUR_WASMTIME_STRING "${_wasmtime_resolved} (available; only its own tests use it so far)")
+        set(CONTOUR_WASMTIME_STRING "${_wasmtime_resolved}")
     else()
         set(THIRDPARTY_BUILTIN_wasmtime "(not found: ${_wasmtime_reason})")
         set(CONTOUR_WASMTIME_STRING "not available (${_wasmtime_reason})")
     endif()
-    message(STATUS "Wasmtime for the extension host: ${CONTOUR_WASMTIME_STRING}")
+    message(STATUS "Wasmtime: ${CONTOUR_WASMTIME_STRING}")
 else()
     set(THIRDPARTY_BUILTIN_wasmtime "(extensions disabled)")
 endif()

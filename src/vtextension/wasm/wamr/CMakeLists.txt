@@ -1,6 +1,7 @@
 # vtextension_wamr: the WAMR backend of the WebAssembly runtime interface (../WasmRuntime.hpp). The only
-# target that links WAMR. vtextension itself does not: whoever composes a program links vtextension_runtime,
-# which names the selected backend, and calls makeDefaultBackend() (../DefaultBackend.hpp).
+# target that links WAMR. vtextension itself does not: a program running extensions in process links it through
+# vtextension_runtime and calls makeDefaultBackend() (../DefaultBackend.hpp), and the tests that run guests in
+# process name it.
 # scripts/check-wasm-runtime-containment.py keeps it that way.
 
 add_library(vtextension_wamr STATIC
@@ -31,7 +32,7 @@ add_library(vtextension_wamr_engine STATIC
 target_link_libraries(vtextension_wamr_engine PUBLIC vtextension_wamr vtextension_remote_wire PRIVATE contour::wamr)
 
 # The engine the extension host executable runs (../host/HelperEngine.hpp), where it runs WAMR's
-# (CONTOUR_EXTENSION_HOST_ENGINE, ../../../CMakeLists.txt).
+# (CONTOUR_WASM_RUNTIME, ../../../../CMakeLists.txt).
 add_library(vtextension_wamr_helper_engine STATIC
     HelperEngine.cpp
     ${PROJECT_SOURCE_DIR}/src/vtextension/wasm/host/HelperEngine.hpp
