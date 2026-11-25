@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Shared memory objects on Windows: an unnamed, pagefile-backed section, not inheritable until it is handed
-// over. A section cannot be resized once created, so it needs no seal.
+// over. A section cannot be resized once created, so it needs no seal. Guest memory is a reserved section
+// (SEC_RESERVE): none of it is charged until commit() commits its pages through a view, so that an object
+// sized for the instance's largest memory costs only what the instance grew to. The interrupt page is
+// committed whole.
 //
 // A view's size is the section's, rounded up to the page; a mapping checks it against the size the object
 // was made of, as POSIX checks fstat()'s.
@@ -29,12 +32,12 @@ namespace
     struct UseRow
     {
         SharedObjectUse use; ///< The use.
-        DWORD sectionKind;   ///< What backs its pages: committed at once (SEC_COMMIT).
+        DWORD sectionKind;   ///< What backs its pages: committed at once (SEC_COMMIT), or reserved.
     };
 
     /// Every use, at its enumerator's index.
     constexpr auto Uses = std::array {
-        UseRow { .use = SharedObjectUse::GuestMemory, .sectionKind = SEC_COMMIT },
+        UseRow { .use = SharedObjectUse::GuestMemory, .sectionKind = SEC_RESERVE },
         UseRow { .use = SharedObjectUse::InterruptPage, .sectionKind = SEC_COMMIT },
     };
     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, Uses.size()),
@@ -105,6 +108,15 @@ std::expected<SharedMapping, SharedObjectError> SharedMapping::map(NativeHandle 
     }
     return SharedMapping { std::span { static_cast<std::byte*>(view), static_cast<std::size_t>(bytes) },
                            access };
+}
+
+std::expected<void, SharedObjectError> SharedMapping::commitRange(uint64_t from, uint64_t to) noexcept
+{
+    auto const protection = _access == MapAccess::ReadWrite ? PAGE_READWRITE : PAGE_READONLY;
+    if (::VirtualAlloc(_bytes.data() + from, static_cast<SIZE_T>(to - from), MEM_COMMIT, protection)
+        == nullptr)
+        return std::unexpected(SharedObjectError::Io);
+    return {};
 }
 
 void SharedMapping::release() noexcept

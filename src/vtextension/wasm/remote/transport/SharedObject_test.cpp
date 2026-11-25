@@ -2,7 +2,7 @@
 //
 // The shared memory objects Contour and its extension host process both map: a size rounded up to any page a
 // parent may use is accepted and no more, what one mapping writes the other sees, and nobody can resize an
-// object or inherit it unasked.
+// object, inherit it unasked, or find more of a reserved one committed than was asked for.
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstddef>
@@ -73,6 +73,8 @@ TEST_CASE("SharedObject.writesAreSeenThroughASecondMapping", "[vtextension]")
     REQUIRE(second.has_value());
     REQUIRE(sealSharedObject(object->get(), SharedObjectUse::GuestMemory).has_value());
     CHECK(first->bytes().size() == GuestBytes);
+    REQUIRE(first->commit(0, GuestBytes).has_value());
+    REQUIRE(second->commit(0, GuestBytes).has_value());
 
     first->bytes().front() = std::byte { 0x5A };
     second->bytes().back() = std::byte { 0xA5 };
@@ -82,6 +84,10 @@ TEST_CASE("SharedObject.writesAreSeenThroughASecondMapping", "[vtextension]")
     // A moved mapping is the same mapping.
     auto moved = std::move(*second);
     CHECK(moved.bytes().front() == std::byte { 0x5A });
+
+    // Nothing past the mapping commits.
+    CHECK(first->commit(0, GuestBytes + 1) == std::unexpected(SharedObjectError::OutOfRange));
+    CHECK(first->commit(2, 1) == std::unexpected(SharedObjectError::OutOfRange));
 }
 
 TEST_CASE("SharedObject.noObjectIsEmpty", "[vtextension]")
@@ -157,3 +163,29 @@ TEST_CASE("SharedObject.checkRefusesAWrongSize", "[vtextension]")
     CHECK(checkSharedObjectSize(-1, 4 * KiB) == std::unexpected(SharedObjectError::Io));
 #endif
 }
+
+#ifdef _WIN32
+TEST_CASE("SharedObject.reservedSectionCommitsOnlyWhatIsAsked", "[vtextension]")
+{
+    // Guest memory is reserved: only the pages committed through a view are backed, and charged.
+    auto const object = createSharedObject(MiB, SharedObjectUse::GuestMemory);
+    REQUIRE(object.has_value());
+    auto mapping = SharedMapping::map(object->get(), MiB, MapAccess::ReadWrite);
+    REQUIRE(mapping.has_value());
+    auto* const base = mapping->bytes().data();
+
+    auto region = MEMORY_BASIC_INFORMATION {};
+    REQUIRE(::VirtualQuery(base, &region, sizeof(region)) != 0);
+    CHECK(region.State == MEM_RESERVE);
+
+    REQUIRE(mapping->commit(0, GuestBytes).has_value());
+    REQUIRE(::VirtualQuery(base, &region, sizeof(region)) != 0);
+    CHECK(region.State == MEM_COMMIT);
+    CHECK(region.RegionSize == GuestBytes);
+    REQUIRE(::VirtualQuery(base + GuestBytes, &region, sizeof(region)) != 0);
+    CHECK(region.State == MEM_RESERVE);
+
+    mapping->bytes()[GuestBytes - 1] = std::byte { 1 };
+    CHECK(mapping->bytes()[GuestBytes - 1] == std::byte { 1 });
+}
+#endif

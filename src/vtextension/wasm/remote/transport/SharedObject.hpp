@@ -5,7 +5,8 @@
 /// Shared memory objects Contour and its extension host process both map, made in one place: the interrupt
 /// page (ControlPage.hpp) and an instance's guest memory. Linux and FreeBSD make a memfd, sealed against
 /// resizing; macOS a POSIX shared memory object under a name unique to this process, unlinked at once, sized
-/// once; Windows an unnamed pagefile-backed section.
+/// once; Windows an unnamed pagefile-backed section, whose guest memory is reserved and committed page by
+/// page.
 ///
 /// A mapping trusts no size the object reports beyond what fitsSharedObject() accepts: XNU rounds an object
 /// up to its page, which may be larger than the page of the process that reads it (an x86_64 helper under
@@ -41,7 +42,7 @@ inline constexpr uint64_t MaxPageBytes = uint64_t { 16 } * 1024;
 /// What a shared memory object is for, which decides how it is made and sealed.
 enum class SharedObjectUse : uint8_t
 {
-    GuestMemory,   ///< An instance's memory: the helper writes it.
+    GuestMemory,   ///< An instance's memory: the helper writes it. Reserved on Windows, committed on demand.
     InterruptPage, ///< The interrupt page: only Contour writes it. Sealed against later write mappings.
 };
 
@@ -58,11 +59,12 @@ enum class SharedObjectError : uint8_t
     Unsupported, ///< The system has no shared memory object of the kind needed.
     Io,          ///< The system refused.
     WrongSize,   ///< The object is not the size expected, or no object can have that size.
+    OutOfRange,  ///< A range runs past the mapping's end.
 };
 
 /// Makes a shared memory object of @p bytes, not inherited by a child unless handed over. Linux and FreeBSD
 /// seal it against shrinking and growing at once; sealSharedObject() seals it for good once Contour mapped
-/// it.
+/// it. On Windows, guest memory is a reserved section whose pages commit() commits.
 /// @param bytes Its size: more than 0.
 /// @param use What it is for.
 /// @return Its handle; `WrongSize` for a size no object has, `Unsupported` or `Io` if the system refused.
@@ -111,10 +113,22 @@ class SharedMapping
     /// @return The mapped bytes; empty once moved from.
     [[nodiscard]] std::span<std::byte> bytes() const noexcept { return _bytes; }
 
+    /// Commits [@p from, @p to) of the mapping, so that it can be touched: on Windows, the reserved pages of
+    /// guest memory, committed through this view (VirtualAlloc, MEM_COMMIT); nothing elsewhere, where every
+    /// page of the object is backed on first touch. Committing a committed page again does nothing.
+    /// @param from The first byte.
+    /// @param to One past the last byte; at most bytes().size().
+    /// @return Nothing once committed; `OutOfRange` if the range runs past the mapping, `Io` if the system
+    ///         refused.
+    [[nodiscard]] std::expected<void, SharedObjectError> commit(uint64_t from, uint64_t to) noexcept;
+
   private:
     /// @param bytes The mapping, its own.
     /// @param access How it was mapped.
     SharedMapping(std::span<std::byte> bytes, MapAccess access) noexcept;
+
+    /// Commits [@p from, @p to), a range within the mapping, as this system does.
+    [[nodiscard]] std::expected<void, SharedObjectError> commitRange(uint64_t from, uint64_t to) noexcept;
 
     /// Unmaps what it holds, if anything.
     void release() noexcept;

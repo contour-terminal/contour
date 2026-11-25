@@ -172,6 +172,13 @@ std::expected<SharedMapping, SharedObjectError> SharedMapping::map(NativeHandle 
         });
 }
 
+std::expected<void, SharedObjectError> SharedMapping::commitRange([[maybe_unused]] uint64_t from,
+                                                                  [[maybe_unused]] uint64_t to) noexcept
+{
+    // Every page of the object is backed on first touch.
+    return {};
+}
+
 void SharedMapping::release() noexcept
 {
     if (!_bytes.empty())
