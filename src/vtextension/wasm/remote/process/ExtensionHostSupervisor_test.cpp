@@ -276,7 +276,7 @@ TEST_CASE("Supervisor.crashAfterAKillIsStillUnclean", "[vtextension]")
     CHECK(rig.supervisor->counters().uncleanExits == 1);
 }
 
-TEST_CASE("Supervisor.dropKillsAndReaps", "[vtextension]")
+TEST_CASE("Supervisor.zeroGraceKillsAtOnce", "[vtextension]")
 {
     auto rig = Rig {};
     {
@@ -289,7 +289,7 @@ TEST_CASE("Supervisor.dropKillsAndReaps", "[vtextension]")
     CHECK(rig.supervisor->liveProcesses() == 0);
 }
 
-TEST_CASE("Supervisor.dropWaitsTheTeardownGrace", "[vtextension]")
+TEST_CASE("Supervisor.teardownGraceThenKills", "[vtextension]")
 {
     auto rig = Rig { 2000ms };
     {
@@ -306,22 +306,48 @@ TEST_CASE("Supervisor.dropWaitsTheTeardownGrace", "[vtextension]")
     CHECK(rig.deaths->load() == 0);
 }
 
-TEST_CASE("Supervisor.helperExitingWithinTheGraceIsNotKilled", "[vtextension]")
+TEST_CASE("Supervisor.teardownGraceLetsAHelperExit", "[vtextension]")
 {
     auto rig = Rig { 2000ms };
     {
         auto const helper = rig.launch();
     }
     rig.supervisor->sync();
+    rig.advance(1000ms);
     rig.fake->exit(0, ExitStatus { .kind = ExitKind::Exited, .value = 0 });
     // Reaped before the clock moves on: a turn of the loop already under way could otherwise see the exit
     // only after it saw the grace run out.
     rig.supervisor->sync();
     rig.advance(1h);
     CHECK(rig.fake->kills().empty());
+    CHECK(killsFor(*rig.supervisor, KillReason::Dropped) == 0);
     CHECK(rig.supervisor->counters().reaped == 1);
     CHECK(rig.supervisor->counters().uncleanExits == 0);
     CHECK(rig.supervisor->liveProcesses() == 0);
+}
+
+TEST_CASE("Supervisor.letGoIsOneDrop", "[vtextension]")
+{
+    // Let go while still held, then destroyed: one drop, whose grace runs from the first.
+    auto rig = Rig { 2000ms };
+    {
+        auto helper = rig.launch();
+        helper.letGo();
+        rig.supervisor->sync();
+        rig.advance(1000ms);
+        helper.kill();
+        {
+            auto const watch = helper.watch(HostStep::Load, 1ms);
+        }
+    }
+    rig.supervisor->sync();
+    rig.advance(999ms);
+    CHECK(rig.fake->kills().empty());
+    rig.advance(1ms);
+    CHECK(killsFor(*rig.supervisor, KillReason::Dropped) == 1);
+    CHECK(killsFor(*rig.supervisor, KillReason::Requested) == 0);
+    CHECK(killsFor(*rig.supervisor, KillReason::StepTimeout) == 0);
+    CHECK(rig.supervisor->counters().reaped == 1);
 }
 
 TEST_CASE("Supervisor.idleNeverWakes", "[vtextension]")
@@ -655,7 +681,7 @@ TEST_CASE("Supervisor.graceIsForgottenWithTheHelper", "[vtextension]")
     grace.lanes->lane(0).enter(7);
     grace.interrupt(7);
     grace.rig.fake->exit(0, ExitStatus { .kind = ExitKind::Exited, .value = 0 });
-    grace.rig.supervisor->sync(); // reaped before the clock moves on (helperExitingWithinTheGraceIsNotKilled)
+    grace.rig.supervisor->sync(); // reaped before the clock moves on (teardownGraceLetsAHelperExit)
     grace.rig.advance(1h);
     CHECK(grace.graceKills() == 0);
     CHECK(grace.rig.deaths->load() == 1);

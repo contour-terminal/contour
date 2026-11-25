@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <expected>
 #include <memory>
 #include <mutex>
@@ -25,6 +26,10 @@
 
 namespace vtextension::wasm::remote
 {
+
+/// How many releases an incarnation queues for its control channel, at most: a host that has let this many
+/// pile up is not reading it, and is killed.
+inline constexpr std::size_t MaxPendingReleases = 4096;
 
 /// Whether an incarnation still serves. It goes from Alive to Dead once, and never back.
 enum class IncarnationState : uint8_t
@@ -115,9 +120,18 @@ class HelperIncarnation
     [[nodiscard]] std::expected<proto::Pdu, transport::StreamError> request(proto::Pdu const& pdu,
                                                                             HostStep step);
 
-    /// Sends @p pdu on the control channel, expecting no reply; does nothing once the incarnation is dead,
-    /// and ignores a failure.
-    void post(proto::Pdu const& pdu) noexcept;
+    /// Tells the host a module or an instance is gone, without ever blocking: the release is queued, and
+    /// sent at once only if no other thread holds the control channel and the channel takes it now. What is
+    /// queued goes out before and after the next request's exchange, in order. Does nothing once the
+    /// incarnation is dead; a host that lets more than MaxPendingReleases pile up kills it.
+    /// @param release What is gone.
+    void release(proto::Release release) noexcept;
+
+    /// Lets the host go at once, as dropping the last reference to the incarnation would, though threads may
+    /// still hold one: the incarnation is dead, its host is let go (IHostHandle::letGo()), and every channel
+    /// is shut down, so that a thread blocked on one returns. Never blocks. Only the first of letGo() and
+    /// markDead() does anything.
+    void letGo() noexcept;
 
     /// @return Lane @p index's stream; used only by the thread holding that lane.
     [[nodiscard]] transport::PduStream& lane(std::size_t index) noexcept { return _lanes[index]; }
@@ -126,7 +140,7 @@ class HelperIncarnation
     [[nodiscard]] bool isAlive() const noexcept { return _state.load() == IncarnationState::Alive; }
 
     /// Declares it dead, unless it is: terminates the host, then shuts every channel down. Thread-safe;
-    /// only the first call does anything.
+    /// only the first of markDead() and letGo() does anything.
     void markDead() noexcept;
 
     /// Interrupts one of its instances, for good, without waiting on the host: arms the backstop on the lane
@@ -159,8 +173,28 @@ class HelperIncarnation
     /// @return A watch over @p step, with its budget.
     [[nodiscard]] StepWatch watch(HostStep step);
 
+    /// Sends every queued release, blocking, its caller holding the control mutex; kills the incarnation if
+    /// one cannot be sent.
+    /// @return Whether every one was sent.
+    [[nodiscard]] bool sendReleases();
+
+    /// Sends queued releases as far as the channel takes them now, its caller holding the control mutex;
+    /// kills the incarnation if the channel failed.
+    void trySendReleases() noexcept;
+
+    /// @return The oldest queued release; nothing if none is queued.
+    [[nodiscard]] std::optional<proto::Release> oldestRelease();
+
+    /// Forgets the oldest queued release, which was sent.
+    void forgetOldestRelease();
+
+    /// Shuts every channel down.
+    void shutdownChannels() noexcept;
+
     HostTimeouts _timeouts;
-    std::mutex _controlMutex; ///< Held for each request and post on the control channel.
+    std::mutex _controlMutex;           ///< Held for each request, and for sending queued releases.
+    std::mutex _outboxMutex;            ///< Guards _outbox; never held across I/O.
+    std::deque<proto::Release> _outbox; ///< Releases not sent yet, oldest first.
     transport::PduStream _control;
     std::vector<transport::PduStream> _lanes;
     std::atomic<IncarnationState> _state { IncarnationState::Alive };

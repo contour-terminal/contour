@@ -2,9 +2,9 @@
 #pragma once
 
 /// @file
-/// A launcher that decorates another: it records what was launched and from which threads its processes were
-/// killed, and can rewrite the command line of every launch after the first -- how a test makes a respawned
-/// helper behave unlike the first one.
+/// A launcher that decorates another: it records what was launched, how it ended, and from which threads its
+/// processes were killed, and can rewrite the command line of every launch after the first -- how a test
+/// makes a respawned helper behave unlike the first one.
 
 #include <cstddef>
 #include <expected>
@@ -26,7 +26,8 @@ namespace vtextension::wasm::remote::process::testing
 /// Rewrites a launch's command line.
 using ArgumentRewrite = std::function<std::vector<std::string>(std::vector<std::string>)>;
 
-/// Records the launches and kills of another launcher. Thread-safe: every record is guarded by one mutex.
+/// Records the launches, kills and exits of another launcher. Thread-safe: every record is guarded by one
+/// mutex.
 class RecordingLauncher final: public IProcessLauncher
 {
   public:
@@ -91,6 +92,13 @@ class RecordingLauncher final: public IProcessLauncher
         return _records->killThreads;
     }
 
+    /// @return How each process reaped so far ended, in reaping order.
+    [[nodiscard]] std::vector<ExitStatus> exitStatuses() const
+    {
+        auto const lock = std::scoped_lock { _records->mutex };
+        return _records->exitStatuses;
+    }
+
   private:
     /// What the launcher and its handles record, which a handle may outlive the launcher with.
     struct Records
@@ -99,6 +107,7 @@ class RecordingLauncher final: public IProcessLauncher
         std::size_t launches = 0;
         std::vector<ProcessId> processIds;
         std::vector<std::thread::id> killThreads;
+        std::vector<ExitStatus> exitStatuses;
     };
 
     /// Forwards to the inner launcher's handle, recording each kill.
@@ -121,13 +130,24 @@ class RecordingLauncher final: public IProcessLauncher
             _inner->kill();
         }
 
-        [[nodiscard]] std::optional<ExitStatus> tryReap() noexcept override { return _inner->tryReap(); }
+        [[nodiscard]] std::optional<ExitStatus> tryReap() noexcept override
+        {
+            auto status = _inner->tryReap();
+            if (status && !_reaped)
+            {
+                _reaped = status;
+                auto const lock = std::scoped_lock { _records->mutex };
+                _records->exitStatuses.push_back(*status);
+            }
+            return status;
+        }
 
         [[nodiscard]] Waitable waitable() const noexcept override { return _inner->waitable(); }
 
       private:
         std::unique_ptr<IProcessHandle> _inner;
         std::shared_ptr<Records> _records;
+        std::optional<ExitStatus> _reaped; ///< Recorded once: tryReap() returns it again on every later call.
     };
 
     std::shared_ptr<IProcessLauncher> _inner;

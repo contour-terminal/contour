@@ -8,6 +8,7 @@
 #include <memory>
 #include <span>
 #include <utility>
+#include <vector>
 
 #include <vtextension/wasm/remote/proto/Codec.hpp>
 #include <vtextension/wasm/remote/proto/PduTable.hpp>
@@ -60,16 +61,57 @@ PduStream::PduStream(Channel channel,
 {
 }
 
-std::expected<void, StreamError> PduStream::send(proto::Pdu const& pdu)
+std::expected<std::vector<uint8_t>, StreamError> PduStream::frameOf(proto::Pdu const& pdu) const
 {
     // A PDU the peer would refuse is not sent: the stream stays usable, and the caller learns why. The
     // encoder checks every list against its cap; the body's bytes are checked here, against the cap the
     // peer's reader applies under the same limits.
-    auto const frame = proto::encodeFrame(pdu);
+    auto frame = proto::encodeFrame(pdu);
     if (!frame
         || bodySizeOf(*frame) > proto::PduTable[std::to_underlying(proto::kindOf(pdu)) - 1].sizeCap(_limits))
         return std::unexpected(StreamError::OverCap);
-    return _channel.send(*frame).transform_error([](ChannelError error) { return streamErrorOf(error); });
+    return *std::move(frame);
+}
+
+std::expected<void, StreamError> PduStream::send(proto::Pdu const& pdu)
+{
+    auto const frame = frameOf(pdu);
+    if (!frame)
+        return std::unexpected(frame.error());
+    auto const toStreamError = [](ChannelError error) {
+        return streamErrorOf(error);
+    };
+    if (!_unsentTail.empty())
+    {
+        if (auto const tail = _channel.send(_unsentTail); !tail)
+            return std::unexpected(toStreamError(tail.error()));
+        _unsentTail.clear();
+    }
+    return _channel.send(*frame).transform_error(toStreamError);
+}
+
+std::expected<SendOutcome, StreamError> PduStream::trySend(proto::Pdu const& pdu)
+{
+    auto const frame = frameOf(pdu);
+    if (!frame)
+        return std::unexpected(frame.error());
+    if (!_unsentTail.empty())
+    {
+        auto const sent = _channel.trySend(_unsentTail);
+        if (!sent)
+            return std::unexpected(streamErrorOf(sent.error()));
+        _unsentTail.erase(_unsentTail.begin(), _unsentTail.begin() + static_cast<std::ptrdiff_t>(*sent));
+        if (!_unsentTail.empty())
+            return SendOutcome::WouldBlock;
+    }
+    auto const sent = _channel.trySend(*frame);
+    if (!sent)
+        return std::unexpected(streamErrorOf(sent.error()));
+    if (*sent == 0)
+        return SendOutcome::WouldBlock;
+    // Begun, the frame must be finished, or the peer would read the next one's bytes as its rest.
+    _unsentTail.assign(frame->begin() + static_cast<std::ptrdiff_t>(*sent), frame->end());
+    return SendOutcome::Sent;
 }
 
 std::expected<proto::Pdu, StreamError> PduStream::receive()

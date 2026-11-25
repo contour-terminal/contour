@@ -39,6 +39,13 @@ namespace
     /// The most bytes one ReadFile or WriteFile moves.
     constexpr auto MaxTransferBytes = std::size_t { 1024 } * 1024 * 1024;
 
+    /// How long a transfer may take.
+    enum class Completion : uint8_t
+    {
+        Poll, ///< Only what completes at once: a transfer still pending is cancelled.
+        Wait, ///< Until it completed, or the end was shut down.
+    };
+
     /// Where an end is in its life.
     enum class EndState : uint8_t
     {
@@ -200,16 +207,18 @@ struct Channel::Native
             ::CloseHandle(pipe);
     }
 
-    /// Runs one overlapped transfer to completion, or until the end is shut down.
+    /// Runs one overlapped transfer to completion, or until the end is shut down; or, polled, only as far as
+    /// it completes at once.
     /// @param start Starts it: ReadFile or WriteFile on the pipe with the given OVERLAPPED.
+    /// @param completion Whether to wait for it.
     /// @return How many bytes it moved.
     template <typename Start>
-    [[nodiscard]] std::expected<std::size_t, ChannelError> transfer(Start start)
+    [[nodiscard]] std::expected<std::size_t, ChannelError> transfer(Start start, Completion completion)
     {
         // Counted before the state is read, and shutdown() stores the state before it reads the count: either
         // this sees the end shut down, or shutdown() sees this in flight and leaves the handle to it.
         inFlight.fetch_add(1);
-        auto const result = transferCounted(start);
+        auto const result = transferCounted(start, completion);
         inFlight.fetch_sub(1);
         if (state.load() != EndState::Open)
             closeIfDrained();
@@ -218,7 +227,7 @@ struct Channel::Native
 
   private:
     template <typename Start>
-    [[nodiscard]] std::expected<std::size_t, ChannelError> transferCounted(Start start)
+    [[nodiscard]] std::expected<std::size_t, ChannelError> transferCounted(Start start, Completion completion)
     {
         if (state.load() != EndState::Open)
             return std::unexpected(ChannelError::Closed);
@@ -238,8 +247,21 @@ struct Channel::Native
         if (state.load() != EndState::Open)
             ::CancelIoEx(pipe, &overlapped);
         auto moved = DWORD { 0 };
-        if (!::GetOverlappedResult(pipe, &overlapped, &moved, TRUE))
-            return std::unexpected(channelErrorOf(::GetLastError()));
+        if (!::GetOverlappedResult(pipe, &overlapped, &moved, completion == Completion::Wait ? TRUE : FALSE))
+        {
+            auto const error = ::GetLastError();
+            if (error != ERROR_IO_INCOMPLETE)
+                return std::unexpected(channelErrorOf(error));
+            // Polled and still pending: what does not fit now is not sent. Cancelled, the transfer reports
+            // how much of it the reader took meanwhile, from the front.
+            ::CancelIoEx(pipe, &overlapped);
+            if (!::GetOverlappedResult(pipe, &overlapped, &moved, TRUE))
+            {
+                auto const cancelled = ::GetLastError();
+                if (cancelled != ERROR_OPERATION_ABORTED)
+                    return std::unexpected(channelErrorOf(cancelled));
+            }
+        }
         if (state.load() != EndState::Open)
             return std::unexpected(ChannelError::Closed);
         return static_cast<std::size_t>(moved);
@@ -269,10 +291,12 @@ std::expected<void, ChannelError> Channel::send(std::span<uint8_t const> bytes)
     while (!bytes.empty())
     {
         auto const chunk = bytes.first(std::min(bytes.size(), MaxTransferBytes));
-        auto const sent = _native->transfer([&](OVERLAPPED& overlapped) {
-            return ::WriteFile(
-                _native->pipe, chunk.data(), static_cast<DWORD>(chunk.size()), nullptr, &overlapped);
-        });
+        auto const sent = _native->transfer(
+            [&](OVERLAPPED& overlapped) {
+                return ::WriteFile(
+                    _native->pipe, chunk.data(), static_cast<DWORD>(chunk.size()), nullptr, &overlapped);
+            },
+            Completion::Wait);
         if (!sent)
             return std::unexpected(sent.error());
         bytes = bytes.subspan(*sent);
@@ -280,13 +304,28 @@ std::expected<void, ChannelError> Channel::send(std::span<uint8_t const> bytes)
     return {};
 }
 
+std::expected<std::size_t, ChannelError> Channel::trySend(std::span<uint8_t const> bytes)
+{
+    if (bytes.empty())
+        return 0;
+    auto const chunk = bytes.first(std::min(bytes.size(), MaxTransferBytes));
+    return _native->transfer(
+        [&](OVERLAPPED& overlapped) {
+            return ::WriteFile(
+                _native->pipe, chunk.data(), static_cast<DWORD>(chunk.size()), nullptr, &overlapped);
+        },
+        Completion::Poll);
+}
+
 std::expected<std::size_t, ChannelError> Channel::receiveSome(std::span<uint8_t> buffer)
 {
     auto const chunk = buffer.first(std::min(buffer.size(), MaxTransferBytes));
-    auto const received = _native->transfer([&](OVERLAPPED& overlapped) {
-        return ::ReadFile(
-            _native->pipe, chunk.data(), static_cast<DWORD>(chunk.size()), nullptr, &overlapped);
-    });
+    auto const received = _native->transfer(
+        [&](OVERLAPPED& overlapped) {
+            return ::ReadFile(
+                _native->pipe, chunk.data(), static_cast<DWORD>(chunk.size()), nullptr, &overlapped);
+        },
+        Completion::Wait);
     if (received && *received == 0)
         return std::unexpected(ChannelError::Closed);
     return received;

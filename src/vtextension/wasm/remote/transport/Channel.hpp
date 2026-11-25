@@ -5,7 +5,8 @@
 /// A reliable, ordered byte channel between Contour and its extension host process: one end of a connected
 /// pair. A Unix-domain stream socket on POSIX, an overlapped named pipe on Windows.
 ///
-/// Its I/O blocks. shutdown() is what makes a blocked receive return, from any thread, on both ends.
+/// Its I/O blocks, but for trySend(). shutdown() is what makes a blocked receive return, from any thread, on
+/// both ends.
 
 #include <cstddef>
 #include <cstdint>
@@ -61,6 +62,12 @@ class Channel
     /// @param bytes The bytes to send.
     /// @return Nothing once every byte is sent; `Closed` if the peer is gone or this end was shut down.
     [[nodiscard]] std::expected<void, ChannelError> send(std::span<uint8_t const> bytes);
+
+    /// Sends as much of @p bytes as the channel takes now, without blocking.
+    /// @param bytes The bytes to send.
+    /// @return How many of them, from the front, were sent: 0 if none fit; `Closed` if the peer is gone or
+    ///         this end was shut down.
+    [[nodiscard]] std::expected<std::size_t, ChannelError> trySend(std::span<uint8_t const> bytes);
 
     /// Receives at least one byte, blocking until one arrives.
     /// @param buffer Where the bytes go. Not empty.

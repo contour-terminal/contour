@@ -4,12 +4,16 @@
 // for the reason it gave.
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <expected>
 #include <future>
 #include <ranges>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <vtextension/wasm/remote/proto/Codec.hpp>
@@ -202,4 +206,65 @@ TEST_CASE("PduStream.keepsAModerateBufferBetweenFrames", "[vtextension]")
         REQUIRE(sent.get().has_value());
     }
     CHECK(pair.helper.receiveBufferStats().allocations <= 2);
+}
+
+TEST_CASE("PduStream.trySendKeepsAPartialFrame", "[vtextension]")
+{
+    using namespace std::chrono_literals;
+    auto pair = makeControlPair();
+
+    // Frames larger than half a socket's buffer, which the channel takes in part: nobody reads, so they go
+    // in until one does not fit whole, and then until none fits at all.
+    auto const loadNumbered = [](uint32_t moduleId) {
+        return proto::Pdu { proto::Load {
+            .runtimeId = 1,
+            .moduleId = moduleId,
+            .bytes = std::vector<std::byte>(std::size_t { 256 } * 1024, std::byte { 9 }) } };
+    };
+    constexpr auto MaxFrames = uint32_t { 1024 };
+    auto sentFrames = uint32_t { 0 };
+    auto begunTail = std::size_t { 0 };
+    while (sentFrames < MaxFrames)
+    {
+        auto const outcome = pair.parent.trySend(loadNumbered(sentFrames + 1));
+        REQUIRE(outcome.has_value());
+        if (*outcome == transport::SendOutcome::WouldBlock)
+            break;
+        ++sentFrames;
+        begunTail = pair.parent.unsentBytes();
+    }
+    REQUIRE(sentFrames < MaxFrames);
+#ifndef _WIN32
+    // A socket takes part of a frame; a pipe's write may be taken whole or not at all.
+    CHECK(begunTail > 0);
+#endif
+    CHECK(pair.parent.unsentBytes() == begunTail);
+
+    // A reader drains; the next send, a blocking one, finishes the frame begun before its own.
+    auto reading = std::async(std::launch::async, [&] {
+        auto moduleIds = std::vector<uint32_t> {};
+        for ([[maybe_unused]] auto const index: std::views::iota(uint32_t { 0 }, sentFrames + 1))
+        {
+            auto const pdu = pair.helper.receive();
+            if (!pdu || !std::holds_alternative<proto::Load>(*pdu))
+            {
+                // Ended here, so that the blocking send below fails rather than waits.
+                pair.helper.shutdown();
+                break;
+            }
+            moduleIds.push_back(std::get<proto::Load>(*pdu).moduleId);
+        }
+        return moduleIds;
+    });
+    auto const sent = pair.parent.send(loadNumbered(sentFrames + 1));
+    if (reading.wait_for(5s) != std::future_status::ready)
+    {
+        FAIL_CHECK("the reader did not get every frame");
+        std::fputs("PduStream.trySendKeepsAPartialFrame: the reader did not get every frame\n", stderr);
+        std::abort();
+    }
+    CHECK(sent.has_value());
+    CHECK(pair.parent.unsentBytes() == 0);
+    auto const expected = std::views::iota(uint32_t { 1 }, sentFrames + 2);
+    CHECK(reading.get() == std::vector<uint32_t>(expected.begin(), expected.end()));
 }

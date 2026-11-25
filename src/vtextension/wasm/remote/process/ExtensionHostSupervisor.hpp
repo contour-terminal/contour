@@ -97,6 +97,10 @@ class SupervisedHelper
     /// Has the supervisor kill the helper. Posts, and returns.
     void kill() noexcept;
 
+    /// Lets the helper go now, as destroying this would; every later call is a no-op. Posts, and returns.
+    /// Thread-safe against the other calls, as a holder shared by threads needs it to be.
+    void letGo() noexcept;
+
     /// Arms a step's timeout, from now: should the watch still live once @p budget passed, the supervisor
     /// kills the helper and runs the attachment's onDeath.
     /// @param step The step about to begin.
@@ -120,11 +124,8 @@ class SupervisedHelper
 
     SupervisedHelper(std::shared_ptr<SupervisorMailbox> mailbox, uint64_t key, ProcessId processId) noexcept;
 
-    /// Lets the helper go, unless it was moved from.
-    void release() noexcept;
-
     std::shared_ptr<SupervisorMailbox> _mailbox;
-    uint64_t _key = 0; ///< The supervisor's name for the helper; 0 once moved from.
+    std::atomic<uint64_t> _key = 0; ///< The supervisor's name for the helper; 0 once moved from or let go.
     ProcessId _processId = 0;
 };
 

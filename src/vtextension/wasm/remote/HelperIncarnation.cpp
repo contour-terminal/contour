@@ -5,6 +5,7 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <deque>
 #include <expected>
 #include <memory>
 #include <mutex>
@@ -142,7 +143,16 @@ std::expected<proto::Pdu, StreamError> HelperIncarnation::request(proto::Pdu con
     auto const lock = std::scoped_lock { _controlMutex };
     // Armed only once the channel is this request's: waiting for another's is not the host's time.
     auto const watch = this->watch(step);
-    return exchange(pdu);
+    if (!isAlive())
+        return std::unexpected(StreamError::Closed);
+    // What was released before goes first -- an interrupt slot given back with an instance is handed to the
+    // next only after the host heard of it -- and what was released meanwhile goes right after.
+    if (!sendReleases())
+        return std::unexpected(StreamError::Closed);
+    auto reply = exchange(pdu);
+    if (reply)
+        std::ignore = sendReleases();
+    return reply;
 }
 
 std::expected<proto::Pdu, StreamError> HelperIncarnation::exchange(proto::Pdu const& pdu)
@@ -167,11 +177,70 @@ StepWatch HelperIncarnation::watch(HostStep step)
     return _handle->watch(step, _timeouts.*StepBudgets[std::to_underlying(step)].budget);
 }
 
-void HelperIncarnation::post(proto::Pdu const& pdu) noexcept
+void HelperIncarnation::release(proto::Release release) noexcept
 {
-    auto const lock = std::scoped_lock { _controlMutex };
-    if (isAlive())
-        std::ignore = _control.send(pdu);
+    if (!isAlive())
+        return;
+    auto const isOverflowing = [&] {
+        auto const lock = std::scoped_lock { _outboxMutex };
+        if (_outbox.size() >= MaxPendingReleases)
+            return true;
+        _outbox.push_back(release);
+        return false;
+    }();
+    if (isOverflowing)
+    {
+        markDead();
+        return;
+    }
+    // Sent now only if that costs no wait: another thread's request sends it after its exchange, and a host
+    // that reads slowly gets it with the next release or request.
+    auto const lock = std::unique_lock { _controlMutex, std::try_to_lock };
+    if (lock.owns_lock() && isAlive())
+        trySendReleases();
+}
+
+bool HelperIncarnation::sendReleases()
+{
+    while (auto const next = oldestRelease())
+    {
+        if (!_control.send(*next))
+        {
+            markDead();
+            return false;
+        }
+        forgetOldestRelease();
+    }
+    return true;
+}
+
+void HelperIncarnation::trySendReleases() noexcept
+{
+    while (auto const next = oldestRelease())
+    {
+        auto const outcome = _control.trySend(*next);
+        if (!outcome)
+        {
+            markDead();
+            return;
+        }
+        if (*outcome == transport::SendOutcome::WouldBlock)
+            return;
+        forgetOldestRelease();
+    }
+}
+
+std::optional<proto::Release> HelperIncarnation::oldestRelease()
+{
+    auto const lock = std::scoped_lock { _outboxMutex };
+    return _outbox.empty() ? std::nullopt : std::optional { _outbox.front() };
+}
+
+void HelperIncarnation::forgetOldestRelease()
+{
+    // Only the holder of the control mutex takes from the front; others only append.
+    auto const lock = std::scoped_lock { _outboxMutex };
+    _outbox.pop_front();
 }
 
 void HelperIncarnation::markDead() noexcept
@@ -179,6 +248,19 @@ void HelperIncarnation::markDead() noexcept
     if (_state.exchange(IncarnationState::Dead) == IncarnationState::Dead)
         return;
     _handle->terminate();
+    shutdownChannels();
+}
+
+void HelperIncarnation::letGo() noexcept
+{
+    if (_state.exchange(IncarnationState::Dead) == IncarnationState::Dead)
+        return;
+    _handle->letGo();
+    shutdownChannels();
+}
+
+void HelperIncarnation::shutdownChannels() noexcept
+{
     // A thread blocked on one of the parent's ends returns; a host that never closes its own ends, as a
     // hostile one may not, cannot keep it waiting.
     _control.shutdown();

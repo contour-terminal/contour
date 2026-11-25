@@ -152,6 +152,63 @@ namespace
                               .exports = std::move(loaded->exports) };
     }
 
+    /// Whether a backend still starts hosts.
+    enum class RosterState : uint8_t
+    {
+        Closed, ///< Its backend went: its hosts were let go, and no more start.
+        Open,   ///< Hosts start, and are listed.
+    };
+
+    /// The incarnations one backend started, so that they go with it: a backend let go while a thread still
+    /// uses one of its runtimes -- one blocked on a host that stopped reading, say -- lets its hosts go
+    /// rather than wait for that thread. Thread-safe; nothing it does blocks.
+    class IncarnationRoster
+    {
+      public:
+        /// @return Whether hosts still start.
+        [[nodiscard]] bool isOpen() const
+        {
+            auto const lock = std::scoped_lock { _mutex };
+            return _state == RosterState::Open;
+        }
+
+        /// Lists @p incarnation, or lets it go at once if the backend went meanwhile.
+        /// @return Whether it was listed.
+        [[nodiscard]] bool enlist(std::shared_ptr<HelperIncarnation> const& incarnation)
+        {
+            {
+                auto const lock = std::scoped_lock { _mutex };
+                if (_state == RosterState::Open)
+                {
+                    std::erase_if(_listed, [](auto const& listed) { return listed.expired(); });
+                    _listed.push_back(incarnation);
+                    return true;
+                }
+            }
+            incarnation->letGo();
+            return false;
+        }
+
+        /// Lets every listed incarnation go, and starts none from now on.
+        void close() noexcept
+        {
+            auto listed = std::vector<std::weak_ptr<HelperIncarnation>> {};
+            {
+                auto const lock = std::scoped_lock { _mutex };
+                _state = RosterState::Closed;
+                listed = std::exchange(_listed, {});
+            }
+            for (auto const& entry: listed)
+                if (auto const incarnation = entry.lock())
+                    incarnation->letGo();
+        }
+
+      private:
+        mutable std::mutex _mutex; ///< Guards what follows.
+        RosterState _state = RosterState::Open;
+        std::vector<std::weak_ptr<HelperIncarnation>> _listed;
+    };
+
     /// The host a runtime runs the modules of one identity in: its current incarnation, started anew when the
     /// last one died.
     class HelperSlot
@@ -160,23 +217,31 @@ namespace
         /// @param connector What starts each incarnation.
         /// @param runtime The runtime each incarnation is created with.
         /// @param policy What each incarnation's host is held to.
-        HelperSlot(std::shared_ptr<IHostConnector> connector,
+        /// @param roster Where each incarnation is listed, to go with the backend.
+        HelperSlot(std::shared_ptr<IncarnationRoster> roster,
+                   std::shared_ptr<IHostConnector> connector,
                    proto::CreateRuntime runtime,
                    HelperPolicy policy) noexcept:
-            _connector { std::move(connector) }, _runtime { std::move(runtime) }, _policy { policy }
+            _roster { std::move(roster) },
+            _connector { std::move(connector) },
+            _runtime { std::move(runtime) },
+            _policy { policy }
         {
         }
 
-        /// @return The incarnation serving; a new one if none is.
+        /// @return The incarnation serving; a new one if none is; `HostUnavailable` once the backend went.
         [[nodiscard]] std::expected<std::shared_ptr<HelperIncarnation>, ExtensionError> live()
         {
             auto const lock = std::scoped_lock { _mutex };
             if (_current && _current->isAlive())
                 return _current;
-            if (!_connector)
+            if (!_connector || !_roster->isOpen())
                 return std::unexpected(ExtensionError::HostUnavailable);
             return HelperIncarnation::connect(*_connector, _runtime, _policy)
-                .transform([this](std::shared_ptr<HelperIncarnation> started) {
+                .and_then([this](std::shared_ptr<HelperIncarnation> started)
+                              -> std::expected<std::shared_ptr<HelperIncarnation>, ExtensionError> {
+                    if (!_roster->enlist(started))
+                        return std::unexpected(ExtensionError::HostUnavailable);
                     if (_current)
                         errorLog()("An extension host stopped; it was started anew ({} times so far).",
                                    ++_respawns);
@@ -186,6 +251,7 @@ namespace
         }
 
       private:
+        std::shared_ptr<IncarnationRoster> _roster;
         std::shared_ptr<IHostConnector> _connector;
         proto::CreateRuntime _runtime;
         HelperPolicy _policy;
@@ -200,11 +266,13 @@ namespace
       public:
         /// Counts the runtime alive in @p kind for as long as it lives.
         RemoteRuntime(std::shared_ptr<RemoteKindState> kind,
+                      std::shared_ptr<IncarnationRoster> roster,
                       std::shared_ptr<IHostConnector> connector,
                       HelperPolicy policy,
                       RuntimeLimits limits,
                       proto::CreateRuntime create) noexcept:
             _kind { std::move(kind) },
+            _roster { std::move(roster) },
             _connector { std::move(connector) },
             _policy { policy },
             _limits { limits },
@@ -239,7 +307,7 @@ namespace
         [[nodiscard]] std::shared_ptr<HelperSlot> slotFor(std::string const& key)
         {
             if (key.empty())
-                return std::make_shared<HelperSlot>(_connector, _create, _policy);
+                return std::make_shared<HelperSlot>(_roster, _connector, _create, _policy);
             auto const lock = std::scoped_lock { _mutex };
             // The hosts of identities whose last module went are forgotten.
             std::erase_if(_slots, [](auto const& entry) { return entry.second.expired(); });
@@ -247,13 +315,14 @@ namespace
             auto slot = entry.lock();
             if (!slot)
             {
-                slot = std::make_shared<HelperSlot>(_connector, _create, _policy);
+                slot = std::make_shared<HelperSlot>(_roster, _connector, _create, _policy);
                 entry = slot;
             }
             return slot;
         }
 
         std::shared_ptr<RemoteKindState> _kind;
+        std::shared_ptr<IncarnationRoster> _roster;
         std::shared_ptr<IHostConnector> _connector;
         HelperPolicy _policy;
         RuntimeLimits _limits;
@@ -292,7 +361,7 @@ namespace
 
         ~RemoteModule() override
         {
-            _loadedIn->post(proto::Release { .target = proto::ReleaseTarget::Module, .id = _moduleId });
+            _loadedIn->release(proto::Release { .target = proto::ReleaseTarget::Module, .id = _moduleId });
         }
 
         [[nodiscard]] std::span<ImportDescription const> imports() const noexcept override
@@ -360,10 +429,11 @@ namespace
 
         ~RemoteInstance() override
         {
-            // Lowered before it is released, and given back only once the host was told: the next instance
-            // its slot is handed to is instantiated after the host let this one go.
+            // Lowered before it is released, and given back only once the release is queued: the next
+            // instance its slot is handed to is instantiated by a request, which sends every queued release
+            // before it, so after the host let this one go. Nothing here waits for the host.
             _incarnation->clearInterrupt(_interruptSlot);
-            _incarnation->post(
+            _incarnation->release(
                 proto::Release { .target = proto::ReleaseTarget::Instance, .id = _instanceId });
             _incarnation->interruptSlots().release(_interruptSlot);
         }
@@ -496,7 +566,7 @@ namespace
                 host.markDead();
                 return std::unexpected(ExtensionError::InvalidComponent);
             }
-            _loadedIn->post(proto::Release { .target = proto::ReleaseTarget::Module, .id = _moduleId });
+            _loadedIn->release(proto::Release { .target = proto::ReleaseTarget::Module, .id = _moduleId });
             _loadedIn = *incarnation;
             _moduleId = reloaded->moduleId;
         }
@@ -675,10 +745,19 @@ namespace
     class RemoteBackend final: public IWasmBackend
     {
       public:
-        RemoteBackend(std::shared_ptr<RemoteKindState> kind, BackendConfig config) noexcept:
+        RemoteBackend(std::shared_ptr<RemoteKindState> kind, BackendConfig config):
             _kind { std::move(kind) }, _config { std::move(config) }
         {
         }
+
+        RemoteBackend(RemoteBackend const&) = delete;
+        RemoteBackend(RemoteBackend&&) = delete;
+        RemoteBackend& operator=(RemoteBackend const&) = delete;
+        RemoteBackend& operator=(RemoteBackend&&) = delete;
+
+        /// Lets every host it started go, and returns: a thread still using one fails `HostUnavailable`
+        /// rather than keep this waiting.
+        ~RemoteBackend() override { _roster->close(); }
 
         [[nodiscard]] std::expected<std::shared_ptr<IWasmRuntime>, ExtensionError> createRuntime(
             RuntimeLimits limits, std::span<HostFunction const> hostFunctions) override
@@ -704,6 +783,7 @@ namespace
                                               .parameterCount = function.parameterCount });
             return std::make_shared<RemoteRuntime>(
                 _kind,
+                _roster,
                 _config.connector,
                 HelperPolicy { .timeouts = _config.timeouts, .lockdown = _config.lockdown },
                 limits,
@@ -732,6 +812,7 @@ namespace
       private:
         std::shared_ptr<RemoteKindState> _kind;
         BackendConfig _config;
+        std::shared_ptr<IncarnationRoster> _roster = std::make_shared<IncarnationRoster>();
     };
 } // namespace
 

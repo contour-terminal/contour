@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <expected>
 #include <memory>
+#include <vector>
 
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
@@ -15,8 +16,8 @@
 namespace vtextension::wasm::remote::transport
 {
 
-/// Why a stream could not send or receive a PDU. Every one ends the stream, except an OverCap from send(),
-/// which sent nothing.
+/// Why a stream could not send or receive a PDU. Every one ends the stream, except an OverCap from send() or
+/// trySend(), which sent nothing.
 enum class StreamError : uint8_t
 {
     Closed,    ///< The channel closed, or was shut down.
@@ -25,6 +26,14 @@ enum class StreamError : uint8_t
                ///< direction or channel.
     OverCap,   ///< The peer sent a frame larger than its kind may be; or, from send(), the PDU holds a
                ///< list over its cap or is larger than its kind may be, and was not sent.
+};
+
+/// What became of a PDU a stream was asked to send without blocking.
+enum class SendOutcome : uint8_t
+{
+    WouldBlock, ///< Nothing of it was sent: the channel takes nothing now, or a frame sent before is not all
+                ///< sent yet. It is the caller's to send again.
+    Sent,       ///< It is the stream's: sent, or begun and its tail kept for the next send.
 };
 
 /// What a stream's receive buffer cost so far; a test hook.
@@ -45,12 +54,20 @@ class PduStream
     /// @param limits The caps of the PDUs whose size follows the stream's limits.
     PduStream(Channel channel, proto::ChannelKind kind, proto::Direction arriving, proto::PduLimits limits);
 
-    /// Sends one PDU.
+    /// Sends one PDU, blocking until the channel took it -- and first the tail of a frame trySend() began.
     /// @param pdu The PDU.
     /// @return Nothing once it is sent; why it was not. `OverCap` if a list it carries exceeds its cap
     ///         (Pdu.hpp), or its body exceeds its kind's byte cap under the stream's limits (PduTable.hpp):
     ///         nothing was sent, and the stream remains usable.
     [[nodiscard]] std::expected<void, StreamError> send(proto::Pdu const& pdu);
+
+    /// Sends one PDU as far as the channel takes it now, without blocking: a frame begun is the stream's, and
+    /// the rest of it is sent first by the next send, blocking or not. A frame begun before and not all sent
+    /// yet is sent on first; while it is not, nothing of @p pdu is.
+    /// @param pdu The PDU.
+    /// @return `Sent` once the frame is begun, `WouldBlock` if nothing of it was sent; why it failed, as
+    ///         send() fails.
+    [[nodiscard]] std::expected<SendOutcome, StreamError> trySend(proto::Pdu const& pdu);
 
     /// Receives the next PDU, blocking until all of it has arrived. A frame larger than its kind may be fails
     /// as soon as its header arrives, without waiting for its body.
@@ -64,10 +81,17 @@ class PduStream
     /// @return What the receive buffer cost since the stream was made.
     [[nodiscard]] ReceiveBufferStats receiveBufferStats() const noexcept { return _stats; }
 
+    /// Test hook.
+    /// @return How many bytes of a frame trySend() began are not sent yet.
+    [[nodiscard]] std::size_t unsentBytes() const noexcept { return _unsentTail.size(); }
+
   private:
     /// Replaces the receive buffer with one of @p capacity bytes, keeping the bytes buffered.
     /// @param capacity At least _buffered; 0 lets the buffer go.
     void reallocate(std::size_t capacity);
+
+    /// @return @p pdu as one frame; `OverCap` if the peer would refuse it (send()).
+    [[nodiscard]] std::expected<std::vector<uint8_t>, StreamError> frameOf(proto::Pdu const& pdu) const;
 
     Channel _channel;
     proto::ChannelKind _kind;
@@ -77,6 +101,7 @@ class PduStream
     std::size_t _capacity = 0;          ///< How many bytes _buffer holds.
     std::size_t _buffered = 0;
     ReceiveBufferStats _stats;
+    std::vector<uint8_t> _unsentTail; ///< What trySend() did not get sent of the frame it began.
 };
 
 } // namespace vtextension::wasm::remote::transport

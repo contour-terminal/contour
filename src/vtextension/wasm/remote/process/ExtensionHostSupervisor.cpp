@@ -142,7 +142,7 @@ SupervisedHelper::SupervisedHelper(std::shared_ptr<SupervisorMailbox> mailbox,
 
 SupervisedHelper::SupervisedHelper(SupervisedHelper&& other) noexcept:
     _mailbox { std::move(other._mailbox) },
-    _key { std::exchange(other._key, 0) },
+    _key { other._key.exchange(0) },
     _processId { std::exchange(other._processId, 0) }
 {
 }
@@ -151,9 +151,9 @@ SupervisedHelper& SupervisedHelper::operator=(SupervisedHelper&& other) noexcept
 {
     if (this != &other)
     {
-        release();
+        letGo();
         _mailbox = std::move(other._mailbox);
-        _key = std::exchange(other._key, 0);
+        _key = other._key.exchange(0);
         _processId = std::exchange(other._processId, 0);
     }
     return *this;
@@ -161,31 +161,31 @@ SupervisedHelper& SupervisedHelper::operator=(SupervisedHelper&& other) noexcept
 
 SupervisedHelper::~SupervisedHelper()
 {
-    release();
+    letGo();
 }
 
-void SupervisedHelper::release() noexcept
+void SupervisedHelper::letGo() noexcept
 {
-    if (_key != 0)
-        std::ignore =
-            _mailbox->post(SupervisorMailbox::Command { DropCommand { .helper = std::exchange(_key, 0) } });
+    if (auto const key = _key.exchange(0); key != 0)
+        std::ignore = _mailbox->post(SupervisorMailbox::Command { DropCommand { .helper = key } });
 }
 
 void SupervisedHelper::kill() noexcept
 {
-    if (_key != 0)
-        std::ignore = _mailbox->post(SupervisorMailbox::Command { KillCommand { .helper = _key } });
+    if (auto const key = _key.load(); key != 0)
+        std::ignore = _mailbox->post(SupervisorMailbox::Command { KillCommand { .helper = key } });
 }
 
 StepWatch SupervisedHelper::watch(HostStep step, std::chrono::milliseconds budget)
 {
-    if (_key == 0)
+    auto const key = _key.load();
+    if (key == 0)
         return StepWatch {};
     // Timed from the caller's instant, not from when the supervisor gets to it.
     auto const start = _mailbox->now();
     if (!start)
         return StepWatch {};
-    auto const timer = TimerKey { .helper = _key, .serial = _mailbox->nextSerial() };
+    auto const timer = TimerKey { .helper = key, .serial = _mailbox->nextSerial() };
     if (_mailbox->post(SupervisorMailbox::Command {
             WatchCommand { .timer = timer, .step = step, .start = *start, .budget = budget } })
         == SupervisorMailbox::Delivery::Dropped)
@@ -197,9 +197,9 @@ StepWatch SupervisedHelper::watch(HostStep step, std::chrono::milliseconds budge
 
 void SupervisedHelper::attach(HostAttachment attachment)
 {
-    if (_key != 0)
+    if (auto const key = _key.load(); key != 0)
         std::ignore = _mailbox->post(SupervisorMailbox::Command {
-            AttachCommand { .helper = _key, .attachment = std::move(attachment) } });
+            AttachCommand { .helper = key, .attachment = std::move(attachment) } });
 }
 
 void SupervisedHelper::nudge() noexcept

@@ -77,6 +77,9 @@ class InProcessHost final: public remote::IHostHandle
     /// Stops the server: its channels close, and its thread winds down.
     void terminate() noexcept override;
 
+    /// Stops the server, as terminate() does; its thread is joined when the host is destroyed.
+    void letGo() noexcept override;
+
     /// A host in this process cannot hang its parent's steps the way a process could: no timeout is armed.
     /// @return An inert watch.
     [[nodiscard]] remote::StepWatch watch(remote::HostStep step, std::chrono::milliseconds budget) override;

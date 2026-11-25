@@ -110,6 +110,12 @@ class IHostHandle
     /// not wait for it to be gone.
     virtual void terminate() noexcept = 0;
 
+    /// Lets the host go now, as destroying the handle would, while the handle stays usable to the threads
+    /// that hold it: a process is given its teardown grace to exit on its own, then killed, and reaped by its
+    /// supervisor; a host in this process stops serving. Does not wait. Later calls do nothing, nor does the
+    /// handle's destruction once this ran.
+    virtual void letGo() noexcept = 0;
+
     /// Arms @p step's timeout: should the host still be at it once @p budget passed, it is stopped, and the
     /// attachment's onDeath runs.
     /// @param step The step about to begin.

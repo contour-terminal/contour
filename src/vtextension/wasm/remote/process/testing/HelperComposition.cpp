@@ -113,14 +113,13 @@ std::vector<std::pair<std::string, std::string>> helperEnvironment()
     return environment;
 }
 
-HelperComposition::HelperComposition():
+HelperComposition::HelperComposition(std::chrono::milliseconds teardownGrace):
+    _teardownGrace { teardownGrace },
     _recording { std::make_shared<RecordingLauncher>(makeSystemProcessLauncher()) },
     _supervisor { [this] {
         logErrorsToOriginalStandardError();
-        auto started =
-            ExtensionHostSupervisor::start(SupervisorConfig { .launcher = _recording,
-                                                              .clock = &core::defaultSteadyClock(),
-                                                              .teardownGrace = HelperTeardownGrace });
+        auto started = ExtensionHostSupervisor::start(SupervisorConfig {
+            .launcher = _recording, .clock = &core::defaultSteadyClock(), .teardownGrace = _teardownGrace });
         if (!started)
         {
             std::fputs("HelperComposition: the supervisor could not start\n", stderr);
@@ -167,7 +166,7 @@ bool HelperComposition::awaitEveryHelperReaped() const
 bool HelperComposition::awaitLiveHelpersAtMost(std::size_t count) const
 {
     using namespace std::chrono_literals;
-    auto const deadline = std::chrono::steady_clock::now() + HelperTeardownGrace + ReapSlack;
+    auto const deadline = std::chrono::steady_clock::now() + _teardownGrace + ReapSlack;
     while (_supervisor->liveProcesses() > count && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(1ms);
     return _supervisor->liveProcesses() <= count;

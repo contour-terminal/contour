@@ -51,6 +51,7 @@ namespace
         void clearInterrupt(uint32_t interruptSlot) noexcept override { _page.clear(interruptSlot); }
 
         void terminate() noexcept override { _helper.kill(); }
+        void letGo() noexcept override { _helper.letGo(); }
 
         [[nodiscard]] remote::StepWatch watch(remote::HostStep step,
                                               std::chrono::milliseconds budget) override

@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include <vtextension/wasm/remote/transport/Channel.hpp>
+#include <vtextension/wasm/remote/transport/WouldBlock.hpp>
 
 namespace vtextension::wasm::remote::transport
 {
@@ -119,6 +120,26 @@ std::expected<void, ChannelError> Channel::send(std::span<uint8_t const> bytes)
         bytes = bytes.subspan(static_cast<std::size_t>(sent));
     }
     return {};
+}
+
+std::expected<std::size_t, ChannelError> Channel::trySend(std::span<uint8_t const> bytes)
+{
+    auto sent = std::size_t { 0 };
+    while (sent < bytes.size())
+    {
+        auto const rest = bytes.subspan(sent);
+        auto const count = ::send(_native->descriptor, rest.data(), rest.size(), SendFlags | MSG_DONTWAIT);
+        if (count == -1)
+        {
+            if (errno == EINTR)
+                continue;
+            if (wouldBlock(errno))
+                break;
+            return std::unexpected(channelErrorOf(errno));
+        }
+        sent += static_cast<std::size_t>(count);
+    }
+    return sent;
 }
 
 std::expected<std::size_t, ChannelError> Channel::receiveSome(std::span<uint8_t> buffer)

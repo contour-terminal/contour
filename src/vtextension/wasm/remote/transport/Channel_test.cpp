@@ -4,10 +4,13 @@
 // process does not inherit.
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <expected>
 #include <future>
 #include <optional>
@@ -208,4 +211,50 @@ TEST_CASE("Channel.adoptRefusesAClosedHandle", "[vtextension]")
     closeHandle(*copy);
     // Nothing else of this test opens a handle meanwhile, so the number names nothing.
     CHECK(Channel::adopt(*copy) == std::unexpected(ChannelError::Io));
+}
+
+TEST_CASE("Channel.trySendNeverBlocks", "[vtextension]")
+{
+    using namespace std::chrono_literals;
+    auto pair = makeChannelPair();
+    REQUIRE(pair.has_value());
+
+    // Nobody reads: chunks go in until the channel takes no more, and then trySend() says so rather than
+    // wait. Bounded, so that a channel that took everything would end the loop too, and fail below.
+    constexpr auto MaxSentBytes = std::size_t { 64 } * 1024 * 1024;
+    auto const chunk = std::vector<uint8_t>(std::size_t { 4 } * 1024, uint8_t { 0x3c });
+    auto filling = std::async(std::launch::async, [&]() -> std::expected<std::size_t, ChannelError> {
+        auto total = std::size_t { 0 };
+        while (total < MaxSentBytes)
+        {
+            auto const sent = pair->parent.trySend(chunk);
+            if (!sent)
+                return sent;
+            if (*sent == 0)
+                break;
+            total += *sent;
+        }
+        return total;
+    });
+    if (filling.wait_for(5s) != std::future_status::ready)
+    {
+        // The future's destructor would wait for the blocked send forever: the run ends here, rather than
+        // hang.
+        FAIL_CHECK("trySend() blocked");
+        std::fputs("Channel.trySendNeverBlocks: trySend() blocked\n", stderr);
+        std::abort();
+    }
+    auto const filled = filling.get();
+    REQUIRE(filled.has_value());
+    CHECK(*filled > 0);
+    CHECK(*filled < MaxSentBytes);
+
+    // What it took arrives, all of it, and the channel takes more once drained.
+    auto const received = receiveExactly(pair->helper, *filled);
+    REQUIRE(received.has_value());
+    CHECK(std::ranges::all_of(*received, [](uint8_t byte) { return byte == 0x3c; }));
+    CHECK(pair->parent.trySend(chunk).value_or(0) > 0);
+
+    pair->helper.shutdown();
+    CHECK(pair->parent.trySend(chunk) == std::unexpected(ChannelError::Closed));
 }

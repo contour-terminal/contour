@@ -109,6 +109,11 @@ void InProcessHost::terminate() noexcept
     _host.stop();
 }
 
+void InProcessHost::letGo() noexcept
+{
+    terminate();
+}
+
 remote::StepWatch InProcessHost::watch(remote::HostStep /*step*/, std::chrono::milliseconds /*budget*/)
 {
     return remote::StepWatch {};

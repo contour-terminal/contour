@@ -40,13 +40,18 @@ struct HelperBackendConfig
     HostTimeouts timeouts {};                                              ///< Its budgets.
 };
 
-/// A supervisor over the system's launcher, recorded, waiting HelperTeardownGrace for each helper let go,
-/// and the kind every remote backend built over it shares.
+/// A supervisor over the system's launcher, recorded, waiting a teardown grace for each helper let go (by
+/// default HelperTeardownGrace), and the kind every remote backend built over it shares.
 class HelperComposition
 {
   public:
     /// Starts the supervisor; aborts the test run if it cannot start.
-    HelperComposition();
+    /// @param teardownGrace How long a helper let go may take to exit on its own before it is killed.
+    explicit HelperComposition(std::chrono::milliseconds teardownGrace = HelperTeardownGrace);
+
+    /// Destroys the supervisor, as a hosting process that quits does: it kills every helper, reaps within its
+    /// budget, and joins. Afterwards only recording() and kind() may be used.
+    void stopSupervisor() noexcept { _supervisor.reset(); }
 
     /// @return What started every helper, and when.
     [[nodiscard]] RecordingLauncher& recording() const noexcept { return *_recording; }
@@ -77,6 +82,7 @@ class HelperComposition
     [[nodiscard]] bool awaitLiveHelpersAtMost(std::size_t count) const;
 
   private:
+    std::chrono::milliseconds _teardownGrace;
     std::shared_ptr<RecordingLauncher> _recording;
     std::unique_ptr<ExtensionHostSupervisor> _supervisor;
     std::shared_ptr<RemoteKindState> _kind;

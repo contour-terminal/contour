@@ -28,6 +28,10 @@ class RemoteKindState;
 ///
 /// Instances' memory is reached by copy: a view is a copy of the range, read on first access, and what was
 /// written to it goes back before the instance next runs.
+///
+/// Nothing it lets go waits for a host: a module or an instance dropped queues its release, and the backend
+/// dropped lets every host it started go -- should a thread still use one of its runtimes then, its request
+/// fails `HostUnavailable` rather than keep the dropping thread waiting.
 /// @param kind The kind's state; every backend created with it behaves as one.
 /// @param config How hosts are started; a null connector starts none, and every load fails `HostUnavailable`.
 /// @return The backend.

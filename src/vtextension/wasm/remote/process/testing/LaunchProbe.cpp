@@ -4,14 +4,23 @@
 // reports what it was started with, on the control channel it was handed, and exits once that channel ends.
 //
 //   extension_host_probe --report <helper arguments> [--check-handle=H]…
+//   extension_host_probe --parent <helper arguments> <helper executable> [its extra arguments]…
 //
 // Before it reports, it does to itself what the extension host does: it binds itself to its parent (exiting
 // as the host does if that is not the process named), and caps its resources to its `--data-bytes`.
+//
+// With --parent, it is a hosting process of its own instead: bound to its parent likewise, it starts a
+// supervisor and has it start the helper executable, as Contour does, and once the helper said Hello sends
+// `helper=<pid>` and `end` lines on its control channel, and then waits for that channel to end -- or to be
+// killed, which is what the tests of a helper outliving its parent do.
 //
 // The report is one `key=value` line each: `cwd=` its working directory, `env=NAME` per environment variable,
 // `stdin=` and `stdout=` each `null` if it is the null device, else `other`; `caps=` `apply` or `skip` as
 // the build caps, and (POSIX) `nproc=` and `data=` its limits, a number or `unlimited`; and `fd=N` per open
 // descriptor (POSIX) or `handle=H:valid|invalid` per --check-handle (Windows); then `end`.
+#include <core/Clock.hpp>
+
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <charconv>
@@ -19,16 +28,26 @@
 #include <cstdlib>
 #include <filesystem>
 #include <format>
+#include <iterator>
+#include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <variant>
 #include <vector>
 
 #include <vtextension/wasm/host/HostBootstrap.hpp>
 #include <vtextension/wasm/host/HostProcess.hpp>
+#include <vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp>
+#include <vtextension/wasm/remote/process/ProcessHostConnector.hpp>
+#include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+#include <vtextension/wasm/remote/process/testing/RecordingLauncher.hpp>
+#include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
+#include <vtextension/wasm/remote/transport/PduStream.hpp>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -37,7 +56,6 @@
     #include <sys/resource.h>
     #include <sys/stat.h>
 
-    #include <algorithm>
     #include <ranges>
 
     #include <fcntl.h>
@@ -58,6 +76,7 @@ enum class ProbeExit : uint8_t
     NoControl = 3,    ///< Its control channel cannot be adopted.
     ReportFailed = 4, ///< The report could not be sent.
     ParentGone = 5,   ///< It is not its parent's child: it exits as the host does then.
+    NoHelper = 6,     ///< With --parent: no helper could be started.
 };
 
 /// The prefix of the option naming a handle whose validity is reported.
@@ -201,6 +220,62 @@ enum class StandardStream : uint8_t
     return ProbeExit::Reported;
 }
 
+/// Starts a helper as Contour does, says which process it is, then waits for its control channel to end.
+[[nodiscard]] ProbeExit parent(std::span<std::string_view const> arguments)
+{
+    namespace process = vtextension::wasm::remote::process;
+    // The helper arguments are the `--name=value` ones; the helper executable is the first that is not.
+    auto const firstOther = std::ranges::find_if(
+        arguments, [](std::string_view argument) { return !argument.starts_with("--"); });
+    if (firstOther == arguments.end())
+        return ProbeExit::Usage;
+    auto const parsed = parseHelperArguments({ arguments.begin(), firstOther });
+    if (!parsed)
+        return ProbeExit::Usage;
+    if (!vtextension::wasm::host::bindToParent(parsed->parentProcessId))
+        return ProbeExit::ParentGone;
+    auto control = Channel::adopt(parsed->control);
+    if (!control)
+        return ProbeExit::NoControl;
+
+    auto const recording =
+        std::make_shared<process::testing::RecordingLauncher>(process::makeSystemProcessLauncher());
+    auto supervisor = process::ExtensionHostSupervisor::start(process::SupervisorConfig {
+        .launcher = recording, .clock = &core::defaultSteadyClock(), .teardownGrace = {} });
+    if (!supervisor)
+        return ProbeExit::NoHelper;
+    auto connector = process::ProcessHostConnector {
+        (*supervisor)->mailbox(),
+        process::ProcessHostConfig { .helper = std::filesystem::path { *firstOther },
+                                     .environment = process::defaultHelperEnvironment(),
+                                     .extraArguments = { std::next(firstOther), arguments.end() },
+                                     .caps = {},
+                                     .standardError = std::nullopt }
+    };
+    auto connection = connector.connect();
+    if (!connection || recording->processIds().empty())
+        return ProbeExit::NoHelper;
+    // Told only once the helper bound itself to this process: it says Hello after that, never before.
+    auto helperControl = vtextension::wasm::remote::transport::PduStream {
+        std::move(connection->control),
+        vtextension::wasm::remote::proto::ChannelKind::Control,
+        vtextension::wasm::remote::proto::Direction::ToParent,
+        vtextension::wasm::remote::proto::PduLimits {}
+    };
+    auto const hello = helperControl.receive();
+    if (!hello || !std::holds_alternative<vtextension::wasm::remote::proto::Hello>(*hello))
+        return ProbeExit::NoHelper;
+
+    auto const text = std::format("helper={}\nend\n", recording->processIds().front());
+    if (!control->send(std::span { reinterpret_cast<uint8_t const*>(text.data()), text.size() }))
+        return ProbeExit::ReportFailed;
+    auto buffer = std::array<uint8_t, 64> {};
+    while (control->receiveSome(buffer))
+    {
+    }
+    return ProbeExit::Reported;
+}
+
 } // namespace
 
 // The third parameter is what POSIX systems pass and Windows' C runtime passes too: the environment, read
@@ -208,9 +283,10 @@ enum class StandardStream : uint8_t
 int main(int argc, char const* argv[], char const* envp[])
 {
     auto const arguments = std::vector<std::string_view>(argv + 1, argv + argc);
-    if (arguments.empty() || arguments.front() != "--report")
+    if (arguments.empty() || (arguments.front() != "--report" && arguments.front() != "--parent"))
         return static_cast<int>(ProbeExit::Usage);
-    auto const exit = report(std::span { arguments }.subspan(1), envp);
+    auto const rest = std::span { arguments }.subspan(1);
+    auto const exit = arguments.front() == "--report" ? report(rest, envp) : parent(rest);
     if (exit == ProbeExit::ParentGone)
         return vtextension::wasm::host::exitCodeOf(vtextension::wasm::host::HostProcessExit::ParentGone);
     return static_cast<int>(exit);

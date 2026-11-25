@@ -20,6 +20,13 @@ enum class HostileMode : uint8_t
     /// Serves as the real host does, but never reads the interrupt page: an interrupted call runs on, as a
     /// guest stuck where the engine cannot stop it would.
     IgnoreInterrupt,
+    /// Serves through a relay on its control channel until it answered an instantiation; from the next module
+    /// Contour loads on, it reads nothing more of that channel, as a host wedged mid-request would: Contour's
+    /// send of that module blocks once the channel's buffer is full.
+    StopReadingAfterInstantiate,
+    /// Serves as the real host does, but once Contour's channels end it neither exits nor heeds SIGTERM: it
+    /// sleeps until it is killed.
+    IgnoreEof,
 };
 
 /// One way the hostile host misbehaves, and its name on the command line.
@@ -32,6 +39,9 @@ struct HostileModeRow
 /// Every way the hostile host misbehaves.
 inline constexpr auto HostileModes = std::array {
     HostileModeRow { .mode = HostileMode::IgnoreInterrupt, .name = "ignore-interrupt" },
+    HostileModeRow { .mode = HostileMode::StopReadingAfterInstantiate,
+                     .name = "stop-reading-after-instantiate" },
+    HostileModeRow { .mode = HostileMode::IgnoreEof, .name = "ignore-eof" },
 };
 
 /// The only argument the hostile host takes beyond the real one's.

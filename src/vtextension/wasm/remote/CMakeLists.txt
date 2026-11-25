@@ -94,8 +94,11 @@ if(_process_source)
         # The probe the launcher's tests start: it binds itself to its parent and caps itself as the host does,
         # reports what it was started with -- working directory, environment, caps, open handles -- on its
         # control channel, and exits once that channel ends. Never installed.
-        add_executable(extension_host_probe process/testing/LaunchProbe.cpp)
-        target_link_libraries(extension_host_probe PRIVATE vtextension_host vtextension_remote_wire)
+        # With --parent it is a hosting process instead: it supervises a helper of its own, for the tests of a
+        # helper outliving its parent.
+        add_executable(extension_host_probe process/testing/LaunchProbe.cpp process/testing/RecordingLauncher.hpp)
+        target_link_libraries(extension_host_probe PRIVATE
+            vtextension_host vtextension_remote_process vtextension_remote_wire)
 
         # The launcher against the probe, the transport's pieces the helper inherits, and the test launchers;
         # no engine, so that it cross-builds and runs under wine.
@@ -219,6 +222,7 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime AND _process_source)
         Helper_test.cpp
         ProcessBackend_test.cpp
         ReviewFocusProcess_test.cpp
+        Teardown_test.cpp
         process/testing/HelperComposition.cpp
         process/testing/HelperComposition.hpp
         process/testing/LaunchedHelper.cpp
@@ -234,10 +238,11 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime AND _process_source)
     target_link_libraries(vtextension_helper_test PRIVATE
         vtextension vtextension_host vtextension_remote vtextension_remote_process vtextension_remote_wire
         glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
-    add_dependencies(vtextension_helper_test contour-extension-host contour-extension-host-hostile)
+    add_dependencies(vtextension_helper_test contour-extension-host contour-extension-host-hostile extension_host_probe)
     target_compile_definitions(vtextension_helper_test PRIVATE
         VTEXTENSION_HELPER_PATH="$<TARGET_FILE:contour-extension-host>"
-        VTEXTENSION_HOSTILE_HELPER_PATH="$<TARGET_FILE:contour-extension-host-hostile>")
+        VTEXTENSION_HOSTILE_HELPER_PATH="$<TARGET_FILE:contour-extension-host-hostile>"
+        VTEXTENSION_PROBE_PATH="$<TARGET_FILE:extension_host_probe>")
     if(CONTOUR_WASM_GUESTS)
         # The guests vtextension_test reads, from where it reads them (../../CMakeLists.txt).
         foreach(_guest IN ITEMS echo hostile sleeper spawner)

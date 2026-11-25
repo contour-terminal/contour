@@ -11,6 +11,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -28,6 +29,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <vtextension/ExtensionError.hpp>
@@ -36,6 +38,7 @@
 #include <vtextension/wasm/WasmRuntime.hpp>
 #include <vtextension/wasm/host/HostServer.hpp>
 #include <vtextension/wasm/host/InProcessHost.hpp>
+#include <vtextension/wasm/remote/HelperIncarnation.hpp>
 #include <vtextension/wasm/remote/HostConnector.hpp>
 #include <vtextension/wasm/remote/RemoteBackend.hpp>
 #include <vtextension/wasm/remote/proto/Codec.hpp>
@@ -382,6 +385,8 @@ struct WatchRecord
 struct HandleRecords
 {
     std::atomic<int> terminations = 0;
+    std::atomic<int> lettings = 0; ///< How often a handle was let go.
+    std::atomic<std::size_t> connections = 0;
     std::mutex mutex;                 ///< Guards what follows.
     std::vector<WatchRecord> watches; ///< Every watch armed, in order.
     std::size_t disarmed = 0;         ///< How many watches were disarmed.
@@ -399,6 +404,7 @@ class CountingHandle final: public IHostHandle
     void interrupt(uint32_t /*instanceId*/, uint32_t /*interruptSlot*/) noexcept override {}
     void clearInterrupt(uint32_t /*interruptSlot*/) noexcept override {}
     void terminate() noexcept override { _records->terminations.fetch_add(1); }
+    void letGo() noexcept override { _records->lettings.fetch_add(1); }
 
     [[nodiscard]] StepWatch watch(HostStep step, std::chrono::milliseconds budget) override
     {
@@ -452,6 +458,7 @@ class ScriptedConnector final: public IHostConnector
             connection.lanes.push_back(std::move(lane->parent));
             ends.lanes.push_back(std::move(lane->helper));
         }
+        _records->connections.fetch_add(1);
         _threads.emplace_back([script = _script,
                                ends = std::move(ends),
                                connection = _threads.size()]() mutable { script(ends, connection); });
@@ -460,6 +467,12 @@ class ScriptedConnector final: public IHostConnector
 
     /// @return How often a host of this connector was told to terminate.
     [[nodiscard]] int terminations() const noexcept { return _records->terminations.load(); }
+
+    /// @return How often a host of this connector was let go before its handle went.
+    [[nodiscard]] int lettings() const noexcept { return _records->lettings.load(); }
+
+    /// @return How many hosts it connected.
+    [[nodiscard]] std::size_t connections() const noexcept { return _records->connections.load(); }
 
     /// @return Every watch its hosts' handles armed, in order.
     [[nodiscard]] std::vector<WatchRecord> watches() const
@@ -1314,6 +1327,249 @@ TEST_CASE("RemoteBackend.interruptedInstancesHostCallIsRefused", "[vtextension][
     CHECK(within(called, "the call did not return")
           == std::expected<void, CallFailure> { std::unexpected(CallFailure::Interrupted) });
     CHECK(context.calls().empty());
+}
+
+namespace
+{
+/// The control PDUs a scripted host received, in order, for a test thread to wait on.
+class Transcript
+{
+  public:
+    /// Records @p pdu.
+    void record(proto::Pdu pdu)
+    {
+        {
+            auto const lock = std::scoped_lock { _mutex };
+            _pdus.push_back(std::move(pdu));
+        }
+        _recorded.notify_all();
+    }
+
+    /// Waits up to five seconds until @p count PDUs were recorded.
+    /// @return Every one recorded by then.
+    [[nodiscard]] std::vector<proto::Pdu> awaitAtLeast(std::size_t count)
+    {
+        auto lock = std::unique_lock { _mutex };
+        std::ignore =
+            _recorded.wait_for(lock, std::chrono::seconds { 5 }, [&] { return _pdus.size() >= count; });
+        return _pdus;
+    }
+
+  private:
+    std::mutex _mutex;
+    std::condition_variable _recorded;
+    std::vector<proto::Pdu> _pdus;
+};
+
+/// @return The index of the first of @p pdus that @p matches; their count if none does.
+template <typename Matches>
+[[nodiscard]] std::size_t indexOf(std::vector<proto::Pdu> const& pdus, Matches matches)
+{
+    return static_cast<std::size_t>(std::ranges::find_if(pdus, matches) - pdus.begin());
+}
+
+/// @return Whether @p pdu releases instance @p instanceId.
+[[nodiscard]] bool releasesInstance(proto::Pdu const& pdu, uint32_t instanceId)
+{
+    return pdu
+           == proto::Pdu { proto::Release { .target = proto::ReleaseTarget::Instance, .id = instanceId } };
+}
+
+/// What a gated scripted host does once its gate opened.
+enum class AfterGate : uint8_t
+{
+    Silent,  ///< Nothing more is answered.
+    Answers, ///< The gated request is answered, and every one after it.
+};
+
+/// Plays an honest host that records every control PDU after the handshake in @p transcript and answers
+/// each Load and Instantiate -- but the Instantiate numbered @p gated (1 for the first), which it waits on
+/// @p gate for (ten seconds at most), telling @p arrived when it got it; and after which it goes on as
+/// @p afterGate says.
+void serveGated(HelperEnds& ends,
+                Transcript& transcript,
+                std::size_t gated,
+                std::promise<void>& arrived,
+                std::shared_future<void> const& gate,
+                AfterGate afterGate)
+{
+    if (!ends.send(HonestHello))
+        return;
+    auto const create = ends.receive<proto::CreateRuntime>();
+    if (!create
+        || !ends.send(proto::RuntimeCreated { .runtimeId = create->runtimeId, .error = std::nullopt }))
+        return;
+    auto instantiates = std::size_t { 0 };
+    while (auto pdu = ends.receivePdu())
+    {
+        transcript.record(*pdu);
+        if (auto const* const load = std::get_if<proto::Load>(&*pdu))
+        {
+            if (!ends.sendFrame(frameOf(peekDescription(load->moduleId))))
+                return;
+        }
+        else if (auto const* const instantiate = std::get_if<proto::Instantiate>(&*pdu))
+        {
+            if (++instantiates == gated)
+            {
+                arrived.set_value();
+                std::ignore = gate.wait_for(std::chrono::seconds { 10 });
+                if (afterGate == AfterGate::Silent)
+                    break;
+            }
+            if (!ends.sendFrame(HelperScript {}.instantiated(instantiate->instanceId)))
+                return;
+        }
+    }
+    ends.drain();
+}
+
+/// @return @p future ready within @p bound; else the run ends, rather than wait on a thread a regression
+///         keeps from returning.
+void readyWithin(std::future<void>& future, std::chrono::milliseconds bound, char const* what)
+{
+    if (future.wait_for(bound) == std::future_status::ready)
+        return;
+    FAIL_CHECK(what);
+    std::fputs(what, stderr);
+    std::fputs("\n", stderr);
+    std::abort();
+}
+} // namespace
+
+TEST_CASE("RemoteBackend.releaseWaitsForTheControlChannel", "[vtextension][remote][threading]")
+{
+    // A thread's request holds the control channel while the test drops an instance: the drop does not wait
+    // for it, and its release goes out right after that request's reply, not with the next request.
+    using namespace std::chrono_literals;
+    auto transcript = Transcript {};
+    auto arrived = std::promise<void> {};
+    auto gate = std::promise<void> {};
+    auto const connector = std::make_shared<ScriptedConnector>(
+        [&, opened = gate.get_future().share()](HelperEnds& ends, std::size_t /*connection*/) {
+            serveGated(ends, transcript, 2, arrived, opened, AfterGate::Answers);
+        });
+    auto const backend = makeBackend(connector);
+    auto const runtime = contract::createRuntime(*backend);
+    auto const module = contract::load(*runtime, PeekModule);
+    auto context = contract::RecordingHostContext {};
+    auto older = contract::instantiate(*module, context);
+
+    auto instantiating = std::async(std::launch::async, [&] { return module->instantiate(context); });
+    auto arrival = arrived.get_future();
+    within(arrival, "the second instantiation never reached the host");
+    auto dropping = std::async(std::launch::async, [&] { older.reset(); });
+    readyWithin(dropping, 100ms, "dropping an instance waited for another thread's request");
+    gate.set_value();
+    auto const newer = within(instantiating, "the second instantiation did not return");
+    REQUIRE(newer.has_value());
+
+    // Recorded: Load, Instantiate, Instantiate, and the release -- with no further request to carry it.
+    auto const pdus = transcript.awaitAtLeast(4);
+    REQUIRE(pdus.size() >= 4);
+    auto const& first = std::get<proto::Instantiate>(pdus.at(1));
+    CHECK(std::holds_alternative<proto::Instantiate>(pdus.at(2)));
+    CHECK(releasesInstance(pdus.at(3), first.instanceId));
+
+    auto const third = contract::instantiate(*module, context);
+    auto const all = transcript.awaitAtLeast(5);
+    CHECK(indexOf(all, [&](auto const& pdu) { return releasesInstance(pdu, first.instanceId); }) == 3);
+    CHECK(connector->terminations() == 0);
+}
+
+TEST_CASE("RemoteBackend.releaseOverflowKillsTheHelper", "[vtextension][remote][threading]")
+{
+    // A host that stops reading its control channel while a request is outstanding: every drop after it is
+    // queued, at once, until more pile up than a host that reads would ever let -- and that host is killed.
+    using namespace std::chrono_literals;
+    auto transcript = Transcript {};
+    auto arrived = std::promise<void> {};
+    auto gate = std::promise<void> {};
+    auto const connector = std::make_shared<ScriptedConnector>(
+        [&, opened = gate.get_future().share()](HelperEnds& ends, std::size_t /*connection*/) {
+            serveGated(ends, transcript, 1, arrived, opened, AfterGate::Silent);
+        });
+    auto const backend = makeBackend(connector);
+    auto const runtime = contract::createRuntime(*backend);
+    // Modules, not instances: no more than InterruptSlotCount instances live at once.
+    auto modules = std::vector<std::shared_ptr<IWasmModule>> {};
+    for ([[maybe_unused]] auto const index:
+         std::views::iota(std::size_t { 0 }, vtextension::wasm::remote::MaxPendingReleases + 2))
+        modules.push_back(loadAs(*runtime, "one host", PeekModule));
+    REQUIRE(connector->connections() == 1);
+
+    auto context = contract::RecordingHostContext {};
+    auto instantiating =
+        std::async(std::launch::async, [&, held = modules.front()] { return held->instantiate(context); });
+    auto arrival = arrived.get_future();
+    within(arrival, "the instantiation never reached the host");
+
+    // On a thread of its own, so that a drop that waited would fail the case rather than hang it.
+    auto terminationsBefore = std::vector<int> {};
+    auto dropping = std::async(std::launch::async, [&] {
+        auto slowestDrop = std::chrono::steady_clock::duration {};
+        while (modules.size() > 1)
+        {
+            terminationsBefore.push_back(connector->terminations());
+            auto const started = std::chrono::steady_clock::now();
+            modules.pop_back();
+            slowestDrop = std::max(slowestDrop, std::chrono::steady_clock::now() - started);
+        }
+        return slowestDrop;
+    });
+    auto const slowest = within(dropping, "dropping the modules waited for the host");
+    CHECK(slowest < 100ms);
+    // Killed by the drop one past the limit, not before.
+    CHECK(terminationsBefore.at(vtextension::wasm::remote::MaxPendingReleases) == 0);
+    CHECK(connector->terminations() == 1);
+    auto const refused = within(instantiating, "the outstanding instantiation did not end with its host");
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(refused.error() == ExtensionError::HostUnavailable);
+    gate.set_value();
+}
+
+TEST_CASE("RemoteBackend.droppedBackendLetsItsHostsGo", "[vtextension][remote][threading]")
+{
+    // The owner lets go of everything while another thread's request waits on a host that does not answer:
+    // nothing it drops waits, and the backend going lets the host go, which ends that request.
+    using namespace std::chrono_literals;
+    auto transcript = Transcript {};
+    auto arrived = std::promise<void> {};
+    auto gate = std::promise<void> {};
+    auto const connector = std::make_shared<ScriptedConnector>(
+        [&, opened = gate.get_future().share()](HelperEnds& ends, std::size_t /*connection*/) {
+            serveGated(ends, transcript, 2, arrived, opened, AfterGate::Silent);
+        });
+    auto backend = makeBackend(connector);
+    auto runtime = contract::createRuntime(*backend);
+    auto module = contract::load(*runtime, PeekModule);
+    auto context = contract::RecordingHostContext {};
+    auto instance = contract::instantiate(*module, context);
+
+    auto instantiating =
+        std::async(std::launch::async, [&, held = module] { return held->instantiate(context); });
+    auto arrival = arrived.get_future();
+    within(arrival, "the second instantiation never reached the host");
+    auto const straggler = runtime; // a thread that keeps using the runtime past its backend
+    auto dropping = std::async(std::launch::async, [&] {
+        instance.reset();
+        module.reset();
+        runtime.reset();
+        backend.reset();
+    });
+    readyWithin(dropping, 100ms, "dropping the backend waited for its host");
+    CHECK(connector->lettings() == 1);
+    CHECK(connector->terminations() == 0);
+    auto const refused = within(instantiating, "the outstanding instantiation did not end with its host");
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(refused.error() == ExtensionError::HostUnavailable);
+
+    // No host starts for a backend that went.
+    auto const late = straggler->load(ModuleIdentity {}, toModule(PeekModule));
+    REQUIRE_FALSE(late.has_value());
+    CHECK(late.error() == ExtensionError::HostUnavailable);
+    CHECK(connector->connections() == 1);
+    gate.set_value();
 }
 
 TEST_CASE("RemoteBackend.preparedGenerationFollowsTheOutermostGuard", "[vtextension][remote]")
