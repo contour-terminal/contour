@@ -231,7 +231,12 @@ TEST_CASE("a restored grid keeps scrolling like the original", "[GridState]")
 TEST_CASE("image fragments restore through the resolver, one object each", "[GridState]")
 {
     auto const image = std::make_shared<Image>(
-        ImageId(1), ImageFormat::RGBA, Image::Data(16, 0), ImageSize { Width(2), Height(2) }, [](auto) {});
+        ImageId(1),
+        ImageFormat::RGBA,
+        Image::Data(16, 0),
+        ImageSize { Width(2), Height(2) },
+        [](auto) {},
+        ImagePoolId(0));
     auto const rasterized =
         std::make_shared<RasterizedImage>(image,
                                           ImageAlignment::TopStart,

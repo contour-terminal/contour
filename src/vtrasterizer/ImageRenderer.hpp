@@ -73,9 +73,9 @@ class ImageRenderer: public Renderable, public TextRendererEvents
 
     void renderImage(crispy::Point pos, vtbackend::ImageFragment const& fragment);
 
-    /// notify underlying cache that this fragment is not going to be rendered anymore, maybe freeing up some
-    /// GPU caches.
-    void discardImage(vtbackend::ImageId imageId);
+    /// Releases the texture of an image that is not going to be rendered anymore.
+    /// @param imageKey The image's pool and id; an image of another pool under the same id is left alone.
+    void discardImage(vtbackend::ImageKey imageKey);
 
     void inspect(std::ostream& output) const override;
 
@@ -147,9 +147,22 @@ class ImageRenderer: public Renderable, public TextRendererEvents
         uint64_t lastUsedFrame = 0; ///< The frame this was last drawn in; the LRU key.
     };
 
-    /// vtbackend ImageId -> the texture holding it. Keyed on the image rather than on the
+    /// Hashes an ImageKey by packing its pool and id into one 64-bit value.
+    struct ImageKeyHash
+    {
+        [[nodiscard]] size_t operator()(vtbackend::ImageKey key) const noexcept
+        {
+            return std::hash<uint64_t> {}((static_cast<uint64_t>(key.pool.value) << 32U) | key.id.value);
+        }
+    };
+
+    /// The image's pool and id -> the texture holding it. Keyed on the image rather than on the
     /// rasterization: policies and cell size change where an image is sampled, not what it contains.
-    std::unordered_map<uint32_t, ImageTextureEntry> _imageTextures;
+    ///
+    /// The pool is part of the key because one renderer serves every tab its display switches to, and each
+    /// tab's terminal numbers its images from 1: keyed on the id alone, one tab's image was drawn with
+    /// another tab's texture, stretched to its size.
+    std::unordered_map<vtbackend::ImageKey, ImageTextureEntry, ImageKeyHash> _imageTextures;
     uint32_t _nextImageTextureId = 1;
 
     size_t const _textureBudgetBytes;

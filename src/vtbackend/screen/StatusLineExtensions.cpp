@@ -65,8 +65,15 @@ void rehomeImageFragments(Line& line, ImageRehome const& rehome)
 
 std::shared_ptr<Image const> detachedImage(Image const& image)
 {
+    // Keeps the source's pool as well as its id: the copy holds the same pixels, so it may share the
+    // source's texture, and a key from no pool would collide with whatever else claims that.
     return std::make_shared<Image const>(
-        image.id(), image.format(), Image::Data(image.data()), image.size(), [](Image const*) {});
+        image.id(),
+        image.format(),
+        Image::Data(image.data()),
+        image.size(),
+        [](Image const*) {},
+        image.pool());
 }
 
 void clearHyperlinks(Line& line) noexcept

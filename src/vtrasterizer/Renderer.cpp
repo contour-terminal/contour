@@ -351,15 +351,15 @@ void Renderer::discardImage(vtbackend::Image const& image)
     // Defer rendering into the renderer thread & render stage, as this call might have
     // been coming out of bounds from another thread (e.g. the terminal's screen update thread)
     auto l = scoped_lock { _imageDiscardLock };
-    _discardImageQueue.emplace_back(image.id());
+    _discardImageQueue.emplace_back(image.key());
 }
 
 void Renderer::executeImageDiscards()
 {
     auto l = scoped_lock { _imageDiscardLock };
 
-    for (auto const imageId: _discardImageQueue)
-        _imageRenderer.discardImage(imageId);
+    for (auto const imageKey: _discardImageQueue)
+        _imageRenderer.discardImage(imageKey);
 
     _discardImageQueue.clear();
 }

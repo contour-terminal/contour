@@ -74,8 +74,8 @@ std::optional<atlas::ImageTextureId> ImageRenderer::textureFor(
     // Keyed on the image, not on the rasterization: cell size and policies change where the image is
     // sampled, never what the texture holds.
     auto const& image = rasterizedImage.image();
-    auto const imageId = image.id().value;
-    if (auto const known = _imageTextures.find(imageId); known != _imageTextures.end())
+    auto const imageKey = image.key();
+    if (auto const known = _imageTextures.find(imageKey); known != _imageTextures.end())
     {
         known->second.lastUsedFrame = _frameCounter;
         return known->second.id;
@@ -90,7 +90,7 @@ std::optional<atlas::ImageTextureId> ImageRenderer::textureFor(
         || !vtbackend::isConsistentPixmap(image.format(), image.size(), image.data().size()))
     {
         errorLog()("Refusing to upload image {}: {} pixmap of {} bytes does not match its size {}.",
-                   imageId,
+                   image.id().value,
                    image.format(),
                    image.data().size(),
                    image.size());
@@ -100,7 +100,7 @@ std::optional<atlas::ImageTextureId> ImageRenderer::textureFor(
     auto const id = atlas::ImageTextureId { _nextImageTextureId++ };
     // RGBA8 whatever the protocol sent (widenToRgba() below makes sure of it), with its mip chain.
     auto const bytes = imageTextureBytes(image.size());
-    _imageTextures.emplace(imageId,
+    _imageTextures.emplace(imageKey,
                            ImageTextureEntry { .id = id, .bytes = bytes, .lastUsedFrame = _frameCounter });
     _residentBytes += bytes;
 
@@ -150,20 +150,20 @@ void ImageRenderer::evictToBudget()
 
     // Only what this frame did not draw may go; see the declaration. Carrying the LRU key alongside the
     // id keeps the sort from hashing its way back into the map on every comparison.
-    auto candidates = std::vector<std::pair<uint64_t, uint32_t>> {};
-    for (auto const& [imageId, entry]: _imageTextures)
+    auto candidates = std::vector<std::pair<uint64_t, vtbackend::ImageKey>> {};
+    for (auto const& [imageKey, entry]: _imageTextures)
         if (entry.lastUsedFrame != _frameCounter)
-            candidates.emplace_back(entry.lastUsedFrame, imageId);
+            candidates.emplace_back(entry.lastUsedFrame, imageKey);
 
-    std::ranges::sort(candidates);
+    std::ranges::sort(candidates, {}, &std::pair<uint64_t, vtbackend::ImageKey>::first);
 
-    for (auto const& [lastUsedFrame, imageId]: candidates)
+    for (auto const& [lastUsedFrame, imageKey]: candidates)
     {
         if (_residentBytes <= _textureBudgetBytes)
             break;
         // Exactly what a pool removal does: release the texture and forget the mapping, so the next
         // sight of this image uploads it again.
-        discardImage(vtbackend::ImageId { imageId });
+        discardImage(imageKey);
     }
 }
 
@@ -300,9 +300,9 @@ void ImageRenderer::endPass()
     flushQuads(_pendingQuadsAboveText);
 }
 
-void ImageRenderer::discardImage(vtbackend::ImageId imageId)
+void ImageRenderer::discardImage(vtbackend::ImageKey imageKey)
 {
-    auto const known = _imageTextures.find(imageId.value);
+    auto const known = _imageTextures.find(imageKey);
     if (known == _imageTextures.end())
         return;
     imageScheduler().destroyImageTexture(atlas::DestroyImageTexture { .id = known->second.id });
@@ -323,7 +323,7 @@ void ImageRenderer::clearCache()
     // Issuing the destroys is right for the setRenderTarget() caller too: they reach a target that
     // never had these ids, whose backend ignores them, while the textures of the target being
     // replaced die with it.
-    for (auto const& [imageId, entry]: _imageTextures)
+    for (auto const& [imageKey, entry]: _imageTextures)
         imageScheduler().destroyImageTexture(atlas::DestroyImageTexture { .id = entry.id });
     _imageTextures.clear();
     _residentBytes = 0;

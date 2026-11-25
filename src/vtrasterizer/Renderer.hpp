@@ -676,8 +676,8 @@ class Renderer
     /// @param fontDescriptions  the new font descriptions to apply.
     void applyFontDescriptions(FontDescriptions fontDescriptions);
 
-    std::mutex _imageDiscardLock;                       //!< Lock guard for accessing _discardImageQueue.
-    std::vector<vtbackend::ImageId> _discardImageQueue; //!< List of images to be discarded.
+    std::mutex _imageDiscardLock;                        //!< Lock guard for accessing _discardImageQueue.
+    std::vector<vtbackend::ImageKey> _discardImageQueue; //!< List of images to be discarded.
 
     BackgroundRenderer _backgroundRenderer;
     ImageRenderer _imageRenderer;

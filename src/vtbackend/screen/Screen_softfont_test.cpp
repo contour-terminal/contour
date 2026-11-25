@@ -92,7 +92,12 @@ TEST_CASE("SoftGlyph.ICH shifts image fragments too", "[screen][SoftGlyph]")
     mock.writeToScreen("ABCDEFGH");
 
     auto const image = std::make_shared<Image>(
-        ImageId(1), ImageFormat::RGBA, Image::Data(4, 0xFF), ImageSize { Width(1), Height(1) }, [](auto) {});
+        ImageId(1),
+        ImageFormat::RGBA,
+        Image::Data(4, 0xFF),
+        ImageSize { Width(1), Height(1) },
+        [](auto) {},
+        ImagePoolId(0));
     auto const rasterized = std::make_shared<RasterizedImage>(image,
                                                               ImageAlignment::TopStart,
                                                               ImageResize::NoResize,

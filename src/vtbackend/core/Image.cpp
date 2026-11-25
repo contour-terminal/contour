@@ -5,6 +5,7 @@
 #include <crispy/StrongLRUHashtable.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <memory>
 #include <ranges>
 #include <utility>
@@ -51,7 +52,22 @@ ImageFragment::~ImageFragment()
     --ImageStats::get().fragments;
 }
 
+namespace
+{
+    /// Hands every pool the process creates an identity of its own.
+    ///
+    /// A counter rather than the pool's address: a closed tab's pool may be freed and a new tab's allocated
+    /// at the same address while the renderer still holds textures, or queued discards, for the old one.
+    /// @return The next pool identity, starting at 1 so that zero stays "no pool".
+    [[nodiscard]] ImagePoolId nextImagePoolId() noexcept
+    {
+        static auto counter = std::atomic<uint32_t> { 0 };
+        return ImagePoolId(counter.fetch_add(1, std::memory_order_relaxed) + 1);
+    }
+} // namespace
+
 ImagePool::ImagePool(OnImageRemove onImageRemove, ImageId nextImageId):
+    _poolId { nextImagePoolId() },
     _nextImageId { nextImageId },
     _imageNameToImageCache { crispy::StrongHashtableSize { 1024 },
                              crispy::LRUCapacity { 100 },
@@ -425,7 +441,11 @@ shared_ptr<Image const> ImagePool::adopt(ImageId id, ImageFormat format, ImageSi
     // index by shared_ptr, never the pool: an image's last reference may outlive the
     // pool member order-wise, and it may drop on any thread.
     auto image = make_shared<Image>(
-        id, format, std::move(data), size, [index = _idIndex, remover = _onImageRemove](Image const* image) {
+        id,
+        format,
+        std::move(data),
+        size,
+        [index = _idIndex, remover = _onImageRemove](Image const* image) {
             {
                 auto const _ = std::lock_guard { index->mutex };
                 // Prune only if this dying image still owns its slot. After the uint32
@@ -440,7 +460,8 @@ shared_ptr<Image const> ImagePool::adopt(ImageId id, ImageFormat format, ImageSi
             }
             if (remover)
                 remover(image);
-        });
+        },
+        _poolId);
     {
         auto const _ = std::lock_guard { _idIndex->mutex };
         // insert_or_assign, not emplace: after the uint32 id counter wraps, the
