@@ -408,6 +408,7 @@ TEST_CASE("PduStream.tooManyDescriptorsAreMalformed", "[vtextension]")
                 objects.push_back(makeObject());
             REQUIRE(sendWithDescriptors(channels->parent.nativeHandle(), objects));
         }
+        // With three, Linux itself drops the descriptor that does not fit the buffer as it truncates.
         CHECK(helper.receive() == std::unexpected(StreamError::Malformed));
         CHECK_FALSE(helper.takeAttachedHandle());
         CHECK(transport::testing::openDescriptorCount() == before);

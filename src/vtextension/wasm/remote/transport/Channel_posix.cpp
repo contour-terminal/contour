@@ -240,6 +240,8 @@ std::expected<std::size_t, ChannelError> Channel::receiveSomeWithHandles(std::sp
     auto unconfigured = false;
     for (auto* header = CMSG_FIRSTHDR(&message); header != nullptr; header = CMSG_NXTHDR(&message, header))
     {
+        // Defence in depth: on Linux the 2-descriptor buffer is too small for any other cmsg, which ends as
+        // MSG_CTRUNC instead, so this is unreachable there.
         if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_RIGHTS
             || header->cmsg_len < CMSG_LEN(0))
         {
