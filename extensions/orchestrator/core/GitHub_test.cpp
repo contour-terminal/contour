@@ -268,6 +268,8 @@ TEST_CASE("GitHub.changeRequests.recorded", "[github]")
         CHECK_FALSE(actual.head.empty());
     }
     CHECK(std::ranges::contains(listed->items[4].failingChecks, "Check clang-tidy"sv));
+    for (auto const& pr: listed->items)
+        CHECK(pr.updatedWallMs != 0);
 }
 
 TEST_CASE("GitHub.changeRequests.largest", "[github]")
@@ -303,7 +305,7 @@ TEST_CASE("GitHub.changeRequests.fixtures_have_the_filters_shape", "[github]")
     auto const rowArity = projectedArity(filter, "[.[]|");
     auto const issueArity = projectedArity(filter, "[.closingIssuesReferences[]|");
     auto const checkArity = projectedArity(filter, "[.statusCheckRollup[]|");
-    CHECK(rowArity == 10);
+    CHECK(rowArity == 12);
     CHECK(issueArity == 2);
     CHECK(checkArity == 6);
     for (auto const name: { "prs-open.json"sv, "prs-mixed-checks.json"sv, "prs-100.json"sv })
@@ -353,6 +355,24 @@ TEST_CASE("GitHub.changeRequests.mixed_checks", "[github]")
     CHECK(pr.closesIssues == std::vector<uint64_t> { 2301 });
     CHECK_FALSE(pr.title.contains('\x1b'));
     CHECK(pr.title == "[31mSay why the stdio relay failed[0m");
+}
+
+TEST_CASE("GitHub: mergeable CONFLICTING is a conflict, and updatedAt the update time", "[github]")
+{
+    auto const listed = github::changeRequests(
+        readFixture(FixtureRoot::Testdata, "github/prs-mixed-checks.json"), OutputExtent::Whole);
+    REQUIRE(listed.has_value());
+    // prs-mixed-checks: #2375 CONFLICTING (its #2376 row is skipped for its base, as before).
+    REQUIRE(listed->items.size() == 1);
+    CHECK(listed->items[0].conflicts == Conflicts::Conflicting);
+    CHECK(listed->items[0].updatedWallMs == 1'794'571'200'000); // "2026-11-13T12:00:00Z"
+    CHECK(listed->items[0].source == StateSource::Complete);
+    // prs-open: every row MERGEABLE, so none conflicts.
+    auto const open = github::changeRequests(readFixture(FixtureRoot::Testdata, "github/prs-open.json"),
+                                             OutputExtent::Whole);
+    REQUIRE(open.has_value());
+    CHECK(std::ranges::none_of(open->items,
+                               [](auto const& pr) { return pr.conflicts == Conflicts::Conflicting; }));
 }
 
 TEST_CASE("GitHub.changeRequests.completeness", "[github]")

@@ -22,3 +22,6 @@ closing issue and check has as many members as the filter builds.
 `prs-mixed-checks.raw.json` is hand-made rather than recorded: commit statuses, a failing check, a
 control sequence in a title and a base that is an option. `prs-100.json` is the largest reply the
 command can print: `prs-open.json` scaled up to the 100 pull requests the command asks for.
+
+`mergeable` and `updatedAt` were added to the recorded replies by hand (their shapes checked against `gh` once):
+`MERGEABLE`, `CONFLICTING` or `UNKNOWN`, and an ISO 8601 time.

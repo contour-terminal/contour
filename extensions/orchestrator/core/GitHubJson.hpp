@@ -48,6 +48,8 @@ struct JsonPullRequest
     std::string reviewDecision;
     std::vector<JsonIssueReference> closingIssuesReferences;
     std::vector<JsonCheck> statusCheckRollup;
+    std::string mergeable;
+    std::string updatedAt;
 };
 
 /// One `gh issue list` entry.

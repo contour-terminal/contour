@@ -20,6 +20,7 @@
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Sanitize.hpp>
 #include <orchestrator/core/Spelling.hpp>
+#include <orchestrator/core/Timestamps.hpp>
 
 using namespace std::string_view_literals;
 
@@ -61,7 +62,9 @@ struct glz::meta<orchestrator::github::detail::JsonPullRequest>
                                              &T::isCrossRepository,
                                              &T::reviewDecision,
                                              &T::closingIssuesReferences,
-                                             &T::statusCheckRollup);
+                                             &T::statusCheckRollup,
+                                             &T::mergeable,
+                                             &T::updatedAt);
 };
 
 namespace orchestrator::github
@@ -200,6 +203,8 @@ namespace
             .failingChecks = std::move(failingChecks),
             .review = reviewStateOf(json.reviewDecision),
             .closesIssues = std::move(closesIssues),
+            .conflicts = json.mergeable == "CONFLICTING" ? Conflicts::Conflicting : Conflicts::None,
+            .updatedWallMs = unixMsOf(json.updatedAt).value_or(0),
         };
     }
 } // namespace

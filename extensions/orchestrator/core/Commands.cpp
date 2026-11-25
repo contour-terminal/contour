@@ -190,11 +190,12 @@ namespace
         "100"sv,
         "--json"sv,
         "number,title,url,headRefName,baseRefName,isDraft,isCrossRepository,reviewDecision,statusCheckRollup,"
-        "closingIssuesReferences"sv,
+        "closingIssuesReferences,mergeable,updatedAt"sv,
         "--jq"sv,
         "[.[]|[.number,.title,.url,.headRefName,.baseRefName,.isDraft,.isCrossRepository,.reviewDecision,"
         "[.closingIssuesReferences[]|[.number,.url]],"
-        "[.statusCheckRollup[]|[.__typename,.name,.context,.status,.conclusion,.state]]]]"sv,
+        "[.statusCheckRollup[]|[.__typename,.name,.context,.status,.conclusion,.state]],"
+        ".mergeable,.updatedAt]]"sv,
     };
     constexpr auto GhIssuesArgv = std::array {
         "gh"sv,       "issue"sv,   "list"sv,   "--state"sv,          "open"sv, "--limit"sv, "100"sv,

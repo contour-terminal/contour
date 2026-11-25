@@ -415,7 +415,7 @@ TEST_CASE("ExtensionConsent: the daemon question for the orchestrator", "[vtexte
         "[.[]|[.number,.title,.url,.headRefName,.baseRefName,.isDraft,.isCrossRepository,.reviewDecision,"
         "[.closingIssuesReferences[]|[.number,.url]],[.statusCheckRollup[]|[.__typename,.name,.context,."
         "status,"
-        ".conclusion,.state]]]]"));
+        ".conclusion,.state]],.mergeable,.updatedAt]]"));
     CHECK(
         std::ranges::find(question.lines,
                           std::string_view { "Directory (worktrees, created if missing): /home/u/worktrees" },

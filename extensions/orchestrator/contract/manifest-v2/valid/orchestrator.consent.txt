@@ -13,7 +13,7 @@ Each of them with:
   GIT_CONFIG_VALUE_1=/dev/null
 gh-auth (short, in repos): gh auth status
 gh-default-branch (short, in repos): gh repo view --json defaultBranchRef
-gh-prs (long, in repos): gh pr list --author @me --state open --limit 100 --json number,title,url,headRefName,baseRefName,isDraft,isCrossRepository,reviewDecision,statusCheckRollup,closingIssuesReferences --jq [.[]|[.number,.title,.url,.headRefName,.baseRefName,.isDraft,.isCrossRepository,.reviewDecision,[.closingIssuesReferences[]|[.number,.url]],[.statusCheckRollup[]|[.__typename,.name,.context,.status,.conclusion,.state]]]]
+gh-prs (long, in repos): gh pr list --author @me --state open --limit 100 --json number,title,url,headRefName,baseRefName,isDraft,isCrossRepository,reviewDecision,statusCheckRollup,closingIssuesReferences,mergeable,updatedAt --jq [.[]|[.number,.title,.url,.headRefName,.baseRefName,.isDraft,.isCrossRepository,.reviewDecision,[.closingIssuesReferences[]|[.number,.url]],[.statusCheckRollup[]|[.__typename,.name,.context,.status,.conclusion,.state]],.mergeable,.updatedAt]]
 gh-issues (long, in repos): gh issue list --state open --limit 100 --search {query} --json number,title,url
 git-fetch (long, in repos): git fetch --quiet {remote}
 git-worktree-add (long, in repos): git worktree add --detach {path} {base}

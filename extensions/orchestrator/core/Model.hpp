@@ -67,6 +67,20 @@ enum class ReviewState : uint8_t
     ChangesRequested, ///< A reviewer asked for changes.
 };
 
+/// Whether a change request conflicts with its base.
+enum class Conflicts : uint8_t
+{
+    None = 0,    ///< It merges cleanly, or the forge has not yet said.
+    Conflicting, ///< It conflicts with its base.
+};
+
+/// Where a change request's CI and review state come from.
+enum class StateSource : uint8_t
+{
+    Complete = 0, ///< The forge reported them directly.
+    Inferred,     ///< Inferred from GitLab's single `detailed_merge_status` (no matched pipeline).
+};
+
 /// Whether a change request is open for review.
 enum class Readiness : uint8_t
 {
@@ -133,6 +147,9 @@ struct ChangeRequest
     ReviewState review = ReviewState::None;         ///< Where it stands with its reviewers.
     std::vector<uint64_t>
         closesIssues; ///< The issues of its own repository it closes when merged, by number.
+    Conflicts conflicts = Conflicts::None;      ///< Whether it conflicts with its base.
+    uint64_t updatedWallMs = 0;                 ///< When it was last updated, Unix ms; 0: unknown.
+    StateSource source = StateSource::Complete; ///< Where @ref ci and @ref review come from.
     [[nodiscard]] bool operator==(ChangeRequest const&) const = default;
 };
 

@@ -107,6 +107,8 @@ add_library(orchestrator_core STATIC
     core/Stats.hpp
     core/Timeline.cpp
     core/Timeline.hpp
+    core/Timestamps.cpp
+    core/Timestamps.hpp
     core/Transcript.cpp
     core/Transcript.hpp
     core/TranscriptJson.hpp
@@ -208,6 +210,7 @@ if(ORCHESTRATOR_TESTING)
         core/Sanitize_test.cpp
         core/Stats_test.cpp
         core/Timeline_test.cpp
+        core/Timestamps_test.cpp
         core/Transcript_test.cpp
         core/Utf8_test.cpp
         core/UnmeasuredSources.hpp
