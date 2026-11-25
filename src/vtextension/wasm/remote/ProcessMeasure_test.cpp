@@ -6,6 +6,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -16,6 +17,7 @@
 #include <optional>
 #include <print>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -55,6 +57,16 @@ namespace
                                  .timeouts = {} };
 }
 
+/// The real host serving as one that copies guest memory where the system could map it (the hostile host's
+/// `copy-memory` mode, which serves as the real one otherwise): what sharing memory is measured against.
+[[nodiscard]] HelperBackendConfig copyingHelper()
+{
+    return HelperBackendConfig { .helper = VTEXTENSION_HOSTILE_HELPER_PATH,
+                                 .extraArguments = { "--hostile=copy-memory" },
+                                 .lockdown = LockdownRequirement::AcceptUnsandboxed,
+                                 .timeouts = {} };
+}
+
 /// @return The process id of the helper the binary's supervisor started last.
 [[nodiscard]] process::ProcessId lastHelper()
 {
@@ -63,53 +75,145 @@ namespace
     return processIds.back();
 }
 
-/// What Linux states of a process's memory (/proc/<pid>/status): what its RLIMIT_DATA counts (VmData), what
-/// is resident (VmRSS), and the most that ever was (VmHWM).
+/// What Linux states of a process's memory (/proc/<pid>/status and smaps_rollup): what its RLIMIT_DATA counts
+/// (VmData), what is resident (VmRSS) and of that what is anonymous (RssAnon) and shared memory (RssShmem,
+/// where a shared guest memory's pages count), its proportional share (Pss: a shared page counts once across
+/// the processes mapping it), and the most that ever was resident (VmHWM).
 struct Footprint
 {
-    std::size_t dataKiB = 0;     ///< VmData.
-    std::size_t residentKiB = 0; ///< VmRSS.
-    std::size_t peakKiB = 0;     ///< VmHWM.
+    std::size_t dataKiB = 0;                       ///< VmData.
+    std::size_t residentKiB = 0;                   ///< VmRSS.
+    std::size_t anonymousKiB = 0;                  ///< RssAnon.
+    std::size_t sharedMemoryKiB = 0;               ///< RssShmem.
+    std::size_t peakKiB = 0;                       ///< VmHWM.
+    std::optional<std::size_t> proportionalKiB {}; ///< Pss; only for a process that may be traced.
 };
 
-/// @return @p processId's footprint; nothing where the system states none.
-[[nodiscard]] std::optional<Footprint> footprintOf([[maybe_unused]] process::ProcessId processId)
-{
 #ifdef __linux__
-    auto status = std::ifstream { std::format("/proc/{}/status", processId) };
-    if (!status)
-        return std::nullopt;
-    auto footprint = Footprint {};
-    auto const fields = std::array<std::pair<std::string_view, std::size_t*>, 3> {
-        std::pair { std::string_view { "VmData:" }, &footprint.dataKiB },
-        std::pair { std::string_view { "VmRSS:" }, &footprint.residentKiB },
-        std::pair { std::string_view { "VmHWM:" }, &footprint.peakKiB },
-    };
-    for (auto line = std::string {}; std::getline(status, line);)
+/// Reads the `name: value kB` lines of a /proc file whose names @p fields lists into the values it points at.
+/// @return Whether the file could be opened.
+[[nodiscard]] bool readProcFields(std::string const& path,
+                                  std::span<std::pair<std::string_view, std::size_t*> const> fields)
+{
+    auto file = std::ifstream { path };
+    if (!file)
+        return false;
+    for (auto line = std::string {}; std::getline(file, line);)
         for (auto const& [name, value]: fields)
             if (line.starts_with(name))
                 *value = std::stoull(line.substr(name.size()));
+    return true;
+}
+#endif
+
+/// @param process What names the process under /proc: its id, or `self`.
+/// @return Its footprint; nothing where the system states none. A helper made itself undumpable, so its
+///         smaps_rollup, and with it its Pss, is not readable to its parent.
+[[nodiscard]] std::optional<Footprint> footprintOf([[maybe_unused]] std::string const& process)
+{
+#ifdef __linux__
+    auto footprint = Footprint {};
+    auto const status = std::array {
+        std::pair { std::string_view { "VmData:" }, &footprint.dataKiB },
+        std::pair { std::string_view { "VmRSS:" }, &footprint.residentKiB },
+        std::pair { std::string_view { "RssAnon:" }, &footprint.anonymousKiB },
+        std::pair { std::string_view { "RssShmem:" }, &footprint.sharedMemoryKiB },
+        std::pair { std::string_view { "VmHWM:" }, &footprint.peakKiB },
+    };
+    if (!readProcFields(std::format("/proc/{}/status", process), status))
+        return std::nullopt;
+    auto proportional = std::size_t { 0 };
+    auto const rollup = std::array { std::pair { std::string_view { "Pss:" }, &proportional } };
+    if (readProcFields(std::format("/proc/{}/smaps_rollup", process), rollup))
+        footprint.proportionalKiB = proportional;
     return footprint;
 #else
     return std::nullopt;
 #endif
 }
 
-/// Prints @p processId's footprint as it is at @p moment.
-void reportFootprint(std::string_view moment, process::ProcessId processId)
+/// Prints the footprint of @p who, the process /proc names @p process, as it is at @p moment.
+void reportFootprint(std::string_view moment, std::string_view who, std::string const& process)
 {
-    auto const footprint = footprintOf(processId);
+    auto const footprint = footprintOf(process);
     if (!footprint)
     {
-        std::println(stdout, "Process footprint {}: not stated on this system", moment);
+        std::println(stdout, "{} footprint {}: not stated on this system", who, moment);
         return;
     }
+    auto const mebibytes = [](std::size_t kibibytes) {
+        return static_cast<double>(kibibytes) / 1024.0;
+    };
+    auto const proportional = footprint->proportionalKiB
+                                  ? std::format("{:.1f} MiB", mebibytes(*footprint->proportionalKiB))
+                                  : std::string { "not readable" };
     std::println(stdout,
-                 "Process footprint {}: VmData {:.1f} MiB, VmRSS {:.1f} MiB, VmHWM {:.1f} MiB",
+                 "{} footprint {}: VmData {:.1f} MiB, VmRSS {:.1f} MiB (RssAnon {:.1f}, RssShmem {:.1f}), "
+                 "Pss {}, VmHWM {:.1f} MiB",
+                 who,
                  moment,
-                 static_cast<double>(footprint->dataKiB) / 1024.0,
-                 static_cast<double>(footprint->residentKiB) / 1024.0,
-                 static_cast<double>(footprint->peakKiB) / 1024.0);
+                 mebibytes(footprint->dataKiB),
+                 mebibytes(footprint->residentKiB),
+                 mebibytes(footprint->anonymousKiB),
+                 mebibytes(footprint->sharedMemoryKiB),
+                 proportional,
+                 mebibytes(footprint->peakKiB));
+}
+
+/// Prints the footprint of the helper @p processId as it is at @p moment.
+void reportFootprint(std::string_view moment, process::ProcessId processId)
+{
+    reportFootprint(moment, "Process", std::to_string(processId));
+}
+
+/// Times 200 creations of an instance of plasma, the heaviest bundled extension, on a helper @p config names,
+/// each released before the next, and prints what was measured: what a pane's extension costs to start, its
+/// memory object and grant included where memory is shared.
+void measureInstantiate([[maybe_unused]] HelperBackendConfig const& config,
+                        [[maybe_unused]] std::string_view name)
+{
+#ifdef VTEXTENSION_TEST_MODULE_DIR
+    constexpr auto MeasuredInstantiations = 200;
+    auto const backend = process::testing::binaryComposition().backend(config);
+    auto limits = vtextension::ExtensionLimits {};
+    limits.callDeadline = std::chrono::seconds { 10 };
+    limits.loadDeadline = std::chrono::seconds { 60 };
+    auto engine = vtextension::Engine::create(*backend, limits);
+    REQUIRE(engine.has_value());
+    auto const guard = backend->enterThread();
+    REQUIRE(guard.has_value());
+    auto compiled = vtextension::CompiledExtension::load(
+        **engine, {}, vtextension::testing::readTestModule("plasma.wasm"), nullptr);
+    REQUIRE(compiled.has_value());
+
+    auto services = vtextension::testing::FakeHostServices {};
+    auto guestClock = core::ManualClock {};
+    auto& clock = core::defaultSteadyClock();
+    // One untimed instance first: the helper's first instantiation pays for what later ones reuse.
+    REQUIRE(vtextension::Instance::create(**engine, **compiled, services, guestClock, limits).has_value());
+    auto durations = std::vector<std::chrono::nanoseconds> {};
+    durations.reserve(MeasuredInstantiations);
+    for ([[maybe_unused]] auto const index: std::views::iota(0, MeasuredInstantiations))
+    {
+        auto const start = clock.now();
+        auto const instance =
+            vtextension::Instance::create(**engine, **compiled, services, guestClock, limits);
+        durations.emplace_back(clock.now() - start);
+        REQUIRE(instance.has_value());
+    }
+    auto const times = vtextension::wasm::testing::summarize(std::move(durations));
+
+    using Micros = std::chrono::duration<double, std::micro>;
+    std::println(stdout,
+                 "{} instantiate plasma ({} instances): median {:.1f} us, p90 {:.1f} us, fastest {:.1f} us",
+                 name,
+                 MeasuredInstantiations,
+                 Micros { times.median }.count(),
+                 Micros { times.p90 }.count(),
+                 Micros { times.fastest }.count());
+#else
+    SKIP("the bundled extensions are not built");
+#endif
 }
 
 } // namespace
@@ -117,8 +221,16 @@ void reportFootprint(std::string_view moment, process::ProcessId processId)
 TEST_CASE("Process.measureRender", "[.measure]")
 {
     // Reported, not asserted; vtextension_remote_test's twin measures a host in this process.
-    auto const backend = process::testing::binaryComposition().backend(realHelper());
-    vtextension::wasm::testing::measureBundledRender(*backend, "Process");
+    SECTION("memory shared")
+    {
+        auto const backend = process::testing::binaryComposition().backend(realHelper());
+        vtextension::wasm::testing::measureBundledRender(*backend, "Process");
+    }
+    SECTION("memory copied")
+    {
+        auto const backend = process::testing::binaryComposition().backend(copyingHelper());
+        vtextension::wasm::testing::measureBundledRender(*backend, "Process (copy)");
+    }
 }
 
 TEST_CASE("Process.measureRoundTrip", "[.measure]")
@@ -167,6 +279,19 @@ TEST_CASE("Process.measureSpawn", "[.measure]")
                  Micros { times.fastest }.count() / 1000.0);
 }
 
+TEST_CASE("Process.measureInstantiate", "[.measure]")
+{
+    // Reported, not asserted.
+    SECTION("memory shared")
+    {
+        measureInstantiate(realHelper(), "Process");
+    }
+    SECTION("memory copied")
+    {
+        measureInstantiate(copyingHelper(), "Process (copy)");
+    }
+}
+
 TEST_CASE("Process.measureFootprint", "[.measure]")
 {
 #ifdef VTEXTENSION_TEST_MODULE_DIR
@@ -202,6 +327,7 @@ TEST_CASE("Process.measureFootprint", "[.measure]")
     }
     CHECK(lastHelper() == helper);
     reportFootprint(std::format("{} plasma instances rendered", Instances), helper);
+    reportFootprint(std::format("{} plasma instances rendered", Instances), "Contour", "self");
 #else
     SKIP("the bundled extensions are not built");
 #endif
