@@ -426,13 +426,19 @@ class Harness
         return std::ranges::any_of(_reads, [&](ReadFile const& file) { return file.path.ends_with(suffix); });
     }
 
+    /// What boot() answers a poll with instead of the recorded default: by tag first, then by command.
+    std::map<std::string, ProcessOutcome, std::less<>> answers;
+    /// The poll tags boot() leaves pending, for the test to answer.
+    std::set<std::string, std::less<>> held;
+
     /// Answers every pending poll: logged in, hooks present, every repository's lists.
     void boot()
     {
         while (true)
         {
-            auto const next = std::ranges::find_if(
-                _pending, [](RunCommand const& command) { return command.tag.starts_with("poll/"); });
+            auto const next = std::ranges::find_if(_pending, [&](RunCommand const& command) {
+                return command.tag.starts_with("poll/") && !held.contains(command.tag);
+            });
             if (next == _pending.end())
                 return;
             auto tag = next->tag;
@@ -506,8 +512,12 @@ class Harness
         }
     }
 
-    [[nodiscard]] static ProcessOutcome answerFor(RunCommand const& command)
+    [[nodiscard]] ProcessOutcome answerFor(RunCommand const& command) const
     {
+        if (auto const byTag = answers.find(command.tag); byTag != answers.end())
+            return byTag->second;
+        if (auto const byCommand = answers.find(command.command); byCommand != answers.end())
+            return byCommand->second;
         if (command.command == "agent-setup-check")
             return ok(readFixture(FixtureRoot::Testdata, "contour/setup-hooks-present.json"));
         if (command.command == "claude-plugins")
@@ -528,6 +538,10 @@ class Harness
             return ok(readFixture(FixtureRoot::Testdata, "gitlab/mrs-open.json"));
         if (command.command == "glab-issues")
             return ok(readFixture(FixtureRoot::Testdata, "gitlab/issues-open.json"));
+        if (command.command == "glab-pipelines")
+            return ok(readFixture(FixtureRoot::Testdata, "gitlab/pipelines-hand.json"));
+        if (command.command == "glab-failed-jobs")
+            return ok(readFixture(FixtureRoot::Testdata, "gitlab/jobs-failed-hand.json"));
         return ok();
     }
 
@@ -5104,3 +5118,275 @@ TEST_CASE("a permission profile on a Copilot worker's task is one problem line",
                                      .fixCiKeys = R"("worker": "copilot", "permissions": "trusted",)" });
     CHECK(linesMentioning(harness.engine().problems(), "tasks[0].permissions") == 1);
 }
+
+// {{{ the Work board's lists
+
+namespace
+{
+
+/// A GitLab repository beside a GitHub one.
+[[nodiscard]] StartContext gitlabAndGithubContext()
+{
+    return contextFor(
+        Settings { .repos = R"([ { "name": "contour", "path": "~/projects/contour", "forge": "gitlab",
+                        "issues": [ { "source": "forge", "query": "crash" } ] },
+                      { "name": "other", "path": "~/projects/other", "forge": "github",
+                        "issues": [ { "source": "forge", "query": "assignee:@me" } ] } ])",
+                   .repoPaths = { ContourPath, OtherPath } });
+}
+
+/// @return The commands issued so far under @p tag.
+[[nodiscard]] std::vector<RunCommand> issuedTagged(Harness const& harness, std::string_view tag)
+{
+    auto found = std::vector<RunCommand> {};
+    for (auto const& command: harness.issuedCommands())
+        if (command.tag == tag)
+            found.push_back(command);
+    return found;
+}
+
+/// @return What `acli-issues` prints for work items @p keys, each `To Do`.
+[[nodiscard]] std::string jiraItems(std::initializer_list<std::string_view> keys)
+{
+    auto json = std::string { "[" };
+    for (auto const key: keys)
+        json += std::format(R"({}{{"key":"{}","fields":{{"summary":"Work item",)"
+                            R"("status":{{"name":"To Do","statusCategory":{{"key":"new"}}}}}}}})",
+                            json.size() == 1 ? "" : ",",
+                            key);
+    return json + "]";
+}
+
+/// @return @p issues' entry for Jira key @p key; nullptr: none.
+[[nodiscard]] ListedIssue const* listedJira(std::span<ListedIssue const> issues, std::string_view key)
+{
+    auto const found = std::ranges::find_if(issues, [&](ListedIssue const& listed) {
+        return listed.issue.item == ItemRef { JiraRef { .key = std::string(key) } };
+    });
+    return found != issues.end() ? &*found : nullptr;
+}
+
+/// A GitHub repository listing from Jira, with an in-progress query.
+[[nodiscard]] StartContext inProgressContext()
+{
+    return contextFor(
+        Settings { .repos = R"j([ { "name": "contour", "path": "~/projects/contour", "forge": "github",
+                        "issues": [ { "source": "jira", "jql": "assignee = currentUser()",
+                                      "in_progress_jql": "status = \"Selected for Development\"",
+                                      "site": "https://example.atlassian.net" } ] } ])j" });
+}
+
+constexpr auto ProgressTag = "poll/contour/progress/0"sv;
+constexpr auto LookupTag = "poll/contour/jira-keys"sv;
+
+} // namespace
+
+TEST_CASE("a GitLab poll lists pipelines and failed jobs once per repository",
+          "[orchestrator][engine][gitlab][work]")
+{
+    auto harness = Harness { gitlabAndGithubContext() };
+    harness.boot();
+    for (auto const command: { "glab-pipelines"sv, "glab-failed-jobs"sv, "glab-mrs"sv })
+    {
+        CAPTURE(command);
+        auto const issued = issuedNamed(harness, command);
+        REQUIRE(issued.size() == 1);
+        CHECK(issued.front().cwd == ContourPath);
+    }
+    // The GitHub repository's list carries its checks: it needs neither.
+    CHECK(std::ranges::none_of(harness.issuedCommands(), [](RunCommand const& command) {
+        return command.cwd == OtherPath && command.command.starts_with("glab-");
+    }));
+    CHECK(harness.engine().problems().empty());
+    auto const mrs = harness.engine().changeRequests("contour");
+    REQUIRE_FALSE(mrs.empty());
+    CHECK(mrs[0].number == 5752);
+    CHECK(mrs[0].ci == CiState::Failing);
+    CHECK(mrs[0].failingChecks == std::vector<std::string> { "test-windows", "lint" });
+}
+
+TEST_CASE("a failed pipeline list leaves inferred rows and a problem line",
+          "[orchestrator][engine][gitlab][work]")
+{
+    auto harness = Harness { gitlabContext() };
+    harness.boot();
+    REQUIRE(harness.engine().problems().empty());
+    harness.wake(2 * Minute);
+
+    SECTION("a failed pipeline list infers CI and review")
+    {
+        harness.answers["glab-pipelines"] = failed(1, "HTTP 502");
+        harness.boot();
+        auto const mrs = harness.engine().changeRequests("contour");
+        REQUIRE_FALSE(mrs.empty());
+        CHECK(std::ranges::all_of(
+            mrs, [](ChangeRequest const& mr) { return mr.source == StateSource::Inferred; }));
+        CHECK(
+            mentions(harness.engine().problems(),
+                     "contour: the pipeline list could not be read; CI and review are inferred from GitLab's "
+                     "merge status"));
+        // 5752's detailed_merge_status is discussions_not_resolved: not ready to merge.
+        auto const items = harness.engine().workItems();
+        auto const unresolved = std::ranges::find_if(items, [](WorkItem const& item) {
+            return item.changeRequest && item.changeRequest->number == 5752;
+        });
+        REQUIRE(unresolved != items.end());
+        CHECK(unresolved->group == WorkGroup::InReview);
+    }
+    SECTION("a failed job list only loses the names")
+    {
+        harness.answers["glab-failed-jobs"] = failed(1, "HTTP 502");
+        harness.boot();
+        auto const mrs = harness.engine().changeRequests("contour");
+        REQUIRE_FALSE(mrs.empty());
+        CHECK(mrs[0].ci == CiState::Failing);
+        CHECK(mrs[0].failingChecks.empty());
+        CHECK(mentions(harness.engine().problems(), "the failed job list could not be read"));
+    }
+    // A list that falls back is no failed poll: no back-off, and no login check next time.
+    CHECK(harness.wakeAt() - harness.now() == 2 * Minute);
+    harness.feed(Wake { .monoMs = harness.wakeAt(), .wallMs = DispatchWallMs });
+    CHECK_FALSE(harness.pending("glab-auth"));
+    CHECK(harness.pending("glab-mrs"));
+}
+
+TEST_CASE("an in_progress_jql runs once per poll and decides progress", "[orchestrator][engine][jira][work]")
+{
+    auto harness = Harness { inProgressContext() };
+    harness.answers["poll/contour/issues/0"] =
+        ok(readFixture(FixtureRoot::Testdata, "jira/issues-work.json"));
+    harness.answers[std::string(ProgressTag)] = ok(jiraItems({ "PRJ-1240" }));
+    harness.boot();
+    auto const progress = issuedTagged(harness, ProgressTag);
+    REQUIRE(progress.size() == 1);
+    CHECK(progress.front().command == "acli-issues");
+    CHECK(argumentOf(progress.front(), "jql")
+          == R"j((assignee = currentUser()) AND (status = "Selected for Development"))j");
+    auto const* const selected = listedJira(harness.engine().listedIssues("contour"), "PRJ-1240");
+    auto const* const working = listedJira(harness.engine().listedIssues("contour"), "PRJ-1234");
+    REQUIRE(selected != nullptr);
+    REQUIRE(working != nullptr);
+    CHECK(selected->progress == Progress::InProgress);
+    CHECK(working->progress == Progress::NotStarted); // indeterminate, but the query does not name it
+    CHECK(harness.engine().problems().empty());
+    harness.wake(2 * Minute);
+
+    SECTION("a failed query keeps the default rule")
+    {
+        harness.answers[std::string(ProgressTag)] = failed(1, "bad JQL");
+        harness.boot();
+        CHECK(issuedTagged(harness, ProgressTag).size() == 2);
+        auto const* const now = listedJira(harness.engine().listedIssues("contour"), "PRJ-1234");
+        REQUIRE(now != nullptr);
+        CHECK(now->progress == Progress::InProgress);
+        CHECK(mentions(harness.engine().problems(),
+                       R"(contour: the Jira in-progress query "status = "Selected for Development"" failed; )"
+                       R"(tickets in progress are those Jira counts as in progress)"));
+        CHECK(harness.wakeAt() - harness.now() == 2 * Minute);
+    }
+    SECTION("a progress-only change shows")
+    {
+        // The same answers change nothing drawn.
+        harness.boot();
+        auto const unchanged = harness.engine().revision();
+        harness.wake(2 * Minute);
+        harness.boot();
+        CHECK(harness.engine().revision() == unchanged);
+
+        harness.wake(2 * Minute);
+        harness.answers[std::string(ProgressTag)] = ok(jiraItems({ "PRJ-1240", "PRJ-1234" }));
+        harness.boot();
+        CHECK(harness.engine().revision() > unchanged);
+        auto const* const now = listedJira(harness.engine().listedIssues("contour"), "PRJ-1234");
+        REQUIRE(now != nullptr);
+        CHECK(now->progress == Progress::InProgress);
+    }
+}
+
+TEST_CASE("one key lookup per poll for tickets MRs name that no source listed",
+          "[orchestrator][engine][jira][work]")
+{
+    auto harness = Harness { contextFor(
+        Settings { .repos = R"j([ { "name": "contour", "path": "~/projects/contour", "forge": "github",
+                        "issues": [ { "source": "jira", "jql": "assignee = currentUser()",
+                                      "site": "https://example.atlassian.net" } ] } ])j" }) };
+    auto const prs = [](std::initializer_list<std::string_view> titles) {
+        auto json = std::string { "[" };
+        auto number = 1;
+        for (auto const title: titles)
+        {
+            json += std::format(
+                R"({}[{},"{}","https://github.com/o/r/pull/{}","h","master",false,false,"",[],[]])",
+                number == 1 ? "" : ",",
+                number,
+                title,
+                number);
+            ++number;
+        }
+        return ok(json + "]");
+    };
+    harness.answers["gh-prs"] =
+        prs({ "PRJ-1999: fix the crash", "UTF-8 fix", "OTHER-5 rename", "PRJ-1234 listed" });
+    harness.answers["poll/contour/issues/0"] =
+        ok(readFixture(FixtureRoot::Testdata, "jira/issues-work.json"));
+    harness.held.insert(std::string(LookupTag));
+    harness.boot();
+    auto const lookups = issuedTagged(harness, LookupTag);
+    REQUIRE(lookups.size() == 1);
+    CHECK(lookups.front().command == "acli-issues");
+    CHECK(lookups.front().cwd == ContourPath);
+    CHECK(argumentOf(lookups.front(), "jql") == "key in (PRJ-1999)");
+    CHECK(issuedNamed(harness, "acli-issues").size() == 2);
+
+    // The poll waits for the lookup: a wake meanwhile starts none, and the next one is due from its answer.
+    harness.wake(Minute);
+    CHECK(harness.commandsIssued("gh-prs") == 1);
+    auto const before = harness.engine().revision();
+    harness.finish("acli-issues", ok(jiraItems({ "PRJ-1999" })));
+    CHECK(harness.engine().revision() > before);
+    REQUIRE(harness.engine().linkedTickets().size() == 1);
+    CHECK(harness.engine().linkedTickets()[0].item == ItemRef { JiraRef { .key = "PRJ-1999" } });
+    CHECK(harness.engine().linkedTickets()[0].url == "https://example.atlassian.net/browse/PRJ-1999");
+    CHECK(harness.wakeAt() - harness.now() == 2 * Minute);
+
+    // A failed lookup keeps what the last one found, says so, and backs nothing off.
+    harness.feed(Wake { .monoMs = harness.wakeAt(), .wallMs = DispatchWallMs });
+    harness.boot();
+    REQUIRE(issuedTagged(harness, LookupTag).size() == 2);
+    harness.finish("acli-issues", failed(1, "bad JQL"));
+    REQUIRE(harness.engine().linkedTickets().size() == 1);
+    CHECK(mentions(harness.engine().problems(),
+                   "contour: the Jira lookup of the tickets merge requests name failed"));
+    CHECK(harness.wakeAt() - harness.now() == 2 * Minute);
+    harness.feed(Wake { .monoMs = harness.wakeAt(), .wallMs = DispatchWallMs });
+    CHECK_FALSE(harness.pending("gh-auth"));
+
+    // A poll where every named ticket was listed looks nothing up.
+    harness.answers["gh-prs"] = prs({ "PRJ-1234 listed", "UTF-8 fix" });
+    harness.boot();
+    CHECK(issuedTagged(harness, LookupTag).size() == 2);
+    CHECK(harness.engine().linkedTickets().empty());
+    CHECK_FALSE(mentions(harness.engine().problems(), "lookup"));
+    CHECK(harness.wakeAt() - harness.now() == 2 * Minute);
+}
+
+TEST_CASE("workItems joins the engine's lists in configuration order", "[orchestrator][engine][work]")
+{
+    auto harness = Harness { contextFor(
+        Settings { .repos = R"j([ { "name": "contour", "path": "~/projects/contour", "forge": "github",
+                        "issues": [ { "source": "jira", "jql": "a", "site": "https://example.atlassian.net" } ] },
+                      { "name": "other", "path": "~/projects/other", "forge": "github",
+                        "issues": [ { "source": "jira", "jql": "b", "site": "https://example.atlassian.net" } ] } ])j",
+                   .repoPaths = { ContourPath, OtherPath } }) };
+    harness.answers["acli-issues"] = ok(readFixture(FixtureRoot::Testdata, "jira/issues-work.json"));
+    harness.boot();
+    REQUIRE(listedJira(harness.engine().listedIssues("other"), "PRJ-1234") != nullptr);
+    auto const items = harness.engine().workItems();
+    auto const ticket = [](WorkItem const& item) {
+        return item.item == ItemRef { JiraRef { .key = "PRJ-1234" } };
+    };
+    REQUIRE(std::ranges::count_if(items, ticket) == 1);
+    CHECK(std::ranges::find_if(items, ticket)->repo == "contour");
+}
+
+// }}}

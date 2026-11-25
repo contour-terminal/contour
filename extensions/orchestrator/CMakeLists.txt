@@ -51,6 +51,7 @@ add_library(orchestrator_core STATIC
     core/EnginePoll.cpp
     core/EngineStats.cpp
     core/EngineTranscript.cpp
+    core/EngineWork.cpp
     core/FailureWords.cpp
     core/FailureWords.hpp
     core/Finished.cpp

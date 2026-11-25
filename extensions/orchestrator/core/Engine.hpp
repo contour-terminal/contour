@@ -25,6 +25,7 @@
 #include <orchestrator/core/Reconcile.hpp>
 #include <orchestrator/core/Run.hpp>
 #include <orchestrator/core/Transcript.hpp>
+#include <orchestrator/core/WorkItems.hpp>
 
 namespace orchestrator
 {
@@ -512,6 +513,13 @@ class Engine
     /// @return Its open issues no listed change request claims.
     [[nodiscard]] std::span<Issue const> unclaimedIssues(std::string_view repo) const noexcept;
     /// @param repo A repository's name.
+    /// @return The repository's issues from every source, de-duplicated by URL, with their progress.
+    [[nodiscard]] std::span<ListedIssue const> listedIssues(std::string_view repo) const noexcept;
+    /// @return The tickets the last key lookup found: those MRs name that no source listed.
+    [[nodiscard]] std::span<Issue const> linkedTickets() const noexcept { return _linkedTickets; }
+    /// @return The Work board's items, from the lists, the lookup and the runs (EngineWork.cpp).
+    [[nodiscard]] std::vector<WorkItem> workItems() const;
+    /// @param repo A repository's name.
     /// @return Its worktrees no run accounts for.
     [[nodiscard]] std::span<WorktreeEntry const> orphans(std::string_view repo) const noexcept;
     /// @return What the user should know: configuration, store, `gh` and list problems, incomplete-list
@@ -662,13 +670,19 @@ class Engine
     /// What the polls learnt about one repository.
     struct RepoState
     {
-        std::string name;                              ///< Its configured name.
-        std::vector<ChangeRequest> changeRequests;     ///< The user's open change requests.
-        std::vector<std::vector<Issue>> issuesByQuery; ///< The open issues, one list per query.
-        std::vector<Issue> unclaimed;                  ///< Those no change request claims.
-        std::optional<std::string> defaultBranch;      ///< The forge's default branch, once read.
-        std::vector<WorktreeEntry> worktrees;          ///< Its worktrees, as last listed.
-        std::vector<WorktreeEntry> orphans;            ///< Those no run accounts for.
+        std::string name;                                   ///< Its configured name.
+        std::vector<ChangeRequest> listedChangeRequests;    ///< The list as mapped, before enrichment.
+        std::vector<ChangeRequest> changeRequests;          ///< The user's open change requests.
+        std::optional<std::vector<PipelineInfo>> pipelines; ///< The last pipelines; nullopt: none or failed.
+        std::optional<std::vector<FailedJob>> failedJobs; ///< The last failed jobs; nullopt: none or failed.
+        std::vector<std::vector<Issue>> issuesByQuery;    ///< The open issues, one list per query.
+        /// Per query: the in-progress keys; nullopt: not asked or failed.
+        std::vector<std::optional<std::vector<std::string>>> inProgressByQuery;
+        std::vector<ListedIssue> issues;          ///< listedIssues().
+        std::vector<Issue> unclaimed;             ///< Those no change request claims.
+        std::optional<std::string> defaultBranch; ///< The forge's default branch, once read.
+        std::vector<WorktreeEntry> worktrees;     ///< Its worktrees, as last listed.
+        std::vector<WorktreeEntry> orphans;       ///< Those no run accounts for.
         CheckoutUnknown unknownCheckout =
             CheckoutUnknown::Pending;       ///< Why @ref worktrees names no main checkout, if they do not.
         uint32_t worktreeListFailures = 0;  ///< The worktree listings in a row that failed.
@@ -761,6 +775,19 @@ class Engine
     void issueSourceAuthChecks(std::vector<Effect>& out);
     void onSourceAuthResult(std::string_view tag, ProcessOutcome const& outcome, std::vector<Effect>& out);
     void onListAnswered(std::vector<Effect>& out);
+    /// Takes in issue query @p query's in-progress keys; a failure only writes @p lines.
+    void onProgressResult(std::size_t query,
+                          Repo const& repo,
+                          ProcessOutcome const& outcome,
+                          std::vector<std::string>& lines);
+    /// Takes in the key lookup's tickets; a failure keeps the previous ones and only writes @p lines.
+    void onLinkedResult(Repo const& repo, ProcessOutcome const& outcome, std::vector<std::string>& lines);
+    /// Once per poll, after its other lists: looks up the Jira tickets merge requests name that no source
+    /// listed.
+    /// @return Yes when the lookup was handed to the host, and the poll waits for it.
+    [[nodiscard]] Issued issueKeyLookup(std::vector<Effect>& out);
+    /// @return Each repository's lists, in configuration order (EngineWork.cpp).
+    [[nodiscard]] std::vector<RepoWork> repoWork() const;
     void checkHooks(std::vector<Effect>& out);
     void checkHooksOf(std::string_view envSet, std::vector<Effect>& out);
     void checkPlugins(std::vector<Effect>& out);
@@ -816,6 +843,14 @@ class Engine
     std::size_t _insideCount = 0; ///< The runs the engine works on: those of this configuration, and the ones
                                   ///< outside it the user ended.
     std::vector<RepoState> _repos;
+    std::vector<Issue> _linkedTickets; ///< linkedTickets(); kept across a failed lookup.
+    /// Whether this poll's key lookup was issued; reset to NotIssued when a poll starts.
+    enum class LookupPhase : uint8_t
+    {
+        NotIssued = 0, ///< Not yet this poll.
+        Issued,        ///< Issued, or found nothing to look up, this poll.
+    };
+    LookupPhase _lookupPhase = LookupPhase::NotIssued;
     std::vector<PaneFact>
         _panes; ///< As last listed; AwaitMessage's runs as holdAwaitedMessages() reads them.
     std::vector<std::string> _awaitingMessage; ///< The runs AwaitMessage turned Waiting, while their tabs

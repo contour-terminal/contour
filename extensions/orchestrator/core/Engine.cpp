@@ -162,8 +162,14 @@ Engine::Engine(std::optional<Config> config, HostInfo host, uint64_t monoMs, uin
     for (auto const& repo: _config->repos())
         _repos.push_back(
             RepoState { .name = repo.name,
+                        .listedChangeRequests = {},
                         .changeRequests = {},
+                        .pipelines = std::nullopt,
+                        .failedJobs = std::nullopt,
                         .issuesByQuery = std::vector<std::vector<Issue>>(repo.issueQueries.size()),
+                        .inProgressByQuery =
+                            std::vector<std::optional<std::vector<std::string>>>(repo.issueQueries.size()),
+                        .issues = {},
                         .unclaimed = {},
                         .defaultBranch = std::nullopt,
                         .worktrees = {},
@@ -323,6 +329,13 @@ std::span<Issue const> Engine::unclaimedIssues(std::string_view repo) const noex
 {
     auto const* const state = findRepoState(repo);
     return state != nullptr ? std::span<Issue const> { state->unclaimed } : std::span<Issue const> {};
+}
+
+std::span<ListedIssue const> Engine::listedIssues(std::string_view repo) const noexcept
+{
+    auto const* const state = findRepoState(repo);
+    return state != nullptr ? std::span<ListedIssue const> { state->issues }
+                            : std::span<ListedIssue const> {};
 }
 
 std::span<WorktreeEntry const> Engine::orphans(std::string_view repo) const noexcept

@@ -4,6 +4,7 @@
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <map>
 #include <optional>
@@ -24,6 +25,7 @@
 #include <orchestrator/core/Plugins.hpp>
 #include <orchestrator/core/Provider.hpp>
 #include <orchestrator/core/Sanitize.hpp>
+#include <orchestrator/core/WorkItems.hpp>
 
 using namespace std::string_view_literals;
 
@@ -56,6 +58,53 @@ namespace
     constexpr auto IssuesList = "issues/"sv;
     constexpr auto DefaultBranchList = "default-branch"sv;
     constexpr auto WorktreesList = "worktrees"sv;
+    constexpr auto PipelinesList = "pipelines"sv;
+    constexpr auto FailedJobsList = "failed-jobs"sv;
+    constexpr auto ProgressList = "progress/"sv;
+    constexpr auto LinkedList = "jira-keys"sv;
+
+    /// What a repository's poll lists.
+    enum class PollList : uint8_t
+    {
+        ChangeRequests, ///< Its open change requests.
+        Issues,         ///< One issue query's issues.
+        DefaultBranch,  ///< Its default branch.
+        Worktrees,      ///< Its worktrees.
+        Pipelines,      ///< Its newest pipelines.
+        FailedJobs,     ///< Its failed jobs.
+        Progress,       ///< One issue query's tickets in progress.
+        Linked,         ///< The key lookup: the tickets merge requests name that no source listed.
+    };
+
+    /// Whether a list's name is followed by the index of the issue query it is for.
+    enum class ListIndex : uint8_t
+    {
+        None = 0, ///< The name is the whole list.
+        Query,    ///< `<name><query index>`.
+    };
+
+    /// One list a repository's poll tag may name.
+    struct PollListRow
+    {
+        PollList list;         ///< The list.
+        std::string_view name; ///< Its name in the tag.
+        ListIndex index;       ///< Whether the name is followed by a query's index.
+    };
+
+    /// Every list, one row each: the parser looks a tag's list up here.
+    constexpr auto PollListRows = std::array {
+        PollListRow { .list = PollList::ChangeRequests, .name = PrsList, .index = ListIndex::None },
+        PollListRow { .list = PollList::Issues, .name = IssuesList, .index = ListIndex::Query },
+        PollListRow { .list = PollList::DefaultBranch, .name = DefaultBranchList, .index = ListIndex::None },
+        PollListRow { .list = PollList::Worktrees, .name = WorktreesList, .index = ListIndex::None },
+        PollListRow { .list = PollList::Pipelines, .name = PipelinesList, .index = ListIndex::None },
+        PollListRow { .list = PollList::FailedJobs, .name = FailedJobsList, .index = ListIndex::None },
+        PollListRow { .list = PollList::Progress, .name = ProgressList, .index = ListIndex::Query },
+        PollListRow { .list = PollList::Linked, .name = LinkedList, .index = ListIndex::None },
+    };
+
+    /// The configuration key of a source whose query is JQL: the one a key lookup searches.
+    constexpr auto JqlKey = "jql"sv;
 
     /// What separates a set's or an issue source's name from its check in the check's tag. No repository
     /// name holds it (an ArgumentKind::Name), so `poll/hooks:<set>` is never `poll/<repo>/<list>` of a
@@ -107,8 +156,38 @@ namespace
     struct PollTag
     {
         std::string_view repo; ///< The repository's name.
-        std::string_view list; ///< What was listed, such as `prs` or `issues/0`.
+        PollList list;         ///< What was listed.
+        std::size_t query = 0; ///< The issue query it is for (ListIndex::Query); 0 otherwise.
     };
+
+    /// @return The index @p digits spell whole; std::nullopt when they spell none.
+    [[nodiscard]] std::optional<std::size_t> indexOf(std::string_view digits) noexcept
+    {
+        auto index = std::size_t { 0 };
+        auto const [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), index);
+        if (error != std::errc {} || end != digits.data() + digits.size())
+            return std::nullopt;
+        return index;
+    }
+
+    /// @return @p list, looked up in PollListRows, as a tag of @p repo; std::nullopt when no row names it.
+    [[nodiscard]] std::optional<PollTag> parseList(std::string_view repo, std::string_view list) noexcept
+    {
+        for (auto const& row: PollListRows)
+            switch (row.index)
+            {
+                case ListIndex::None:
+                    if (list == row.name)
+                        return PollTag { .repo = repo, .list = row.list, .query = 0 };
+                    break;
+                case ListIndex::Query:
+                    if (list.starts_with(row.name))
+                        if (auto const query = indexOf(list.substr(row.name.size())))
+                            return PollTag { .repo = repo, .list = row.list, .query = *query };
+                    break;
+            }
+        return std::nullopt;
+    }
 
     [[nodiscard]] std::optional<PollTag> parsePollTag(std::string_view tag) noexcept
     {
@@ -118,24 +197,150 @@ namespace
         auto const slash = rest.find('/');
         if (slash == std::string_view::npos)
             return std::nullopt;
-        return PollTag { .repo = rest.substr(0, slash), .list = rest.substr(slash + 1) };
+        return parseList(rest.substr(0, slash), rest.substr(slash + 1));
     }
 
-    [[nodiscard]] std::optional<std::size_t> issueQueryIndex(std::string_view list) noexcept
+    /// @return How much of a poll command's output may be read: all of it, what came before the host's cut,
+    ///         or nothing (std::nullopt: it failed).
+    [[nodiscard]] std::optional<OutputExtent> readableExtent(Judgement const& judgement) noexcept
     {
-        if (!list.starts_with(IssuesList))
+        switch (judgement.verdict)
+        {
+            case Verdict::Ok: return OutputExtent::Whole;
+            case Verdict::Cut: return OutputExtent::Truncated;
+            default: return std::nullopt;
+        }
+    }
+
+    /// @param map A provider row's mapping; nullptr: none.
+    /// @param outcome How its command ended.
+    /// @return What @p map read from @p outcome; std::nullopt when the command failed or @p map refused it.
+    template <typename T>
+    [[nodiscard]] std::optional<std::vector<T>> readList(
+        std::expected<std::vector<T>, ParseError> (*map)(std::string_view, OutputExtent),
+        ProcessOutcome const& outcome)
+    {
+        auto const extent = readableExtent(judge(outcome));
+        if (!extent || map == nullptr)
             return std::nullopt;
-        auto const digits = list.substr(IssuesList.size());
-        auto index = std::size_t { 0 };
-        auto const [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), index);
-        if (error != std::errc {} || end != digits.data() + digits.size())
+        auto mapped = map(outcome.stdoutText, *extent);
+        if (!mapped)
             return std::nullopt;
-        return index;
+        return std::move(*mapped);
+    }
+
+    /// @return @p list as a span, or std::nullopt when there is none.
+    template <typename T>
+    [[nodiscard]] std::optional<std::span<T const>> viewOf(std::optional<std::vector<T>> const& list) noexcept
+    {
+        if (!list)
+            return std::nullopt;
+        return std::span<T const> { *list };
+    }
+
+    /// The query a key lookup runs as, and its source.
+    struct LookupQuery
+    {
+        IssueQuery const* query;      ///< The query: its site builds the tickets' pages.
+        IssueSourceRow const* source; ///< Its source: the command and argument the lookup runs.
+    };
+
+    /// @param repo A configured repository.
+    /// @param rows The issue sources.
+    /// @return @p repo's first query whose source searches by JQL; std::nullopt: none.
+    [[nodiscard]] std::optional<LookupQuery> lookupQueryOf(Repo const& repo,
+                                                           std::span<IssueSourceRow const> rows) noexcept
+    {
+        for (auto const& query: repo.issueQueries)
+            if (auto const* const source = findIssueSource(rows, query.source);
+                source != nullptr && source->configKey == JqlKey && !source->command.empty()
+                && source->map != nullptr)
+                return LookupQuery { .query = &query, .source = source };
+        return std::nullopt;
+    }
+
+    /// @return The Jira keys of @p issues, in order.
+    [[nodiscard]] std::vector<std::string> jiraKeysOf(std::span<Issue const> issues)
+    {
+        auto keys = std::vector<std::string> {};
+        for (auto const& issue: issues)
+            if (auto const* const ref = std::get_if<JiraRef>(&issue.item))
+                keys.push_back(ref->key);
+        return keys;
+    }
+
+    /// Sets @p state's change requests: as listed, joined through @p provider's row with the pipelines and
+    /// failed jobs when the row has a join.
+    template <typename RepoState>
+    void enrichChangeRequests(RepoState& state, Provider const& provider)
+    {
+        state.changeRequests = provider.enrich != nullptr ? provider.enrich(state.listedChangeRequests,
+                                                                            viewOf(state.pipelines),
+                                                                            viewOf(state.failedJobs))
+                                                          : state.listedChangeRequests;
+    }
+
+    /// Rebuilds @p state's issues from every query's list, de-duplicated by URL, each with its progress (an
+    /// issue several queries list is in progress if any of them says so), and those no change request
+    /// claims.
+    template <typename RepoState>
+    void rebuildIssues(RepoState& state)
+    {
+        auto issues = std::vector<ListedIssue> {};
+        for (auto const query: std::views::iota(std::size_t { 0 }, state.issuesByQuery.size()))
+        {
+            auto const keys = query < state.inProgressByQuery.size() ? viewOf(state.inProgressByQuery[query])
+                                                                     : std::nullopt;
+            for (auto const& found: state.issuesByQuery[query])
+            {
+                auto const progress = progressOf(found, keys);
+                auto const known = std::ranges::find_if(
+                    issues, [&](ListedIssue const& listed) { return listed.issue.url == found.url; });
+                if (known == issues.end())
+                    issues.push_back(ListedIssue { .issue = found, .progress = progress });
+                else if (progress == Progress::InProgress)
+                    known->progress = Progress::InProgress;
+            }
+        }
+        state.issues = std::move(issues);
+        state.unclaimed = unclaimed(
+            std::ranges::to<std::vector<Issue>>(state.issues | std::views::transform(&ListedIssue::issue)),
+            state.changeRequests);
     }
 
     [[nodiscard]] std::string line(std::string_view text)
     {
         return displayText(text, MaxSummaryLineChars);
+    }
+
+    /// Takes in a pipeline or failed-job list, and joins it into @p state's change requests. A failure leaves
+    /// std::nullopt, which the join reads as a list that could not be read, and a line saying so.
+    /// @param list PollList::Pipelines or PollList::FailedJobs.
+    template <typename RepoState>
+    void readCiList(PollList list,
+                    Repo const& repo,
+                    Provider const& provider,
+                    ProcessOutcome const& outcome,
+                    RepoState& state,
+                    std::vector<std::string>& lines)
+    {
+        if (list == PollList::Pipelines)
+        {
+            state.pipelines = readList(provider.mapPipelines, outcome);
+            if (!state.pipelines)
+                lines.push_back(line(std::format("{}: the pipeline list could not be read; CI and review are "
+                                                 "inferred from {}'s merge status",
+                                                 repo.name,
+                                                 provider.name)));
+        }
+        else
+        {
+            state.failedJobs = readList(provider.mapFailedJobs, outcome);
+            if (!state.failedJobs)
+                lines.push_back(line(std::format(
+                    "{}: the failed job list could not be read; failing jobs are not named", repo.name)));
+        }
+        enrichChangeRequests(state, provider);
     }
 
     /// The lines a failed poll command leaves: why, and for a list, that it is incomplete.
@@ -170,10 +375,12 @@ namespace
         return isSetCheckTag(tag) || tag == PluginStepTag || isAuthTag(tag);
     }
 
-    /// What a repository's lists show: on the dashboard, in the launcher and in what a dispatch would do.
+    /// What a repository's lists show: on the dashboard, on the Work board, in the launcher and in what a
+    /// dispatch would do.
     struct ShownLists
     {
         std::vector<ChangeRequest> changeRequests;
+        std::vector<ListedIssue> issues;
         std::vector<Issue> unclaimed;
         std::optional<std::string> defaultBranch;
         std::vector<WorktreeEntry> worktrees;
@@ -186,6 +393,7 @@ namespace
     [[nodiscard]] ShownLists shownOf(RepoState const& state)
     {
         return ShownLists { .changeRequests = state.changeRequests,
+                            .issues = state.issues,
                             .unclaimed = state.unclaimed,
                             .defaultBranch = state.defaultBranch,
                             .worktrees = state.worktrees,
@@ -379,6 +587,7 @@ void Engine::startPoll(std::vector<Effect>& out)
     if (!_config || _config->repos().empty())
         return;
     _pollResult = PollResult::Clean;
+    _lookupPhase = LookupPhase::NotIssued;
     recheckFinished(out);
     auto const& first = _config->repos().front();
     auto const* const provider = findProvider(_config->sources().providers, first.forge);
@@ -432,7 +641,7 @@ bool Engine::isForgePoll(std::string_view tag) const noexcept
     if (isAuthTag(tag))
         return true;
     auto const parsed = parsePollTag(tag);
-    return parsed && parsed->list != WorktreesList && findRepoState(parsed->repo) != nullptr;
+    return parsed && parsed->list != PollList::Worktrees && findRepoState(parsed->repo) != nullptr;
 }
 
 void Engine::startOrResumePoll(StartContext const& context, std::vector<Effect>& out)
@@ -471,6 +680,7 @@ void Engine::startOrResumePoll(StartContext const& context, std::vector<Effect>&
         // The results are counted before any is taken in, so that the poll ends with the last of them.
         _pollOutstanding += forgeAnswered;
         _pollResult = PollResult::Clean;
+        _lookupPhase = LookupPhase::NotIssued;
         recheckFinished(out);
         // A list is only ever run once the login was confirmed; the lists the previous instance had not run,
         // or whose results it took in before it went, are run now.
@@ -545,15 +755,30 @@ void Engine::issueLists(std::vector<Effect>& out)
         if (!repo.base && !state->defaultBranch)
             issueList(DefaultBranchList, provider->defaultBranch, {});
         issueList(PrsList, provider->listChangeRequests, {});
+        // A forge whose change-request list carries no CI detail reads it from two more lists.
+        if (!provider->listPipelines.empty())
+            issueList(PipelinesList, provider->listPipelines, {});
+        if (!provider->listFailedJobs.empty())
+            issueList(FailedJobsList, provider->listFailedJobs, {});
         auto index = std::size_t { 0 };
         for (auto const& query: repo.issueQueries)
         {
-            auto const list = std::format("{}{}", IssuesList, index++);
+            auto const queryIndex = index++;
             // The configuration accepted the source, so it has a row; the forge's lists through the provider.
-            if (auto const* const source = findIssueSource(_config->sources().issueSources, query.source))
-                issueList(list,
-                          source->command.empty() ? provider->listIssues : source->command,
-                          { Argument { .name = source->argument, .value = query.text } });
+            auto const* const source = findIssueSource(_config->sources().issueSources, query.source);
+            if (source == nullptr)
+                continue;
+            auto const command = source->command.empty() ? provider->listIssues : source->command;
+            issueList(std::format("{}{}", IssuesList, queryIndex),
+                      command,
+                      { Argument { .name = source->argument, .value = query.text } });
+            // The same search, narrowed to what the user counts as in progress.
+            if (!query.inProgressJql.empty())
+                issueList(
+                    std::format("{}{}", ProgressList, queryIndex),
+                    command,
+                    { Argument { .name = source->argument,
+                                 .value = std::format("({}) AND ({})", query.text, query.inProgressJql) } });
         }
     }
 }
@@ -898,7 +1123,7 @@ void Engine::onListResult(std::string_view tag, ProcessOutcome const& outcome, s
     auto& lines = _pollProblems[std::string(tag)];
     lines.clear();
 
-    if (parsed->list == WorktreesList)
+    if (parsed->list == PollList::Worktrees)
     {
         // Not part of the poll's outcome: a failing git does not slow the forge down.
         if (ok)
@@ -922,11 +1147,37 @@ void Engine::onListResult(std::string_view tag, ProcessOutcome const& outcome, s
     }
 
     --_pollOutstanding;
-    auto const query = issueQueryIndex(parsed->list);
+    // The lists the Work board reads besides fall back when they fail: their own line says so, and they
+    // neither back the poll off nor ask for the login again.
+    auto const answered = [&] {
+        rebuildIssues(*state);
+        onListAnswered(out);
+    };
+    switch (parsed->list)
+    {
+        case PollList::Pipelines:
+        case PollList::FailedJobs:
+            readCiList(parsed->list, *repo, *provider, outcome, *state, lines);
+            answered();
+            return;
+        case PollList::Progress:
+            onProgressResult(parsed->query, *repo, outcome, lines);
+            answered();
+            return;
+        case PollList::Linked:
+            onLinkedResult(*repo, outcome, lines);
+            answered();
+            return;
+        case PollList::ChangeRequests:
+        case PollList::Issues:
+        case PollList::DefaultBranch:
+        case PollList::Worktrees: break;
+    }
+    auto const query = parsed->list == PollList::Issues ? std::optional { parsed->query } : std::nullopt;
     auto const label = [&] {
-        if (parsed->list == PrsList)
+        if (parsed->list == PollList::ChangeRequests)
             return std::string("the pull request list");
-        if (parsed->list == DefaultBranchList)
+        if (parsed->list == PollList::DefaultBranch)
             return std::string("the default branch");
         if (query && *query < repo->issueQueries.size())
         {
@@ -937,7 +1188,7 @@ void Engine::onListResult(std::string_view tag, ProcessOutcome const& outcome, s
                 return std::format("the {} issue list \"{}\"", source->title, issueQuery.text);
             return std::format("the issue list \"{}\"", issueQuery.text);
         }
-        return std::string(parsed->list);
+        return std::format("the list {}", tag);
     }();
     auto const failed = [&](Judgement const& why) {
         lines = failureLines(repo->name, repo->path, label, why);
@@ -960,17 +1211,18 @@ void Engine::onListResult(std::string_view tag, ProcessOutcome const& outcome, s
     };
     if (!ok && !cut)
         failed(judgement);
-    else if (parsed->list == PrsList)
+    else if (parsed->list == PollList::ChangeRequests)
     {
         if (auto listed = provider->changeRequests(outcome.stdoutText, extent))
         {
             lines = listNotices(repo->name, label, *listed);
-            state->changeRequests = std::move(listed->items);
+            state->listedChangeRequests = std::move(listed->items);
+            enrichChangeRequests(*state, *provider);
         }
         else
             unread();
     }
-    else if (parsed->list == DefaultBranchList)
+    else if (parsed->list == PollList::DefaultBranch)
     {
         if (auto branch = provider->defaultBranchOf(outcome.stdoutText))
             state->defaultBranch = std::move(*branch);
@@ -993,18 +1245,136 @@ void Engine::onListResult(std::string_view tag, ProcessOutcome const& outcome, s
         else
             unread();
     }
-    // Issues found by several queries are offered once.
-    auto issues = std::vector<Issue> {};
-    for (auto const& found: state->issuesByQuery | std::views::join)
-        if (std::ranges::none_of(issues, [&](Issue const& known) { return known.url == found.url; }))
-            issues.push_back(found);
-    state->unclaimed = unclaimed(std::move(issues), state->changeRequests);
-    onListAnswered(out);
+    answered();
+}
+
+void Engine::onProgressResult(std::size_t query,
+                              Repo const& repo,
+                              ProcessOutcome const& outcome,
+                              std::vector<std::string>& lines)
+{
+    auto* const state = findRepoState(repo.name);
+    if (state == nullptr || query >= repo.issueQueries.size() || query >= state->inProgressByQuery.size())
+        return;
+    auto const& issueQuery = repo.issueQueries[query];
+    auto const* const source = findIssueSource(_config->sources().issueSources, issueQuery.source);
+    auto& keys = state->inProgressByQuery[query];
+    keys = std::nullopt;
+    auto const extent = readableExtent(judge(outcome));
+    if (extent && source != nullptr && source->map != nullptr)
+        if (auto const listed =
+                source->map(outcome.stdoutText, *extent, IssueSourceContext { .site = issueQuery.site }))
+            keys = jiraKeysOf(listed->items);
+    // Without the keys, a ticket's own status category says whether it is in progress.
+    if (!keys)
+    {
+        auto const who = source != nullptr ? source->title : std::string_view { issueQuery.source };
+        lines.push_back(
+            line(std::format("{}: the {} in-progress query \"{}\" failed; tickets in progress are "
+                             "those {} counts as in progress",
+                             repo.name,
+                             who,
+                             issueQuery.inProgressJql,
+                             who)));
+    }
+}
+
+void Engine::onLinkedResult(Repo const& repo, ProcessOutcome const& outcome, std::vector<std::string>& lines)
+{
+    // A lookup a previous instance issued counts as this poll's.
+    _lookupPhase = LookupPhase::Issued;
+    auto const lookup = lookupQueryOf(repo, _config->sources().issueSources);
+    auto const extent = readableExtent(judge(outcome));
+    auto tickets = std::optional<std::vector<Issue>> {};
+    if (lookup && extent)
+        if (auto listed = lookup->source->map(
+                outcome.stdoutText, *extent, IssueSourceContext { .site = lookup->query->site }))
+            tickets = std::move(listed->items);
+    if (!tickets)
+    {
+        // The previous tickets stay: a failure is no empty list.
+        lines.push_back(line(std::format("{}: the {} lookup of the tickets merge requests name failed; those "
+                                         "merge requests are shown without their ticket",
+                                         repo.name,
+                                         lookup ? lookup->source->title : "ticket"sv)));
+        return;
+    }
+    if (*tickets != _linkedTickets)
+    {
+        _linkedTickets = std::move(*tickets);
+        ++_revision;
+    }
+}
+
+Engine::Issued Engine::issueKeyLookup(std::vector<Effect>& out)
+{
+    _lookupPhase = LookupPhase::Issued;
+    // Only after the lists were read: a poll that never got past the login has no new names.
+    if (!_config || _auth != AuthState::LoggedIn)
+        return Issued::No;
+    auto const work = repoWork();
+    auto const projects = jiraProjectsOf(_config->repos(), work);
+    auto const isListed = [&](std::string_view key) {
+        return std::ranges::any_of(work, [&](RepoWork const& repo) {
+            return std::ranges::any_of(repo.issues, [&](ListedIssue const& listed) {
+                auto const* const ref = std::get_if<JiraRef>(&listed.issue.item);
+                return ref != nullptr && ref->key == key;
+            });
+        });
+    };
+    auto keys = std::vector<std::string> {};
+    for (auto const& repo: work)
+        for (auto const& mr: repo.changeRequests)
+            if (auto key = linkedJiraKey(mr.title, mr.head, projects); key && !isListed(*key))
+                keys.push_back(std::move(*key));
+    std::ranges::sort(keys);
+    auto const [first, last] = std::ranges::unique(keys);
+    keys.erase(first, last);
+    if (keys.size() > ListLimit)
+        keys.resize(ListLimit);
+    // Nothing to look up: no merge request names a ticket the lists left out, and what a failed lookup said
+    // no longer holds.
+    if (keys.empty())
+    {
+        for (auto const& repo: _config->repos())
+            _pollProblems.erase(std::format("{}{}/{}", PollTagPrefix, repo.name, LinkedList));
+        if (!_linkedTickets.empty())
+        {
+            _linkedTickets.clear();
+            ++_revision;
+        }
+        return Issued::No;
+    }
+    auto const& repos = _config->repos();
+    auto const sources = _config->sources().issueSources;
+    auto const repo = std::ranges::find_if(
+        repos, [&](Repo const& configured) { return lookupQueryOf(configured, sources).has_value(); });
+    if (repo == repos.end())
+        return Issued::No;
+    auto const lookup = lookupQueryOf(*repo, sources);
+    auto jql = std::string { "key in (" };
+    for (auto const& key: keys)
+        jql += std::format("{}{}", &key == &keys.front() ? "" : ", ", key);
+    jql += ")";
+    auto tag = std::format("{}{}/{}", PollTagPrefix, repo->name, LinkedList);
+    if (isPending(tag)
+        || issuePoll(std::move(tag),
+                     lookup->source->command,
+                     { Argument { .name = lookup->source->argument, .value = std::move(jql) } },
+                     repo->path,
+                     out)
+               == Issued::No)
+        return Issued::No;
+    ++_pollOutstanding;
+    return Issued::Yes;
 }
 
 void Engine::onListAnswered(std::vector<Effect>& out)
 {
     if (_pollOutstanding > 0)
+        return;
+    // The other lists answered: the poll ends once the key lookup they lead to did.
+    if (_lookupPhase == LookupPhase::NotIssued && issueKeyLookup(out) == Issued::Yes)
         return;
     if (_pollResult == PollResult::Failed)
         ++_pollFailures;
