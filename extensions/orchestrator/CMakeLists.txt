@@ -116,6 +116,8 @@ add_library(orchestrator_core STATIC
     core/Utf8.hpp
     core/Uuid.cpp
     core/Uuid.hpp
+    core/WorkItems.cpp
+    core/WorkItems.hpp
 )
 target_compile_features(orchestrator_core PUBLIC cxx_std_23)
 # PRIVATE: glaze stays in the .cpp files, and no header of the core may pull it in (scripts/include-budget.txt).
@@ -216,6 +218,7 @@ if(ORCHESTRATOR_TESTING)
         core/Utf8_test.cpp
         core/UnmeasuredSources.hpp
         core/Uuid_test.cpp
+        core/WorkItems_test.cpp
         guest/Driver_test.cpp
         view/Actions_test.cpp
         view/Attention_test.cpp
