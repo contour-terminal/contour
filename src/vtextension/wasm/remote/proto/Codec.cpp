@@ -497,6 +497,16 @@ std::expected<Pdu, DecodeError> decodeBody(std::span<uint8_t const> body)
 {
     auto reader = Reader { body };
     auto value = Body {};
+    if constexpr (std::same_as<Body, Hello>)
+    {
+        // A Hello's version comes first, and is all that is read of another version's Hello: what follows is
+        // that version's to lay out, and a peer speaking it is refused for its version, not as malformed.
+        auto const version = Reader { body }.varint32();
+        if (!version)
+            return std::unexpected(version.error());
+        if (*version != ProtocolVersion)
+            return Pdu { Hello { .version = *version } };
+    }
     return read(reader, value).and_then([&]() -> std::expected<Pdu, DecodeError> {
         if (!reader.atEnd())
             return std::unexpected(DecodeError::TrailingBytes);

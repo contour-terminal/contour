@@ -228,6 +228,11 @@ class RecordingSandbox final: public ISandbox
                 confined->record("harden");
                 return confined->hardening;
             },
+        .adoptEndpoints =
+            [confined](HelperArguments const& arguments) {
+                confined->record("adopt");
+                return vtextension::wasm::host::adoptEndpoints(arguments);
+            },
         .sandbox = [confined](SandboxDescriptors descriptors) -> std::unique_ptr<ISandbox> {
             confined->sandboxedControl.store(descriptors.control);
             return std::make_unique<RecordingSandbox>(confined);
@@ -624,15 +629,17 @@ TEST_CASE("HostProcess.locksDownInTheSandboxOrder", "[vtextension][host]")
     for (auto const& event: events)
         listed += event + ' ';
     INFO(listed);
-    // Endpoints are adopted between hardening and the engine (the sandbox was made for the adopted control
+    // Endpoints are adopted once hardened and before the engine (the sandbox was made for the adopted control
     // end, helloOf() checks); the rest is recorded as it happens.
     constexpr auto Lanes = static_cast<std::ptrdiff_t>(MaxLaneChannels);
-    REQUIRE(events.size() == 5 + MaxLaneChannels + (MaxLaneChannels + 1) + 3);
-    auto const head = std::vector<std::string> { "bind", "harden", "engine", "restrict", "listener" };
-    CHECK(std::vector(events.begin(), events.begin() + 5) == head);
+    constexpr auto HeadSize = std::size_t { 6 };
+    REQUIRE(events.size() == HeadSize + MaxLaneChannels + (MaxLaneChannels + 1) + 3);
+    auto const head =
+        std::vector<std::string> { "bind", "harden", "adopt", "engine", "restrict", "listener" };
+    CHECK(std::vector(events.begin(), events.begin() + HeadSize) == head);
     // Each lane's executor prepares its thread as it starts; the control thread prepares its own once every
     // lane's started. Their interleaving is the scheduler's.
-    auto const threads = std::span { events }.subspan(5, (2 * MaxLaneChannels) + 1);
+    auto const threads = std::span { events }.subspan(HeadSize, (2 * MaxLaneChannels) + 1);
     CHECK(std::ranges::count(threads, std::string { "executor" }) == Lanes);
     CHECK(std::ranges::count(threads, std::string { "prepare" }) == Lanes + 1);
     auto executors = std::ptrdiff_t { 0 };

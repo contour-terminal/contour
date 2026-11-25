@@ -172,6 +172,7 @@ HostConfinement systemConfinement()
     return HostConfinement {
         .bindToParent = &bindToParent,
         .beforeThreads = [] { return hardenProcess(); },
+        .adoptEndpoints = &adoptEndpoints,
         .sandbox = &makeSystemSandbox,
         .startThread = &ExecutorThread::start,
         .confine =
@@ -204,7 +205,7 @@ int runExtensionHost(std::span<std::string_view const> arguments,
     // While the main thread is the only one: what is set per thread then reaches every thread started later.
     auto const hardened = confinement.beforeThreads();
     tellOf("hardening", hardened);
-    auto endpoints = adoptEndpoints(*parsed);
+    auto endpoints = confinement.adoptEndpoints(*parsed);
     if (!endpoints)
         return endWith(endpoints.error());
     // Declared before the host, so that every object the host made of it goes first.

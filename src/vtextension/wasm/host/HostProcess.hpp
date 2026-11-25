@@ -104,7 +104,7 @@ class HostProcess
 
 /// What the host process does to itself, as the operating system does it (systemConfinement()) or, in a test
 /// that runs the host in its own process, as a double does it. In the order the host does it: bind, harden,
-/// (adopt its endpoints, make its engine,) restrict, start its threads, (prepare them,) cap, lock down. Every
+/// adopt its endpoints, (make its engine,) restrict, start its threads, (prepare them,) cap, lock down. Every
 /// step of the confinement runs, even past one that failed; the first that failed is what Hello states.
 struct HostConfinement
 {
@@ -115,6 +115,11 @@ struct HostConfinement
     /// @return Nothing if it hardened itself wholly; the first step that failed otherwise, which the host
     ///         tells of through tell.
     std::function<std::expected<void, ConfinementFailure>()> beforeThreads;
+    /// Takes ownership of every handle the command line names, as adoptEndpoints() does: once hardened, so
+    /// that no descriptor it adopts was open while the process could still be dumped or traced.
+    std::function<std::expected<HostEndpoints, HostProcessExit>(
+        remote::transport::HelperArguments const& arguments)>
+        adoptEndpoints;
     /// Makes the host's sandbox for the endpoints it adopted, as makeSystemSandbox() does: once its engine is
     /// made, while its main thread is still its only one. Never returns null.
     std::function<std::unique_ptr<ISandbox>(SandboxDescriptors descriptors)> sandbox;
@@ -135,8 +140,9 @@ struct HostConfinement
 /// @param line The line, without its end.
 void tellOnStandardError(std::string_view line) noexcept;
 
-/// @return bindToParent(), hardenProcess(), makeSystemSandbox(), ExecutorThread::start, and capResources()
-///         under BuildCapPolicy, which under `Skip` says so once on stderr; tellOnStandardError().
+/// @return bindToParent(), hardenProcess(), adoptEndpoints(), makeSystemSandbox(), ExecutorThread::start, and
+///         capResources() under BuildCapPolicy, which under `Skip` says so once on stderr;
+///         tellOnStandardError().
 [[nodiscard]] HostConfinement systemConfinement();
 
 /// The executable's body: parse, bind to the parent, harden, adopt, make the engine, restrict, serve -- which

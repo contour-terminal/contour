@@ -287,6 +287,7 @@ TEST_CASE("PduCodec.overCapIsRejectedFromTheHeader", "[vtextension]")
 TEST_CASE("PduCodec.lyingBodyIsMalformed", "[vtextension]")
 {
     auto const& helloRow = PduTable.at(std::to_underlying(PduKind::Hello) - 1);
+    constexpr auto ThisVersion = static_cast<uint8_t>(ProtocolVersion);
 
     SECTION("an inner count beyond the body is Truncated")
     {
@@ -304,16 +305,19 @@ TEST_CASE("PduCodec.lyingBodyIsMalformed", "[vtextension]")
 
     SECTION("a byte after the last field is TrailingBytes")
     {
-        auto const body = std::vector<uint8_t> { 1, 0, 2, 0, 0, 0 };
+        // A Hello of this version: another version's is read no further than its version.
+        auto const body = std::vector<uint8_t> { ThisVersion, 0, 2, 0, 0, 0 };
         CHECK(errorOf(frameOf(std::to_underlying(PduKind::Hello), body), helloRow)
               == DecodeError::TrailingBytes);
     }
 
     SECTION("an enumeration byte out of range is BadEnum")
     {
-        CHECK(errorOf(frameOf(std::to_underlying(PduKind::Hello), std::vector<uint8_t> { 1, 2, 2 }), helloRow)
+        CHECK(errorOf(frameOf(std::to_underlying(PduKind::Hello), std::vector<uint8_t> { ThisVersion, 2, 2 }),
+                      helloRow)
               == DecodeError::BadEnum);
-        CHECK(errorOf(frameOf(std::to_underlying(PduKind::Hello), std::vector<uint8_t> { 1, 0, 3 }), helloRow)
+        CHECK(errorOf(frameOf(std::to_underlying(PduKind::Hello), std::vector<uint8_t> { ThisVersion, 0, 3 }),
+                      helloRow)
               == DecodeError::BadEnum);
         auto const& grownRow = PduTable.at(std::to_underlying(PduKind::Grown) - 1);
         CHECK(errorOf(frameOf(std::to_underlying(PduKind::Grown), std::vector<uint8_t> { 1 }), grownRow)
@@ -536,17 +540,48 @@ TEST_CASE("PduCodec.protocolVersionIsFour", "[vtextension]")
 TEST_CASE("PduCodec.helloAtItsLargestFitsItsCap", "[vtextension]")
 {
     // Every field at its largest, the failure code an HRESULT's bit pattern: still under the row's cap.
-    auto const largest = Pdu { Hello { .version = UINT32_MAX,
-                                       .memoryMode = MemoryMode::Shared,
-                                       .lockdown = LockdownState::Failed,
-                                       .failedStep = lockdownSteps().back().step,
-                                       .failureCode = UINT32_MAX } };
-    auto const frame = encoded(largest);
-    auto const& row = rowOf(largest);
-    CHECK(bodyBytesOf(frame) <= row.sizeCap(PduLimits {}));
-    auto const decoded = decodeFrame(frame, row.direction, ChannelKind::Control, PduLimits {});
+    auto const largest = Hello { .version = UINT32_MAX,
+                                 .memoryMode = MemoryMode::Shared,
+                                 .lockdown = LockdownState::Failed,
+                                 .failedStep = lockdownSteps().back().step,
+                                 .failureCode = UINT32_MAX };
+    auto const& row = rowOf(Pdu { largest });
+    CHECK(bodyBytesOf(encoded(Pdu { largest })) <= row.sizeCap(PduLimits {}));
+
+    // This version's Hello decodes whole.
+    auto ours = largest;
+    ours.version = ProtocolVersion;
+    auto const decoded =
+        decodeFrame(encoded(Pdu { ours }), row.direction, ChannelKind::Control, PduLimits {});
     REQUIRE(decoded.has_value());
-    CHECK(decoded->pdu == largest);
+    CHECK(decoded->pdu == Pdu { ours });
+}
+
+TEST_CASE("PduCodec.helloOfAnotherVersionDecodesItsVersion", "[vtextension]")
+{
+    // An older helper's Hello, laid out as version 3 laid it: version, memory mode, lockdown. Its body is
+    // read no further than its version, so the parent refuses it for that version rather than as malformed.
+    auto const versionThree = std::vector<uint8_t> {
+        4,
+        static_cast<uint8_t>(PduKind::Hello),
+        3,
+        static_cast<uint8_t>(MemoryMode::Shared),
+        static_cast<uint8_t>(LockdownState::LockedDown),
+    };
+    auto const decoded = decodeFrame(versionThree, Direction::ToParent, ChannelKind::Control, PduLimits {});
+    REQUIRE(decoded.has_value());
+    CHECK(decoded->pdu == Pdu { Hello { .version = 3 } });
+    CHECK(decoded->consumed == versionThree.size());
+
+    // A later one with more fields than this version knows likewise; one without a version is still
+    // malformed.
+    auto const later = std::vector<uint8_t> { 8, static_cast<uint8_t>(PduKind::Hello), 5, 1, 2, 3, 4, 5, 6 };
+    auto const laterDecoded = decodeFrame(later, Direction::ToParent, ChannelKind::Control, PduLimits {});
+    REQUIRE(laterDecoded.has_value());
+    CHECK(laterDecoded->pdu == Pdu { Hello { .version = 5 } });
+    auto const empty = std::vector<uint8_t> { 1, static_cast<uint8_t>(PduKind::Hello) };
+    CHECK(decodeFrame(empty, Direction::ToParent, ChannelKind::Control, PduLimits {}).error()
+          == DecodeError::Truncated);
 }
 
 TEST_CASE("LockdownSteps.oneRowPerStep", "[vtextension]")

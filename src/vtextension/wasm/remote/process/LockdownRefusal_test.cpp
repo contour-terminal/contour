@@ -6,6 +6,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -69,7 +70,70 @@ void sayLockdownFailed([[maybe_unused]] std::size_t index, process::LaunchSpec c
     REQUIRE(sent.has_value());
 }
 
+/// Plays an older host: says a Hello laid out as protocol version 3 laid it (version, memory mode, lockdown).
+void sayVersionThreeHello([[maybe_unused]] std::size_t index, process::LaunchSpec const& spec)
+{
+    REQUIRE_FALSE(spec.inherited.empty());
+    auto const copy = transport::testing::duplicate(spec.inherited.front());
+    REQUIRE(copy.has_value());
+    auto channel = transport::Channel::adopt(*copy);
+    REQUIRE(channel.has_value());
+    auto const frame = std::array<uint8_t, 5> {
+        4,
+        static_cast<uint8_t>(proto::PduKind::Hello),
+        3,
+        static_cast<uint8_t>(proto::MemoryMode::Shared),
+        static_cast<uint8_t>(proto::LockdownState::LockedDown),
+    };
+    REQUIRE(channel->send(frame).has_value());
+}
+
+/// A connector over @p supervisor's mailbox that writes to @p writer.
+[[nodiscard]] process::ProcessHostConnector connectorOf(process::ExtensionHostSupervisor& supervisor,
+                                                        HostRefusalLog::Writer writer)
+{
+    return process::ProcessHostConnector { supervisor.mailbox(),
+                                           process::ProcessHostConfig { .helper = "contour-extension-host",
+                                                                        .environment = {},
+                                                                        .extraArguments = {},
+                                                                        .caps = {},
+                                                                        .standardError = std::nullopt },
+                                           std::move(writer) };
+}
+
+/// The runtime every case here asks the host to create.
+[[nodiscard]] proto::CreateRuntime testRuntime()
+{
+    return proto::CreateRuntime {
+        .runtimeId = HelperIncarnation::RuntimeId, .memoryBytes = 65536, .stackBytes = 65536, .functions = {}
+    };
+}
+
 } // namespace
+
+TEST_CASE("HelperIncarnation.olderHostIsRefusedForItsVersion", "[vtextension][remote]")
+{
+    auto const fake = std::make_shared<process::testing::FakeProcessLauncher>(&sayVersionThreeHello);
+    auto clock = core::ManualClock {};
+    auto supervisor = process::ExtensionHostSupervisor::start(process::SupervisorConfig {
+        .launcher = fake, .clock = &clock, .teardownGrace = std::chrono::milliseconds { 0 } });
+    REQUIRE(supervisor.has_value());
+    auto lines = std::make_shared<std::vector<std::string>>();
+    auto const writer = [lines](std::string_view line) {
+        lines->emplace_back(line);
+    };
+    {
+        auto connector = connectorOf(**supervisor, writer);
+        auto refusals = HostRefusalLog { writer };
+        auto const policy =
+            HelperPolicy { .timeouts = {}, .lockdown = LockdownRequirement::AcceptUnsandboxed };
+        auto const connected = HelperIncarnation::connect(connector, testRuntime(), policy, refusals);
+        REQUIRE_FALSE(connected.has_value());
+        CHECK(connected.error() == ExtensionError::HostUnavailable);
+    }
+    // Refused for its version, said in the version's line, not taken for a broken peer.
+    CHECK(*lines == std::vector<std::string> { refusalLine(HostRefusal::ProtocolVersion) });
+}
 
 TEST_CASE("ProcessHostConnector.lockdownFailureIsNotRelaunched", "[vtextension][remote]")
 {
@@ -85,19 +149,9 @@ TEST_CASE("ProcessHostConnector.lockdownFailureIsNotRelaunched", "[vtextension][
         lines->emplace_back(line);
     };
     {
-        auto connector =
-            process::ProcessHostConnector { (*supervisor)->mailbox(),
-                                            process::ProcessHostConfig { .helper = "contour-extension-host",
-                                                                         .environment = {},
-                                                                         .extraArguments = {},
-                                                                         .caps = {},
-                                                                         .standardError = std::nullopt },
-                                            writer };
+        auto connector = connectorOf(**supervisor, writer);
         auto refusals = HostRefusalLog { writer };
-        auto const runtime = proto::CreateRuntime { .runtimeId = HelperIncarnation::RuntimeId,
-                                                    .memoryBytes = 65536,
-                                                    .stackBytes = 65536,
-                                                    .functions = {} };
+        auto const runtime = testRuntime();
         auto const policy =
             HelperPolicy { .timeouts = {}, .lockdown = LockdownRequirement::AcceptUnsandboxed };
 
