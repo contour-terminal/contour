@@ -178,8 +178,7 @@ namespace
     /// @param key The entry, a valid spelling.
     /// @param row Its action.
     /// @param others The other actions of its context it may clash with: those keeping their defaults, and
-    /// the
-    ///        configured ones before it.
+    ///        the configured ones before it.
     /// @param own Its action's entries before it.
     /// @return The subject naming the other holder, or std::nullopt: no clash.
     [[nodiscard]] std::optional<std::string> clashOf(std::string_view key,

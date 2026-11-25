@@ -1380,8 +1380,7 @@ namespace
     }
 
     /// @return The Work board's settings `work` asks for: the groups it names folded at start, each once and
-    /// in
-    ///         row order, and whether empty groups show; without it, the defaults.
+    ///         in row order, and whether empty groups show; without it, the defaults.
     [[nodiscard]] Checked<WorkSettings> workOf(std::optional<JsonWork> const& value)
     {
         if (!value)

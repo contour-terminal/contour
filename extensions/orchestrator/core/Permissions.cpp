@@ -215,6 +215,11 @@ std::expected<std::vector<PermissionProfile>, ProfileProblem> resolveProfiles(
         else
             profiles.push_back(profile);
     }
+    // A configured profile is resolved first, so that a problem is reported where it is written: a built-in
+    // profile fails only through a configured one it builds on.
+    for (auto const& profile: configured)
+        if (auto const one = resolveOne(profiles, profile); !one)
+            return std::unexpected(ProfileProblem { .profile = profile.name, .error = one.error() });
     auto resolved = std::vector<PermissionProfile> {};
     resolved.reserve(profiles.size());
     for (auto const& profile: profiles)

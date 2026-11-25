@@ -164,12 +164,12 @@ TEST_CASE("Permissions: an unknown or circular extends is refused", "[orchestrat
     CHECK(resolveProfiles(unknown).error()
           == ProfileProblem { .profile = "x", .error = ProfileError::UnknownProfile });
 
-    // A built-in profile replaced so that it builds on one built on it. `auto` is the first built-in, and it
-    // builds on `standard`, so it is the first profile the cycle is found through.
+    // A built-in profile replaced so that it builds on one built on it. `auto` is the first built-in and
+    // builds on `standard`, but the cycle is reported at the configured profile, where it is written.
     auto const builtinCycle =
         std::vector<ProfileDef> { ProfileDef { .name = "standard", .extends = "trusted" } };
     CHECK(resolveProfiles(builtinCycle).error()
-          == ProfileProblem { .profile = "auto", .error = ProfileError::ProfileCycle });
+          == ProfileProblem { .profile = "standard", .error = ProfileError::ProfileCycle });
 }
 
 TEST_CASE("Permissions: the settings Claude Code takes", "[orchestrator][permissions]")

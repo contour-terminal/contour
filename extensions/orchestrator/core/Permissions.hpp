@@ -126,7 +126,7 @@ struct ProfileProblem
 /// Resolves the profiles: the built-in ones, each replaced by a configured profile of its name, then the
 /// other configured ones in order.
 /// @param configured The profiles from `permission_profiles`, names unique.
-/// @return Every profile, resolved; or the first profile whose `extends` is unknown or circular.
+/// @return Every profile, resolved; or the first configured profile whose `extends` is unknown or circular.
 [[nodiscard]] std::expected<std::vector<PermissionProfile>, ProfileProblem> resolveProfiles(
     std::span<ProfileDef const> configured);
 
