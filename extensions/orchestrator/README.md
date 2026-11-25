@@ -107,8 +107,9 @@ click selects a row of the Fleet, and a double click runs its primary action; on
 `n` box. A click switches the Focus's tab, answers with a quick-reply chip, gives the message box the keys, opens
 a link, or runs a palette entry. A click on a view's name in the top bar shows that view. A click beside an open
 popup closes it. The wheel moves the Fleet's selection, scrolls the Focus's tab, or moves a popup's highlight,
-whichever is under the pointer. While the `n` box's text or the dialog's note is typed, the wheel over the box
-does nothing but step a setting under the pointer, which then has the keys. Each frame records what it drew where, so a click lands on what you see.
+whichever is under the pointer. While the `n` box's text or the dialog's note is typed, the wheel does nothing,
+even over a setting; on the settings it moves between them or steps the one under the pointer. Each frame records
+what it drew where, so a click lands on what you see.
 Shift+drag still selects text in Contour. The Work view's mouse is described with it, below.
 
 **Places and keys.** The Fleet has the keys by default, and its letters are commands; the Focus gets them with

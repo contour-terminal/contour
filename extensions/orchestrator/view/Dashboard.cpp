@@ -1775,12 +1775,7 @@ void Dashboard::State::press(NavAction action, std::vector<UiAction>& actions)
     else if (interaction.work.menu)
         applyMenuKey(core::tui::KeyEvent { .key = key }, action, actions);
     else if (interaction.startDialog || interaction.taskBox)
-    {
-        // The wheel does not move a box out of its text: the letters typed next would act.
-        auto const isMove = action == NavAction::MoveUp || action == NavAction::MoveDown;
-        if (!isMove || navContextOf(interaction, keyContext()) != NavContext::Typing)
-            applyBoxKey(core::tui::KeyEvent { .key = key }, action, dialogHooks(), actions);
-    }
+        applyBoxKey(core::tui::KeyEvent { .key = key }, action, dialogHooks(), actions);
     else
         applyListKey(core::tui::KeyEvent { .key = key }, action, actions);
     if (interaction != before)
@@ -1888,6 +1883,12 @@ void Dashboard::State::applyMouse(core::tui::MouseEvent const& mouse, std::vecto
         case Type::Release: scrollbarDrag.reset(); return;
         case Type::ScrollUp:
         case Type::ScrollDown: {
+            // The wheel leaves a box being typed in alone, wherever it turns over it: a setting stepped or
+            // moved to would take the letters typed next as keys.
+            auto const boxTyped = (interaction.startDialog || interaction.taskBox)
+                                  && navContextOf(interaction, keyContext()) == NavContext::Typing;
+            if (boxTyped)
+                return;
             // The pane under the pointer scrolls: the topmost hit that the wheel moves.
             auto const pane = std::ranges::find_if(
                 under, [](HitRegion const& region) { return mouseRowOf(region.hit).wheel != nullptr; });

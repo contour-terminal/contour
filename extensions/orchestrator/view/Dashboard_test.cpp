@@ -12,6 +12,7 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -1509,51 +1510,107 @@ TEST_CASE("Work mouse: the n box's settings step under the pointer", "[orchestra
     CHECK_FALSE(box.has_value());
 }
 
-TEST_CASE("Work mouse: the wheel over a box being typed in leaves it typing",
+namespace
+{
+/// @return Every place the wheel may turn over the open box or dialog: its frame, and each of its settings,
+///         steppers and worker chips; none of them may be missing.
+[[nodiscard]] std::vector<core::tui::Point> wheelPlacesOf(Dashboard const& dashboard,
+                                                          std::span<HitKind const> kinds)
+{
+    auto const frame = regionOf(dashboard, Hit { .kind = HitKind::Popup });
+    auto places = std::vector { core::tui::Point { .x = frame.x, .y = frame.y } };
+    for (auto const kind: kinds)
+    {
+        auto const regions = regionsOf(dashboard, kind);
+        CHECK_FALSE(regions.empty());
+        for (auto const& region: regions)
+            places.push_back(core::tui::Point { .x = region.area.x, .y = region.area.y });
+    }
+    return places;
+}
+
+/// Turns the wheel up and down at each of @p places.
+void wheelOver(Dashboard& dashboard, std::span<core::tui::Point const> places)
+{
+    for (auto const& place: places)
+        for (auto const direction: { MouseWheel::Up, MouseWheel::Down })
+        {
+            CAPTURE(place.x, place.y);
+            CHECK(dashboard.input(wheelAt(place.x, place.y, direction)).empty());
+        }
+}
+} // namespace
+
+TEST_CASE("Work mouse: the wheel over the n box being typed in does nothing",
           "[orchestrator][view][mouse][start]")
 {
     auto const fixture = workFixture(twoWorkersWorld());
     auto& dashboard = fixture->dashboard;
-
-    // The n box, its text typed: the wheel on its frame moves nothing, and the next letters still type.
     CHECK(dashboard.input("n").empty());
     CHECK(dashboard.input("fix").empty());
     static_cast<void>(dashboard.frame());
     auto const& box = dashboard.interaction().taskBox;
     REQUIRE(box.has_value());
-    auto const boxFrame = regionOf(dashboard, Hit { .kind = HitKind::Popup });
-    CHECK(dashboard.input(wheelAt(boxFrame.x, boxFrame.y, MouseWheel::Down)).empty());
-    CHECK(box->focus == TaskBoxField::Text);
-    CHECK(box->mode == FieldMode::Typing);
-    CHECK(dashboard.input("q").empty());
+    REQUIRE(box->mode == FieldMode::Typing);
+    auto const before = *box;
+    constexpr auto Kinds = std::array { HitKind::DialogSetting, HitKind::DialogStep };
+    auto const places = wheelPlacesOf(dashboard, Kinds);
+    // The Repo, Worker and Model rows and their steppers are among them.
+    for (auto const field: { TaskBoxField::Repo, TaskBoxField::Worker, TaskBoxField::Model })
+        static_cast<void>(
+            regionOf(dashboard, Hit { .kind = HitKind::DialogSetting, .value = std::to_underlying(field) }));
+    wheelOver(dashboard, places);
     REQUIRE(box.has_value());
-    CHECK(box->text == "fixq");
+    CHECK(*box == before);
+    // The letters typed next are text: q closes nothing.
+    CHECK(dashboard.input("qj").empty());
+    REQUIRE(box.has_value());
+    CHECK(box->text == "fixqj");
     CHECK(box->mode == FieldMode::Typing);
+
     // On its settings the wheel moves between them, as ↓ does.
     CHECK(dashboard.input("").empty());
     static_cast<void>(fixture->escapeTimesOut());
     REQUIRE(box->mode == FieldMode::Navigating);
     auto const settingBefore = box->focus;
     static_cast<void>(dashboard.frame());
-    CHECK(dashboard.input(wheelAt(boxFrame.x, boxFrame.y, MouseWheel::Down)).empty());
+    CHECK(dashboard.input(wheelAt(places.front().x, places.front().y, MouseWheel::Down)).empty());
     CHECK(box->focus != settingBefore);
-    CHECK(dashboard.input(clickAt(0, 0)).empty());
-    REQUIRE_FALSE(box.has_value());
+}
 
-    // The start dialog, its note typed: likewise.
+TEST_CASE("Work mouse: the wheel over the start dialog's note being typed does nothing",
+          "[orchestrator][view][mouse][start]")
+{
+    auto const fixture = workFixture(twoWorkersWorld());
+    auto& dashboard = fixture->dashboard;
     CHECK(dashboard.input("").empty());
     auto const& dialog = dashboard.interaction().startDialog;
     REQUIRE(dialog.has_value());
     CHECK(dashboard.input("i").empty());
     CHECK(dashboard.input("ab").empty());
     static_cast<void>(dashboard.frame());
-    auto const dialogFrame = regionOf(dashboard, Hit { .kind = HitKind::Popup });
-    CHECK(dashboard.input(wheelAt(dialogFrame.x, dialogFrame.y, MouseWheel::Up)).empty());
-    CHECK(dialog->setting == FormField::Note);
-    CHECK(dialog->mode == FieldMode::Typing);
-    CHECK(dashboard.input("q").empty());
+    REQUIRE(dialog->mode == FieldMode::Typing);
+    auto const before = *dialog;
+    constexpr auto Kinds = std::array { HitKind::DialogSetting, HitKind::DialogStep, HitKind::WorkerChip };
+    auto const places = wheelPlacesOf(dashboard, Kinds);
+    wheelOver(dashboard, places);
     REQUIRE(dialog.has_value());
-    CHECK(dialog->form.note == "abq");
+    CHECK(*dialog == before);
+    CHECK(dashboard.input("qj").empty());
+    REQUIRE(dialog.has_value());
+    CHECK(dialog->form.note == "abqj");
+    CHECK(dialog->mode == FieldMode::Typing);
+
+    // On its settings the wheel over a setting steps it, as before.
+    CHECK(dashboard.input("").empty());
+    static_cast<void>(fixture->escapeTimesOut());
+    REQUIRE(dialog->mode == FieldMode::Navigating);
+    static_cast<void>(dashboard.frame());
+    auto const model = regionOf(
+        dashboard, Hit { .kind = HitKind::DialogSetting, .value = std::to_underlying(FormField::Model) });
+    auto const modelBefore = dialog->form.model;
+    CHECK(dashboard.input(wheelAt(model.x + 1, model.y, MouseWheel::Down)).empty());
+    CHECK(dialog->form.model != modelBefore);
 }
 
 TEST_CASE("Row menu: a key with Alt closes it, as esc does", "[orchestrator][view][work][rowmenu]")
