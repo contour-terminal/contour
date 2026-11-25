@@ -2,6 +2,7 @@
 #include <vtpty/EnvironmentBlock.hpp>
 #include <vtpty/OverlappedPipe.hpp>
 #include <vtpty/ProcessRunner.hpp>
+#include <vtpty/StreamKeeper.hpp>
 #include <vtpty/Win32Handle.hpp>
 #include <vtpty/Win32HeldDirectory.hpp>
 #include <vtpty/Win32HeldSpawn.hpp>
@@ -156,19 +157,12 @@ namespace
         UniqueHandle pipe;                 ///< Overlapped read end, on the runner's port; closed at EOF.
         std::unique_ptr<PendingRead> read; ///< Stable while a read is pending.
         ReadState state =
-            ReadState::Idle;     ///< Whether a read is pending; the pipe is never closed while one is.
-        int readsThisRound = 0;  ///< How many reads it completed in the current round.
-        std::size_t cap = 0;     ///< How many bytes are kept; 0 to discard.
-        CapturedStream captured; ///< What was kept.
+            ReadState::Idle;    ///< Whether a read is pending; the pipe is never closed while one is.
+        int readsThisRound = 0; ///< How many reads it completed in the current round.
+        StreamKeeper kept;      ///< What is kept of what was read.
 
-        /// Keeps what a completed read gave, up to the cap; the rest is dropped and marks it Truncated.
-        void keep(std::span<char const> bytes)
-        {
-            auto const kept = std::min(bytes.size(), cap - std::min(cap, captured.bytes.size()));
-            captured.bytes.append(bytes.data(), kept);
-            if (kept < bytes.size())
-                captured.extent = OutputExtent::Truncated;
-        }
+        /// Keeps what a completed read gave, as StreamKeeper::take() does.
+        void keep(std::span<char const> bytes) { kept.take(std::string_view(bytes.data(), bytes.size())); }
     };
 
     /// What a leader's exit wait posts to the port: allocated apart from the Child, so that its address stays
@@ -284,8 +278,8 @@ namespace
             return ProcessExit { .completion = endedBy.value_or(ProcessCompletion::Exited),
                                  .exitCode = exitCode,
                                  .signal = std::nullopt,
-                                 .standardOutput = std::move(streams[0].captured),
-                                 .standardError = std::move(streams[1].captured) };
+                                 .standardOutput = std::move(streams[0].kept).finish(),
+                                 .standardError = std::move(streams[1].kept).finish() };
         }
     };
 
@@ -730,28 +724,30 @@ std::expected<ProcessToken, ProcessStartError> PipedProcessRunner::start(Process
     auto const capOf = [&spec](StreamCapture capture) {
         return capture == StreamCapture::Capture ? spec.outputCap : std::size_t { 0 };
     };
-    auto const streamOf =
-        [&](OverlappedPipe& pipe, std::unique_ptr<PendingRead>& read, StreamCapture capture) {
-            return Stream { .pipe = std::move(pipe.ours),
-                            .read = std::move(read),
-                            .state = ReadState::Idle,
-                            .readsThisRound = 0,
-                            .cap = capOf(capture),
-                            .captured = {} };
-        };
-    auto child = Child { .directory = std::move(directory),
-                         .job = std::move(*job),
-                         .process = std::move(process),
-                         .exitWait = {},
-                         .streams = { streamOf(*output, reads[0], spec.standardOutput),
-                                      streamOf(*error, reads[1], spec.standardError) },
-                         .deadline = _state->clock.now() + spec.timeout,
-                         .ending = Ending::NotAsked,
-                         .endedBy = std::nullopt,
-                         .leader = Leader::Running,
-                         .exitCode = std::nullopt,
-                         .leaderExitedAt = {},
-                         .done = std::move(done) };
+    auto const streamOf = [&](OverlappedPipe& pipe,
+                              std::unique_ptr<PendingRead>& read,
+                              StreamCapture capture,
+                              std::vector<std::string> droppedLines) {
+        return Stream { .pipe = std::move(pipe.ours),
+                        .read = std::move(read),
+                        .state = ReadState::Idle,
+                        .readsThisRound = 0,
+                        .kept = StreamKeeper { capOf(capture), std::move(droppedLines) } };
+    };
+    auto child =
+        Child { .directory = std::move(directory),
+                .job = std::move(*job),
+                .process = std::move(process),
+                .exitWait = {},
+                .streams = { streamOf(*output, reads[0], spec.standardOutput, spec.droppedOutputLines),
+                             streamOf(*error, reads[1], spec.standardError, {}) },
+                .deadline = _state->clock.now() + spec.timeout,
+                .ending = Ending::NotAsked,
+                .endedBy = std::nullopt,
+                .leader = Leader::Running,
+                .exitCode = std::nullopt,
+                .leaderExitedAt = {},
+                .done = std::move(done) };
     {
         // Registered under the lock and inserted before it is released: a leader that exits at once posts a
         // packet that pump() takes in only once the child is in the table.

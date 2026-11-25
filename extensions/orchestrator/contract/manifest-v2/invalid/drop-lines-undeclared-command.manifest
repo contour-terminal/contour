@@ -1,0 +1,4 @@
+# Dropped output lines for a command that is not declared.
+name = orphan
+version = 2
+command-drop-lines git-index-flags = H 10

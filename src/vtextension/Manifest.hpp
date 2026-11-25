@@ -104,6 +104,10 @@ struct DeclaredCommand
 
     /// The variables it may take from a user's set (`command-env-set`), if any.
     std::optional<EnvironmentSetBinding> environmentSet {};
+
+    /// The lines of its standard output the host drops as it reads them, before its cap applies
+    /// (`command-drop-lines`): each line that begins with one of these, in declaration order.
+    std::vector<std::string> droppedOutputLines {};
 };
 
 /// A program the extension may put in a tab (`pane <name> @<root> = argv…`).
@@ -234,6 +238,7 @@ enum class ManifestFault : uint8_t
     ForbiddenEnvironment, ///< An environment variable an extension may not set, or a value it may not take.
     ForbiddenGitConfig,   ///< A git configuration key an extension may not set, or a value it may not take.
     EnvSetNotName,        ///< A pane-env-set or command-env-set whose argument is not of kind name.
+    DropForUndeclared,    ///< `command-drop-lines` naming no such command.
 };
 
 /// The most characters (code points) a manifest's `title`, or an `action`'s title, may hold.
@@ -307,9 +312,11 @@ inline constexpr auto ManifestFaultTexts = std::array {
                             "a git configuration key an extension may not set, or a value it may not take" },
     ManifestFaultText { .fault = ManifestFault::EnvSetNotName,
                         .text = "a variable-set argument that is not of kind name" },
+    ManifestFaultText { .fault = ManifestFault::DropForUndeclared,
+                        .text = "dropped output lines for a command that is not declared" },
 };
 
-static_assert(ManifestFaultTexts.size() == std::to_underlying(ManifestFault::EnvSetNotName) + 1U,
+static_assert(ManifestFaultTexts.size() == std::to_underlying(ManifestFault::DropForUndeclared) + 1U,
               "every ManifestFault has a row");
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ManifestFaultTexts.size()),
                                   [](std::size_t index) {

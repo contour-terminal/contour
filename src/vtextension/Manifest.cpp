@@ -614,6 +614,23 @@ namespace
         return bindEnvironmentSet(state.manifest.arguments, state.manifest.panes, line);
     }
 
+    /// Adds a `command-drop-lines` line's prefix to the command it names, which an earlier line declared: the
+    /// host drops each line of its standard output that begins with it. The prefix is the whole value, single
+    /// spaces and all.
+    [[nodiscard]] LineResult addDroppedOutputLines(ParseState& state, Line const& line)
+    {
+        if (line.head.size() != 1)
+            return refuse(ManifestFault::UnknownLine);
+        auto const command =
+            std::ranges::find(state.manifest.commands, line.head.front(), &DeclaredCommand::name);
+        if (command == state.manifest.commands.end())
+            return refuse(ManifestFault::DropForUndeclared);
+        if (std::ranges::contains(command->droppedOutputLines, *line.value))
+            return refuse(ManifestFault::Duplicate);
+        command->droppedOutputLines.emplace_back(*line.value);
+        return {};
+    }
+
     [[nodiscard]] LineResult addPane(ParseState& state, Line const& line)
     {
         auto const root = boundRoot(line, 1);
@@ -739,6 +756,10 @@ namespace
                    .since = 2,
                    .value = LineValue::Text,
                    .handler = &bindCommandEnvironmentSet },
+        LineKind { .keyword = "command-drop-lines",
+                   .since = 2,
+                   .value = LineValue::Text,
+                   .handler = &addDroppedOutputLines },
         LineKind { .keyword = "pane", .since = 2, .value = LineValue::Argv, .handler = &addPane },
         LineKind { .keyword = "pane-env-set",
                    .since = 2,

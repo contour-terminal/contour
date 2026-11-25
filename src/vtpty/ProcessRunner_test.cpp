@@ -216,6 +216,18 @@ TEST_CASE("PipedProcessRunner: output past the cap is drained and cut", "[proces
     CHECK(exit.standardError.extent == vtpty::OutputExtent::Whole);
 }
 
+TEST_CASE("PipedProcessRunner: dropped output lines go before the cap", "[processrunner]")
+{
+    auto fixture = RunnerFixture {};
+    auto spec = fixture.spec({ "sh", "-c", "echo 'H 100644 a'; echo 'h 100644 b'; echo 'H 160000 c'" });
+    spec.droppedOutputLines = { "H 10" };
+    spec.outputCap = 11;
+    auto const exit = fixture.runToCompletion(fixture.start(std::move(spec)));
+    CHECK(exit.exitCode == 0);
+    CHECK(exit.standardOutput.bytes == "h 100644 b\n");
+    CHECK(exit.standardOutput.extent == vtpty::OutputExtent::Truncated);
+}
+
 TEST_CASE("PipedProcessRunner: a timeout terminates", "[processrunner]")
 {
     auto fixture = RunnerFixture {};

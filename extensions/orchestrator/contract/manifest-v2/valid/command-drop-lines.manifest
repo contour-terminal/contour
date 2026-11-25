@@ -1,0 +1,8 @@
+# Lines of one declared command's output the host drops as it reads them: each value is a line prefix,
+# single spaces and all.
+name = sieved
+version = 2
+root worktrees = config:worktree_root
+command git-index-flags short @worktrees = git ls-files -v --stage
+command-drop-lines git-index-flags = H 10
+command-drop-lines git-index-flags = H 12

@@ -363,6 +363,13 @@ constexpr auto LineKinds = std::array {
                .valued = Valued::Yes,
                .since = 2,
                .rootAt = 0 },
+    // Its key is completed by its value: a command may drop lines of several prefixes, each once.
+    LineKind { .keyword = "command-drop-lines",
+               .headWords = 2,
+               .keyWords = 2,
+               .valued = Valued::Yes,
+               .since = 2,
+               .rootAt = 0 },
     LineKind {
         .keyword = "inbox", .headWords = 2, .keyWords = 2, .valued = Valued::Yes, .since = 2, .rootAt = 0 },
     LineKind {
@@ -582,7 +589,8 @@ struct ManifestLine
         return state.isDeclared("root", line.value.substr(5)) ? Fault::None : Fault::UndeclaredRoot;
     if (keyword == "arg" && !std::ranges::contains(PlainKinds, line.value))
         return Fault::UnknownKind;
-    if ((keyword == "command-env-for" && !state.isDeclared("command", head[1]))
+    if (((keyword == "command-env-for" || keyword == "command-drop-lines")
+         && !state.isDeclared("command", head[1]))
         || (keyword == "pane-env" && !state.isDeclared("pane", head[1])))
         return Fault::UndeclaredTarget;
     if ((keyword == "title" || keyword == "action") && !isShownAsWritten(line.value))
@@ -640,6 +648,8 @@ struct ManifestLine
     auto key = std::string(keyword);
     for (auto const word: std::span(line.head).subspan(1, line.kind->keyWords - 1))
         key += ' ' + std::string(word);
+    if (keyword == "command-drop-lines")
+        key += " = " + std::string(line.value);
     if (!state.declared.insert(key).second)
         return Fault::Duplicate;
     // An empty argv is refused by the argv check, which names the fault more precisely.
@@ -698,6 +708,7 @@ constexpr auto CorpusRows = std::array {
     CorpusRow { .file = "valid/arg.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/command-env-for.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/command-env.manifest", .expected = Fault::None },
+    CorpusRow { .file = "valid/command-drop-lines.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/command-env-set.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/command.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/crlf.manifest", .expected = Fault::None },
@@ -754,6 +765,9 @@ constexpr auto CorpusRows = std::array {
     CorpusRow { .file = "invalid/env-set-argument-not-name.manifest", .expected = Fault::EnvSetNotName },
     CorpusRow { .file = "invalid/env-set-forbidden-variable.manifest", .expected = Fault::ForbiddenVariable },
     CorpusRow { .file = "invalid/env-set-repeated.manifest", .expected = Fault::Duplicate },
+    CorpusRow { .file = "invalid/drop-lines-undeclared-command.manifest",
+                .expected = Fault::UndeclaredTarget },
+    CorpusRow { .file = "invalid/drop-lines-repeated.manifest", .expected = Fault::Duplicate },
     CorpusRow { .file = "invalid/env-set-without-placeholder.manifest", .expected = Fault::UnknownLine },
 };
 
@@ -1070,6 +1084,8 @@ TEST_CASE("manifestLines spells the declared tables", "[orchestrator][commands][
         "command-env-for git-status GIT_OPTIONAL_LOCKS = 0"sv,
         "command git-head-reachable short @worktrees = git for-each-ref --count=1 --contains HEAD refs/heads refs/tags refs/remotes"sv,
         "command git-index-flags short @worktrees = git ls-files -v --stage"sv,
+        "command-drop-lines git-index-flags = H 10"sv,
+        "command-drop-lines git-index-flags = H 12"sv,
         "command git-common-dir short @worktrees = git rev-parse --path-format=absolute --git-common-dir"sv,
         "command-env-for git-common-dir GIT_CONFIG_COUNT = 3"sv,
         "command-env-for git-status GIT_CONFIG_KEY_2 = core.attributesFile"sv,

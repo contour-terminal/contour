@@ -93,6 +93,9 @@ struct ProcessSpec
     StreamCapture standardOutput = StreamCapture::Capture;
     /// What becomes of standard error.
     StreamCapture standardError = StreamCapture::Capture;
+    /// Lines of standard output that begin with one of these are dropped as they are read, before
+    /// @ref outputCap applies (StreamKeeper); none is empty. Empty: every line counts against the cap.
+    std::vector<std::string> droppedOutputLines = {};
 };
 
 /// Why a process could not be started.

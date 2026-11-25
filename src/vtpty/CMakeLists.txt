@@ -42,6 +42,7 @@ set(vtpty_SOURCES
     SpawnSpec.cpp
     SpawnTrampoline${PLATFORM_SUFFIX}.cpp
     SshFailureMessage.cpp
+    StreamKeeper.cpp
     SshAgentIo.cpp
     SshSessionRules.cpp
     SshSocketWait.cpp
@@ -95,6 +96,7 @@ set(vtpty_HEADERS
     SshSessionRules.hpp
     SshSocketWait.hpp
     SshTerminfoInstall.hpp
+    StreamKeeper.hpp
     UniqueHandle.hpp
     WindowsBeneathRules.hpp
     WindowsCommandLine.hpp
@@ -231,6 +233,7 @@ if(VTPTY_TESTING)
         SshSessionRules_test.cpp
         SshSocketWait_test.cpp
         SshTerminfoInstall_test.cpp
+        StreamKeeper_test.cpp
         WindowsBeneathRules_test.cpp
         WindowsCommandLine_test.cpp
         WindowsPathRules_test.cpp

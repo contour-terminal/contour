@@ -345,6 +345,7 @@ std::expected<ProcessHandle, ProcessError> DeclaredProcesses::start(std::string_
         .outputCap = _config.limits.streamCap,
         .standardOutput = vtpty::StreamCapture::Capture,
         .standardError = vtpty::StreamCapture::Capture,
+        .droppedOutputLines = declared->droppedOutputLines,
     };
 
     auto const started = _runner.start(

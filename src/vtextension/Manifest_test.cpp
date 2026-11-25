@@ -541,6 +541,8 @@ constexpr auto InvalidRows = std::array {
     InvalidRow { .file = "env-set-forbidden-variable", .fault = ManifestFault::ForbiddenEnvironment },
     InvalidRow { .file = "env-set-repeated", .fault = ManifestFault::Duplicate },
     InvalidRow { .file = "env-set-without-placeholder", .fault = ManifestFault::UnknownLine },
+    InvalidRow { .file = "drop-lines-undeclared-command", .fault = ManifestFault::DropForUndeclared },
+    InvalidRow { .file = "drop-lines-repeated", .fault = ManifestFault::Duplicate },
 };
 
 [[nodiscard]] std::optional<ManifestFault> faultOf(std::string_view text)
@@ -611,6 +613,27 @@ TEST_CASE("Manifest v2: a pane and a command bound to a user's set", "[vtextensi
     // A version-1 manifest does not know the lines.
     CHECK(faultOf("name = a\nversion = 1\ncommand x = id\npane-env-set x {a} = NO_PROXY\n")
           == ManifestFault::Version2LineInVersion1);
+}
+
+TEST_CASE("Manifest v2: a command's dropped output lines", "[vtextension][manifest]")
+{
+    auto const parsed =
+        parseManifestText(readCorpusFile(corpusDirectory() / "valid" / "command-drop-lines.manifest"));
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed->commands.size() == 1);
+    // The value is the whole prefix, its inner space included.
+    CHECK(parsed->commands.front().droppedOutputLines == std::vector<std::string> { "H 10", "H 12" });
+    // A command without the line drops nothing.
+    auto const plain =
+        parseManifestText("name = a\nversion = 2\nroot r = config:r\ncommand x short @r = id\n"sv);
+    REQUIRE(plain.has_value());
+    CHECK(plain->commands.front().droppedOutputLines.empty());
+    // A version-1 manifest does not know the line, and an empty prefix is no prefix.
+    CHECK(faultOf("name = a\nversion = 1\ncommand x = id\ncommand-drop-lines x = H\n"sv)
+          == ManifestFault::Version2LineInVersion1);
+    CHECK(faultOf(
+              "name = a\nversion = 2\nroot r = config:r\ncommand x short @r = id\ncommand-drop-lines x =\n"sv)
+          == ManifestFault::EmptyName);
 }
 
 TEST_CASE("Manifest v2: blanks around a line are refused, never trimmed", "[vtextension][manifest]")

@@ -1,0 +1,7 @@
+# The same prefix dropped twice for one command.
+name = twice
+version = 2
+root worktrees = config:worktree_root
+command git-index-flags short @worktrees = git ls-files -v --stage
+command-drop-lines git-index-flags = H 10
+command-drop-lines git-index-flags = H 10

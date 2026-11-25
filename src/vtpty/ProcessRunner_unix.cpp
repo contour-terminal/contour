@@ -3,6 +3,7 @@
 #include <vtpty/PosixSpawn.hpp>
 #include <vtpty/ProcessRunner.hpp>
 #include <vtpty/ProgramLookup.hpp>
+#include <vtpty/StreamKeeper.hpp>
 #include <vtpty/UnixUtils.hpp>
 
 #include <sys/stat.h>
@@ -84,9 +85,8 @@ namespace
     /// One of a process's two output pipes, and what was read from it.
     struct Stream
     {
-        OwnedFd pipe;            ///< The read end; closed once it reported EOF (or was given up on).
-        std::size_t cap = 0;     ///< How many bytes are kept; 0 to discard.
-        CapturedStream captured; ///< What was kept.
+        OwnedFd pipe;      ///< The read end; closed once it reported EOF (or was given up on).
+        StreamKeeper kept; ///< What is kept of what was read.
     };
 
     /// A started process.
@@ -137,8 +137,8 @@ namespace
                 result.completion = ProcessCompletion::StatusLost;
             else
                 result.completion = result.signal ? ProcessCompletion::Signalled : ProcessCompletion::Exited;
-            result.standardOutput = std::move(streams[0].captured);
-            result.standardError = std::move(streams[1].captured);
+            result.standardOutput = std::move(streams[0].kept).finish();
+            result.standardError = std::move(streams[1].kept).finish();
             return result;
         }
     };
@@ -234,11 +234,7 @@ namespace
                 stream.pipe.reset();
                 return;
             }
-            auto const read = static_cast<std::size_t>(count);
-            auto const kept = std::min(read, stream.cap - std::min(stream.cap, stream.captured.bytes.size()));
-            stream.captured.bytes.append(buffer.data(), kept);
-            if (kept < read)
-                stream.captured.extent = OutputExtent::Truncated;
+            stream.kept.take(std::string_view(buffer.data(), static_cast<std::size_t>(count)));
         }
     }
 
@@ -649,10 +645,10 @@ std::expected<ProcessToken, ProcessStartError> PipedProcessRunner::start(Process
     auto child = Child {
         .pid = pid,
         .exitDescriptor = exitDescriptorOf(pid),
-        .streams = { Stream {
-                         .pipe = std::move(output->read), .cap = capOf(spec.standardOutput), .captured = {} },
-                     Stream {
-                         .pipe = std::move(error->read), .cap = capOf(spec.standardError), .captured = {} } },
+        .streams = { Stream { .pipe = std::move(output->read),
+                              .kept = StreamKeeper { capOf(spec.standardOutput), spec.droppedOutputLines } },
+                     Stream { .pipe = std::move(error->read),
+                              .kept = StreamKeeper { capOf(spec.standardError), {} } } },
         .deadline = _state->clock.now() + spec.timeout,
         .ending = Ending::NotAsked,
         .killAt = {},
